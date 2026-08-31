@@ -9,7 +9,7 @@ import { loadDraftRuntime, draftConfiguration, captureDraft } from '../tools/pro
 import { buildBankedDraftSemanticReport, loadDraftSemanticPairs, oracleForDraftSemanticObservation, evaluateDraftSemanticCase, type DraftSemanticObservation, type DraftSemanticOracle } from '../tools/prompt-consumer/semantic.js';
 import { compareDraftConfigurations } from '../tools/prompt-consumer/fidelity.js';
 import type { ServingObservation } from '../tools/prompt-consumer/serving-evidence.js';
-import { buildDraftQualityReport } from '../tools/prompt-consumer/quality-report.js';
+import { buildDraftQualityReport, buildResponseIdentityPacket } from '../tools/prompt-consumer/quality-report.js';
 
 process.env.LOG_LEVEL = 'fatal';
 const arg = (key: string) => { const n = process.argv.indexOf(key); return n < 0 ? undefined : process.argv[n + 1]; };
@@ -17,7 +17,17 @@ const out = arg('--out');
 assert(out && out.startsWith('/'), 'new absolute --out path required');
 assert(!existsSync(out), 'refusing to overwrite evidence');
 const save = (path: string, value: unknown) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
-if (process.argv.includes('--observe')) {
+if (process.argv.includes('--responses')) {
+  const inputPath = arg('--input');
+  assert(inputPath, '--responses requires --input with original captured response bodies');
+  // Offline only. Raw HTTP captures are decoded again; serialized PASS fields,
+  // administrative snapshots and caller-authored verifier callbacks are unused.
+  const report = buildResponseIdentityPacket(JSON.parse(readFileSync(inputPath, 'utf8')));
+  save(out, report);
+  process.stdout.write(JSON.stringify({ output: out, status: report.status,
+    modelCalls: 0, deploymentPermission: report.deploymentPermission }) + '\n');
+  process.exitCode = report.status === 'FAIL' ? 1 : report.status === 'UNVERIFIED' ? 2 : 0;
+} else if (process.argv.includes('--observe')) {
   const task = arg('--task') ?? 'draft_graph';
   const result = await readServingObservation({ baseUrl: arg('--base-url') ?? 'https://cee-staging.onrender.com', promptId: `${task}_default`,
     environment: 'staging', adminKey: process.env.ADMIN_API_KEY ?? '' });
@@ -102,4 +112,4 @@ if (process.argv.includes('--observe')) {
   const summary = { identity, comparisons, cases: cases.map(c => ({ id: c.observation.id, fidelity: c.fidelity, semantic: c.semantic })), promotionPermission: 'NOT_GRANTED' };
   save(resolve(out, 'summary.json'), summary);
   process.exitCode = cases.some(c => c.fidelity.status === 'FAIL' || c.fidelity.structuralStatus === 'FAIL' || c.semantic.semanticStatus === 'FAIL') ? 1 : 2;
-} else throw new Error('Choose --observe, --banked, --packet, or --evaluate --live-provider. No promotion command exists.');
+} else throw new Error('Choose --responses --input, --observe, --banked, --packet, or --evaluate --live-provider. No promotion command exists.');

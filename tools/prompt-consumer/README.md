@@ -79,6 +79,54 @@ that every instruction can be honoured. Where the foundation's structural
 probes do not match the target source, they stay explicitly historical and the
 target structural-compatibility result is `UNVERIFIED`.
 
+## Individual responses and mixed instances
+
+The successor of #1252 adds an offline response-evidence command to this same
+operator. It decodes original `/assist/v1/draft-graph` or buffered V5 JSON bodies;
+it does not issue requests, activate prompts or load stored PASS annotations:
+
+```sh
+pnpm exec tsx scripts/prompt-model-quality.ts --responses \
+  --input /absolute/original-response-captures.json --out /absolute/new-identities.json
+```
+
+Input format is `olumi.prompt-response-observations.v1` with `mode` (`observed`
+or `simulation`), the existing `ServingConfiguration` comparison reference,
+`captures`, and `settling` (null unless its authority is known). Each capture
+retains `observedAt`, actual `url`, `httpStatus`, expected `requestId`, original
+JSON `body`, full `bodySha256`, and optional same-response `serviceBuild` header.
+Do not turn a saved graph or reconstructed body into an observed HTTP capture.
+Body digests detect corruption; they are not signatures or proof of origin.
+
+The decoder reads identity only where that response actually carries it. A
+configuration reference, administrative snapshot or supplied PASS callback
+cannot fill an absent instruction, provider-returned model or consumer witness.
+The existing V5 response-hash algorithm checks trace/body correlation; a missing
+trace is UNVERIFIED and a contradictory trace is FAIL. A hash prefix is reported
+as that limited correlation, not upgraded to a full cryptographic attestation.
+
+Every instance retains its own response identities. A:X and B:Y are MIXED even
+behind one nominal deployment. Matching samples need two distinct responses per
+observed instance spanning the known effective cache expiry, with observed cache
+reload. `settling` specifies `notBefore`, `effectiveExpiryMs` and a source
+component reference; before-cutoff observations remain in the report. Duplicate
+bodies do not count twice. Optional `expectedInstanceIds` is a requested sample
+set, not an authoritative fleet inventory. The existing `instance_id` is a
+prompt-loader process marker, not a platform inventory. Matching observed instances never
+means universal deployment convergence.
+
+At inspected source `87f3e43ece5306e28336bd068dc8007a40b209a5`, complete mounted
+response identity remains UNVERIFIED: the adapter does not retain full
+provider-returned composition/attempt lineage, and V5 drops instance/cache data.
+The precise production telemetry boundary is recorded in the successor evidence
+handoff. This tools-only change does not add that instrumentation. The separate
+local-response replay checks immutable provider bodies through the real parser
+and immediate graph consumer; it does not certify final canonical consumption,
+deployed traffic or reasoning quality merely because identity matches.
+
+Exit 1 means a detected contradiction; exit 2 means incomplete proof. Only CC
+can assign/integrate serving instrumentation and perform promotion or rollback.
+
 ## Existing structural registry
 
 This follow-on does not gate or activate #1228. No production prompt execution

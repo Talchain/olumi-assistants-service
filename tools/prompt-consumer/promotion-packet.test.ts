@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildDraftRecordsSchema } from '../../src/cee/draft/records/grammar.js';
 import { DRAFT_RECORDS_INSTRUCTION } from '../../src/cee/draft/records/instruction.js';
+import { buildLlmMetadataProjection } from '../../src/cee/unified-pipeline/llm-metadata-projection.js';
 import { assertExactCaseIds, sha256 } from './contract.js';
+import { evaluateResponseIdentity } from './response-identity.js';
+import { evaluateResponseFleet } from './response-fleet.js';
 import { buildPromotionEvidencePacket, type PromotionEvidenceInput } from './promotion-packet.js';
 import {
   configurationHash, evidenceHash, evaluateServingEvidence, verifyEvaluationEvidence,
@@ -12,7 +15,7 @@ import {
 
 const collected: string[] = [];
 beforeEach(() => expect.hasAssertions());
-afterAll(() => assertExactCaseIds(['simulation', 'missing', 'semantic-failure', 'hybrid', 'wrong-identity', 'rollback', 'rollback-models', 'cache', 'forged', 'simulation-is-not-observation'], collected));
+afterAll(() => assertExactCaseIds(['simulation', 'missing', 'semantic-failure', 'hybrid', 'wrong-identity', 'rollback', 'rollback-models', 'cache', 'forged', 'simulation-is-not-observation', 'actual-response-failure'], collected));
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const component = (path: string, exportName: string): EvidenceComponent => ({ path, exportName, fileSha256: sha256(read(path)) });
 const incumbentText = read('src/cee/draft/records/__tests__/fixtures/served-draft-graph-v195.txt');
@@ -77,10 +80,12 @@ describe('promotion/rollback evidence handoff never performs the actions', () =>
   it('rehearses candidate then rollback GET timelines with explicit simulation and no permission', () => {
     collected.push('simulation');
     const packet = buildPromotionEvidencePacket(input());
-    expect(packet.status).toBe('PASS');
+    expect(packet.status).toBe('UNVERIFIED');
     expect(packet.preActionEvidenceStatus).toBe('PASS');
-    expect(packet.checks.candidateCache.status).toBe('PASS');
-    expect(packet.checks.rollbackCache.status).toBe('PASS');
+    expect(packet.evidence.candidateCache!.cacheWindow.status).toBe('PASS');
+    expect(packet.checks.candidateCache.status).toBe('UNVERIFIED');
+    expect(packet.checks.rollbackCache.status).toBe('UNVERIFIED');
+    expect(packet.checks.candidateCache.issues.join(' ')).toContain('No actual response telemetry');
     expect(packet.codeOnlyRequired).toBe(true);
     expect(packet.operations).toMatchObject({ owner: 'CC', promotionPerformed: false, rollbackPerformed: false });
     expect(packet.mode).toBe('simulation');
@@ -109,7 +114,8 @@ describe('promotion/rollback evidence handoff never performs the actions', () =>
     expect(bad.status).toBe('FAIL');
     const unrelated = buildPromotionEvidencePacket({ ...good, evaluations: { ...good.evaluations,
       comparison: evaluation('reasoning', [incumbent, candidate], { wording: 'green bicycle' }) } });
-    expect(unrelated.status).toBe('PASS');
+    expect(unrelated.preActionEvidenceStatus).toBe('PASS');
+    expect(unrelated.status).toBe('UNVERIFIED');
   });
   it('RED changing either original environment model breaks rollback; unrelated description is GREEN', () => {
     collected.push('rollback-models');
@@ -144,7 +150,7 @@ describe('promotion/rollback evidence handoff never performs the actions', () =>
       expect(packet.checks.comparison.issues.join(' ')).toContain('observed wrong configuration');
     }
     expect(buildPromotionEvidencePacket({ ...good, evaluations: { ...good.evaluations,
-      comparison: evaluation('reasoning', [incumbent, candidate], { wording: 'irrelevant cup' }) } }).status).toBe('PASS');
+      comparison: evaluation('reasoning', [incumbent, candidate], { wording: 'irrelevant cup' }) } }).preActionEvidenceStatus).toBe('PASS');
   });
   it('binds rollback to original full bytes/model/components/head, not just a version label', () => {
     collected.push('rollback');
@@ -155,7 +161,8 @@ describe('promotion/rollback evidence handoff never performs the actions', () =>
     expect(wrongBytes.checks.rollback.status).toBe('FAIL');
     const unrelated = buildPromotionEvidencePacket({ ...good, rollback: { ...good.rollback!, originalPms: stored(incumbent, 'A different notebook description') } });
     expect(unrelated.checks.rollback.status).toBe('PASS');
-    expect(unrelated.status).toBe('PASS');
+    expect(unrelated.preActionEvidenceStatus).toBe('PASS');
+    expect(unrelated.status).toBe('UNVERIFIED');
   });
   it('requires post-promotion and post-rollback cache expiry, preserving unknown short-window observations', () => {
     collected.push('cache');
@@ -166,7 +173,8 @@ describe('promotion/rollback evidence handoff never performs the actions', () =>
     expect(short.status).toBe('UNVERIFIED');
     const wrong = buildPromotionEvidencePacket({ ...good, cacheTransitions: { ...good.cacheTransitions, rollback: cache(candidate) } });
     expect(wrong.checks.rollbackCache.status).toBe('FAIL');
-    expect(buildPromotionEvidencePacket(good).status).toBe('PASS');
+    expect(buildPromotionEvidencePacket(good).preActionEvidenceStatus).toBe('PASS');
+    expect(buildPromotionEvidencePacket(good).status).toBe('UNVERIFIED');
   });
   it('rejects manually assigned or JSON-cloned PASS envelopes; they must be recomputed', () => {
     collected.push('forged');
@@ -177,7 +185,8 @@ describe('promotion/rollback evidence handoff never performs the actions', () =>
     expect(packet.checks.comparison.issues.join(' ')).toContain('not executable verifier evidence');
     const clonedCache = JSON.parse(JSON.stringify(good.cacheTransitions!.candidate)) as ServingEvidenceReport;
     expect(buildPromotionEvidencePacket({ ...good, cacheTransitions: { ...good.cacheTransitions, candidate: clonedCache } }).status).toBe('FAIL');
-    expect(buildPromotionEvidencePacket(good).status).toBe('PASS');
+    expect(buildPromotionEvidencePacket(good).preActionEvidenceStatus).toBe('PASS');
+    expect(buildPromotionEvidencePacket(good).status).toBe('UNVERIFIED');
   });
   it('cannot relabel a complete simulation as an observed promotion/rollback', () => {
     collected.push('simulation-is-not-observation');
@@ -187,6 +196,41 @@ describe('promotion/rollback evidence handoff never performs the actions', () =>
     expect(packet.checks.comparison.issues.join(' ')).toContain('simulation cannot certify actual evaluation');
     expect(packet.checks.candidateCache.status).toBe('FAIL');
     expect(packet.operations.promotionPerformed).toBe(false);
-    expect(buildPromotionEvidencePacket(good).status).toBe('PASS');
+    expect(buildPromotionEvidencePacket(good).preActionEvidenceStatus).toBe('PASS');
+    expect(buildPromotionEvidencePacket(good).status).toBe('UNVERIFIED');
+  });
+  it('keeps known individual-response failure RED despite settled administrative GETs', () => {
+    collected.push('actual-response-failure');
+    const good = input(), observed = good.cacheTransitions!.candidate!.configuration;
+    const candidateCache = (wrong: boolean) => {
+      const observations = [sample(observed, '2026-08-31T09:00:00Z'), sample(observed, '2026-08-31T09:20:00Z')];
+      const responses = observations.map((snapshot, i) => {
+        const served = wrong && i === 0 ? incumbent.prompt : observed.prompt;
+        const requestId = `response-${i}`, version = `${served.id}@v${served.version} (staging)`;
+        const body = JSON.stringify({ trace: { request_id: requestId, correlation_id: requestId,
+          engine: { model: observed.model.id, provider: observed.model.provider }, pipeline: {
+            llm_metadata: buildLlmMetadataProjection({ model: observed.model.id, prompt_version: version, prompt_hash: served.sha256, instance_id: 'A', cache_age_ms: 10, cache_status: 'fresh' }, undefined),
+            cee_provenance: { commit: observed.sourceHead.slice(0, 8), prompt_version: version, prompt_hash: served.sha256, prompt_store_version: served.version },
+          } } });
+        return evaluateResponseIdentity({ configuration: observed, mode: 'simulation', capture: { observedAt: snapshot.observedAt, url: 'https://simulation.invalid/assist/v1/draft-graph', httpStatus: 200, requestId, body, bodySha256: sha256(body), serviceBuild: observed.sourceHead } });
+      });
+      const expirySource = component('src/adapters/llm/prompt-loader.ts', 'getPromptLoaderCacheDiagnostics');
+      const responseFleet = evaluateResponseFleet({ configuration: observed, mode: 'simulation', responses,
+        settling: { notBefore: observations[0]!.observedAt, effectiveExpiryMs: 600_000, source: expirySource } });
+      return evaluateServingEvidence({ configuration: observed, mode: 'simulation', observations, modelSelectionEvidence: evaluation('model-selection', [observed]),
+        cacheWindow: { effectiveExpiryMs: 600_000, source: expirySource }, responses, responseFleet });
+    };
+    const badReport = candidateCache(true);
+    expect(badReport.cacheWindow.status).toBe('PASS');
+    expect(badReport.fleet.status).toBe('FAIL');
+    const bad = buildPromotionEvidencePacket({ ...good, cacheTransitions: { ...good.cacheTransitions, candidate: badReport } });
+    expect(bad.preActionEvidenceStatus).toBe('PASS');
+    expect(bad.checks.candidateCache.status).toBe('FAIL');
+    expect(bad.status).toBe('FAIL');
+    const counterpart = candidateCache(false);
+    expect(counterpart.actualResponseSelection.status).toBe('PASS');
+    expect(counterpart.responseFleet!.sampledInstanceStatus).toBe('PASS');
+    expect(counterpart.actualResponse.status).toBe('UNVERIFIED');
+    expect(buildPromotionEvidencePacket({ ...good, cacheTransitions: { ...good.cacheTransitions, candidate: counterpart } }).checks.candidateCache.status).toBe('UNVERIFIED');
   });
 });

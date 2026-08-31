@@ -10,6 +10,8 @@ import { draftConfiguration, loadDraftRuntime } from './runtime-draft.js';
 import { evaluateDraftSemanticCase, loadDraftSemanticPairs, oracleForDraftSemanticObservation, type DraftSemanticImplementations, type DraftSemanticObservation, type DraftSemanticOracle } from './semantic.js';
 import { configurationHash, evidenceHash, evaluateServingEvidence, verifyEvaluationEvidence, type ServingConfiguration, type ServingObservation, type VerifiedEvaluationReceipt } from './serving-evidence.js';
 import { buildPromotionEvidencePacket } from './promotion-packet.js';
+import { evaluateResponseIdentity, type ResponseCapture } from './response-identity.js';
+import { evaluateResponseFleet, type ResponseFleetInput } from './response-fleet.js';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const combine = (values: readonly ContractStatus[]): ContractStatus => values.includes('FAIL') ? 'FAIL' : !values.length || values.includes('UNVERIFIED') ? 'UNVERIFIED' : 'PASS';
@@ -316,4 +318,48 @@ export async function buildDraftQualityReport(input: { experimentDir: string; ru
     runtimeAuthority: { sourceHead: runtime.head, configurations, components: runtime.components, implementations: runtime.implementations, semanticImplementations: runtime.semanticImplementations, contractSourceAgreement, expectedMessagesByCaseId, declaredEnvironment } });
   runtime.assertUnchanged();
   return report;
+}
+
+export interface ResponseIdentityPacketInput {
+  format: 'olumi.prompt-response-observations.v1';
+  mode: 'observed' | 'simulation';
+  configuration: ServingConfiguration;
+  captures: readonly ResponseCapture[];
+  settling: ResponseFleetInput['settling'];
+  expectedInstanceIds?: readonly string[];
+}
+
+/** Fixed, offline decoder. Never accepts serialized reports or a PASS callback.
+ * Capture hashes establish artifact integrity, not transport authenticity. The
+ * expected configuration is a comparison reference, never a missing-field fill.
+ */
+export function buildResponseIdentityPacket(input: ResponseIdentityPacketInput) {
+  assert.equal(input.format, 'olumi.prompt-response-observations.v1', 'REFUSE: unsupported response-evidence format');
+  assert(input.mode === 'observed' || input.mode === 'simulation', 'REFUSE: response evidence mode is required');
+  assert(Array.isArray(input.captures), 'REFUSE: original response captures required');
+  const responses = input.captures.map(capture => evaluateResponseIdentity({ configuration: input.configuration, capture, mode: input.mode }));
+  const fleet = evaluateResponseFleet({ configuration: input.configuration, mode: input.mode, responses,
+    settling: input.settling ?? null, expectedInstanceIds: input.expectedInstanceIds });
+  return {
+    format: 'olumi.prompt-response-identity.v1' as const,
+    mode: input.mode, status: fleet.status, configuration: input.configuration,
+    configurationSha256: configurationHash(input.configuration),
+    // Only actual inputs contribute. Decorative stored verdicts do not alter
+    // either the evidence identity or its re-derived meaning.
+    evidenceSha256: evidenceHash({ mode: input.mode, configuration: input.configuration,
+      captures: input.captures, settling: input.settling ?? null, expectedInstanceIds: input.expectedInstanceIds ?? [] }),
+    decoderSources: ['tools/prompt-consumer/response-identity.ts', 'tools/prompt-consumer/response-fleet.ts',
+      'src/utils/response-hash.ts'].map(path => ({ path, sha256: sha256(read(path)) })),
+    responses, fleet,
+    transportProvenance: 'Operator-supplied captures; body digests detect corruption, not forged origin or omitted traffic.',
+    semanticStatus: 'UNVERIFIED' as const,
+    deploymentPermission: 'NOT_GRANTED' as const,
+    operations: { networkRequests: 0, providerCalls: 0, promotionPerformed: false, rollbackPerformed: false },
+    limitations: [
+      'Known response identity contradictions fail. Missing fields remain UNVERIFIED, even with complete administrative snapshots.',
+      'Local/frozen provider evidence is separate from an actually observed deployed response.',
+      'Selection consistency covers observed instances only; no fleet inventory or universal serving claim is inferred.',
+      'Provider-returned composition and consumer invocation need serving-path telemetry not emitted by the inspected V5 runtime.',
+    ],
+  };
 }

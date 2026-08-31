@@ -4,6 +4,8 @@ import { PromptDefinitionSchema } from '../../src/prompts/schema.js';
 import type { PromptVerifyEntry } from '../../src/adapters/llm/prompt-loader.js';
 import type { TaskRouting } from '../../src/adapters/llm/model-routing-report.js';
 import { sha256, type ContractStatus } from './contract.js';
+import { isResponseIdentityReport, type ResponseIdentityReport } from './response-identity.js';
+import { isResponseFleetReport, type ResponseFleetReport } from './response-fleet.js';
 
 export interface EvidenceComponent {
   readonly path: string;
@@ -151,6 +153,9 @@ export interface ServingEvidenceInput {
   /** Actual per-call selection replay, never the configured-router GET alone. */
   readonly modelSelectionEvidence?: VerifiedEvaluationReceipt;
   readonly providerEvidence?: VerifiedEvaluationReceipt;
+  /** Fixed decoder receipts from individual responses, never administrative snapshots. */
+  readonly responses?: readonly ResponseIdentityReport[];
+  readonly responseFleet?: ResponseFleetReport;
 }
 interface Level { readonly status: ContractStatus; readonly issues: readonly string[] }
 export interface ServingEvidenceReport {
@@ -166,6 +171,11 @@ export interface ServingEvidenceReport {
   readonly status: ContractStatus;
   readonly observationCount: number;
   readonly deployedProviderStatus: ContractStatus;
+  readonly actualResponse: Level;
+  readonly actualResponseSelection: Level;
+  readonly responseIdentities: readonly ResponseIdentityReport[];
+  readonly responseFleet: ResponseFleetReport | null;
+  readonly fleet: Level;
   readonly limitation: string;
   readonly deploymentPermission: 'NOT_GRANTED';
 }
@@ -279,6 +289,11 @@ export function evaluateServingEvidence(input: ServingEvidenceInput): ServingEvi
   else add('providerBound', 'UNVERIFIED', 'no captured provider-bound request and parser/consumer witness');
   if (receipt && isVerifiedEvaluationReceipt(receipt) && levels.providerBound.status !== 'FAIL') {
     levels.providerBound = { status: statusOf([receipt.verdict.status, receipt.verdict.fidelityStatus]), issues: [...receipt.verdict.issues] };
+    // A callback's declared scope is not server-origin response telemetry.
+    // Keep generic receipts useful for local provider probes, never deployment.
+    if (receipt.scope === 'deployed-provider' && levels.providerBound.status !== 'FAIL') {
+      levels.providerBound = { status: 'UNVERIFIED', issues: [...receipt.verdict.issues, 'Generic verifier scope cannot establish an actual deployed response; fixed response telemetry evidence required'] };
+    }
   }
   const selection = input.modelSelectionEvidence;
   if (selection) {
@@ -289,6 +304,9 @@ export function evaluateServingEvidence(input: ServingEvidenceInput): ServingEvi
       if (input.mode === 'observed') assert.notEqual(selection.scope, 'simulation', 'simulated model selection is not observed selection');
     });
     if (levels.selectedModel.status !== 'FAIL') levels.selectedModel = { status: statusOf([selection.verdict.status, selection.verdict.fidelityStatus]), issues: [...selection.verdict.issues] };
+    if (selection.scope === 'deployed-provider' && levels.selectedModel.status !== 'FAIL') {
+      levels.selectedModel = { status: 'UNVERIFIED', issues: [...selection.verdict.issues, 'Generic selection verifier scope is not deployed per-response model telemetry'] };
+    }
   } else if (levels.providerBound.status === 'PASS') levels.selectedModel = { status: 'PASS', issues: ['Selected model bound by the supplied provider witness, not by the configured-router row'] };
   else add('selectedModel', 'UNVERIFIED', 'PMS pin and configured-router projection do not prove per-call model selection');
   const cacheIssues: string[] = [];
@@ -306,13 +324,45 @@ export function evaluateServingEvidence(input: ServingEvidenceInput): ServingEvi
   }
   const promptIdentityStatus = statusOf([levels.configured.status, levels.selected.status, levels.loaded.status, cacheStatus]);
   const identityStatus = statusOf([promptIdentityStatus, levels.selectedModel.status]);
-  const deployedProviderStatus = input.mode === 'observed' && receipt?.scope === 'deployed-provider'
-    ? statusOf([identityStatus, levels.providerBound.status, levels.deployed.status, levels.observed.status]) : 'UNVERIFIED';
+  const responseIssues: string[] = [];
+  const responseIdentities: ResponseIdentityReport[] = [];
+  let responseCollectionStatus: ContractStatus = 'PASS';
+  for (const response of input.responses ?? []) {
+    if (!isResponseIdentityReport(response)) { responseCollectionStatus = 'FAIL'; responseIssues.push('Actual response was not issued by the fixed raw-response decoder'); continue; }
+    responseIdentities.push(response);
+    if (response.mode !== input.mode || response.configurationSha256 !== configurationHash(config)) {
+      responseCollectionStatus = 'FAIL'; responseIssues.push('Actual response targets a different mode/configuration');
+    }
+  }
+  const actualResponse: Level = { status: statusOf([responseCollectionStatus, responseIdentities.length ? 'PASS' : 'UNVERIFIED', ...responseIdentities.map(r => r.status)]),
+    issues: responseIdentities.length ? responseIssues : [...responseIssues, 'No actual response telemetry supplied; GET snapshots and local provider probes cannot substitute'] };
+  const actualResponseSelection: Level = { status: statusOf([responseCollectionStatus, responseIdentities.length ? 'PASS' : 'UNVERIFIED',
+    ...responseIdentities.flatMap(r => [r.levels.binding.status, r.levels.selectedPrompt.status, r.levels.requestedModel.status, r.levels.instance.status, r.levels.build.status])]), issues: responseIssues };
+  let fleet: Level = { status: 'UNVERIFIED', issues: ['No per-response observed-instance settling evidence supplied'] };
+  let responseFleet: ResponseFleetReport | null = null;
+  if (input.responseFleet) {
+    const candidate = input.responseFleet;
+    if (!isResponseFleetReport(candidate) || candidate.mode !== input.mode || candidate.configurationSha256 !== configurationHash(config)) {
+      fleet = { status: 'FAIL', issues: ['Fleet evidence is unissued or targets another mode/configuration'] };
+    } else {
+      responseFleet = candidate;
+      // Equal body bytes do not make different capture headers/associations the
+      // same evidence. Compare complete decoded receipts, not body hashes alone.
+      const responseHashes = [...new Set(responseIdentities.map(r => evidenceHash(r)))].sort();
+      const fleetHashes = [...new Set(candidate.responses.map(r => evidenceHash(r)))].sort();
+      fleet = JSON.stringify(responseHashes) === JSON.stringify(fleetHashes)
+        ? { status: candidate.status, issues: candidate.issues }
+        : { status: 'FAIL', issues: ['Fleet evidence and actual response collection disagree'] };
+    }
+  }
+  const deployedProviderStatus = input.mode === 'observed'
+    ? statusOf([actualResponse.status, responseIdentities.length ? 'PASS' : 'UNVERIFIED', ...responseIdentities.flatMap(r => [r.levels.binding.status, r.levels.providerBound.status, r.levels.build.status])]) : 'UNVERIFIED';
   const result: ServingEvidenceReport = frozen({
     configuration: config, configurationSha256: configurationHash(config), evidenceSha256: evidenceHash(input), mode: input.mode,
     levels, configuredModels, cacheWindow: { status: cacheStatus, issues: cacheIssues }, promptIdentityStatus, identityStatus,
-    status: statusOf([identityStatus, levels.providerBound.status, levels.deployed.status, levels.observed.status, levels.configuredRouter.status]), observationCount: count, deployedProviderStatus,
-    limitation: 'PASS is identity scope only. Loaded evidence binds a digest prefix/length/edge bytes to full selected PMS bytes; it is not full provider bytes. Configured identities are references, not source execution. The configured-router GET is not per-call model selection. Anonymous instances do not establish fleet convergence. Simulation is never a deployed observation. No semantic/promotion certification.',
+    status: statusOf([identityStatus, levels.providerBound.status, levels.deployed.status, levels.observed.status, levels.configuredRouter.status, actualResponse.status, fleet.status]), observationCount: count, deployedProviderStatus,
+    actualResponse, actualResponseSelection, responseIdentities, responseFleet, fleet,
+    limitation: 'PASS is identity scope only. GET loaded evidence binds a digest prefix/length/edge bytes to selected PMS bytes, not an individual response. Configured identities and generic verifier callbacks are not server-origin observations. Per-response telemetry and observed-instance consistency are separate; missing composition/provider fields stay UNVERIFIED. Neither a requested instance list nor a sample proves whole-fleet convergence. No semantic/promotion certification.',
     deploymentPermission: 'NOT_GRANTED',
   });
   issuedServingReports.add(result);

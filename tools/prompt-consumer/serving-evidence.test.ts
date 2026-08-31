@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildDraftRecordsSchema } from '../../src/cee/draft/records/grammar.js';
 import { DRAFT_RECORDS_INSTRUCTION } from '../../src/cee/draft/records/instruction.js';
+import { buildLlmMetadataProjection } from '../../src/cee/unified-pipeline/llm-metadata-projection.js';
 import { assertExactCaseIds, sha256 } from './contract.js';
+import { evaluateResponseIdentity } from './response-identity.js';
+import { evaluateResponseFleet } from './response-fleet.js';
 import {
   configurationHash, configurationIssues, evidenceHash, evaluateServingEvidence, isVerifiedEvaluationReceipt, verifyEvaluationEvidence,
   type EvidenceComponent, type EvaluationVerdict, type ReadOnlyGetCapture, type ServingConfiguration,
@@ -11,7 +14,7 @@ import {
 
 const collected: string[] = [];
 beforeEach(() => expect.hasAssertions());
-afterAll(() => assertExactCaseIds(['levels', 'prompt', 'model', 'model-authority', 'schema', 'parser', 'projector', 'consumer', 'candidate-version', 'cache-window', 'cache-split', 'capture', 'issued-receipt', 'scope', 'unverified-priority'], collected));
+afterAll(() => assertExactCaseIds(['levels', 'prompt', 'model', 'model-authority', 'schema', 'parser', 'projector', 'consumer', 'candidate-version', 'cache-window', 'cache-split', 'capture', 'issued-receipt', 'scope', 'unverified-priority', 'claimed-deployment', 'actual-response', 'mixed-response-cache'], collected));
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
 const component = (path: string, exportName: string): EvidenceComponent => ({ path, exportName, fileSha256: sha256(read(path)) });
 const prompt = read('src/cee/draft/records/__tests__/fixtures/served-draft-graph-v195.txt');
@@ -56,6 +59,13 @@ function receipt(configuration = config, scope: VerifiedEvaluationReceipt['scope
   const evidence = { capturedConfiguration: configuration, metadata: { object: 'teapot' } };
   return verifyEvaluationEvidence({ kind: 'provider-fidelity', scope, configurations: [config], evidence, evidenceSha256: evidenceHash(evidence),
     verifier: { ...verifierSource, run: raw => ({ status, fidelityStatus: status, observedConfigurationHashes: [configurationHash(raw.capturedConfiguration)], issues: [] }) } });
+}
+function response(expected: ServingConfiguration, actualPrompt = expected.prompt, requestId = 'request-a', instanceId = 'A', observedAt = '2026-08-31T09:00:00Z') {
+  const version = `${actualPrompt.id}@v${actualPrompt.version} (staging)`;
+  const body = JSON.stringify({ trace: { request_id: requestId, correlation_id: requestId, engine: { model: expected.model.id, provider: expected.model.provider },
+    pipeline: { llm_metadata: buildLlmMetadataProjection({ model: expected.model.id, prompt_version: version, prompt_hash: actualPrompt.sha256, instance_id: instanceId, cache_age_ms: 10, cache_status: 'fresh' }, undefined),
+      cee_provenance: { commit: expected.sourceHead.slice(0, 8), prompt_version: version, prompt_hash: actualPrompt.sha256, prompt_store_version: actualPrompt.version } } } });
+  return evaluateResponseIdentity({ configuration: expected, mode: 'simulation', capture: { observedAt, url: 'https://simulation.invalid/assist/v1/draft-graph', httpStatus: 200, requestId, body, bodySha256: sha256(body), serviceBuild: expected.sourceHead } });
 }
 
 describe('read-only serving identity evidence refuses unsupported claims', () => {
@@ -173,5 +183,62 @@ describe('read-only serving identity evidence refuses unsupported claims', () =>
     expect(evaluateServingEvidence({ ...input(), providerEvidence: receipt(config, 'simulation', 'UNVERIFIED') }).levels.providerBound.status).toBe('UNVERIFIED');
     const wrong = { ...config, model: { ...config.model, id: 'wrong-model' } };
     expect(evaluateServingEvidence({ ...input(), providerEvidence: receipt(wrong, 'simulation', 'UNVERIFIED') }).levels.providerBound.status).toBe('FAIL');
+  });
+  it('a same-process self-authored PASS callback cannot certify a deployed response', () => {
+    collected.push('claimed-deployment');
+    const asserted = receipt(config, 'deployed-provider');
+    expect(isVerifiedEvaluationReceipt(asserted)).toBe(true);
+    expect(asserted.verdict.status).toBe('PASS');
+    const report = evaluateServingEvidence({ ...input(), mode: 'observed', providerEvidence: asserted });
+    expect(report.levels.providerBound.status).toBe('UNVERIFIED');
+    expect(report.actualResponse.status).toBe('UNVERIFIED');
+    expect(report.deployedProviderStatus).toBe('UNVERIFIED');
+    expect(report.levels.providerBound.issues.join(' ')).toContain('Generic verifier scope');
+    const raw = { capturedConfiguration: config };
+    const claimedSelection = verifyEvaluationEvidence({ kind: 'model-selection', scope: 'deployed-provider', configurations: [config], evidence: raw, evidenceSha256: evidenceHash(raw),
+      verifier: { ...verifierSource, run: facts => ({ status: 'PASS', fidelityStatus: 'PASS', observedConfigurationHashes: [configurationHash(facts.capturedConfiguration)], issues: [] }) } });
+    const selected = evaluateServingEvidence({ ...input(), mode: 'observed', modelSelectionEvidence: claimedSelection });
+    expect(selected.levels.selectedModel.status).toBe('UNVERIFIED');
+    expect(selected.actualResponseSelection.status).toBe('UNVERIFIED');
+    expect(selected.deployedProviderStatus).toBe('UNVERIFIED');
+    const local = evaluateServingEvidence({ ...input(), mode: 'observed', providerEvidence: receipt(config, 'local-provider') });
+    expect(local.levels.providerBound.status).toBe('PASS');
+    expect(local.actualResponse.status).toBe('UNVERIFIED');
+  });
+  it('keeps decoded response selection separate from missing provider/composition and refuses clones', () => {
+    collected.push('actual-response');
+    const observed = response(config);
+    const report = evaluateServingEvidence({ ...input(), responses: [observed] });
+    expect(report.actualResponseSelection.status).toBe('PASS');
+    expect(report.actualResponse.status).toBe('UNVERIFIED');
+    expect(report.responseIdentities).toEqual([observed]);
+    expect(report.deployedProviderStatus).toBe('UNVERIFIED');
+    const fake = JSON.parse(JSON.stringify(observed));
+    expect(evaluateServingEvidence({ ...input(), responses: [fake] }).actualResponse.status).toBe('FAIL');
+  });
+  it('latest administrative Y cannot relabel mixed A:X/B:Y actual responses', () => {
+    collected.push('mixed-response-cache');
+    const textY = 'Distinct synthetic prompt Y for response identity controls.';
+    const targetY: ServingConfiguration = { ...config, prompt: { ...config.prompt, version: 196, sha256: sha256(textY) } };
+    const observations = input().observations.map(sample => changeCapture(changeCapture(sample, 'stored', body => {
+      body.stagingVersion = 196; body.versions = [{ version: 196, content: textY, createdBy: 'simulation', createdAt: '2026-08-30T10:00:00.000Z' }];
+    }), 'loaded', body => { const row = body.prompts[0]; row.store_version = 196; row.content_hash = targetY.prompt.sha256.slice(0, 16); row.content_length = textY.length; row.first_100_chars = textY.slice(0, 100); row.last_100_chars = textY.slice(-100); }));
+    const responses = [response(targetY, config.prompt, 'a1', 'A'), response(targetY, targetY.prompt, 'b1', 'B'),
+      response(targetY, config.prompt, 'a2', 'A', '2026-08-31T09:20:00Z'), response(targetY, targetY.prompt, 'b2', 'B', '2026-08-31T09:20:00Z')];
+    const fleet = evaluateResponseFleet({ configuration: targetY, mode: 'simulation', responses, settling: { notBefore: '2026-08-31T09:00:00Z', effectiveExpiryMs: 600_000, source: component('src/adapters/llm/prompt-loader.ts', 'getPromptLoaderCacheDiagnostics') } });
+    const report = evaluateServingEvidence({ ...input(), configuration: targetY, observations, responses, responseFleet: fleet });
+    expect(report.levels.selected.status).toBe('PASS');
+    expect(report.levels.loaded.status).toBe('PASS');
+    expect(report.responseFleet!.state).toBe('MIXED');
+    expect(report.actualResponse.status).toBe('FAIL');
+    expect(report.fleet.status).toBe('FAIL');
+    expect(report.responseIdentities[0]!.actual.prompt.sha256).toBe(config.prompt.sha256);
+    expect(report.responseIdentities[1]!.actual.prompt.sha256).toBe(targetY.prompt.sha256);
+    const settledResponses = responses.map((_, i) => response(targetY, targetY.prompt, `settled-${i}`, i % 2 ? 'B' : 'A', i < 2 ? '2026-08-31T09:00:00Z' : '2026-08-31T09:20:00Z'));
+    const settledFleet = evaluateResponseFleet({ configuration: targetY, mode: 'simulation', responses: settledResponses, settling: { notBefore: '2026-08-31T09:00:00Z', effectiveExpiryMs: 600_000, source: component('src/adapters/llm/prompt-loader.ts', 'getPromptLoaderCacheDiagnostics') } });
+    const counterpart = evaluateServingEvidence({ ...input(), configuration: targetY, observations, responses: settledResponses, responseFleet: settledFleet });
+    expect(counterpart.actualResponseSelection.status).toBe('PASS');
+    expect(counterpart.responseFleet!.sampledInstanceStatus).toBe('PASS');
+    expect(counterpart.actualResponse.status).toBe('UNVERIFIED');
   });
 });

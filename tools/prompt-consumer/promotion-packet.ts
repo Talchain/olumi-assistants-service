@@ -74,6 +74,9 @@ function cacheCheck(report: ServingEvidenceReport | undefined, configuration: Se
   });
   if (binding.status === 'FAIL') return binding;
   const checks = [report.cacheWindow, report.levels.configured, report.levels.selected, report.levels.selectedModel, report.levels.loaded, report.levels.deployed];
+  // Administrative cache reads do not show what any individual user received.
+  // Keep full response/composition gaps visible, even when sampled selection settles.
+  checks.push(report.actualResponse, report.actualResponseSelection, report.fleet);
   // Missing provider evidence is outside the cache check; a supplied, known
   // contradiction is not. Never hide a failed actual request behind GET success.
   if (report.levels.providerBound.status === 'FAIL') checks.push(report.levels.providerBound);
@@ -151,7 +154,7 @@ export function buildPromotionEvidencePacket(input: PromotionEvidenceInput) {
     },
     codeOnlyRequired,
     operations: { owner: 'CC' as const, promotionPerformed: false as const, rollbackPerformed: false as const,
-      procedure: 'Existing approved PMS/deploy procedures only; this packet has no client or admission hook. Preserve original environment-specific PMS/model selection and exact code head; after each CC-authorised action collect successful GET snapshots spanning verified effective cache expiry.' },
+      procedure: 'Existing approved PMS/deploy procedures only; this packet has no client or admission hook. Preserve original environment-specific PMS/model selection and exact code head; after each CC-authorised action collect successful GET snapshots plus request-correlated individual responses spanning verified effective cache expiry on each observed instance. Missing response/provider/composition telemetry remains UNVERIFIED.' },
     deployedSemanticStatus: 'UNVERIFIED' as const,
     deploymentPermission: 'NOT_GRANTED' as const,
     limitation: input.mode === 'simulation'
