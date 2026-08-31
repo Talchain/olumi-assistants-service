@@ -29,6 +29,7 @@ import { makeMessagePayload } from './fixtures.js';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { PENDING_ACTION_DEFAULT_TURN_TTL } from '../session/pending-action.js';
 
 const appendCalls: Array<Record<string, unknown>> = [];
 let mockedPendingActions: ReadonlyArray<PendingAction> = [];
@@ -450,19 +451,34 @@ describe('R2918B ROUTE — an unreadable ANSWER is re-asked; a non-answer is not
     expect(response.assistant_text).toContain('What percentage is Churn rate at right now?');
 
     // The question SURVIVES the re-ask, so the next attempt still has a
-    // referent to bind through. It survives by carry-forward (this branch
-    // consumes nothing), NOT by an explicit re-persist: an explicit list
-    // REPLACES the carried-forward set, so writing one here would drop every
-    // sibling pending. Both halves are asserted below.
+    // referent to bind through — and it survives by an EXPLICIT RE-PERSIST
+    // whose turn-TTL is refreshed, not by bare carry-forward.
+    //
+    // ⚠ This comment previously said the opposite ("it survives by
+    // carry-forward ... NOT by an explicit re-persist: an explicit list
+    // REPLACES the carried-forward set"). That was false about `commit.ts`
+    // — see the corrected note at the re-ask commit site — and bare
+    // carry-forward is not survival: it DECREMENTS, so the question reached
+    // zero on the second re-ask and the next valid answer fell into silence.
+    // The TTL assertion below is what discriminates the two mechanisms;
+    // without it this test passes under either.
     const persisted = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
     const reAsked = persisted.filter((p) => p.action.kind === 'elicit_target_baseline');
     expect(reAsked).toHaveLength(1);
     expect(
       (reAsked[0]!.action as { target_id: string }).target_id,
     ).toBe('o-churn-rate');
+    // REFRESHED, not decremented. Carry-forward alone would persist 1 here.
+    expect(reAsked[0]!.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+    // ...and the wall clock is NOT refreshed with it — the bound the re-ask
+    // may never extend (identity preserved too, so telemetry tracks one
+    // question across re-asks).
+    expect(reAsked[0]!.expires_at_iso).toBe('2099-12-31T23:59:59.000Z');
+    expect(reAsked[0]!.emitted_at_iso).toBe('2026-08-08T00:00:00.000Z');
+    expect(reAsked[0]!.id).toBe('pa-elicit-route-1');
   });
 
-  it('a SIBLING pending survives the re-ask too (an explicit list would have dropped it)', async () => {
+  it('a SIBLING pending survives the re-ask alongside the re-persisted question', async () => {
     const graph = graphWithFramedRow();
     const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
     const sibling = {
@@ -485,11 +501,32 @@ describe('R2918B ROUTE — an unreadable ANSWER is re-asked; a non-answer is not
       graphState: graph,
     });
 
+    // ⚠ RENAMED. This test used to be called "(an explicit list would have
+    // dropped it)" — a name asserting a mechanism that is FALSE (`commit.ts`
+    // combines `[...chipDerivedPending, ...survivingPrior]`, so an explicit
+    // list adds, it does not replace) and that the body never tested. It
+    // passed identically with and without the re-persist, so its name was the
+    // only thing claiming a property, and the claim was wrong.
+    //
+    // What it pins now is real and discriminating in BOTH directions: the
+    // sibling carries forward (decremented, as carry-forward does) while the
+    // question is re-persisted FRESH by the explicit list beside it. Drop the
+    // explicit list and the question reads 1; drop the carry-forward and the
+    // sibling disappears. One assertion cannot be satisfied by the other.
     const persisted = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
     expect(persisted.map((p) => p.action.kind).sort()).toEqual([
       'elicit_target_baseline',
       'run_analysis',
     ]);
+    const question = persisted.find((p) => p.action.kind === 'elicit_target_baseline')!;
+    const carried = persisted.find((p) => p.action.kind === 'run_analysis')!;
+    expect(question.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+    expect(carried.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL - 1);
+    // Exactly one copy of the question: the explicit list SUPERSEDES the
+    // carried copy by `chip_id` rather than sitting alongside it as a second
+    // live referent (two would make the next bare number ambiguous and bind
+    // neither — `findSoleLiveElicitBaselinePending` requires exactly one).
+    expect(persisted.filter((p) => p.chip_id === 'chip_elicit_target_baseline')).toHaveLength(1);
   });
 
   it('"120%" re-asks about the RANGE (the reason reaches the copy, not just the branch)', async () => {
@@ -522,5 +559,169 @@ describe('R2918B ROUTE — an unreadable ANSWER is re-asked; a non-answer is not
     expect(chatWithTools).toHaveBeenCalled();
     expect(response.assistant_text).not.toContain('One number is enough');
     expect(response.assistant_text).not.toContain('What percentage is Churn rate at right now?');
+  });
+});
+
+/**
+ * R2918C — THE THREE-TURN JOURNEY, and the two opposite harms that bound it.
+ *
+ * These are TURN-CHAINED, not single-shot: each turn's persisted
+ * `pending_actions` becomes the next turn's `most_recent_pending_actions`,
+ * which is what production does. A single-turn assertion cannot see this
+ * defect class at all — the question looked healthy on turn 1 (it persisted,
+ * at 1) and was gone on turn 2, so every existing single-shot pin was green
+ * while the journey was broken.
+ */
+describe('R2918C — the re-asked question is still there on the third turn', () => {
+  /** One chained turn. Returns the reply and the pendings it persisted. */
+  async function turn(
+    graph: GraphV3T,
+    message: string,
+    requestId: string,
+  ): Promise<{
+    readonly text: string;
+    readonly persisted: readonly PendingAction[];
+    readonly llmCalled: boolean;
+    readonly minted: unknown;
+  }> {
+    appendCalls.length = 0;
+    const { adapter, chatWithTools } = directAnswerAdapter();
+    const { response } = await runTurnExecutor(payload(message), requestId, {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+    const last = appendCalls[appendCalls.length - 1];
+    const persisted = (last?.pending_actions ?? []) as PendingAction[];
+    // Chain: this turn's committed pendings are the next turn's prior state.
+    mockedPendingActions = persisted;
+    return {
+      text: response.assistant_text,
+      persisted,
+      llmCalled: chatWithTools.mock.calls.length > 0,
+      minted: (last?.graph as GraphV3T | undefined)?.nodes.find((n) => n.id === 'o-churn-rate')
+        ?.observed_state?.baseline,
+    };
+  }
+
+  it('THE DEFECT — fumble, fumble, then a perfect "30" still binds', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+
+    // Fumble 1 — an unreadable range. The product re-asks.
+    const t1 = await turn(graph, '10-15%', 'req-r2918c-t1');
+    expect(t1.text).toContain('What percentage is Churn rate at right now?');
+    expect(t1.persisted.filter((p) => p.action.kind === 'elicit_target_baseline')).toHaveLength(1);
+
+    // Fumble 2 — a second unreadable answer. The product re-asks AGAIN, and
+    // this is the turn the defect lived on: before the fix it re-asked while
+    // persisting ZERO pendings, so the question below had no referent.
+    const t2 = await turn(graph, 'maybe 12%', 'req-r2918c-t2');
+    expect(t2.text).toContain('What percentage is Churn rate at right now?');
+    expect(
+      t2.persisted.filter((p) => p.action.kind === 'elicit_target_baseline'),
+      'the product re-asked while persisting no question — the next answer falls into silence',
+    ).toHaveLength(1);
+
+    // THE PAYOFF. A bare, perfectly good answer to the question just asked.
+    const t3 = await turn(graph, '30', 'req-r2918c-t3');
+    // It BOUND: zero LLM calls (the pre-route claimed the turn) and the
+    // baseline landed on the named target.
+    expect(t3.llmCalled).toBe(false);
+    expect(t3.minted).toBe(0.3);
+    expect(t3.text).toContain('Noted Churn rate is currently at 30%.');
+    // ...and the answered question was consumed, so it cannot zombie.
+    expect(t3.persisted.filter((p) => p.action.kind === 'elicit_target_baseline')).toHaveLength(0);
+  });
+
+  it('THE OPPOSITE HARM — the question still genuinely EXPIRES on the wall clock', async () => {
+    // The re-ask refreshes the TURN-TTL only. `expires_at_iso` is carried
+    // through from the original ask, so no amount of fumbling can extend the
+    // window the ask opened. Here the question is already past it.
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [
+      elicitPending(liveHash, {
+        expires_at_iso: new Date(Date.now() - 60_000).toISOString(),
+      } as Partial<PendingAction>),
+    ];
+
+    // Exactly the message that re-asks when the question is live.
+    const t = await turn(graph, '10-15%', 'req-r2918c-expired');
+
+    // No re-ask copy, and NOTHING re-persisted: an expired question is dead,
+    // and the re-persist cannot resurrect it. The flow is untouched.
+    expect(t.text).not.toContain('What percentage is Churn rate at right now?');
+    expect(t.text).not.toContain('One number is enough');
+    expect(t.persisted.filter((p) => p.action.kind === 'elicit_target_baseline')).toHaveLength(0);
+    expect(t.llmCalled).toBe(true);
+    expect(t.minted).toBeUndefined();
+  });
+
+  it('THE OPPOSITE HARM — an ABANDONED question decays in two turns, and a later bare number does NOT bind to it', async () => {
+    // The bound on the other side. A message that IGNORES the question
+    // classifies `not_an_answer`, never reaches the re-ask branch, and so is
+    // never re-persisted: ordinary carry-forward decrements it to nothing.
+    // This is why refreshing on re-ask cannot make a stale question immortal
+    // — the refresh happens only on evidence the user is still answering.
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [elicitPending(liveHash)];
+
+    const a1 = await turn(graph, 'let us talk about something else', 'req-r2918c-ab1');
+    expect(a1.text).not.toContain('What percentage is Churn rate at right now?');
+    // Carried, decremented — not refreshed.
+    const carried = a1.persisted.filter((p) => p.action.kind === 'elicit_target_baseline');
+    expect(carried).toHaveLength(1);
+    expect(carried[0]!.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL - 1);
+
+    const a2 = await turn(graph, 'what were we doing again', 'req-r2918c-ab2');
+    expect(a2.persisted.filter((p) => p.action.kind === 'elicit_target_baseline')).toHaveLength(0);
+
+    // A bare number two turns after abandonment binds NOTHING — it does not
+    // land on a question the user walked away from.
+    const a3 = await turn(graph, '30', 'req-r2918c-ab3');
+    expect(a3.minted).toBeUndefined();
+    expect(a3.llmCalled).toBe(true);
+  });
+});
+
+/**
+ * R2918C — THE REFRESH IS PINNED AGAINST A DECREMENTED VALUE.
+ *
+ * ⚠ Trap 13b, caught in this lane's own first draft. Every other pin here
+ * feeds a question at `PENDING_ACTION_DEFAULT_TURN_TTL`, so "refreshed to 2"
+ * and "re-persisted unchanged" produce the SAME number and the assertion
+ * cannot tell them apart. A mutant that re-persists
+ * `pending.expires_at_turn_count` verbatim survives all of them. The fixture
+ * below arrives ALREADY DECREMENTED — the one state where the two mechanisms
+ * disagree — so the assertion has to do real work.
+ */
+describe('R2918C — the re-ask REFRESHES the turn-TTL, it does not merely re-persist it', () => {
+  it('a question carried down to 1 comes back out of the re-ask at the full TTL', async () => {
+    const graph = graphWithFramedRow();
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    // The ordinary state after one turn that ignored the question.
+    mockedPendingActions = [
+      elicitPending(liveHash, {
+        expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL - 1,
+      } as Partial<PendingAction>),
+    ];
+    const { adapter } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('10-15%'), 'req-r2918c-refresh', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    const persisted = (appendCalls[0]!.pending_actions ?? []) as PendingAction[];
+    const question = persisted.filter((p) => p.action.kind === 'elicit_target_baseline');
+    expect(question).toHaveLength(1);
+    // PRECONDITION PINNED IN-TEST: the input really was below the full TTL, so
+    // a green result here cannot be the fixture failing to set up the case.
+    expect(mockedPendingActions[0]!.expires_at_turn_count).toBeLessThan(
+      PENDING_ACTION_DEFAULT_TURN_TTL,
+    );
+    expect(question[0]!.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
   });
 });

@@ -83,6 +83,7 @@ import {
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
+import { boundNodeLabel } from "./label-bound.js";
 import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
 import type {
   DraftInferenceClaim,
@@ -1244,22 +1245,80 @@ export function isBasisPointsUnit(unit: string | undefined): boolean {
 }
 
 /**
- * The smallest {1,2,5}·10^k STRICTLY greater than `x` (x > 0, finite).
+ * The exponent span of an IEEE-754 double, decades: 10^-324 (the smallest
+ * denormal) to 10^308 (the largest normal) is 633 decades. Every ladder walk
+ * over representable numbers therefore fits inside this many steps with room to
+ * spare — a walk that exceeds it is not a large input, it is a non-terminating
+ * one. DERIVED from the format, not chosen: it is a backstop, never a policy.
+ */
+const NICE_NUMBER_LADDER_MAX_STEPS = 700;
+
+/**
+ * The smallest FINITE {1,2,5}·10^k STRICTLY greater than `x`, or `undefined`
+ * when no such number truthfully exists.
+ *
  * Pure arithmetic, no floating log tricks at the boundaries: the exponent scan
  * starts safely below x and walks up, so exact powers (100 → 200) behave.
+ *
+ * ⭐⭐ THE PRECONDITION USED TO BE PROSE ONLY. This docstring has always read
+ * "(x > 0, finite)" and the body has always TRUSTED the caller for it. Outside
+ * that domain the walk does not throw and does not return — it SPINS FOREVER,
+ * because every comparison against the candidate is false and there is no exit
+ * but `return`. Measured at `9f401d25` in a SIGKILL-bounded child process, six
+ * inputs hang: `NaN`, `+Infinity`, `-Infinity`, `0`, any negative, and the two
+ * smallest positive denormals (`5e-324`, `1e-323`, where `10 ** -324`
+ * underflows the start magnitude to `0` and `0 * 10` is `0` forever).
+ *
+ * ⚠ NOTE THE SHAPE, because it is why the caller's guards did not save it:
+ * `deriveFactorScaleFrame` refuses `m < 0` and `max <= 1`, and BOTH ARE FALSE
+ * FOR `NaN` — every comparison against `NaN` is false, so a NaN slips through a
+ * sign guard and a bound guard alike and arrives here. `-Infinity` IS caught
+ * (by `m < 0`); `NaN` and `+Infinity` are not. A guard written as an ordering
+ * test is not a domain test (trap 13d).
+ *
+ * ⭐ REFUSAL, NOT SUBSTITUTION. `undefined` is this file's established refusal
+ * convention for "no truthful answer exists" — `deriveFactorScaleFrame`, this
+ * function's only caller, already refuses that way and its caller already reads
+ * it as `continue`. Returning an invented number (0, 1, the input) would put a
+ * fabricated frame into the analysis, which is the harm the surrounding module
+ * exists to prevent.
+ *
+ * Non-finite is also the honest answer ABOVE the domain: from ~1.6e308 the
+ * ladder's next rung is not representable, and `Infinity` as a frame would ship
+ * a fabricated level 0 under a green guard (review breadth finding, pinned by
+ * `projector-scale-projection.test.ts`). That case now refuses here rather than
+ * being filtered at the caller, so the postcondition is uniform: **the return
+ * is a finite positive number, or nothing.**
  */
-export function nextNiceNumberAbove(x: number): number {
+export function nextNiceNumberAbove(x: number): number | undefined {
+  // The domain, ENFORCED. `!(x > 0)` rather than `x <= 0` so `NaN` is refused
+  // by the same test — an ordering comparison against NaN is false either way,
+  // and this is exactly the asymmetry that let NaN reach the loop.
+  if (!Number.isFinite(x) || !(x > 0)) return undefined;
   let magnitude = 10 ** Math.floor(Math.log10(x));
+  // Underflow: for the two smallest denormals `10 ** -324` is `0`, and a zero
+  // magnitude can never be scaled back up. Refuse rather than spin.
+  if (!Number.isFinite(magnitude) || !(magnitude > 0)) return undefined;
   // Math.log10 can land one bucket high or low at representation boundaries;
   // step down until magnitude ≤ x so the candidate walk below is complete.
-  while (magnitude > x) magnitude /= 10;
-  for (;;) {
+  // Bounded for the same reason the ascending walk is: a descending walk from a
+  // finite positive magnitude provably reaches 0, but the bound costs nothing
+  // and removes the need to re-prove that at every future edit.
+  for (let step = 0; magnitude > x; step++) {
+    if (step >= NICE_NUMBER_LADDER_MAX_STEPS) return undefined;
+    magnitude /= 10;
+  }
+  for (let step = 0; step < NICE_NUMBER_LADDER_MAX_STEPS; step++) {
     for (const m of [1, 2, 5]) {
       const candidate = m * magnitude;
-      if (candidate > x) return candidate;
+      // `Number.isFinite` is the postcondition, not an optimisation: above
+      // ~1.6e308 the rung overflows and an infinite frame is a fabricated 0.
+      if (candidate > x) return Number.isFinite(candidate) ? candidate : undefined;
     }
     magnitude *= 10;
+    if (!Number.isFinite(magnitude)) return undefined;
   }
+  return undefined;
 }
 
 /**
@@ -1399,12 +1458,13 @@ export function deriveFactorScaleFrame(
   const scaleClass = classifyUnitScaleClass(unit);
   if (scaleClass === "percent" && max <= 100) return 100;
   if (scaleClass === "basis_points" && max <= 10000) return 10000;
-  const frame = nextNiceNumberAbove(max);
-  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows to Infinity, and an
-  // infinite frame would ship a fabricated level 0 under a green guard
-  // (review breadth finding). Non-finite frame → unframed, the honest path.
-  if (!Number.isFinite(frame)) return undefined;
-  return frame;
+  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows, and an infinite frame
+  // would ship a fabricated level 0 under a green guard (review breadth
+  // finding). That refusal now lives INSIDE `nextNiceNumberAbove`, whose
+  // postcondition is "a finite positive number, or nothing" — so the single
+  // `undefined` test below covers it, and there is no second guard here that
+  // no test could ever kill. Unframed is the honest path either way.
+  return nextNiceNumberAbove(max);
 }
 
 // ── The projector ───────────────────────────────────────────────────────────
@@ -3790,7 +3850,92 @@ export function projectRecordsToGraph(
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
-  return { graph: projection.graph, provenance: projection.provenance, dropped: projection.dropped };
+  return boundEveryNodeLabel({
+    graph: projection.graph,
+    provenance: projection.provenance,
+    dropped: projection.dropped,
+  });
+}
+
+/**
+ * ⭐⭐ THE LAST THING THIS MODULE DOES: BRING EVERY LABEL INSIDE THE PUBLISHED
+ * CONTRACT'S BOUND, BEFORE THE GRAPH IS COMMITTED OR HASHED.
+ *
+ * ── WHY IT EXISTS (CEE #1178, staging 28 Aug 2026) ─────────────────────────
+ * A 212-character node label failed the PUBLISHED `NodeV3Schema.label`
+ * (`.min(1).max(200)`) at egress and replaced the user's ENTIRE assistant reply
+ * with "The server produced a response that failed validation." #1178 fixed the
+ * symptom at the boundary; this is the cause. The label was a brief sentence
+ * copied VERBATIM — `label === source_quote` — and nothing upstream bounded it,
+ * because the gate the producer checks itself against is CEE-LOCAL
+ * `schemas/cee-v3.ts`, whose `NodeV3.label` is a bare `z.string()`. Two schemas,
+ * one name (trap 21).
+ *
+ * ── ⚠ WHY HERE AND NOT AT THE THREE MINT SITES ─────────────────────────────
+ * Labels are minted in three places — stated items (`:2185`), claims (`:2593`)
+ * and the decision node (`:3264`). Bounding at each would be a hand-maintained
+ * list that a fourth mint site silently escapes (trap 12); bounding at the one
+ * return covers all of them and anything added later.
+ *
+ * ⭐ AND ONE OF THOSE SITES MAKES THE ORDERING LOAD-BEARING, NOT MERELY TIDY: a
+ * CLAIM node's id is `sha8(claim_kind, label)` (`:2575`). Shortening a label
+ * BEFORE that id is minted would collapse two claims differing only after
+ * character 199 into a single node — trading a dropped receipt for a silently
+ * deleted node, which is strictly worse. Running after every id is minted (and
+ * after the demote/merge passes above, which reason over full labels) is
+ * id-preserving BY CONSTRUCTION.
+ *
+ * ── WHY NOTHING DOWNSTREAM RE-BREAKS IT (derived at the bytes, not assumed) ─
+ * The chain from here is `enforceSingleGoal` → `projectGraphAndOptionsToV3` →
+ * `GraphV3` (`structure/index.ts:392`), and no step in it can LENGTHEN a label:
+ * `enforceSingleGoal`'s `composed.label` is a pure SELECTION (`labels[0]`, not a
+ * string join — the "Compound Goal: A + B" prefix that motivated this module's
+ * sibling is gone), `demoteGoalToOutcome` returns either the current label or a
+ * `deriveGoalObjectiveLabel` result that can only shorten, and
+ * `cleanNodeLabel` (`transforms/schema-v3.ts:197`) only strips and collapses.
+ *
+ * ── ⭐ IDENTITY WHEN NOTHING IS OVER-LONG ──────────────────────────────────
+ * The ordinary draft returns the ORIGINAL projection object, with the original
+ * node objects and the original provenance record — not a rebuilt copy. That is
+ * the over-correction control expressed as code: this pass cannot perturb a
+ * graph it has no work to do on.
+ */
+function boundEveryNodeLabel(projection: RecordProjection): RecordProjection {
+  let changed = false;
+  const provenance: Record<string, RecordProvenance> = { ...projection.provenance };
+
+  const nodes = projection.graph.nodes.map((node) => {
+    const label = boundNodeLabel(node.label);
+    // Referential identity: `boundNodeLabel` returns its input when it fits.
+    if (label === node.label) return node;
+    changed = true;
+
+    // `label_authored` is DERIVED, never hand-set (`cee-v3.ts:281-284`): it
+    // means the display string is OURS rather than the user's verbatim words,
+    // and after shortening that is exactly true.
+    //
+    // ⚠ SCOPED TO NODES THAT CARRY THE VERBATIM, and the scope is the honest
+    // half. The field's contract is to sit BESIDE `source_quote` so a surface
+    // can say *"you said: …"*; stamping it on an `ai_inferred` claim node —
+    // which has no `source_quote` and whose label was never the user's — would
+    // promise a verbatim that does not exist. `provenance_class: "ai_inferred"`
+    // already says that label is not the user's.
+    const carriesVerbatim = typeof node.provenance?.source_quote === "string";
+    const prov =
+      node.provenance !== undefined && carriesVerbatim
+        ? { ...node.provenance, label_authored: true }
+        : node.provenance;
+    if (prov !== undefined) provenance[node.id] = prov;
+
+    return { ...node, label, ...(prov !== undefined ? { provenance: prov } : {}) };
+  });
+
+  if (!changed) return projection;
+  return {
+    graph: { ...projection.graph, nodes },
+    provenance,
+    dropped: projection.dropped,
+  };
 }
 
 /** The determinism-comparison value: one canonical string per projection. */

@@ -400,13 +400,26 @@ describe('RUN-B — OPPOSITE-DIRECTION TWINS for the comma clause break', () => 
     for (const message of [
       `${WITNESS.ids.sibling_option_label} matters more, set it to 0.2.`,
       `The team disagrees, set the ${FACTOR_LABEL} baseline to 0.8.`,
-      // No unit conversion: this writer only ever writes a model-unit value.
-      'That would push it up a lot, set it to 80%.',
+      // ⭐ 'That would push it up a lot, set it to 80%.' LEFT THIS LIST on
+      // 2026-08-30. Its stated reason — "no unit conversion" — became false
+      // when the percent conversion landed, and a pin whose reason has gone
+      // false is the honest-label defect (CLAUDE.md trap 14). It is now
+      // claimed at 0.8, asserted BY VALUE in the twin below rather than
+      // silently dropped from the list.
       // A named target inside the answering clause keeps its existing owner.
       'It would push it up a lot, set it to 0.8 for the Status Quo: Hold current strategy option.',
     ]) {
       expect(resolveOptionEffectWrite({ message, graph: graph() }).matched, message).toBe(false);
     }
+  });
+
+  it('⭐ TWIN — the percent answer that left the list above is claimed, at the CONVERTED value', () => {
+    // Pins the divisor, not merely "something came back": a `/10` divisor
+    // would put this at 8, out of range, and a `/1000` at 0.08 — in range and
+    // wrong. Only asserting 0.8 discriminates.
+    expect(
+      resolveOptionEffectWrite({ message: 'That would push it up a lot, set it to 80%.', graph: graph() }),
+    ).toMatchObject({ matched: true, kind: 'write', value: 0.8 });
   });
 
   it('⭐ M2 — a comma with NO FOLLOWING SPACE is not a break (pinned, was a survivor)', () => {

@@ -57,7 +57,14 @@ import {
 import {
   buildGateRemedySectionDirective,
   buildGateFlipSectionDirective,
+  buildAmbiguityCandidateUiDirective,
+  collectAmbiguityCandidateEntityIds,
 } from './compose/ui-directive.js';
+// The ambiguity highlight resolves its candidate ids against the turn's
+// persisted graph — the same lookup the wave-4 directive rows use for the
+// mutation / what_would_flip branches, which likewise have no enrichment graph
+// to read. Labels come from here, never from the id (Phase-3 §0.1).
+import { buildGraphNodeLookupFromGraph } from './compose/phase3-blocks.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -4788,11 +4795,22 @@ export async function runTurnExecutor(
             message: 'Not now.',
           },
         ];
+        // Point at the candidates the question is about. The set is the SAME
+        // one the numbered list above is rendered from, so the gesture asserts
+        // nothing the question does not already assert — it relocates it onto
+        // the model. Suppressed entirely when no candidate id resolves in the
+        // turn's persisted graph (see the builder's fail-closed list): a
+        // highlight pointing at nothing is worse than no highlight.
+        const ambiguityDirective = buildAmbiguityCandidateUiDirective(
+          collectAmbiguityCandidateEntityIds(shortConfirmDispatch.candidates),
+          buildGraphNodeLookupFromGraph(context.persistedGraph),
+        );
         const ambiguousResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: ambiguousAssistantText,
           stage: context.stage,
           suggested_actions: consentResolutionChips,
+          ...(ambiguityDirective === null ? {} : { blocks: [ambiguityDirective] }),
         });
         sonnetTextForLog = ambiguousResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -5169,11 +5187,22 @@ export async function runTurnExecutor(
             const ambiguousAssistantText = allLabelsAreFallback
               ? 'I had more than one offer open. Which would you like?'
               : `Which one would you like? ${numberedList}`;
+            // Same gesture, same charter, at the label-collision twin of the
+            // branch above: highlight the proposals whose labels the user's
+            // reply matched. `ambiguousProposals` is the exact set the
+            // numbered clarification lists.
+            const labelAmbiguityDirective = buildAmbiguityCandidateUiDirective(
+              collectAmbiguityCandidateEntityIds(ambiguousProposals),
+              buildGraphNodeLookupFromGraph(context.persistedGraph),
+            );
             const ambiguousResponse = composeAnswer({
               answerKind: 'functional',
               assistant_text: ambiguousAssistantText,
               stage: context.stage,
               suggested_actions: labelAmbiguousChips,
+              ...(labelAmbiguityDirective === null
+                ? {}
+                : { blocks: [labelAmbiguityDirective] }),
             });
             sonnetTextForLog = ambiguousResponse.assistant_text;
             resolvedTurnClass = 'direct_answer';
@@ -5950,27 +5979,60 @@ export async function runTurnExecutor(
               llm_calls_used: 0,
               duration_ms: Date.now() - startedAt,
               handler_facts: [],
-              // NO `pending_actions` OVERRIDE, deliberately. The commit's
-              // default is `priorPendingActions: most_recent_pending_actions`,
-              // so omitting the field carries the question forward untouched
-              // AND preserves anything else that was live (the ask turn's own
-              // "Run the analysis" chip pending is the routine co-occurrence).
-              // Passing `[pending]` here would have looked like belt-and-braces
-              // and silently DROPPED those siblings: an explicit list REPLACES
-              // the carried-forward set rather than adding to it. Caught by a
-              // surviving mutant, which is the only reason it is not in this
-              // commit.
+              // RE-PERSIST THE QUESTION, with its turn-TTL refreshed.
               //
-              // WHY THE QUESTION SURVIVES, derived rather than assumed: this
-              // branch RETURNS here, thousands of lines before
-              // `consumedPendingAction` is read into `consumedPendingRefs`, so
-              // consumption cannot be expressed on this path at all and the
-              // commit's `priorPendingActions` default carries everything
-              // forward. An earlier draft of this comment credited "we do not
-              // set `consumedPendingAction`" — plausible, and false: a mutant
-              // that DOES set it survives, because nothing on this path reads
-              // it. Stated exactly, so the next reader does not inherit a
-              // mechanism that is not the one operating.
+              // ⚠ CORRECTING A FALSE COMMENT THAT SHIPPED HERE, because it is
+              // the stated reason this re-persist was omitted. It read: "an
+              // explicit list REPLACES the carried-forward set rather than
+              // adding to it", and concluded that passing `[pending]` would
+              // silently drop the sibling pendings. THAT IS NOT WHAT THE
+              // COMMIT DOES. `commit.ts` builds
+              // `combinedPendings = [...chipDerivedPending, ...survivingPrior]`
+              // — an explicit list is this turn's OWN pendings and the priors
+              // still carry forward beside it. Supersession is by `chip_id`,
+              // and this pending's `chip_id` is the CONSTANT
+              // `chip_elicit_target_baseline`, so the explicit copy supersedes
+              // exactly the carried copy of the same question and nothing else.
+              // Siblings survive; there is no belt-and-braces cost. (Derived at
+              // `commit.ts` `computeSurvivingPriorPendingsDetailed` + the
+              // combine site; the sibling test below pins it by execution.)
+              //
+              // WHY THE RE-PERSIST IS NECESSARY, measured rather than assumed.
+              // Carry-forward alone decrements `expires_at_turn_count` by 1 per
+              // surviving turn and drops at `<= 0`. The question is minted at
+              // `PENDING_ACTION_DEFAULT_TURN_TTL` (2), so it persists at 1 after
+              // the first re-ask and at ZERO after the second: the product
+              // re-asked while persisting no question at all, and the user's
+              // next perfectly good "30" fell into silence — the exact harm
+              // this branch exists to prevent, one turn later. Refreshing the
+              // turn-TTL here means every re-ask leaves a live referent.
+              //
+              // THE BOUND, and why it is not "forever". `emitted_at_iso` and
+              // `expires_at_iso` are carried through UNCHANGED from the
+              // original ask (spread, never restamped), so the wall-clock TTL
+              // set once at the ask (`PENDING_ACTION_DEFAULT_WALL_TTL_MS`) can
+              // never be extended by any number of re-asks. Past it,
+              // `findSoleLiveElicitBaselinePending` filters on liveness FIRST,
+              // so no re-ask can fire and nothing is re-persisted: the question
+              // is mortal by construction, not by a counter someone has to
+              // maintain. The opposite harm — a later bare number binding to a
+              // question the user abandoned — is bounded separately and already:
+              // a message that IGNORES the question classifies `not_an_answer`,
+              // never reaches this branch, and so decays through ordinary
+              // carry-forward in 2 turns. Refresh on evidence of engagement,
+              // decay on evidence of abandonment. Both are pinned by execution
+              // in `baseline-elicitation-route-level.test.ts`.
+              //
+              // Identity is preserved deliberately: same `id` (one question,
+              // traceable across re-asks in telemetry), same `chip_id` (the
+              // supersession key above), same `preconditions.graph_hash` (the
+              // answer-turn divergence gate must still fail closed).
+              pending_actions: [
+                {
+                  ...baselineAnswer.pending,
+                  expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+                },
+              ],
             });
             commitPerformed = committed.performed;
             stagesCompleted.push('commit');
