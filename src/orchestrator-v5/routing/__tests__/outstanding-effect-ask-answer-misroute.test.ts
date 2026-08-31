@@ -212,6 +212,19 @@ describe('CASE 2 — the legitimate factor-baseline edit still writes', () => {
     expect(collide(`Change the ${FACTOR_LABEL} baseline to 0.4.`)).toBeNull();
   });
 
+  it('⭐⭐ an UNANCHORED `baseline` request still writes — found by a surviving mutant', () => {
+    // COVERAGE GAP FOUND BY EXECUTION, not by reading (trap 13c: a survivor is a
+    // claim either way and must be settled with a discriminating fixture).
+    // Removing the `BASELINE_FRAMING` early return left the whole battery GREEN,
+    // because every baseline case here NAMED the factor and the new
+    // `!namesTheFactor` conjunct declines those on its own. The one input where
+    // `BASELINE_FRAMING` is genuinely load-bearing is a baseline request that
+    // does NOT name the factor: `messageAnswersMissingValueAsk` reads it as an
+    // answer, nothing anchors it, and without the suppressor the guard would
+    // refuse a request whose own wording says the user means the factor's value.
+    expect(collide('Change its baseline to 0.4.')).toBeNull();
+  });
+
   it('⭐ a set_factor_value on a factor with NO outstanding ask still writes', () => {
     // Identity binding: the collision is keyed on the ASKED factor id. A write
     // to any other node is untouched however the sentence is phrased.
