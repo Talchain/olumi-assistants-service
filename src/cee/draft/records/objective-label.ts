@@ -156,20 +156,37 @@ export type AuthoredLabelRefusal =
  * cannot regress a label) is the fail-DANGEROUS direction of Q2 (refuse ⇒ strip
  * a real attribution).
  *
- * ⭐ WHY THE TWO SURVIVORS ARE DIFFERENT IN KIND, not merely safer. Each is a
- * closed, explicit *construction* test whose match is a positive judgement that
- * the span states a CHOICE — and a choice is not an objective however it is
- * worded, whoever wrote it. The union above declares both in exactly those
- * terms, and the same measurement gives them **9 of 9** (4 real governed
- * captures + 5 adversarial quotes), with **0** genuine objectives struck.
+ * ⛔⛔ AND THE SAME MISTAKE WAS MADE TWICE, ONE REASON APART. The version that
+ * removed `head_disclaims` kept `states_alternatives` on the strength of a
+ * sentence calling BOTH survivors "closed, explicit construction tests". That
+ * was FALSE AT THE BYTES for one of them: `states_alternatives` is
+ * `NAMES_AN_ALTERNATIVE = /(^|\s)or(\s|$)/i` (`:636`) — a bare word test, the
+ * same KIND of thing as the one just removed. A second independent review drove
+ * three ordinary objectives end to end and every one was told the brief
+ * designates no objective:
  *
- * ⚠ A CONSTRUCTION TEST IS STILL NOT PROOF OF NON-DESIGNATION, and the residual
- * is named rather than implied: a user who designates a genuinely disjunctive
- * objective ("Reduce churn or grow expansion revenue") is struck by
- * `states_alternatives`. It is retained because it is the structural twin of
- * `deliberation_frame` — the form no frame list can outrun — and because the
- * corpus shows it striking a real choice 1/1 and a real objective 0/1. If that
- * ever measures otherwise, this table is where it is corrected.
+ *   · "Reach 99.9% uptime or better"                   ← a COMPARATIVE
+ *   · "Increase margin, or failing that, hold it flat"  ← a FALLBACK
+ *   · "grow in Germany or France"                       ← a SCOPE
+ *
+ * ⭐ THE LESSON WORTH MORE THAN THE FIX: the defect was not the word list, it
+ * was that a COMMENT was doing the work of a MEASUREMENT. "Construction test"
+ * described `DELIBERATION_FRAMES` accurately and was extended to its neighbour
+ * by assertion. **Before admitting any reason here, open the predicate and read
+ * it — a claim about the KIND of a test is a claim about bytes.**
+ *
+ * ⚠ AND THE CORPUS COULD NOT HAVE CAUGHT IT: of the acceptance corpus's 8
+ * designating rows, **0** contained a free-standing `or`, while 3 of its 6
+ * non-designating rows did. A corpus that is one-way on the very token a
+ * predicate keys on is structurally incapable of falsifying it (trap 22b). The
+ * spec now carries a DISJUNCTION corpus with a contrast control asserting both
+ * directions on that axis specifically.
+ *
+ * ⭐ SO ONE MEMBER REMAINS, and it survives on a property that was checked
+ * rather than asserted: {@link DELIBERATION_FRAMES} really is a closed list of
+ * 32 explicit deliberation constructions. On the governed baseline it accounts
+ * for **all 4** of the real closures; `states_alternatives` fired on **0 of 13**
+ * and so earned nothing on real data.
  *
  * ⭐ DERIVED, NOT MIRRORED (trap 12). `Record<AuthoredLabelRefusal, …>` is
  * EXHAUSTIVE, so a new refusal reason FAILS `tsc` until someone states which
@@ -178,13 +195,49 @@ export type AuthoredLabelRefusal =
 type RefusalAnswers = "designation" | "display_only";
 
 const REFUSAL_ANSWERS: Readonly<Record<AuthoredLabelRefusal, RefusalAnswers>> = {
-  /** "states a DECISION, not an objective" — a closed frame list, Q2. */
+  /**
+   * "states a DECISION, not an objective" — Q2, and the ONLY member.
+   *
+   * ⭐ WHY THIS ONE SURVIVES WHERE ITS FORMER TWIN DID NOT: it is a genuinely
+   * CLOSED, EXPLICIT list of 32 deliberation constructions
+   * ({@link DELIBERATION_FRAMES}) — "should we ", "whether to ", "torn between "
+   * — each of which is unambiguous deliberation English, so a match is evidence
+   * rather than a guess. That is a different KIND of test from a single word.
+   */
   deliberation_frame: "designation",
-  /** "a choice, not an objective" — the structural twin of the above, Q2. */
-  states_alternatives: "designation",
 
   // ── Q1 ONLY. Each is a verdict about TRANSFORMING the span, and says
   //    nothing whatever about who put it forward.
+  /**
+   * ⛔ DEMOTED, AND THE SECOND TIME THIS FILE MADE THE SAME MISTAKE.
+   *
+   * `states_alternatives` is `NAMES_AN_ALTERNATIVE = /(^|\s)or(\s|$)/i` — a
+   * BARE WORD TEST, the same KIND of thing as `head_disclaims`, and it was kept
+   * here on the strength of a comment calling it a "construction test". It is
+   * not one. English uses a free-standing `or` for things that are not choices:
+   *
+   *   · "Reach 99.9% uptime or better"                  ← a COMPARATIVE
+   *   · "Increase margin, or failing that, hold it flat" ← a FALLBACK
+   *   · "grow in Germany or France"                      ← a SCOPE
+   *
+   * All three were driven end to end and every one earned `ai_inferred` and the
+   * disclosure *"the brief designates no objective"* — a false authorship
+   * verdict on a plainly designated objective, which is the exact harm this
+   * consumer exists to prevent. Third appearance of one-predicate-two-questions
+   * in this seam, found by an independent reviewer because THIS LANE'S OWN
+   * CORPUS COULD NOT SEE IT: 0 of its 8 designating rows contained a
+   * free-standing `or`, while 3 of 6 non-designating rows did.
+   *
+   * ⚠ THE PRICE, MEASURED AND ACCEPTED: a genuine unmade choice
+   * ("Build our own last-mile fleet — or partner with a third-party courier")
+   * now KEEPS the user's badge. That is a GAP, and it is today's shipped
+   * staging behaviour — not a new lie. On the governed baseline
+   * `states_alternatives` fires on **0 of 13** goal quotes, so it earned
+   * nothing on real data; all 4 real closures are `deliberation_frame`.
+   * Over-refusal on the DISPLAY side costs nothing; a false verdict on the
+   * DESIGNATION side is the harm. Pinned KNOWN-OPEN in the spec.
+   */
+  states_alternatives: "display_only",
   /** A degenerate input, not a judgement. Filtered before any surface. */
   empty: "display_only",
   would_drop_a_qualification: "display_only",

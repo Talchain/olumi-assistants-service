@@ -2368,11 +2368,24 @@ function projectOnce(
     // user who wrote *"Our objective for this quarter is: We must never let
     // latency exceed 200ms"* that the brief designates no objective. Three of
     // three `head_disclaims` quotes in the external adversarial corpus are
-    // genuine objectives. `refusalDeniesObjecthood` therefore admits ONLY the
-    // two closed CONSTRUCTION tests that positively judge the span to state a
-    // CHOICE; the full table and its measurement live at
-    // `objective-label.ts:REFUSAL_ANSWERS`, and both directions are pinned in
-    // `goal-designation-provenance.test.ts`.
+    // genuine objectives.
+    //
+    // ⛔⛔ AND THE SAME MISTAKE WAS THEN MADE ONE REASON ACROSS. That head kept
+    // `states_alternatives` — `/(^|\s)or(\s|$)/`, a BARE WORD TEST — on the
+    // strength of a comment calling both survivors "closed construction tests".
+    // False at the bytes for one of them. A second review drove three ordinary
+    // objectives through this seam and every one was told the brief designates
+    // no objective: "Reach 99.9% uptime or better" (a COMPARATIVE), "Increase
+    // margin, or failing that, hold it flat" (a FALLBACK), "grow in Germany or
+    // France" (a SCOPE). ⭐ The defect was a COMMENT doing the work of a
+    // MEASUREMENT — a claim about the KIND of a test is a claim about bytes.
+    //
+    // `refusalDeniesObjecthood` therefore admits exactly ONE reason:
+    // `deliberation_frame`, whose predicate is a genuinely CLOSED list of 32
+    // explicit constructions, read rather than asserted. The full table and its
+    // measurement live at `objective-label.ts:REFUSAL_ANSWERS`, and both
+    // directions — plus the DISJUNCTION axis the first corpus was structurally
+    // blind to — are pinned in `goal-designation-provenance.test.ts`.
     //
     // ── WHAT IS AND IS NOT SAID ───────────────────────────────────────────
     // `source_quote` STAYS: the user's verbatim is theirs and still reaches the

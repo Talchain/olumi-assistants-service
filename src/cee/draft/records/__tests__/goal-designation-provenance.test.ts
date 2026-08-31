@@ -215,13 +215,6 @@ describe("a goal the user never designated does not wear the user's badge", () =
     expect(o.labelAuthored, "we did not author these characters").toBe(false);
   });
 
-  it("the structural twin — a free-standing alternative — is treated identically", () => {
-    const quote = "Build our own last-mile fleet — or partner with a third-party courier";
-    expect(reasonOf(quote)).toBe("states_alternatives");
-    const o = drive(quote, `${quote}. Costs are rising fast.`);
-    expect(o.recordClass).toBe(PROJECTOR_STRUCTURAL_CLASS);
-    expect(o.wireProvenance).toBe("ai_inferred");
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -421,11 +414,14 @@ describe("an EXPLICITLY DESIGNATED objective keeps the user's badge and its quot
 // 3. THE TWO-QUESTION TABLE IS PINNED, MEMBER BY MEMBER.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("the objecthood-denying refusal set is pinned exactly", () => {
-  it("is exactly the two CONSTRUCTION tests, and nothing else", () => {
-    expect([...REFUSALS_DENYING_OBJECTHOOD].sort()).toEqual([
-      "deliberation_frame",
-      "states_alternatives",
-    ]);
+  it("is exactly the ONE closed-list construction test, and nothing else", () => {
+    // ⛔ TWO reasons have now been demoted out of this set, one review apart —
+    // `head_disclaims` (a lexical negation test) and `states_alternatives` (a
+    // bare `/(^|\s)or(\s|$)/`). Both read like designation verdicts and neither
+    // is one. `deliberation_frame` remains because its predicate is a genuinely
+    // CLOSED list of 32 explicit constructions — a property that was read at the
+    // bytes, not asserted in a comment.
+    expect([...REFUSALS_DENYING_OBJECTHOOD].sort()).toEqual(["deliberation_frame"]);
   });
 
   /**
@@ -436,6 +432,7 @@ describe("the objecthood-denying refusal set is pinned exactly", () => {
    */
   const DISPLAY_ONLY: readonly AuthoredLabelRefusal[] = [
     "empty",
+    "states_alternatives",
     "would_drop_a_qualification",
     "clause_discarded",
     "head_disclaims",
@@ -546,9 +543,14 @@ describe("the external adversarial corpus, judged by hand and replayed through t
       because: "a compound objective with a floor",
     },
     {
+      // ⛔ KNOWN-OPEN since `states_alternatives` was demoted: a genuine unmade
+      // choice now KEEPS the badge. A GAP, and today's shipped staging
+      // behaviour — not a new lie. The price of not telling three real
+      // objectives they were invented. See the disjunction corpus below.
       quote: "Build our own last-mile fleet — or partner with a third-party courier",
       designates: false,
       because: "an unmade choice between two courses of action",
+      knownOpen: true,
     },
     {
       quote: "Torn between rebuilding and buying",
@@ -593,7 +595,8 @@ describe("the external adversarial corpus, judged by hand and replayed through t
     // ⭐ trap 22f's KNOWN-DROPPED discipline: the gap is pinned by name, so the
     // suite stays green for the RIGHT reason and REDs if the set grows OR
     // shrinks. Shrinking is a WIN that must be noticed, not absorbed.
-    expect(HAND_JUDGED.filter((c) => c.knownOpen).map((c) => c.quote)).toEqual([
+    expect(HAND_JUDGED.filter((c) => c.knownOpen).map((c) => c.quote).sort()).toEqual([
+      "Build our own last-mile fleet — or partner with a third-party courier",
       "Cost is not the problem; the problem is that we cannot ship weekly",
     ]);
   });
@@ -613,6 +616,80 @@ describe("the external adversarial corpus, judged by hand and replayed through t
       expect(o.sourceQuote, `${quote}: the verbatim must survive either way`).toBe(quote);
     },
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4b. ⛔⛔ THE DISJUNCTION AXIS — the corpus the section above STRUCTURALLY
+//     COULD NOT PROVIDE, and the reason a second regression shipped.
+//
+//     `states_alternatives` keys on `/(^|\s)or(\s|$)/`. Of §4's 8 designating
+//     rows, **0** contain a free-standing `or`; 3 of its 6 non-designating rows
+//     do. A corpus that is one-way on the exact token a predicate keys on cannot
+//     falsify that predicate, however many rows it has (trap 22b). These quotes
+//     come from the independent reviewer, i.e. outside this lane's head, and the
+//     contrast control below pins BOTH directions on this axis specifically so
+//     it can never go one-way again.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("a free-standing `or` is not evidence of an unmade choice", () => {
+  const DISJUNCTIONS: readonly {
+    readonly name: string;
+    readonly quote: string;
+    /** HAND verdict: would a person say this puts an objective forward? */
+    readonly designates: boolean;
+  }[] = [
+    { name: "a COMPARATIVE", quote: "Reach 99.9% uptime or better", designates: true },
+    {
+      name: "a FALLBACK",
+      quote: "Increase margin, or failing that, hold it flat",
+      designates: true,
+    },
+    { name: "a SCOPE", quote: "grow in Germany or France", designates: true },
+    {
+      name: "a genuine UNMADE CHOICE — the direction this axis must still contain",
+      quote: "Build our own last-mile fleet — or partner with a third-party courier",
+      designates: false,
+    },
+  ];
+
+  it("the axis carries BOTH directions — the control that stops it going one-way again", () => {
+    // ⭐ Without this the section could silently become all-designating, which is
+    // the mirror image of the blindness it was written to fix.
+    expect(DISJUNCTIONS.filter((c) => c.designates).length).toBeGreaterThan(0);
+    expect(DISJUNCTIONS.filter((c) => !c.designates).length).toBeGreaterThan(0);
+    // Every row must actually exercise the token, or this proves nothing.
+    for (const c of DISJUNCTIONS) {
+      expect(/(^|\s)or(\s|$)/i.test(c.quote), `${c.quote} must contain a free-standing "or"`).toBe(
+        true,
+      );
+      expect(reasonOf(c.quote), `${c.quote}: precondition — the refusal under test`).toBe(
+        "states_alternatives",
+      );
+    }
+  });
+
+  it.each(DISJUNCTIONS)("$name: $quote", ({ quote }) => {
+    // ⚠ EVERY row asserts `from_brief`, INCLUDING the genuine unmade choice —
+    // and that is the honest shape, not an oversight. Since the demotion this
+    // predicate no longer withdraws anyone's badge, so the three real
+    // objectives keep theirs (the fix) and the real choice keeps its too (the
+    // KNOWN-OPEN gap, pinned in §4). One predicate cannot serve both, which is
+    // the whole lesson of this seam.
+    const o = drive(quote, `Our objective is: ${quote}. We could act now, or wait a quarter.`);
+    expect(o.wireProvenance, quote).toBe("from_brief");
+    expect(o.recordClass, quote).toBe("stated");
+    expect(o.disclosureQuote, `${quote}: no CEE disclosure`).toBeUndefined();
+  });
+
+  it("DISCRIMINATES: the seam still withdraws a badge on this axis' NEIGHBOUR", () => {
+    // ⭐ The contrast that stops the four rows above passing on a seam that has
+    // simply stopped withdrawing anything at all. "Do we rebuild the platform or
+    // buy one" carries the same free-standing `or` AND a deliberation frame —
+    // and it must still lose the badge.
+    const both = "Do we rebuild the platform or buy one";
+    expect(/(^|\s)or(\s|$)/i.test(both), "same token as the rows above").toBe(true);
+    expect(reasonOf(both), "but a CLOSED-LIST frame wins first").toBe("deliberation_frame");
+    expect(drive(both, `${both}? Margin is tight.`).wireProvenance).toBe("ai_inferred");
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
