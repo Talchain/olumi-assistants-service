@@ -164,7 +164,7 @@ describe('option framing recovery across production stages', () => {
     await runStageParse(ctx);
     expect(ctx.earlyReturn).toBeUndefined();
     await runStagePackage(ctx);
-    expect(ctx.draftWarnings.some((w) => w.id === 'QUESTION_NOT_AN_OPTION')).toBe(false);
+    expect(ctx.draftWarnings).not.toContainEqual(expect.objectContaining({ id: 'QUESTION_NOT_AN_OPTION' }));
     expect((ctx.ceeResponse as Record<string, any>).record_disclosures).toEqual([unrelated]);
   });
 });

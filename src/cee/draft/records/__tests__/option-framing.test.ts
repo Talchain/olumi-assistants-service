@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DraftRecordSet } from '../grammar.js';
 import { projectRecordsToGraph } from '../projector.js';
+import { projectDraftRecords } from '../seam.js';
 import { projectGraphAndOptionsToV3 } from '../../../transforms/schema-v3.js';
 import { buildAnalysisReadyPayload } from '../../../transforms/analysis-ready.js';
 import { isWholeOptionDecisionFraming, reconcileDraftOptionFraming } from '../option-framing.js';
@@ -41,6 +42,111 @@ describe('whole-utterance framing discrimination', () => {
     'Raise prices 15% next quarter', 'Survey customers about whether to raise prices',
     'Hold prices while deciding whether to restructure', 'Assess whether churn is price-related',
   ])('preserves an actual action: %s', (text) => expect(isWholeOptionDecisionFraming(text)).toBe(false));
+
+  it.each(["'", '’'])('recognises only the supported framing with apostrophe %s', (apostrophe) => {
+    expect(isWholeOptionDecisionFraming(`We${apostrophe}re deciding whether to raise prices`)).toBe(true);
+    expect(isWholeOptionDecisionFraming(`I${apostrophe}m deciding between keeping and raising prices`)).toBe(true);
+    for (const action of [
+      `Keep the café${apostrophe}s prices unchanged`,
+      `Launch the campaign named ${apostrophe}Should we raise prices?${apostrophe}`,
+      `Hold prices while we${apostrophe}re deciding whether to restructure`,
+      `We${apostrophe}re keeping prices unchanged`,
+    ]) expect(isWholeOptionDecisionFraming(action)).toBe(false);
+  });
+});
+
+describe('same-text typography does not lose a genuine refinement or admit a question', () => {
+  function replay(records: DraftRecordSet, brief: string, sourceQuote: string, label: string) {
+    const rawBefore = JSON.stringify(records);
+    freeze(records);
+    const seam = projectDraftRecords(records, brief);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) throw new Error('Typography control must pass the actual records seam');
+    const original = freeze(seam.projection);
+    const originalBytes = JSON.stringify(original);
+    const question = original.graph.nodes.find((node) => node.provenance?.source_quote === sourceQuote)!;
+    expect(question).toBeDefined();
+    expect(question.provenance?.merged_refinements).toEqual([label]);
+    expect(question.data?.raw_interventions).toEqual({ '5f3b2b5d': 1 });
+    expect(question.data?.interventions).toEqual({ '5f3b2b5d': 0.5 });
+
+    const seamBytes = JSON.stringify(seam.records);
+    const result = reconcileDraftOptionFraming(freeze(seam.records), original);
+    expect(result.unresolved).toEqual([]);
+    expect(result.resolved).toEqual([{ option_id: question.id, label, source_quote: sourceQuote, claim_index: 0 }]);
+    const repaired = result.projection.graph.nodes.find((node) => node.id === question.id)!;
+    expect(withoutNodeProvenanceAndLabel(repaired as never)).toEqual(withoutNodeProvenanceAndLabel(question as never));
+    expect(repaired.provenance).toEqual({ ...question.provenance, provenance_class: 'ai_inferred', label_authored: true });
+    expect(result.projection.graph.edges).toEqual(original.graph.edges);
+    expect(result.projection.graph.nodes.map((node) => node.id)).toEqual(original.graph.nodes.map((node) => node.id));
+
+    const v3 = projectGraphAndOptionsToV3(result.projection.graph as never, { brief });
+    const option = v3.options.find((entry) => entry.id === question.id)!;
+    expect(option.label).toBe(label);
+    expect(option.is_baseline).toBe(true);
+    expect(option.raw_interventions).toEqual({ '5f3b2b5d': 1 });
+    expect(option.interventions['5f3b2b5d'].value).toBe(0.5);
+    expect(v3.graph.nodes.find((node) => node.id === question.id)?.source_quote).toBe(sourceQuote);
+    const ready = buildAnalysisReadyPayload(v3.options, v3.goal_node_id, v3.graph);
+    expect(ready.options.find((entry) => entry.id === question.id)?.label).toBe(label);
+    expect(JSON.stringify(records)).toBe(rawBefore);
+    expect(JSON.stringify(seam.records)).toBe(seamBytes);
+    expect(JSON.stringify(original)).toBe(originalBytes);
+    expect(reconcileDraftOptionFraming(seam.records, result.projection)).toEqual({ projection: result.projection, resolved: [], unresolved: [] });
+    return question.id;
+  }
+
+  it.each(['NFC', 'NFD'] as const)('recovers the same captured option with a %s refinement label', (form) => {
+    const records = structuredClone(LIVE_RECORDS);
+    records.claims[0]!.label = 'Keep Café prices unchanged'.normalize(form);
+    expect(replay(records, BRIEF, QUESTION, 'Keep Café prices unchanged')).toBe('e432b605');
+  });
+
+  it('matches NFC and NFD source quotations to the same original option', () => {
+    const sourceQuote = 'We need to decide whether to raise Café prices 15% next quarter';
+    const ids = (['NFC', 'NFD'] as const).map((form) => {
+      const records = structuredClone(LIVE_RECORDS);
+      const rawQuote = sourceQuote.normalize(form);
+      records.stated_items[3]!.source_quote = rawQuote;
+      return replay(records, BRIEF.replace(QUESTION, rawQuote), sourceQuote, 'Hold Price (Status Quo)');
+    });
+    expect(ids[0]).toBe(ids[1]);
+  });
+
+  it.each(["'", '’'])('recovers the genuine refinement behind the contraction with apostrophe %s', (apostrophe) => {
+    const records = structuredClone(LIVE_RECORDS);
+    const sourceQuote = `We${apostrophe}re deciding whether to raise prices 15% next quarter`;
+    records.stated_items[3]!.source_quote = sourceQuote;
+    replay(records, BRIEF.replace(QUESTION, sourceQuote), sourceQuote, 'Hold Price (Status Quo)');
+  });
+
+  it.each(['NFC', 'NFD'] as const)('preserves a genuine %s action without a refinement', (form) => {
+    const records: DraftRecordSet = { stated_items: [
+      { kind: 'option', source_quote: 'Keep Café prices unchanged'.normalize(form), is_baseline: true },
+      { kind: 'option', source_quote: 'Raise Café prices 15%'.normalize(form), is_baseline: false },
+    ], claims: [] };
+    const projection = freeze(projectRecordsToGraph(records));
+    expect(reconcileDraftOptionFraming(freeze(records), projection)).toEqual({ projection, resolved: [], unresolved: [] });
+  });
+
+  it.each([
+    ['Keep Cafe prices unchanged', 'Keep Café prices unchanged'],
+    ["Keep the café's prices unchanged", 'Keep the café’s prices unchanged'],
+  ])('does not equate a different refinement %s with receipt %s', (rawLabel, receipt) => {
+    const records = structuredClone(LIVE_RECORDS);
+    records.claims[0]!.label = rawLabel;
+    const projection = projectRecordsToGraph(records, BRIEF);
+    const question = projection.graph.nodes.find((node) => node.id === 'e432b605')!;
+    const provenance = { ...question.provenance!, merged_refinements: [receipt] };
+    question.provenance = provenance;
+    const inconsistentProjection = {
+      ...projection, provenance: { ...projection.provenance, [question.id]: provenance },
+    };
+    const result = reconcileDraftOptionFraming(freeze(records), freeze(inconsistentProjection));
+    expect(result.resolved).toEqual([]);
+    expect(result.unresolved.map((entry) => entry.node_id)).toEqual([question.id]);
+    expect(result.projection.graph.nodes.some((node) => node.id === question.id)).toBe(false);
+  });
 });
 
 describe('captured live merge: recover the producer name without changing its maths', () => {

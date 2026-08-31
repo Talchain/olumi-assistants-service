@@ -133,7 +133,7 @@ describe('final adapter reconciliation before any graph consumer', () => {
     const adapterNode = result.graph.nodes.find(n => n.id === before.id)!;
     const node = wire.nodes.find(n => n.id === before.id)!;
     const option = wire.options.find(o => o.id === before.id)!;
-    const ready = wire.analysis_ready!.options.find(o => o.id === before.id)!;
+    const ready = wire.analysis_ready!.options.find((o: { id: string }) => o.id === before.id)!;
     expect(adapterNode.label).toBe('Hold Price (Status Quo)');
     expect(adapterNode.data?.interventions).toEqual(before.data?.interventions);
     expect(adapterNode.data?.raw_interventions).toEqual(before.data?.raw_interventions);
@@ -194,7 +194,7 @@ describe('final adapter reconciliation before any graph consumer', () => {
     expect(result.graph.nodes.some(n => n.id === question.id)).toBe(false);
     expect(result.graph.edges.some(e => e.from === question.id || e.to === question.id)).toBe(false);
     expect(wire.options.map(o => o.id).sort()).toEqual(genuine.map(n => n.id).sort());
-    expect(wire.analysis_ready!.options.map(o => o.id).sort()).toEqual(genuine.map(n => n.id).sort());
+    expect(wire.analysis_ready!.options.map((o: { id: string }) => o.id).sort()).toEqual(genuine.map(n => n.id).sort());
     expect(wire.options.every(o => o.is_baseline !== true)).toBe(true);
     for (const retained of genuine) {
       expect(result.graph.nodes.find(n => n.id === retained.id)?.data?.interventions).toEqual(retained.data?.interventions);

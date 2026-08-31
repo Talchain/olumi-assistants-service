@@ -13,8 +13,6 @@ import type {
 import { boundNodeLabel } from './label-bound.js';
 import { canonicalText, sha8 } from './projector.js';
 
-const canonical = (text: string): string => text.replace(/\s+/gu, ' ').trim();
-
 /**
  * Whole-utterance decision framing only. This is deliberately not the label
  * author's refusal predicate: "we could hold prices" and "hire a researcher
@@ -22,9 +20,9 @@ const canonical = (text: string): string => text.replace(/\s+/gu, ' ').trim();
  * Nor does punctuation alone invalidate an action with a question in its name.
  */
 export function isWholeOptionDecisionFraming(text: string): boolean {
-  const source = canonical(text);
+  const source = canonicalText(text);
   return /^(?:should|do)\s+(?:we|i)\s+\S/iu.test(source)
-    || /^(?:(?:we|i)\s+(?:(?:need|want|have)\s+to\s+|must\s+|(?:are|am)\s+)?|(?:we're|i'm)\s+)?(?:decide|deciding)\s+(?:whether(?:\s+to)?|between)\b/iu.test(source)
+    || /^(?:(?:we|i)\s+(?:(?:need|want|have)\s+to\s+|must\s+|(?:are|am)\s+)?|(?:we['’]re|i['’]m)\s+)?(?:decide|deciding)\s+(?:whether(?:\s+to)?|between)\b/iu.test(source)
     || /^(?:the\s+)?(?:decision|question)\s+is\s+whether\b/iu.test(source)
     || /^whether\s+to\s+\S/iu.test(source);
 }
@@ -63,8 +61,10 @@ function recoverableRefinement(
   provenance: RecordProvenance,
   sourceQuote: string,
 ): { label: string; claimIndex: number } | undefined {
+  // Match the projector's NFC identity for quotes and merge receipts; raw
+  // records may use canonically equivalent decomposed Unicode spelling.
   const statedIndices = records.stated_items.flatMap((item, index) =>
-    item.kind === 'option' && canonical(item.source_quote) === canonical(sourceQuote) ? [index] : [],
+    item.kind === 'option' && canonicalText(item.source_quote) === canonicalText(sourceQuote) ? [index] : [],
   );
   if (statedIndices.length !== 1) return undefined;
   const parentIndex = statedIndices[0]!;
@@ -79,10 +79,10 @@ function recoverableRefinement(
   // Competing sub-alternatives do not become a label-selection contest.
   if (candidates.length !== 1) return undefined;
   const candidate = candidates[0]!;
-  const label = canonical(candidate.claim.label);
+  const label = canonicalText(candidate.claim.label);
   if (!label || isWholeOptionDecisionFraming(label)) return undefined;
   const receipt = provenance.merged_refinements ?? [];
-  if (receipt.length !== 1 || canonical(receipt[0]!) !== label) return undefined;
+  if (receipt.length !== 1 || canonicalText(receipt[0]!) !== label) return undefined;
   if (typeof candidate.claim.is_baseline === 'boolean'
     && typeof node.is_baseline === 'boolean'
     && candidate.claim.is_baseline !== node.is_baseline) return undefined;
