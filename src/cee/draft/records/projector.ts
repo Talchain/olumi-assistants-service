@@ -88,6 +88,7 @@ import {
   deriveGoalObjectiveLabel,
   deriveDecisionLabel,
   refusalDeniesObjecthood,
+  deliberationFrameOpensTheSpan,
   type AuthoredLabel,
 } from "./objective-label.js";
 import type {
@@ -2415,8 +2416,18 @@ function projectOnce(
     // skips `projector_structural` nodes in its destroyed-content guard, so a
     // goal re-badged here leaves that guard's domain. Pinned by name in the
     // spec so it is visible in the suite rather than silent.
+    // ⭐ TWO CONDITIONS, TWO QUESTIONS. `refusalDeniesObjecthood` asks whether
+    // this KIND of refusal is a designation verdict at all;
+    // `deliberationFrameOpensTheSpan` asks whether THIS SPAN's evidence is
+    // sentence-initial. A frame token merely PRESENT in a span is ordinary
+    // English — "Considering the runway, reach break-even by Q3" is an
+    // objective, not a deliberation — and the unanchored form told eight such
+    // spans the brief designated no objective.
     const goalWasNeverDesignated =
-      kind === "goal" && !authoredLabel.authored && refusalDeniesObjecthood(authoredLabel.reason);
+      kind === "goal" &&
+      !authoredLabel.authored &&
+      refusalDeniesObjecthood(authoredLabel.reason) &&
+      deliberationFrameOpensTheSpan(quote);
 
     const prov: RecordProvenance = goalWasNeverDesignated
       ? {

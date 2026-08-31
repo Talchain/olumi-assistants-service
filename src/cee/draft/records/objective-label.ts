@@ -301,6 +301,55 @@ export function refusalDeniesObjecthood(reason: AuthoredLabelRefusal | undefined
 }
 
 /**
+ * ⭐⭐ CLOSED IS NOT ANCHORED — the fourth and last member of this defect family.
+ *
+ * {@link DELIBERATION_FRAMES} really is a closed list of 32 explicit
+ * constructions; that was checked. But {@link findDeliberationFrame} is
+ * `lower.indexOf(frame)` — **UNANCHORED** — so a frame token appearing ANYWHERE
+ * in a span carried the authorship verdict. Driven end to end, eight plainly
+ * designated objectives were told *"the brief designates no objective"*:
+ *
+ *   · "Considering the runway, reach break-even by Q3"   ← `considering` as a PREPOSITION
+ *   · "Cut churn to 3% so we could reinvest in R&D"      ← `we could` in a PURPOSE CLAUSE
+ *   · "Cut cost per unit, working out at under £4"       ← `working out at` = "amounting to"
+ *   · "Improve onboarding by choosing a simpler default plan", +4 more
+ *
+ * A sentence that OPENS with a deliberation frame is stating the deliberation.
+ * One that merely CONTAINS the token is using ordinary English.
+ *
+ * ⚠⚠ AND WHY THE ANCHOR LIVES HERE AND NOT IN {@link findDeliberationFrame},
+ * WHICH IS THE OBVIOUS FIX AND IS THE WRONG ONE. That function has THREE
+ * callers and they do not want the same thing (trap 21, the very defect this
+ * seam keeps producing):
+ *
+ *   · `deriveGoalObjectiveLabel` / `deriveOptionActionLabel` — a DISPLAY
+ *     refusal, fail-safe: refusing keeps the verbatim and cannot regress a
+ *     label. Anchoring there would turn today's refusals into AUTHORINGS and
+ *     could reintroduce the label harms this module was built to prevent.
+ *   · `decisionLabelFromCandidate` — the EXTRACTION ANCHOR. It slices at
+ *     `frame.index` (`:1170-1173`), so it REQUIRES mid-sentence matching: a
+ *     brief whose decision sentence is not the first thing in the span would
+ *     stop naming a decision at all.
+ *
+ * So the anchor is applied to the AUTHORSHIP question only, leaving all three
+ * existing callers byte-identical — the same move this file already made when
+ * it withdrew the investigative frames from one of the list's two jobs rather
+ * than from the list.
+ *
+ * ⚠ KNOWN-OPEN, pinned by name in the spec rather than chased with a fifth
+ * rule: three sentence-INITIAL uses remain false positives — `considering `,
+ * `work out `, `figure out ` opening a span that then names a real objective.
+ * Anchoring fixes 5 of the 8 at zero cost on real data (all 4 governed
+ * decisions and all 4 corpus rows are sentence-initial and keep their verdict).
+ * **If a fifth instance of this family appears after this, the answer is a
+ * different design, not another patch.**
+ */
+export function deliberationFrameOpensTheSpan(quote: string): boolean {
+  const frame = findDeliberationFrame(canonical(quote));
+  return frame !== undefined && frame.index === 0;
+}
+
+/**
  * ⭐ DELIBERATION FRAMES — the closed list of constructions in which a sentence
  * describes a CHOICE BEING MADE rather than an objective being pursued.
  *

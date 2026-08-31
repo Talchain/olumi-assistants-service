@@ -58,6 +58,7 @@ import {
   deriveGoalObjectiveLabel,
   REFUSALS_DENYING_OBJECTHOOD,
   refusalDeniesObjecthood,
+  deliberationFrameOpensTheSpan,
   type AuthoredLabelRefusal,
 } from "../objective-label.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
@@ -574,13 +575,30 @@ describe("the external adversarial corpus, judged by hand and replayed through t
     },
   ];
 
-  it("the table is the WHOLE external corpus — every MEASURED_HARMS goal quote, none pruned", () => {
-    // ⛔ THE ANTI-PRUNING ASSERTION. A corpus the author may quietly shorten is
-    // a corpus that will agree with the code, because the rows that disagree are
-    // exactly the ones it is tempting to drop. `authored-node-labels.test.ts`
-    // MEASURED_HARMS carries 14 quotes; all 14 are here.
-    expect(HAND_JUDGED).toHaveLength(14);
-    expect(new Set(HAND_JUDGED.map((c) => c.quote)).size, "no duplicate rows").toBe(14);
+  it("the table is the WHOLE external corpus — DERIVED from the source, not counted by hand", () => {
+    // ⛔ THE ANTI-PRUNING ASSERTION, and it must not itself be a hand-maintained
+    // mirror (trap 12). `toHaveLength(14)` was one: it could not notice
+    // MEASURED_HARMS GROWING, only this table shrinking. The quote set is now
+    // read out of the sibling spec's source, so a row added there REDs here.
+    const source = fs.readFileSync(
+      path.join(HERE, "authored-node-labels.test.ts"),
+      "utf8",
+    );
+    const table = source.slice(
+      source.indexOf("const MEASURED_HARMS"),
+      source.indexOf("it.each(MEASURED_HARMS)"),
+    );
+    // Rows are `["harm", "quote", "reason"],` — take the MIDDLE literal.
+    const upstream = [...table.matchAll(/\[\s*"(?:[^"\\]|\\.)*",\s*"((?:[^"\\]|\\.)*)"/g)].map(
+      (m) => m[1]!.replace(/\\"/g, '"'),
+    );
+    // POSITIVE CONTROL: a regex that silently matched nothing would make this
+    // assertion vacuous in the most convincing way possible (trap 13).
+    expect(upstream.length, "extraction must not be blind").toBeGreaterThan(10);
+    expect([...HAND_JUDGED].map((c) => c.quote).sort()).toEqual([...upstream].sort());
+    expect(new Set(HAND_JUDGED.map((c) => c.quote)).size, "no duplicate rows").toBe(
+      HAND_JUDGED.length,
+    );
   });
 
   it("the corpus carries both directions — an all-one-way corpus proves nothing", () => {
@@ -690,6 +708,105 @@ describe("a free-standing `or` is not evidence of an unmade choice", () => {
     expect(reasonOf(both), "but a CLOSED-LIST frame wins first").toBe("deliberation_frame");
     expect(drive(both, `${both}? Margin is tight.`).wireProvenance).toBe("ai_inferred");
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4c. ⛔⛔⛔ CLOSED IS NOT ANCHORED — the fourth member of this defect family,
+//     and the axis §4 was *also* one-way on.
+//
+//     `DELIBERATION_FRAMES` is genuinely a closed list of 32 constructions.
+//     `findDeliberationFrame` is `lower.indexOf(frame)` — UNANCHORED — so a
+//     frame token appearing ANYWHERE carried the authorship verdict.
+//
+//     ⚠ MEASURED ONE-WAYNESS, the same shape as the `or` axis one round earlier:
+//     of §4's designating rows, **0** contain any frame token; of its
+//     non-designating rows, **all** do. A corpus built from the cases a
+//     predicate was written for cannot falsify that predicate.
+//
+//     The anchor is applied to the AUTHORSHIP question only —
+//     `findDeliberationFrame` has three callers and the decision node SLICES at
+//     `frame.index`, so anchoring the shared function would stop it naming a
+//     decision at all (trap 21 again, this time avoided).
+// ─────────────────────────────────────────────────────────────────────────────
+describe("a deliberation frame the span merely CONTAINS is ordinary English", () => {
+  /** Reviewer-sourced. Every one is a plainly designated objective. */
+  const MERELY_CONTAINS: readonly (readonly [string, string])[] = [
+    ["`we could` in a PURPOSE CLAUSE", "Cut churn to 3% so we could reinvest in R&D"],
+    ["`working out at` = AMOUNTING TO", "Cut cost per unit, working out at under £4"],
+    ["`choosing` as a GERUND", "Improve onboarding by choosing a simpler default plan"],
+    ["`deciding on` as a NOUN COMPLEMENT", "Speed up deciding on new suppliers"],
+    ["`figuring out` inside the OBJECT", "Reduce the time we spend figuring out payroll"],
+    ["`work out` in a SUBORDINATE clause", "Grow revenue while we work out the pricing model"],
+  ];
+
+  it("every row really does contain a frame token — or this section proves nothing", () => {
+    // ⭐ THE PRECONDITION FOR THE WHOLE SECTION (trap 13b). These rows exist to
+    // exercise the frame list; if they stopped containing frame tokens they
+    // would pass while testing nothing at all.
+    for (const [, quote] of MERELY_CONTAINS) {
+      expect(reasonOf(quote), `${quote}: must still be refused for DISPLAY`).toBe(
+        "deliberation_frame",
+      );
+      expect(
+        deliberationFrameOpensTheSpan(quote),
+        `${quote}: the frame must NOT open the span`,
+      ).toBe(false);
+    }
+  });
+
+  it.each(MERELY_CONTAINS)("keeps the user's badge (%s): %s", (_kind, quote) => {
+    const o = drive(quote, `Our objective is: ${quote}. We could act now, or wait a quarter.`);
+    expect(o.wireProvenance, quote).toBe("from_brief");
+    expect(o.recordClass, quote).toBe("stated");
+    expect(o.disclosureQuote, `${quote}: no CEE disclosure`).toBeUndefined();
+  });
+
+  it("DISCRIMINATES: a frame that OPENS the span still withdraws the badge", () => {
+    // ⭐ Without this the six rows above could pass on a seam that has simply
+    // stopped withdrawing anything. Same list, same predicate — only the
+    // POSITION differs, which is exactly the property under test.
+    const opens = "Should we raise the price or keep it as is?";
+    expect(deliberationFrameOpensTheSpan(opens)).toBe(true);
+    expect(drive(opens, GOVERNED_QUESTION_BRIEF).wireProvenance).toBe("ai_inferred");
+    const contains = "Cut churn to 3% so we could reinvest in R&D";
+    expect(deliberationFrameOpensTheSpan(contains)).toBe(false);
+    expect(drive(contains, `Our objective is: ${contains}.`).wireProvenance).toBe("from_brief");
+  });
+
+  /**
+   * ⚠⚠ KNOWN-OPEN, AND DELIBERATELY NOT AN ENUMERATION.
+   *
+   * The residual is a CLASS — a frame token used sentence-initially in a
+   * NON-deliberative sense — not a fixed set of frames. Measured: at least five
+   * frames produce it (`considering `, `figure out `, `figuring out `,
+   * `work out `, `working out `, `deciding `), which is more than the three the
+   * review predicted. **Pinning "exactly three" would be a census claiming a
+   * completeness it does not have** — the hand-maintained-mirror defect this
+   * suite exists to avoid — so the representative members are pinned and the
+   * class is named.
+   *
+   * ⛔ THE STOP CONDITION IS RECORDED HERE ON PURPOSE: four rounds have each
+   * found a different member of one family (a lexical negation test, a bare
+   * `or`, an unanchored frame). Separating a preposition from a deliberation is
+   * a semantic judgement about the span, and a fifth predicate tweak is sunk
+   * cost wearing engineering clothes. The route is the grammar follow-on.
+   */
+  const SENTENCE_INITIAL_BUT_NOT_DELIBERATIVE: readonly (readonly [string, string])[] = [
+    ["`considering` as a PREPOSITION", "Considering the runway, reach break-even by Q3"],
+    ["`considering` as a PREPOSITION", "Considering our size, hold headcount flat"],
+    ["`working out` = AMOUNTING TO", "Working out at under £4, hold cost per unit"],
+    ["`deciding` as an ADJECTIVE", "Deciding factors aside, grow revenue 20%"],
+  ];
+
+  it.each(SENTENCE_INITIAL_BUT_NOT_DELIBERATIVE)(
+    "KNOWN-OPEN — still loses its badge (%s): %s",
+    (_kind, quote) => {
+      expect(deliberationFrameOpensTheSpan(quote), "sentence-initial by construction").toBe(true);
+      // Asserted against what the CODE does, so the gap is countable and a
+      // future fix REDs here rather than passing unnoticed.
+      expect(drive(quote, `Our objective is: ${quote}.`).wireProvenance).toBe("ai_inferred");
+    },
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
