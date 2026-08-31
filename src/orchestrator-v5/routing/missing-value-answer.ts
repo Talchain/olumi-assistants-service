@@ -67,6 +67,10 @@ import {
   CURRENCY_SYMBOL_SOURCE,
   NUMERIC_SUFFIX_SOURCE,
 } from '../context/cqe/rules.js';
+import {
+  CARDINAL_WORD_VALUES,
+  CARDINAL_HUNDRED_WORD,
+} from '../../utils/cardinal-words.js';
 
 /**
  * The CLOSED referent set — MOVED here from `repair-value-binding.ts`, not
@@ -401,17 +405,52 @@ const BARE_NUMBER_PATTERN = new RegExp(`^${FRAME_LEAD}${NUMBER}\\s*[.!]*$`);
  *   · anything outside the lexicon — one unknown word and the whole reading
  *     declines. There is no partial credit and no cliff.
  */
-const SPELLED_ONES: Readonly<Record<string, number>> = {
-  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
-  eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
-  fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
-  nineteen: 19,
-};
+/**
+ * THE SPELLED-CARDINAL LEXICON — DERIVED, NOT RE-TYPED.
+ *
+ * `utils/cardinal-words.ts` declares `CARDINAL_WORD_VALUES` "THE CANONICAL
+ * SMALL-CARDINAL MAP — the only place a cardinal word below one hundred may be
+ * written", and the first cut of this module re-typed all 27 of its keys. That
+ * is the two-lists-one-meaning defect this estate pays for repeatedly, and the
+ * magnitude union guard caught it (ROADMAP 2.330): a second lexicon spelling
+ * `hundred` is exactly what that guard exists to red.
+ *
+ * So the words come from the canonical map and `hundred` from
+ * `CARDINAL_HUNDRED_WORD`. The tens/ones split this reader needs is DERIVED
+ * from the values (a tens word is >= 20 and divisible by 10), never re-listed —
+ * so a word the canonical map gains is readable here the instant it lands.
+ *
+ * WHY THIS READER STILL EXISTS beside `parseCardinalAmount`: that parser reads
+ * AMOUNTS and closes a group on a scale word (thousand, million). This reads a
+ * PERCENTAGE LEVEL, where a scale word must fail rather than multiply — and it
+ * does, because no scale word appears in either map below, so
+ * `five thousand percent` yields null and is refused. Different question,
+ * shared vocabulary.
+ *
+ * ⚠ ONE DELIBERATE DELTA, a real divergence rather than an oversight.
+ * `CARDINAL_WORD_VALUES` omits `zero` on purpose: its docblock records that "a
+ * spelled zero target would silently bypass the direction refusal's zero-pair
+ * carve-out" for goal AMOUNTS. That hazard does not exist here — this reader
+ * answers "what level does the factor reach?", where `zero percent` is a
+ * legitimate answer whose digit form `0%` already binds. Refusing the spelled
+ * form while accepting the digit form would make one notation behave
+ * differently from the other for the same number. The delta is additive and
+ * local; it cannot widen the amount grammar.
+ */
+const SPELLED_ONES: Readonly<Record<string, number>> = Object.freeze({
+  ...Object.fromEntries(
+    Object.entries(CARDINAL_WORD_VALUES).filter(([, value]) => value < 20),
+  ),
+  zero: 0,
+});
 
-const SPELLED_TENS: Readonly<Record<string, number>> = {
-  twenty: 20, thirty: 30, forty: 40, fifty: 50,
-  sixty: 60, seventy: 70, eighty: 80, ninety: 90,
-};
+const SPELLED_TENS: Readonly<Record<string, number>> = Object.freeze(
+  Object.fromEntries(
+    Object.entries(CARDINAL_WORD_VALUES).filter(
+      ([, value]) => value >= 20 && value % 10 === 0,
+    ),
+  ),
+);
 
 /**
  * Read a run of number-words as one non-negative integer, or `null`.
@@ -439,12 +478,12 @@ function readSpelledInteger(words: readonly string[]): number | null {
     }
     if (word === 'a') {
       // "a hundred" only — never a bare "a", and never "a third".
-      if (seenDigitWord || words[i + 1] !== 'hundred') return null;
+      if (seenDigitWord || words[i + 1] !== CARDINAL_HUNDRED_WORD) return null;
       current = 1;
       seenDigitWord = true;
       continue;
     }
-    if (word === 'hundred') {
+    if (word === CARDINAL_HUNDRED_WORD) {
       if (!seenDigitWord || current === 0 || current > 9) return null;
       total += current * 100;
       current = 0;

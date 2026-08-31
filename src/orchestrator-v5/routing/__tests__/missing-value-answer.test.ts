@@ -644,6 +644,40 @@ describe('the answer frame — PARAMETER 1 closes the GAP', () => {
     expect(bindsTo(twin), `"${twin}" reached a WRITE`).toBeNull();
   });
 
+  it('⭐ FRAMED × SPELLED — the cross-product a surviving mutant proved unpinned', () => {
+    // ⚠ WHY THIS EXISTS. An adversarial review removed `FRAME_LEAD` from
+    // `SPELLED_PERCENT_PATTERN` and the whole file stayed GREEN — because every
+    // spelled case in the corpus was BARE and every framed case was in DIGITS.
+    // Neither axis was wrong; their cross-product was simply never written, so
+    // a real capability had no guard. That is the corpus sharing the code's
+    // blind spot (trap 13d), and the fix is a row, not a rule.
+    const framedSpelled: readonly [string, string][] = [
+      ['it is thirty percent', '0.3'],
+      ["it's thirty percent", '0.3'],
+      ['just thirty percent', '0.3'],
+      ['only twenty five percent', '0.25'],
+      ['my guess is thirty percent', '0.3'],
+      ['that would be thirty percent', '0.3'],
+      ['it reaches thirty percent', '0.3'],
+      ['the factor is thirty percent', '0.3'],
+    ];
+    for (const [message, expected] of framedSpelled) {
+      expect(bindsTo(message), `"${message}" must bind — frame + spelled`).toBe(expected);
+    }
+
+    // ⛔ OPPOSITE DIRECTION, same axis. A frame does not license a foreign
+    // subject just because the figure is spelled: the LIE guard must hold in
+    // the spelled notation exactly as it does in digits, or widening one
+    // notation quietly widened the other.
+    for (const message of [
+      'churn rate is thirty percent',
+      'revenue is thirty percent',
+      'the payroll is thirty percent',
+    ]) {
+      expect(bindsTo(message), `"${message}" named a FOREIGN subject and must not bind`).toBeNull();
+    }
+  });
+
   it('⭐ THE SPELLED-OUT PERCENTAGE — a closed integer lexicon, never a fraction', () => {
     expect(bindsTo('Thirty percent')).toBe('0.3');
     expect(bindsTo('thirty percent')).toBe('0.3');
@@ -720,6 +754,30 @@ describe('the answer frame — PARAMETER 1 closes the GAP', () => {
     // oscillating rounds happened.
     expect(CONTENTFUL_SUBJECT_KNOWN_DROPPED.length, 'a vacuous pin is not a pin')
       .toBeGreaterThan(0);
+
+    // ⚠ AN EXACT PIN, not a per-member loop. The loop this replaced asserted
+    // only `.length > 0` plus a property of each member, so BOTH directions
+    // were vacuous: adding a member stayed green, and removing one stayed
+    // green. Measured, at this file's own head. `toEqual` on the filtered list
+    // is the shape the sibling `KNOWN_DEAD_ENDS`
+    // (`ask-copy-acceptance-pairing.test.ts`) already uses, and it REDs the
+    // moment a listed message starts binding — which is the direction that
+    // matters, because that is a gap silently closing without anyone noticing
+    // the record is now a lie.
+    const stillDropped = CONTENTFUL_SUBJECT_KNOWN_DROPPED.filter(
+      (message) => readMissingValueAnswer(message) === null,
+    );
+    expect(stillDropped, 'a listed message now BINDS — update the pinned set')
+      .toEqual(CONTENTFUL_SUBJECT_KNOWN_DROPPED);
+
+    // CONTRAST CONTROL — without it the filter above could return everything
+    // by being blind, and the pin would agree with itself.
+    const blind = ['30%', 'about 30%', 'set it to 30%'].filter(
+      (message) => readMissingValueAnswer(message) === null,
+    );
+    expect(blind, 'the drop probe is blind — it calls working phrasings dropped')
+      .toEqual([]);
+
     for (const message of CONTENTFUL_SUBJECT_KNOWN_DROPPED) {
       expect(messageAnswersMissingValueAsk(message), message).toBe(true);
       expect(clarify(message), message).not.toBe(DEMAND);
