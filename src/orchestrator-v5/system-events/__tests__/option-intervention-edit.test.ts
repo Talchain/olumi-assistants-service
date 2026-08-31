@@ -9,7 +9,8 @@ import { mergeAppliedGraphForPersistence } from '../../handlers/edit-graph-dispa
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { linkedFactorsOf } from '../../routing/option-effect-write.js';
 import { mergeInterventionSources } from '../../../orchestrator/tools/analysis-ready-helper.js';
-import { prepareOptionInterventionEdit } from '../option-intervention-edit.js';
+import { prepareOptionInterventionEdit, applyOptionInterventionEdit,
+  optionInterventionPostimageIsScoped } from '../option-intervention-edit.js';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const intervention = (value: number) => ({ value, source: 'cee_hypothesis',
@@ -159,4 +160,89 @@ describe('explicit option-intervention preparation — existing canonical operat
     expect(prepare(g, { modelValue: 0.2 })).toMatchObject({ kind: 'refused' });
     expect(prepare(graph(), { modelValue: 0.2 })).toEqual({ kind: 'unchanged' });
   });
+});
+
+function canonicalGraph() {
+  return projectGraphForPersistence({ ...graph(), options: [] as unknown[],
+    metadata: { preserved: 'canonical context' } });
+}
+function apply(g = canonicalGraph()) {
+  return applyOptionInterventionEdit({ persistedGraph: g, optionId: 'option', factorId: 'factor',
+    modelValue: 0.3, expectedGraphHash: computeAnalysisAffectingGraphHash(g)!,
+    scenarioId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    turnId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', requestId: 'internal-effect',
+    freshness: 'none', hasExistingAnalysis: false });
+}
+const target = { optionId: 'option', factorId: 'factor', modelValue: 0.3 };
+
+describe('option-intervention candidate — target-only final persisted postimage', () => {
+  it('uses the existing referee/apply/projection and fact producer, changing only the cell and its mirror', () => {
+    const before = canonicalGraph();
+    const original = clone(before);
+    const result = apply(before);
+    expect(result.kind).toBe('candidate');
+    if (result.kind !== 'candidate') throw new Error(JSON.stringify(result));
+    expect(before).toEqual(original);
+    expect(result.graph.nodes.find(n => n.id === 'option')!.interventions!.factor).toMatchObject({
+      value: 0.3, source: 'user_specified' });
+    expect(result.graph.nodes.filter(n => n.id !== 'option')).toEqual(before.nodes.filter(n => n.id !== 'option'));
+    expect(result.graph.goal_constraints).toEqual(before.goal_constraints);
+    expect(result.graph.edges).toEqual(before.edges);
+    expect(result.graph.metadata).toEqual(before.metadata);
+    expect(result.graph.options).not.toEqual(before.options);
+    expect(optionInterventionPostimageIsScoped(before, result.graph, target)).toBe(true);
+    expect(result.handlerFact).toMatchObject({ fact_type: 'edit_graph', noop: false,
+      result: { status: 'applied', operations_count: 1, edit_kind: 'option_configuration' } });
+    expect(result.analysisGraphHash).toBe(computeAnalysisAffectingGraphHash(result.graph));
+  });
+
+  it('creates a missing exact cell without requiring or touching another quantity', () => {
+    const before = canonicalGraph();
+    delete before.nodes.find(n => n.id === 'option')!.interventions;
+    before.options = [];
+    const canonical = projectGraphForPersistence(before);
+    const result = apply(canonical);
+    expect(result.kind).toBe('candidate');
+    if (result.kind !== 'candidate') throw new Error(JSON.stringify(result));
+    expect(optionInterventionPostimageIsScoped(canonical, result.graph, target)).toBe(true);
+  });
+
+  it.each([0, -0.2])('leaves raw persisted sigma %s untouched when the existing referee holds its strict candidate', std => {
+    const before = canonicalGraph();
+    before.edges[0]!.strength.std = std;
+    const original = clone(before);
+    const result = apply(before);
+    // Preparation accepts the sanctioned raw persisted representation, but
+    // the inherited live referee's candidate builder uses strict GraphV3.
+    // This carrier must not floor canonical bytes or bypass that authority.
+    expect(result).toEqual({ kind: 'refused', reason: 'mutation_held' });
+    expect(before).toEqual(original);
+  });
+
+  it('refuses an unrelated legacy normalization rather than laundering it by projecting both sides', () => {
+    const before = canonicalGraph();
+    before.nodes.find(n => n.id === 'other_option')!.data = { interventions: { factor: { value: 0.9 } } };
+    const original = clone(before);
+    expect(apply(before).kind).toBe('refused');
+    expect(before).toEqual(original);
+  });
+
+  it.each(['baseline', 'constraint', 'sibling', 'target-label', 'edges', 'metadata', 'wrong-value', 'wrong-origin'] as const)(
+    'rejects an actually mutated %s postimage with an unchanged positive twin', field => {
+      const before = canonicalGraph();
+      const result = apply(before);
+      if (result.kind !== 'candidate') throw new Error(JSON.stringify(result));
+      const mutant = clone(result.graph);
+      if (field === 'baseline') mutant.nodes.find(n => n.id === 'factor')!.observed_state!.value = 0.9;
+      if (field === 'constraint') mutant.goal_constraints![0]!.value = 20;
+      if (field === 'sibling') mutant.nodes.find(n => n.id === 'other_option')!.interventions!.factor.value = 0.9;
+      if (field === 'target-label') mutant.nodes.find(n => n.id === 'option')!.label = 'Unexpected rename';
+      if (field === 'edges') mutant.edges.reverse();
+      if (field === 'metadata') mutant.metadata = { preserved: 'changed' };
+      if (field === 'wrong-value') mutant.nodes.find(n => n.id === 'option')!.interventions!.factor.value = 0.8;
+      if (field === 'wrong-origin') mutant.nodes.find(n => n.id === 'option')!.interventions!.factor.source = 'cee_hypothesis';
+      expect(mutant).not.toEqual(result.graph);
+      expect(optionInterventionPostimageIsScoped(before, mutant, target)).toBe(false);
+      expect(optionInterventionPostimageIsScoped(before, result.graph, target)).toBe(true);
+    });
 });
