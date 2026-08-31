@@ -86,8 +86,62 @@ const METRIC_UNIT = String.raw`kg|km|miles?`;
 export const NUMERIC_SUFFIX_SOURCE = String.raw`(?:k|m|bn|million|billion|thousand)(?![a-z])`;
 const SUFFIX = NUMERIC_SUFFIX_SOURCE;
 
+/**
+ * ⭐⭐ THE SPELLED-OUT PERCENT TOKENS. A USER WHO WRITES THE WORD HAS STATED THE
+ * SCALE JUST AS EXPLICITLY AS ONE WHO TYPES THE SYMBOL.
+ *
+ * Until this constant existed, this grammar's percent vocabulary was `%` and
+ * nothing else, so "12 percent" extracted as `{value: 12, unit: null}` while
+ * "12%" extracted as `{value: 0.12, unit: 'percentage'}`. Every hop downstream
+ * then carried the unitless 12 faithfully: `mapCqeQuantityToProposalValue`
+ * returns `{value: 12, unit: undefined}`, `set-factor-value`'s
+ * `parseProposalValue` sets `inputHasUnit: false`, and `normaliseFactorValue`
+ * writes `{value: 12, raw_value: 12}` — a pair that positively asserts "12 is
+ * already on the analysis scale", false by 100x. The analysis seam's baseline
+ * gate (`findScaleIncoherentBaselineFactorIds`) then correctly refused the run
+ * with `baseline_scale_unresolved` — "recorded as a bare amount with no range".
+ *
+ * ⚠ THE GATE WAS RIGHT AND IS NOT TOUCHED. The pair it was handed genuinely
+ * encodes no frame. The loss was here, at the FIRST hop: the user stated the
+ * scale in their own words and this grammar threw the words away. #1236 taught
+ * the WRITER to honour a stated unit; the unit never arrived.
+ *
+ * ⚠ THE ESTATE ALREADY KNEW. `routing/value-unit-resolution.ts:77-78` carries
+ * `['percent', 'percent'], ['percentage', 'percent']` under the comment
+ * "the words CQE's grammar omits" — a sibling module compensating for this
+ * omission for its own guard while the omission itself stayed unrepaired at
+ * the source. That is the hand-maintained-mirror defect: two vocabularies for
+ * one concept, and the reader was wider than the writer.
+ *
+ * ⚠ EVERY TOKEN ENDS `(?![a-z])`, AND THAT IS THE WHOLE SAFETY ARGUMENT FOR THE
+ * SHAPE. It is what keeps `percent` out of "percentile" and out of the
+ * "percent" PREFIX of "percentage"/"percentage points" — so `percentage
+ * points` cannot be silently re-read as a percent (a 100x lie in the opposite
+ * direction, and the exact "closed the gap, opened the lie" trade this must
+ * avoid). `pp` / `percentage points?` keep their existing ownership: P13 runs
+ * FIRST in `PATTERN_RULES` and masks its span, and this lookahead means the
+ * outcome does not DEPEND on that ordering.
+ *
+ * ⚠ BARE `percentage` IS DELIBERATELY ABSENT, and this is a decision, not an
+ * oversight. As a quantity suffix it is not idiomatic English on its own —
+ * "12 percentage" is only ever the head of "12 percentage points", which P13
+ * owns. `classifyUnitScaleClass` DOES classify the token "percentage" as the
+ * percent family, and that is not an inconsistency to tidy away (trap 21): it
+ * answers "which scale family is this stored unit LABEL in?", while this
+ * constant answers "which words did the user type as a quantity suffix?".
+ * Suppress rather than guess; a bare "12 percentage" falls through to the
+ * unitless write and the gate keeps refusing it, visibly.
+ *
+ * `per cent` is here because this is a British-English estate — the same
+ * spelling an adversarial review had to supply to `classifyUnitScaleClass`
+ * from outside its corpus, where "3 per cent" was silently read as 0.6.
+ */
+const PERCENT_WORD = String.raw`percent(?![a-z])|per\s+cent(?![a-z])|pct(?![a-z])`;
+
 // UNIT token for patterns that accept a trailing unit.
-const UNIT = `(?:%|pp|percentage\\s+points?|${TIME_UNIT}|${METRIC_UNIT}|${CURRENCY_SYMBOL}|${CURRENCY_CODE}|${CURRENCY_COLLOQUIAL})`;
+// `percentage\s+points?` precedes PERCENT_WORD so the longer, more specific
+// token wins the alternation even before the lookaheads are consulted.
+const UNIT = `(?:%|pp|percentage\\s+points?|${PERCENT_WORD}|${TIME_UNIT}|${METRIC_UNIT}|${CURRENCY_SYMBOL}|${CURRENCY_CODE}|${CURRENCY_COLLOQUIAL})`;
 
 // Word fractions (handled by P5; values from §4.3 cross-cutting modifiers).
 // Order matters: longer phrases must precede shorter ones so the alternation
@@ -156,8 +210,16 @@ function normaliseUnit(token: string | undefined): string | null {
   if (!token) return null;
   const t = token.trim().toLowerCase();
   if (!t) return null;
-  if (t === '%') return 'percentage';
+  // `percentage_points` is tested FIRST: the spelled-out percent test below
+  // would otherwise never see it (its own regex is anchored and cannot match
+  // "percentage points"), but ordering it first makes that independent of the
+  // percent pattern's shape rather than a consequence of it.
   if (t === 'pp' || /^percentage\s+points?$/.test(t)) return 'percentage_points';
+  if (t === '%') return 'percentage';
+  // The spelled-out forms admitted by `PERCENT_WORD`. Anchored at both ends so
+  // this cannot classify a longer token by prefix — "percentile" and
+  // "percentage" reach the plural-collapse fallback below and stay themselves.
+  if (/^(?:percent|per\s+cent|pct)$/.test(t)) return 'percentage';
   if (/^(£|\$|€|gbp|usd|eur|grand|quid)$/.test(t)) return normaliseCurrencyUnit(t);
   // Collapse plurals for duration/metric units (months -> month, etc).
   return t.replace(/s$/u, '');
@@ -808,7 +870,11 @@ const rule_P8: PatternRule = {
 
 // ---- P9 bare_percentage ----------------------------------------------------
 
-const P9_REGEX = new RegExp(`(${NUM})\\s*%`, 'gi');
+// The catch-all bare percentage. It admits the spelled-out forms on the same
+// terms as the symbol (see `PERCENT_WORD`): this is the rule that owns
+// "record 12 percent as the current measured coverage", the exact native
+// utterance whose rerun was refused as "a bare amount with no range".
+const P9_REGEX = new RegExp(`(${NUM})\\s*(?:%|${PERCENT_WORD})`, 'gi');
 
 const rule_P9: PatternRule = {
   id: 'P9',
