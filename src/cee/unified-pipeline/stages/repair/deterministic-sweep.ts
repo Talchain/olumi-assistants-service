@@ -39,7 +39,7 @@ import { DETERMINISTIC_SWEEP_VERSION } from "../../../constants/versions.js";
 // `fixControllableMissingData`, which remains a `0.5` safety net for a factor
 // carrying neither a value nor an explicit unknown.
 import { FACTOR_VALUE_TIER_FIELD } from "../../../provenance/factor-value-provenance.js";
-import { buildUnquantifiedPrior, unquantifiedFactorSentence, shouldPreserveModelPrior } from "../../../provenance/unquantified-factor.js";
+import { buildUnquantifiedPrior, unquantifiedFactorSentence, shouldPreserveModelPrior, factorHasExpressiblePrior } from "../../../provenance/unquantified-factor.js";
 import { log } from "../../../../utils/telemetry.js";
 import { sha8 } from "../../../../utils/logger-config.js";
 import { config } from "../../../../config/index.js";
@@ -389,9 +389,85 @@ function fixControllableMissingData(
     const data = (node as any).data ?? {};
     let changed = false;
 
+    // ⛔⛔ AN EXPLICIT UNKNOWN IS A STATED LEVEL. DO NOT OVERWRITE IT WITH 0.5.
+    //
+    // ── THE COUPLING THAT WAS ASSERTED, AND WAS FALSE ON THE REAL WIRE ──────
+    // `normalisation.ts`'s `ensureControllableFactorBaselines` (W1) stops
+    // inventing a midpoint and instead marks a valueless controllable factor
+    // with `prior: uniform(0,1)` + `prior_is_unquantified`. Its header carried a
+    // "SAFETY NET AGREEMENT" claiming this function could not inherit that
+    // population, "because the factors this function marks no longer raise that
+    // violation".
+    //
+    // That claim was about the WHOLE violation; the validator's relaxation is
+    // about ONE LIMB of it. `graph-validator.ts::validateFactorData` exempts
+    // `value` alone when the factor states its level as a distribution —
+    // `extractionType`, `factor_type` and `uncertainty_drivers` remain separate
+    // requirements, and the validator's own comment says so in terms. A factor
+    // the model emitted BARE therefore still raises CONTROLLABLE_MISSING_DATA
+    // after W1 has marked it — on the other three fields — and this function's
+    // entire gate is `violations.filter(v => v.code === "CONTROLLABLE_MISSING_DATA")`
+    // being non-empty. It never asked WHICH fields were missing. So it fired,
+    // found `data.value` absent (because W1 had honestly removed it), and wrote
+    // the 0.5 straight back on.
+    //
+    // ⚠ THE PIN AGREED WITH ITSELF. Block D of
+    // `provenance/__tests__/honest-unknown-factor.test.ts` pins the coupling on
+    // a fixture that ALREADY carries `extractionType`, `factor_type` and
+    // `uncertainty_drivers` — the one shape for which no violation survives. It
+    // is true as stated and certifies nothing about the shape the deployed model
+    // actually emits. Thirty lines above it, "the OTHER required fields are
+    // still required" proves the violation IS raised without that metadata.
+    // Both green; nothing composed them. The new block H does.
+    //
+    // MEASURED ON THE DEPLOYED BUILD (cee-staging, 6 fresh guest drafts,
+    // 2026-08-31): 19 of 20 controllable factors came back at exactly 0.5, and
+    // ALL 19 carried `prior_is_unquantified: true` ON THE SAME NODE — the product
+    // saying it does not know the level while feeding 0.5 to the maths that ranks
+    // levers (ISL elasticity is linear in the factor's baseline). All 19 also
+    // carried `factor_type: "other"` and `uncertainty_drivers: ["Not provided"]`
+    // — this function's literal defaults, not anything a model wrote.
+    //
+    // The 20th discriminates, which is what makes the other 19 evidence rather
+    // than an artefact of the probe: a brief stating "churn is 4%" produced
+    // `value: 0.04, extractionType: "explicit", factor_type: "probability"`. The
+    // SAME factor label from a brief with no numbers came back 0.5/other/"Not
+    // provided". Extracted values and this function's defaults look nothing alike.
+    //
+    // ⭐⭐ THE GUARD IS THE VALIDATOR'S OWN PREDICATE, NOT A SECOND ONE.
+    // `factorHasExpressiblePrior` is literally what `validateFactorData` binds
+    // to `statesLevelAsDistribution` when it decides whether `value` is missing.
+    // Asking the same question with the same function is what makes the gate and
+    // the repair ONE authority: this function may not invent a level the gate
+    // has already accepted as stated. A hand-rolled second predicate here is the
+    // shape that produced this defect in the first place (CLAUDE.md trap 12).
+    //
+    // ⚠ IT MUST NOT BE `factorIsExplicitlyUnquantified`. That was this change's
+    // first draft, and driving it found a SECOND live instance of the same
+    // defect: a model's own narrowed `uniform(0.6, 1.0)` is preserved by W1
+    // (`shouldPreserveModelPrior`) and satisfies the validator's `value` limb,
+    // but carries no `prior_is_unquantified` flag — so a flag-keyed guard let
+    // the 0.5 through and OVERWROTE THE MODEL'S ESTIMATE, on precisely the
+    // population carrying the MOST information. Block C's own comment predicted
+    // this in terms and believed the relaxation had closed it; it had not,
+    // for the same reason the explicit-unknown case was open — the relaxation is
+    // scoped to `value`, the repair gated on the CODE.
+    //
+    // THE SAFETY NET IS NOT REMOVED, ONLY NARROWED TO WHAT IT WAS FOR. A factor
+    // whose level is NOT expressible as a distribution — no prior at all, or a
+    // degenerate / inverted / unknown-family one — is a structurally broken node,
+    // still raises the `value` limb, and still gets the default. Both directions
+    // are pinned in block H.
+    //
+    // The other three fields are still filled below: they are genuinely missing,
+    // they are separate requirements, and a stated distribution says nothing
+    // about any of them. Only the LEVEL is left alone, because only the level
+    // has already been stated.
+    const statesLevelAsDistribution = factorHasExpressiblePrior(node);
+
     // INVARIANT: Never overwrite an explicit or earlier-justified value.
     // Only default when truly absent (Stage 1 adapter sets 0.5; this is a safety net).
-    if (data.value === undefined || data.value === null) {
+    if (!statesLevelAsDistribution && (data.value === undefined || data.value === null)) {
       data.value = 0.5;
       // ⭐ STAMPED. See `factor-value-provenance.ts`'s FACTOR_VALUE_TIER_FIELD
       // block: the site that invents the number is the only one that KNOWS it

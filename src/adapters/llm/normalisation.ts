@@ -923,14 +923,33 @@ export function normaliseDraftResponse(raw: unknown): unknown {
  * also writes through. Two same-purpose mechanisms under different names is
  * this estate's chronic defect.
  *
- * ⚠ SAFETY NET AGREEMENT. `fixControllableMissingData()` (deterministic-sweep)
- * still writes `0.5`, and it is gated on the validator reporting
- * CONTROLLABLE_MISSING_DATA. Because the factors this function marks no longer
- * raise that violation, it does not inherit this population. That coupling is
- * load-bearing and is pinned by test (block D of
- * `provenance/__tests__/honest-unknown-factor.test.ts`) — if the validator
- * relaxation is ever reverted alone, the marking here becomes a no-op and the
- * `0.5` returns through the safety net with nothing red.
+ * ⚠⚠ SAFETY NET AGREEMENT — THIS PARAGRAPH WAS FALSE, AND THE MARKING BELOW WAS
+ * A NO-OP ON THE DEPLOYED PRODUCT FOR THE WHOLE TIME IT STOOD. Superseded text:
+ * ~~`fixControllableMissingData()` (deterministic-sweep) still writes `0.5`, and
+ * it is gated on the validator reporting CONTROLLABLE_MISSING_DATA. Because the
+ * factors this function marks no longer raise that violation, it does not
+ * inherit this population.~~
+ *
+ * The relaxation in `graph-validator.ts::validateFactorData` exempts `value`
+ * ALONE — `extractionType`, `factor_type` and `uncertainty_drivers` stay
+ * required, and that file says so in terms. A factor the model emits BARE (the
+ * common shape on the real wire) therefore STILL raises
+ * CONTROLLABLE_MISSING_DATA after this function marks it, on those three fields.
+ * `fixControllableMissingData` gated on the CODE and never on WHICH fields were
+ * missing, so it fired and wrote the `0.5` back over the honest unknown.
+ *
+ * Measured on cee-staging, 6 fresh guest drafts, 2026-08-31: 19 of 20
+ * controllable factors carried `prior_is_unquantified: true` AND `value: 0.5` on
+ * the SAME node. The two writers were not disjoint; they were stacked.
+ *
+ * ⚠ AND THE PIN COULD NOT SEE IT. Block D of
+ * `provenance/__tests__/honest-unknown-factor.test.ts` asserted the coupling on
+ * a fixture that already carried all three other fields — the one shape where no
+ * violation survives. It was true as stated and blind to the shape that ships.
+ * The coupling is now enforced at the consumer instead of assumed here:
+ * `fixControllableMissingData` skips the value write when
+ * `factorIsExplicitlyUnquantified(node)`, and block H drives the composed
+ * W1 → validate → sweep path on a BARE factor.
  *
  * @param response - Draft graph response
  * @returns Response with every controllable factor's baseline stated, and the
