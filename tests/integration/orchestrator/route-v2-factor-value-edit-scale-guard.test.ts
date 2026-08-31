@@ -147,7 +147,10 @@ function observedState(graph: Graph, id = TARGET_ID): ObservedState {
 }
 
 function committedGraphs(): Graph[] {
-  return appendMock.mock.calls.flatMap(([arg]: [{ graph?: Graph }]) => arg.graph ? [arg.graph] : []);
+  return appendMock.mock.calls.flatMap(([arg]) => {
+    const input = arg as { graph?: Graph };
+    return input.graph ? [input.graph] : [];
+  });
 }
 
 function expectSameNumber(actual: number, intended: number): void {
