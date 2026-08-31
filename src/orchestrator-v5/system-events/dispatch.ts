@@ -60,6 +60,7 @@ import {
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
 import { applyStructuralDelete } from './structural-delete.js';
+import { applyStructuralAdd, findFabricatedLevel } from './structural-add.js';
 import { applyStructuralRename, findStaleRenamedLabel } from './structural-rename.js';
 // TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
 // grammar at typecheck time without adding a runtime edge into the tools layer.
@@ -307,7 +308,11 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // `'reader_only_refusal'` is the only posture that leaves the user knowing
   // what happened, and it is what the contract asks for in terms
   // ("Reader-first adoption is mandatory", schemas enums.ts).
-  structural_add: 'reader_only_refusal',
+  // 0.50.0 — THE NODE WRITER. `'reader_only_refusal'` was honest while CEE had
+  // no writer; it becomes a lie the moment one exists. See `structural-add.ts`
+  // for the collision gate the base hash provably cannot replace, and for why a
+  // new factor arrives as an EXPLICIT UNKNOWN rather than a fabricated number.
+  structural_add: 'mutating',
   structural_add_edge: 'reader_only_refusal',
   // 0.50.0 — THE LABEL WRITER (landed after the two above). `'reader_only_refusal'`
   // here was honest while CEE had no writer; it is a LIE the moment one exists,
@@ -456,12 +461,11 @@ const READER_ONLY_REFUSAL_COPY: Partial<
   // unsupported-action-response fires only for handler ids with no chat route.
   //
   // Pinned BOTH WAYS in `__tests__/reader-only-refusal-capability-honesty.test.ts`.
-  structural_add: {
-    text:
-      "I can't apply a factor added on the canvas in this version, so I haven't " +
-      "changed the model. Tell me in chat what you want to add and I'll add it for you.",
-    reason: 'structural_add_reader_only',
-  },
+  // ⚠ `structural_add` DELIBERATELY HAS NO ENTRY ANY MORE — it is declared
+  // `'mutating'` above, so this branch is unreachable for it and a sentence
+  // saying "I can't apply a factor added on the canvas in this version" would be
+  // false the moment someone re-declared the kind. Deleted rather than left as a
+  // comment, on the same reasoning as `structural_rename`'s.
   structural_add_edge: {
     text:
       "I can't apply a link added on the canvas in this version, so I haven't " +
@@ -506,7 +510,6 @@ const READER_ONLY_REFUSAL_COPY: Partial<
 export const READER_ONLY_CHAT_ROUTE_OPS: Readonly<
   Partial<Record<SystemEventKindLiteral, StructuralEditOp>>
 > = {
-  structural_add: 'add_node',
   structural_add_edge: 'add_edge',
   // `structural_rename` is GONE from this table because it is no longer
   // reader-only: CEE writes the label server-side now. The table's own both-ways
@@ -620,6 +623,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'structural_rename'
   ) {
     return await dispatchStructuralRename(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'structural_add'
+  ) {
+    return await dispatchStructuralAdd(payload, payload.event, requestId, startedAt);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -2039,5 +2048,335 @@ async function dispatchStructuralRename(
     // against it. See the `graph` field's doc at the top of this file — passing
     // null does not SKIP the scrub, it runs it blind.
     graph: graphForEgress,
+  };
+}
+
+/**
+ * `structural_add` — commit the new entry, verify it in the committed bytes.
+ *
+ * Same shape as its two siblings; two things differ, and both are derived from
+ * the fact that an add IS analysis-affecting where a rename is not:
+ *
+ *  1. `analysisReady` IS re-derived and stamped, from the bytes that LANDED.
+ *     Adding an option can legitimately move the model to not-analysable (a new
+ *     option has no interventions, so there is nothing to compare it on), and
+ *     adding a factor with no stated level adds an open question. That verdict
+ *     must describe the model the user now has — the delete lane's reasoning,
+ *     applying in the opposite direction.
+ *
+ *  2. `freshness` is derived and emitted, because `nodes` and `options[]` are
+ *     both inside the analysis-hash projection, so any prior analysis genuinely
+ *     is out of date and the currency verdict has to move with it. This is why
+ *     the prior-facts read below is issued at all — the rename path skips it
+ *     precisely because its hash cannot move.
+ *
+ * ⚠ NOT GATED on `config.features.graphCas.rpcEnforce`, for the reason the
+ * delete sibling records: that gate is a rollout device whose default (`shadow`)
+ * would ship the capability DARK. Posture stated the same honest way — base
+ * checked at T0, writes ordered by the turn fence, CAS stamped-not-enforced.
+ */
+async function dispatchStructuralAdd(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'structural_add' }>,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  let priorPendingActions: Awaited<
+    ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
+  >;
+  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  try {
+    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+      loadPersistedGraphStrict(payload.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_add — authoritative graph/pending read failed; refusing any append',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  let result: ReturnType<typeof applyStructuralAdd>;
+  try {
+    result = applyStructuralAdd({ payload, event, requestId, persistedGraph });
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_add — adapter failed before commit',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const persistedParse = GraphV3.safeParse(persistedGraph);
+  const contentGraph = persistedParse.success ? persistedParse.data : null;
+  const currentAnalysisHash = persistedParse.success
+    ? computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      )
+    : null;
+
+  if (result.kind === 'refused') {
+    const response: OlumiResponse =
+      currentAnalysisHash !== null
+        ? { ...result.response, graph_hash: currentAnalysisHash }
+        : result.response;
+    if (result.baseHashConflict !== undefined) {
+      return {
+        response,
+        commitPerformed: false,
+        graph: contentGraph,
+        graphConflict: {
+          recovery_action: result.baseHashConflict.recovery_action,
+          conflict_category: result.baseHashConflict.conflict_category,
+          expected_base_graph_hash: result.baseHashConflict.expected_base_graph_hash,
+        },
+      };
+    }
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        pending_actions: [],
+        priorPendingActions,
+        ...(currentAnalysisHash !== null ? { graph_hash: currentAnalysisHash } : {}),
+        ...(contentGraph !== null ? { contentGraph } : {}),
+        coaching_state: null,
+      });
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 structural_add — refusal commit failed',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        refusal_reason: result.reason,
+      },
+      'V5 structural_add refused — committed honestly, no graph written',
+    );
+    return { response, commitPerformed: true, graph: contentGraph };
+  }
+
+  // ── the mutation path: ONE atomic commit ─────────────────────────────────
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let graphPersisted = false;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const commitResult = await commitDirectAnswer(result.response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      // `direct_answer` + `handler_id: null` — the estate's ruling for an
+      // `edit_graph` receipt; `edit_graph` is not a `V5ActionType` member, so
+      // `turn_class: 'handler'` with that id would need a schemas widening.
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      // THE LINE THE WHOLE CHANGE IS ABOUT. Without this key the commit writes a
+      // turn row and NO graph, and the new entry vanishes on the next reload —
+      // which is `'ack_and_commit'` wearing a writer's name.
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      pending_actions: [],
+      priorPendingActions,
+      contentGraph: result.mutatedGraph,
+      // SPREAD, never conditionally omitted: `supabase-store.ts` derives
+      // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
+      // "known-absent base" into "no base asserted" and darkens the CAS guard.
+      ...cas,
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    graphPersisted = commitResult.graphPersisted;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 structural_add — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_add — atomic mutation commit failed',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  // ── the post-commit receipt check ────────────────────────────────────────
+  // For an ADD the claim to verify is PRESENCE — and, because this writer's
+  // whole point is that it invents no number, that the committed bytes still
+  // carry no fabricated level.
+  //
+  // ⚠ SCOPE, at the same honesty level the delete sibling states it:
+  // `commitResult.persistedGraph` is `graphForStore` — "this commit's own input
+  // after projection, NOT a re-read" (`commit.ts`). So this compares the
+  // adapter's projected graph against the chokepoint's SECOND projection of it.
+  // It catches a non-idempotent projection dropping the entry or synthesising a
+  // baseline; it CANNOT see the store persisting something different from what
+  // it was handed.
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const committedNode = committedParse.success
+    ? committedParse.data.nodes.find((n) => n.id === result.addedNodeId)
+    : undefined;
+  const addLanded =
+    committedNode !== undefined &&
+    committedNode.label === result.addedLabel &&
+    findFabricatedLevel(
+      persistedGraphBytes as Record<string, unknown>,
+      result.addedNodeId,
+    ) === null;
+  if (
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    !committedParse.success ||
+    !addLanded
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        graph_persisted: graphPersisted,
+        has_analysis_hash: persistedAnalysisGraphHash !== null,
+        graph_parse_ok: committedParse.success,
+        add_landed: addLanded,
+      },
+      'V5 structural_add — committed graph receipt invalid; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  const graphForReadiness = committedParse.data;
+
+  const response: OlumiResponse = {
+    ...committedResponse,
+    graph_hash: persistedAnalysisGraphHash,
+    draft_graph: buildAppliedGraphWireField(graphForReadiness),
+  };
+
+  // Fact history is observational only: it never authorises or blocks the write.
+  // A healthy empty read means canonical `none`; a degraded read must not
+  // fabricate that conclusion and therefore emits honest `unknown`.
+  const freshness: FreshnessDerivation =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
+      : {
+          freshness: 'unknown',
+          reason: 'derivation_failed',
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: persistedAnalysisGraphHash,
+          computed_at: null,
+        };
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.structural_add',
+    },
+    {
+      prior_fact_count: priorFactsRead.facts.length,
+      prior_fact_read_status: priorFactsRead.status,
+      added_node_kind: result.addedNodeKind,
+      left_unquantified: result.leftUnquantified,
+    },
+  );
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      added_node_id: result.addedNodeId,
+      added_node_kind: result.addedNodeKind,
+      left_unquantified: result.leftUnquantified,
+    },
+    'V5 structural_add committed — canonical graph/fact written atomically, new entry verified in the persisted bytes with no fabricated level',
+  );
+  return {
+    response,
+    commitPerformed: true,
+    // Readiness from the bytes that LANDED. An added option with no
+    // interventions can legitimately move the model to not-analysable, and that
+    // verdict must describe the model the user now has.
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    freshness,
+    graph: graphForReadiness,
   };
 }
