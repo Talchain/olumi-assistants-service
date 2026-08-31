@@ -674,6 +674,24 @@ describe('the answer frame — PARAMETER 1 closes the GAP', () => {
     ]) {
       expect(bindsTo(refused), `"${refused}" reached a WRITE`).toBeNull();
     }
+
+    // ⭐⭐ THE LEXICON ITSELF, REACHED DIRECTLY — ADDED BECAUSE A MUTANT
+    // SURVIVED AND HAD TO BE SETTLED BY EXECUTION, NOT ARGUED (trap 13c).
+    //
+    // Adding `half: 50` to `SPELLED_ONES` left the WHOLE battery GREEN at
+    // 155/155. The cases above look like they pin the fraction refusal and do
+    // not: bare `half` is refused by the PERCENT SUFFIX requirement, never
+    // reaching the lexicon at all, so both guards were resting on one of them.
+    // These strings carry the suffix, so the lexicon is the only thing that can
+    // decline them — and with the mutant applied `half percent` binds 0.5.
+    //
+    // ⚠ Two independent guards, separately pinned, is the point: if a later
+    // lane relaxes the suffix requirement for a good reason, the fraction
+    // refusal must not silently go with it.
+    for (const refused of ['half percent', 'a third percent', 'a quarter percent']) {
+      expect(readMissingValueAnswer(refused), `"${refused}" read as a value`).toBeNull();
+      expect(bindsTo(refused), `"${refused}" reached a WRITE`).toBeNull();
+    }
   });
 
   it('⛔ PARAMETER 2 GUARDS THE LIE — a CONTENTFUL subject never binds', () => {
