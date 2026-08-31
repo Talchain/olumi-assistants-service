@@ -468,7 +468,16 @@ export function draftResultToOlumiResponse(
   } as OlumiResponse;
 }
 
-function buildPostDraftChips(params: {
+/**
+ * EXPORTED FOR ONE REASON: so a guard test can drive the REAL chip row rather
+ * than describing it. `clarify-v2/framing-first-sequencing.ts` keeps a copy of
+ * the two displaceable chip ids (it cannot import them from here — the
+ * route-level harnesses `vi.mock` this module wholesale, which would make any
+ * such import `undefined` at test time; platform trap 12), and
+ * `tests/unit/framing-first-sequencing.test.ts` pins that copy against what
+ * this function actually emits, in both directions.
+ */
+export function buildPostDraftChips(params: {
   readonly graphPersisted: boolean;
   readonly analysisReadyField: DraftGraphResult['analysisReady'] | undefined;
   readonly graph: GraphV3T | null;

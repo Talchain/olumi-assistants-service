@@ -1023,6 +1023,28 @@ export function composeDraftFirstDisclosure(
 }
 
 /**
+ * THE FRAMING QUESTIONS AS TAP-ABLE ANSWERS, for the draft-first path.
+ *
+ * The blocking clarify round has always offered its questions' candidate
+ * answers as chips (`composeClarifyV2Response` -> `selectCandidateChips`). The
+ * draft-first path carried the same questions as PROSE ONLY. This exposes the
+ * SAME candidates — one per asked dimension, round-robin, deterministic — so
+ * the framing questions can be offered as actions rather than as a paragraph.
+ *
+ * No new copy: every chip here is a member of `QUESTION_TEMPLATES`, already
+ * chosen so its `message` satisfies its own dimension's detector battery. The
+ * caller decides how many of them survive the chip row (see
+ * `framing-first-sequencing.ts::promoteFramingChips`); this function only says
+ * which ones, and in what order.
+ */
+export function composeDraftFirstFramingChips(
+  questions: readonly ClarifyQuestion[],
+  budget: number = CLARIFY_V2_MAX_CHIPS,
+): SuggestedAction[] {
+  return selectCandidateChips(questions, budget);
+}
+
+/**
  * Compose the wire response for an ask decision.
  *
  * Copy contract:

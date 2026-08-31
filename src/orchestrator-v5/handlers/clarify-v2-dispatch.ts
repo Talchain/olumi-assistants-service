@@ -56,12 +56,14 @@ import {
 } from '../session/pending-action.js';
 import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { isClarifyDimension, type ClarifyDimension } from '../clarify-v2/rubric.js';
+import type { SuggestedAction } from '../compose/types.js';
 import {
   CLARIFY_V2_PROCEED_CHIP_ID,
   composeClarifyV2DeclineResponse,
   composeClarifyV2ReofferResponse,
   composeClarifyV2Response,
   composeDraftFirstDisclosure,
+  composeDraftFirstFramingChips,
   decideClarifyV2Resume,
   decideClarifyV2Round1,
   type ClarifyV2Decision,
@@ -115,6 +117,16 @@ export type ClarifyV2Outcome =
       readonly deferredAsk?: {
         readonly dimensions: readonly ClarifyDimension[];
         readonly disclosure: string;
+        /**
+         * The SAME questions' tap-able candidate answers. Carried alongside
+         * the prose so route-v2 can offer the framing questions as actions
+         * when the drafter has manufactured options out of the user's own
+         * statements (`clarify-v2/framing-first-sequencing.ts`). Composed
+         * unconditionally and consumed conditionally: the decision about
+         * whether to promote them belongs at the splice site, which is the
+         * only place that can see the committed graph.
+         */
+        readonly framingChips: readonly SuggestedAction[];
       };
     };
 
@@ -421,6 +433,7 @@ export async function tryClarifyV2Turn(
                 deferredAsk: {
                   dimensions: decision.deferredQuestions.map((q) => q.dimension),
                   disclosure: composeDraftFirstDisclosure(decision.deferredQuestions),
+                  framingChips: composeDraftFirstFramingChips(decision.deferredQuestions),
                 },
               }
             : {}),
@@ -541,6 +554,7 @@ export async function tryClarifyV2Turn(
       deferredAsk: {
         dimensions: decision.deferredQuestions.map((q) => q.dimension),
         disclosure: composeDraftFirstDisclosure(decision.deferredQuestions),
+        framingChips: composeDraftFirstFramingChips(decision.deferredQuestions),
       },
     };
   }

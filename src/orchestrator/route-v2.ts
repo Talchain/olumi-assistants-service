@@ -129,6 +129,13 @@ import {
   type DispatchSystemEventResult,
 } from '../orchestrator-v5/system-events/dispatch.js';
 import { dispatchDraftGraph } from '../orchestrator-v5/handlers/draft-graph-dispatch.js';
+import type { SuggestedAction } from '../orchestrator-v5/compose/types.js';
+import {
+  hasOptionFactorLabelMirror,
+  POST_DRAFT_DISPLACEABLE_CHIP_IDS,
+  promoteFramingAboveNextStep,
+  promoteFramingChips,
+} from '../orchestrator-v5/clarify-v2/framing-first-sequencing.js';
 // R2 — post-draft auto-run scheduler (fires AFTER the draft response is
 // handed to the transport; see the draft_graph branch below).
 import { scheduleAutoRunAfterFreshDraft } from '../orchestrator-v5/handlers/auto-run-after-draft.js';
@@ -4174,6 +4181,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // from the persisted graph), so this append introduces no new
     // wire-vs-store divergence class.
     let clarifyV2DeferredDisclosure: string | null = null;
+    // The SAME deferred questions' tap-able candidate answers, carried
+    // alongside the prose. Consumed only when the committed graph shows the
+    // manufactured-options shape (see the splice below).
+    let clarifyV2DeferredFramingChips: readonly SuggestedAction[] = [];
     // Review fix A5 (17 Jul): an EMPTY canvas ({nodes:[],edges:[]}) passes
     // ingress as non-null but is 'no model' by this file's own predicate —
     // gate on POPULATION, not nullness, so clarify v2 engages for exactly
@@ -4223,6 +4234,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (cv2 !== null && cv2.kind === 'draft') {
         clarifyV2DraftBrief = cv2.briefOverride;
         clarifyV2DeferredDisclosure = cv2.deferredAsk?.disclosure ?? null;
+        clarifyV2DeferredFramingChips = cv2.deferredAsk?.framingChips ?? [];
       }
     }
 
@@ -4456,12 +4468,48 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // about a model that never landed would be a false statement). Ships
         // through sendFinalised200's central egress sanitiser like the rest
         // of the narrative. Deterministic template text — no graph labels.
+        //
+        // ⭐⭐ CLASS-B SEQUENCING: WHEN THE DRAFTER MANUFACTURED THE OPTIONS,
+        // THE FRAMING QUESTIONS LEAD AND THE RUN NUDGE IS SUBORDINATED.
+        //
+        // A brief that is a disagreement about CAUSES ("some think the product
+        // has fallen behind, some think onboarding…") meets an unconditional
+        // 2-6 option floor in the draft prompt, and the drafter turns the same
+        // three statements into both options AND factors. The option -> factor
+        // effect cells are then tautological, they default, and the analysis
+        // names a winner among the team's own hypotheses — the inverse of
+        // making disagreement productive.
+        //
+        // `hasOptionFactorLabelMirror` is the MECHANICAL tell: an option label
+        // that normalises to a factor label. String comparison over two node
+        // kinds — deliberately NOT a natural-language "does this brief name an
+        // action?" test, which is the one-predicate-two-harms shape CEE #888
+        // paid nine rounds for.
+        //
+        // ⚠ SEQUENCING ONLY. The analysis is NOT blocked: the run nudge still
+        // ships and every executable chip survives. The option floor, the
+        // grammar and the readiness gate are untouched. When the signal does
+        // not fire — a genuinely decision-shaped brief — the disclosure is
+        // appended exactly as before, byte for byte.
         const draftResponse =
           clarifyV2DeferredDisclosure !== null && dg.graph !== null
-            ? {
-                ...dg.response,
-                assistant_text: `${dg.response.assistant_text.trimEnd()}\n\n${clarifyV2DeferredDisclosure}`,
-              }
+            ? hasOptionFactorLabelMirror(dg.graph.nodes ?? [])
+              ? {
+                  ...dg.response,
+                  assistant_text: promoteFramingAboveNextStep(
+                    dg.response.assistant_text,
+                    clarifyV2DeferredDisclosure,
+                  ),
+                  suggested_actions: promoteFramingChips({
+                    existing: dg.response.suggested_actions ?? [],
+                    framing: clarifyV2DeferredFramingChips,
+                    displaceableChipIds: POST_DRAFT_DISPLACEABLE_CHIP_IDS,
+                  }),
+                }
+              : {
+                  ...dg.response,
+                  assistant_text: `${dg.response.assistant_text.trimEnd()}\n\n${clarifyV2DeferredDisclosure}`,
+                }
             : dg.response;
         // R2 / ROADMAP 2.1271 — THE IN-FLIGHT SIGNAL, resolved from the SAME
         // predicate that gates the scheduler below.
