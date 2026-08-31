@@ -193,15 +193,32 @@ export interface ChipClickAutoRunTrigger {
 /**
  * ⭐⭐ STANDING INVARIANT FOR STATE-RECOVERY CODE (2.1353 r4):
  *
- *     FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS.
+ *     FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS
+ *     — AND, AT THIS SEAM, THAT BUYS ATTRIBUTION, NOT PREVENTION.
  *
- * No path may author "there are no pending actions" unless absence was actually
- * ESTABLISHED. `[]` is a CLAIM about the world, and a read that failed has not
- * earned it — yet `[]` is exactly what every degrading read tends to return, and
- * `commit.ts` resolves a threaded `[]` (or an omitted key) to a TOTAL
- * carry-forward wipe. So an unreadable history that becomes `[]` does not merely
- * lose information: it publishes a confident, wrong answer that the next turn
- * treats as authoritative.
+ * ⚠⚠ READ THE LIMIT BEFORE THE PRINCIPLE, because the principle overclaims
+ * without it. Complete reader manifest for `CommitMetadata.priorPendingActions`
+ * in `commit.ts`, derived at this tip: the type declaration, and exactly TWO
+ * reads — both `metadata.priorPendingActions ?? []`. There is NO key-presence
+ * branch on this key anywhere (contrast control: the `!== undefined` /
+ * `hasOwnProperty` hits in that file are about `CommitMetadata.graph` and
+ * `decisionRecordFact`, not this one).
+ *
+ * THEREFORE AN OMITTED KEY IS BYTE-IDENTICAL TO `[]` AT EVERY CONSUMER, and the
+ * durable carry-forward outcome of `unavailable` is the SAME TOTAL WIPE as
+ * `known_empty`. The three states below are a true distinction in THIS MODULE
+ * and a distinction that DIES AT THE PERSISTED BOUNDARY.
+ *
+ * What this fix actually delivers, stated narrowly so no later reader inherits
+ * more: the loss becomes ATTRIBUTABLE — a distinct telemetry event naming it a
+ * loss instead of a recovery — and the round-3 defect of REPORTING a total loss
+ * as a partial recovery is closed. It does NOT prevent the wipe. Making the
+ * durable boundary preserve `unavailable` is a persisted-shape change with its
+ * own readers; it is a separate lane, deliberately not attempted here.
+ *
+ * `[]` is still a CLAIM about the world that a failed read has not earned, and
+ * that is why the state is modelled at all — but the only channel currently
+ * carrying it is telemetry.
  *
  * The prior-pending read therefore has THREE outcomes, not two, and they are
  * modelled on WHAT IS TRUE ABOUT THE WORLD rather than on which error code
@@ -216,16 +233,15 @@ export interface ChipClickAutoRunTrigger {
  *                         carried. Never `[]` by construction (length >= 1).
  *   unavailable           we could not establish what was there — unreadable
  *                         column, wholly unparseable entries, store down, fetch
- *                         failed. MUST NOT thread anything: the key is omitted
- *                         so the resulting loss stays attributable to the read
- *                         failure instead of masquerading as a successful empty.
+ *                         failed. Threads nothing, and emits the LOSS event.
+ *                         ⚠ The omission does not change what is persisted (see
+ *                         the manifest above); it changes what is REPORTED.
  *
- * ⚠ This type is deliberately LOCAL to this dispatcher. An independent review
- * found the same "malformed input silently becomes `[]`" shape in the prompt
- * store (#1288) the same night, so this is a recurring seam rather than an
- * incident — but that PR has a different owner, and hoisting a shared helper
- * across both while one is in review would couple two live changes. If this
- * invariant is adopted estate-wide, THIS is the definition to lift.
+ * ⚠ This type is LOCAL to this dispatcher and is not offered as an estate-wide
+ * definition. Given the limit above it has not earned that status: a shared
+ * helper would export a distinction that dies at the first durable boundary it
+ * meets, and a confident claim in a docstring is how the next session gets a
+ * register row for work nobody validated.
  */
 type PriorPendingsOutcome =
   | { readonly state: 'known_empty' }
@@ -236,9 +252,12 @@ type PriorPendingsOutcome =
  * The single place the invariant above is enforced: what may this outcome hand
  * to `CommitMetadata.priorPendingActions`?
  *
- * `null` means OMIT THE KEY — never `[]`. Returning `[]` here for `unavailable`
- * would be the whole defect, so the mapping is written once and read by the one
- * threading site rather than being re-decided inline.
+ * `null` means OMIT THE KEY. ⚠ NOT because that prevents the wipe — `commit.ts`
+ * reads this key as `?? []` at both of its two read sites, so omitted and `[]`
+ * are byte-identical downstream — but so the dispatcher never STATES an empty
+ * history it did not establish, and so the LOSS event beside it is true. The
+ * mapping is written once and read by the one threading site rather than being
+ * re-decided inline.
  */
 function priorsToThread(
   outcome: PriorPendingsOutcome,

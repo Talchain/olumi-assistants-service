@@ -510,3 +510,114 @@ describe('chip-click run_analysis SUCCESS commit — a recovery that recovered n
     expect(recoverable.threaded).toBe(true);
   });
 });
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⭐⭐ THE LIMIT, PINNED AT THE REAL CARRY-FORWARD — NOT AT A MOCK.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Every case above mocks `commitDirectAnswer`, so all of them are assertions
+ * about what the dispatcher SUPPLIED, never about what was PERSISTED. That is
+ * the same shape as the defect this PR repairs, one layer down, and it is why
+ * this block exists: it drives the REAL `computeSurvivingPriorPendingsDetailed`
+ * — the function `commit.ts` actually carries priors through — with no mock
+ * anywhere.
+ *
+ * WHAT IT PROVES, and it is deliberately an unflattering result: the three-state
+ * distinction the dispatcher makes DIES AT THE DURABLE BOUNDARY. Complete reader
+ * manifest for `CommitMetadata.priorPendingActions` in `commit.ts`: the type
+ * declaration plus exactly two reads, BOTH `metadata.priorPendingActions ?? []`,
+ * and no key-presence branch anywhere. So an omitted key and an explicit `[]`
+ * are byte-identical downstream, and `unavailable` carries forward exactly what
+ * `known_empty` does.
+ *
+ * This test therefore pins the NARROW claim the PR is entitled to — the loss is
+ * ATTRIBUTABLE, not PREVENTED — and it will RED the day someone makes the
+ * boundary preserve `unavailable`, which is the correct moment to re-derive
+ * every claim that rests on this limit.
+ */
+describe('the REAL carry-forward — what the three states actually deliver downstream', () => {
+  const NOW = Date.UTC(2026, 7, 31, 12, 0, 0);
+  const liveHold = (id: string): PendingAction =>
+    ({
+      id,
+      scenario_id: SCENARIO_ID,
+      chip_id: `chip-${id}`,
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: `prop-${id}`,
+        inline_patch: {},
+        public_label: 'Widen the depot budget',
+        public_message: 'Widen the depot budget',
+      },
+      preconditions: {},
+      expires_at_turn_count: 3,
+      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      emitted_at_iso: '2026-08-31T10:00:00.000Z',
+    }) as unknown as PendingAction;
+
+  it('⭐ an OMITTED key and an explicit [] are indistinguishable at the real carry-forward', async () => {
+    const { computeSurvivingPriorPendingsDetailed } = await vi.importActual<
+      typeof import('../../commit.js')
+    >('../../commit.js');
+
+    // Reproduce the two metadata SHAPES and read them with the exact expression
+    // commit.ts uses at BOTH of its read sites (`metadata.priorPendingActions ?? []`),
+    // rather than hand-writing the resolved value — the read is the thing under test.
+    type MetaShape = { priorPendingActions?: readonly PendingAction[] };
+    const metaKeyOmitted: MetaShape = {};
+    const metaExplicitEmpty: MetaShape = { priorPendingActions: [] };
+    const omittedKey = metaKeyOmitted.priorPendingActions ?? [];
+    const explicitEmpty = metaExplicitEmpty.priorPendingActions ?? [];
+
+    const fromOmitted = computeSurvivingPriorPendingsDetailed(omittedKey, [], [], 'gh-1', NOW);
+    const fromEmpty = computeSurvivingPriorPendingsDetailed(explicitEmpty, [], [], 'gh-1', NOW);
+
+    expect(
+      fromOmitted.survivors,
+      'the durable outcome of `unavailable` differs from `known_empty` — if this is now true, the ' +
+        'boundary has been changed and every "attributable, not prevented" claim must be re-derived',
+    ).toEqual(fromEmpty.survivors);
+    expect(fromOmitted.survivors).toEqual([]);
+    expect(fromOmitted.lapsedConfirmationExpecting).toEqual(fromEmpty.lapsedConfirmationExpecting);
+  });
+
+  it('POSITIVE CONTROL: the same function DOES carry a real survivor through, so the comparison above is not vacuous', async () => {
+    const { computeSurvivingPriorPendingsDetailed } = await vi.importActual<
+      typeof import('../../commit.js')
+    >('../../commit.js');
+
+    const carried = computeSurvivingPriorPendingsDetailed(
+      [liveHold('pa-survivor-1')],
+      [],
+      [],
+      'gh-1',
+      NOW,
+    );
+
+    // Bound by IDENTITY — a count could be satisfied by another object.
+    expect(
+      carried.survivors.map((p) => p.id),
+      'the instrument cannot see a survivor at all, so the equality above proved nothing',
+    ).toEqual(['pa-survivor-1']);
+  });
+
+  it('and THAT is the gap: a survivor list is the ONLY thing this seam can carry that an unavailable read cannot', async () => {
+    const { computeSurvivingPriorPendingsDetailed } = await vi.importActual<
+      typeof import('../../commit.js')
+    >('../../commit.js');
+
+    const withSurvivor = computeSurvivingPriorPendingsDetailed(
+      [liveHold('pa-survivor-1')],
+      [],
+      [],
+      'gh-1',
+      NOW,
+    );
+    const withNothing = computeSurvivingPriorPendingsDetailed([], [], [], 'gh-1', NOW);
+
+    // The discrimination that IS real downstream — so the reader can see exactly
+    // where the value of this PR lives (`known_with_survivors`) and where it
+    // does not (`unavailable` vs `known_empty`).
+    expect(withSurvivor.survivors).not.toEqual(withNothing.survivors);
+  });
+});
