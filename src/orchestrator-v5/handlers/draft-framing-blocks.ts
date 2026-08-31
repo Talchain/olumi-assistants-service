@@ -9,7 +9,7 @@
  *
  *   - `draft-bias-signal-blocks.ts:210`      `if (analysisReady?.status !== 'ready') return [];`
  *   - `draft-option-widening-blocks.ts:611`  `if (analysisReady?.status !== 'ready') return [];`
- *   - `post-draft-narrative.ts:526`          `mayServeFreeformCoaching = analysisReady?.status === 'ready'`
+ *   - `coaching/post-draft-narrative.ts:667`  `mayServeFreeformCoaching = analysisReady?.status === 'ready'`
  *
  * So on a model that is NOT analysis-ready the product serves a fixed generic
  * assumption, a trade-off line assembled from node labels, and a readiness
@@ -63,7 +63,12 @@
  * The gate here is the EXACT INVERSE of every sibling's: this module returns
  * `[]` when `status === 'ready'`. So it can never double-emit with the widening
  * card, the bias card, or the narrative's freeform coaching. Ready and not-ready
- * partition the space; each half now has a producer. Pinned by T2.
+ * are MUTUALLY EXCLUSIVE — verified across all 8 `analysisReady` states, and
+ * pinned by T2. They are NOT jointly exhaustive, and the earlier wording
+ * ("partition the space; each half now has a producer") overstated it: states
+ * remain where NOTHING emits — a not-ready draft whose only strengthen items
+ * are neither `reframe_goal` nor `add_option` is one, and this suite's own J4
+ * is exactly that case. The claim proved here is no-double-emit, not coverage.
  *
  * ── WHAT THIS MODULE WILL NOT DO ───────────────────────────────────────────
  * It never GENERATES a goal, an option, a value or a number. Every byte it ships
@@ -185,6 +190,27 @@ const DSK_CLAIM_BY_ACTION_TYPE: Readonly<Record<FramingActionType, string | null
 /** Contract bounds. Module-private in `@talchain/schemas`, so mirrored here —
  *  and the mirror is contained: `CoachingBlockSchema.safeParse` is the real
  *  authority and drops the block whole if either drifts. */
+/**
+ * Strengthen items CEE writes ITSELF, which this emitter must never quote.
+ *
+ * `str_status_quo` is hardcoded at `src/cee/unified-pipeline/stages/package.ts:326-332`
+ * whenever a graph has options and no baseline, with fixed `label`/`detail`.
+ * Quoting it would ship IDENTICAL copy on every such card — furniture rather
+ * than information — and its sentence ("add one to measure improvement") is
+ * the very instruction this emitter exists to stop giving a team that is still
+ * framing its problem.
+ *
+ * ⚠ This is the DEGRADED-PATH DEFAULT, not an edge case. The Stage 4.5 coaching
+ * pass regenerates `ctx.coaching` wholesale and the injection runs AFTER it, so
+ * when that pass is skipped under the latency budget or fails, this is the ONLY
+ * surviving strengthen item — i.e. the worse the turn goes, the more likely it
+ * is the only thing here to quote.
+ *
+ * Matched on the producer's own dedup key (`id`), never on the copy, so a
+ * rewording at the injection site cannot silently reopen this.
+ */
+const PRODUCER_AUTHORED_ITEM_IDS: ReadonlySet<string> = new Set(['str_status_quo']);
+
 const TITLE_BUDGET = 80;
 const BODY_BUDGET = 300;
 /** Cap on the model-authored slug used inside a signal id. */
@@ -298,6 +324,8 @@ export function buildDraftFramingBlocks(
     for (const raw of strengthenItems) {
       if (!isRecord(raw)) continue;
       if (raw.action_type !== actionType) continue;
+      // Gate 4a — never quote copy CEE wrote itself. See PRODUCER_AUTHORED_ITEM_IDS.
+      if (PRODUCER_AUTHORED_ITEM_IDS.has(readTrimmedString(raw.id))) continue;
 
       const label = readTrimmedString(raw.label);
       const detail = readTrimmedString(raw.detail);

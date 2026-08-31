@@ -451,8 +451,10 @@ export function draftResultToOlumiResponse(
         // their option set. This emitter serves that half and ONLY that half:
         // its gate is the exact inverse (`=== 'ready'` returns []), so it can
         // never double-emit with the widening card, the bias card, or the
-        // narrative. Ready and not-ready partition the space; each half now has
-        // a producer. It reads `strengthen_items.action_type` — a
+        // narrative. The gates are MUTUALLY EXCLUSIVE (verified across all 8
+        // `analysisReady` states) — but not jointly exhaustive: states remain
+        // where nothing emits, so this adds a producer for one uncovered half,
+        // it does not partition the space. It reads `strengthen_items.action_type` — a
         // contract-typed field the drafter has always written and nothing on
         // either side of the wire has ever read — and surfaces only the two
         // members that do work before a complete option set exists:

@@ -1,10 +1,19 @@
 /**
  * draft-framing-blocks — RED-first spec.
  *
- * ⭐ FIXTURE PROVENANCE (CLAUDE.md trap 16 / trap 22): every `strengthen_items`
- * fixture below is a VERBATIM CAPTURE from a live draft response in the estate's
- * evidence directories, not a sentence written by this lane. A self-authored
- * fixture encodes the author's model of the drafter rather than the drafter.
+ * ⭐ FIXTURE PROVENANCE (CLAUDE.md trap 16 / trap 22). Stated precisely, because
+ * an overstated provenance label is itself the defect this estate keeps paying
+ * for: the `id`, `label` and `action_type` of every captured item below are
+ * REPRODUCED EXACTLY from live draft responses in the estate's evidence
+ * directories — those are the fields this module's logic keys on. The `detail`
+ * strings are ABRIDGED from the same captures (shortened for readability) and
+ * `bias_category` is omitted, so they are NOT verbatim and must not be cited as
+ * evidence of what the drafter emits. What matters for these tests is that the
+ * items are not invented by this lane: a self-authored fixture encodes the
+ * author's model of the producer rather than the producer.
+ *
+ * `INJECTED_STATUS_QUO` is the exception and IS byte-exact, because it is copied
+ * from CEE's own source rather than from a capture.
  * Sources (19 unique items, action_type distribution add_risk 7 / add_option 6 /
  * add_constraint 6 / reframe_goal 3):
  *   olumi-docs/witness-998-2026-08-16/c-a1-graph-response.json
@@ -59,6 +68,26 @@ const CAPTURED_ADD_CONSTRAINT = {
   detail:
     "Finance says 'cash is tight but will not put a number on it', yet cash runway pressure already appears as a risk flowing into the goal — leaving it unbounded means the acquisition price uncertainty cannot be sized.",
   action_type: 'add_constraint',
+} as const;
+
+// ── THE DETERMINISTIC INJECTION (verbatim from the producer, not a capture) ──
+// CEE *hardcodes* this item at `src/cee/unified-pipeline/stages/package.ts:326-332`
+// whenever a graph has options and no baseline. It is copied here byte-exact
+// from that source, INCLUDING `bias_category`, because the whole point of the
+// gate below is that these bytes are identical on every turn that fires it.
+//
+// ⚠ It is the DEGRADED-PATH DEFAULT, not an edge case: the Stage 4.5 coaching
+// pass regenerates `ctx.coaching` wholesale and this append runs AFTER it, so
+// when the pass is skipped under the latency budget or fails, `str_status_quo`
+// is the ONLY surviving strengthen item. The worse the turn goes, the more
+// likely it is the only qualifying item this emitter sees.
+const INJECTED_STATUS_QUO = {
+  id: 'str_status_quo',
+  label: 'Add baseline option',
+  detail:
+    "No status quo option detected — add one to measure improvement. If one of your existing options is the baseline (e.g. 'Continue as-is', 'Maintain current approach'), rename it to make the baseline intent explicit.",
+  action_type: 'add_option',
+  bias_category: 'narrow_framing',
 } as const;
 
 const NOT_READY = { status: 'asking_effect_value' } as const;
@@ -213,5 +242,41 @@ describe('buildDraftFramingBlocks — the FRAME/IDEATE complement', () => {
     expect(
       build({ strengthenItems: [{ ...CAPTURED_REFRAME_GOAL, detail: '' }] }),
     ).toEqual([]);
+  });
+
+  // ── 9. THE DETERMINISTIC INJECTION, both directions ────────────────────
+  // The class the rest of this corpus structurally EXCLUDES: every other
+  // fixture here is model-authored, so none of them can observe what happens
+  // when the only qualifying item is one CEE wrote itself. Its copy is
+  // identical on every turn, which makes it furniture rather than information
+  // — and it says the one thing this emitter exists NOT to say to a team that
+  // is still framing: go and finish your option set.
+  it('T11 is SILENT when the deterministically injected str_status_quo is the only qualifying item', () => {
+    expect(build({ strengthenItems: [INJECTED_STATUS_QUO] })).toEqual([]);
+    // Bind by IDENTITY to the producer's own dedup key, not to the copy: the
+    // label/detail may be reworded at the injection site without this gate
+    // changing meaning.
+    expect(INJECTED_STATUS_QUO.id).toBe('str_status_quo');
+    // Pin the precondition (trap 13b): absent the gate this item WOULD qualify
+    // — same action_type as T4's card, non-empty label and detail. Without
+    // this the test could pass because the fixture stopped qualifying at all.
+    expect(INJECTED_STATUS_QUO.action_type).toBe('add_option');
+    expect(FRAMING_ACTION_TYPE_PRECEDENCE).toContain(INJECTED_STATUS_QUO.action_type);
+    expect(INJECTED_STATUS_QUO.label.length).toBeGreaterThan(0);
+    expect(INJECTED_STATUS_QUO.detail.length).toBeGreaterThan(0);
+  });
+
+  it('T12 SKIPS the injected item without silencing the arm: a model-authored add_option alongside it still ships', () => {
+    // Opposite-direction twin of T11. The gate must drop one ITEM, not the
+    // whole IDEATE arm — otherwise a real drafted suggestion is lost whenever
+    // the baseline injection happens to fire on the same turn.
+    const out = build({ strengthenItems: [INJECTED_STATUS_QUO, CAPTURED_ADD_OPTION] });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.signal_id).toBe(
+      `${DRAFT_FRAMING_SIGNAL_PREFIX}add_option:${CAPTURED_ADD_OPTION.id}`,
+    );
+    // And never the injected one, by identity.
+    expect(out[0]!.signal_id).not.toContain('str_status_quo');
+    expect(out[0]!.title).toBe(CAPTURED_ADD_OPTION.label);
   });
 });

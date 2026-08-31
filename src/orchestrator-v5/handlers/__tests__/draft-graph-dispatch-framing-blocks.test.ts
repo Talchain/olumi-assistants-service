@@ -13,9 +13,16 @@
  * array: a card that can never appear, under a fully green unit suite. This
  * test is the only thing in the lane that can see that class of defect.
  *
- * Fixtures are VERBATIM CAPTURES from live draft responses in the estate's
- * evidence directories (see the unit spec's provenance header), never sentences
- * written by this lane (CLAUDE.md trap 16 / trap 22).
+ * FIXTURE PROVENANCE, stated precisely (CLAUDE.md trap 16 / trap 22). The
+ * strengthen items below are NOT verbatim captures: their `id`, `label` and
+ * `action_type` — the fields the join and the emitter key on — are reproduced
+ * from live draft responses in the estate's evidence directories, while the
+ * `detail` strings are abridged and `bias_category` is dropped. They are not
+ * sentences invented by this lane, but they must not be cited as evidence of
+ * what the drafter emits on the wire. The earlier header here claimed verbatim
+ * capture and named the unit spec's source list, which is not where these came
+ * from; an overstated provenance label teaches the next reader to stop
+ * checking, which is the defect class this estate keeps paying for.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { OlumiResponseSchema } from '@talchain/schemas/boundary';
