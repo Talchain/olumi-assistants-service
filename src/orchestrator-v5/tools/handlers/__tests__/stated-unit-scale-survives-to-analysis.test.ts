@@ -392,11 +392,15 @@ describe('the pinned frame is magnitude-set independent; the laddered one is not
    * a weakening — it is the honest shape of a guard that must never hand back a
    * frame the draft pipeline would not have written.
    *
-   * ⚠ NON-FINITE MAGNITUDES ARE DELIBERATELY EXCLUDED from this corpus.
-   * `nextNiceNumberAbove` (`projector.ts`) INFINITE-LOOPS on `NaN`/`Infinity` —
-   * a pre-existing defect, byte-identical at base, out of scope here — so a
-   * differential that fed them would hang rather than fail. `unitPinnedScaleFrame`
-   * refuses them directly and that is asserted separately below.
+   * ⚠ NON-FINITE MAGNITUDES ARE INCLUDED — AND THIS SENTENCE REPLACES ITS OWN
+   * OPPOSITE, which is the point. It first read "deliberately EXCLUDED, because
+   * `nextNiceNumberAbove` INFINITE-LOOPS on `NaN`/`Infinity`, so a differential
+   * that fed them would hang rather than fail". That was true at this branch's
+   * base `caceba1a` and it is FALSE at the merged tip: `staging` landed a domain
+   * fix (`nextNiceNumberAbove` now returns `number | undefined`, refuses
+   * non-finite and non-positive input, and bounds both walks), so the hazard
+   * that justified the exclusion is gone. Re-derived after the merge rather than
+   * inherited — a dependent claim survives its premise only by accident.
    */
   it('the two authorities never contradict, across a corpus that spans the sub-1 class', () => {
     const UNITS = ['percent', '%', 'per cent', 'pct', 'percentage', 'bps', 'basis points',
@@ -404,7 +408,11 @@ describe('the pinned frame is magnitude-set independent; the laddered one is not
     // ⭐ SPANS (0,1] — the class the previous corpus excluded — plus the
     //   agreeing band, the pinned bounds, and above them.
     const MAGS = [0, 0.0001, 0.04, 0.3, 0.5, 0.9, 0.999, 1, 1.0001, 1.5, 12, 45, 99, 100,
-      100.001, 150, 4500, 9999, 10000, 10001, 123456] as const;
+      100.001, 150, 4500, 9999, 10000, 10001, 123456,
+      // Non-finite and negative — reachable here only because `staging`'s
+      // domain fix made `nextNiceNumberAbove` total. Both authorities must
+      // abstain rather than diverge.
+      -30, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY] as const;
 
     let checked = 0;
     let abstentions = 0;
@@ -428,7 +436,7 @@ describe('the pinned frame is magnitude-set independent; the laddered one is not
     // THE CORPUS PINS ITS OWN SIZE (trap: a loop that silently iterates nothing
     // asserts nothing).
     expect(checked, 'corpus size').toBe(UNITS.length * MAGS.length);
-    expect(checked).toBe(252);
+    expect(checked).toBe(300);
     // AND ITS OWN DISCRIMINATION: both outcomes must actually occur, or the
     // invariant is satisfied vacuously by one branch.
     expect(agreements, 'the authority must SPEAK somewhere').toBeGreaterThan(0);
@@ -459,10 +467,11 @@ describe('the pinned frame is magnitude-set independent; the laddered one is not
     // not a blanket that would have re-closed the gap this PR exists to open.
     expect(unitPinnedScaleFrame('percent', 1.0001), 'just above 1 must still pin').toBe(100);
     expect(unitPinnedScaleFrame('percent', 12)).toBe(100);
-    // Non-finite and negative are refused directly (never reaching the projector,
-    // which infinite-loops on non-finite input — pre-existing, out of scope).
+    // Non-finite and negative are refused directly, and the projector abstains
+    // on them too since `staging`'s domain fix made `nextNiceNumberAbove` total.
     for (const m of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -30]) {
       expect(unitPinnedScaleFrame('percent', m), `percent @ ${m}`).toBeUndefined();
+      expect(deriveFactorScaleFrame([m], 'percent'), `projector @ ${m}`).toBeUndefined();
     }
   });
 });

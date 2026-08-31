@@ -1731,7 +1731,9 @@ export function assembleContextPackWithSummary(
   // projectable receipt, but fail the HISTORY claim weak whenever projection
   // drops any bound durable carrier entry. Plain/direct arrays are already
   // degraded and stay so.
-  const projectedRecentChanges = projectRecentChanges(recentMutationFacts);
+  const projectedRecentChanges = projectRecentChanges(
+    recentMutationFacts, recentMutationHistory?.recent_mutation_entries,
+  );
   const effectiveRecentChangesStatus: RecentChangesHistoryStatus =
     recentChangesStatus !== 'degraded' &&
     projectedRecentChanges.length !== recentMutationFacts.length

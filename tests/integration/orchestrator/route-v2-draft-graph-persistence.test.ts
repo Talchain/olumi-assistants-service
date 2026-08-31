@@ -21,6 +21,7 @@
 
 import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest';
 import type { FastifyRequest } from 'fastify';
+import type { PendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
 
 // ── Module-level mocks ────────────────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ const readRecentMock = vi.fn().mockResolvedValue([]);
 const mockStore = {
   append: appendMock,
   readRecent: readRecentMock,
+  readMostRecentPendingActions: vi.fn<() => Promise<readonly PendingAction[]>>().mockResolvedValue([]),
   readFactsFor: vi.fn().mockResolvedValue([]),
   invalidateScoped: vi.fn().mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] }),
   invalidateAll: vi.fn().mockResolvedValue({ scope: { kind: 'structural' }, entries_invalidated: [] }),
@@ -52,6 +54,9 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 import { dispatchDraftGraph } from '../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js';
 import { handleDraftGraph } from '../../../src/orchestrator/tools/draft-graph.js';
 import { StateCommitFailedError } from '../../../src/orchestrator-v5/session/store.js';
+import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
+import { parsePendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -112,12 +117,125 @@ function makeDraftResult(graphOutput: unknown = MINIMAL_GRAPH_1, assistantText?:
 
 const STUB_REQUEST = {} as FastifyRequest;
 
+const MISSING_EFFECT_GRAPH = {
+  nodes: [
+    { id: 'goal_revenue', kind: 'goal', label: 'Revenue' },
+    { id: 'opt_keep', kind: 'option', label: 'Keep current approach', status: 'ready' },
+    { id: 'opt_expand', kind: 'option', label: 'Expand delivery', status: 'ready' },
+    { id: 'fac_capacity', kind: 'factor', label: 'Delivery capacity', observed_state: { value: 0.5 } },
+  ],
+  edges: [
+    { from: 'fac_capacity', to: 'goal_revenue', strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
+  ],
+  // Persistence reconciles this existing array with option nodes. The pending
+  // must describe those stored bytes, not the pipeline's pre-projection hash.
+  options: [],
+};
+
+const MISSING_EFFECT_READINESS = {
+  status: 'needs_user_input',
+  goal_node_id: 'goal_revenue',
+  options: [
+    { option_id: 'opt_keep', label: 'Keep current approach', status: 'ready', interventions: {} },
+    { option_id: 'opt_expand', label: 'Expand delivery', status: 'ready', interventions: {} },
+  ],
+  blockers: [
+    { blocker_type: 'missing_value', option_id: 'opt_keep', option_label: 'Keep current approach', factor_id: 'fac_capacity', factor_label: 'Delivery capacity' },
+    { blocker_type: 'missing_value', option_id: 'opt_expand', option_label: 'Expand delivery', factor_id: 'fac_capacity', factor_label: 'Delivery capacity' },
+  ],
+} satisfies NonNullable<Awaited<ReturnType<typeof handleDraftGraph>>['analysisReady']>;
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('V5 draft_graph persistence integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readRecentMock.mockResolvedValue([]);
+    mockStore.readMostRecentPendingActions.mockResolvedValue([]);
+  });
+
+  describe('the initial missing-effect question', () => {
+    beforeEach(() => {
+      vi.mocked(handleDraftGraph).mockResolvedValue({
+        ...makeDraftResult(MISSING_EFFECT_GRAPH),
+        analysisReady: MISSING_EFFECT_READINESS,
+      } as Awaited<ReturnType<typeof handleDraftGraph>>);
+      appendMock.mockResolvedValue({ id: 'row-asked-effect' });
+    });
+
+    it('persists the exact asked pair and projected graph in one atomic commit', async () => {
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-asked-effect', request: STUB_REQUEST,
+      });
+
+      expect(result.commitPerformed).toBe(true);
+      expect(result.response.assistant_text).toContain('missing effect value for "Keep current approach" on "Delivery capacity"');
+      expect(result.response.suggested_actions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'chip_prompt_repair_effect_value', message: expect.stringContaining('Keep current approach') }),
+      ]));
+      expect(appendMock).toHaveBeenCalledOnce();
+      const [stored] = appendMock.mock.calls[0];
+      const projected = projectGraphForPersistence(MISSING_EFFECT_GRAPH);
+      const projectedHash = computeAnalysisAffectingGraphHash(projected);
+      expect(projectedHash).not.toBe(computeAnalysisAffectingGraphHash(MISSING_EFFECT_GRAPH));
+      expect(stored.graph).toEqual(projected);
+      expect(stored.pending_actions).toHaveLength(1);
+      expect(parsePendingAction(stored.pending_actions[0])).toMatchObject({
+        scenario_id: SCENARIO_ID,
+        chip_id: 'chip_configure_option_clarify',
+        action: {
+          kind: 'elicit_option_effect', option_id: 'opt_keep', option_label: 'Keep current approach',
+          factor_id: 'fac_capacity', factor_label: 'Delivery capacity',
+        },
+        preconditions: { graph_hash: projectedHash },
+        expires_at_turn_count: 2,
+      });
+    });
+
+    it('does not publish a successful question or perform a second write after atomic failure', async () => {
+      appendMock.mockRejectedValue(new StateCommitFailedError('atomic append refused'));
+      const result = await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-asked-effect-failed', request: STUB_REQUEST,
+      });
+      expect(appendMock).toHaveBeenCalledOnce();
+      expect(result.commitPerformed).toBe(false);
+      expect(result.response.assistant_text).not.toContain('Next, choose the missing effect value');
+      expect(result.response.suggested_actions).toEqual([]);
+    });
+
+    it('preserves unrelated live pending state through the same atomic commit', async () => {
+      const graphHash = computeAnalysisAffectingGraphHash(projectGraphForPersistence(MISSING_EFFECT_GRAPH));
+      if (graphHash === null) throw new Error('fixture must have a graph hash');
+      mockStore.readMostRecentPendingActions.mockResolvedValue([{
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', scenario_id: SCENARIO_ID,
+        chip_id: 'previous-run-offer', action: { kind: 'run_analysis' },
+        preconditions: { graph_hash: graphHash }, expires_at_turn_count: 4,
+        emitted_at_iso: new Date().toISOString(),
+        expires_at_iso: new Date(Date.now() + 600_000).toISOString(),
+      }]);
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-asked-effect-carry', request: STUB_REQUEST,
+      });
+      expect(appendMock).toHaveBeenCalledOnce();
+      const pending = appendMock.mock.calls[0][0].pending_actions;
+      expect(pending).toHaveLength(2);
+      expect(pending).toEqual(expect.arrayContaining([
+        expect.objectContaining({ chip_id: 'chip_configure_option_clarify', expires_at_turn_count: 2 }),
+        expect.objectContaining({ chip_id: 'previous-run-offer', expires_at_turn_count: 3 }),
+      ]));
+    });
+
+    it('does not invent an effect question from a mapping status carrying the same blockers', async () => {
+      vi.mocked(handleDraftGraph).mockResolvedValue({
+        ...makeDraftResult(MISSING_EFFECT_GRAPH),
+        analysisReady: { ...MISSING_EFFECT_READINESS, status: 'needs_user_mapping' },
+      } as Awaited<ReturnType<typeof handleDraftGraph>>);
+      await dispatchDraftGraph({
+        payload: makePayload(TURN_ID_1), requestId: 'req-mapping-not-value', request: STUB_REQUEST,
+      });
+      expect(appendMock).toHaveBeenCalledOnce();
+      expect(appendMock.mock.calls[0][0].pending_actions).toEqual([]);
+    });
   });
 
   // ── Scenario 1: first-turn draft success ────────────────────────────────────

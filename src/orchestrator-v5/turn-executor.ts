@@ -57,7 +57,14 @@ import {
 import {
   buildGateRemedySectionDirective,
   buildGateFlipSectionDirective,
+  buildAmbiguityCandidateUiDirective,
+  collectAmbiguityCandidateEntityIds,
 } from './compose/ui-directive.js';
+// The ambiguity highlight resolves its candidate ids against the turn's
+// persisted graph — the same lookup the wave-4 directive rows use for the
+// mutation / what_would_flip branches, which likewise have no enrichment graph
+// to read. Labels come from here, never from the id (Phase-3 §0.1).
+import { buildGraphNodeLookupFromGraph } from './compose/phase3-blocks.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -186,6 +193,7 @@ import {
   tryBaselineElicitationResume,
   tryClarificationResume,
 } from './routing/clarification-resume.js';
+import { formatBaselineReask } from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -4705,11 +4713,22 @@ export async function runTurnExecutor(
             message: 'Not now.',
           },
         ];
+        // Point at the candidates the question is about. The set is the SAME
+        // one the numbered list above is rendered from, so the gesture asserts
+        // nothing the question does not already assert — it relocates it onto
+        // the model. Suppressed entirely when no candidate id resolves in the
+        // turn's persisted graph (see the builder's fail-closed list): a
+        // highlight pointing at nothing is worse than no highlight.
+        const ambiguityDirective = buildAmbiguityCandidateUiDirective(
+          collectAmbiguityCandidateEntityIds(shortConfirmDispatch.candidates),
+          buildGraphNodeLookupFromGraph(context.persistedGraph),
+        );
         const ambiguousResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text: ambiguousAssistantText,
           stage: context.stage,
           suggested_actions: consentResolutionChips,
+          ...(ambiguityDirective === null ? {} : { blocks: [ambiguityDirective] }),
         });
         sonnetTextForLog = ambiguousResponse.assistant_text;
         resolvedTurnClass = 'direct_answer';
@@ -5086,11 +5105,22 @@ export async function runTurnExecutor(
             const ambiguousAssistantText = allLabelsAreFallback
               ? 'I had more than one offer open. Which would you like?'
               : `Which one would you like? ${numberedList}`;
+            // Same gesture, same charter, at the label-collision twin of the
+            // branch above: highlight the proposals whose labels the user's
+            // reply matched. `ambiguousProposals` is the exact set the
+            // numbered clarification lists.
+            const labelAmbiguityDirective = buildAmbiguityCandidateUiDirective(
+              collectAmbiguityCandidateEntityIds(ambiguousProposals),
+              buildGraphNodeLookupFromGraph(context.persistedGraph),
+            );
             const ambiguousResponse = composeAnswer({
               answerKind: 'functional',
               assistant_text: ambiguousAssistantText,
               stage: context.stage,
               suggested_actions: labelAmbiguousChips,
+              ...(labelAmbiguityDirective === null
+                ? {}
+                : { blocks: [labelAmbiguityDirective] }),
             });
             sonnetTextForLog = ambiguousResponse.assistant_text;
             resolvedTurnClass = 'direct_answer';
@@ -5822,6 +5852,129 @@ export async function runTurnExecutor(
           // into a second resume (the commit excludes its ref from
           // carry-forward; a successful mint also moves the graph hash).
           consumedPendingAction = pending;
+        } else if (baselineAnswer.skip_reason === 'unreadable_answer') {
+          // R2918B — THE USER ANSWERED AND WE CANNOT READ IT. Before this,
+          // every such reply fell through in silence: the answer landed
+          // nowhere and the product never said why. Say what shape is needed
+          // and re-persist the question, so the next attempt still has a
+          // referent to bind through.
+          //
+          // SCOPE — the whole safety argument for this branch. It fires ONLY
+          // on `unreadable_answer`, which the classifier reserves for messages
+          // SHAPED like an answer ("10-15%", "maybe 12%", "120%"). A message
+          // that ignores the question still returns `not_an_answer` and still
+          // falls through untouched, because a re-ask on every non-answer
+          // would hijack "run the analysis" and everything else the user might
+          // say next. The elicitation stays additive.
+          emit(TelemetryEvents.PendingActionSkipped, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            reason: `baseline_elicitation_reask_${baselineAnswer.reason}`,
+          });
+          const reaskResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: formatBaselineReask({
+              targetLabel: baselineAnswer.targetLabel,
+              reason: baselineAnswer.reason,
+            }),
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = reaskResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(reaskResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+              // RE-PERSIST THE QUESTION, with its turn-TTL refreshed.
+              //
+              // ⚠ CORRECTING A FALSE COMMENT THAT SHIPPED HERE, because it is
+              // the stated reason this re-persist was omitted. It read: "an
+              // explicit list REPLACES the carried-forward set rather than
+              // adding to it", and concluded that passing `[pending]` would
+              // silently drop the sibling pendings. THAT IS NOT WHAT THE
+              // COMMIT DOES. `commit.ts` builds
+              // `combinedPendings = [...chipDerivedPending, ...survivingPrior]`
+              // — an explicit list is this turn's OWN pendings and the priors
+              // still carry forward beside it. Supersession is by `chip_id`,
+              // and this pending's `chip_id` is the CONSTANT
+              // `chip_elicit_target_baseline`, so the explicit copy supersedes
+              // exactly the carried copy of the same question and nothing else.
+              // Siblings survive; there is no belt-and-braces cost. (Derived at
+              // `commit.ts` `computeSurvivingPriorPendingsDetailed` + the
+              // combine site; the sibling test below pins it by execution.)
+              //
+              // WHY THE RE-PERSIST IS NECESSARY, measured rather than assumed.
+              // Carry-forward alone decrements `expires_at_turn_count` by 1 per
+              // surviving turn and drops at `<= 0`. The question is minted at
+              // `PENDING_ACTION_DEFAULT_TURN_TTL` (2), so it persists at 1 after
+              // the first re-ask and at ZERO after the second: the product
+              // re-asked while persisting no question at all, and the user's
+              // next perfectly good "30" fell into silence — the exact harm
+              // this branch exists to prevent, one turn later. Refreshing the
+              // turn-TTL here means every re-ask leaves a live referent.
+              //
+              // THE BOUND, and why it is not "forever". `emitted_at_iso` and
+              // `expires_at_iso` are carried through UNCHANGED from the
+              // original ask (spread, never restamped), so the wall-clock TTL
+              // set once at the ask (`PENDING_ACTION_DEFAULT_WALL_TTL_MS`) can
+              // never be extended by any number of re-asks. Past it,
+              // `findSoleLiveElicitBaselinePending` filters on liveness FIRST,
+              // so no re-ask can fire and nothing is re-persisted: the question
+              // is mortal by construction, not by a counter someone has to
+              // maintain. The opposite harm — a later bare number binding to a
+              // question the user abandoned — is bounded separately and already:
+              // a message that IGNORES the question classifies `not_an_answer`,
+              // never reaches this branch, and so decays through ordinary
+              // carry-forward in 2 turns. Refresh on evidence of engagement,
+              // decay on evidence of abandonment. Both are pinned by execution
+              // in `baseline-elicitation-route-level.test.ts`.
+              //
+              // Identity is preserved deliberately: same `id` (one question,
+              // traceable across re-asks in telemetry), same `chip_id` (the
+              // supersession key above), same `preconditions.graph_hash` (the
+              // answer-turn divergence gate must still fail closed).
+              pending_actions: [
+                {
+                  ...baselineAnswer.pending,
+                  expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+                },
+              ],
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'baseline_elicitation_reask',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on baseline elicitation re-ask',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
         }
       }
 
@@ -9785,6 +9938,7 @@ export async function runTurnExecutor(
       const selectedDependenciesEvidence =
         proposedHandlerId === 'explain_from_structure' && contextPackForLog
           ? buildSelectedDependenciesEvidence(contextPackForLog.graph, {
+              messageText: payload.message,
               structureQuery: action.structure_query,
               requestedSelection: options.selectedElements,
               focus: contextPackForLog.focus,

@@ -68,6 +68,7 @@ import {
   GM_HELD_HANDLER_ID,
   type EditGmGoverningVerdict,
 } from './edit-graph-referee-gate.js';
+import { detectOptionOwnValueSubstitution } from '../routing/option-observed-state-substitution.js';
 import { elideCascadeRedundantRemoveEdges } from '../graph-management/cascade-removes.js';
 import type { FrameFreshness } from '../graph-management/types.js';
 import type { PendingAction } from '../session/pending-action.js';
@@ -322,7 +323,19 @@ export type GmHeldExecuteOutcome =
        * batch is refused WHOLE rather than persisting a partial under a
        * "Confirmed" receipt.
        */
-      readonly reason: 'apply_error' | 'fact_unavailable' | 'incomplete_apply';
+      readonly reason:
+        | 'apply_error'
+        | 'fact_unavailable'
+        | 'incomplete_apply'
+        /**
+         * r1224 second door: the confirmed batch wrote an OPTION's own
+         * `observed_state` while THAT option's effect values did not move —
+         * the wrong-carrier substitution `#1224` closed on the direct edit
+         * path. Refused WHOLE, for the same reason `incomplete_apply` is:
+         * a "Confirmed:" receipt over a write the analysis path never reads
+         * is a false confirmation.
+         */
+        | 'option_own_value_withheld';
     }
   | {
       readonly status: 'executed';
@@ -591,6 +604,46 @@ export function executeGmHeldResume(input: GmHeldExecuteInput): GmHeldExecuteOut
       'GM held-execute — a confirmed op did not survive canonicalisation onto the persisted graph; refusing the WHOLE batch (no partial apply)',
     );
     return { status: 'apply_failed', reason: 'incomplete_apply' };
+  }
+
+  // ── 3c. Wrong-carrier honesty guard (r1224, the SECOND door) ──────────
+  // `#1224` wired `detectOptionOwnValueSubstitution` into
+  // `effectiveAppliedMutation` in edit-graph-dispatch.ts, described there as
+  // "this dispatcher's single gate". True WITHIN that dispatcher — and this
+  // module is a second, independent apply+commit path, so a user who
+  // CONFIRMS a held proposal reached the same substitution unguarded and was
+  // told "Confirmed: change 'Coverage Pilot' to 30% ...", the auditor's own
+  // sentence through a different door.
+  //
+  // Same function, not a second spelling of the rule (trap 12): one module
+  // decides, both seams obey. `input.currentGraph` is passed RAW — the guard
+  // safeParses it itself, exactly as the edit lane passes `parsedGraph`.
+  // `appliedMutation: true` by construction: we are past the apply and past
+  // `batchFullyLanded`, so a mutation has provably landed on the canonical
+  // persisted graph.
+  //
+  // ⚠ WEAKER THAN #1224'S REPLACEMENT NARRATION, deliberately. That path
+  // names the option, echoes the user's own quantity and asks which link the
+  // number belonged to; matching it here needs the held-proposal chip
+  // lifecycle. This return reuses the existing decline, whose copy
+  // (GM_HELD_APPLY_FAILED_ASSISTANT_TEXT) is true across the WHOLE widened
+  // domain because the return precedes every commit. Rowed as follow-up.
+  const optionOwnValue = detectOptionOwnValueSubstitution({
+    before: input.currentGraph,
+    after: appliedGraph,
+    appliedMutation: true,
+  });
+  if (optionOwnValue.verdict === 'withhold') {
+    log.warn(
+      {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        option_ids: optionOwnValue.substitutions.map((s) => s.optionId),
+        operations_count: operations.length,
+      },
+      "GM held-execute — the confirmed batch wrote an option's own observed_state while that option's effect values did not move; refusing the WHOLE batch (nothing persisted)",
+    );
+    return { status: 'apply_failed', reason: 'option_own_value_withheld' };
   }
 
   // ── 4. Receipt fact (rich → generic → refuse) ─────────────────────────

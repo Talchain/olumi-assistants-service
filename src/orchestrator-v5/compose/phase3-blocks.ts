@@ -374,9 +374,8 @@ function collectLeverLabels(
  * prefix to a prefix), so relative order is preserved exactly even though
  * absolute positions shift.
  */
-function firstBoundedPhraseAt(haystack: string, needle: string): number {
+function firstBoundedPhraseAt(haystack: string, needle: string, from = 0): number {
   if (needle.length === 0) return -1;
-  let from = 0;
   for (;;) {
     const at = haystack.indexOf(needle, from);
     if (at < 0) return -1;
@@ -650,6 +649,7 @@ export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
 interface ProseEntityReferenceOptions {
   readonly allowGenericSingleWordLabels?: boolean;
   readonly genericAllowedIds?: ReadonlySet<string>;
+  readonly preferLongestMention?: boolean;
 }
 
 /**
@@ -795,7 +795,7 @@ function resolveProseEntityRefsWithOptions(
         options.genericAllowedIds?.has(ref.id) === true
       )
     ) continue;
-    const at = firstBoundedPhraseAt(hay, needle);
+    let at = firstBoundedPhraseAt(hay, needle);
     if (at < 0) continue;
     // Fail-closed on ambiguity: a duplicate normalised label resolves to
     // AMBIGUOUS_LABEL → link to neither node.
@@ -803,17 +803,36 @@ function resolveProseEntityRefsWithOptions(
     if (resolved === undefined || resolved === AMBIGUOUS_LABEL) continue;
     if (seen.has(resolved)) continue;
     seen.add(resolved);
-    matched.push({
-      ref: { id: ref.id, label: ref.label, kind: ref.kind },
-      at,
-      len: needle.length,
-      ordinal,
-    });
+    do {
+      matched.push({
+        ref: { id: ref.id, label: ref.label, kind: ref.kind },
+        at,
+        len: needle.length,
+        ordinal,
+      });
+      // A second standalone "Cost" must remain visible even when its first
+      // occurrence was nested inside "Engineering Build Cost".
+      at = options.preferLongestMention === true
+        ? firstBoundedPhraseAt(hay, needle, at + needle.length)
+        : -1;
+    } while (at >= 0);
   }
   matched.sort(
     (a, b) => a.at - b.at || b.len - a.len || a.ordinal - b.ordinal,
   );
-  return matched.map((m) => m.ref);
+  if (options.preferLongestMention !== true) return matched.map((m) => m.ref);
+  let coveredUntil = -1;
+  const visibleIds = new Set<string>();
+  const visible: TargetRef[] = [];
+  for (const match of matched) {
+    const end = match.at + match.len;
+    if (end <= coveredUntil) continue;
+    coveredUntil = end;
+    if (visibleIds.has(match.ref.id)) continue;
+    visibleIds.add(match.ref.id);
+    visible.push(match.ref);
+  }
+  return visible;
 }
 
 export function resolveProseEntityRefs(
@@ -838,12 +857,20 @@ export function resolveTypedCanonicalProseEntityRefs(
   index: LabelIndex,
   prose: string,
   expectedIds: readonly string[],
+  scope: { readonly rejectOtherGenericReferences?: boolean } = {},
 ): readonly TargetRef[] | null {
   const expected = new Set(expectedIds);
   if (expected.size !== expectedIds.length) return null;
   const options = {
     allowGenericSingleWordLabels: true,
-    genericAllowedIds: expected,
+    // A singleton dependency question must not silently drop a second named
+    // generic object (e.g. "Engineering Build Cost and Cost"). Opt-in keeps
+    // ordinary prose linking and existing pair-query behavior unchanged. Extra
+    // matches can only reject the typed id set, never select another target.
+    genericAllowedIds: scope.rejectOtherGenericReferences === true
+      ? new Set(lookup.keys())
+      : expected,
+    preferLongestMention: scope.rejectOtherGenericReferences === true,
   } as const;
   if (hasAmbiguousProseEntityReferenceWithOptions(index, prose, options)) return null;
   const refs = resolveProseEntityRefsWithOptions(lookup, index, prose, options);

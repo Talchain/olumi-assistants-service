@@ -85,6 +85,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { BoundaryError, OlumiResponse, OrchestratorTurnPayload } from '@talchain/schemas/boundary';
+import { isReplayedTurnSource } from '../orchestrator-v5/routing/turn-source-authorship.js';
 
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
@@ -187,6 +188,7 @@ import {
   markDraftGraphWriteFailed,
   loadMostRecentPendingActions,
   loadMostRecentPendingActionsStrict,
+  loadMostRecentPendingActionsIntegrityStrict,
   loadPersistedGraphStrict,
   loadPersistedScenarioStateStrict,
   loadRecentConversationTurns,
@@ -259,8 +261,10 @@ import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compos
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
   resolveRepairValueBinding,
+  resolveRecordedOptionEffectAnswer,
   deriveMissingEffectPairs,
   type RepairValueBindingResolution,
+  type RecordedEffectAnswer,
 } from '../orchestrator-v5/routing/repair-value-binding.js';
 import { composeRepairValueAskResponse } from '../orchestrator-v5/compose/repair-value-ask-response.js';
 // ⭐⭐ ROADMAP 2.1353 — every exit that solicits a reply persists the question.
@@ -4914,8 +4918,71 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const structuralRestructureDetection = detectStructuralRestructureIntent(
       ingress.message,
     );
+    // ⭐⭐ #1231 — THE PRODUCT'S OWN CONFIRM AFFORDANCE IS NOT A FRESH COMMAND.
+    //
+    // `quoted_rename_command` is the one trigger whose shape the product ITSELF
+    // emits: a rename-only held batch's public copy is minted by
+    // describe-changeset.ts (`rename 'X' to 'Y'`, :257) and capitalised by
+    // `buildGmHeldPublicCopy` into the hold chip's LABEL — "Rename 'X' to 'Y'".
+    // The other two triggers are user phrasings no producer here renders.
+    //
+    // That collision falsifies the safety precondition #644 P2-2 relied on
+    // (the omission was safe *because* no edit-verb-free chip copy could match
+    // this detector). Left unguarded it re-opens the exact loop this feature
+    // exists to kill: rename/relabel are absent from EDIT_GRAPH_POSITIVE_REGEX
+    // (edit-graph-intent-regex.ts:20 — derived, not assumed), so before this
+    // arm a rename chip replay could never be an edit-lane intent; with it, a
+    // replay whose hold is no longer in the pending set (consumed, swept, or a
+    // chip still on screen from an earlier turn) falls past the exact-copy
+    // resolver as `replay_no_match` and DISPATCHES THE EDIT LANE, which drafts
+    // a SECOND hold and renders ANOTHER confirm chip.
+    //
+    // ⭐ THE GUARD IS IDENTITY-BOUND, NOT TEXTUAL. `source === 'chip_click'` is
+    // the boundary's own statement that this text is the product replaying its
+    // affordance — the SAME identity `isProposalReplayCandidate` below already
+    // trusts (DGAI #340). A string heuristic here would be the wrong instrument
+    // twice over: it would exclude a sentence a user can legitimately type, and
+    // it would drift the moment describe-changeset's copy changed. A user
+    // cannot type an ingress source, so nothing typed is excluded — the typed
+    // gain this PR exists for is untouched (route-v2-structural-restructure-
+    // routing.test.ts pins both halves on the SAME string in one run).
+    //
+    // ⚠ SCOPE: this suppresses the RENAME ARM only, and only on chip_click. A
+    // chip_click carrying per-option/each-option-own copy still counts (that is
+    // #644 P2-2's genuine future case, and the proposal-confirm gate below now
+    // resolves it).
+    //
+    // ⭐⭐ AND IT WITHDRAWS EDIT-LANE ELIGIBILITY ONLY — NOT RESOLVER
+    // ELIGIBILITY, which is a DIFFERENT QUESTION and gets its own term below.
+    // Measured, not reasoned: the first cut of this guard dropped the flag on
+    // the floor entirely, and an EXPIRED rename hold's chip then resumed and
+    // APPLIED ("Confirmed: rename 'Marketing' to …") instead of returning the
+    // honest no-live-proposal clarification — because route-level expiry is
+    // enforced by `resolveProposalConfirmAtRoute`, and skipping the gate skips
+    // the expiry check with it. Two questions under one flag (trap 21):
+    //   · "is this a fresh authoring command?"  → NO for a chip replay.
+    //   · "may this resume/clarify a held proposal?" → YES, always.
+    // `productChipRenameReplay` answers the second and is passed to the gate.
+    //
+    // ⚠⚠ #1231 REVIEW CORRECTION — THIS COMPARED AGAINST `'chip_click'` ALONE,
+    // AND WAS THEREFORE DARK ON THE ONLY INGRESS REAL USERS HIT. The wire union
+    // has FOUR members (`TurnSource`, @talchain/schemas/boundary), and the
+    // deployed UI sends the held-confirm chip as `'chip'`: buildPayload.ts
+    // promotes to `'chip_click'` only for a chip carrying a PUBLISHED,
+    // CEE-ACCEPTED `action_type`, and the held-confirm chip carries none. So
+    // the guard is bound to the DERIVED classifier instead of a hand-written
+    // subset — `isReplayedTurnSource` is exhaustive over the contract type, so
+    // a fifth member is a typecheck error there rather than a silent default.
+    // Measured, all four members, one string, `source` the only difference:
+    // route-v2-structural-restructure-routing.test.ts and
+    // route-v2-held-proposal-confirm.test.ts both run the full union.
+    const productChipRenameReplay =
+      structuralRestructureDetection.matched &&
+      structuralRestructureDetection.trigger === 'quoted_rename_command' &&
+      isReplayedTurnSource(ingress.source);
     const structuralRestructureIntent =
       structuralRestructureDetection.matched &&
+      !productChipRenameReplay &&
       !negativeEditRegexHit &&
       !analyticalQuestionDetected &&
       !stateQuerySuppressed;
@@ -4951,8 +5018,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       !analyticalQuestionDetected &&
       !stateQuerySuppressed;
     // Proposal-confirmation suppressor (behaviour #1) + no-live-proposal
-    // clarification (amendment #3). Only a confirmation-shaped, edit-verb-bearing
-    // message pays the pending-actions read (hot path unchanged). Live graph-safe
+    // clarification (amendment #3). Confirmation/replay-shaped edit candidates
+    // pay the pending-actions read (ordinary typed edit hot path unchanged). Live graph-safe
     // proposal → suppress (TurnExecutor's tryShortConfirmResume applies it); no
     // proposal → return the no-live-proposal clarification (not the legacy edit
     // no-op dead-end); read failure → suppress (degraded, distinct trace).
@@ -4974,24 +5041,51 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const isProposalReplayCandidate =
       !isConfirmationShaped &&
       (ingress.source === 'chip_click' || AFFIRMATIVE_PREFIX_PATTERN.test(ingress.message));
-    // #644 adversarial P2-2 (KNOWN ASYMMETRY, currently zero blast radius —
-    // deliberately NOT folded in): `structuralRestructureIntent` is absent from
-    // this proposal-confirm resolution gate, so a structural-restructure REPLAY
-    // (a chip_click / affirmative-prefixed message that matches
-    // detectStructuralRestructureIntent) skips resolveProposalConfirmAtRoute
-    // and re-dispatches the edit lane instead of resuming the exact live hold.
-    // This is unreachable today: every structural hold's rendered chip copy is
-    // built by describe-changeset.ts, whose per-op verbs lead with
-    // add/remove/change/update/adjust — ALL in EDIT_GRAPH_POSITIVE_REGEX — so
-    // `editVerbCandidate` already claims the replay here; and the only edit-verb-
-    // free copy it emits ("link 'X' to 'Y'", "rename 'X' to 'Y'") never carries a
-    // per-option / each-option-own clause, so it never matches the structural
-    // detector either. The omission would only bite if a FUTURE hold rendered a
-    // restructure-phrased, edit-verb-free chip label (e.g. "Split 'Cost' into
-    // per-option links"). Folding `|| structuralRestructureIntent` in now would
-    // be symmetry with no discriminating (non-vacuous) mutation-pin — rowed for
-    // ROADMAP follow-up (add it in the SAME change that introduces such copy).
-    if ((editVerbCandidate || configureOptionIntent) && (isConfirmationShaped || isProposalReplayCandidate)) {
+    // #1231 closes #644 P2-2's former asymmetry: a structural-shaped REPLAY (a
+    // chip_click or affirmative-prefixed message that matches the structural
+    // detector) now pays the pendings read and resolves the live hold before
+    // edit dispatch, instead of re-dispatching the edit lane and drafting a
+    // second one. Structural intent is only ELIGIBILITY for the existing
+    // exact-copy resolver, never consent: unrelated copy still returns
+    // replay_no_match and edit routing proceeds untouched.
+    //
+    // ⚠ THIS IS NOT WHAT GUARDS THE RENAME CHIP, and the distinction matters
+    // because it was briefly conflated. The exact-copy resolver can only
+    // recognise a replay while the hold is STILL IN THE PENDING SET; a chip
+    // whose hold has been consumed or swept resolves `replay_no_match` and
+    // would dispatch. The product's own rename copy is therefore excluded by
+    // IDENTITY upstream (`productChipRenameReplay`), which does not depend on
+    // the pending set existing. This gate is the complement, not the guard.
+    if (
+      (editVerbCandidate
+        || configureOptionIntent
+        || structuralRestructureIntent
+        // #1231 — the rename chip replay is eligible HERE (so a live hold
+        // resumes and a DEAD one clarifies honestly) while staying ineligible
+        // for `editIntentDetected` below (so a hold that is simply GONE cannot
+        // be redrafted). `replay_no_match` therefore falls to the coach, which
+        // is exactly where this copy went before the rename arm existed.
+        || productChipRenameReplay)
+      && (isConfirmationShaped
+        || isProposalReplayCandidate
+        // ⚠⚠ #1231 REVIEW CORRECTION — WITHOUT THIS TERM THE WIDENED GUARD
+        // ABOVE RE-OPENS THE AUTHOR'S OWN MEASURED DEFECT ON `chip`/`retry`.
+        // `isProposalReplayCandidate` is the pre-existing DGAI #340 term and
+        // recognises `chip_click` only, so a rename replay arriving as `chip`
+        // (the deployed UI's actual held-confirm ingress) or `retry` satisfied
+        // the first conjunct and FAILED this one: it skipped
+        // `resolveProposalConfirmAtRoute` — and route-level EXPIRY is enforced
+        // there — so an EXPIRED hold resumed and APPLIED instead of returning
+        // the honest no-live-proposal clarification. Measured on all four
+        // members before and after (route-v2-held-proposal-confirm.test.ts,
+        // "an EXPIRED rename hold cannot be revived by ANY replay source").
+        //
+        // Deliberately narrow: only the rename-replay IDENTITY gains gate
+        // eligibility. `isProposalReplayCandidate` is left exactly as it was,
+        // so no other chip copy changes routing — the smallest change that
+        // makes the guard above correct, not a general widening of #340.
+        || productChipRenameReplay)
+    ) {
       const resolution = await resolveProposalConfirmAtRoute(
         ingress.scenario_id,
         requestId,
@@ -5550,6 +5644,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // ONE reading of "did the user answer?", shared with both resolvers — never
     // a second text predicate at the route (trap 12).
     const repairAnswerReading = readMissingValueAnswer(ingress.message);
+    let recordedEffectAnswer: RecordedEffectAnswer | null = null;
+    let recordedEffectGraph: GraphStateIngress | null = null;
+    let repairPriorPendings: readonly PendingAction[] | null = null;
+    let recordedQuestionOwnsAnswer = false;
     if (
       !bypassEditHandling &&
       !configureOptionIntent &&
@@ -5558,35 +5656,68 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       repairAnswerReading !== null &&
       repairAnswerReading.kind === 'numeric'
     ) {
-      let repairClaimBlocked = false;
       try {
-        const pendings = await loadMostRecentPendingActionsStrict(ingress.scenario_id, requestId);
-        const nowMs = Date.now();
-        repairClaimBlocked = pendings.some(
-          (pa) => pa.action.kind === 'set_factor_value' && !isPendingActionExpired(pa, nowMs),
-        );
-        // ⚠ NO WIDER GATE HERE, AND THAT IS A CORRECTION TO THIS LANE'S OWN FIRST
-        // CUT. It briefly stood down for ANY live pending, to cover a naked "1"
-        // colliding with ordinal selection of an offered proposal. That
-        // over-declined — it withheld a legitimate bare answer for a full TTL
-        // window whenever any unrelated offer was outstanding — and it also
-        // under-covered, because this lane's own ask arm persists no pending at
-        // all. The collision is now refused by SHAPE in
-        // `isModelUnitEffectValueText` (a bare integer is never claimed), which
-        // is where it cannot go stale.
+        repairPriorPendings = await loadMostRecentPendingActionsIntegrityStrict(ingress.scenario_id, requestId);
       } catch {
-        // A pendings read must never fail the turn; it only withdraws this
-        // claim (the turn proceeds exactly as before this pre-route existed).
-        repairClaimBlocked = true;
+        // Unreadable pending state is not permission to infer a different ask.
+        repairPriorPendings = null;
       }
       let persistedForRepair: unknown = null;
-      if (!repairClaimBlocked) {
+      if (repairPriorPendings !== null) {
         try {
           persistedForRepair = await loadPersistedGraphOnce();
         } catch {
           persistedForRepair = null;
         }
       }
+      const repairGraphParse = GraphStateIngressSchema.safeParse(persistedForRepair);
+      const repairGraph = repairGraphParse.success ? persistedForRepair as GraphStateIngress : null;
+      const recorded = resolveRecordedOptionEffectAnswer({
+        message: ingress.message, pendings: repairPriorPendings, graph: repairGraph,
+        readiness: repairGraph ? buildCanonicalAnalysisReadyFromGraph(repairGraph) : undefined,
+        scenarioId: ingress.scenario_id, nowMs: Date.now(),
+      });
+      recordedQuestionOwnsAnswer = recorded.kind !== 'unrelated' && recorded.kind !== 'unrecorded';
+      if (recorded.kind === 'bind') {
+        recordedEffectAnswer = recorded.answer;
+        recordedEffectGraph = repairGraph;
+      } else if (recorded.kind === 'ask' || recorded.kind === 'stale'
+        || recorded.kind === 'ambiguous' || recorded.kind === 'unavailable') {
+        let response: OlumiResponse = recorded.kind === 'ask'
+          ? composeConfigureOptionClarifyResponse({
+              optionLabel: recorded.pair.optionLabel,
+              factorLabels: [recorded.pair.factorLabel], stage: ingress.stage,
+              message: ingress.message,
+            })
+          : { response_version: 2, assistant_text:
+              'I cannot safely match that answer to the previous question. Nothing has changed. Please name the option and factor you want to set.',
+              blocks: [], suggested_actions: [], insights: [], stage_indicator: ingress.stage };
+        if (recorded.kind === 'ask') {
+          response = { ...response, assistant_text:
+            `For "${recorded.pair.optionLabel}" on "${recorded.pair.factorLabel}": ${response.assistant_text}` };
+        }
+        // Keep the existing question on a refused value. Do not reissue/reset its
+        // TTL, consume it, or replace an unreadable history with an empty row.
+        if (repairPriorPendings !== null) {
+          const committed = await commitDirectAnswer(response, {
+            scenario_id: ingress.scenario_id, turn_id: ingress.turn_id,
+            turn_class: 'clarify', handler_id: null, request_hash: computeRequestHash(ingress),
+            llm_calls_used: 0, duration_ms: Date.now() - routeStartedAt,
+            handler_facts: [], pending_actions: [], priorPendingActions: repairPriorPendings,
+            coaching_state: null, userMessage: ingress.message,
+          });
+          response = committed.response;
+        }
+        return sendFinalised200(reply, requestId, 'edit_graph', response, {
+          ...(repairGraph ? { analysisReady: buildCanonicalAnalysisReadyFromGraph(repairGraph) } : {}),
+          graph: null, ...(await claimSafety.forExit()), answerKind: 'functional',
+          requestStartedAt: routeStartedAt, scenarioId: ingress.scenario_id,
+          turnId: ingress.turn_id, userMessage: ingress.message,
+        });
+      }
+      const repairClaimBlocked = recordedQuestionOwnsAnswer || repairPriorPendings === null
+        || repairPriorPendings.some(pa => pa.action.kind === 'set_factor_value'
+          && !isPendingActionExpired(pa, Date.now()));
       if (
         !repairClaimBlocked &&
         persistedForRepair != null &&
@@ -5721,6 +5852,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // its own right — the claim anchor + the sole-missing-pair derivation
       // above ARE its gates (bypassEditHandling was already required to claim).
       (editVerbCandidate || configureOptionIntent || structuralRestructureIntent ||
+        recordedEffectAnswer !== null ||
         repairValueBinding !== null ||
         // ⭐ ROADMAP 2.1266 / A2 — an answer to the product's own outstanding ask
         // is an edit-lane intent in its own right, on exactly the same footing
@@ -5758,7 +5890,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         intent_class: classifyAnalyticalIntent(ingress.message),
       });
     }
-    let resolvedGraphState: GraphStateIngress | null = null;
+    let resolvedGraphState: GraphStateIngress | null = recordedEffectGraph;
     if (editIntentDetected) {
       if (extensions.graphState != null) {
         emit(TelemetryEvents.V5EditGraphGraphStatePresent, {
@@ -6088,13 +6220,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // resolves them against this exact edit graph and admits prompt focus
           // only after a strict GraphV3 parse; client labels never cross.
           selectedElements: extensions.selectedElements,
+          ...(recordedEffectAnswer !== null ? { recordedEffectAnswer } : {}),
           // ⭐ ROADMAP 2.1261 — the BIND path's instruction. The edit LLM
           // receives the advised-format sentence (probe P1 verbatim) carrying
           // the user's value bound to the sole missing option×factor pair;
           // `payload.message` stays the user's own bytes everywhere it is
           // recorded (commit `userMessage`, wire echo, telemetry).
-          ...(repairValueBinding !== null
-            ? { editInstructionOverride: repairValueBinding.instruction }
+          ...(recordedEffectAnswer !== null || repairValueBinding !== null
+            ? { editInstructionOverride: recordedEffectAnswer?.instruction ?? repairValueBinding!.instruction }
             : {}),
           // ROADMAP 2.684 — the turn's wall-clock baseline, threaded so the
           // structural-edit composer can derive what is LEFT of the turn rather

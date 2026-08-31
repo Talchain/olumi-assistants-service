@@ -138,6 +138,13 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
   // ROADMAP 2.918 — the baseline elicitation question (the mint receipt's
   // interrogative dual, appended on the mintable-and-baseline-less cell).
   formatBaselineElicitation: () => receipts.formatBaselineElicitation({ targetLabel: SLOT }),
+  // R2918B — the RE-ASK, emitted when the user answered the elicitation above
+  // and the binder could not read the answer. `unreadable` is the branch that
+  // interpolates the label in BOTH positions, so it is the strongest slot
+  // shape of the three; the other two reasons are covered by the per-reason
+  // doctrine check below, because one producer key can only exercise one.
+  formatBaselineReask: () =>
+    receipts.formatBaselineReask({ targetLabel: SLOT, reason: 'unreadable' }),
   formatGoalTargetSet: () => receipts.formatGoalTargetSet({ goalLabel: SLOT, value: 2 }),
   formatGoalTargetUnchanged: () =>
     receipts.formatGoalTargetUnchanged({ goalLabel: SLOT, value: 2 }),
@@ -177,6 +184,41 @@ describe('every deterministic receipt TEMPLATE is doctrine-clean', () => {
         findForbiddenPhraseHit(template),
         `${name} composes user-facing copy that trips the forbidden-phrase guard: ` +
           JSON.stringify(template),
+      ).toBeNull();
+      expect(applyEgressForbiddenPhraseGuard(template).remedy).toBe('none');
+    });
+  }
+
+  // R2918B. `TEMPLATE_PRODUCERS` is keyed by EXPORT NAME, so it can only ever
+  // exercise ONE branch of a formatter that switches on a reason — and a
+  // doctrine violation in the other two would ship unobserved behind a green
+  // producer entry. Every reason is checked here.
+  //
+  // ⚠ THIS LIST IS HAND-WRITTEN, so it is guarded in BOTH directions rather
+  // than trusted (CLAUDE.md trap 12: where you cannot derive, the mirror must
+  // fail loud). `satisfies` proves every listed reason is real; the assignment
+  // below proves every real reason is listed. A fourth member on the
+  // formatter's union makes that assignment a type error, and because this file
+  // is not in scripts/ci/typecheck-baseline.txt, the Typecheck Drift ratchet
+  // fails on it as new-file drift. A short list cannot go unobserved.
+  type ReaskReason = Parameters<typeof receipts.formatBaselineReask>[0]['reason'];
+  const REASKS = [
+    'out_of_range',
+    'ambiguous_scale',
+    'unreadable',
+  ] as const satisfies readonly ReaskReason[];
+  const _everyReasonIsListed: (typeof REASKS)[number] = undefined as unknown as ReaskReason;
+  void _everyReasonIsListed;
+  for (const reason of REASKS) {
+    it(`formatBaselineReask(${reason}) is doctrine-clean`, () => {
+      const template = slotShape(receipts.formatBaselineReask({ targetLabel: SLOT, reason }));
+      // Anti-vacuity, same as the producer loop: no sentinel means the slot
+      // substitution proved nothing about this branch.
+      expect(template, `${reason}: no slot marker`).toContain('{label}');
+      expect(template).not.toContain(SLOT);
+      expect(
+        findForbiddenPhraseHit(template),
+        `${reason} trips the forbidden-phrase guard: ${JSON.stringify(template)}`,
       ).toBeNull();
       expect(applyEgressForbiddenPhraseGuard(template).remedy).toBe('none');
     });

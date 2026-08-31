@@ -50,7 +50,6 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 import {
   deriveConstraintVerdict,
   readRatifiedConstraints,
-  collectUnmeasuredConstraintTargetIds,
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
@@ -1471,32 +1470,48 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // condition was evaluated) come from this single call, so no two surfaces
     // can disagree about what the constraint evidence said.
     //
-    // ⭐ AND THE FOURTH ARGUMENT — the constraints whose TARGET NODE CARRIES NO
-    // NUMBER, derived here because this is the one place that holds both the
-    // ratified rows and the graph they point at.
+    // ⚠⚠ THE FOURTH ARGUMENT IS DELIBERATELY NOT PASSED — REVERTED 2026-08-30
+    // (release blocker r1225-constraint-regression). #1225 derived the
+    // constraints whose TARGET NODE CARRIES NO STORED QUANTITY here and passed
+    // them as `unmeasuredTargetIds`, so `deriveConstraintVerdict` partitioned
+    // them out at its STEP 0b — BEFORE rule 1, the rule that reads the
+    // producer's own "I did not reach decision grade" disclosure.
     //
-    // WIRE-WITNESSED (2026-08-30, 10 runs of one brief, two staging builds): a
-    // "£240,000" ceiling CEE itself extracted, bound by the shared matcher to a
-    // `risk` node with no `observed_state`, no `scale_frame` and no unit, then
-    // read back as "a condition the engine did not check" — nulling the leading
-    // option on every run where it existed, while the 8 runs that dropped the
-    // constraint entirely gave the user a working analysis. The absence of a
-    // score for such a row is guaranteed by OUR node shape, not by the engine,
-    // so it is not evidence and must not withhold. See
-    // `ConstraintVerdict.unmeasuredTargetConstraints`.
+    // ITS SAFETY ARGUMENT INVERTS ON DERIVED TARGETS. "A constraint bound to a
+    // node that carries no quantity cannot be scored by any engine" is true for
+    // an absent target and an unreadable graph, and FALSE for the case that
+    // matters: an `outcome` or `goal` node carries no STORED quantity precisely
+    // because ISL DERIVES its value. Measured on #1225's own captured deployed
+    // node sets, 20/20 outcome and goal nodes read as "carries no quantity",
+    // against a clean contrast control of 18 quantity-bearing factors — so the
+    // gate fired hardest exactly where the engine is most able to score. That
+    // is the founding 1/1 live-staging defect of `constraint-feasibility.ts`
+    // verbatim (a £2,500 cap on a normalised [0,1] "Cost Efficiency" OUTCOME),
+    // and it silently un-fixes trust-spine board #1 — the same collapse that
+    // file's own docstring names.
     //
-    // Reads the SAME two mirrors `readRatifiedConstraints` does, in the same
-    // order, so the rows and the node lookup can never come from different
-    // snapshots.
-    const unmeasuredTargetIds = collectUnmeasuredConstraintTargetIds(
-      snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
-      snapshot.rawPersistedGraph ?? snapshot.graph,
-    );
+    // OMITTING IT IS THE AUTHOR'S DOCUMENTED SAFE PATH: the parameter is
+    // optional and "an empty set makes this function byte-identical to its
+    // pre-narrowing behaviour, so a caller who forgets loses the narrowing and
+    // cannot gain a false leader". What is given back is the 2/10 self-block a
+    // constraint bound to a value-less `risk` node causes — OVER-withholding,
+    // which is the honest direction. Half 1 of #1225 (the `target_unmatched`
+    // ask, in `compound-goals.ts` / `direction-gate.ts` / `extractor.ts` /
+    // `constraint-gap-disclosure.ts`) reads none of these fields and is
+    // untouched.
+    //
+    // ⚠ DO NOT "FIX" THIS BY NARROWING `NODE_QUANTITY_FIELDS` BY NODE KIND OR
+    // BY MOVING STEP 0b AFTER RULE 1. Each repairs one direction of a predicate
+    // whose ROOT PREMISE ("no stored quantity ⇒ no engine can score it") is
+    // false for every derived node, and #1225 already measured and rejected
+    // kind-based narrowing on the binding side.
+    //
+    // Pinned by `__tests__/run-analysis-derived-constraint-target.test.ts`,
+    // which executes this handler and reads the verdict off the persisted fact.
     const constraintVerdict = deriveConstraintVerdict(
       response as Record<string, unknown>,
       ratifiedConstraints,
       leadingOptionId ?? null,
-      unmeasuredTargetIds,
     );
     // ⚠ NO TELEMETRY EVENT FOR THE UNMEASURED-TARGET PARTITION, AND THAT IS A
     // DISCLOSED GAP RATHER THAN AN OVERSIGHT — the same call, for the same

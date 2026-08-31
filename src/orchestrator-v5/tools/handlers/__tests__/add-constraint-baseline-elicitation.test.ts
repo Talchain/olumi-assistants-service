@@ -371,6 +371,137 @@ describe('2.918 — NO elicitation outside the cell (each case flips exactly one
   });
 });
 
+/**
+ * R2918B — the answer turn's real state-class, identical to the 2.918 suite
+ * below: the pending question is persisted in the SAME commit as the
+ * level-framed row, so every answer turn replays against a graph that already
+ * carries it. A fresh graph here would be a state no resume can produce
+ * (trap 16-inverse — a fixture must stay inside what the producer can feed).
+ */
+function graphWithPersistedChurnRow(): GraphV3T {
+  const g = graphWithConstraintTargets();
+  (g as { goal_constraints?: unknown[] }).goal_constraints = [
+    {
+      constraint_id: 'gc-persisted-1',
+      node_id: 'o-churn-rate',
+      operator: '<=',
+      value: 10,
+      label: 'Churn rate',
+      provenance: 'explicit',
+      unit: '%',
+      value_frame: 'level',
+    },
+  ];
+  return g;
+}
+
+describe('R2918B — the bare-number answer the ask itself invites', () => {
+  // The ask is "Roughly what percentage is Churn rate at right now?". These are
+  // its own words coming back, and until R2918B every one of them refused.
+  const answers: ReadonlyArray<readonly [string, number]> = [
+    ['30', 0.3],
+    ['roughly 30', 0.3],
+    ['about 30', 0.3],
+    ['30 percent', 0.3],
+    ['30%', 0.3],
+  ];
+
+  it.each(answers)('"%s" mints the baseline (%d)', async (message, expected) => {
+    const outcome = await runTurn({
+      message,
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph: graphWithPersistedChurnRow(),
+      pendings: [elicitPending()],
+    });
+    expect(
+      node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state?.baseline,
+    ).toBe(expected);
+    // The question is answered, so it must not be asked again.
+    expect(outcome.__elicit_baseline).toBeUndefined();
+  });
+});
+
+describe('R2918B — the sole-pending gate binds THIS referent (discriminating pair, trap 19)', () => {
+  // WHY THIS PAIR EXISTS. The suite below calls its no-pending case a POSITIVE
+  // CONTROL, and it is one for "does a pending exist at all" — but it cannot
+  // observe a referent MIS-binding, because the extractor's elliptical limb
+  // deliberately does not bind by label (the question supplies the subject).
+  // Proven by fixture rot at the extractor:
+  // `deriveElicitedBaselineAnswerPercent('about 12%', 'Zzz Unrelated Metric')`
+  // returns 12, exactly as it does for the genuine label. So the ONLY thing
+  // standing between a bare "30" and the wrong node is the handler's
+  // `soleElicitPending.action.target_id === targetId` gate, and nothing pinned
+  // it. Neither half of this pair shows anything alone: the GREEN proves the
+  // carry works, the RED proves it is the target id doing the work.
+
+  it('GENUINE referent: the pending names THIS target, so the bare answer mints here', async () => {
+    const outcome = await runTurn({
+      message: '30',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph: graphWithPersistedChurnRow(),
+      pendings: [elicitPending({ target_id: 'o-churn-rate', target_label: 'Churn rate' })],
+    });
+    expect(
+      node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state?.baseline,
+    ).toBe(0.3);
+  });
+
+  it('ROT-MUTANT referent: the pending names a DIFFERENT live node, so the same message mints NOTHING', async () => {
+    const outcome = await runTurn({
+      message: '30',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph: graphWithPersistedChurnRow(),
+      // A real, live, well-formed pending question — about 'Breach likelihood'.
+      pendings: [elicitPending({ target_id: 'r-breach', target_label: 'Breach likelihood' })],
+    });
+    // No baseline anywhere: not on this turn's target...
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toBeUndefined();
+    // ...and emphatically not on the node the stray pending happened to name.
+    expect(node(outcome.mutated_graph as GraphV3T, 'r-breach').observed_state).toBeUndefined();
+    // The unanswered question for THIS target is asked, which is the honest
+    // outcome: the product still does not know where churn stands.
+    expect(outcome.assistant_text).toContain(QUESTION_FOR_CHURN);
+    expect(outcome.__elicit_baseline?.target_id).toBe('o-churn-rate');
+  });
+
+  it('ROT-MUTANT kind: a COMPETING live number-ask makes the bare answer ambiguous, so it mints nothing', async () => {
+    const outcome = await runTurn({
+      message: '30',
+      targetId: 'o-churn-rate',
+      value: 10,
+      unit: '%',
+      graph: graphWithPersistedChurnRow(),
+      pendings: [
+        elicitPending(),
+        {
+          id: 'pa-effect-1',
+          scenario_id: 'scn-1',
+          chip_id: 'chip_elicit_option_effect',
+          action: {
+            kind: 'elicit_option_effect',
+            option_id: 'opt-1',
+            option_label: 'Two Developers',
+            factor_id: 'f-support-load',
+            factor_label: 'Support load',
+          },
+          preconditions: {},
+          expires_at_turn_count: 2,
+          expires_at_iso: '2099-12-31T23:59:59.000Z',
+          emitted_at_iso: '2026-08-08T00:00:00.000Z',
+        } as unknown as PendingAction,
+      ],
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toBeUndefined();
+    expect(outcome.assistant_text).toContain(QUESTION_FOR_CHURN);
+  });
+});
+
 describe('2.918 — the elliptical answer binds ONLY through the pending question (fail closed)', () => {
   /**
    * The answer turn's REAL state-class (trap 16-inverse: a fixture must stay

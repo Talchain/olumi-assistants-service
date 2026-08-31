@@ -80,6 +80,7 @@ import {
   resolveOptionEffectWrite,
 } from '../routing/option-effect-write.js';
 import { composeConfigureOptionClarifyResponse } from '../compose/configure-option-clarify-response.js';
+import { finalizeChips } from '../compose/chip-finalizer.js';
 import { resolveRunAdmission } from '../tools/handlers/analysis-ready-core.js';
 import {
   decideGoalTargetReceipt,
@@ -150,7 +151,8 @@ import {
   findProposedConceptAction,
   resolveProposalResume,
 } from '../coaching/proposal-continuation.js';
-import { buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
+import { buildReadinessRecoveryChip, buildReadinessEffectPending } from '../coaching/readiness-recovery.js';
+import { resolveRecordedOptionEffectAnswer, type RecordedEffectAnswer } from '../routing/repair-value-binding.js';
 import {
   buildHeldSupersessionNotice,
   evaluateEditGraphMutations,
@@ -1223,6 +1225,8 @@ export interface DispatchEditGraphParams {
    * one missing pair; no other caller may pass it.
    */
   readonly editInstructionOverride?: string;
+  /** Server-resolved recorded question. Revalidated below; never copied from ingress. */
+  readonly recordedEffectAnswer?: RecordedEffectAnswer;
 }
 
 export interface DispatchEditGraphResult {
@@ -1975,6 +1979,20 @@ export async function dispatchEditGraph(
 
   const { graph: parsedGraph, strict: graphStrictlyCanonical } =
     graphStateToGraphV3WithParseResult(graphState, requestId);
+  let recordedAnswer: RecordedEffectAnswer | null = null;
+  if (params.recordedEffectAnswer !== undefined) {
+    const resolved = resolveRecordedOptionEffectAnswer({
+      message: payload.message, pendings: params.recordedEffectAnswer.priorPendingActions,
+      graph: graphState, readiness: buildCanonicalAnalysisReadyFromGraph(graphState),
+      scenarioId: payload.scenario_id, nowMs: Date.now(),
+    });
+    if (!graphStrictlyCanonical || resolved.kind !== 'bind'
+      || resolved.answer.pending.id !== params.recordedEffectAnswer.pending.id) {
+      throw new Error('Recorded option-effect answer no longer matches the canonical question');
+    }
+    recordedAnswer = resolved.answer;
+  }
+  const editInstruction = recordedAnswer?.instruction ?? params.editInstructionOverride ?? payload.message;
   const editSelectionFocus = projectEditSelectionFocus(
     params.selectedElements,
     parsedGraph,
@@ -2438,12 +2456,15 @@ export async function dispatchEditGraph(
         // `interventions` were dropped on the way in. A guard held up by a
         // coincidence in someone else's constant is exactly the kind this
         // estate loses; keeping it costs one boolean.
-        const optionEffect = graphStrictlyCanonical
+        const optionEffect = recordedAnswer !== null
+          ? { matched: true as const, kind: 'write' as const,
+              ...recordedAnswer.pair, value: Number(recordedAnswer.valueText) }
+          : graphStrictlyCanonical
           ? resolveOptionEffectWrite({
               // The instruction this turn is actually executing — the SAME
               // expression handed to `handleEditGraph` below, so the writer and
               // the LLM can never be asked to perform different sentences.
-              message: params.editInstructionOverride ?? payload.message,
+              message: editInstruction,
               graph: parsedGraph,
             })
           : { matched: false as const, reason: 'graph_unparseable' as const };
@@ -2472,7 +2493,7 @@ export async function dispatchEditGraph(
           // ⭐ ROADMAP 2.1261 — the bind instruction substitutes ONLY here (the
           // edit LLM's task); `payload.message` stays the record everywhere
           // else in this dispatcher. See `editInstructionOverride`'s jsdoc.
-          params.editInstructionOverride ?? payload.message,
+          editInstruction,
           adapter,
           requestId,
           payload.turn_id,
@@ -3252,6 +3273,11 @@ export async function dispatchEditGraph(
     appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
   });
   const optionOwnValueWithheld = optionOwnValueVerdict.verdict === 'withhold';
+  // A recorded answer licenses this exact cell, not a substitute baseline or
+  // another option. Feed the existing all-success-effects gate, not just prose.
+  const recordedAnswerNotLanded = recordedAnswer !== null && successfulAppliedMutation
+    && readCommittedOptionEffect(editResult.appliedGraph, recordedAnswer.pair.optionId,
+      recordedAnswer.pair.factorId) !== Number(recordedAnswer.valueText);
   // Structural honesty: every downstream success effect (persist, edit fact,
   // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
   // live-blocked verdict — or a part-accounting substitution block, or a
@@ -3261,7 +3287,8 @@ export async function dispatchEditGraph(
     !gmBlockedApply &&
     !paSubstitutionBlocked &&
     !optionInterventionWriteWithheld &&
-    !optionOwnValueWithheld;
+    !optionOwnValueWithheld &&
+    !recordedAnswerNotLanded;
   if (optionInterventionWriteWithheld) {
     log.warn(
       {
@@ -3287,7 +3314,7 @@ export async function dispatchEditGraph(
       "V5 edit_graph — the applied mutation wrote an option's OWN observed_state while that option's effect values did not move; write withheld so the reply cannot confirm a change the analysis will never see (mutation NOT persisted)",
     );
   }
-  if (optionInterventionWriteWithheld || optionOwnValueWithheld) {
+  if (optionInterventionWriteWithheld || optionOwnValueWithheld || recordedAnswerNotLanded) {
     // The graph did NOT change this turn — re-derive the wire freshness against
     // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
     // branches below do, so staleness is never claimed off an unpersisted
@@ -4012,6 +4039,11 @@ export async function dispatchEditGraph(
   // discarded because it is indistinguishable at the graph from the witnessed
   // wrong-entity write. Without this sentence they get copy about the option's
   // missing effect value and are never told their edit was dropped.
+  if (recordedAnswerNotLanded && recordedAnswer !== null) {
+    response = { ...response, assistant_text:
+      `I could not record that value for "${recordedAnswer.pair.optionLabel}" on "${recordedAnswer.pair.factorLabel}". Nothing has changed.`,
+      suggested_actions: [] };
+  }
   if (optionInterventionWriteVerdict.verdict === 'withhold') {
     response = {
       ...response,
@@ -4226,7 +4258,7 @@ export async function dispatchEditGraph(
   // `scenarios.graph`.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
-    : (!successfulAppliedMutation || optionInterventionWriteWithheld) && graphStrictlyCanonical
+    : (!successfulAppliedMutation || optionInterventionWriteWithheld || recordedAnswerNotLanded) && graphStrictlyCanonical
       ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
       : undefined;
 
@@ -4286,6 +4318,7 @@ export async function dispatchEditGraph(
   // A BLOCKER, so the head blocker — and therefore the chip — necessarily names a
   // DIFFERENT slot. The affordance cannot repeat itself, by construction rather
   // than by a comparison someone has to remember to write.
+  let readinessEffectAskOffered = false;
   if (effectiveAppliedMutation && analysisReady !== undefined) {
     const reissued = buildReadinessRecoveryChip(analysisReady);
     if (reissued !== null && !response.suggested_actions.some((a) => a.id === reissued.id)) {
@@ -4294,6 +4327,11 @@ export async function dispatchEditGraph(
         suggested_actions: [...response.suggested_actions, reissued],
       };
     }
+    readinessEffectAskOffered = reissued !== null && finalizeChips(response.suggested_actions, {
+      logSuppressions: false,
+    }).chips.some(
+      a => a.id === reissued.id && a.message === reissued.message,
+    );
   }
 
   // V5 state-trust freshness derivation moved earlier in this function
@@ -4656,6 +4694,30 @@ export async function dispatchEditGraph(
     if (gmBlockedApply && hasLiveHeldProposal(gmDecision)) {
       pendingActionsForCommit = [...gmDecision.pendingActions].slice(0, 3);
     }
+    // Persist only the recovery question this response actually offers, in the
+    // same graph commit. A refusal/hold must not mint a new asked cell.
+    if (graphForCommit !== undefined && readinessEffectAskOffered && !gmBlockedApply) {
+      const projected = projectGraphForPersistence(graphForCommit, {
+        scenarioId: payload.scenario_id, turnId: payload.turn_id,
+        turnClass: 'direct_answer',
+      });
+      if (projected && typeof projected === 'object' && 'nodes' in projected) {
+        const askedGraphHash = computeAnalysisAffectingGraphHash(projected as GraphStateIngress);
+        const asked = askedGraphHash === null ? null : buildReadinessEffectPending({
+          analysisReady, nodes: (projected as GraphStateIngress).nodes,
+          scenarioId: payload.scenario_id, emittedAtIso: new Date().toISOString(),
+          graphHash: askedGraphHash,
+        });
+        if (asked !== null) {
+          const chipPending = pendingActionsForCommit ?? derivePendingActionsFromFinalizedChips(
+            (response.suggested_actions ?? []) as readonly BoundarySuggestedAction[],
+            { scenario_id: payload.scenario_id, emitted_at_iso: new Date().toISOString(),
+              graph_hash: currentGraphHashForRecovery ?? undefined },
+          );
+          pendingActionsForCommit = [...chipPending, asked];
+        }
+      }
+    }
     // ── HOLD-WIPE fix (task_2e1b8c87): thread holds through this commit ──
     // Closes the F-HELD round-2 KNOWN RESIDUAL: edit-classified commits
     // previously threaded NO priorPendingActions, silently wiping live
@@ -4668,7 +4730,7 @@ export async function dispatchEditGraph(
     // TTL/wall/supersession bookkeeping either way.
     const graphWrittenThisTurn = graphForCommit !== undefined;
     const holdThread = threadHoldsThroughMutatingCommit({
-      priorPendingActions: priorPendingForCarry,
+      priorPendingActions: recordedAnswer?.priorPendingActions ?? priorPendingForCarry,
       graphAfterCommit: graphWrittenThisTurn ? graphForCommit : null,
       graphHashAfterCommit: graphWrittenThisTurn ? currentGraphHashForRecovery : null,
       // Fulfilment detection (round-3 concern 1): the APPLIED ops let the
@@ -4748,6 +4810,10 @@ export async function dispatchEditGraph(
       // non-mutating turn threads none so an ingress-echo divergence can
       // never falsely invalidate a carried hold.
       priorPendingActions: holdThread.threaded,
+      ...(recordedAnswer !== null && graphForCommit !== undefined
+        && readCommittedOptionEffect(graphForCommit, recordedAnswer.pair.optionId,
+          recordedAnswer.pair.factorId) === Number(recordedAnswer.valueText)
+        ? { consumedPendingRefs: [recordedAnswer.pending.chip_id] } : {}),
       ...(graphWrittenThisTurn && currentGraphHashForRecovery !== null
         ? { graph_hash: currentGraphHashForRecovery }
         : {}),

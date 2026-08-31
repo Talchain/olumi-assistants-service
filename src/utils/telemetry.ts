@@ -2157,7 +2157,7 @@ export const TelemetryEvents = {
   // "Yes, apply it now" had no held proposal to resume (the four-turn-nothing
   // loop). Routing to the edit lane produces the held proposal + confirm chip;
   // the bare consent resumes via short-confirm → executeGmHeldResume. Payload:
-  // request_id, scenario_id, trigger ('per_option_term' | 'each_option_own').
+  // request_id, scenario_id, trigger (StructuralRestructureTrigger).
   V5EditGraphStructuralRestructureRouted:
     "v5.edit_graph.structural_restructure_intent_routed",
 

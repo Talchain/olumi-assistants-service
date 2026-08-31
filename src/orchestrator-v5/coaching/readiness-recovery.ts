@@ -15,6 +15,8 @@
  * judgement.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import {
   CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX,
   CONFIGURE_OPTION_GENERIC_CHIP,
@@ -27,6 +29,11 @@ import {
   deriveMissingEffectPairs,
 } from '../routing/repair-value-binding.js';
 import { MISSING_VALUE_ASK_FORMAT_HINT } from '../routing/missing-value-answer.js';
+import {
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+  type PendingAction,
+} from '../session/pending-action.js';
 
 const MAX_LABEL_CHARS = 40;
 
@@ -110,6 +117,52 @@ export interface ReadinessRecoveryChip {
   readonly id: string;
   readonly label: string;
   readonly message: string;
+}
+
+/** Persist only the exact effect question this readiness projection asks. */
+export function buildReadinessEffectPending(input: {
+  readonly analysisReady: ReadinessRecoveryInput | null | undefined;
+  readonly nodes: readonly ReadinessRecoveryNode[];
+  readonly scenarioId: string;
+  readonly graphHash: string;
+  readonly emittedAtIso: string;
+}): PendingAction | null {
+  const recovery = projectReadinessRecovery(input.analysisReady, input.nodes);
+  const asked = deriveAskedEffectPair(input.analysisReady);
+  if (recovery.kind !== 'provide_value' || asked === null) return null;
+
+  // IDs are the authority. Labels must agree with the SAME graph-backed
+  // question and chip; an old readiness label cannot license a different ask.
+  // Duplicate labels are fine, but duplicate/foreign IDs are not a referent.
+  const options = input.nodes.filter((node) => node.id === asked.optionId);
+  const factors = input.nodes.filter((node) => node.id === asked.factorId);
+  if (options.length !== 1 || factors.length !== 1
+    || options[0]?.kind !== 'option' || factors[0]?.kind !== 'factor'
+    || options[0]?.label?.trim() !== asked.optionLabel
+    || factors[0]?.label?.trim() !== asked.factorLabel
+    || recovery.optionLabelFull !== asked.optionLabel
+    || recovery.factorLabelFull !== asked.factorLabel) return null;
+
+  const emittedAtMs = Date.parse(input.emittedAtIso);
+  if (!input.scenarioId.trim() || !input.graphHash.trim() || !Number.isFinite(emittedAtMs)) return null;
+  return {
+    id: randomUUID(),
+    scenario_id: input.scenarioId,
+    // Same server-only handle as the configure-option question: a newly
+    // emitted ask supersedes the old one through existing pending lifecycle.
+    chip_id: 'chip_configure_option_clarify',
+    action: {
+      kind: 'elicit_option_effect',
+      option_id: asked.optionId,
+      option_label: asked.optionLabel,
+      factor_id: asked.factorId,
+      factor_label: asked.factorLabel,
+    },
+    preconditions: { graph_hash: input.graphHash },
+    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+    expires_at_iso: new Date(emittedAtMs + PENDING_ACTION_DEFAULT_WALL_TTL_MS).toISOString(),
+    emitted_at_iso: input.emittedAtIso,
+  };
 }
 
 interface ReadinessBlockerLite {

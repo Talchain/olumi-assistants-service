@@ -13,6 +13,43 @@ import {
  * each-option mentions out.
  */
 describe('detectStructuralRestructureIntent', () => {
+  describe('explicit quoted rename commands use the existing structural edit lane', () => {
+    it.each([
+      'Rename factor "Engineer interruption rate" to "Unplanned engineer interruptions".',
+      'Please rename the factor "Cost" to "Delivery effort".',
+      "Relabel option 'Outsource' to 'Partner delivery'",
+      'Rename "Cost" to "Budget"',
+      'Rename node “Cost” to “Delivery effort”.',
+    ])('%s', (message) => {
+      expect(detectStructuralRestructureIntent(message)).toEqual({
+        matched: true,
+        trigger: 'quoted_rename_command',
+      });
+    });
+
+    it.each([
+      'Should we rename that factor?',
+      'Should we rename factor "Cost" to "Budget"?',
+      'Should we rename factor "Cost" to "Budget"',
+      'Would it help to rename factor "Cost" to "Budget"?',
+      'Do not rename factor "Cost" to "Budget".',
+      'Please do not rename factor "Cost" to "Budget".',
+      'We discussed renaming factor "Cost" to "Budget".',
+      'Rename factor "Cost" to "Budget", but do not apply it yet.',
+      'Rename factor "Cost" to "Budget" only if I confirm.',
+      'Rename factor "Cost" to "Budget"; hold off until I confirm.',
+      'Rename factor "Cost" to "Budget"?',
+      'Rename factor "" to "Budget".',
+      'Rename factor "Cost" to "  ".',
+      'Rename factor "Cost" to "Budget" and another factor too.',
+      'Rename factor "Cost" to an appropriate label.',
+      'Rename company "Acme" to "Other".',
+      '"Rename factor Cost to Budget" is just an example.',
+    ])('%s remains outside this command arm', (message) => {
+      expect(detectStructuralRestructureIntent(message).matched).toBe(false);
+    });
+  });
+
   describe('matches restructure requests', () => {
     const positives: ReadonlyArray<[string, StructuralRestructureTrigger]> = [
       // The live probe message (the exact reproduction target).

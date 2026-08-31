@@ -30,6 +30,12 @@ import type { FastifyInstance } from 'fastify';
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import type { ChatWithToolsResult } from '../../adapters/llm/types.js';
 import { _resetConfigCache } from '../../config/index.js';
+import { TurnSource } from '@talchain/schemas/boundary';
+import { detectStructuralRestructureIntent } from '../../orchestrator-v5/routing/structural-restructure-intent.js';
+import {
+  buildGmHeldPublicCopy,
+  describeHeldOperationsSubject,
+} from '../../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 
 const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
 
@@ -204,6 +210,51 @@ describe('POST /orchestrate/v2/turn — free-text structural restructure routes 
     expect(chatWithToolsMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'Rename factor "Engineer interruption rate" to "Unplanned engineer interruptions".',
+    'Please rename the factor "Cost" to "Delivery effort".',
+    "Relabel option 'Outsource' to 'Partner delivery'",
+  ])('explicit rename reaches the existing edit dispatcher: %s', async (message) => {
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message, stage: 'frame', turn_class: 'frame' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'Should we rename factor "Cost" to "Budget"?',
+    'Should we rename factor "Cost" to "Budget"',
+    'Do not rename factor "Cost" to "Budget".',
+    'Please do not rename factor "Cost" to "Budget".',
+    'We discussed renaming factor "Cost" to "Budget".',
+    'Rename factor "Cost" to "Budget" only if I confirm.',
+    'Rename factor "Cost" to "Budget", but do not apply it yet.',
+  ])('rename discussion or withheld consent does not enter mutation: %s', async (message) => {
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message, stage: 'frame', turn_class: 'frame' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+  });
+
+  it('the mounted rename shape reaches edit dispatch without caller graph_state', async () => {
+    const request = payload({
+      message: 'Rename factor "Engineer interruption rate" to "Unplanned engineer interruptions".',
+      stage: 'frame', turn_class: 'frame',
+    });
+    delete request.graph_state;
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn', payload: request,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(chatWithToolsMock).not.toHaveBeenCalled();
+  });
+
   it('a plain conversational message does NOT reach the edit lane (reaches the coach)', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -274,6 +325,151 @@ describe('POST /orchestrate/v2/turn — free-text structural restructure routes 
       expect(res.statusCode).toBe(200);
       expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
       expect(chatWithToolsMock).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * ⭐⭐ #1231 IDENTITY TWIN — the product's own confirm-chip copy must never
+   * re-enter the lane that PRODUCED it.
+   *
+   * THE DEFECT this pins (introduced by this PR's `quoted_rename_command`
+   * arm, blocker verified at head e30e078d): a rename-only held batch's
+   * public copy is minted by `describe-changeset.ts` as
+   * `rename 'X' to 'Y'`, capitalised by `buildGmHeldPublicCopy` into the
+   * confirm chip's LABEL — "Rename 'Cost' to 'Delivery effort'". That string
+   * carries NO `EDIT_GRAPH_POSITIVE_REGEX` verb (rename/relabel are absent
+   * from it — derived at edit-graph-intent-regex.ts:20), so before this PR a
+   * chip replay could never be claimed as an edit-lane intent. The new arm
+   * makes the product's own label match the structural detector, so the
+   * replay becomes an edit-lane intent — and when the hold it confirms is no
+   * longer in the pending set (already consumed, or swept), the route-level
+   * exact-copy resolver returns `replay_no_match` and the turn DISPATCHES THE
+   * EDIT LANE, which drafts a SECOND hold and renders ANOTHER confirm chip.
+   * Confirm-click-returns-another-confirm — the loop this feature exists to
+   * kill. `readMostRecentPendingActions` returns [] in this suite, which is
+   * exactly that state.
+   *
+   * THE FIX is IDENTITY-BOUND, not textual: the quoted-rename arm is not
+   * honoured for a `chip_click` ingress — the product's own affordance being
+   * replayed — while every typed rename is untouched. A user cannot type an
+   * ingress source, so nothing a user can write is excluded by it.
+   *
+   * ⭐ THE TWIN IS THE POINT, and both halves run here in the SAME run on the
+   * SAME string, differing ONLY in `source`. A test that only proved the
+   * chip does not re-enter would pass equally if the whole arm were deleted;
+   * a test that only proved the typed rename routes would pass equally at the
+   * unfixed head. Only the PAIR discriminates the identity gate from both.
+   */
+  describe("the product's own rename chip is not a fresh rename command (#1231)", () => {
+    // Derived from the PRODUCERS the runtime uses — never a test-authored
+    // alias (trap 16-inverse: a fixture you wrote yourself is not evidence
+    // about the wire). `describeHeldOperationsSubject` + `buildGmHeldPublicCopy`
+    // are the same two calls edit-graph-referee-gate makes when it HOLDS a
+    // rename batch against this graph.
+    const RENAME_OPERATIONS = [
+      { op: 'update_node', path: 'fac-cost', value: { label: 'Delivery effort' } },
+    ];
+    const PRODUCT_CHIP = buildGmHeldPublicCopy(
+      describeHeldOperationsSubject(RENAME_OPERATIONS, SHARED_FACTOR_GRAPH),
+    );
+
+    // PRECONDITION PIN (trap 13b): this suite's conclusion is only about the
+    // identity gate if the string under test genuinely triggers the new arm.
+    // If the producer's copy ever stops matching `quoted_rename_command`, the
+    // twin below would pass by testing nothing — so assert it here and RED.
+    it('precondition: the producer mints the quoted-rename shape the new arm claims', () => {
+      expect(PRODUCT_CHIP.label).toBe("Rename 'Cost' to 'Delivery effort'");
+      expect(detectStructuralRestructureIntent(PRODUCT_CHIP.label)).toEqual({
+        matched: true,
+        trigger: 'quoted_rename_command',
+      });
+    });
+
+    it('(a) TYPED by the user, that exact string still reaches the structural edit dispatcher', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/orchestrate/v2/turn',
+        payload: payload({ message: PRODUCT_CHIP.label, source: 'composer' }),
+      });
+      expect(res.statusCode).toBe(200);
+      expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+      expect(chatWithToolsMock).not.toHaveBeenCalled();
+    });
+
+    /**
+     * ⚠⚠ THIS TEST USED TO DRIVE `chip_click` ALONE, AND THAT IS EXACTLY HOW
+     * THE GUARD SHIPPED DARK. The wire union has FOUR members and the deployed
+     * UI sends a held-confirm chip as `'chip'` (buildPayload.ts promotes to
+     * `chip_click` only for a chip carrying a published, CEE-accepted
+     * `action_type`; the held-confirm chip carries none). A single-member twin
+     * cannot see a guard bound to the wrong member — it agrees with itself on
+     * the one value it was written for. The `it.each` below drives EVERY
+     * replayed member on the SAME string, and the exhaustiveness assertion
+     * makes a contract widening RED here rather than silently untested.
+     */
+    const REPLAYED_SOURCES = ['chip', 'chip_click', 'retry'] as const;
+    const FRESHLY_AUTHORED_SOURCES = ['composer'] as const;
+
+    it('precondition: the twin below covers the WHOLE contract source union', () => {
+      // Not derived from the routing code under test — from the CONTRACT. If a
+      // fifth member lands, this REDs until it is adjudicated into one arm.
+      expect([...REPLAYED_SOURCES, ...FRESHLY_AUTHORED_SOURCES].sort())
+        .toEqual([...TurnSource.options].sort());
+    });
+
+    it.each(REPLAYED_SOURCES)(
+      "(b) REPLAYED as the product's own chip via source=%s, that exact string does NOT re-enter the edit lane",
+      async (source) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: payload({ message: PRODUCT_CHIP.label, source }),
+        });
+        expect(res.statusCode).toBe(200);
+        // No second hold is drafted: the edit lane — the sole structural-proposal
+        // producer — is never called, so no new confirm chip can be minted.
+        expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+        expect(chatWithToolsMock).toHaveBeenCalled();
+      },
+    );
+
+    // The chip's MESSAGE variant ("Yes, rename 'Cost' to 'Delivery effort'.")
+    // is affirmative-prefixed, so it never matched the anchored rename arm in
+    // the first place; pinned so a future widening of the anchor cannot
+    // silently reopen the same door through the other replayed string.
+    // SCOPE PIN — the guard is bound to the RENAME ARM, not to chip_click at
+    // large. Without this, widening the exclusion to every structural trigger
+    // would look identical to the fix, and #644 P2-2's genuine future case (a
+    // chip rendering restructure-phrased copy) would be silently switched off.
+    it.each(REPLAYED_SOURCES)(
+      '(d) a per-option replay via source=%s is untouched by the guard and still reaches the edit lane',
+      async (source) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: payload({
+            message: 'split the shared factor into per-option links',
+            source,
+          }),
+        });
+        expect(res.statusCode).toBe(200);
+        expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+        expect(chatWithToolsMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("(c) the chip's MESSAGE variant likewise does not re-enter the edit lane", async () => {
+      expect(PRODUCT_CHIP.message).toBe("Yes, rename 'Cost' to 'Delivery effort'.");
+      for (const source of REPLAYED_SOURCES) {
+        dispatchEditGraphMock.mockClear();
+        const res = await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: payload({ message: PRODUCT_CHIP.message, source }),
+        });
+        expect(res.statusCode).toBe(200);
+        expect(dispatchEditGraphMock).not.toHaveBeenCalled();
+      }
     });
   });
 });

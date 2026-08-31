@@ -24,6 +24,10 @@ import {
   DRAFT_RECORDS_CONNECT_INSTRUCTION,
   draftRecordsInstructionHash,
 } from "../instruction.js";
+// The grammar's own enums, imported rather than restated: the v12 route test
+// binds to the source of truth so a widening there fails this test loud, instead
+// of leaving a hand-copied list to drift (CLAUDE.md trap 12).
+import { DRAFT_RECORD_STATED_KINDS, DRAFT_RECORD_CLAIM_KINDS } from "../grammar.js";
 
 /**
  * HISTORIC — v2. The bytes served on every run measured up to and including
@@ -310,15 +314,174 @@ const HISTORIC_V9_INSTRUCTION_BYTES = 9183;
  * rule on `stated_items` is untouched, because that governs the USER's half of
  * the record set and is not what was blocking anybody.
  */
-const PREREGISTERED_V10_INSTRUCTION_SHA256 =
+const HISTORIC_V10_INSTRUCTION_SHA256 =
   "3a1226696828692f6538a2de8bc8e156c5a9ce69575748c23094444642e81ce1";
-const PREREGISTERED_V10_INSTRUCTION_BYTES = 10079;
+const HISTORIC_V10_INSTRUCTION_BYTES = 10079;
+
+/**
+ * ⭐⭐ v11 — A PROPOSED CAUSE IS NOT AN OPTION. SHAPE half only; the connect half
+ * is byte-identical to v10 (`b631a953…` / 4,544, asserted below).
+ *
+ * THE WITNESSED DEFECT, measured at the DEPLOYED staging draft endpoint on
+ * 2026-08-30 (CEE build `a18e194`, served `draft_graph` v195 `152998b447819c2e`
+ * plus exactly the v10 bytes above), on a brief whose leadership team disagrees
+ * about why growth stalled:
+ *
+ *   POST /assist/v1/draft-graph returned option nodes
+ *     `0811361d` "The Product Has Fallen Behind Competitors"
+ *     `b8e1cbe6` "Onboarding Is the Problem"
+ *     `5f615ae5` "We're Selling to the Wrong Customers"
+ *   each `provenance: "from_brief"`, each `source_quote` the attributed span,
+ *   each `status: "needs_user_mapping"` — i.e. three competing EXPLANATIONS put
+ *   on the graph to be scored and ranked against one another. The same draw ALSO
+ *   emitted the genuine actions ("Commission structured win/loss review", "Run
+ *   rapid customer interviews and churn analysis"), so the model was never
+ *   short of the right answer: the instruction simply let the causes stand as
+ *   their siblings.
+ *
+ * WHY HERE AND NOT IN THE SERVED PROMPT: `anthropic.ts:516-517` pushes this
+ * constant as a SECOND system block beside PMS `draft_graph`. A control arm
+ * carrying v195 ALONE (admin `test-prompt-llm`, 6 briefs) emitted no records at
+ * all and never reproduced the defect; the composed arm reproduced it on the
+ * first draw. The filing decision is made here, so this is where it is fixed.
+ *
+ * WHAT v11 ADDS, and it is RECLASSIFICATION ONLY — it tells the model where to
+ * put something it was already going to say, applying no pressure to invent,
+ * which is the property every version of this instruction has had to keep:
+ *   · a carry-out/true-or-false test on what an option IS;
+ *   · the proposed-cause exclusion, routing each span to a `factor` or a `risk`;
+ *   · the opposite-direction preservation clause — "who said it makes no
+ *     difference" — because a rule keyed on ATTRIBUTION rather than on
+ *     ACTION would demote "sales says cut the price, product says hold and
+ *     ship the integrations", which are two real options. That clause is the
+ *     half that stops this fix being worse than the defect (trap 22b).
+ *
+ * ⚠⚠ STATUS AT PINNING: **MEASURED ON A PROXY, NOT ON THE DEPLOYED PATH, AND THE
+ * PROXY IS NOISIER THAN DEPLOYED.** Said in full because this comment is what a
+ * future session finds first. Both arms were composed from the same two system
+ * blocks and drawn through admin `test-prompt-llm`, which carries NO structured-
+ * outputs grammar — so it measures the FILING decision this change governs, and
+ * nothing downstream of it. Within that instrument, over a 6-brief corpus:
+ *   · diagnostic briefs, causes filed as options: BEFORE 5 of 5 draws, AFTER
+ *     3 of 9 draws. A large reduction, NOT elimination — the residual is
+ *     stochastic, and deployed behaviour on the witnessed brief was
+ *     DETERMINISTIC (identical node ids across independent draws), so the
+ *     absolute AFTER rate is not a deployed rate and none is claimed.
+ *   · genuine-choice briefs, options preserved: 7 of 7 draws, ZERO losses,
+ *     including the attributed-but-real contrast case.
+ * The corpus was written by the lane that wrote these bytes, which is the exact
+ * limitation trap 22 names: it cannot see the class its author did not imagine.
+ * The deployed witness on `/assist/v1/draft-graph` is owed AFTER this merge
+ * deploys, and no claim about it is made here.
+ *
+ * ⚠ v10 IS NOW HISTORIC AND ITS PIN IS NEVER RE-POINTED. Every draft served from
+ * the option-effect-value change until this merge received exactly those bytes,
+ * and the deployed BEFORE witness above is attributable to them.
+ */
+const WITHDRAWN_V11_INSTRUCTION_SHA256 =
+  "e778852c76a27469e26d8d61f3685bb2f91a20524d89bfd577b70dbe393e3f75";
+const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
+
+/**
+ * ⭐⭐⭐ v12 — v11's EXCLUSION WAS RIGHT AND ITS DESTINATION DID NOT EXIST.
+ *
+ * v11 was never served. It is pinned here as WITHDRAWN rather than deleted
+ * because it WAS measured, and this is what the measurement found.
+ *
+ * ── THE BLOCKER, MEASURED ──────────────────────────────────────────────────
+ * v11 read as working: 6 of 9 draws on the diagnostic briefs stopped filing the
+ * competing explanations as options. **All six were clean only by emitting
+ * `stated_items[].kind = "claim"` — a value that does not exist.**
+ * `DRAFT_RECORD_STATED_KINDS` is `["goal","option","constraint","figure"]`, and
+ * `grammar.ts:453` puts exactly that enum in the structured-outputs schema the
+ * deployed draft sends (`structured_outputs_used: true` in the capture). The
+ * escape route is CLOSED ON THE WIRE, so those six draws could not happen in
+ * production. Of the 3 draws that stayed inside the legal enum, 3 of 3 filed the
+ * causes as options, and 0 of 27 cause-instances reached the intended
+ * destination. Contrast control: the illegal kind occurs 25 times across 8 AFTER
+ * draws and 0 times in any BEFORE draw — v11's own wording introduced it.
+ *
+ * ── WHY THE MODEL REACHED FOR AN ILLEGAL VALUE ─────────────────────────────
+ * Two defects in one paragraph, both of them about DESTINATION, not about the
+ * rule:
+ *   · v11 wrote "File each as a `claim`" and "the disagreement itself is a
+ *     `claim`" INSIDE the `kind` enumeration, where `option`, `constraint` and
+ *     `figure` are the sibling bullets. Read in place, `claim` is a fifth `kind`.
+ *     The model did as it was told, in the only list it was standing in.
+ *   · v11 then said "the options are what the user could DO about the problem"
+ *     while still inside `stated_items`, every entry of which must be a VERBATIM
+ *     span of the brief. On a brief that names no course of action there is no
+ *     such span, so the sentence asked for something the stated grammar cannot
+ *     express and named no other place to put it.
+ *
+ * ── ⭐ WHAT v12 CHANGES: IT NAMES THE ROUTE THAT ALREADY EXISTS ────────────
+ * NO record kind is added and the grammar is untouched — that would solve a
+ * carrier problem that does not exist. `option_refinement` is already a
+ * `DRAFT_RECORD_CLAIM_KINDS` member, `CLAIM_KIND_TO_NODE_KIND` already maps it
+ * to `option`, and pass 1b already declines to merge one whose `basis` names no
+ * stated option, so it stands as its OWN alternative with its OWN chain.
+ * Independently confirmed by four executable same-module controls at `a18e1943`
+ * (`olumi-programme-docs@f862392d/codex-evidence/resume-20260830/1238-route`):
+ * zero stated options plus goal-based proposed actions project to option nodes
+ * with `ai_inferred` provenance; the empty-basis variant stays `unbased: true`;
+ * the stated-action twin still projects as `stated`; and flipping only the claim
+ * role to `factor` yields factors, not options — the discriminating control.
+ *
+ * ⚠ SCOPE OF THAT EVIDENCE, NOT FLATTENED: it measures PROJECTED CARRIAGE. It
+ * proves the grammar CAN carry an AI-proposed option. It does NOT prove the
+ * model WILL emit one on a diagnostic brief. That is what v12 must be measured
+ * for, and it is measured on grammar-legal draws only.
+ *
+ * So v12 keeps v11's exclusion verbatim and replaces only the destination:
+ *   · `kind` has no fifth value — said in the list itself, which is where the
+ *     model was standing when it invented one;
+ *   · the cause goes to `claims` as `factor` / `risk`, named by `claim_kind`;
+ *   · every hypothesis is RETAINED — the disagreement is the user's reasoning,
+ *     not clutter to tidy away;
+ *   · an action the model puts forward is an `option_refinement`, which is how
+ *     something becomes an option when the user named none, and it arrives
+ *     BADGED AS OURS and open to challenge;
+ *   · `basis` empty is honest, and stays marked unbased.
+ *
+ * ⚠ WHAT v12 DELIBERATELY DOES NOT DO, because the product ruling forbids both:
+ * it does not push `sets_to` onto explanation-framed options (it cannot: the
+ * explanations are no longer options, so no `sets_to` pressure reaches them —
+ * the constraint is met STRUCTURALLY, by reclassification, not by a new
+ * sentence), and it does not erase attribution to make a gate go green. It also
+ * sets NO quota of options: manufacturing alternatives to green the readiness
+ * gate is the failure mode this instruction has to avoid, not its objective.
+ */
+const PREREGISTERED_V12_INSTRUCTION_SHA256 =
+  "9c3906151c4a6abec7906fc430c3c26bc8d6c92559a8e859401dd03b9682f232";
+const PREREGISTERED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v10 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V10_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v12 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V12_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V10_INSTRUCTION_BYTES,
+      PREREGISTERED_V12_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the WITHDRAWN v11 bytes, so v11's measurement stays its own", () => {
+    // v11 is the artefact the illegal-`kind` measurement belongs to: 25
+    // `kind: "claim"` emissions across 8 draws, 0 in any BEFORE draw. Re-pointing
+    // this literal would let that finding read as a finding about v12, which is
+    // the version written to remove its cause.
+    expect(draftRecordsInstructionHash()).not.toBe(WITHDRAWN_V11_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      WITHDRAWN_V11_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the historic v10 bytes, so v10's runs stay attributable", () => {
+    // v10 is the artefact the deployed BEFORE witness was served: the three
+    // explanation-shaped option nodes came back from a build running exactly
+    // these bytes. Re-pointing this literal would make that measurement read as
+    // a measurement of the CURRENT instruction, which is the one thing it is not.
+    expect(draftRecordsInstructionHash()).not.toBe(HISTORIC_V10_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      HISTORIC_V10_INSTRUCTION_BYTES,
     );
   });
 
@@ -440,10 +603,31 @@ describe("the draft records instruction is the measured artefact", () => {
     // `option` IS, and which span of the brief names it, are both statements
     // about what goes in a field, so v9 is shape-half in its entirety and the
     // connect half is byte-identical to v6/v7/v8 (asserted in the next test).
+    //
+    // ⚠⚠ AND AGAIN IN v11 — the FIFTH version to touch it, after v10 left it
+    // alone entirely. What an `option` IS, and which spans are excluded from
+    // being one, are statements about what goes in a field, so v11 is shape-half
+    // in its entirety and the connect half is byte-identical to v10 (asserted in
+    // the next test). That asymmetry is the point of pinning the halves apart:
+    // this edit is legible as "the option bullet changed" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "aa3d7c18d26326260476ce5ae674f7dfee91fc8bf10b5eaf0ce5996625f28b3f",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(7736);
+    // WITHDRAWN — v11's shape half. Asserted DISTINCT because the illegal-`kind`
+    // draws were produced by exactly these bytes and must stay attributable to
+    // them; v12 replaced this paragraph's DESTINATION, not its rule.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      "5f058e0be800bda882350a1c33b88e89b4308b16e57cfff9c83a63c0bce0b3c3",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(6627);
+    // HISTORIC — the v9/v10 SHARED shape half (v10 moved the connect half only).
+    // Asserted DISTINCT: these are the bytes the deployed BEFORE witness was
+    // served, so they must stay separable from the ones that replace them.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "9dfb9f583edaf66df70d355a260a9a56ef9b80fe3367a5043a97d3cca048a207",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(5535);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(5535);
     // HISTORIC — v8's shape half. Asserted DISTINCT so v8's runs stay
     // attributable to the bytes that produced them.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -522,6 +706,132 @@ describe("the draft records instruction is the measured artefact", () => {
    * its own content — and bound to BOTH halves of the claim, because the negative
    * half ("`to_claim` cannot reach it") is the one that names the actual defect.
    */
+  /**
+   * ⭐⭐ THE v11 RULE, PINNED BY CONTENT — AND THE TWO DIRECTIONS PINNED APART.
+   *
+   * A hash pin cannot tell "someone deleted the preservation clause" from
+   * "someone fixed a typo two bullets away", and here that distinction is the
+   * whole safety argument. Two OPPOSITE harms, asserted separately, because a
+   * fix for either alone reopens the other (CLAUDE.md trap 22b):
+   *
+   *   (a) A PROPOSED CAUSE IS SCORED AS AN OPTION. The witnessed defect: three
+   *       competing explanations of why growth stalled shipped as ranked
+   *       alternatives, so the analysis reported a win probability for
+   *       "The Product Has Fallen Behind Competitors".
+   *   (b) A REAL OPTION IS DEMOTED BECAUSE SOMEONE IS NAMED AS PROPOSING IT.
+   *       STRICTLY WORSE than (a): it silently deletes the user's actual
+   *       alternatives from their own decision, and it would not show up in any
+   *       corpus of diagnostic briefs. A rule keyed on attribution rather than
+   *       on action produces exactly this, which is why the clause naming it is
+   *       asserted in its own right and not folded into (a).
+   */
+  it("excludes a proposed cause from being an option, without demoting attributed actions", () => {
+    // (a) the exclusion, bound to the discriminator rather than to a phrase list
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "An option is something you can CARRY OUT.",
+    );
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "A proposed CAUSE is the case this catches most often.",
+    );
+    // and where the demoted span is to go, or the rule only says "not here"
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "with `claim_kind` `factor` for what it says varies\n  and `risk` for what it says threatens the goal",
+    );
+    // (b) the opposite-direction half — the one that keeps this fix from being
+    // worse than the defect it closes.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain("Who said it makes no difference.");
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "names two real acts, and both are options",
+    );
+  });
+
+  /**
+   * ⭐⭐⭐ THE v12 ROUTE, PINNED BY CONTENT — THE THREE PARTS THAT MADE v11
+   * UNSHIPPABLE, EACH ASSERTED IN ITS OWN RIGHT.
+   *
+   * v11's rule was right and its DESTINATION did not exist, so 6 of its 9 clean
+   * draws were clean only by emitting an illegal `stated_items[].kind`. Each
+   * assertion below closes one of the three ways that happened, and they are
+   * separate because a fix for any one alone leaves the others open.
+   */
+  it("routes a demoted cause to a destination that EXISTS on the wire", () => {
+    // (1) THE ILLEGAL ESCAPE, closed in the list the model was standing in when
+    // it invented a fifth value. Bound to the grammar's own enum rather than to
+    // a phrase, so it fails loud if `DRAFT_RECORD_STATED_KINDS` ever widens
+    // without this sentence moving with it.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "It is not a stated_item of any kind: the four above are the\n  only values `kind` takes, and there is no fifth.",
+    );
+    expect(DRAFT_RECORD_STATED_KINDS).toHaveLength(4);
+    expect([...DRAFT_RECORD_STATED_KINDS]).not.toContain("claim");
+
+    // (2) THE CARRIER, NAMED. v11 described an end state ("the options are what
+    // the user could DO about the problem") and left the model to find a shape
+    // for it. `option_refinement` is that shape and it already existed.
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "An action YOU are putting forward is an\n  `option_refinement` claim",
+    );
+    expect([...DRAFT_RECORD_CLAIM_KINDS]).toContain("option_refinement");
+    // named in the claim-kind list too, or the model meets the term cold
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "when the user named no\n  course of action and the option is one you are proposing",
+    );
+
+    // (3) THE TWO THINGS THE PRODUCT RULING FORBIDS TRADING AWAY TO GET AN
+    // ANALYSIS TO RUN. Both are asserted here because both are invisible to a
+    // "zero false options" count — the symptom metric that passed v11.
+    //   · hypotheses are RETAINED, not tidied away
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain("Keep every one of them.");
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "a hypothesis dropped to tidy the graph removes the thing\n  they are arguing about",
+    );
+    //   · attribution SURVIVES: ours arrives marked ours, unbased stays unbased
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "so putting it there is what lets the user\n  tell your proposal from their own words and argue with it",
+    );
+    expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
+      "an option that honestly rests on nothing is worth more than one\n  resting on a basis that does not hold",
+    );
+    // ⚠ AND IT SAYS ALL THAT WITHOUT A WORD OF PROVENANCE VOCABULARY, which is
+    // load-bearing and is NOT decoration: the model has no provenance channel,
+    // and the suite below ("the instruction says nothing it must not say")
+    // forbids the concept outright, because a model that is told about a stamp
+    // it cannot set will approximate one. The guarantee is delivered by the
+    // PROJECTOR; this sentence only tells the model which array it is writing in.
+  });
+
+  /**
+   * ⭐ THE NEGATIVE HALF, and it is the one a later tidy-up would delete.
+   *
+   * v12 must NOT buy a completed analysis with either of the two currencies the
+   * product ruling puts off the table. A hash pin cannot see the difference
+   * between adding a clarifying sentence and adding a quota, so the prohibitions
+   * are asserted as ABSENCES with a contrast control proving the probe can see a
+   * presence at all (CLAUDE.md trap 13).
+   */
+  it("adds no option quota and no sets_to pressure on explanations", () => {
+    const shape = DRAFT_RECORDS_SHAPE_INSTRUCTION;
+    // CONTRAST CONTROL — the probe must find a string that IS there, or every
+    // absence below is vacuous.
+    expect(shape).toContain("option_refinement");
+
+    // No quota: "at least two options", "two or more options" and friends would
+    // make the model manufacture alternatives to clear `options.length < 2` in
+    // `analysis-ready-helper.ts:1487`. That is forcing a decision framing onto
+    // diagnostic work, which is worse than blocking.
+    expect(shape).not.toMatch(/at least (two|2|three|3) option/i);
+    expect(shape).not.toMatch(/(two|three|2|3) or more option/i);
+
+    // No `sets_to` in the shape half at all. It belongs to the connect half, and
+    // it must never be asked for on something explanation-framed: "the value
+    // that factor would take if that option were chosen" is undefined for a
+    // hypothesis, and forcing it would rank hypotheses as if they were actions.
+    expect(shape).not.toContain("sets_to");
+    // The connect half is where it lives, unchanged — the contrast that proves
+    // the absence above is about placement, not about the string being gone.
+    expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("sets_to");
+  });
+
   it("keeps the goal-is-a-stated-item rule that round 9 added", () => {
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain(
       "The goal is a `stated_item`, so a link that reaches it sets `to_stated`.",

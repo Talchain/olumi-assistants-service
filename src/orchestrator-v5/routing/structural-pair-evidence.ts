@@ -77,16 +77,30 @@ export type StructuralPairEvidence =
     };
 
 /**
- * Canonical direct-dependency evidence for one selected Living Model item.
+ * Canonical direct-dependency evidence for one identified Living Model item.
  *
  * This is intentionally separate from {@link StructuralPairEvidence}: a
- * selected-item question establishes its subject by canonical canvas identity
+ * question establishes its subject by canonical canvas identity or an exact
+ * current-message reference corroborating the typed canonical id,
  * and its predicate through a separately typed `dependencies` query,
  * while the pair carrier establishes two subjects from current-message prose.
  * Neither identity warrant may substitute for the other.
  */
 export type SelectedDependenciesEvidence =
-  | { readonly status: 'ambiguous' }
+  | {
+      readonly status: 'ambiguous';
+      /**
+       * Set iff this turn carried exactly one RESOLVED selected element
+       * (`focus.elements.length === 1 && focus.unresolved === 'none'`).
+       *
+       * The consumer's ambiguity notice asks the user to "name or select one
+       * element and ask again". That instruction's truth condition is FALSE
+       * here — the user has already done it, and the ambiguity is in the typed
+       * query or in the saved model, not in their gesture. The mark exists so
+       * the copy can state something true; it never relaxes a verdict.
+       */
+      readonly subject_selection?: 'single_resolved';
+    }
   | {
       readonly status: 'coverage_unavailable';
       readonly reason: 'graph_coverage_unavailable' | 'structural_semantics_unlicensed';
@@ -107,6 +121,8 @@ export interface BuildStructuralPairEvidenceOptions {
 }
 
 export interface BuildSelectedDependenciesEvidenceOptions {
+  /** Required for named references; omitted legacy callers remain selection-only. */
+  readonly messageText?: string;
   readonly structureQuery: StructureQuery | undefined;
   /**
    * The original ingress selection, before node-only focus projection. A mixed
@@ -221,9 +237,26 @@ function publicRelationships(
 }
 
 /**
+ * An ambiguous verdict, carrying whether the turn had one resolved selected
+ * element. Every ambiguous return inside {@link buildSelectedDependenciesEvidence}
+ * goes through here; a source-derived test asserts that, so a return site added
+ * later cannot silently reintroduce the false notice.
+ */
+function ambiguousForTurn(
+  options: BuildSelectedDependenciesEvidenceOptions,
+): SelectedDependenciesEvidence {
+  return options.focus !== undefined &&
+    options.focus.elements.length === 1 &&
+    options.focus.unresolved === 'none'
+    ? { status: 'ambiguous', subject_selection: 'single_resolved' }
+    : { status: 'ambiguous' };
+}
+
+/**
  * Return deterministic incoming-dependency evidence only when the typed query,
- * selected identity, validated proposal target and canonical graph all identify
- * the same one element.
+ * selected or current-message identity, validated proposal target and canonical
+ * graph all identify the same one element. A named reference never creates a
+ * canvas selection, and an unresolved/conflicting selection cannot be bypassed.
  *
  * A `general` structural answer remains free-form model prose because identity
  * answers "which item?", not "which question?". The distinct query avoids
@@ -239,7 +272,17 @@ export function buildSelectedDependenciesEvidence(
   const selectedIds = options.groundedSelection?.element_ids ?? [];
   const requestedNodeIds = options.requestedSelection?.node_ids ?? [];
   const requestedEdgeIds = options.requestedSelection?.edge_ids ?? [];
+  const hasSelection = requestedNodeIds.length > 0 || requestedEdgeIds.length > 0 ||
+    options.focus !== undefined || selectedIds.length > 0 ||
+    (options.groundedSelection != null && options.groundedSelection.unresolved !== 'none');
+  const selectedId = options.structureQuery.element_id;
   if (
+    options.proposalEntity?.resolution_status !== 'resolved' ||
+    options.proposalEntity.id !== selectedId
+  ) {
+    return ambiguousForTurn(options);
+  }
+  if (hasSelection && (
     requestedNodeIds.length !== 1 ||
     requestedEdgeIds.length !== 0 ||
     requestedNodeIds[0] !== options.structureQuery.element_id ||
@@ -255,11 +298,10 @@ export function buildSelectedDependenciesEvidence(
     options.proposalEntity?.resolution_status !== 'resolved' ||
     options.proposalEntity.id !== selectedIds[0] ||
     options.structureQuery.element_id !== selectedIds[0]
-  ) {
-    return { status: 'ambiguous' };
+  )) {
+    return ambiguousForTurn(options);
   }
 
-  const selectedId = selectedIds[0]!;
   if (
     options.graphContextStatus !== 'canonical' ||
     options.graphAuthority !== 'canonical_strict' ||
@@ -270,9 +312,15 @@ export function buildSelectedDependenciesEvidence(
 
   const displayGraph = formatGraphForContext(graph);
   const idCounts = countNodeIds(displayGraph.nodes);
+  // Only the named path uses the whole lookup to corroborate its typed id.
+  // The selected path retains its scoped endpoint checks below: an unrelated
+  // duplicate must not invalidate an otherwise unambiguous selected item.
+  if (!hasSelection && [...idCounts.values()].some((count) => count !== 1)) {
+    return ambiguousForTurn(options);
+  }
   const selectedNodes = displayGraph.nodes.filter((node) => node.id === selectedId);
   if (selectedNodes.length !== 1 || idCounts.get(selectedId) !== 1) {
-    return { status: 'ambiguous' };
+    return ambiguousForTurn(options);
   }
   const selectedNode = selectedNodes[0]!;
 
@@ -282,7 +330,21 @@ export function buildSelectedDependenciesEvidence(
   const lookup = buildGraphNodeLookupFromGraph(displayGraph);
   const labelIndex = buildLabelIndex(lookup);
   if (resolveLabelToId(labelIndex, selectedNode.label) !== selectedId) {
-    return { status: 'ambiguous' };
+    return ambiguousForTurn(options);
+  }
+
+  if (!hasSelection) {
+    // Existence of the model-proposed id does not corroborate a user reference.
+    // Reuse the pair-query identity check: precisely this canonical id must be
+    // named, with no duplicate labels or extra references. Intent remains the
+    // router's typed query, not a classification made from these mentions.
+    const named = resolveTypedCanonicalProseEntityRefs(
+      lookup, labelIndex, options.messageText ?? '', [selectedId],
+      { rejectOtherGenericReferences: true },
+    );
+    if (named?.length !== 1 || named[0]?.id !== selectedId) {
+      return ambiguousForTurn(options);
+    }
   }
 
   const relevantEdges = displayGraph.edges.filter(
@@ -310,12 +372,12 @@ export function buildSelectedDependenciesEvidence(
       resolveLabelToId(labelIndex, edge.from_label) !== edge.from ||
       resolveLabelToId(labelIndex, edge.to_label) !== edge.to
     ) {
-      return { status: 'ambiguous' };
+      return ambiguousForTurn(options);
     }
   }
 
   const relationships = uniqueRelationships(relevantEdges, 'canonical_strict');
-  if (relationships === null) return { status: 'ambiguous' };
+  if (relationships === null) return ambiguousForTurn(options);
   if (relationships.length > SELECTED_DEPENDENCIES_MAX_RELATIONSHIPS) {
     return { status: 'coverage_unavailable', reason: 'graph_coverage_unavailable' };
   }

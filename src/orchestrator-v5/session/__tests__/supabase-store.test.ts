@@ -1017,7 +1017,11 @@ describe('SupabaseSessionStore.readRecentAppliedMutationFactsFor', () => {
     });
     expect(selectCalls).toHaveLength(1);
     expect(selectCalls[0]!.table).toBe('v5_handler_facts');
-    expect(selectCalls[0]!.cols).toBe('id, payload, handler_id, noop, created_at');
+    expect(selectCalls[0]!.cols).toBe(
+      'id, payload, handler_id, noop, created_at, v5_conversation_turn_id, turn:v5_conversation_turns(id, turn_id, scenario_id, user_id, model_version_mutation_id, model_version_created)',
+    );
+    expect(selectCalls[0]!.cols).not.toContain('!inner');
+    expect(facts[0]).not.toHaveProperty('committed_turn_ref');
     const filters = selectCalls[0]!.filters as Record<string, unknown>;
     expect(filters['eq:scenario_id']).toBe(SCENARIO);
     expect(filters['in:handler_id']).toEqual(Array.from(MUTATION_RECEIPT_FACT_TYPES));
@@ -1029,6 +1033,109 @@ describe('SupabaseSessionStore.readRecentAppliedMutationFactsFor', () => {
 
     await store.readRecentAppliedMutationFactsFor(SCENARIO, 4);
     expect(selectCalls).toHaveLength(2);
+  });
+
+  const committedParent = {
+    id: '22222222-2222-4222-8222-222222222222',
+    turn_id: '33333333-3333-4333-8333-333333333333',
+    scenario_id: SCENARIO,
+    user_id: USER,
+    model_version_mutation_id: '44444444-4444-4444-8444-444444444444',
+    model_version_created: true,
+  };
+
+  async function readReceiptWithParent(parent: unknown, parentRowId: unknown = committedParent.id) {
+    const { client, selectCalls } = makeClient({
+      selectResult: {
+        data: [{ ...appliedConstraintRow, v5_conversation_turn_id: parentRowId, turn: parent }],
+        error: null,
+      },
+    });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    return { facts: await store.readRecentAppliedMutationFactsFor(SCENARIO, 4), selectCalls };
+  }
+
+  it('adds only the exact server-read parent lineage while preserving receipt identity', async () => {
+    const { facts } = await readReceiptWithParent(committedParent);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      fact_row_id: appliedConstraintRow.id,
+      fact_created_at: appliedConstraintRow.created_at,
+      committed_turn_ref: {
+        conversation_row_id: committedParent.id,
+        source_turn_id: committedParent.turn_id,
+        scenario_id: SCENARIO,
+        owner_user_id: USER,
+        mutation_id: committedParent.model_version_mutation_id,
+      },
+    });
+    expect(facts[0]!.committed_turn_ref!.source_turn_id).not.toBe(appliedConstraintRow.id);
+    expect(facts[0]!.committed_turn_ref!.source_turn_id).not.toBe(committedParent.id);
+  });
+
+  it.each([
+    ['missing parent', undefined],
+    ['null parent', null],
+    ['array embed', [committedParent]],
+    ['wrong parent identity', { ...committedParent, id: 'other-parent' }],
+    ['foreign scenario', { ...committedParent, scenario_id: 'foreign-scenario' }],
+    ['no version committed', { ...committedParent, model_version_created: false }],
+    ['truthy version marker', { ...committedParent, model_version_created: 'true' }],
+    ['missing owner', { ...committedParent, user_id: null }],
+    ['malformed owner', { ...committedParent, user_id: 42 }],
+    ['empty owner', { ...committedParent, user_id: '' }],
+    ['missing source turn', { ...committedParent, turn_id: undefined }],
+    ['malformed source turn', { ...committedParent, turn_id: {} }],
+    ['empty source turn', { ...committedParent, turn_id: '' }],
+    ['missing mutation', { ...committedParent, model_version_mutation_id: null }],
+    ['malformed mutation', { ...committedParent, model_version_mutation_id: 7 }],
+    ['empty mutation', { ...committedParent, model_version_mutation_id: '' }],
+  ])('%s withholds lineage, never filters out the successfully loaded receipt', async (_name, parent) => {
+    const { facts, selectCalls } = await readReceiptWithParent(parent);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).not.toHaveProperty('committed_turn_ref');
+    expect(facts[0]).toMatchObject({
+      fact_row_id: appliedConstraintRow.id,
+      fact: { fact_type: 'add_constraint', noop: false, result: { status: 'applied' } },
+    });
+    expect(selectCalls).toHaveLength(1);
+    expect(selectCalls[0]!.filters).toEqual({
+      'eq:scenario_id': SCENARIO,
+      'in:handler_id': Array.from(MUTATION_RECEIPT_FACT_TYPES),
+      'eq:noop': false,
+      'eq:payload->result->>status': 'applied',
+      'order:created_at': { ascending: false },
+      'order:id': { ascending: false },
+      limit: 4,
+    });
+  });
+
+  it('does not infer the parent row id from an otherwise complete embedded parent', async () => {
+    const { facts } = await readReceiptWithParent(committedParent, null);
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).not.toHaveProperty('committed_turn_ref');
+  });
+
+  it('keeps the whole ordered lookahead page when only one receipt has version lineage', async () => {
+    const rows = ['receipt-newest', 'receipt-second', 'receipt-third', 'receipt-lookahead'].map((id, index) => ({
+      ...appliedConstraintRow,
+      id,
+      v5_conversation_turn_id: committedParent.id,
+      turn: index === 1 ? committedParent : null,
+    }));
+    const { client } = makeClient({ selectResult: { data: rows, error: null } });
+    const store = new SupabaseSessionStore(
+      client,
+      new SessionLRUCache({ maxScenarios: 5, maxTurnsPerScenario: 10 }),
+      { defaultReadLimit: 20 },
+    );
+    const facts = await store.readRecentAppliedMutationFactsFor(SCENARIO, 4);
+    expect(facts.map((row) => row.fact_row_id)).toEqual(rows.map((row) => row.id));
+    expect(facts.map((row) => row.committed_turn_ref !== undefined)).toEqual([false, true, false, false]);
   });
 
   it('returns an authoritative empty set only for a clean zero-row read', async () => {
