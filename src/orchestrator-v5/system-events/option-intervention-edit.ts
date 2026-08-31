@@ -50,7 +50,7 @@ export interface OptionInterventionTransactionInput extends OptionInterventionEd
 type EditableGraph = GraphV3T & Record<string, unknown>;
 // Derive the injected port from the canonical commit entrypoint. This module
 // neither constructs a session store nor introduces another persistence API.
-type OptionInterventionStore = Parameters<typeof commitDirectAnswer>[2];
+type OptionInterventionStore = NonNullable<Parameters<typeof commitDirectAnswer>[2]>;
 
 // Same check-only sigma projection used by commit and model-version receipts.
 // This narrows the raw object; it NEVER returns the floored/parsed copy.
