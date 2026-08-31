@@ -13,6 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { loadPrompt, type PromptResolveTrigger } from './loader.js';
+import type { FallbackReason } from './resolution-policy.js';
 import {
   TRACKED_KEYS,
   STATUS_KEYS,
@@ -73,6 +74,45 @@ export interface PromptKeyStatus {
   gate_active?: boolean;
   /** True when this key GATES health (`prompts_ready` / `all_pms`). */
   critical?: boolean;
+  /**
+   * When the key fell back to a bundled default, WHY.
+   *
+   * P0 (~2.5h prompt-store outage): this prober used to DISCARD
+   * `loaded.fallbackReason`, so "no PMS row for this key, by design"
+   * (`not_found`) and "the PMS store is THROWING" (`fetch_error`) surfaced
+   * identically as `source: 'default'`. An operator reading the status
+   * surface could not tell a steady state from an outage.
+   *
+   * Note `source` can never be `'error'` for a store failure: `loadPrompt`
+   * catches internally and returns a default. That is why `arePromptsReady()`
+   * — `statuses.every(s => s.source !== 'error')` — stayed TRUE BY
+   * CONSTRUCTION throughout the incident. This field is the honest signal.
+   */
+  fallback_reason?: FallbackReason;
+}
+
+/**
+ * `degraded_reasons` token raised on `/healthz` when a CRITICAL prompt key
+ * fell back because the store THREW.
+ *
+ * Deliberately scoped to `fallbackReason === 'fetch_error'` and NOT to
+ * `all_pms === false`: `all_pms` is legitimately false in healthy shapes (no
+ * DB-backed store configured, a key with no PMS row by design), so keying the
+ * alarm on it would make it always-on — and an always-on alarm is no alarm.
+ */
+export const CRITICAL_PROMPT_FETCH_ERROR_REASON = 'critical_prompt_fetch_error';
+
+/**
+ * Derive the prompt-store `degraded_reasons` contribution from coverage.
+ *
+ * Extracted as a pure function so the DECISION is unit-testable and the ROUTE
+ * wiring can be tested separately — the alternative is a rule that only exists
+ * inline in `server.ts` and can be severed without any test going red.
+ */
+export function promptStoreDegradationReasons(
+  coverage: CriticalPromptCoverage,
+): string[] {
+  return coverage.fetch_error.length > 0 ? [CRITICAL_PROMPT_FETCH_ERROR_REASON] : [];
 }
 
 function shortSha256(content: string): string {
@@ -127,6 +167,12 @@ async function probePromptKeys(
           version: resolvePublicVersion(key, loaded.source, loaded.version),
           content_hash: shortSha256(loaded.content),
           content_chars: loaded.content.length,
+          // Carried, not discarded — see `PromptKeyStatus.fallback_reason`.
+          // `'none'` is omitted so the field's presence means "this key fell
+          // back, and here is why".
+          ...(loaded.fallbackReason && loaded.fallbackReason !== 'none'
+            ? { fallback_reason: loaded.fallbackReason }
+            : {}),
           ...meta,
         };
       } catch (err) {
@@ -221,6 +267,8 @@ export interface CriticalPromptCoverage {
     pms_task?: CeeTaskId;
     /** Set when this key serves a STALE snapshot (a later rebuild was rejected). */
     snapshot_error?: string;
+    /** Why this key fell back to a bundled default, when it did. */
+    fallback_reason?: FallbackReason;
   }>;
   /** Critical keys NOT resolving from PMS (default or error) — the offenders. */
   default_or_error: TrackedKey[];
@@ -233,6 +281,16 @@ export interface CriticalPromptCoverage {
    * reload would leave the operator health gate falsely green.
    */
   snapshot_errors: TrackedKey[];
+  /**
+   * Critical keys that fell back because the STORE THREW (`fetch_error`) — as
+   * opposed to having no PMS row. This is the offender list for the P0 class:
+   * during the incident every one of these was populated while `/healthz`
+   * reported `ok: true`, `prompts_ready: true`, `degraded: false`.
+   *
+   * A strict subset of `default_or_error`, and the ONLY one of the two that
+   * means something is broken rather than merely unconfigured.
+   */
+  fetch_error: TrackedKey[];
 }
 
 /**
@@ -256,6 +314,7 @@ export async function getCriticalPromptCoverage(
         version: s.version,
         ...(s.pms_task ? { pms_task: s.pms_task } : {}),
         ...(s.snapshot_error ? { snapshot_error: s.snapshot_error } : {}),
+        ...(s.fallback_reason ? { fallback_reason: s.fallback_reason } : {}),
       }));
       const default_or_error = statuses
         .filter((s) => s.source !== 'pms')
@@ -266,11 +325,16 @@ export async function getCriticalPromptCoverage(
       const snapshot_errors = statuses
         .filter((s) => s.snapshot_error != null)
         .map((s) => s.key);
+      // The store THREW for these — distinct from "no PMS row for this key".
+      const fetch_error = statuses
+        .filter((s) => s.fallback_reason === 'fetch_error')
+        .map((s) => s.key);
       const coverage: CriticalPromptCoverage = {
         all_pms: default_or_error.length === 0 && snapshot_errors.length === 0,
         keys,
         default_or_error,
         snapshot_errors,
+        fetch_error,
       };
       coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
       return coverage;
@@ -278,9 +342,19 @@ export async function getCriticalPromptCoverage(
       log.warn({ err }, 'critical_prompt_coverage probe failed');
       const coverage: CriticalPromptCoverage = {
         all_pms: false,
-        keys: TRACKED_KEYS.map((key) => ({ key, source: 'error' as const, version: null })),
+        keys: TRACKED_KEYS.map((key) => ({
+          key,
+          source: 'error' as const,
+          version: null,
+          fallback_reason: 'fetch_error' as const,
+        })),
         default_or_error: [...TRACKED_KEYS],
         snapshot_errors: [],
+        // The PROBE itself threw — a harder failure than a per-key fallback,
+        // and unambiguously broken. It must raise the alarm, and it cannot
+        // fire in the healthy `not_found` shape (the per-key prober catches
+        // there and never reaches this branch), so the alarm stays scoped.
+        fetch_error: [...TRACKED_KEYS],
       };
       coverageCached = { value: coverage, expiresAt: Date.now() + READINESS_CACHE_TTL_MS };
       return coverage;

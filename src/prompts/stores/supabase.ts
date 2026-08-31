@@ -29,6 +29,7 @@ import type {
   ApprovalRequest,
   CompiledPrompt,
   PromptTestCase,
+  PromptVariable,
 } from '../schema.js';
 import { computeContentHash, interpolatePrompt } from '../schema.js';
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
@@ -63,6 +64,49 @@ function getJwtClaim(token: string, claim: string): string | undefined {
 }
 
 /**
+ * Decode a JSON-list column that PostgREST may deliver EITHER as a JSON string
+ * OR as an already-parsed JS value.
+ *
+ * WHY THIS EXISTS (P0, ~2.5h prompt-store outage). Three call sites here wrote
+ * `JSON.parse(x || '[]')`. For one row `test_cases` arrived as a JS ARRAY `[]`
+ * rather than the string `"[]"` this file's `VersionRow` type asserted. An
+ * empty array is TRUTHY, so `||` did not substitute the fallback;
+ * `JSON.parse([])` coerces via `String([]) === ''` and throws
+ * `SyntaxError: Unexpected end of JSON input`.
+ *
+ * Blast radius was TOTAL for the task: `list({ taskId })` decodes EVERY version
+ * row before any version pointer is consulted, so one poisoned row disabled
+ * every version of `draft_graph` and a staging-pointer rollback could not help.
+ *
+ * ONE helper, called from all three sites, deliberately: three copies of one
+ * predicate is the hand-maintained mirror this estate keeps paying for — and
+ * the sibling `stores/postgres.ts` proves the point, having carried a
+ * `typeof === 'string'` guard at two of its three sites all along while this
+ * file carried it at none.
+ *
+ * Tolerates, by design: a JSON string, an empty string, `null`/`undefined`, and
+ * an already-parsed array. Anything else that is not decodable to a list yields
+ * `[]` rather than throwing — a prompt row is not worth taking the store down
+ * for, and the caller's health surface now reports a store failure loudly
+ * (see `promptStoreDegradationReasons`).
+ */
+function parseJsonColumn<T>(value: unknown): T[] {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return [];
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      return Array.isArray(parsed) ? (parsed as T[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
  * Supabase store configuration
  */
 export interface SupabaseStoreConfig {
@@ -93,7 +137,13 @@ interface VersionRow {
   prompt_id: string;
   version: number;
   content: string;
-  variables: string; // JSON string
+  /**
+   * JSON string OR an already-parsed list. The declared type used to be plain
+   * `string`, which is exactly what made the P0 invisible: the type asserted a
+   * guarantee PostgREST does not make, so `JSON.parse(...)` looked safe at
+   * every call site. Read it through `parseJsonColumn`, never directly.
+   */
+  variables: string | unknown[] | null;
   created_by: string | null;
   created_at: string;
   change_note: string | null;
@@ -101,7 +151,8 @@ interface VersionRow {
   requires_approval: boolean;
   approved_by: string | null;
   approved_at: string | null;
-  test_cases: string; // JSON string
+  /** JSON string OR an already-parsed list — see `variables` above. */
+  test_cases: string | unknown[] | null;
 }
 
 interface ObservationRow {
@@ -695,7 +746,7 @@ export class SupabasePromptStore
     }
 
     const version = versions as VersionRow;
-    const versionVariables = JSON.parse(version.variables || '[]');
+    const versionVariables = parseJsonColumn<PromptVariable>(version.variables);
     const content = interpolatePrompt(version.content, variables, versionVariables);
 
     return {
@@ -761,7 +812,7 @@ export class SupabasePromptStore
       versions: versions.map((v) => ({
         version: v.version,
         content: v.content,
-        variables: JSON.parse(v.variables || '[]'),
+        variables: parseJsonColumn<PromptVariable>(v.variables),
         createdBy: v.created_by ?? 'system',
         createdAt: v.created_at,
         changeNote: v.change_note ?? undefined,
@@ -769,7 +820,7 @@ export class SupabasePromptStore
         requiresApproval: v.requires_approval ?? false,
         approvedBy: v.approved_by ?? undefined,
         approvedAt: v.approved_at ?? undefined,
-        testCases: JSON.parse(v.test_cases || '[]'),
+        testCases: parseJsonColumn<PromptTestCase>(v.test_cases),
       })),
     };
   }
