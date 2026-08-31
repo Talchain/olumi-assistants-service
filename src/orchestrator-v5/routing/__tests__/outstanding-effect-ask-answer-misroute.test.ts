@@ -225,6 +225,56 @@ describe('CASE 2 — the legitimate factor-baseline edit still writes', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CASE 2b — THE FACTOR-NAME CHECK IS BOUND TO THE **ASKED** PAIR, NOT TO EVERY
+// OUTSTANDING PAIR. Two blockers on two different factors; the write targets
+// the asked one while the sentence names the OTHER. Reading "did the user name
+// a factor?" across all outstanding pairs would let this through.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('CASE 2b — naming a DIFFERENT outstanding factor does not license the asked one', () => {
+  const OTHER_FACTOR = 'aa11bb22';
+  const OTHER_LABEL = 'Driver Retention Rate';
+  const twoBlockers = {
+    blockers: [
+      ...(readiness.blockers as unknown[]),
+      {
+        option_id: ASKED_OPTION,
+        option_label: OPTION_LABELS[2],
+        factor_id: OTHER_FACTOR,
+        factor_label: OTHER_LABEL,
+        blocker_type: 'missing_value',
+        code: 'MISSING_OPTION_VALUE',
+      },
+    ],
+  };
+
+  it('⭐ the write targets the ASKED factor while the sentence names ANOTHER — refused', () => {
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: ASKED_FACTOR,
+      message: `Set ${OTHER_LABEL} to 40%.`,
+      optionLabels: OPTION_LABELS,
+      readiness: twoBlockers,
+      chipOriginated: false,
+    });
+    // Bound by IDENTITY: only the pair whose factor IS the write target.
+    expect(hit?.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([ASKED_PAIR]);
+  });
+
+  it('⭐ OPPOSITE DIRECTION — naming the factor the write actually targets still writes', () => {
+    expect(
+      findOutstandingEffectAskCollision({
+        handlerId: 'set_factor_value',
+        entityId: OTHER_FACTOR,
+        message: `Set ${OTHER_LABEL} to 40%.`,
+        optionLabels: OPTION_LABELS,
+        readiness: twoBlockers,
+        chipOriginated: false,
+      }),
+    ).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CASE 3 — REGRESSION GUARDS. The arms that already worked must be unchanged.
 // ═══════════════════════════════════════════════════════════════════════════
 describe('CASE 3 — the arms that already worked are unchanged', () => {
