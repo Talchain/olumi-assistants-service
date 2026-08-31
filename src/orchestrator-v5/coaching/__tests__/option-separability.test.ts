@@ -78,7 +78,11 @@ import {
   fieldSeparation,
   isFieldUnseparable,
 } from '../option-separability.js';
-import measuredRuns from './fixtures/measured-analysis-fields-2026-08-31.json' with { type: 'json' };
+// Plain JSON import, matching `blocked-slot-claim-guard.test.ts`. The
+// `with { type: 'json' }` form four other specs use raises TS2823 under the
+// repo's `typecheck:all-including-known-broken-tests` config; this form raises
+// nothing, so the fixture adds zero diagnostics to the drift ratchet.
+import measuredRuns from './fixtures/measured-analysis-fields-2026-08-31.json';
 
 /** The contender band the headline module passes in — its own MIN_LEAD_MARGIN. */
 const BAND = 0.05;
