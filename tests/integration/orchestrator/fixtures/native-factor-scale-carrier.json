@@ -1,0 +1,64 @@
+{
+  "evidence_url": "https://github.com/Talchain/olumi-programme-docs/blob/d639361dab84b9057015b4156939f63a1963982d/codex-evidence/resume-20260831/p0-scale-reachability/native.json",
+  "evidence_sha256": "16b4f1794799ae836d8ad061cbccfde263b815baa5c4183057d9cfdb8903337f",
+  "ui_head": "cffe418d1c9a012b78a4c4ffbec04ef332d08f76",
+  "cee_head": "6a99eb75bf02f132b93fe6a3112ee29d218cff10",
+  "browser_request_id": "15547.120",
+  "before_node": {
+    "id": "feeb14db",
+    "kind": "factor",
+    "label": "Platform Licence Cost",
+    "prior": {
+      "range_max": 1,
+      "range_min": 0,
+      "distribution": "uniform",
+      "prior_is_unquantified": true
+    },
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100000,
+    "display_value": "Moderate (0.5)",
+    "observed_state": {
+      "value": 0.5,
+      "source": "cee_inference",
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+        "Not provided"
+      ]
+    }
+  },
+  "event": {
+    "kind": "factor_value_edit",
+    "target_id": "feeb14db",
+    "value": 0.85,
+    "field": "value"
+  },
+  "observed_after_node": {
+    "id": "feeb14db",
+    "kind": "factor",
+    "label": "Platform Licence Cost",
+    "prior": {
+      "range_max": 1,
+      "range_min": 0,
+      "distribution": "uniform",
+      "prior_is_unquantified": true
+    },
+    "category": "controllable",
+    "provenance": "user_set",
+    "scale_frame": 100000,
+    "display_value": "0.85",
+    "observed_state": {
+      "value": 8.5e-06,
+      "source": "user_override",
+      "raw_value": 0.85,
+      "factor_type": "other",
+      "extractionType": "inferred",
+      "uncertainty_drivers": [
+        "Not provided"
+      ]
+    }
+  },
+  "cold_read_request_id": "15547.225",
+  "limitation": "Retained native carrier replayed in constructed surrounding graph. No fresh mounted journey, live mutation, or post-edit analysis witnessed by this test."
+}
