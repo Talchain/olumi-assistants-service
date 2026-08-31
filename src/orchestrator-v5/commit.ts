@@ -698,7 +698,7 @@ export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boo
  *     Mounted at `server.ts:1224`; whether a user reaches it is UNVERIFIED —
  *     no wire witness taken and the UI repo was not inspected.
  */
-function buildHeldLapseNotice(pa: PendingAction): string {
+export function buildHeldLapseNotice(pa: PendingAction): string {
   const a = pa.action;
   const label =
     (a.kind === 'apply_proposed_change' || a.kind === 'proposed_concept') &&
@@ -1630,9 +1630,22 @@ export async function commitDirectAnswer(
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume
-    // `CommitResult.response` (the TurnExecutor commitTurn wrapper — the only
-    // caller that threads `priorPendingActions`) surface it on the wire, so
-    // wire copy == durable copy.
+    // `CommitResult.response` surface it on the wire, so wire copy == durable
+    // copy — and a caller that threads `priorPendingActions` but DISCARDS this
+    // value persists the lapse notice into the turn row without ever speaking
+    // it, which is a silent wipe wearing an honest notice's clothes.
+    //
+    // ⚠ THE PARENTHETICAL THAT STOOD HERE UNTIL 31 Aug 2026 — "the TurnExecutor
+    // commitTurn wrapper, the ONLY caller that threads `priorPendingActions`" —
+    // WAS FALSE, and its falsity had teeth. It went stale as the edit, draft and
+    // chip-click paths each gained threading, and because it read as a settled
+    // single-caller fact it taught every later lane that this return value had
+    // exactly one consumer worth checking. An independent review (Codex, PR
+    // #1286 verdict `5483244874`) found the chip-click `run_analysis` exits
+    // awaiting this commit and then returning their own PRE-COMMIT object.
+    // CLAUDE.md trap 12/14: a hand-maintained claim about who calls you drifts
+    // silently and reads as green. DERIVE the caller set at your tip
+    // (`rg -a 'commitDirectAnswer\(' src/`); do not trust this sentence.
     response: responseWithModelVersionReceipt,
     performed: true,
     persisted_row_id: persistedRowId,

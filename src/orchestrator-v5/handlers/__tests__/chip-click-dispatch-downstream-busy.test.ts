@@ -155,12 +155,17 @@ let errorSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
   commitDirectAnswerMock.mockReset();
-  commitDirectAnswerMock.mockResolvedValue({
-    response: {},
+  // The real chokepoint RETURNS the response it committed: the SAME object on
+  // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+  // notice or suppressed competing run_analysis chips. `response: {}` misstated
+  // that contract, and the dispatcher now CONSUMES the returned value, so the
+  // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+  commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+    response: r,
     performed: true,
     persisted_row_id: 'row-busy',
     graphPersisted: false,
-  });
+  }));
   priorPendingsMock.mockReset();
   priorPendingsMock.mockResolvedValue([]);
   warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});

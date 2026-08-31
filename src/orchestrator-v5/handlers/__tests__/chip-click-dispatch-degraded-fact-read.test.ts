@@ -279,12 +279,14 @@ function primeMocks() {
   enrichRunAnalysisMock.mockImplementation(
     async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
   );
-  commitDirectAnswerMock.mockResolvedValue({
-    response: {},
+  // Echoes, because the real chokepoint returns the response it committed and
+  // the dispatcher now consumes that value (see the F-HELD lapse-copy fix).
+  commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+    response: r,
     performed: true,
     persisted_row_id: 'row-1',
     graphPersisted: true,
-  });
+  }));
   createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
   loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(snapshotFor(READY_GRAPH));
   // Non-empty prior turns WITH row ids — clears the three `fetchPriorFacts`
