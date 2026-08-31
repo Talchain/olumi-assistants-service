@@ -126,7 +126,11 @@ describe('option framing recovery across production stages', () => {
     await runStageBoundary(ctx);
     expect(ctx.earlyReturn).toBeUndefined();
     expect((ctx.finalResponse as Record<string, any>).draft_warnings).toContainEqual(warning);
-    expect((ctx.finalResponse as Record<string, any>).record_disclosures).toEqual([GAP]);
+    // V3 intentionally removes the dead node address and marks the retained
+    // source disclosure withdrawn, so it cannot point at a nonexistent node.
+    expect((ctx.finalResponse as Record<string, any>).record_disclosures).toEqual([
+      { reason: GAP.reason, label: QUESTION, withdrawn: true },
+    ]);
   });
 
   it.each([0, 1])('stops %i remaining alternatives before normalise or GRAPH_READY, with targeted recovery', async (count) => {
