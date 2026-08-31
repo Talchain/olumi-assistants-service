@@ -1725,6 +1725,91 @@ export async function dispatchChipClickRunAnalysis(
       'V5 chip-click: run_analysis fact persistence pre-commit (verbose)',
     );
 
+    // ══════════════════════════════════════════════════════════════════════
+    // ⭐⭐⭐ THE SUCCESS COMMIT WAS THE LAST CHIP-CLICK WIPE SHARER (2.1353 r3)
+    //
+    // `commit.ts`'s own module docstring named this exact call site as a
+    // REMAINING wipe sharer — "`handlers/chip-click-dispatch.ts:1679`, in
+    // `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit)". This
+    // is that repair. Mechanism, all three hops:
+    //
+    //   1. `commit.ts` reads `metadata.priorPendingActions ?? []` (:1136/:1183)
+    //      and writes the carry-forward result into the NEW row's
+    //      `pending_actions` column;
+    //   2. `supabase-store.ts` `readMostRecentPendingActions` selects
+    //      `.order('created_at', desc).limit(1)` — the NEWEST ROW ONLY;
+    //   3. so a commit that threads no priors does not "carry nothing
+    //      forward". It DELETES — and silently, because the F-HELD lapse
+    //      notice is built by the carry-forward pass, which never ran.
+    //
+    // MEASURED: a founder's recorded ask died 15 seconds after it was made,
+    // across ZERO user turns, to this wipe. Not TTL expiry.
+    // `elicit_option_effect` pendings measured 5 created / 0 ever matched.
+    //
+    // ⚠ `…IntegrityStrict`, NOT the tolerant variant — same reasoning as the
+    // recovery path above: this commit becomes the NEWEST row, so its pendings
+    // column supersedes the row being read. The tolerant loader returns the
+    // SURVIVORS of a partially-corrupt row without throwing, which would
+    // silently drop the unreadable entries into a row that then becomes
+    // authoritative. Truncation is a lossy write here.
+    //
+    // ⚠⚠ DELIBERATE DIVERGENCE FROM THE RECOVERY PATH'S FAIL-CLOSED CHOICE —
+    // STATED PLAINLY SO A REVIEWER CAN CHALLENGE IT. The recovery path ABORTS
+    // its commit when this read fails, on the ordering
+    //
+    //     LOSING THE USER'S PROPOSAL ≫ LOSING THE MEMORY ≫ LOSING THE REFERENT
+    //
+    // That ordering is right THERE and wrong HERE, because the two commits do
+    // not carry the same cargo. The recovery commit carries a refusal fact and
+    // this turn's memory. THIS commit carries the `run_analysis` FACT that the
+    // freshness chain and the rerun escape hatch read — refusing it converts a
+    // successful analysis into an unrecorded one, which breaks a DIFFERENT
+    // user-visible link ("rerun uses the correction") and can leave the user
+    // staring at a completed analysis the product has no record of.
+    //
+    // So on a failed read this path COMMITS ANYWAY and announces the risk
+    // loudly. That is a strict improvement on the status quo, in which this
+    // branch wiped live pendings SILENTLY, 100% of the time — the common path
+    // is now fully fixed and the rare path is at least observable. It is NOT
+    // a claim that losing a hold is acceptable; it is a claim that on THIS
+    // seam the two harms are close enough that the silent one must become
+    // visible before it is traded. If a reviewer judges the proposal strictly
+    // dominant here too, the change is a one-line early return and the loud
+    // event becomes the abort's telemetry.
+    // ══════════════════════════════════════════════════════════════════════
+    let successPriorPendingActions: readonly PendingAction[] | null = null;
+    try {
+      successPriorPendingActions = await loadMostRecentPendingActionsIntegrityStrict(
+        payload.scenario_id,
+        requestId,
+      );
+    } catch (priorReadError) {
+      // Duck-typed on `code`, deliberately NOT `instanceof SessionReadError`:
+      // a dozen suites mock that class as a bare `class extends Error {}`, so
+      // an identity check would silently stop discriminating under a mock.
+      const priorReadCode =
+        typeof (priorReadError as { code?: unknown } | null)?.code === 'string'
+          ? (priorReadError as { code: string }).code
+          : null;
+      log.error(
+        {
+          event: 'v5.pending_wipe_risk_on_success_commit',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          turn_id: payload.turn_id,
+          auto_run: params.autoRun !== undefined,
+          prior_read_code: priorReadCode,
+          err:
+            priorReadError instanceof Error
+              ? { name: priorReadError.name, message: priorReadError.message }
+              : { message: String(priorReadError) },
+        },
+        'V5 chip_click run_analysis SUCCESS commit — prior-pending read failed; committing anyway ' +
+          'to keep the run_analysis fact durable, so any live pending on the prior row is WIPED by ' +
+          'this commit',
+      );
+    }
+
     try {
       const committed = await commitDirectAnswer(response, {
         scenario_id: payload.scenario_id,
@@ -1746,6 +1831,18 @@ export async function dispatchChipClickRunAnalysis(
         // only to satisfy the boundary contract and must never enter the
         // conversation record as user speech.
         ...(params.autoRun === undefined ? { userMessage: payload.message } : {}),
+        // ⭐ THE ROUND-3 FIX. Without this key the chokepoint carries forward
+        // `[]` and this row — which becomes the newest — wipes every live
+        // pending. Omitted (not `[]`) when the read FAILED, so the wipe stays
+        // honestly attributable to the read failure the loud event above
+        // names, rather than being disguised as a successful empty read.
+        // `pending_actions` is deliberately NOT pre-supplied: the chokepoint
+        // derives this turn's own pendings from the EGRESS-finalised chips,
+        // which is what keeps the "persisted pending ⟹ rendered chip"
+        // invariant true.
+        ...(successPriorPendingActions !== null
+          ? { priorPendingActions: successPriorPendingActions }
+          : {}),
         // Same GraphV3T the egress sanitiser uses for this turn — resolves
         // entity-id labels in the stored assistant answer so stored == wire.
         contentGraph: snapshotGraph,

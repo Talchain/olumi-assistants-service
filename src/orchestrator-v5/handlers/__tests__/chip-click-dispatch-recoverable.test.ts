@@ -89,7 +89,7 @@ import type { RunAnalysisScenarioSnapshot, ScenarioReader } from '../../tools/ha
 import type { PLoTClient, PLoTClientRunOpts, V2RunError } from '../../../orchestrator/plot-client.js';
 import { PLoTError } from '../../../orchestrator/plot-client.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
-import type { V5ActionType } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -771,5 +771,264 @@ describe('chip-click run_analysis — a recovered turn must not WIPE a live hold
         `cause ${cause} committed without threading the prior hold`,
       ).toContain(HOLD_ID);
     }
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// ⭐⭐⭐ THE SUCCESS COMMIT IS THE LAST CHIP-CLICK WIPE SHARER (2.1353 round 3)
+//
+// Everything above pins the RECOVERY path. The SUCCESS path — the one a user
+// hits when the analysis actually WORKS — commits with neither
+// `pending_actions` nor `priorPendingActions`, so it lands an authoritative
+// newest row whose pendings column is `[]`. `commit.ts` names this call site
+// itself, in the module docstring listing the remaining wipe sharers:
+//
+//     `handlers/chip-click-dispatch.ts:1679`, in
+//     `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit)
+//
+// MECHANISM (all three hops, none of them speculative):
+//   1. `commit.ts` reads `metadata.priorPendingActions ?? []` (:1136/:1183)
+//      and writes the carry-forward result into the NEW row's
+//      `pending_actions` column;
+//   2. `supabase-store.ts` `readMostRecentPendingActions` selects
+//      `.order('created_at', desc).limit(1)` — the NEWEST ROW ONLY;
+//   3. therefore a commit that threads no priors does not "carry nothing
+//      forward". It DELETES. Silently: the F-HELD lapse notice is built by
+//      the carry-forward pass, which never ran.
+//
+// MEASURED USER IMPACT: a founder asked a question at 12:14:19Z; the recorded
+// ask was gone at 12:14:34Z — FIFTEEN SECONDS later, across ZERO user turns.
+// Not TTL expiry. `elicit_option_effect` pendings measured 5 created / 0 ever
+// matched.
+//
+// CONTRAST CONTROL (the probe discriminates, it is not blind): in this very
+// file the RECOVERY path threads priors and says why. `rg -a -n
+// "priorPendingActions" src/orchestrator-v5/handlers/chip-click-dispatch.ts`
+// returns hits ONLY inside the recovery function. The success path never
+// reads priors at all.
+//
+// ⚠ EVERY CASE BINDS BY IDENTITY (the hold's `id`), never by list length or by
+// a value predicate another pending could satisfy.
+// ══════════════════════════════════════════════════════════════════════════
+describe('chip-click run_analysis — the SUCCESS commit must not WIPE a live hold (2.1353 round 3)', () => {
+  const HOLD_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const OTHER_HOLD_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const DRAFT_TURN_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+
+  /** A live consent hold sitting on the prior turn's authoritative row. */
+  function livePriorHold(id: string = HOLD_ID) {
+    return {
+      id,
+      scenario_id: SCENARIO_ID,
+      chip_id: `chip-apply-${id}`,
+      action: {
+        kind: 'apply_proposed_change',
+        proposal_ref: `prop-${id}`,
+        public_label: 'Raise price to 1.2',
+      },
+      preconditions: { graph_hash: 'h-prior' },
+      expires_at_turn_count: 3,
+      expires_at_iso: new Date(Date.now() + 3_600_000).toISOString(),
+      emitted_at_iso: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * A `run_analysis` HandlerFact mirroring the shape PLoT actually produces.
+   * Lifted from the established success fixture in
+   * `__tests__/chip-click-decision-review-attachment.integration.test.ts`
+   * (`makeRunAnalysisFact`) rather than invented here, so this suite's notion
+   * of "a successful run" is the same one the integration suite already
+   * drives the dispatcher with.
+   */
+  function makeRunAnalysisFact(): HandlerFact {
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      result: {
+        scenario_id: SCENARIO_ID,
+        leading_option_id: 'opt_a',
+        summary: 'Ran analysis on your current scenario.',
+        win_probabilities: { opt_a: 0.7, opt_b: 0.3 },
+        graph_hash_at_run: 'gh_success_commit_0001',
+        computed_at: '2026-05-17T00:00:00.000Z',
+        enrichment: {
+          graph: {
+            nodes: [
+              { id: 'fac_delivery_risk', label: 'Delivery risk', kind: 'factor' },
+              { id: 'fac_cost_overrun', label: 'Cost overrun', kind: 'factor' },
+            ],
+          },
+          factor_sensitivity: [
+            { factor_id: 'fac_delivery_risk', confidence: 0.2 },
+            { factor_id: 'fac_cost_overrun', confidence: 0.5 },
+          ],
+          option_comparison: [
+            {
+              id: 'opt_a',
+              option_id: 'opt_a',
+              label: 'Plan A',
+              option_label: 'Plan A',
+              status: 'computed',
+              outcome: { mean: 0.05, p10: -0.1, p50: 0.05, p90: 0.2 },
+              win_probability: 0.7,
+            },
+            {
+              id: 'opt_b',
+              option_id: 'opt_b',
+              label: 'Plan B',
+              option_label: 'Plan B',
+              status: 'computed',
+              outcome: { mean: 0.02, p10: -0.05, p50: 0.02, p90: 0.1 },
+              win_probability: 0.3,
+            },
+          ],
+          decision_brief: {
+            options: [
+              { rank: 1, option_id: 'opt_a', label: 'Plan A', win_probability: 0.7 },
+              { rank: 2, option_id: 'opt_b', label: 'Plan B', win_probability: 0.3 },
+            ],
+          },
+        },
+      },
+    } as unknown as HandlerFact;
+  }
+
+  /**
+   * The counterpart to `registryThrowing`: a registry whose `run_analysis`
+   * handler SUCCEEDS. Same construction idiom as the integration suite's
+   * `makeHandlerRegistry`.
+   */
+  function registrySucceeding(): HandlerRegistry {
+    const fn: HandlerFn = () =>
+      Promise.resolve({
+        handler_facts: [makeRunAnalysisFact()],
+        assistant_text: 'Ran analysis on your current scenario.',
+        llm_calls_used: 0,
+      } as unknown as Awaited<ReturnType<HandlerFn>>);
+    return new Map<V5ActionType, HandlerFn>([['run_analysis', fn]]);
+  }
+
+  beforeEach(() => {
+    commitDirectAnswerMock.mockClear();
+    priorPendingsMock.mockReset();
+    priorPendingsMock.mockResolvedValue([livePriorHold()]);
+  });
+
+  function soleCommitMetadata(): Record<string, unknown> {
+    expect(
+      commitDirectAnswerMock.mock.calls.length,
+      'exactly one commit is expected on this turn',
+    ).toBe(1);
+    return (commitDirectAnswerMock.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+  }
+
+  it('RED-FIRST: a SUCCESSFUL run_analysis threads the live hold through the commit, so the new newest row cannot wipe it', async () => {
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r3-success-priors',
+      handlerRegistry: registrySucceeding(),
+    });
+    expect(out.outcome).toBe('ok');
+
+    // PRECONDITION PINNED IN-TEST (the discriminating twin): the read this
+    // turn depends on actually RAN and actually returned a hold. Without this
+    // the assertion below could pass vacuously against a stub that silently
+    // stopped returning anything — a guard agreeing with itself.
+    expect(priorPendingsMock.mock.calls.length, 'the prior-pending read must have run').toBe(1);
+
+    const meta = soleCommitMetadata();
+    const priors = meta.priorPendingActions as Array<{ id?: string }> | undefined;
+    expect(
+      priors,
+      'no priors threaded ⟹ commit.ts carries forward [] ⟹ the newest row lands with an EMPTY ' +
+        'pendings list and the live hold is silently gone (15s, zero user turns, measured)',
+    ).toBeDefined();
+    expect((priors ?? []).map((p) => p.id)).toContain(HOLD_ID);
+  });
+
+  it('binds by IDENTITY — every live hold on the prior row is carried, not just some pending that happens to be there', async () => {
+    priorPendingsMock.mockResolvedValue([livePriorHold(), livePriorHold(OTHER_HOLD_ID)]);
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r3-success-identity',
+      handlerRegistry: registrySucceeding(),
+    });
+    expect(out.outcome).toBe('ok');
+    expect(priorPendingsMock.mock.calls.length, 'the prior-pending read must have run').toBe(1);
+
+    const ids = ((soleCommitMetadata().priorPendingActions ?? []) as Array<{ id?: string }>).map(
+      (p) => p.id,
+    );
+    expect(ids).toContain(HOLD_ID);
+    expect(ids).toContain(OTHER_HOLD_ID);
+  });
+
+  it('THE AUTO-RUN PATH — the founder’s actual route (auto-run-after-draft) threads the same hold', async () => {
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r3-autorun-priors',
+      handlerRegistry: registrySucceeding(),
+      autoRun: { draftTurnId: DRAFT_TURN_ID },
+    });
+    expect(out.outcome).toBe('ok');
+    expect(priorPendingsMock.mock.calls.length, 'the prior-pending read must have run').toBe(1);
+
+    const meta = soleCommitMetadata();
+    expect(
+      (meta.priorPendingActions as Array<{ id?: string }> | undefined),
+      'the auto-run success commit wiped the live hold',
+    ).toBeDefined();
+    expect(((meta.priorPendingActions ?? []) as Array<{ id?: string }>).map((p) => p.id)).toContain(
+      HOLD_ID,
+    );
+    // The auto-run turn still stores NO user message (R2) — pinned here so a
+    // future edit to this commit's metadata cannot quietly reintroduce it.
+    expect(meta.userMessage).toBeUndefined();
+  });
+
+  it('READ FAILURE — the commit STILL happens (the run_analysis fact is durable) and the wipe risk is announced LOUDLY by event name', async () => {
+    priorPendingsMock.mockRejectedValue(
+      Object.assign(new Error('session read failed'), { code: 'store_unavailable' }),
+    );
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r3-read-fail',
+      handlerRegistry: registrySucceeding(),
+    });
+
+    // DELIBERATE DIVERGENCE FROM THE RECOVERY PATH'S FAIL-CLOSED CHOICE.
+    // On the SUCCESS path the commit carries the `run_analysis` fact the
+    // freshness chain and the rerun escape hatch depend on; refusing it turns
+    // a successful analysis into an unrecorded one. See the source comment.
+    expect(out.outcome).toBe('ok');
+    expect(out.commitPerformed).toBe(true);
+    expect(commitDirectAnswerMock.mock.calls.length).toBe(1);
+
+    // Bound BY IDENTITY to the event name, never to substring-matched prose.
+    const loud = (errorSpy?.mock.calls ?? []).filter(
+      (c: unknown[]) => (c[0] as { event?: unknown } | undefined)?.event === 'v5.pending_wipe_risk_on_success_commit',
+    );
+    expect(
+      loud.length,
+      'the read-failure branch previously wiped live pendings SILENTLY, 100% of the time — ' +
+        'it must now be loud',
+    ).toBe(1);
+    const fields = loud[0][0] as Record<string, unknown>;
+    expect(fields.request_id).toBe('req-r3-read-fail');
+    expect(fields.scenario_id).toBe(SCENARIO_ID);
+  });
+
+  it('DISCRIMINATING TWIN for the loud event — it is NOT emitted on the healthy read (an always-on alarm is no alarm)', async () => {
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(),
+      requestId: 'req-r3-no-false-alarm',
+      handlerRegistry: registrySucceeding(),
+    });
+    expect(out.outcome).toBe('ok');
+    const loud = (errorSpy?.mock.calls ?? []).filter(
+      (c: unknown[]) => (c[0] as { event?: unknown } | undefined)?.event === 'v5.pending_wipe_risk_on_success_commit',
+    );
+    expect(loud.length, 'the wipe-risk alarm fired on a turn that read the priors just fine').toBe(0);
   });
 });
