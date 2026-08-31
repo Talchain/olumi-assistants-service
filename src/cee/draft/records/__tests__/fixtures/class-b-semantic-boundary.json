@@ -1,0 +1,154 @@
+{
+  "fixture_kind": "synthetic_current_grammar_records_with_external_acceptance_oracle",
+  "oracle_note": "The oracle is test-only metadata transcribed from the user's acceptance requirements. It is not a producer field and is never passed to projectDraftRecords. These are hand-built records, not provider captures. Intervention values are synthetic test inputs, not measured effects. No model evaluation or completed analysis is claimed.",
+  "cases": {
+    "misfiled_explanation": {
+      "brief": "We want to improve retention. Poor onboarding is causing churn.",
+      "records": {
+        "stated_items": [
+          { "kind": "goal", "source_quote": "improve retention" },
+          { "kind": "option", "source_quote": "Poor onboarding is causing churn" }
+        ],
+        "claims": [
+          { "claim_kind": "factor", "label": "Onboarding completion", "basis": [0] },
+          { "claim_kind": "outcome", "label": "Retained customers", "basis": [0] },
+          { "claim_kind": "causal_link", "label": "candidate changes completion", "from_stated": 1, "to_claim": 0, "effect": "positive", "sets_to": 0.8 },
+          { "claim_kind": "causal_link", "label": "completion affects retention", "from_claim": 0, "to_claim": 1, "effect": "positive" },
+          { "claim_kind": "causal_link", "label": "retention reaches objective", "from_claim": 1, "to_stated": 0, "effect": "positive" }
+        ]
+      },
+      "oracle": {
+        "semantic_role": "explanation",
+        "misclassification_is_deliberate": true,
+        "subject_id": "5d9a72b6",
+        "source_quote": "Poor onboarding is causing churn",
+        "must_not_be_option": true,
+        "dependency": "The current record mislabels the explanation as an option. A producer semantic verdict is missing; this fixture does not authorize a lexical projector classifier."
+      }
+    },
+    "user_stated_explanation": {
+      "brief": "We want to improve retention. Poor onboarding is causing churn.",
+      "records": {
+        "stated_items": [
+          { "kind": "goal", "source_quote": "improve retention" }
+        ],
+        "claims": [
+          { "claim_kind": "factor", "label": "Poor onboarding is causing churn", "basis": [0] },
+          { "claim_kind": "outcome", "label": "Retained customers", "basis": [0] },
+          { "claim_kind": "causal_link", "label": "onboarding hypothesis bears on retention", "from_claim": 0, "to_claim": 1, "effect": "negative" },
+          { "claim_kind": "causal_link", "label": "retention reaches objective", "from_claim": 1, "to_stated": 0, "effect": "positive" }
+        ]
+      },
+      "oracle": {
+        "semantic_role": "explanation",
+        "subject_id": "800d1bd0",
+        "subject_label": "Poor onboarding is causing churn",
+        "expected_provenance": "from_brief",
+        "source_quote": "Poor onboarding is causing churn",
+        "dependency": "The instruction routes this user-stated cause into claims, but the current claim record has no source-origin field."
+      }
+    },
+    "ai_inferred_explanation": {
+      "brief": "Retention has fallen. We want to improve retention.",
+      "records": {
+        "stated_items": [
+          { "kind": "goal", "source_quote": "improve retention" }
+        ],
+        "claims": [
+          { "claim_kind": "factor", "label": "Poor onboarding is causing churn", "basis": [0] },
+          { "claim_kind": "outcome", "label": "Retained customers", "basis": [0] },
+          { "claim_kind": "causal_link", "label": "onboarding hypothesis bears on retention", "from_claim": 0, "to_claim": 1, "effect": "negative" },
+          { "claim_kind": "causal_link", "label": "retention reaches objective", "from_claim": 1, "to_stated": 0, "effect": "positive" }
+        ]
+      },
+      "oracle": {
+        "semantic_role": "explanation",
+        "subject_id": "800d1bd0",
+        "subject_label": "Poor onboarding is causing churn",
+        "expected_provenance": "ai_inferred"
+      }
+    },
+    "nonaction_connected": {
+      "brief": "Retention is 70%. We want to improve retention and understand why it has fallen.",
+      "records": {
+        "stated_items": [
+          { "kind": "goal", "source_quote": "improve retention" },
+          { "kind": "figure", "source_quote": "Retention is 70%", "value": 70, "unit": "%", "role": "baseline" }
+        ],
+        "claims": [
+          { "claim_kind": "factor", "label": "Poor onboarding is causing churn", "basis": [1] },
+          { "claim_kind": "factor", "label": "Pricing mismatch is causing churn", "basis": [1] },
+          { "claim_kind": "outcome", "label": "Retained customers", "basis": [0] },
+          { "claim_kind": "causal_link", "label": "onboarding hypothesis bears on retention", "from_claim": 0, "to_claim": 2, "effect": "negative" },
+          { "claim_kind": "causal_link", "label": "pricing hypothesis bears on retention", "from_claim": 1, "to_claim": 2, "effect": "negative" },
+          { "claim_kind": "causal_link", "label": "current retention bears on result", "from_stated": 1, "to_claim": 2, "effect": "positive" },
+          { "claim_kind": "causal_link", "label": "retention reaches objective", "from_claim": 2, "to_stated": 0, "effect": "positive" }
+        ]
+      },
+      "oracle": {
+        "subjects": [
+          { "id": "800d1bd0", "label": "Poor onboarding is causing churn" },
+          { "id": "b639f9c9", "label": "Pricing mismatch is causing churn" }
+        ],
+        "stated_fact_id": "7683a7f4",
+        "stated_fact_quote": "Retention is 70%",
+        "expected_option_count": 0,
+        "expected_ready": false
+      }
+    },
+    "nonaction_disconnected": {
+      "brief": "Retention is 70%. We want to improve retention and understand why it has fallen.",
+      "records": {
+        "stated_items": [
+          { "kind": "goal", "source_quote": "improve retention" },
+          { "kind": "figure", "source_quote": "Retention is 70%", "value": 70, "unit": "%", "role": "baseline" }
+        ],
+        "claims": [
+          { "claim_kind": "factor", "label": "Poor onboarding is causing churn", "basis": [1] },
+          { "claim_kind": "factor", "label": "Pricing mismatch is causing churn", "basis": [1] },
+          { "claim_kind": "outcome", "label": "Retained customers", "basis": [0] },
+          { "claim_kind": "causal_link", "label": "onboarding hypothesis bears on retention", "from_claim": 0, "to_claim": 2, "effect": "negative" },
+          { "claim_kind": "causal_link", "label": "current retention bears on result", "from_stated": 1, "to_claim": 2, "effect": "positive" },
+          { "claim_kind": "causal_link", "label": "retention reaches objective", "from_claim": 2, "to_stated": 0, "effect": "positive" }
+        ]
+      },
+      "oracle": {
+        "subjects": [
+          { "id": "800d1bd0", "label": "Poor onboarding is causing churn" },
+          { "id": "b639f9c9", "label": "Pricing mismatch is causing churn" }
+        ],
+        "disconnected_subject_id": "b639f9c9",
+        "expected_option_count": 0,
+        "expected_ready": false,
+        "dependency": "Removing one causal link must not erase the unresolved explanation from canonical reasoning/context. This oracle does not prescribe a new wire field or a fabricated edge."
+      }
+    },
+    "genuine_alternatives": {
+      "brief": "We want to improve retention. Sales says improve onboarding; please suggest another course of action.",
+      "records": {
+        "stated_items": [
+          { "kind": "goal", "source_quote": "improve retention" },
+          { "kind": "option", "source_quote": "improve onboarding" }
+        ],
+        "claims": [
+          { "claim_kind": "factor", "label": "Onboarding completion", "basis": [1] },
+          { "claim_kind": "option_refinement", "label": "Introduce a guided product tour", "basis": [0] },
+          { "claim_kind": "outcome", "label": "Retained customers", "basis": [0] },
+          { "claim_kind": "causal_link", "label": "stated action changes completion", "from_stated": 1, "to_claim": 0, "effect": "positive", "sets_to": 0.8 },
+          { "claim_kind": "causal_link", "label": "proposed tour changes completion", "from_claim": 1, "to_claim": 0, "effect": "positive", "sets_to": 0.4 },
+          { "claim_kind": "causal_link", "label": "completion affects retention", "from_claim": 0, "to_claim": 2, "effect": "positive" },
+          { "claim_kind": "causal_link", "label": "retention reaches objective", "from_claim": 2, "to_stated": 0, "effect": "positive" }
+        ]
+      },
+      "oracle": {
+        "target_factor_id": "226e8f89",
+        "target_factor_label": "Onboarding completion",
+        "options": [
+          { "id": "691fdd80", "label": "Improve Onboarding", "provenance": "from_brief", "intervention": 0.8 },
+          { "id": "a641491a", "label": "Introduce a guided product tour", "provenance": "ai_inferred", "intervention": 0.4 }
+        ],
+        "expected_ready": true
+      }
+    }
+  }
+}
