@@ -1272,6 +1272,40 @@ describe("label_placeholder — an un-chosen mint, marked as one", () => {
    * be one boolean answering two questions again, which is the defect this
    * field was minted to end.
    */
+  /**
+   * ⭐⭐ THE USER WHO NAMES THEIR NODE "Question" — the discriminating fixture
+   * that settles a SURVIVING mutant rather than asserting it away.
+   *
+   * A mutant making the provenance reader mark EVERY node survived the arms
+   * above, so the honest question was whether it is EQUIVALENT (trap 13c: a
+   * survivor is a claim either way, and both directions must be demonstrated).
+   * It is NOT. This is the input that separates them: the banked flag is
+   * ABSENT — nobody minted a placeholder here — while the label happens to
+   * equal the placeholder word because the user typed it.
+   *
+   * The mark must NOT appear. The user chose this name, and showing them an
+   * empty state over a node they deliberately titled would be the same class
+   * of false claim as the one this whole change removes — just pointing the
+   * other way.
+   */
+  it("⭐ a user who NAMES their decision \"Question\" is not marked as a placeholder", () => {
+    const userNamed = {
+      version: "1",
+      nodes: [
+        {
+          id: "dec_1",
+          kind: "decision",
+          label: UI_DECISION_NODE_LABEL,
+          // No `label_placeholder`: the producer never minted one here.
+          provenance: { provenance_class: "projector_structural" },
+        },
+        { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+      ],
+      edges: [],
+    };
+    expect(wireDecision(userNamed)?.label_placeholder).toBeUndefined();
+  });
+
   it("⭐ a blank label is NOT marked as the placeholder — a different question", () => {
     for (const blank of ["", "   "]) {
       const v1 = placeholderV1({ label: blank });
