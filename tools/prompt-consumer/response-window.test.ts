@@ -70,7 +70,8 @@ function retain(name: string, result: ReturnType<typeof through>) {
 }
 afterAll(() => {
   assert.deepEqual(names, ['current-control', 'history-window-binding', 'inside-window-failure', 'missing-cutoff-failure', 'annotation-control',
-    'full-history-binding', 'current-duplicate-contradiction', 'fleet-authority', 'historical-integrity', 'empty-current-window', 'missing-fleet-no-cutoff', 'observed-status-window']);
+    'full-history-binding', 'current-duplicate-contradiction', 'fleet-authority', 'historical-integrity', 'empty-current-window', 'missing-fleet-no-cutoff', 'observed-status-window',
+    'coherent-history-control', 'inside-window-conflict-control', 'cross-cutoff-conflict']);
   console.log('CODEX1271_WINDOW=' + JSON.stringify({ head, scope: 'Synthetic captures through real decoder/fleet/serving/promotion; no network', summaries }));
 });
 describe('CODEX1271 historical evidence must not become current-window contradiction', () => {
@@ -229,5 +230,33 @@ describe('CODEX1271 historical evidence must not become current-window contradic
     expect(r.promotion.deploymentPermission).toBe('NOT_GRANTED');
     const bad = through([capture('wrong-current-observation', start, previous), ...current()], start, 'observed');
     expect(bad.serving.deployedProviderStatus).toBe('FAIL');
+  });
+  // Independently authored counterexample: programme-docs b19b8c0c65294dd6d736f70c6519b52203d53ec5,
+  // 1271-window-rereview. These three cases vary only request association/cutoff.
+  it('coherent-history-control', () => {
+    names.push('coherent-history-control');
+    const r = through([capture('distinct-predecessor', '2026-08-31T08:59:00Z', previous), ...current()]);
+    retain('coherent-history-control', r);
+    expect(r.serving.actualResponseSelection.status).toBe('PASS');
+    expect(r.promotion.checks.candidateCache.status).toBe('UNVERIFIED');
+  });
+  it('inside-window-conflict-control', () => {
+    names.push('inside-window-conflict-control');
+    const r = through([capture('after-1', '2026-08-31T09:01:00Z', previous), ...current()]);
+    retain('inside-window-conflict-control', r);
+    expect(r.packet.responses.every(x => x.levels.binding.status === 'PASS')).toBe(true);
+    expect(r.packet.fleet.issues).toContain('One request id has conflicting response bodies');
+    expect(r.promotion.checks.candidateCache.status).toBe('FAIL');
+  });
+  it('cross-cutoff-conflict', () => {
+    names.push('cross-cutoff-conflict');
+    const r = through([capture('after-1', '2026-08-31T08:59:00Z', previous), ...current()]);
+    retain('cross-cutoff-conflict', r);
+    expect(r.packet.responses.every(x => x.levels.binding.status === 'PASS')).toBe(true);
+    expect(r.packet.fleet.excludedBeforeCutoff).toHaveLength(1);
+    // Moving a selection outside the window cannot make two different HTTP
+    // bodies for the same request become sound evidence.
+    expect.soft(r.packet.fleet.issues).toContain('One request id has conflicting response bodies');
+    expect.soft(r.promotion.checks.candidateCache.status).toBe('FAIL');
   });
 });

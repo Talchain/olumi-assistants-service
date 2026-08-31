@@ -71,6 +71,13 @@ export function evaluateResponseFleet(input: ResponseFleetInput): ResponseFleetR
       collectionStatus = 'FAIL'; issues.push('Response decoder targeted a different mode/configuration');
     }
     if (!Number.isFinite(Date.parse(response.observedAt))) { collectionStatus = 'FAIL'; issues.push('Invalid response observation time'); }
+    // Request/body association is collection integrity, not current selection.
+    // Neither a cutoff nor sample deduplication may hide conflicting receipts.
+    if (response.requestId) {
+      const prior = seenRequests.get(response.requestId);
+      if (prior && prior !== response.responseSha256) { collectionStatus = 'FAIL'; issues.push('One request id has conflicting response bodies'); }
+      seenRequests.set(response.requestId, response.responseSha256);
+    }
   }
   const qualifying: ResponseIdentityReport[] = [], windowResponses: ResponseIdentityReport[] = [];
   for (const response of responses) {
@@ -80,11 +87,6 @@ export function evaluateResponseFleet(input: ResponseFleetInput): ResponseFleetR
     windowResponses.push(response);
     if (seenBodies.has(response.responseSha256)) { duplicates.push(response.responseSha256); continue; }
     seenBodies.add(response.responseSha256);
-    if (response.requestId) {
-      const prior = seenRequests.get(response.requestId);
-      if (prior && prior !== response.responseSha256) { collectionStatus = 'FAIL'; issues.push('One request id has conflicting response bodies'); }
-      seenRequests.set(response.requestId, response.responseSha256);
-    }
     qualifying.push(response);
   }
   if (duplicates.length) issues.push('Duplicate response captures retained but excluded from independent sample counts');

@@ -63,6 +63,28 @@ not new HTTP/provider draws or deployed acceptance. Use the exact corrected head
 and validation report in the PR delivery comment; independent re-review is still
 required and the original CHANGES_REQUIRED verdict is not self-overturned.
 
+[Independent re-review at d454d98d](https://github.com/Talchain/olumi-assistants-service/pull/1271#issuecomment-5480297455)
+confirmed the first correction (75/75 original/targeted cases) and found a
+separate collection-integrity gap: two different bodies carrying one request ID
+escaped the uniqueness check when one observation preceded the cutoff. Its
+three named cases are banked in programme-docs
+`b19b8c0c65294dd6d736f70c6519b52203d53ec5`, under
+`codex-evidence/resume-20260831/1271-window-rereview/`.
+
+The successor moves request/body uniqueness into full-collection validation,
+before cutoff and sample deduplication. The same independent three cases are
+retained in the existing window suite, alongside its original twelve controls.
+Before this correction the fifteen-case run collected fourteen PASS and the
+cross-cutoff FAIL. Coherent distinct-ID history and missing-provider UNVERIFIED
+remain the counterparts, not promotion permission. Consult the exact-head PR
+delivery for the corrected run and independent verdict.
+
+The separately banked [archival portability correction](./PORTABILITY.md) is
+combined here without changing response semantics: full-advisory checkout
+supplies the same full history as required CI; replay refuses absent runtime or
+recorder authority before worktree allocation and cleans up only owned state.
+No hidden fetch, source substitution, skipped gate or timeout increase is used.
+
 ## First unclosed link: assigned serving telemetry
 
 Current-source inspection was pinned to
