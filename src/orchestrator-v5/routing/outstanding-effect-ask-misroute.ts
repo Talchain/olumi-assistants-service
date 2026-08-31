@@ -136,6 +136,13 @@ import {
   resolveOptionEffectWrite,
 } from './option-effect-write.js';
 import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value-binding.js';
+// ⭐ ONE OWNER EACH, imported rather than re-spelled (trap 12):
+//   · "is this an answer to the missing-value ask?" — shared with
+//     `configure-option-clarify-response.ts`, its other consumer;
+//   · "does this message name this label?" — the same word-bounded reader
+//     `configure-option-intent` / `-advice` / `-clarify` already use.
+import { messageAnswersMissingValueAsk } from './missing-value-answer.js';
+import { containsPhrase } from './option-intervention-guard.js';
 
 /** The handlers this module can refuse. Both are D1 graph-mutating writers. */
 export type OutstandingEffectAskHandlerId = 'set_factor_value' | 'adjust_edge_strength';
@@ -217,6 +224,94 @@ function isUnanchoredEffectFraming(
   return trigger !== null && EFFECT_FRAMED_TRIGGERS.has(trigger);
 }
 
+/**
+ * ⭐⭐⭐ THE ANSWERS THIS MODULE RECOGNISES AS ANSWERS AND DELIBERATELY DOES NOT
+ * CLAIM, pinned as data so the suite REDs if the set GROWS **or** SHRINKS
+ * (trap 22f's honest-gap protocol, as used by `MISSING_VALUE_ANSWER_KNOWN_DROPPED`
+ * and `CONTENTFUL_SUBJECT_KNOWN_DROPPED`).
+ *
+ * Every member is a value-word answer that `messageAnswersMissingValueAsk`
+ * returns FALSE for, so {@link isUnanchoredAnswerToOutstandingAsk} cannot see it.
+ * Each is genuinely answer-shaped, and on each the wrong-entity factor write
+ * still proceeds today.
+ *
+ * ⚠ WHY THEY ARE NOT CLOSED HERE. The gap is in the SHARED answer-reader, not in
+ * this guard. Widening `messageAnswersMissingValueAsk` changes what the
+ * loop-breaking clarify claims as well (`configure-option-clarify-response.ts`
+ * is its other consumer), which is a different seam with a different blast
+ * radius. Adding a SECOND spelling of "is this an answer?" here to cover them is
+ * exactly the two-same-named-predicates defect (trap 12/21) — the reason this
+ * guard reuses the one owner is that a second one is what rots.
+ *
+ * A gap recorded in the suite is honest; a gap invisible to it is how the
+ * witnessed defect shipped.
+ */
+export const OUTSTANDING_EFFECT_ASK_ANSWER_KNOWN_DROPPED: readonly string[] = [
+  'a third',
+  'About a third.',
+  'Make it a quarter.',
+  'quite high',
+];
+
+/**
+ * ⭐⭐ IS THIS THE USER ANSWERING THE PRODUCT'S OWN QUESTION, WITHOUT NAMING THE
+ * FACTOR THEY ARE BEING ASKED ABOUT?
+ *
+ * ⚠ THIS EXISTS BECAUSE THE EFFECT FRAMING IS IN THE **ASK**, NOT IN THE
+ * **ANSWER**, and {@link isUnanchoredEffectFraming} can only ever see the answer.
+ * Wire-witnessed on deployed `d0544243`: the product asked for option
+ * `9cb78c6e`'s effect on factor `06fd579a`; the user replied *"Set it to a
+ * third."*; the identity match was PRESENT (`entityId === 06fd579a`) and was
+ * discarded, because a bare answer carries no `effect`/`intervention`/`configure`
+ * vocabulary. The write then moved the factor's own level to 33%, the product
+ * replied *"Updated Operational Control Level to 33%."*, committed a new graph
+ * hash, and the option's `interventions` never changed.
+ *
+ * ⭐ IT INVENTS NO VOCABULARY. Both halves are imported from their existing
+ * owners, so this guard cannot acquire a second spelling of either question
+ * (trap 12 — the second spelling is the one that rots):
+ *
+ *   · "is this an answer to the missing-value ask?" is
+ *     `messageAnswersMissingValueAsk` — the estate's ONE owner, already consumed
+ *     by `configure-option-clarify-response.ts` to decide the same thing;
+ *   · "does the message name this label?" is `containsPhrase` — the same
+ *     word-bounded, regex-free reader `configure-option-intent`,
+ *     `configure-option-advice` and `configure-option-clarify` all use.
+ *
+ * ⭐⭐ WHY `!namesTheFactor` IS THE LOAD-BEARING CONJUNCT, AND IT IS THE TWIN'S
+ * PROTECTION RATHER THAN A NARROWING. A factor whose effect value is outstanding
+ * is STILL a legitimate target for an ordinary baseline edit — this module's
+ * header has said so since it was written, and refusing those would strand the
+ * user for as long as the model is blocked. The discriminator is that a user who
+ * NAMES the factor has made an anchored choice about that entity, whereas a user
+ * who does not name it has given the system nothing but an answer — so the ONLY
+ * reason the proposal resolved this factor at all is the outstanding ask, i.e.
+ * the system is already treating the message as that answer. Measured, both
+ * directions in one run:
+ *
+ *   "Set it to a third."                   → REFUSED (the witnessed defect)
+ *   "Set Operational Control Level to 40%." → WRITES  (the legitimate twin)
+ *
+ * ⚠ DIRECTION OF THE FAILURE MODE, stated, and unchanged from this module's
+ * existing arms: a false positive costs ONE clarify turn on a graph that is
+ * ALREADY BLOCKED — and the copy it produces re-asks the outstanding question,
+ * which is the turn the user needed anyway. A false negative writes the wrong
+ * field, badges it "Applied", and feeds the user's own number back to them as
+ * the factor's established level. They are not symmetric.
+ *
+ * ⚠ IT NEVER PICKS AND NEVER WRITES — the ambiguity is made the product
+ * (trap 22f's exit), exactly as the sibling arms do.
+ */
+function isUnanchoredAnswerToOutstandingAsk(
+  message: string,
+  askedPairs: readonly MissingEffectPair[],
+): boolean {
+  if (!messageAnswersMissingValueAsk(message)) return false;
+  // `containsPhrase` requires a lower-cased, space-padded haystack.
+  const padded = ` ${message.toLowerCase().replace(/\s+/g, ' ').trim()} `;
+  return !askedPairs.some((p) => containsPhrase(padded, p.factorLabel.toLowerCase()));
+}
+
 /** Normalised exactly as the writer normalises, so the two read one string. */
 function readUserValue(message: string): number | null {
   return readOptionEffectValue(message.toLowerCase().replace(/\s+/g, ' ').trim());
@@ -266,11 +361,35 @@ export function findOutstandingEffectAskCollision(params: {
   // set_factor_value — the prose conjuncts apply to a TYPED turn only. On a
   // chip-originated turn the message is the product's own content-free copy, so
   // the arm matches on identity alone, symmetric with the edge arm above.
+  //
+  // ⚠ THE IDENTITY MATCH IS TAKEN FIRST, and that is a reordering rather than a
+  // widening: both were already conjuncts, so the accepted set is unchanged. It
+  // is hoisted because `isUnanchoredAnswerToOutstandingAsk` must read the factor
+  // label of THE PAIR THE PRODUCT IS ASKING ABOUT — not of every outstanding
+  // pair in the model — or a user naming some other blocked factor would be
+  // silently claimed here.
+  const match = pairs.filter((p) => p.factorId === params.entityId);
+  if (match.length === 0) return null;
   if (!params.chipOriginated) {
     if (BASELINE_FRAMING.test(params.message.toLowerCase())) return null;
-    if (!isUnanchoredEffectFraming(params.message, params.optionLabels)) return null;
+    // ⭐⭐ TWO WAYS A TYPED TURN CAN BE THE WRONG FIELD OF THE ASKED PAIR, and
+    // they are genuinely different questions rather than one predicate widened
+    // (trap 21 — name the concepts apart):
+    //
+    //   · the user described an EFFECT and merely failed to anchor the option
+    //     ("Set its effect on X to 0.33") — the framing is in the SENTENCE;
+    //   · the user ANSWERED THE PRODUCT'S OWN QUESTION and named no factor
+    //     ("Set it to a third.")          — the framing is in the ASK.
+    //
+    // The second arm is what the witnessed defect needed and what no reading of
+    // the user's own words could ever have supplied.
+    if (
+      !isUnanchoredEffectFraming(params.message, params.optionLabels)
+      && !isUnanchoredAnswerToOutstandingAsk(params.message, match)
+    ) {
+      return null;
+    }
   }
-  const match = pairs.filter((p) => p.factorId === params.entityId);
   return match.length > 0
     ? { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) }
     : null;
