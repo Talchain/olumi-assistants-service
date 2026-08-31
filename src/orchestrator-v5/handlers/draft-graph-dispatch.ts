@@ -63,6 +63,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
+import { OPTION_FRAMING_WARNING_ID } from '../../cee/draft/records/option-framing-recovery.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { loadMostRecentPendingActions } from '../build-turn-context.js';
 import {
@@ -173,6 +174,16 @@ export interface DispatchDraftGraphResult {
    * never sees it.
    */
   readonly diagnosticTrace?: V5DiagnosticTrace;
+}
+
+/** The exact producer-owned gap, shared by the immediate and durable receipts. */
+function draftOptionFramingNotice(result: DraftGraphResult): string {
+  const text = (result.draftWarnings ?? [])
+    .filter(warning => warning.id === OPTION_FRAMING_WARNING_ID)
+    .map(warning => [warning.explanation, warning.fix_hint].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('\n\n');
+  return text ? sanitiseCoachingProse(text, result.graphOutput).text : '';
 }
 
 /**
@@ -312,7 +323,10 @@ export function draftResultToOlumiResponse(
     // `risk_adjusted` / `goal_setting` / `out_of_scope` are preserved
     // (rule 3). The scrub is idempotent — running it again before the
     // central egress is a no-op.
-    assistantText = sanitiseCoachingProse(narrative.text, result.graphOutput).text;
+    // Preserve the producer's unresolved framing disclosure on the native V5
+    // receipt. The detailed record carrier is otherwise reduced to a count.
+    const narrativeWithFraming = [draftOptionFramingNotice(result), narrative.text].filter(Boolean).join('\n\n');
+    assistantText = sanitiseCoachingProse(narrativeWithFraming, result.graphOutput).text;
     emit(TelemetryEvents.V5PostDraftCoachingSourceSelected, {
       request_id: requestId,
       scenario_id: payload.scenario_id,
@@ -882,6 +896,7 @@ export async function dispatchDraftGraph(
     // only surfaced when the trace is built (flag-on); flag-off path
     // discards the value at the build site without allocating the trace.
     const commitStartedAt = Date.now();
+    const framingNotice = draftOptionFramingNotice(draftResult);
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
@@ -897,16 +912,18 @@ export async function dispatchDraftGraph(
       // building it has a telemetry side-effect — V5PostDraftCoachingSource
       // Selected — that must only fire once persistence has SUCCEEDED; see the
       // "does NOT emit … when graph persistence fails" regression test). We
-      // therefore do NOT capture assistant_message on the draft turn (it stays
-      // null); the draft narrative is reconstructable from the persisted graph,
-      // which IS projected into the next turn's ContextPack. We DO capture the
+      // therefore do NOT capture the full narrative on the draft turn. The
+      // producer-owned framing gap is different: graph compaction drops its
+      // record disclosure, so it cannot be reconstructed next turn. Persist
+      // that exact, side-effect-free notice here through the existing
+      // assistant_message carrier, atomically with the graph. We DO capture the
       // user brief (userMessage) — it is graphPersisted-independent and
       // side-effect-free. Capturing the draft narrative without a second write
       // or breaking the telemetry-after-persistence invariant is a follow-up.
       // The code-owned missing-effect referent DOES persist below, atomically
       // with this graph: no prose parsing or second write is needed to retain
       // the exact question that the successful response will render.
-      { response_version: 2, assistant_text: holdThread.notice ?? '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
+      { response_version: 2, assistant_text: [framingNotice, holdThread.notice].filter(Boolean).join('\n\n'), blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
@@ -951,6 +968,7 @@ export async function dispatchDraftGraph(
         coaching_state: null,
         // V5 Conversation Context Reliability: persist the user's brief.
         userMessage: payload.message,
+        contentGraph: draftResult.graphOutput,
       },
     );
     const persistenceMs = Date.now() - commitStartedAt;
@@ -1035,10 +1053,18 @@ export async function dispatchDraftGraph(
     // has no assistant_text and appends nothing.
     const committedText = commitResult.response?.assistant_text;
     if (typeof committedText === 'string' && committedText.trim().length > 0) {
-      response = {
-        ...response,
-        assistant_text: appendLapseNotice(response.assistant_text, committedText.trim()),
-      };
+      // The exact framing notice already heads the native narrative. Reattach
+      // only the remaining committed notices, including any commit-time TTL
+      // lapse. Do not duplicate the framing gap or discard a different notice.
+      const remainingNotice = framingNotice && committedText.startsWith(framingNotice)
+        ? committedText.slice(framingNotice.length).trim()
+        : committedText.trim();
+      if (remainingNotice) {
+        response = {
+          ...response,
+          assistant_text: appendLapseNotice(response.assistant_text, remainingNotice),
+        };
+      }
     }
     // V5 finaliser contract: surface the rich pipeline payload on the
     // dispatch result so route-v2.ts can stamp it via finaliseV5Response.

@@ -90,6 +90,7 @@ import {
   type DraftInferenceClaim,
 } from '../../cee/draft/records/index.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
+import { reconcileDraftOptionFraming } from '../../cee/draft/records/option-framing.js';
 
 export { FALLBACK_ANTHROPIC_MODEL, resolveAnthropicModel } from "./model-fallback.js";
 import { resolveAnthropicModel } from "./model-fallback.js";
@@ -2160,6 +2161,12 @@ export async function draftGraphWithAnthropic(
       }, "[Anthropic] records completion pass");
     }
 
+    // Run after completion selection: completion reprojects records directly,
+    // so guarding only the initial seam would let the invalid label return.
+    const optionFraming = reconcileDraftOptionFraming(activeRecords, activeProjection);
+    activeProjection = optionFraming.projection;
+    const recordDisclosures = [...activeProjection.dropped, ...optionFraming.unresolved];
+
     const recordsSidecar = buildDraftRecordsSidecar({
       records: activeRecords,
       projection: activeProjection,
@@ -2494,8 +2501,8 @@ export async function draftGraphWithAnthropic(
       // ⚠ Sourced from `activeProjection`, NOT `seam.projection` — the two differ
       // whenever the completion pass was kept, and the disclosures the user needs
       // are the ones describing the graph they actually receive.
-      ...(activeProjection.dropped.length > 0
-        ? { record_disclosures: activeProjection.dropped }
+      ...(recordDisclosures.length > 0
+        ? { record_disclosures: recordDisclosures }
         : {}),
       // Goal constraints passthrough: LLM-emitted constraints have richer metadata
       // (source_quote, confidence, provenance) than the regex extractor.
