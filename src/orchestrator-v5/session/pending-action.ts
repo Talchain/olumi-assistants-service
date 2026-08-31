@@ -604,9 +604,218 @@ export type PendingActionSkipReason =
 /**
  * Default lifecycle bounds. Conservative; tune later via telemetry on
  * `pending_action.invalidated` rates.
+ *
+ * These remain the bounds for every OFFER kind — the pendings a bare "yes" or
+ * a chip click resolves. Recorded ASKS get their own, much longer bounds; see
+ * {@link PENDING_ACTION_ASK_TURN_TTL} and the two-harm note beneath it.
  */
 export const PENDING_ACTION_DEFAULT_TURN_TTL = 2;
 export const PENDING_ACTION_DEFAULT_WALL_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * ⭐ RECORDED-ASK LIFETIME — TWO HARMS, TWO DIALS, AND WHY THEY CANNOT BE ONE
+ * NUMBER (2026-08-31, from a measured production session).
+ *
+ * THE DEFECT. A `configure_option` clarify recorded the question "for OPTION on
+ * FACTOR, give me a number from 0 to 1" and armed an `elicit_option_effect`
+ * pending at the DEFAULT bounds — 2 turns / 10 minutes. In the session that
+ * prompted this change (CEE staging, 2026-08-31, scenario `528e00b0…`), the
+ * SECOND such ask was emitted at 13:13:36Z, carried through two unrelated
+ * `direct_answer` turns, and was dropped by the turn-count leg at 13:15:30Z —
+ * **114 seconds after the product asked the question, having never seen an
+ * answer attempt**. The user's bare numeric answers arrived at 13:38:45Z and
+ * 13:39:07Z, ~25 minutes and six turns later, against an UNCHANGED graph
+ * (`current_graph_hash` held at `dcc8b4d1…` across every one of those turns).
+ * By then `resolveRecordedOptionEffectAnswer` had no live claimant, so the
+ * number fell through to the LLM and was refused. The product asked a
+ * question, closed the window for answering it, then spent half an hour asking
+ * again.
+ *
+ * WHY WIDENING ONE NUMBER WOULD BE THE WRONG FIX. The default bounds are not
+ * arbitrary: they exist to stop a STALE pending hijacking an unrelated later
+ * turn — the user has moved on, and a bare "60%" three topics later must not
+ * silently bind to a forgotten offer. That harm is real and this change must
+ * not reopen it. But the two harms are not two ends of one scale:
+ *
+ *   · "the window closed too early" is a question about ELAPSED CONVERSATION;
+ *   · "a stale action hijacked a later turn" is a question about whether the
+ *     WORLD HAS MOVED — has the graph changed, has the referent gone, has the
+ *     cell already been filled, is some other ask now competing for the same
+ *     bare number?
+ *
+ * A three-second-old ask against a graph that just changed must refuse. A
+ * twenty-eight-minute-old ask against an unchanged graph whose cell is still
+ * empty must bind. **No single threshold expresses both**, and the shipped
+ * design failed in both directions precisely because the clock was doing both
+ * jobs at once. So:
+ *
+ *   · DIAL A — this window ({@link PENDING_ACTION_ASK_TURN_TTL},
+ *     {@link PENDING_ACTION_ASK_WALL_TTL_MS}) guards "closed too early". It is
+ *     a bound on how long the product REMEMBERS having asked.
+ *   · DIAL B — the RELEVANCE PRECONDITION at bind time guards "stale hijack".
+ *     It is not a clock. For `elicit_option_effect` it is
+ *     `resolveRecordedOptionEffectAnswer`'s chain: the pinned
+ *     `preconditions.graph_hash` must still equal the live
+ *     `computeAnalysisAffectingGraphHash`, the option and factor nodes must
+ *     still resolve to exactly one node each of the right kind, the (option,
+ *     factor) cell must still be MISSING in the current readiness, and the ask
+ *     must be the SOLE live claimant on a bare number. For
+ *     `elicit_target_baseline` it is `tryBaselineElicitationResume`'s:
+ *     `graphHashConflicts` (fail-closed when either hash is absent), the target
+ *     node must still carry a live label, and the answer must classify as bound
+ *     against every competing label in the live graph.
+ *
+ * Widening dial A moves load onto dial B, which is why membership in
+ * {@link PENDING_KIND_IS_RECORDED_ASK} is granted ONLY to kinds that have such
+ * a gate — see that map's own note.
+ *
+ * WHERE THE NUMBERS COME FROM — the measured distribution, not intuition.
+ * Render logs for CEE staging, 2026-08-29T00:00Z → 2026-08-31T14:00Z: 249
+ * `elicit_*` pendings created; for the 24 of them followed by a turn carrying a
+ * parsed quantity (the closest available proxy for "the user tried to answer
+ * with a number"), the ask → answer latency was median 17s, p75 339s, p90 897s,
+ * p95 1509s, max 5066s, and the number of INTERVENING turns was median 0, p90 1,
+ * p95 4, max 10.
+ *
+ *   · 30 minutes covers 96% of those follow-ups where the shipped 10 minutes
+ *     covers 83%. 45 and 60 minutes cover no additional case in this sample —
+ *     the single miss is 84 minutes, which is a resumed session rather than a
+ *     late answer, so the window stops at 30.
+ *   · 12 intervening turns covers 100% where the shipped 2 covers 92%; the
+ *     observed maximum is 10, and 12 leaves headroom without being unbounded.
+ *
+ * Both remain REAL bounds: at 31 minutes, or after 13 carried turns, a recorded
+ * ask is expired exactly as before. This is a longer window, not an immortal one.
+ */
+export const PENDING_ACTION_ASK_TURN_TTL = 12;
+export const PENDING_ACTION_ASK_WALL_TTL_MS = 30 * 60 * 1000;
+
+/**
+ * WHICH KINDS ARE RECORDED ASKS — i.e. which get {@link
+ * PENDING_ACTION_ASK_TURN_TTL} / {@link PENDING_ACTION_ASK_WALL_TTL_MS}
+ * instead of the defaults.
+ *
+ * Exhaustive `Record<PendingActionKind, boolean>` on purpose: adding a kind to
+ * the union is a COMPILE ERROR until it is classified here, so the set is
+ * derived from the type rather than mirrored beside it (trap 12 — a
+ * hand-maintained list drifts silently, and here the drift would read as a
+ * confident wrong bind on a number the user meant for something else).
+ * Same construction as {@link PENDING_KIND_CLAIMS_BARE_NUMBER}.
+ *
+ * MEMBERSHIP IS NOT "IS IT AN ELICITATION?" — it is the conjunction of two
+ * claims, and both must hold, because dial A is only safe where dial B exists:
+ *
+ *   1. **A bare "yes" or a chip click can never resolve it.** Every member is
+ *      absent from `RESUMABLE_KINDS` (deterministic-short-confirm.ts) and from
+ *      {@link CONFIRMATION_EXPECTING_ACTION_TYPES}, so a longer window cannot
+ *      make a stray confirmation bind to a forgotten offer. The only thing that
+ *      can resolve a member is a bare NUMBER or a menu index.
+ *   2. **Its bind path re-validates the answer against the CURRENT graph.**
+ *      `elicit_option_effect` → `resolveRecordedOptionEffectAnswer`;
+ *      `elicit_target_baseline` → `tryBaselineElicitationResume`. Both refuse on
+ *      a moved graph hash, a vanished referent, or a competing claimant.
+ *
+ * `elicit_effect_target` and `elicit_edit_target` are members even though they
+ * have NO bind path today (they are recorded-only — see the "NO RESUMER IS
+ * ADDED BY THIS FILE" ruling in routing/persist-asked-question.ts). They are in
+ * for a reason that would be easy to get backwards: they participate in
+ * {@link PENDING_KIND_CLAIMS_BARE_NUMBER}, so their liveness is what makes a
+ * bare number AMBIGUOUS between two open questions. Widening the answerable
+ * kinds while leaving these on the short window would let an
+ * `elicit_option_effect` from three turns earlier quietly WIN a number the user
+ * typed in answer to a "which of these does it belong to?" that had just
+ * expired out of the claimant set — the exact stale-hijack harm, manufactured
+ * by an asymmetric widening. The claimant set has to move as one.
+ *
+ * Every non-member keeps the default bounds unchanged.
+ */
+export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = {
+  // Recorded questions. Answerable only by a bare number or a menu index, and
+  // every bind path re-checks the live graph before it binds.
+  elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
+  elicit_option_effect: true, // "give me a number from 0 to 1"
+  elicit_effect_target: true, // "which of these does your number belong to?"
+  elicit_edit_target: true, // "which factor, edge, option or value?"
+  // Offers and holds. A bare "yes", a chip click or a follow-up parameter
+  // resolves these, so a longer window IS the stale-hijack harm. Unchanged.
+  run_analysis: false,
+  what_would_flip: false,
+  draft_graph: false,
+  apply_proposed_change: false,
+  proposed_concept: false,
+  clarify_v2_round: false,
+  set_factor_value: false,
+  edit_graph_add_risk: false,
+};
+
+/**
+ * Stamp the recorded-ask lifetime onto ONE pending action being created THIS
+ * turn. Pure; clock injected. Non-members are returned by identity.
+ *
+ * MONOTONE BY CONSTRUCTION — it only ever WIDENS. A caller that deliberately
+ * armed an ask wider than these bounds (or a future kind-specific TTL) keeps
+ * its own value; this function can never shorten a window somebody else opened.
+ * That direction matters: a normaliser that could shorten would be a second,
+ * invisible expiry authority sitting underneath every creation site.
+ *
+ * ⚠ IT DOES NOT REPAIR A MALFORMED EXPIRY. {@link isPendingActionExpired}
+ * treats an unparseable `expires_at_iso` as expired — fail-closed, because an
+ * action whose freshness cannot be verified must never be treated as live.
+ * Widening a malformed stamp into a valid one would silently convert that
+ * fail-closed verdict into a 30-minute live window, so a malformed
+ * `expires_at_iso` (or a non-finite turn count) is passed through untouched and
+ * stays expired.
+ *
+ * ⚠ APPLY TO THIS TURN'S OWN NEW PENDINGS ONLY, NEVER TO CARRY-FORWARD
+ * SURVIVORS. `computeSurvivingPriorPendingsDetailed` decrements the turn count
+ * once per carried turn; re-stamping a survivor would reset that decrement
+ * every turn and make the ask immortal, which is the opposite harm this file's
+ * two-dial note exists to prevent.
+ */
+export function withRecordedAskLifetime(pa: PendingAction, nowMs: number): PendingAction {
+  if (!PENDING_KIND_IS_RECORDED_ASK[pa.action.kind]) return pa;
+
+  const currentTurns = pa.expires_at_turn_count;
+  const nextTurns =
+    Number.isFinite(currentTurns) && currentTurns > PENDING_ACTION_ASK_TURN_TTL
+      ? currentTurns
+      : Number.isFinite(currentTurns)
+        ? PENDING_ACTION_ASK_TURN_TTL
+        : currentTurns;
+
+  const currentExpiryMs = Date.parse(pa.expires_at_iso);
+  let nextExpiryIso = pa.expires_at_iso;
+  if (Number.isFinite(currentExpiryMs)) {
+    // Base the floor on when the question was ASKED, not on `nowMs`: the
+    // commit seam runs some milliseconds after the emit, and the two must not
+    // drift apart across re-stamps.
+    const emittedMs = Date.parse(pa.emitted_at_iso);
+    const baseMs = Number.isFinite(emittedMs) ? emittedMs : nowMs;
+    const floorMs = baseMs + PENDING_ACTION_ASK_WALL_TTL_MS;
+    if (floorMs > currentExpiryMs) nextExpiryIso = new Date(floorMs).toISOString();
+  }
+
+  if (nextTurns === currentTurns && nextExpiryIso === pa.expires_at_iso) return pa;
+  return { ...pa, expires_at_turn_count: nextTurns, expires_at_iso: nextExpiryIso };
+}
+
+/**
+ * {@link withRecordedAskLifetime} over this turn's new pendings. Returns the
+ * input array by identity when nothing changed, so a commit that arms no
+ * recorded ask allocates nothing.
+ */
+export function applyRecordedAskLifetimes(
+  pendings: readonly PendingAction[],
+  nowMs: number,
+): readonly PendingAction[] {
+  let changed = false;
+  const out = pendings.map((pa) => {
+    const next = withRecordedAskLifetime(pa, nowMs);
+    if (next !== pa) changed = true;
+    return next;
+  });
+  return changed ? out : pendings;
+}
 
 /**
  * Cap mirrors `MAX_CHIPS` in chip-generator.ts. Enforced at both the

@@ -56,6 +56,7 @@ import type {
   PendingLifecycleSummary,
 } from './session/pending-action.js';
 import {
+  applyRecordedAskLifetimes,
   CONFIRMATION_EXPECTING_ACTION_TYPES,
   isPendingActionExpired,
   PENDING_ACTIONS_PER_TURN_CAP,
@@ -1099,7 +1100,20 @@ export async function commitDirectAnswer(
   // a later "yes" short-confirm could resume — the "persisted pending ⟹
   // rendered chip" invariant is structural at every derivation site.
   const nowMsForPendings = Date.now();
-  const initialChipDerivedPending =
+  // RECORDED-ASK LIFETIME (2026-08-31). Applied HERE, at the single seam where
+  // pendings are persisted (`pending_actions: finalPendings` below is the only
+  // writer into the turn row), rather than at each of the ~15 creation sites
+  // that arm one. A per-site stamp is a hand-maintained mirror — trap 12 — and
+  // the drift would be invisible: a new ask site that forgot it would simply
+  // expire in two turns and read as "the user never answered". Deriving the
+  // window from the KIND at the chokepoint makes a missed site impossible by
+  // construction.
+  //
+  // THIS TURN'S OWN NEW PENDINGS ONLY. Carry-forward survivors are stamped
+  // nowhere — `computeSurvivingPriorPendingsDetailed` owns their decrement, and
+  // re-stamping a survivor each turn would make a recorded ask immortal (see
+  // the ⚠ on `withRecordedAskLifetime`).
+  const initialChipDerivedPending = applyRecordedAskLifetimes(
     metadata.pending_actions === undefined
       ? derivePendingActionsFromFinalizedChips(
           (response.suggested_actions ?? []) as readonly SuggestedAction[],
@@ -1110,7 +1124,9 @@ export async function commitDirectAnswer(
             graph_hash: effectiveGraphHash,
           },
         )
-      : metadata.pending_actions;
+      : metadata.pending_actions,
+    nowMsForPendings,
+  );
 
   // F-HELD fix 3a (steer-don't-bind): while a confirmation-expecting pending
   // remains live AFTER this commit, do not mint competing run_analysis
