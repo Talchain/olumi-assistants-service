@@ -764,6 +764,25 @@ describe('the answer frame — PARAMETER 1 closes the GAP', () => {
     // moment a listed message starts binding — which is the direction that
     // matters, because that is a gap silently closing without anyone noticing
     // the record is now a lie.
+    // ⭐ THE PIN ITSELF. The expectation is written HERE, independently of the
+    // set. A filter OF the set compared AGAINST the set is a projection of the
+    // set onto itself: both sides move together, so it is structurally incapable
+    // of detecting a member being added OR removed. That was the defect in this
+    // very assertion, found by an independent re-verify. The literals below are
+    // the only thing that makes the docblock's "REDs if the set GROWS or
+    // SHRINKS" true.
+    expect(
+      CONTENTFUL_SUBJECT_KNOWN_DROPPED,
+      'the pinned set grew or shrank — a known gap changed and needs re-review',
+    ).toEqual([
+      'Churn rate is 30%',
+      'Churn rate is at 30%',
+      'Handling time is 30%',
+    ]);
+
+    // Every listed member must still actually drop. This direction alone is not
+    // the pin (see above) — it is kept because it names WHICH member started
+    // binding, which the equality check above cannot.
     const stillDropped = CONTENTFUL_SUBJECT_KNOWN_DROPPED.filter(
       (message) => readMissingValueAnswer(message) === null,
     );
