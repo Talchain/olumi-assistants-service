@@ -62,6 +62,7 @@ import {
 import { deriveAuthoritativeStage } from './context/derive-stage.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import type { FreshnessDerivation } from './context/freshness.js';
+import { applyGraphAbsenceWarrant } from './context/graph-absence-warrant.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
@@ -108,7 +109,33 @@ import type { PendingAction } from './session/pending-action.js';
  */
 export type CanonicalGraphReadState =
   | { readonly status: 'ok_present'; readonly graph: unknown }
-  | { readonly status: 'ok_absent' }
+  | {
+      readonly status: 'ok_absent';
+      /**
+       * ⚠ TWO QUESTIONS, ONE STATE (CLAUDE.md trap 21). `status` answers
+       * "did the read succeed?"; THIS answers "does a successful read of
+       * nothing ENTITLE us to say the user has no model?". They are not the
+       * same question, and collapsing them is what let the product tell a
+       * user watching a completed analysis that they had no model started
+       * yet — see `context/graph-absence-warrant.ts` for the witness.
+       *
+       * `false` means a completed analysis PROVES a model existed, so the
+       * absence CLAIM is unwarranted even though the READ genuinely succeeded.
+       *
+       * OPTIONAL, and omission means WARRANTED — i.e. exactly today's
+       * behaviour. That direction is deliberate: hand-built and legacy
+       * contexts must keep the ordinary empty-state answer rather than
+       * hedging, and the only producer that can know better
+       * (`buildTurnContext`) always sets it explicitly.
+       *
+       * ⚠ IT IS DELIBERATELY NOT A `degraded` READ. `degraded` would suppress
+       * the first-touch `provisional` promotion of a caller-supplied graph —
+       * a genuine, tested recovery path that can still give this very user a
+       * truthful answer from their own bytes. The claim is withdrawn; the
+       * read is not falsified.
+       */
+      readonly absenceWarranted?: boolean;
+    }
   | { readonly status: 'degraded'; readonly errorCode: string };
 
 export interface EnrichedTurnContext extends TurnContext {
@@ -823,6 +850,41 @@ export async function buildTurnContext(
     store,
   );
 
+  // ── ARE WE ENTITLED TO SAY THIS USER HAS NO MODEL? ─────────────────────
+  // `fetchPersistedScenarioState` answers "did the read succeed?"; this
+  // answers "does a successful read of nothing WARRANT the absence claim?".
+  // Two questions under one state, and collapsing them is what let the product
+  // tell a user watching a completed analysis that they had no model started
+  // yet (see `context/graph-absence-warrant.ts` for the witness and the proof).
+  //
+  // ONE derivation, ONE consumer of the new bit: it rides `persistedGraphRead`
+  // to `selectContextGraphSnapshot`, which is the single place that turns a
+  // read state into the authority token the model reads. Deriving it a second
+  // time anywhere downstream would be a second authority over one question.
+  //
+  // The `status` is UNCHANGED (`ok_absent` stays `ok_absent`), so the commit
+  // chokepoints and the selection-honesty resolvers below — all of which key on
+  // `status` — behave exactly as before. Only the ENTITLEMENT is new.
+  const canonicalGraphRead = applyGraphAbsenceWarrant(
+    scenarioState.read,
+    scenarioAnalysisFacts,
+  );
+  if (
+    canonicalGraphRead.status === 'ok_absent' &&
+    canonicalGraphRead.absenceWarranted === false
+  ) {
+    // Never dark: this means a model is PROVEN to have existed and this read
+    // did not produce it — the server half of the witnessed P0.
+    log.warn(
+      {
+        event: 'v5.canonical_graph.absence_unwarranted',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+      },
+      'V5 buildTurnContext: persisted graph read produced nothing while a completed analysis proves one existed — the absence claim is withdrawn (the model is unavailable, not absent)',
+    );
+  }
+
   // V5 Wave 2: read pending actions from the most recent prior turn.
   // Read failures are non-fatal — empty array on degradation, mirrors
   // the prior_turns degradation path.
@@ -1039,7 +1101,7 @@ export async function buildTurnContext(
   const turnSelection = resolveTurnSelection(
     selectedNodeIds,
     scenarioState.graph,
-    scenarioState.read.status,
+    canonicalGraphRead.status,
     unreadableEdgeRefIds,
   );
   // Edge selections participate ONLY in this existence classification. The
@@ -1050,7 +1112,7 @@ export async function buildTurnContext(
     options.selectedElements,
     turnSelection,
     scenarioState.graph,
-    scenarioState.read.status,
+    canonicalGraphRead.status,
   );
   if (turnSelection !== null) {
     try {
@@ -1091,7 +1153,7 @@ export async function buildTurnContext(
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
-    persistedGraphRead: scenarioState.read,
+    persistedGraphRead: canonicalGraphRead,
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
     coaching_state: coachingState,
