@@ -60,6 +60,7 @@ import {
 } from './edge-strength-edit.js';
 import { applyFactorValueEdit } from './factor-value-edit.js';
 import { applyStructuralDelete } from './structural-delete.js';
+import { applyStructuralRename, findStaleRenamedLabel } from './structural-rename.js';
 // TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
 // grammar at typecheck time without adding a runtime edge into the tools layer.
 import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
@@ -308,7 +309,12 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // ("Reader-first adoption is mandatory", schemas enums.ts).
   structural_add: 'reader_only_refusal',
   structural_add_edge: 'reader_only_refusal',
-  structural_rename: 'reader_only_refusal',
+  // 0.50.0 — THE LABEL WRITER (landed after the two above). `'reader_only_refusal'`
+  // here was honest while CEE had no writer; it is a LIE the moment one exists,
+  // because the refusal tells the user this version cannot apply a canvas rename
+  // and it now can. See `structural-rename.ts` for the two gates this kind needs
+  // and why only ONE of them answers 409.
+  structural_rename: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -463,13 +469,13 @@ const READER_ONLY_REFUSAL_COPY: Partial<
       'the link for you.',
     reason: 'structural_add_edge_reader_only',
   },
-  structural_rename: {
-    text:
-      "I can't apply a rename made on the canvas in this version, so I haven't " +
-      "changed the model. Tell me in chat what to rename and I'll update the model " +
-      'for you.',
-    reason: 'structural_rename_reader_only',
-  },
+  // ⚠ `structural_rename` DELIBERATELY HAS NO ENTRY ANY MORE. It is declared
+  // `'mutating'` above, so this branch is unreachable for it, and a refusal
+  // sentence saying "I can't apply a rename made on the canvas in this version"
+  // would be FALSE the moment someone re-declared the kind. Dead copy that reads
+  // as live is how an honest label gets overwritten by a false one — the copy is
+  // deleted rather than left as a comment. Its capability-honesty pin moves with
+  // it (see `reader-only-refusal-capability-honesty.test.ts`).
 };
 
 /**
@@ -502,7 +508,9 @@ export const READER_ONLY_CHAT_ROUTE_OPS: Readonly<
 > = {
   structural_add: 'add_node',
   structural_add_edge: 'add_edge',
-  structural_rename: 'update_node',
+  // `structural_rename` is GONE from this table because it is no longer
+  // reader-only: CEE writes the label server-side now. The table's own both-ways
+  // pin REDs if this table and `SYSTEM_EVENT_HANDLING` ever disagree again.
 };
 
 /**
@@ -606,6 +614,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'structural_delete'
   ) {
     return await dispatchStructuralDelete(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'structural_rename'
+  ) {
+    return await dispatchStructuralRename(payload, payload.event, requestId, startedAt);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -1702,5 +1716,328 @@ async function dispatchFactorValueEdit(
     // Still the full graph: the egress id-leak scrub resolves ids to labels
     // against it, independently of the hash above.
     graph: graphForReadiness,
+  };
+}
+
+/**
+ * `structural_rename` — commit the label, verify it in the committed bytes.
+ *
+ * Same shape as `dispatchStructuralDelete` and for the same reasons: three
+ * authoritative reads first, adapter second, ONE atomic commit third, receipt
+ * check fourth. Two things differ, and both are derived from the fact that a
+ * label is not analysis-affecting:
+ *
+ *  1. THE RECEIPT CHECK ASSERTS PRESENCE, NOT ABSENCE. For a delete the claim is
+ *     "the ids are gone"; here it is "the named node carries the new label".
+ *
+ *  2. `analysisReady` IS DELIBERATELY NOT RE-DERIVED AND NOT STAMPED. A rename
+ *     cannot move readiness — `label` is absent from the analysis projection, and
+ *     the adapter has already REFUSED the write if the projected hash moved. The
+ *     dispatch contract at the top of this file says an undefined `analysisReady`
+ *     leaves the UI's prior verdict standing, which is exactly right: it was
+ *     correct before the rename and the rename did not touch it. Stamping a
+ *     freshly-derived one would be a second computation of an unchanged fact,
+ *     and any disagreement between them would be noise presented as a change.
+ *     `freshness` is likewise omitted — the graph hash did not move, so the
+ *     currency of any prior analysis is exactly what it was.
+ *
+ * ⚠ WHY THIS WRITER IS NOT GATED ON `config.features.graphCas.rpcEnforce`: the
+ * same reasoning `dispatchStructuralDelete` records above — that gate is a
+ * ROLLOUT device whose default (`shadow`) would ship this capability DARK, and
+ * the estate's standing ruling is to ship capabilities ON with a code revert as
+ * the rollback. The safety posture is stated the same honest way: base checked at
+ * T0, writes ordered by the turn fence, CAS stamped-not-enforced.
+ */
+async function dispatchStructuralRename(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'structural_rename' }>,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  let priorPendingActions: Awaited<
+    ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
+  >;
+  try {
+    // Both reads are authoritative and required before ANY newest-turn append.
+    // On failure the prior row stays newest and authoritative: no transcript is
+    // appended, because a degraded read gives no trusted base.
+    //
+    // ⚠ NO PRIOR-FACTS READ, unlike the delete sibling. That read exists there
+    // ONLY to derive `freshness`, which this path does not emit (see the header):
+    // a rename moves no hash, so there is no currency verdict to re-derive.
+    // Issuing the read anyway would cost a round trip to compute a value that is
+    // then discarded.
+    [persistedGraph, priorPendingActions] = await Promise.all([
+      loadPersistedGraphStrict(payload.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_rename — authoritative graph/pending read failed; refusing any append',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  let result: ReturnType<typeof applyStructuralRename>;
+  try {
+    result = applyStructuralRename({ payload, event, requestId, persistedGraph });
+  } catch (err) {
+    // A malformed-but-present persisted graph lands here (corruption, not
+    // absence). Retryable 500 with no append; the corrupt row stays
+    // authoritative rather than being healed forward under a rename.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_rename — adapter failed before commit',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const persistedParse = GraphV3.safeParse(persistedGraph);
+  const contentGraph = persistedParse.success ? persistedParse.data : null;
+  const currentAnalysisHash = persistedParse.success
+    ? computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      )
+    : null;
+
+  if (result.kind === 'refused') {
+    const response: OlumiResponse =
+      currentAnalysisHash !== null
+        ? { ...result.response, graph_hash: currentAnalysisHash }
+        : result.response;
+    // A stale ANALYSIS-SPACE base hash is canonical-state divergence: append
+    // nothing, and let the route turn this into 409 GRAPH_DIVERGED carrying the
+    // hash the server holds. An `expected_label` divergence deliberately does
+    // NOT take this branch — see `structural-rename.ts`'s header — and instead
+    // falls through to the committed refusal below, where its copy names the
+    // current label.
+    if (result.baseHashConflict !== undefined) {
+      return {
+        response,
+        commitPerformed: false,
+        graph: contentGraph,
+        graphConflict: {
+          recovery_action: result.baseHashConflict.recovery_action,
+          conflict_category: result.baseHashConflict.conflict_category,
+          expected_base_graph_hash: result.baseHashConflict.expected_base_graph_hash,
+        },
+      };
+    }
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        pending_actions: [],
+        priorPendingActions,
+        ...(currentAnalysisHash !== null ? { graph_hash: currentAnalysisHash } : {}),
+        ...(contentGraph !== null ? { contentGraph } : {}),
+        coaching_state: null,
+      });
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 structural_rename — refusal commit failed',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        refusal_reason: result.reason,
+      },
+      'V5 structural_rename refused — committed honestly, no graph written',
+    );
+    return { response, commitPerformed: true, graph: contentGraph };
+  }
+
+  // ── the mutation path: ONE atomic commit ─────────────────────────────────
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let graphPersisted = false;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const commitResult = await commitDirectAnswer(result.response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      // `direct_answer` + `handler_id: null` — the estate's ruling for an
+      // `edit_graph` receipt, identical to `structural_delete`: `edit_graph` is
+      // not a member of the contract's `V5ActionType`, so `turn_class: 'handler'`
+      // with that id would need a schemas widening. The FACT-level
+      // `fact_type === 'edit_graph'` is the discriminator downstream keys off.
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      // THE LINE THE WHOLE CHANGE IS ABOUT. Without this key `commitDirectAnswer`
+      // writes a turn row and NO graph — which is `'ack_and_commit'` wearing a
+      // writer's name, and the rename would vanish on the next reload exactly as
+      // it does today.
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      pending_actions: [],
+      priorPendingActions,
+      contentGraph: result.mutatedGraph,
+      // SPREAD, never conditionally omitted: `supabase-store.ts` derives
+      // `p_expected_base_known` from key PRESENCE, so omitting a null hash turns
+      // "known-absent base" into "no base asserted" and darkens the CAS guard.
+      ...cas,
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    graphPersisted = commitResult.graphPersisted;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 structural_rename — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          // Analysis-space (16-hex), from a FRESH read — never the 64-hex
+          // identity hash the error carries. See readClientRecoverableBaseHash.
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_rename — atomic mutation commit failed',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  // ── the post-commit receipt check ────────────────────────────────────────
+  // For a RENAME the claim to verify is PRESENCE: the named node carries the new
+  // label in the bytes the commit produced, and the top-level `options[]` mirror
+  // agrees with it.
+  //
+  // ⚠ WHAT THIS ACTUALLY CHECKS, stated at the same honesty level as the delete
+  // sibling: `commitResult.persistedGraph` is `graphForStore` — "this commit's
+  // own input after projection, NOT a re-read" (`commit.ts`). So this compares
+  // the adapter's projected graph against the chokepoint's SECOND projection of
+  // it. It catches a non-idempotent projection reintroducing the old label; it
+  // CANNOT see the store persisting something different from what it was handed.
+  // A real read-back would need a post-commit SELECT this seam does not perform.
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const renameLanded =
+    committedParse.success &&
+    findStaleRenamedLabel(
+      persistedGraphBytes as Record<string, unknown>,
+      result.renamedNodeId,
+      result.newLabel,
+    ) === null;
+  if (
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    !committedParse.success ||
+    !renameLanded
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        graph_persisted: graphPersisted,
+        has_analysis_hash: persistedAnalysisGraphHash !== null,
+        graph_parse_ok: committedParse.success,
+        rename_landed: renameLanded,
+      },
+      'V5 structural_rename — committed graph receipt invalid; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  const graphForEgress = committedParse.data;
+
+  const response: OlumiResponse = {
+    ...committedResponse,
+    graph_hash: persistedAnalysisGraphHash,
+    // `draft_graph` is the UI's ONLY inline-graph ingestion path
+    // (`applied-graph-emit.ts`), and it is the carrier the delete lane already
+    // established for a structural change that `graph_patch` cannot name.
+    draft_graph: buildAppliedGraphWireField(graphForEgress),
+  };
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      renamed_node_id: result.renamedNodeId,
+    },
+    'V5 structural_rename committed — canonical graph/fact written atomically, new label verified in the persisted bytes',
+  );
+  return {
+    response,
+    commitPerformed: true,
+    // Still the full graph: the egress id-leak scrub resolves ids to labels
+    // against it. See the `graph` field's doc at the top of this file — passing
+    // null does not SKIP the scrub, it runs it blind.
+    graph: graphForEgress,
   };
 }

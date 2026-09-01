@@ -87,6 +87,7 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
       'factor_value_edit',
       'edge_strength_edit',
       'structural_delete',
+      'structural_rename',
     ]);
   });
 
@@ -112,10 +113,14 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // Kept EXACT rather than widened, so it still REDs if the set GROWS (a kind
     // silently parked as reader-only instead of getting a writer) or SHRINKS (a
     // writer landed and this pin was not revisited).
+    // ⚠ `structural_rename` LEFT THIS SET when its writer landed. That is the
+    // exact transition the note above says must RED rather than pass silently,
+    // and it did: this assertion is the reason the dead refusal copy and the
+    // dead chat-route entry were deleted in the same change instead of being
+    // left behind to read as live.
     expect(readerOnly).toEqual([
       'structural_add',
       'structural_add_edge',
-      'structural_rename',
     ]);
     // The ORIGINAL intent of this case, named so it cannot be lost by a future
     // edit to the list above: no kind that has a server-side writer may be
@@ -123,6 +128,7 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     expect(readerOnly).not.toContain('edge_strength_edit');
     expect(readerOnly).not.toContain('structural_delete');
     expect(readerOnly).not.toContain('factor_value_edit');
+    expect(readerOnly).not.toContain('structural_rename');
   });
 
   it('client-only kinds are exactly the ones that commit nothing', () => {

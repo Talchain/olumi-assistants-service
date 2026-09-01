@@ -131,9 +131,13 @@ describe('reader-only refusal — the capability denial must be true', () => {
       expect(textFor('structural_add_edge')).not.toContain(
         "i can't add a link between factors in this version",
       );
-      expect(textFor('structural_rename')).not.toContain(
-        "i can't rename a factor in this version",
-      );
+      // `structural_rename` is no longer reader-only — it has a writer — so its
+      // refusal branch is unreachable and there is no sentence left to pin. The
+      // pin migrated to `structural-rename.test.ts`, which asserts the WRITER's
+      // copy states what actually happened. Removing it here rather than leaving
+      // it asserting against the generic fallback is deliberate: a test that
+      // passes because the branch it names is dead is a guard agreeing with
+      // itself (trap 13b).
     });
 
     it('⭐ the honest state claim SURVIVES the fix', () => {
@@ -188,7 +192,6 @@ describe('reader-only refusal — the capability denial must be true', () => {
       expect(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).sort()).toEqual([
         'structural_add',
         'structural_add_edge',
-        'structural_rename',
       ]);
     });
   });
