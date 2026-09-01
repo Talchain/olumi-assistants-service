@@ -71,10 +71,6 @@ vi.mock('../../orchestrator-v5/handlers/draft-graph-dispatch.js', () => ({
   dispatchDraftGraph: dispatchDraftGraphMock,
 }));
 
-const scheduleAutoRunMock = vi.fn();
-vi.mock('../../orchestrator-v5/handlers/auto-run-after-draft.js', () => ({
-  scheduleAutoRunAfterFreshDraft: scheduleAutoRunMock,
-}));
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
@@ -260,7 +256,6 @@ function nextTurnId(): string {
 
 async function turn(app: FastifyInstance, message: string, source: string = 'composer') {
   dispatchDraftGraphMock.mockReset();
-  scheduleAutoRunMock.mockReset();
   appendMock.mockClear();
   chatWithToolsMock.mockClear();
   intakeCallCount = 0;
@@ -419,14 +414,13 @@ describe('ROADMAP 2.715 holds with the open-frame classifier ARMED', () => {
 
   // ── ACCEPTANCE 1 — the floor, under the verdict that reopens the defect ───
 
-  describe('ACCEPTANCE 1: with the classifier armed to `start_model`, the floored class never drafts and never auto-runs', () => {
+  describe('ACCEPTANCE 1: with the classifier armed to `start_model`, the floored class never drafts', () => {
     it.each(FLOORED_PROTECTED)('is not modelled as a decision: %s', async (message) => {
       armedVerdict = 'start_model';
       const { status, body } = await turn(app, message);
 
       expect(status).toBe(200);
       expect(dispatchDraftGraphMock, 'no model may be built for a meta-question').not.toHaveBeenCalled();
-      expect(scheduleAutoRunMock, 'no analysis may be started off one').not.toHaveBeenCalled();
       expect(exitPath(body)).not.toBe('draft_graph');
       expect(String(body.assistant_text ?? '')).not.toContain(DRAFT_MARKER);
     });
@@ -541,7 +535,6 @@ describe('ROADMAP 2.715 holds with the open-frame classifier ARMED', () => {
 
         expect(exitPath(body)).toBe('draft_graph');
         expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
-        expect(scheduleAutoRunMock).toHaveBeenCalledTimes(1);
         expect(
           intakeCallCount,
           'the deterministic decision fast path must short-circuit BEFORE the classifier',

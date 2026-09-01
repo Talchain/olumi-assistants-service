@@ -534,7 +534,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
         // R2 (2026-08-16) — post-draft auto-run of a provisional analysis.
-        V5AutoRunAfterDraft: "v5.run_analysis.auto_run_after_draft",
         // F6 — the defaulted-value egress invariant fired on an analysis-bearing
         // answer over a run the engine defaulted. Log-only (see debugOnlyEvents).
         V5DefaultedValueEgressApplied: "v5.egress.defaulted_value_applied",
@@ -1488,7 +1487,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // R2 (2026-08-16) — post-draft auto-run outcome. Diagnostic-only:
         // structured logs are the operational signal; no Datadog metric
         // mapping until dashboards pick the event up.
-        TelemetryEvents.V5AutoRunAfterDraft,
         // Lane CEE-D (edit-loop reliability) — diagnostic-only parse-shape
         // recovery + relative-delta resolution events. Structured logs are
         // the operational signal; no Datadog metric mapping yet.
@@ -2162,7 +2160,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.decision_review.skipped",
         "v5.decision_review_degraded",
         // R2 (2026-08-16) — post-draft auto-run of a provisional analysis.
-        "v5.run_analysis.auto_run_after_draft",
         "v5.deterministic_value_update",
         "v5.edit_graph.graph_state_present",
         "v5.edit_graph.graph_state_reloaded",
