@@ -99,6 +99,111 @@ export interface ElicitOptionEffectFields {
   readonly option_label: string;
   readonly factor_id: string;
   readonly factor_label: string;
+  /**
+   * ⭐⭐ HOW MANY TIMES THIS SLOT HAS BEEN ASKED — 1 on the first ask.
+   *
+   * THE DEFECT IT CLOSES, measured at this tip: nine of nine unrecognised
+   * replies re-issued the BYTE-IDENTICAL demand. The reason is structural
+   * rather than a copy oversight — `projectReadinessRecovery` is a pure
+   * function of `(analysisReady, nodes)` and receives the user's message
+   * nowhere, so it composes the ask from the GRAPH, which has not changed,
+   * rather than from the EXCHANGE, which has. A second ask computed from an
+   * unchanged input is necessarily the first ask again.
+   *
+   * ⚠ IT MUST BE READ OFF THE SUPERSEDED ROW, NOT MINTED FRESH. `chip_id` is
+   * the stable synthetic handle `chip_configure_option_clarify` precisely so
+   * key-level supersession RETIRES the previous ask instead of accumulating
+   * one row per re-ask (`route-v2.ts`'s carry-forward note). So a counter that
+   * is simply constructed at the emit site resets to 1 on every turn and can
+   * never exceed it. `carryForwardOptionEffectAttempt` below is the ONE reader
+   * of the prior row, and the emit sites go through it.
+   *
+   * OPTIONAL so rows persisted before this change parse unchanged as "no
+   * attempt recorded" — never refused (same rule as `clarify_v2_round`'s
+   * `reoffered`, the estate's only prior art for "we already asked once").
+   */
+  readonly attempt?: number;
+  /**
+   * The user's reply that this ask could NOT interpret, verbatim and bounded.
+   *
+   * Carried so the re-ask can QUOTE what they said rather than restate the
+   * demand. Quoting is the whole difference between "I couldn't tell what
+   * value to use" (which the founder received twice) and "I read 'a third' as
+   * a fraction, but I need the level as a percentage".
+   *
+   * ⚠ BOUNDED AT {@link ELICIT_OPTION_EFFECT_REPLY_MAX} AND NEVER PARSED. It is
+   * quoted copy, not a second input to the binder: a reader that re-interpreted
+   * this field would be a second answer grammar with no owner (trap 12).
+   */
+  readonly last_user_reply?: string;
+  /**
+   * Why the previous reply did not bind — a CLOSED set, so the re-ask composer
+   * is a total function of it and cannot fall through to the generic demand.
+   */
+  readonly failure_reason?: ElicitOptionEffectFailureReason;
+}
+
+/**
+ * Why an answer to the effect ask did not land. CLOSED, and deliberately about
+ * the SHAPE of the failure rather than about the words used, so the re-ask
+ * composer needs no lexicon of its own.
+ */
+export const ELICIT_OPTION_EFFECT_FAILURE_REASONS = [
+  /** A figure was read but sits outside the 0–1 effect scale ("150%"). */
+  'out_of_scale',
+  /** A bare integer, ambiguous between 25 and 25% — never guessed. */
+  'scale_ambiguous',
+  /** A fraction or hedge word denoting a quantity we will not silently round. */
+  'imprecise_quantity',
+  /** More than one figure in the message; we ask rather than pick. */
+  'several_quantities',
+  /** No quantity at all ("high", "a bit more"). */
+  'no_quantity',
+] as const;
+
+/**
+ * ⚠ THE TYPE IS DERIVED FROM THE ARRAY, never declared beside it. The parse
+ * block validates against the ARRAY and the composers switch on the TYPE; two
+ * hand-written spellings of one closed set is the drift this estate pays for
+ * (trap 12), and here the drift would be a row that parses and then falls
+ * through every composer arm to the generic demand — i.e. silently back to the
+ * repetition this change exists to remove.
+ */
+export type ElicitOptionEffectFailureReason =
+  (typeof ELICIT_OPTION_EFFECT_FAILURE_REASONS)[number];
+
+/** Upper bound on the quoted reply carried for the re-ask. */
+export const ELICIT_OPTION_EFFECT_REPLY_MAX = 200;
+
+/**
+ * ⭐ THE ATTEMPT CARRY-FORWARD — the ONE place a re-ask learns it is a re-ask.
+ *
+ * Given the pendings read back from the PREVIOUS turn and the slot being asked
+ * about NOW, return the attempt number this ask should carry. Pure; the caller
+ * owns the read.
+ *
+ * BINDS BY IDENTITY, never by chip handle: the prior row counts only when it is
+ * an `elicit_option_effect` for the SAME (option_id, factor_id). A different
+ * cell is a different question and starts again at 1 — otherwise moving on to
+ * the next missing value would inherit the previous cell's frustration count
+ * and open with an apology for something that never happened.
+ */
+export function carryForwardOptionEffectAttempt(
+  priorPendings: readonly PendingAction[] | null | undefined,
+  slot: { readonly optionId: string; readonly factorId: string },
+): number {
+  if (!Array.isArray(priorPendings)) return 1;
+  let highest = 0;
+  for (const pa of priorPendings) {
+    const action = pa?.action;
+    if (action === undefined || action.kind !== 'elicit_option_effect') continue;
+    if (action.option_id !== slot.optionId || action.factor_id !== slot.factorId) continue;
+    const prior = typeof action.attempt === 'number' && Number.isFinite(action.attempt)
+      ? Math.floor(action.attempt)
+      : 1;
+    if (prior > highest) highest = prior;
+  }
+  return highest === 0 ? 1 : highest + 1;
 }
 
 /**
@@ -1348,6 +1453,20 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (typeof a.option_label !== 'string' || a.option_label.length === 0) return null;
     if (typeof a.factor_id !== 'string' || a.factor_id.length === 0) return null;
     if (typeof a.factor_label !== 'string' || a.factor_label.length === 0) return null;
+    // The three re-ask fields are OPTIONAL (rows written before this change
+    // carry none) but are validated when present — an unvalidated optional is
+    // how a corrupted row reaches a composer that then renders it.
+    if (a.attempt !== undefined
+      && (typeof a.attempt !== 'number' || !Number.isInteger(a.attempt) || a.attempt < 1)) return null;
+    if (a.last_user_reply !== undefined
+      && (typeof a.last_user_reply !== 'string'
+        || a.last_user_reply.length === 0
+        || a.last_user_reply.length > ELICIT_OPTION_EFFECT_REPLY_MAX)) return null;
+    if (a.failure_reason !== undefined
+      && (typeof a.failure_reason !== 'string'
+        || !ELICIT_OPTION_EFFECT_FAILURE_REASONS.includes(
+          a.failure_reason as ElicitOptionEffectFailureReason,
+        ))) return null;
   }
   if (a.kind === 'elicit_effect_target') {
     // ROADMAP 2.1353 — all three fields REQUIRED, and `candidates` NON-EMPTY.

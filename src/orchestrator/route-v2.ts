@@ -262,11 +262,13 @@ import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compos
 import {
   resolveRepairValueBinding,
   resolveRecordedOptionEffectAnswer,
+  messagePlausiblyCarriesQuantity,
   deriveMissingEffectPairs,
   type RepairValueBindingResolution,
   type RecordedEffectAnswer,
 } from '../orchestrator-v5/routing/repair-value-binding.js';
 import { composeRepairValueAskResponse } from '../orchestrator-v5/compose/repair-value-ask-response.js';
+import { formatEffectSlotReask } from '../orchestrator-v5/tools/handlers/d1-shared/format-confirmation.js';
 // ⭐⭐ ROADMAP 2.1353 — every exit that solicits a reply persists the question.
 // The fail-closed ordering (proposal ≫ memory ≫ referent) lives in ONE place;
 // each site below derives its own referent and hands it in.
@@ -5653,8 +5655,28 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       !configureOptionIntent &&
       !structuralRestructureIntent &&
       !repairSelectionPresent &&
-      repairAnswerReading !== null &&
-      repairAnswerReading.kind === 'numeric'
+      // ⭐⭐⭐ THE LOAD-ORDER INVERSION — the defect this lane closes, and it is
+      // an ORDERING defect rather than a parsing one.
+      //
+      // This condition used to be `repairAnswerReading !== null && ... ===
+      // 'numeric'`, i.e. the pending set was fetched from the database ONLY
+      // once a CONTEXT-FREE text predicate had already succeeded in reading the
+      // message as a number. So the record that names the asked cell — which
+      // exists, is armed, and carries `option_id`/`factor_id` — was loaded only
+      // for the replies that did not need it, and withheld from exactly the
+      // replies whose only antecedent it was.
+      //
+      // Measured at `915da5a3` against the product's own effect-value ask:
+      // `make it 25%` reached the resolver and bound; `make it 25% please`
+      // read null here, never loaded the pending, and fell through to the LLM,
+      // which asked again. A trailing "please" was the whole difference.
+      //
+      // Now: consult the record whenever the message plausibly carries a
+      // quantity, and let the SLOT decide what it means. The admission
+      // predicate cannot bind, choose a slot or write — its only authority is
+      // whether to read a row (see `messagePlausiblyCarriesQuantity`).
+      ((repairAnswerReading !== null && repairAnswerReading.kind === 'numeric')
+        || messagePlausiblyCarriesQuantity(ingress.message))
     ) {
       try {
         repairPriorPendings = await loadMostRecentPendingActionsIntegrityStrict(ingress.scenario_id, requestId);
@@ -5682,13 +5704,33 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         recordedEffectAnswer = recorded.answer;
         recordedEffectGraph = repairGraph;
       } else if (recorded.kind === 'ask' || recorded.kind === 'stale'
-        || recorded.kind === 'ambiguous' || recorded.kind === 'unavailable') {
+        || recorded.kind === 'ambiguous' || recorded.kind === 'unavailable'
+        || recorded.kind === 'confirm') {
         let response: OlumiResponse = recorded.kind === 'ask'
           ? composeConfigureOptionClarifyResponse({
               optionLabel: recorded.pair.optionLabel,
               factorLabels: [recorded.pair.factorLabel], stage: ingress.stage,
               message: ingress.message,
             })
+          : recorded.kind === 'confirm'
+          // ⭐⭐ THE HONEST EXIT — ONE discriminating question, and the user's
+          // own words are preserved rather than replaced by a figure we chose.
+          //
+          // ⚠ `a third` MUST NOT become 0.33 silently, and this is where that
+          // ruling is enforced at the wire: we say what we heard, say what we
+          // could not settle, and offer an explicit figure to confirm. The
+          // difference from the demand it replaces is that this sentence can
+          // only be produced by having READ the reply — so it cannot be
+          // byte-identical to the ask that preceded it.
+          ? { response_version: 2, assistant_text: formatEffectSlotReask({
+                heardText: recorded.heardText,
+                suggestedModelUnitText: recorded.suggestedModelUnitText,
+                reason: recorded.reason,
+                optionLabel: recorded.pair.optionLabel,
+                factorLabel: recorded.pair.factorLabel,
+                attempt: recorded.attempt,
+              }),
+              blocks: [], suggested_actions: [], insights: [], stage_indicator: ingress.stage }
           : { response_version: 2, assistant_text:
               'I cannot safely match that answer to the previous question. Nothing has changed. Please name the option and factor you want to set.',
               blocks: [], suggested_actions: [], insights: [], stage_indicator: ingress.stage };

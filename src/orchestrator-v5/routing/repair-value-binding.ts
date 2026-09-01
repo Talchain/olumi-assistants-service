@@ -72,7 +72,7 @@ import { buildConfigureOptionAdvisedFormat } from '../configure-option-chip-text
  *
  * Re-exported so this module's existing consumers and specs are unaffected.
  */
-import { readMissingValueAnswer } from './missing-value-answer.js';
+import { readMissingValueAnswer, toModelUnitText } from './missing-value-answer.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import {
@@ -482,6 +482,262 @@ export type RepairValueBindingResolution =
       readonly valueText: string;
     };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ⭐⭐⭐ THE SLOT-AWARE CONTRACT — arithmetic against a KNOWN target, instead of
+// pattern-matching an unknown one.
+//
+// THE DEFECT, measured at `915da5a3` over fifteen ordinary English replies to
+// the product's OWN effect-value ask. Five bound; the rest were lost, and the
+// mechanism was NOT that the numeric grammar is too narrow:
+//
+//     "make it 25%"        → binds        "make it 25% please"  → LOST
+//     "please make it 25%" → binds        "0.7 please"          → LOST
+//     "set it to 0.7"      → binds        "put it at 0.7"       → LOST
+//     "use 0.7"            → binds        "try 0.7"             → LOST
+//
+// A TRAILING "please" is the whole difference in the first pair. The reason is
+// `NUMERIC_ANSWER_PATTERNS` in `missing-value-answer.ts`: three `^…$`-anchored
+// verb shapes over a closed lexicon (`set|change|update|adjust|put` + `make` +
+// `use`), with `put` requiring `to` — so `put it AT 0.7` misses by a
+// preposition and `reach`, `go with`, `try` miss by not being listed.
+//
+// ⚠⚠ THE FIX IS NOT A FIFTH ROUND ON THAT LEXICON. Adding `reach|go with|try`
+// and a trailing-politeness tail is exactly the widening that oscillated four
+// times on the neighbouring seam (CLAUDE.md trap 22f), and it would still lose
+// the sixth phrasing nobody thought of. The lexicon exists ONLY because the
+// reader has to infer WHICH SLOT the sentence is about from the sentence
+// itself, and a bare verb-less figure gives it nothing to infer from. That
+// inference is what needs deleting, not widening.
+//
+// ⭐ THE STRUCTURAL MOVE. When the product has ASKED — and it has, and the
+// `elicit_option_effect` pending records the exact cell — the slot is already
+// known. A reader given the slot does not need to parse the sentence for a
+// subject at all. It needs only two decidable facts:
+//
+//   1. does this message name any option or factor OTHER than the asked cell?
+//      (decidable against the GRAPH, not against a lexicon)
+//   2. is there exactly one quantity in it?
+//      (decidable by counting, not by matching a verb)
+//
+// Neither question is ambiguous, so neither can oscillate. There is NO verb
+// list here, no politeness list, and no second numeric grammar: the single
+// quantity found is interpreted by {@link isModelUnitEffectValueText}, the same
+// range/ordinal owner the elliptical arm already uses.
+//
+// FAILURE DIRECTION, stated: every unhandled shape DECLINES, which is exactly
+// today's behaviour (fall through to the LLM). The contract can therefore only
+// convert a loss into a bind or into a named clarification — it cannot convert
+// a bind into a wrong write, because rule 1 refuses any sentence naming another
+// entity and the caller supplies the slot from the pending's own ids.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** The cell the product asked about, supplied by the caller from the pending. */
+export interface KnownEffectSlot {
+  readonly optionId: string;
+  readonly optionLabel: string;
+  readonly factorId: string;
+  readonly factorLabel: string;
+}
+
+export type SlotBoundAnswer =
+  /** A single in-scale figure. `modelUnitText` is the canonical 0–1 spelling. */
+  | {
+      readonly kind: 'value';
+      readonly modelUnitText: string;
+      readonly quantityText: string;
+      readonly slot: KnownEffectSlot;
+    }
+  /**
+   * A quantity we can NAME but must not WRITE — offered for confirmation with
+   * the user's own words preserved. This is the ratified exit for "a third":
+   * never silently 0.33, and never the same demand again.
+   */
+  | {
+      readonly kind: 'confirm';
+      readonly reason: 'imprecise_quantity' | 'scale_ambiguous';
+      readonly suggestedModelUnitText: string;
+      readonly heardText: string;
+      readonly slot: KnownEffectSlot;
+    }
+  /** A figure outside the 0–1 effect scale. No mutation, no success receipt. */
+  | {
+      readonly kind: 'out_of_scale';
+      readonly quantityText: string;
+      readonly slot: KnownEffectSlot;
+    }
+  /** Not ours. The caller keeps today's behaviour exactly. */
+  | {
+      readonly kind: 'declined';
+      readonly reason: 'names_other_entity' | 'no_quantity' | 'several_quantities';
+    };
+
+/**
+ * ⭐ THE FRACTION LEXICON — the ONLY word list in this contract, and it is
+ * bounded by what it can DO rather than by how well it is written.
+ *
+ * A member can only ever produce a `confirm`, i.e. one clarifying question
+ * offering an explicit figure. It can NEVER produce a write. So a wrong entry
+ * costs a turn, not a wrong value — which is why a closed five-word list is
+ * acceptable here and a verb lexicon that gates BINDING is not.
+ *
+ * `a third` is in the set for exactly the reason it must never bind: 1/3 is not
+ * expressible as the two-decimal figure the scale wants, so choosing 0.33
+ * invents precision the user did not give. Offering 0.33 and asking is honest;
+ * writing it is not.
+ */
+const FRACTION_WORDS: readonly (readonly [RegExp, string])[] = [
+  [/\b(?:a |one )?half\b/u, '0.5'],
+  [/\b(?:a |one )?third\b/u, '0.33'],
+  [/\b(?:a |one )?quarter\b/u, '0.25'],
+  [/\btwo[ -]thirds\b/u, '0.67'],
+  [/\bthree[ -]quarters\b/u, '0.75'],
+];
+
+/**
+ * Every quantity in the message, as written, with its percent marker if any.
+ * A COUNT, not a choice: two matches mean the contract asks rather than picks.
+ */
+const QUANTITY_SCAN = /(?<![\w.])(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%|percent|per cent)?/giu;
+
+function normaliseLabel(label: string): string {
+  return label.toLowerCase().replace(/\s+/gu, ' ').trim();
+}
+
+/**
+ * Does `message` name an option or factor that is NOT the asked cell?
+ *
+ * ⚠ THIS IS THE SAFETY GATE THAT MAKES ADMITTING CONTEXT SAFE, and it is the
+ * conjunct rule 3c in `option-effect-write.ts` applies for the same purpose. It
+ * is re-derived here rather than imported because that module's copy is
+ * unexported AND unreachable for this case: `resolveOptionEffectWrite` declines
+ * on `no_single_unit_scale_value` before rule 3c runs whenever the message
+ * carries no readable figure, which is precisely the population this contract
+ * exists for. Exporting it would mean editing a file outside this lane's
+ * declared ownership; the duplication is named here so it can be folded when
+ * both seams are owned together.
+ *
+ * FAILS TOWARD DECLINE: a label that matches spuriously costs a fall-through to
+ * today's behaviour, never a write to the wrong cell.
+ */
+function namesForeignEntity(
+  message: string,
+  slot: KnownEffectSlot,
+  graph: { readonly nodes?: unknown } | null | undefined,
+): boolean {
+  const nodes = graph?.nodes;
+  if (!Array.isArray(nodes)) return false;
+  const padded = ` ${normaliseLabel(message)} `;
+  for (const raw of nodes as readonly unknown[]) {
+    if (raw === null || typeof raw !== 'object') continue;
+    const node = raw as Record<string, unknown>;
+    if (node.kind !== 'option' && node.kind !== 'factor') continue;
+    if (node.id === slot.optionId || node.id === slot.factorId) continue;
+    if (typeof node.label !== 'string') continue;
+    const label = normaliseLabel(node.label);
+    // Three characters is `matchLabels`' own floor: shorter labels collide with
+    // ordinary words and would decline every sentence containing one.
+    if (label.length < 3) continue;
+    if (padded.includes(` ${label} `) || padded.includes(` ${label}'s `)) return true;
+  }
+  return false;
+}
+
+/**
+ * ⭐⭐ INTERPRET ONE MESSAGE AGAINST ONE KNOWN SLOT.
+ *
+ * RECEIVES the user's message, the cell the product asked about, and the graph
+ * the ask was recorded against.
+ * RETURNS a written value, a figure to confirm, an out-of-scale refusal, or a
+ * decline.
+ * REFUSES, always: any message naming another option or factor; any message
+ * carrying more than one figure; any figure outside 0–1; any bare integer whose
+ * scale is ambiguous; and every fraction word, which is offered and never
+ * written.
+ *
+ * PURE. No graph mutation, no I/O, no clock.
+ */
+export function resolveAnswerForKnownSlot(params: {
+  readonly message: string;
+  readonly slot: KnownEffectSlot;
+  readonly graph: { readonly nodes?: unknown } | null | undefined;
+}): SlotBoundAnswer {
+  const { message, slot } = params;
+  if (typeof message !== 'string' || message.trim().length === 0) {
+    return { kind: 'declined', reason: 'no_quantity' };
+  }
+  // RULE 1 — a foreign subject is refused before anything is read from it.
+  if (namesForeignEntity(message, slot, params.graph)) {
+    return { kind: 'declined', reason: 'names_other_entity' };
+  }
+
+  // RULE 2 — exactly one quantity, counted rather than matched.
+  QUANTITY_SCAN.lastIndex = 0;
+  const quantities = [...message.matchAll(QUANTITY_SCAN)];
+  if (quantities.length > 1) return { kind: 'declined', reason: 'several_quantities' };
+
+  if (quantities.length === 0) {
+    // No digits. A fraction word is a quantity we can NAME but never WRITE.
+    const lower = ` ${normaliseLabel(message)} `;
+    for (const [pattern, suggested] of FRACTION_WORDS) {
+      const hit = pattern.exec(lower);
+      if (hit !== null) {
+        return {
+          kind: 'confirm',
+          reason: 'imprecise_quantity',
+          suggestedModelUnitText: suggested,
+          heardText: hit[0].trim(),
+          slot,
+        };
+      }
+    }
+    return { kind: 'declined', reason: 'no_quantity' };
+  }
+
+  const found = quantities[0]!;
+  const digits = found[1]!;
+  const percentMarker = found[2];
+  const isPercent = percentMarker !== undefined;
+  const quantityText = isPercent ? `${digits}${percentMarker}` : digits;
+  // ⭐ THE CANONICAL SPELLING COMES FROM THE ONE OWNER, never re-derived here.
+  const modelUnitText = toModelUnitText(digits, isPercent);
+  if (modelUnitText === null) return { kind: 'declined', reason: 'no_quantity' };
+
+  const parsed = Number(modelUnitText);
+  if (!Number.isFinite(parsed)) return { kind: 'declined', reason: 'no_quantity' };
+
+  // ⭐ THE RATIFIED SCALE CLIFF, HONOURED RATHER THAN RE-LITIGATED, AND IT IS
+  // TESTED BEFORE THE RANGE — the order is load-bearing. A bare integer is
+  // ambiguous between `25` and `25%`, a hundredfold difference with nothing in
+  // the message to decide it (`missing-value-answer.ts`'s human/internal
+  // boundary ruling). Range-checking first would refuse `25` as "out of scale"
+  // and tell the user their perfectly ordinary answer was off the scale, when
+  // the truth is that we cannot tell WHICH scale they used. It is OFFERED,
+  // never chosen. `0` is excluded: it means the same on either scale.
+  const bareInteger = !isPercent && /^\d+$/u.test(digits.replace(/,/gu, ''));
+  if (bareInteger && parsed !== 0) {
+    const asPercent = toModelUnitText(digits, true);
+    const asPercentValue = asPercent === null ? Number.NaN : Number(asPercent);
+    // Only ambiguous if the percentage reading is itself usable — a bare `150`
+    // is not "25 or 25%", it is off the scale on both readings.
+    if (Number.isFinite(asPercentValue) && asPercentValue >= 0 && asPercentValue <= 1) {
+      return {
+        kind: 'confirm',
+        reason: 'scale_ambiguous',
+        suggestedModelUnitText: asPercent!,
+        heardText: quantityText,
+        slot,
+      };
+    }
+    return { kind: 'out_of_scale', quantityText, slot };
+  }
+
+  if (parsed < 0 || parsed > 1) {
+    return { kind: 'out_of_scale', quantityText, slot };
+  }
+
+  return { kind: 'value', modelUnitText, quantityText, slot };
+}
+
 /** Server-only binding to a recorded question, never an ingress instruction. */
 export interface RecordedEffectAnswer {
   readonly pending: PendingAction;
@@ -494,7 +750,57 @@ export interface RecordedEffectAnswer {
 export type RecordedEffectAnswerResolution =
   | { readonly kind: 'unrelated' | 'unrecorded' | 'other_question' | 'unavailable' | 'stale' | 'ambiguous' }
   | { readonly kind: 'ask'; readonly pair: MissingEffectPair }
+  | {
+      /**
+       * ⭐ THE HONEST EXIT — we read a quantity we are not entitled to WRITE, so
+       * we name it and ask ONE discriminating question. Distinct from `ask`
+       * because it carries a figure to confirm: `ask` says "that value will not
+       * do", this says "did you mean 0.25?". The difference is the whole
+       * distance between re-issuing a demand and advancing the exchange.
+       */
+      readonly kind: 'confirm';
+      readonly pair: MissingEffectPair;
+      readonly suggestedModelUnitText: string;
+      readonly heardText: string;
+      readonly reason: 'imprecise_quantity' | 'scale_ambiguous';
+      /**
+       * How many times this cell has been asked, off the pending being
+       * answered. THE READER for `ElicitOptionEffectFields.attempt` — a field
+       * with no reader cannot change anything and should not exist (trap 10).
+       */
+      readonly attempt: number;
+    }
   | { readonly kind: 'bind'; readonly answer: RecordedEffectAnswer };
+
+/**
+ * ⭐⭐ THE ADMISSION GATE — "should we CONSULT the record?", never "what does
+ * this message mean?".
+ *
+ * ⚠⚠ IT EXISTS BECAUSE THE OLD GATE CONFLATED THOSE TWO QUESTIONS, AND THAT
+ * CONFLATION IS THE DEFECT THIS LANE CLOSES. At `915da5a3` the pending set was
+ * loaded ONLY when `readMissingValueAnswer(message) !== null` — a context-free
+ * text predicate. So the record that names the asked cell was fetched only for
+ * the replies that did not need it, and withheld from exactly the replies whose
+ * only antecedent it was. `make it 0.8 please` read null, the pending was never
+ * loaded, and the turn fell through to the LLM, which asked again.
+ *
+ * ⭐ WHY THIS PREDICATE IS SAFE WHERE THAT ONE WAS NOT — it is about POWER, not
+ * about being better written. This predicate cannot bind, cannot choose a slot
+ * and cannot write: its entire authority is whether to read a row. Failing OPEN
+ * costs one read and then a decline; failing CLOSED costs exactly today's
+ * behaviour. A binding predicate's failures cost a wrong value on a real graph.
+ * That is why widening THIS is not a fifth round of trap 22f, and why widening
+ * the verb lexicon would have been.
+ *
+ * Deliberately crude: a digit, or one of the fraction words the contract can
+ * offer. Anything else keeps today's route byte-identical.
+ */
+export function messagePlausiblyCarriesQuantity(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  if (/\d/u.test(message)) return true;
+  const padded = ` ${message.toLowerCase().replace(/\s+/gu, ' ').trim()} `;
+  return FRACTION_WORDS.some(([pattern]) => pattern.test(padded));
+}
 
 /** Which recorded cell does this answer belong to? This is not a number parser. */
 export function resolveRecordedOptionEffectAnswer(params: {
@@ -506,7 +812,15 @@ export function resolveRecordedOptionEffectAnswer(params: {
   readonly nowMs: number;
 }): RecordedEffectAnswerResolution {
   const reading = readMissingValueAnswer(params.message);
-  if (reading?.kind !== 'numeric' || reading.leadingContext !== '') return { kind: 'unrelated' };
+  // ⭐ THE CONTEXT-FREE READING IS NO LONGER THE ADMISSION TEST — it is now just
+  // ARM 1. A message it cannot read may still be an answer to a question we
+  // ASKED, and the pending knows which. What gates entry is
+  // {@link messagePlausiblyCarriesQuantity}, which can only decide whether to
+  // consult the record, never what the record means.
+  const contextFreeNumeric = reading?.kind === 'numeric' && reading.leadingContext === '';
+  if (!contextFreeNumeric && !messagePlausiblyCarriesQuantity(params.message)) {
+    return { kind: 'unrelated' };
+  }
   if (params.pendings === null || params.pendings.some(
     (pa) => parsePendingAction(pa) === null || pa.scenario_id !== params.scenarioId,
   )) return { kind: 'unavailable' };
@@ -539,15 +853,66 @@ export function resolveRecordedOptionEffectAnswer(params: {
     p => p.optionId === asked.option_id && p.factorId === asked.factor_id,
   );
   if (pair === undefined) return { kind: 'stale' };
-  // The sole recorded question disambiguates 0/1; it never turns bare 20 into 20%.
-  if (!isModelUnitEffectValueText(reading, { ordinalCollisionPossible: false })) {
-    return { kind: 'ask', pair };
+
+  // ── ARM 1 — the context-free reading, UNCHANGED. Anything that bound at
+  // `915da5a3` binds identically here, by the same predicate, to the same cell.
+  if (contextFreeNumeric) {
+    // The sole recorded question disambiguates 0/1; it never turns bare 20 into 20%.
+    if (!isModelUnitEffectValueText(reading, { ordinalCollisionPossible: false })) {
+      return { kind: 'ask', pair };
+    }
+    const valueText = reading.modelUnitText!;
+    return { kind: 'bind', answer: {
+      pending, priorPendingActions: params.pendings, pair, valueText,
+      instruction: buildRepairBindingInstruction(pair, valueText),
+    } };
   }
-  const valueText = reading.modelUnitText!;
-  return { kind: 'bind', answer: {
-    pending, priorPendingActions: params.pendings, pair, valueText,
-    instruction: buildRepairBindingInstruction(pair, valueText),
-  } };
+
+  // ── ARM 2 — THE SLOT IS THE ANTECEDENT. Reached only when the sentence
+  // cannot be its own antecedent, which is precisely when the question we asked
+  // is the only thing that can supply one.
+  //
+  // ⚠ THE SLOT COMES FROM `asked` (the PENDING's own ids), never from the
+  // sentence, and `pair` is the readiness-derived record for those same ids —
+  // so a wrong-entity write is not merely unlikely here, it is unreachable:
+  // there is no code path on which a label parsed out of the user's prose
+  // becomes a write target.
+  const slotted = resolveAnswerForKnownSlot({
+    message: params.message,
+    slot: {
+      optionId: asked.option_id,
+      optionLabel: asked.option_label,
+      factorId: asked.factor_id,
+      factorLabel: asked.factor_label,
+    },
+    graph,
+  });
+  switch (slotted.kind) {
+    case 'value': {
+      const valueText = slotted.modelUnitText;
+      return { kind: 'bind', answer: {
+        pending, priorPendingActions: params.pendings, pair, valueText,
+        instruction: buildRepairBindingInstruction(pair, valueText),
+      } };
+    }
+    case 'confirm':
+      return {
+        kind: 'confirm', pair,
+        suggestedModelUnitText: slotted.suggestedModelUnitText,
+        heardText: slotted.heardText,
+        reason: slotted.reason,
+        attempt: typeof asked.attempt === 'number' ? asked.attempt : 1,
+      };
+    case 'out_of_scale':
+      // Same exit as arm 1's refused value: named, never converted, never
+      // written, and no success receipt.
+      return { kind: 'ask', pair };
+    case 'declined':
+    default:
+      // Names another entity, several figures, or no figure at all. Not ours —
+      // today's route, unchanged.
+      return { kind: 'unrelated' };
+  }
 }
 
 /**

@@ -4707,6 +4707,10 @@ export async function dispatchEditGraph(
           analysisReady, nodes: (projected as GraphStateIngress).nodes,
           scenarioId: payload.scenario_id, emittedAtIso: new Date().toISOString(),
           graphHash: askedGraphHash,
+          // Read the superseded ask BEFORE it is replaced, so a re-ask knows it
+          // is a re-ask. Without this the counter resets every turn and the
+          // second ask is indistinguishable from the first.
+          priorPendings: recordedAnswer?.priorPendingActions ?? priorPendingForCarry,
         });
         if (asked !== null) {
           const chipPending = pendingActionsForCommit ?? derivePendingActionsFromFinalizedChips(

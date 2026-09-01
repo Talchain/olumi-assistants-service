@@ -272,6 +272,82 @@ export function formatBaselineReask(input: {
 }
 
 /**
+ * ⭐⭐ THE EFFECT-SLOT RE-ASK — {@link formatBaselineReask}'s shape, generalised
+ * to the option×factor effect ask rather than re-invented beside it.
+ *
+ * THE DEFECT IT CLOSES. Measured at `915da5a3`, nine of nine unrecognised
+ * replies to the effect ask received the BYTE-IDENTICAL demand back. The cause
+ * is structural, not a copy oversight: `projectReadinessRecovery` is a pure
+ * function of `(analysisReady, nodes)` and never receives the user's message,
+ * so it composes the ask from the GRAPH — which has not changed — rather than
+ * from the EXCHANGE, which has. A second ask computed from an unchanged input
+ * is necessarily the first ask again. The founder hit exactly this: he typed
+ * `25%` and got "I couldn't tell what value to use." Twice.
+ *
+ * ⭐ SO EVERY ARM QUOTES THE USER. That is what makes the second ask provably
+ * different from the first: the first ask cannot quote a reply that did not
+ * exist yet, so a composer that always quotes cannot emit the opening demand
+ * again. The difference is structural, not a matter of remembering to vary the
+ * wording.
+ *
+ * ⚠ PERCENTAGES, NEVER RAW DECIMALS. `RAW_DECIMAL_RE`
+ * (`belief-elicitation/beta-posterior.ts`) bans leading-decimal probabilities
+ * from user-facing prose, and the estate's own instruction is "use the
+ * PERCENTAGE form ('35%', never '0.35')". It is also the ratified product
+ * ruling: a strategic user must never be asked to understand the internal
+ * normalised coefficient scale. So the internal `0.25` is rendered `25%`.
+ *
+ * Leak-safe on the same terms as its sibling: no handler ids, no parameter
+ * names, no internal tokens, no em dash.
+ */
+export function formatEffectSlotReask(input: {
+  readonly heardText: string;
+  /** The canonical 0–1 spelling. Rendered as a percentage, never emitted raw. */
+  readonly suggestedModelUnitText: string;
+  readonly reason: 'imprecise_quantity' | 'scale_ambiguous';
+  readonly optionLabel: string;
+  readonly factorLabel: string;
+  /**
+   * How many times this cell has now been asked. 1 on the first ask.
+   *
+   * ⚠ THE SECOND ASK MUST NOT BE THE FIRST ASK AGAIN, and this is what makes
+   * that structural rather than remembered: from attempt 2 the copy OPENS by
+   * acknowledging the previous exchange, which the opening ask cannot do
+   * because it has nothing to acknowledge.
+   */
+  readonly attempt?: number;
+}): string {
+  const parsed = Number(input.suggestedModelUnitText);
+  const percent = Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
+  const cell = `"${input.optionLabel}" on "${input.factorLabel}"`;
+  // From the second attempt the product says so, and changes strategy: it stops
+  // restating the scale and offers the single figure as something to accept.
+  const repeat = (input.attempt ?? 1) >= 2;
+  const opener = repeat ? `I am still not certain I have this right. ` : '';
+  if (percent === null) {
+    return (
+      `${opener}I read "${input.heardText}" but could not turn it into a level for ${cell}. ` +
+      `Give it to me as a percentage, for example 60%.`
+    );
+  }
+  switch (input.reason) {
+    case 'scale_ambiguous':
+      return (
+        `${opener}You wrote "${input.heardText}", and I could not tell which scale you meant. ` +
+        `Read as a percentage that is ${percent}% of the top for ${cell}. ` +
+        `Reply ${percent}% to confirm, or give me the percentage you intended.`
+      );
+    case 'imprecise_quantity':
+    default:
+      return (
+        `${opener}I read "${input.heardText}" as roughly ${percent}%, but I will not record ` +
+        `an approximation as your figure for ${cell}. ` +
+        `Reply ${percent}% to confirm, or give me the percentage you want.`
+      );
+  }
+}
+
+/**
  * Receipt for a goal-target set through the add_constraint goal-threshold
  * join (lane CEE-W5 Mission B). Names the target honestly and states only
  * what durably happened (the threshold is stamped on the goal node in the
