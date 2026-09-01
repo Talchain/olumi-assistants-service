@@ -185,7 +185,35 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // Prior facts stay observational — a degraded read yields `unknown` and
     // never authorises or blocks the write. Same post-commit seam, third
     // instance; migrate with the frame-consumer audit, do not add more.
-    'src/orchestrator-v5/system-events/dispatch.ts': 3,
+    // 2026-09-01 structural_add writer (#1275): +1 (one call; the import was
+    // already counted above) — `dispatchStructuralAdd` is the FOURTH instance
+    // of the same post-commit seam, and it is admitted for a DERIVED reason
+    // rather than by symmetry with its siblings.
+    //
+    // WHY THIS ONE GENUINELY NEEDS THE DERIVATION. `nodes` and `options[]` are
+    // both inside the analysis-affecting hash projection, so an add ALWAYS
+    // moves that hash: any prior analysis is out of date by construction and
+    // the currency verdict has to move with it. The pre-write context frame
+    // therefore cannot represent the post-write bytes — the Train C /
+    // structural_delete reason above, in the opposite direction (a removal and
+    // an addition both move the projection).
+    //
+    // ⭐ AND THE CONTRAST THAT SHOWS THIS IS NOT A BLANKET WAIVER FOR THE
+    // FAMILY: `dispatchStructuralRename`, added to this same file by #1273,
+    // adds NO call here and issues no prior-facts read at all — a rename
+    // provably cannot move the analysis hash (`label` is outside the
+    // projection, pinned by `structural-rename.test.ts` → "the
+    // analysis-affecting hash of the persisted bytes does NOT move"), so there
+    // is no currency verdict to re-derive and the round trip would compute a
+    // value that is then discarded. Two writers landed a day apart; only the
+    // one whose bytes move the hash is admitted here. A future `structural_*`
+    // writer must make the same argument at the projection, not cite this row.
+    //
+    // Prior facts stay observational — a degraded read yields `unknown` and
+    // never authorises or blocks the write. Fourth instance of the seam and
+    // the last one that should land ad-hoc; migrate with the frame-consumer
+    // audit, do not add more.
+    'src/orchestrator-v5/system-events/dispatch.ts': 4,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`
