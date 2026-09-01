@@ -4,17 +4,14 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * WHY THIS EXISTS
  *
- * ⚠ THE ORIGINAL RATIONALE IS RETIRED (2026-09-01) — kept rather than deleted
- * (trap 14). This module was built for the post-draft provisional auto-run,
- * whose dispatch committed a `run_analysis` fact ~20s after the draft SSE
- * stream's terminal COMPLETE frame had closed the socket, leaving a persisted
- * result no browser could see without sending another turn. That auto-run has
- * been REMOVED: turn one frames the user's problem rather than scoring it.
- *
- * THIS ROUTE REMAINS LIVE AND GENERIC. It never knew about the auto-run: it
- * reads whatever analysis a scenario has committed, by whatever route, and
- * returns it only on `fresh`. It now serves user-initiated runs exclusively —
- * a channel with less traffic, not a broken one.
+ * A fresh admissible draft schedules a provisional auto-run (#999). Its
+ * dispatch commits a `run_analysis` fact roughly twenty seconds after the draft
+ * SSE stream's terminal COMPLETE frame has closed the socket
+ * (`routes/streamed-turn-sse.ts:425`, a `finally` no branch can hold open). So
+ * the result exists, is persisted, and is correct — and until this module the
+ * ONLY way a browser could see it was to send another turn, because across
+ * CEE's whole route surface no route returned a scenario's analysis except a
+ * turn.
  *
  * Paul's ruling (2026-08-17): server calculation and automatic client delivery
  * are ONE capability. This is the read half.

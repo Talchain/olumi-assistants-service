@@ -54,6 +54,10 @@ vi.mock('../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js', () => (
   dispatchDraftGraph: dispatchDraftGraphMock,
 }));
 
+const scheduleAutoRunMock = vi.fn();
+vi.mock('../../../src/orchestrator-v5/handlers/auto-run-after-draft.js', () => ({
+  scheduleAutoRunAfterFreshDraft: scheduleAutoRunMock,
+}));
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
@@ -228,6 +232,7 @@ describe('POST /orchestrate/v2/turn — draft-first intake (clarification alongs
 
   beforeEach(() => {
     dispatchDraftGraphMock.mockReset();
+    scheduleAutoRunMock.mockReset();
     appendMock.mockClear();
   });
 
@@ -263,6 +268,14 @@ describe('POST /orchestrate/v2/turn — draft-first intake (clarification alongs
     expect(body.assistant_text).toContain(goalQ!.text);
     expect(body.assistant_text).toContain(optionsQ!.text);
 
+    // 3. #999's auto-run fired on this draft exactly as on any fresh draft.
+    expect(scheduleAutoRunMock).toHaveBeenCalledTimes(1);
+    const autoRunArgs = scheduleAutoRunMock.mock.calls[0][0];
+    expect(autoRunArgs.scenarioId).toBe(SCENARIO_ID);
+    expect(autoRunArgs.draftTurnId).toBe(TURN_ID);
+    expect(autoRunArgs.draftGraph).toEqual(DRAFT_GRAPH);
+    expect(autoRunArgs.draftGraphHash).toBe(DRAFT_GRAPH_HASH);
+
     // 4. NON-BLOCKING by construction: no clarify turn was committed and no
     //    clarify round was persisted (the draft dispatch is mocked, so ANY
     //    append here would be the blocking clarify commit).
@@ -283,6 +296,7 @@ describe('POST /orchestrate/v2/turn — draft-first intake (clarification alongs
     const body = JSON.parse(res.body);
     expect(body.assistant_text).toContain(DRAFT_NARRATIVE);
     expect(body.assistant_text).toContain("I've assumed");
+    expect(scheduleAutoRunMock).toHaveBeenCalledTimes(1);
     expect(appendMock).not.toHaveBeenCalled();
   });
 
@@ -302,6 +316,7 @@ describe('POST /orchestrate/v2/turn — draft-first intake (clarification alongs
     // A disclosure about assumptions "in this draft" needs a draft on the
     // canvas — same truth gate as the single-gap path (dg.graph !== null).
     expect(body.assistant_text).not.toContain("I've assumed");
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
   });
 
   it('NEGATIVE PIN (PR #1002 fix round): a question TO the product with a decision verb never drafts — no fabricated model, no auto-run', async () => {
@@ -321,6 +336,7 @@ describe('POST /orchestrate/v2/turn — draft-first intake (clarification alongs
 
     expect(res.statusCode).toBe(200);
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
     const body = JSON.parse(res.body);
     expect(body.assistant_text ?? '').not.toContain("I've assumed");
   });
@@ -334,6 +350,7 @@ describe('POST /orchestrate/v2/turn — draft-first intake (clarification alongs
 
     expect(res.statusCode).toBe(200);
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
     const body = JSON.parse(res.body);
     // Whatever branch answers (deterministic guard or TurnExecutor), it must
     // not carry a fabricated draft disclosure.

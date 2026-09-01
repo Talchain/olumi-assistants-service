@@ -71,6 +71,7 @@ import type { GraphV3T } from '../../schemas/cee-v3.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { extractGraphOptionIds } from '../context/option-identity.js';
 import {
+  buildAutoRunProvenance,
   RUN_PROVENANCE_ENRICHMENT_KEY,
 } from '../context/run-initiator.js';
 import {
@@ -139,6 +140,14 @@ import type { ComposeContext } from '../compose/types.js';
  */
 
 /**
+ * R2 (2026-08-16) — the chip id carried by the SERVER-SYNTHESISED payload the
+ * post-draft auto-run dispatches with (auto-run-after-draft.ts). Exported so
+ * the synthesiser and any log reader share one identity; never emitted as a
+ * suggested_action.
+ */
+export const AUTO_RUN_POST_DRAFT_CHIP_ID = 'auto_run_post_draft';
+
+/**
  * R2 — the CEE-authored key stamped into the run_analysis fact's open
  * `enrichment` record when the run was auto-initiated after a fresh draft.
  * Same carrier pattern as the decision_review enricher (a freshly-cloned
@@ -152,17 +161,96 @@ import type { ComposeContext } from '../compose/types.js';
  * browser is a schemas-train keep-list change, deliberately not made here.
  */
 // ⭐ MOVED to `../context/run-initiator.js` (2026-08-20) — the ONE owner of the
-// auto-run marker vocabulary. ⚠ The WRITER here was deleted on 2026-09-01 with
-// the auto-run; the key survives for the coaching layer's reader of facts
-// persisted BEFORE that date (`v5_handler_facts` is append-only). Re-exported
-// so existing consumers keep their import path (trap #12: one definition).
+// auto-run marker vocabulary, imported by the writer below AND by the coaching
+// layer's reader. Re-exported here so this module's existing consumers and
+// specs keep their import path (CLAUDE.md trap #12: one definition, no copies).
 export { RUN_PROVENANCE_ENRICHMENT_KEY };
+
+/**
+ * R2 — the user-visible provisional label. Opens the auto-run turn's
+ * assistant answer (stored copy and would-be wire copy alike), so a resumed
+ * conversation never presents the auto-run as something the user asked for.
+ * Deterministic template text: no graph labels, no counts, no leader claim.
+ *
+ * ── ⚠ HISTORY, KEPT RATHER THAN OVERWRITTEN (trap 14) ──────────────────────
+ * The whole auto-run was DELETED by #1298 (2026-09-01) on the reading that the
+ * founder's verdict — "far too focused on the analysis rather than enhancing
+ * reasoning" — named this mechanism. **That reading was wrong and the founder
+ * corrected it the same day:** the initial analysis exists to give richer
+ * material for critical and creative thinking, and is deliberate. What was
+ * actually wanted is the half #1298 did not build — making it unmistakable
+ * that this pass is AI-ONLY and UNCONFIRMED. So the behaviour is restored
+ * verbatim from `cb36b1ea^` and only this sentence is rewritten.
+ *
+ * ── WHY THIS WORDING, AND WHERE EVERY CLAUSE COMES FROM ────────────────────
+ * ⭐ NO NEW VOCABULARY WAS MINTED. The product already says "we guessed" in two
+ * registers (model-voice first person; third-person panel voice), and a third
+ * would be the drift this estate keeps paying for. This is the model-voice
+ * register, assembled from sentences already shipping:
+ *
+ *   · "a starting point to argue with, not an answer" — VERBATIM from
+ *     `MODEL_VARIANCE_NOTE` (`coaching/post-draft-narrative.ts`). Its docstring
+ *     warns against two hedges in a row; that warning is about the DRAFT reply,
+ *     and this is a different turn, so there is no double hedge.
+ *   · "tell me what I have got wrong and I will change it" — the correction
+ *     invitation from `context-integrity/brief-audit-answer.ts` ("If something
+ *     matters and is missing, tell me and I will add it") and the terminal
+ *     bridge's "review or replace it".
+ *   · "Nothing in it carries your judgement yet" — the "needs your judgement"
+ *     family (`turn-executor.ts`, `routing/readiness-intake.ts`).
+ *   · "where your brief gave me no figure I estimated one" — the
+ *     `estimated by Olumi` / `cee_inference` provenance register.
+ *
+ * ⭐⭐ WHAT IT DELIBERATELY DOES **NOT** SAY, AND THE ASYMMETRY THAT DECIDES IT.
+ * An earlier draft read "the values it used are my own estimates, not yours".
+ * That is a BLANKET claim over every value, and on any brief that stated
+ * figures it claims the USER's numbers as our invention — the exact direction
+ * `context-integrity/not-modelled-manifest.ts` rules out: "WRONGLY CLAIMING A
+ * USER'S VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY OMITTING ONE OF OUR
+ * OWN INVENTIONS". So the copy claims only what is unambiguously true of EVERY
+ * post-draft auto-run: the user has confirmed nothing (they have taken no turn
+ * yet), and the gaps were filled by estimate. Both hold whatever the brief
+ * contained, so the sentence cannot become false for a particular user.
+ *
+ * ⚠ SCOPE — THIS SENTENCE REACHES THE CONVERSATION SURFACE ONLY. It rides the
+ * auto-run turn's `assistant_text`, so a resumed conversation reads it first
+ * (the "caveat first, top-down" contract `tools/handlers/staleness-prefix.ts`
+ * states). The numbers ALSO land on the canvas via
+ * `routes/scenario-graph-analysis-read.ts` → the UI's provisional-delivery
+ * hook, and THAT surface carries no label, because
+ * `RUN_PROVENANCE_ENRICHMENT_KEY` is not on the transport keep-list. Labelling
+ * the canvas is a UI change plus a schemas keep-list train — the boundary this
+ * lane stops at, reported rather than crossed.
+ *
+ * ⚠ AND IT IS A PROVENANCE CAVEAT, NOT A CURRENCY ONE (trap 21). It answers
+ * "has this had any user input?"; `StalenessCaveat` ('stale' | 'unconfirmed')
+ * answers "is this out of date?". Two different questions — do NOT reuse that
+ * module's `unconfirmed` for this, and do not align their defaults.
+ */
+export const AUTO_RUN_PROVISIONAL_DISCLOSURE =
+  'I ran a first analysis on the model I have just drafted. Nothing in it carries your judgement yet — you have not confirmed any of it, and where your brief gave me no figure I estimated one. Treat it as a starting point to argue with, not an answer: tell me what I have got wrong and I will change it.';
+
+/**
+ * R2 — marks a dispatch as the post-draft auto-run rather than a user's chip
+ * click. Three behavioural consequences, each pinned in
+ * chip-click-dispatch-auto-run.test.ts, and NOTHING else changes:
+ *   1. the commit carries NO `userMessage` (the user typed nothing; NULL
+ *      user_message is the established system-event turn shape);
+ *   2. the run_analysis fact is stamped with `enrichment.run_provenance`;
+ *   3. the assistant answer opens with AUTO_RUN_PROVISIONAL_DISCLOSURE.
+ */
+export interface ChipClickAutoRunTrigger {
+  /** The fresh-draft turn this run was initiated for (provenance only). */
+  readonly draftTurnId: string;
+}
 
 export interface DispatchChipClickRunAnalysisParams {
   readonly payload: MessageTurnPayload;
   readonly requestId: string;
   /** Injectable registry for tests. Production uses the default singleton. */
   readonly handlerRegistry?: HandlerRegistry;
+  /** R2 — present ONLY on the server-initiated post-draft auto-run. */
+  readonly autoRun?: ChipClickAutoRunTrigger;
 }
 
 /**
@@ -1052,6 +1140,31 @@ export async function dispatchDeterministicChipClick(
   );
 }
 
+/**
+ * R2 — stamp auto-run provenance onto the run_analysis fact. Clone-and-spread
+ * per the decision_review enricher's rule: PLoT-originated enrichment keys are
+ * preserved verbatim; only the CEE-authored provenance key is added. Facts of
+ * any other type pass through untouched by reference.
+ */
+function stampAutoRunProvenance(
+  facts: readonly HandlerFact[],
+  draftTurnId: string,
+): readonly HandlerFact[] {
+  return facts.map((fact) => {
+    if (fact.fact_type !== 'run_analysis') return fact;
+    return {
+      ...fact,
+      result: {
+        ...fact.result,
+        enrichment: {
+          ...(fact.result.enrichment ?? {}),
+          [RUN_PROVENANCE_ENRICHMENT_KEY]: buildAutoRunProvenance(draftTurnId),
+        },
+      },
+    };
+  });
+}
+
 export async function dispatchChipClickRunAnalysis(
   params: DispatchChipClickRunAnalysisParams,
 ): Promise<DispatchChipClickRunAnalysisResult> {
@@ -1430,6 +1543,15 @@ export async function dispatchChipClickRunAnalysis(
     });
     enrichedFacts = coachingApplication.handlerFacts;
 
+    // R2 — provisional provenance stamp, BEFORE the compose/commit seams so
+    // the persisted fact, the composed block source and the freshness read
+    // all see one fact object. The wire block's transport keep-list strips
+    // the key (see RUN_PROVENANCE_ENRICHMENT_KEY), so today's UI renders an
+    // ordinary completed analysis — the required graceful degradation.
+    if (params.autoRun !== undefined) {
+      enrichedFacts = stampAutoRunProvenance(enrichedFacts, params.autoRun.draftTurnId);
+    }
+
     // V5 coaching parity — emit the same post-analysis suggested_actions
     // the Sonnet-routed run_analysis path emits. Reuses the existing
     // `generateChips` rule so chip-click and routed turns produce
@@ -1530,6 +1652,21 @@ export async function dispatchChipClickRunAnalysis(
       // — no extra DB read.
       priorTurnFactsForLensHistory: context.prior_facts,
     });
+
+    // R2 — the user-visible provisional label, PREPENDED before the egress
+    // guards below so the forbidden-phrase and defaulted-value seams qualify
+    // the text that actually ships/persists. Deterministic template copy;
+    // placed ahead of the receipt so a resumed conversation reads the honest
+    // framing first.
+    if (params.autoRun !== undefined) {
+      const receipt = response.assistant_text ?? '';
+      response = {
+        ...response,
+        assistant_text: receipt.length > 0
+          ? `${AUTO_RUN_PROVISIONAL_DISCLOSURE} ${receipt}`
+          : AUTO_RUN_PROVISIONAL_DISCLOSURE,
+      };
+    }
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
     // Runs as the LAST step before the chip-click response is
@@ -1657,11 +1794,13 @@ export async function dispatchChipClickRunAnalysis(
         coaching_state: context.coaching_state,
         // V5 Conversation Context Reliability: persist the user's turn text;
         // the assistant answer auto-derives from `response.assistant_text`.
-        // ⚠ UNCONDITIONAL SINCE 2026-09-01. This was previously omitted on the
-        // post-draft auto-run trigger, whose synthesised turn had no user
-        // words to store. That trigger is gone: every run now starts because
-        // a user asked for one, so there is always a real message to record.
-        userMessage: payload.message,
+        // R2 — on the auto-run trigger the user typed NOTHING, so nothing may
+        // be stored as their words: omit the key entirely (capConversationText
+        // maps the absence to a NULL user_message — the established
+        // system-event turn shape). The synthesised payload.message exists
+        // only to satisfy the boundary contract and must never enter the
+        // conversation record as user speech.
+        ...(params.autoRun === undefined ? { userMessage: payload.message } : {}),
         // Same GraphV3T the egress sanitiser uses for this turn — resolves
         // entity-id labels in the stored assistant answer so stored == wire.
         contentGraph: snapshotGraph,
