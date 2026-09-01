@@ -375,7 +375,7 @@ export function detectCoachingSignal(
     //
     // ⚠ IT USED TO ASK `hasAnyPriorRunAnalysisFact` — "does ANY run_analysis
     // fact exist?" — and since R2 those are different questions, because
-    // ⚠ REMOVED 2026-09-01: the post-draft auto-run committed a server-initiated provisional
+    // `scheduleAutoRunAfterFreshDraft` commits a server-initiated provisional
     // run after every admissible fresh draft. Every arm of this branch's rerun
     // copy presupposes the user saw something: "The result is unchanged",
     // "still leads after this re-run", "It replaces the earlier result". On a
@@ -516,7 +516,7 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
  * ⚠⚠ SUPERSEDES `hasAnyPriorRunAnalysisFact` (2026-08-20), WHICH ASKED
  * "does ANY run_analysis fact exist?". Those were one question until R2
  * (2026-08-16) gave the SERVER a way to run an analysis nobody asked for:
- * ⚠ REMOVED 2026-09-01. The post-draft auto-run committed a provisional `run_analysis` fact
+ * `scheduleAutoRunAfterFreshDraft` commits a provisional `run_analysis` fact
  * after every admissible fresh draft. The old predicate counted it, so the
  * user's first-ever analysis took the RE-RUN arm and the product asserted a
  * comparison against a result the user had never seen. Per Paul's convergence

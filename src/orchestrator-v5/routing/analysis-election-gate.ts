@@ -39,8 +39,8 @@
  * initial model generation, and this gate must not touch it. It does not, and
  * the reason is STRUCTURAL rather than a predicate that could drift:
  *
- *   (RETIRED 2026-09-01) `route-v2.ts` → the post-draft auto-run
- *     → `dispatchChipClickRunAnalysis`
+ *   `route-v2.ts` → `scheduleAutoRunAfterFreshDraft`
+ *     → `auto-run-after-draft.ts` → `dispatchChipClickRunAnalysis`
  *
  * That path builds its own turn context and invokes the handler directly. It
  * emits a FRESH turn (`source: 'chip_click'`, `chip.id:
@@ -65,7 +65,7 @@
  * |---|----------------------------------------|-----------------|---------|
  * | 1 | LLM router election (`routeWithToolUse`)| model-decided  | **GATED — this module** |
  * | 2 | Chip click, route-v2 branch (b)         | user's click   | SANCTIONED — the user pressed it |
- * | 3 | ~~post-draft auto-run~~                 | RETIRED 2026-09-01 | REMOVED — turn one frames the problem; a run starts only when the user asks |
+ * | 3 | `scheduleAutoRunAfterFreshDraft`        | server, post-draft | SANCTIONED — the provisional analysis after initial model generation |
  * | 4 | Short-confirm resume of a pending run   | user's "yes"   | SANCTIONED — consent to an offer the product made |
  * | 5 | Imperative re-run pre-route (2.229)     | user's words, deterministic | SANCTIONED — an explicit instruction, matched without an LLM |
  * | 6 | Pending-action derivation → proposal    | product's own offer | SANCTIONED — the product offered it and the user took it |

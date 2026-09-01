@@ -234,6 +234,22 @@ export interface FinaliserContext {
    */
   readonly graph?: import('../orchestrator/types.js').GraphV3T | null;
   /**
+   * ROADMAP 2.1271 — THIS turn started a provisional analysis and it is in
+   * flight. Threaded ONLY by the draft exit, and only from the same
+   * `resolveRunAdmission` verdict that gates the auto-run scheduler.
+   *
+   * ⚠ IT DOES NOT PARTICIPATE IN THE `canonical` PRECEDENCE CHAIN BELOW, and
+   * that is deliberate. `running` is not a freshness derivation: the persisted
+   * facts genuinely say "nothing has run for this graph", and that reading stays
+   * correct — it is the RUN LIFECYCLE that has moved on, which no fact read can
+   * see. So this rides alongside the derivation into `composeAnalysisStateV1`,
+   * where one arm above `never_run` consumes it. Folding it into a synthetic
+   * derivation would corrupt every OTHER member of the verdict (the five
+   * usability predicates, the contradiction list) that is correctly computed
+   * from the facts.
+   */
+  readonly autoRunInFlight?: { readonly startedAt: string };
+  /**
    * THE CONSEQUENCE PRODUCER'S INPUT — the turn's already-loaded
    * `prior_facts`, threaded so the finaliser can stamp the wire `run_delta`
    * block (see `coaching/build-run-delta.ts`).
@@ -444,6 +460,11 @@ function attachAnalysisState(
     // withheld-claim projection has redacted `near_tie`, the separation half
     // is genuinely unknown to the consumer and `leader_claim` must say so.
     rawRobustness: readRawRobustnessFromResponseBody(response),
+    // ROADMAP 2.1271 — passed through verbatim; the composer owns the arm's
+    // precedence and its timestamp validation.
+    ...(ctx.autoRunInFlight !== undefined
+      ? { autoRunInFlight: ctx.autoRunInFlight }
+      : {}),
   });
   if (analysisState === undefined) return response;
   return { ...response, analysis_state: analysisState };

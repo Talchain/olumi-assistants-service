@@ -121,6 +121,10 @@ vi.mock('../../orchestrator-v5/handlers/draft-graph-dispatch.js', () => ({
   dispatchDraftGraph: dispatchDraftGraphMock,
 }));
 
+const scheduleAutoRunMock = vi.fn();
+vi.mock('../../orchestrator-v5/handlers/auto-run-after-draft.js', () => ({
+  scheduleAutoRunAfterFreshDraft: scheduleAutoRunMock,
+}));
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
 vi.mock('../../orchestrator-v5/session/index.js', () => ({
@@ -217,6 +221,7 @@ function turnPayload(message: string) {
 
 async function turn(app: FastifyInstance, message: string) {
   dispatchDraftGraphMock.mockReset();
+  scheduleAutoRunMock.mockReset();
   chatWithToolsMock.mockClear();
   appendMock.mockClear();
   // If the route ever decides to draft, the dispatcher answers — so a draft is
@@ -274,6 +279,7 @@ describe('ROADMAP 2.715 at the routing layer — a question to the assistant is 
 
   beforeEach(() => {
     dispatchDraftGraphMock.mockReset();
+    scheduleAutoRunMock.mockReset();
     chatWithToolsMock.mockClear();
     appendMock.mockClear();
   });
@@ -296,6 +302,7 @@ describe('ROADMAP 2.715 at the routing layer — a question to the assistant is 
     expect(status).toBe(200);
     expect(exitPath(body)).toBe('draft_graph');
     expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
+    expect(scheduleAutoRunMock).toHaveBeenCalledTimes(1);
     expect(String(body.assistant_text ?? '')).toContain(DRAFT_MARKER);
   });
 
@@ -317,6 +324,8 @@ describe('ROADMAP 2.715 at the routing layer — a question to the assistant is 
       expect(exitPath(body)).toBe('turn_executor');
       // No model was built for the meta-question.
       expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+      // No analysis was started off the back of one.
+      expect(scheduleAutoRunMock).not.toHaveBeenCalled();
       // And the draft narrative never reached the user.
       expect(String(body.assistant_text ?? '')).not.toContain(DRAFT_MARKER);
     });

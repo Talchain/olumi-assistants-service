@@ -8383,7 +8383,7 @@ export async function runTurnExecutor(
         // kills with its imperative-re-run twin.
         //
         // ⚠ AND THE SANCTIONED PROVISIONAL ANALYSIS IS NOT REACHABLE FROM
-        // HERE AT ALL. The post-draft auto-run (REMOVED 2026-09-01) dispatched through
+        // HERE AT ALL. `scheduleAutoRunAfterFreshDraft` dispatches through
         // `dispatchChipClickRunAnalysis`, which builds its own turn context
         // and never calls `routeWithToolUse` or `runTurnExecutor`; the
         // user-clicked chip is claimed by route-v2 dispatch branch (b), ahead

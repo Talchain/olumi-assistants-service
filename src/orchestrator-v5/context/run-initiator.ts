@@ -3,21 +3,36 @@
  *
  * ── WHY THIS MODULE EXISTS ──────────────────────────────────────────────────
  * Since R2 (2026-08-16) a `run_analysis` fact can be committed WITHOUT the user
- * asking for one. ⚠⚠ THAT WRITER IS GONE (2026-09-01): the post-draft auto-run
- * was removed because turn one belongs to FRAMING the user's problem, not to
- * scoring it. `handlers/auto-run-after-draft.ts` and the `autoRun` branch of
- * `chip-click-dispatch.ts` were deleted with it.
+ * asking for one: `scheduleAutoRunAfterFreshDraft` dispatches a server-initiated
+ * provisional run after every admissible fresh draft
+ * (`handlers/auto-run-after-draft.ts`, single call site `orchestrator/route-v2.ts`).
  *
- * ⭐ THIS MODULE DELIBERATELY SURVIVES ITS WRITER, as a READER of history.
- * `v5_handler_facts` is append-only, so every scenario that drew a draft before
- * that date still carries `enrichment.run_provenance` FOREVER. Deleting the
- * reader would make those facts unrecognisable and hand them to the coaching
- * layer as ordinary user-initiated runs. Since `AUTO_RUN_RESULT_REACHES_USER`
- * is already `true`, keeping it is exactly behaviour-preserving for that
- * installed base — which is why it stays rather than being inlined.
- * `buildAutoRunProvenance` now has no production caller by design: it is the
- * writer half, retained so the round-trip stays testable and so a future reader
- * can see the shape it is parsing.
+ * ⚠⚠ DELETED BY #1298 AND RESTORED THE SAME DAY (2026-09-01) — HISTORY KEPT
+ * RATHER THAN OVERWRITTEN (trap 14), BECAUSE THE DELETION'S RATIONALE READS AS
+ * SETTLED AND IS NOT. #1298 removed this writer, reasoning from the founder's
+ * verdict ("far too focused on the analysis rather than enhancing reasoning")
+ * that the auto-run was the mechanism. **The founder corrected that directly:**
+ * the initial analysis is deliberate — it exists to give richer material for
+ * critical and creative thinking — and the real defect was that we never made
+ * clear the pass is AI-ONLY and UNCONFIRMED. The behaviour is restored verbatim
+ * from `cb36b1ea^`; the labelling is the part that changed
+ * (`AUTO_RUN_PROVISIONAL_DISCLOSURE` in `handlers/chip-click-dispatch.ts`).
+ * ⭐ Do not re-derive #1298's conclusion from this module's shape.
+ *
+ * ── ⭐ ONE PRODUCER, MEASURED — NOT ASSUMED ────────────────────────────────
+ * The hazard #1298 flagged is that a restored writer would give
+ * `enrichment.run_provenance` TWO producers (this estate's chronic defect).
+ * MEASURED at the restore commit with `rg -a` over `src/` + `tests/`, with the
+ * contrast control in the same sweep: while the writer was deleted there were
+ * ZERO production callers of {@link buildAutoRunProvenance} (only two spec
+ * files, `coaching-auto-run-delivered` and `coaching-phantom-prior-run`), so
+ * restoring `stampAutoRunProvenance` returns the count to EXACTLY ONE, which is
+ * the pre-#1298 shape. Same result for the wire signal it carries: `running`
+ * had ZERO producers of `run_state.kind === 'running'` while the contrast
+ * control `kind: 'never_run'` read one (`compose/analysis-state-v1.ts`), so the
+ * restored `autoRunInFlight` thread is again the single producer named in L-A.
+ * ⚠ If you add a second writer of either, you have reopened the defect —
+ * this module is the one owner and both ends import from here.
  * That fact is real, it is persisted, and it is the CURRENT analysis for the
  * graph — freshness and the analysis projection are right to read it.
  *

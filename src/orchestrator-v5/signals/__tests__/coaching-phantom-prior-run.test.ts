@@ -10,7 +10,7 @@
  * NOT "an absent prior reads as equal" — `buildRerunAcknowledgement` fails
  * closed at two independent guards and cannot compare against nothing. The
  * prior was REAL and the user had simply never seen it:
- * the post-draft auto-run, REMOVED 2026-09-01 (route-v2's draft_graph branch, ungated by
+ * `scheduleAutoRunAfterFreshDraft` (route-v2's draft_graph branch, ungated by
  * any flag) dispatches a SERVER-INITIATED provisional `run_analysis` after
  * every admissible fresh draft. That commits fact #1. The user's own "Run
  * analysis" is fact #2, compared against #1, identical — hence the sentence.

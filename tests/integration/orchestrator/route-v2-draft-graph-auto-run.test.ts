@@ -1,26 +1,27 @@
 /**
- * TURN ONE FRAMES THE PROBLEM — it does not score it.
+ * R2 — auto-run provisional analysis: route-level trigger placement.
  *
- * This file is the NEGATIVE PIN left behind by the deletion of the post-draft
- * auto-run (`scheduleAutoRunAfterFreshDraft`, removed 2026-09-01). A deletion
- * with no guard is an invitation to re-add: the previous behaviour had a whole
- * spec asserting the auto-run FIRED, and nothing would have failed if a later
- * session restored it.
+ * The scheduler fires from EXACTLY ONE place — route-v2's draft_graph branch,
+ * AFTER `sendFinalised200` has handed the draft response to the transport.
+ * These specs pin:
  *
- * ── WHY THE DELETION ────────────────────────────────────────────────────────
- * A user who had just described a messy situation got a Monte Carlo they never
- * asked for, and from then on the conversation was a status report on that
- * result. The run also armed the post-analysis advice gate, which then claimed
- * "help me understand …" and answered it with `llm_calls_used: 0`.
+ *   1. POSITIVE: a successful fresh-draft turn schedules the auto-run once,
+ *      with the draft's graph, analysis-affecting hash and turn id.
+ *   2. LATENCY / NON-BLOCKING: a scheduler that throws synchronously cannot
+ *      change the delivered draft response — the 200 and its body are already
+ *      on the wire-side of the call.
+ *   3. NEGATIVES (fresh drafts only):
+ *      - a draft that produced no graph does not schedule;
+ *      - a failed draft commit (500) does not schedule;
+ *      - a chip-click run_analysis turn does not schedule (no re-trigger
+ *        loops: the run path never schedules more runs);
+ *      - a short non-draft message (TurnExecutor fallthrough) does not
+ *        schedule. Reloads send no turn at all, so they cannot reach the
+ *        trigger by construction — the route is the only caller.
  *
- * ── BOTH DIRECTIONS, IN ONE RUN ─────────────────────────────────────────────
- * The decisive risk of removing an unrequested run is removing the REQUESTED
- * one, and a spec that only asserts the absence cannot see that. So every case
- * here is paired: the draft turn must start nothing, AND the chip turn must
- * still start a run, on the same harness in the same file. If a future change
- * disables the run path wholesale, the negative half would still pass — the
- * positive half is what makes this spec's absence claim mean anything
- * (CLAUDE.md trap 13: a probe that cannot see a presence proves no absence).
+ * Harness: same seams as route-v2-draft-graph.test.ts — dispatchDraftGraph is
+ * mocked at the module boundary (the route↔dispatcher contract is what this
+ * file locks), and the auto-run module is mocked to observe scheduling.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
@@ -28,26 +29,17 @@ import type { FastifyInstance } from 'fastify';
 
 import { DRAFT_GRAPH_MIN_BRIEF_LENGTH } from '../../../src/schemas/assist.js';
 
-// -------- Mocks (same seams as route-v2-draft-graph.test.ts) --------
+// -------- Mocks --------
 const dispatchDraftGraphMock = vi.fn();
 vi.mock('../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js', () => ({
   dispatchDraftGraph: dispatchDraftGraphMock,
 }));
 
-/**
- * TWO observation seams, because the two directions enter by DIFFERENT doors
- * and a single mock would be pointed at the wrong one (CLAUDE.md trap 3b/19 —
- * a test bound to an object other than the one it names).
- *
- *   · `dispatchChipClickRunAnalysis` is what the DELETED auto-run imported and
- *     called DIRECTLY. It is the symbol a re-added auto-run would reach for, so
- *     it is the only seam on which "the draft started nothing" is a real claim.
- *     Asserting on the deterministic-chip seam instead would pass happily while
- *     a restored auto-run ran underneath it.
- *   · `dispatchDeterministicChipClick` is what route-v2 calls for a USER's chip
- *     turn. It is the seam the positive twin needs.
- */
-const runAnalysisMock = vi.fn();
+const scheduleAutoRunMock = vi.fn();
+vi.mock('../../../src/orchestrator-v5/handlers/auto-run-after-draft.js', () => ({
+  scheduleAutoRunAfterFreshDraft: scheduleAutoRunMock,
+}));
+
 const dispatchChipClickMock = vi.fn();
 vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', async () => {
   const actual = await vi.importActual<
@@ -55,7 +47,6 @@ vi.mock('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js', async ()
   >('../../../src/orchestrator-v5/handlers/chip-click-dispatch.js');
   return {
     ...actual,
-    dispatchChipClickRunAnalysis: runAnalysisMock,
     dispatchDeterministicChipClick: dispatchChipClickMock,
   };
 });
@@ -96,11 +87,7 @@ vi.mock('../../../src/adapters/llm/router.js', () => ({
         usage: { input_tokens: 1, output_tokens: 1 },
       }),
     },
-    resolution: {
-      task: 'narrate',
-      resolved_model: 'test-model',
-      resolution_source: 'task_default' as const,
-    },
+    resolution: { task: 'narrate', resolved_model: 'test-model', resolution_source: 'task_default' as const },
   }),
   getMaxTokensFromConfig: () => undefined,
 }));
@@ -183,7 +170,7 @@ function draftTurnPayload(turnId = TURN_ID) {
   };
 }
 
-describe('POST /orchestrate/v2/turn — a fresh draft starts no analysis the user did not ask for', () => {
+describe('POST /orchestrate/v2/turn — R2 auto-run scheduling after a fresh draft', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
@@ -200,13 +187,11 @@ describe('POST /orchestrate/v2/turn — a fresh draft starts no analysis the use
   beforeEach(() => {
     dispatchDraftGraphMock.mockReset();
     dispatchChipClickMock.mockReset();
-    runAnalysisMock.mockReset();
+    scheduleAutoRunMock.mockReset();
     appendMock.mockClear();
   });
 
-  // ── THE DELETION, PINNED ──────────────────────────────────────────────────
-
-  it('a successful fresh draft dispatches NO run', async () => {
+  it('a successful fresh draft schedules the auto-run ONCE with the draft graph, hash and turn id', async () => {
     dispatchDraftGraphMock.mockResolvedValueOnce(draftResult());
 
     const res = await app.inject({
@@ -216,21 +201,20 @@ describe('POST /orchestrate/v2/turn — a fresh draft starts no analysis the use
     });
 
     expect(res.statusCode).toBe(200);
-    // The draft itself still happens — without this the absence below could be
-    // satisfied by the draft never running at all.
-    expect(dispatchDraftGraphMock).toHaveBeenCalledTimes(1);
-    // And nothing started an analysis off the back of it — asserted on the
-    // seam a re-added auto-run would actually use, not on a neighbouring one.
-    expect(runAnalysisMock).not.toHaveBeenCalled();
-    expect(dispatchChipClickMock).not.toHaveBeenCalled();
+    expect(scheduleAutoRunMock).toHaveBeenCalledTimes(1);
+    const args = scheduleAutoRunMock.mock.calls[0][0];
+    expect(args.scenarioId).toBe(SCENARIO_ID);
+    expect(args.draftTurnId).toBe(TURN_ID);
+    expect(args.draftGraph).toEqual(DRAFT_GRAPH);
+    expect(args.draftGraphHash).toBe(DRAFT_GRAPH_HASH);
+    expect(typeof args.requestId).toBe('string');
   });
 
-  it('the draft response never claims an analysis is running', async () => {
-    // `autoRunInFlight` was the ONE producer of `run_state.kind === 'running'`
-    // in the estate (`compose/analysis-state-v1.ts`, limit L-A). With the
-    // auto-run gone the draft exit can no longer make that claim, and a user
-    // on turn one is not told a run they never requested is under way.
+  it('a synchronously-throwing scheduler cannot affect the delivered draft (200 + body intact)', async () => {
     dispatchDraftGraphMock.mockResolvedValueOnce(draftResult());
+    scheduleAutoRunMock.mockImplementationOnce(() => {
+      throw new Error('scheduling fault');
+    });
 
     const res = await app.inject({
       method: 'POST',
@@ -239,19 +223,41 @@ describe('POST /orchestrate/v2/turn — a fresh draft starts no analysis the use
     });
 
     expect(res.statusCode).toBe(200);
-    expect(runAnalysisMock).not.toHaveBeenCalled();
-    const body = JSON.parse(res.body) as {
-      analysis_state?: { run_state?: { kind?: string } };
-    };
-    expect(body.analysis_state?.run_state?.kind).not.toBe('running');
+    const body = JSON.parse(res.body);
+    expect(body.assistant_text).toContain('Drafted a decision model');
   });
 
-  // ── THE OPPOSITE DIRECTION — and it is what decides the change ────────────
+  it('a draft that produced NO graph does not schedule', async () => {
+    dispatchDraftGraphMock.mockResolvedValueOnce(
+      draftResult({ graph: null, freshness: undefined, analysisReady: undefined }),
+    );
 
-  it('TWIN: an explicit "run the analysis" chip turn STILL dispatches a run', async () => {
-    // Removing the unrequested run must not remove the requested one. This is
-    // the assertion that makes the two negatives above meaningful rather than
-    // vacuous: it proves the observation seam CAN see a run when one happens.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: draftTurnPayload('11111111-1111-4111-8111-111111111113'),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
+  });
+
+  it('a failed draft commit (500) does not schedule', async () => {
+    dispatchDraftGraphMock.mockResolvedValueOnce(
+      draftResult({ commitPerformed: false }),
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: draftTurnPayload('11111111-1111-4111-8111-111111111114'),
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
+  });
+
+  it('a chip-click run_analysis turn does NOT schedule (the run path never schedules more runs)', async () => {
     dispatchChipClickMock.mockResolvedValueOnce({
       outcome: 'ok',
       response: {
@@ -285,9 +291,29 @@ describe('POST /orchestrate/v2/turn — a fresh draft starts no analysis the use
 
     expect(res.statusCode).toBe(200);
     expect(dispatchChipClickMock).toHaveBeenCalledTimes(1);
-    // Bound by IDENTITY (trap 19): it is the RUN that was dispatched, not some
-    // other deterministic chip that happens to have been handled.
-    expect(dispatchChipClickMock.mock.calls[0]![0]).toBe('run_analysis');
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
     expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+  });
+
+  it('a short non-draft message (TurnExecutor fallthrough) does not schedule', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: {
+        kind: 'message',
+        turn_id: '11111111-1111-4111-8111-111111111116',
+        scenario_id: SCENARIO_ID,
+        stage: 'frame',
+        message: 'What now?',
+        turn_class: 'frame',
+        source: 'composer',
+      },
+    });
+
+    // Same tolerance as route-v2-draft-graph.test.ts: the fallthrough may 200
+    // or 500 in this harness. What matters is the trigger contract.
+    expect([200, 500]).toContain(res.statusCode);
+    expect(dispatchDraftGraphMock).not.toHaveBeenCalled();
+    expect(scheduleAutoRunMock).not.toHaveBeenCalled();
   });
 });
