@@ -158,7 +158,7 @@ const CONSTRUCTED_CHIP_MESSAGES: readonly string[] = [
   // so it carries no `action_type` and re-enters routing as ordinary text.
   // That makes it the single most important entry here.
   'Please re-run the analysis.',
-  // handlers/auto-run-after-draft.ts `AUTO_RUN_TURN_MESSAGE`. It normally
+  // the RETIRED post-draft auto-run's `AUTO_RUN_TURN_MESSAGE`. It normally
   // arrives as a chip_click and never reaches this gate, but if the sanctioned
   // auto-run's own sentence were inadmissible that would be a contradiction
   // worth REDing on.

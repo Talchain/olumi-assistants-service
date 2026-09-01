@@ -3,9 +3,21 @@
  *
  * ── WHY THIS MODULE EXISTS ──────────────────────────────────────────────────
  * Since R2 (2026-08-16) a `run_analysis` fact can be committed WITHOUT the user
- * asking for one: `scheduleAutoRunAfterFreshDraft` dispatches a server-initiated
- * provisional run after every admissible fresh draft
- * (`handlers/auto-run-after-draft.ts`, single call site `orchestrator/route-v2.ts`).
+ * asking for one. ⚠⚠ THAT WRITER IS GONE (2026-09-01): the post-draft auto-run
+ * was removed because turn one belongs to FRAMING the user's problem, not to
+ * scoring it. `handlers/auto-run-after-draft.ts` and the `autoRun` branch of
+ * `chip-click-dispatch.ts` were deleted with it.
+ *
+ * ⭐ THIS MODULE DELIBERATELY SURVIVES ITS WRITER, as a READER of history.
+ * `v5_handler_facts` is append-only, so every scenario that drew a draft before
+ * that date still carries `enrichment.run_provenance` FOREVER. Deleting the
+ * reader would make those facts unrecognisable and hand them to the coaching
+ * layer as ordinary user-initiated runs. Since `AUTO_RUN_RESULT_REACHES_USER`
+ * is already `true`, keeping it is exactly behaviour-preserving for that
+ * installed base — which is why it stays rather than being inlined.
+ * `buildAutoRunProvenance` now has no production caller by design: it is the
+ * writer half, retained so the round-trip stays testable and so a future reader
+ * can see the shape it is parsing.
  * That fact is real, it is persisted, and it is the CURRENT analysis for the
  * graph — freshness and the analysis projection are right to read it.
  *
