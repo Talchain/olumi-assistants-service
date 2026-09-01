@@ -74,8 +74,30 @@ export function createExplainFromStructureHandler(): HandlerFn {
     const explanation = invocation.explanation;
     const sonnetValid = !!(explanation && explanation.answer_text_valid);
     const canRunAnalysis = invocation.analysisReady?.status === 'ready';
+    // An `ambiguous` selected-dependencies verdict is the topology authority
+    // DECLINING TO SPEAK, not a fact about the model. It carries no label, no
+    // connector and no negative claim, so it must not silence the grounded
+    // structural explanation this turn can still give.
+    //
+    // Witnessed on the deployed build (1 Sep 2026, fresh guest session): a
+    // plain "why do you think investor fit matters here?" was classified
+    // `structure_query.kind = 'dependencies'`, the builder returned
+    // `{status:'ambiguous'}`, and this gate — which tested PRESENCE, not
+    // VERDICT — emitted "I cannot establish one unique Living Model element
+    // and matching dependency question" over a model that was drawn correctly
+    // on the canvas beside it.
+    //
+    // ⚠ The gate itself stays. A CONCLUSIVE verdict — `resolved`, or either
+    // `coverage_unavailable` reason — still outranks authored prose, because
+    // that is what stops fluent prose inventing an unlisted option-to-factor
+    // dependency. Only the non-verdict falls through. Both directions are
+    // pinned by opposite-direction twins in
+    // __tests__/explain-from-structure.test.ts; widening this to any
+    // conclusive status REDs the second twin.
+    const selectedDependencies = invocation.selectedDependenciesEvidence;
+    const selectedDependenciesAmbiguous = selectedDependencies?.status === 'ambiguous';
     const hasSelectedDependenciesEvidence =
-      invocation.selectedDependenciesEvidence !== undefined;
+      selectedDependencies !== undefined && !selectedDependenciesAmbiguous;
     const hasStructuralPairEvidence = invocation.structuralPairEvidence !== undefined;
     // A valid authored answer is licensed only when the router explicitly
     // classified the question as the open-ended `general` arm. Direct-link and
@@ -85,10 +107,21 @@ export function createExplainFromStructureHandler(): HandlerFn {
     // topology authority introduced for the mounted failure.
     const mayUseAuthoredGeneralAnswer =
       invocation.proposal?.structure_query?.kind === 'general';
+    // ⚠ The ambiguous fall-through lands on the DETERMINISTIC projection, never
+    // on authored prose. Declining to speak is not a licence for the model to
+    // speak freely about the same structure: prose invented an unlisted
+    // option-to-factor dependency, which is why the topology authority exists.
+    // In production an ambiguous verdict only ever accompanies
+    // `kind === 'dependencies'` (buildSelectedDependenciesEvidence returns null
+    // otherwise), so `mayUseAuthoredGeneralAnswer` is already false — but that
+    // invariant lives in another module, and this handler must not depend on it
+    // silently. Pinned by the hostile-fixture twin, which pairs an ambiguous
+    // verdict with `kind === 'general'` and valid authored prose.
     const useSonnetAnswer =
       sonnetValid &&
       mayUseAuthoredGeneralAnswer &&
-      !hasSelectedDependenciesEvidence;
+      !hasSelectedDependenciesEvidence &&
+      !selectedDependenciesAmbiguous;
     const assistantText = hasSelectedDependenciesEvidence
       ? composeSelectedDependenciesEvidenceAnswer(
           invocation.selectedDependenciesEvidence!,

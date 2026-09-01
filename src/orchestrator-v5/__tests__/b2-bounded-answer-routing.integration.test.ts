@@ -637,10 +637,22 @@ describe('B2 real executor convergence', () => {
       { routingAdapter: adapter, handlerRegistry: handlers, graphState: structuredClone(GRAPH) },
     );
 
-    expect(response.assistant_text).toContain('will not guess');
+    // AMENDED 1 Sep 2026. The identity guard is unchanged and every safety
+    // assertion below is unchanged: an otherwise-valid proposal still cannot
+    // confer scope, and no invented dependency reaches the user. What changed
+    // is the SHAPE of the fail-weak. An ambiguous verdict is the topology
+    // authority declining to speak; it no longer outranks the grounded
+    // structural explanation, so the user gets true structure instead of
+    // "I cannot establish one unique Living Model element…".
+    expect(response.assistant_text).not.toContain('will not guess');
     expect(response.assistant_text).not.toContain('only dependency');
     expect(response.assistant_text).not.toContain('from Replace CRM to Sales Rep Adoption Rate');
     expect(response.assistant_text).not.toContain('complete direct incoming dependencies');
+    // Positive control, bound by identity to this graph's own labels: the
+    // fall-through is a real grounded answer, not an empty string that would
+    // satisfy every negative assertion above.
+    expect(response.assistant_text).toContain('Reach 1,500 paid teams');
+    expect(response.assistant_text.length).toBeGreaterThan(80);
     expect(persistedGraph).toEqual(GRAPH);
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
@@ -658,9 +670,14 @@ describe('B2 real executor convergence', () => {
       graphState: structuredClone(GRAPH),
     });
 
-    expect(response.assistant_text).toContain('will not guess');
+    // AMENDED 1 Sep 2026 — see the identity-substitution case above. The
+    // deictic question still confers no referent and the wrong answer is still
+    // refused; the fail-weak is now the grounded projection, not a refusal.
+    expect(response.assistant_text).not.toContain('will not guess');
     expect(response.assistant_text).not.toBe(wrongAnswer);
+    expect(response.assistant_text).not.toContain('Sales Rep Adoption Rate is what this depends on');
     expect(response.assistant_text).not.toContain('complete direct incoming dependencies');
+    expect(response.assistant_text).toContain('Reach 1,500 paid teams');
     expect(persistedGraph).toEqual(GRAPH);
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
@@ -730,9 +747,18 @@ describe('B2 real executor convergence', () => {
     // Preserve the deployed identity guard: the resolved selection cannot be
     // replaced by a different otherwise-valid model-typed canonical subject.
     expect(groundedSelection).toEqual({ element_ids: ['goal'], unresolved: 'none' });
-    expect(response.assistant_text).toContain('will not guess');
+    // AMENDED 1 Sep 2026. The identity guard above is unchanged. This case is
+    // the witnessed defect in miniature: the user asked about "Team Capacity
+    // Consumed" and the product refused. It now answers from the saved
+    // structure — and answers with what that element DRIVES, which is what the
+    // question was actually about.
+    expect(response.assistant_text).not.toContain('will not guess');
     expect(response.assistant_text).not.toContain('from Sales Rep Adoption Rate to Reach 1,500 paid teams');
     expect(response.assistant_text).not.toContain('complete direct incoming dependencies');
+    expect(response.assistant_text).not.toBe(wrongAnswer);
+    expect(response.assistant_text).toContain(
+      'Its strongest direct influence runs from Team Capacity Consumed to Reach 1,500 paid teams',
+    );
     expect(persistedGraph).toEqual(GRAPH);
     expect(writes.filter((write) => write.graph !== undefined)).toHaveLength(0);
   });
