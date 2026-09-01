@@ -199,19 +199,43 @@ describe('answer_shape — schema pressure (unconditional)', () => {
     ).toThrow(/bullets must be non-blank/);
   });
 
-  it('rejects a missing/blank detail', () => {
+  // ⚠ CONTRACT INVERTED 2026-09-01 (answer-only lane). This test previously
+  // asserted `rejects a missing/blank detail`. That rejection was the reason a
+  // user could not receive a one-sentence reply: a model answering a factual
+  // lookup correctly and concisely failed validation and was sent through
+  // REPAIR_ONCE to pad the answer. `detail` (and `bullets`) are now OPTIONAL.
+  //
+  // The test is INVERTED rather than deleted, so the seam stays guarded: what
+  // moved is the floor on `detail`, and what did NOT move is that a valid
+  // shape still yields non-blank user-facing text. Full twin-direction proof
+  // (concise is legal AND coaching still arrives) lives in
+  // `answer-shape-answer-only.test.ts`.
+  it('ACCEPTS a missing/blank detail — a concise answer is a legal shape', () => {
+    const blankDetail = parseToolCallResponse({
+      intent_class: 'coach',
+      coaching_mode: 'reframe',
+      answer_shape: { headline: VALID_SHAPE.headline, bullets: [], detail: ' ' },
+    });
+    const omittedDetail = parseToolCallResponse({
+      intent_class: 'coach',
+      coaching_mode: 'reframe',
+      answer_shape: { headline: VALID_SHAPE.headline, bullets: [] },
+    });
+    // Bound by IDENTITY to the fixture's exact headline: the derived text is
+    // that one sentence and nothing else — no padding, no trailing blank
+    // lines from an empty bullets/detail section.
+    expect(blankDetail.answer_text).toBe(VALID_SHAPE.headline);
+    expect(omittedDetail.answer_text).toBe(VALID_SHAPE.headline);
+  });
+
+  it('still REJECTS a blank headline — the relaxation did not make an EMPTY shape legal', () => {
+    // The floor that did NOT move. Without this, "answer-only" would mean
+    // "no answer at all" and assistant_text could reach a consumer blank.
     expect(() =>
       parseToolCallResponse({
         intent_class: 'coach',
         coaching_mode: 'reframe',
-        answer_shape: { headline: VALID_SHAPE.headline, bullets: [], detail: ' ' },
-      }),
-    ).toThrow(/detail/);
-    expect(() =>
-      parseToolCallResponse({
-        intent_class: 'coach',
-        coaching_mode: 'reframe',
-        answer_shape: { headline: VALID_SHAPE.headline, bullets: [] },
+        answer_shape: { headline: '   ' },
       }),
     ).toThrow(ToolCallParseError);
   });

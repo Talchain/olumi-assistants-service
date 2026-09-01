@@ -1240,7 +1240,13 @@ export const TelemetryEvents = {
   //   intent_class: 'coach' | 'converse'
   //   headline_length: number
   //   bullet_count: number   (≤3 by schema)
-  //   detail_length: number
+  //   detail_length: number  (0 on an answer-only turn — `detail` is optional)
+  //   answer_shape_kind: 'answer_only' | 'coached'
+  //     DERIVED from the shape's own content by `classifyAnswerShape`, never
+  //     model-authored, so it cannot disagree with the lengths beside it.
+  //     This is how we can tell on staging whether concise answers are
+  //     actually being emitted, and — the direction that matters just as
+  //     much — whether coaching is still arriving when it should.
   V5AnswerShapeEmitted: "v5.answer_shape.emitted",
 
   // ROADMAP 1.132 (F2) hardening — the captured answer_shape no longer

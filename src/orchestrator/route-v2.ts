@@ -149,6 +149,7 @@ import {
   type AnalysisAuthorityUnavailableEgressMode,
 } from '../orchestrator-v5/compose/analysis-authority-unavailable-notice.js';
 import {
+  classifyAnswerShape,
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
 } from '../orchestrator-v5/routing/answer-shape.js';
@@ -1525,6 +1526,7 @@ async function sendFinalised200(
           headline_length: synth.headline.length,
           bullet_count: synth.bullets.length,
           detail_length: synth.detail.length,
+          answer_shape_kind: classifyAnswerShape(synth),
         });
       } else {
         // Sanitiser perturbed the derived text — fail closed, keep the
