@@ -1457,7 +1457,24 @@ export function applyForcedExplanationHandler(
 export const READINESS_INSTRUCTION = [
   '## Readiness (deterministic — authoritative)',
   'The `readiness` block above is the system’s verified answer to "can this model be analysed yet?". Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',
-  '- If anything is still open, say plainly that the analysis cannot run yet, name what is open, and give the user the next step it carries. Never leave them with only a refusal.',
+  // ⚠⚠ THIS BULLET CAPTURED FOUR CONSECUTIVE TURNS ON DEPLOYED STAGING
+  // (1 Sep 2026). It read *"If anything is still open, say plainly that the
+  // analysis cannot run yet…"* — UNCONDITIONAL and MESSAGE-BLIND — so after
+  // CEE asked for a missing effect value, *"What do these terms mean?"* got
+  // the effect-setting flow back instead of an explanation, and two turns
+  // later *"You were talking about 'Keep Sending Cold Emails'."* got the
+  // IDENTICAL question re-asked. The served system prompt v121 already says
+  // ANSWER FIRST, COACH SECOND; this block is appended to the USER turn
+  // AFTER it and self-labels authoritative, so it is what the model obeys.
+  //
+  // ⚠ THE RISK IS SYMMETRIC, AND THE DISCLOSURE IS DELIBERATELY NOT DELETED.
+  // Too weak and the drag persists; too strong and a blocked user is never
+  // told the analysis cannot run — the inverse defect, and the worse one,
+  // because it is silent. So the obligation survives in BOTH branches: it
+  // LEADS when the turn asks nothing else, and it CLOSES when it does.
+  // Paul's standing rule is unchanged either way — never an honest dead end.
+  '- Answer the user’s own message first. When their turn asks something else — a question, a request to explain, or a reply to a question you asked them — that is what this turn is for, and readiness never displaces it.',
+  '- When the turn does not ask something else and anything is still open, say plainly that the analysis cannot run yet, name what is open, and give the user the next step it carries. When it does, answer them first and add what is open in one closing sentence. Never leave them with only a refusal.',
   '- An EMPTY list of open items does NOT mean the model is ready. Judge readiness by the status alone; when the status is anything other than ready, do not tell the user that nothing is blocking analysis.',
   '- Never claim that nothing is blocking, that the model is ready, or that an analysis can run, unless this block says so. If you have not been given this block, you do not know — say what you can see and offer to check, rather than asserting the model is clear.',
   '- Never invent a blocker, a count, or a remedy that this block does not contain.',
