@@ -1517,28 +1517,80 @@ export const GRAPH_CONTEXT_INSTRUCTION = [
  * off `provenance` for exactly this reason, and the last clause below states the
  * boundary to the model so it cannot carry one field's rule across to another.
  *
- * ── ⚠ WHY THE LICENCE IS DELIBERATELY WEAK ────────────────────────────────
+ * ── ⚠⚠ THE LICENCE IS PURELY NEGATIVE, AND AN EARLIER DRAFT OF IT WAS NOT ──
  *
- * It is a NEGATIVE licence plus a weak positive, and both arms are chosen to be
- * TRUE ON EVERY REACHABLE PATH rather than on the common one:
+ * ⚠ CORRECTED 1 Sep 2026, at this PR's own head, after an independent
+ * prompt-sanction review. The first draft licensed the model to say the value
+ * *"was supplied to the model by the people using it, not drafted or estimated
+ * by you"*, and to *"say the value was supplied rather than estimated"*. THAT
+ * WAS FALSE ON A REACHABLE ARM, AND IT WAS THIS PR'S OWN DEFECT INVERTED: this
+ * change exists to stop the assistant calling the user's number its own
+ * estimate, and the positive clause licensed it to call the MODEL's number the
+ * user's. The reasoning that produced *"never say you typed this"* was simply
+ * not carried across to *supplied-versus-estimated*, which is the same claim
+ * one notch weaker. The header below already argued for the negative alone; the
+ * shipped prose overshot it. The prose now matches the argument.
  *
- *   - `user_set` covers `panel_elicited` — a named COLLEAGUE's verified answer
- *     — and this vocabulary has no member meaning "a colleague, not you"
- *     (`cee/transforms/provenance-display.ts:256-267`). So it must never
+ * Every arm `user_set` is reachable through, and what each one costs:
+ *
+ *   - The user-edit stamper's own literal is in
+ *     `FORGEABLE_USER_AUTHORSHIP_LITERALS`
+ *     (`cee/transforms/provenance-display.ts`): `stampUserEditProvenance`
+ *     stamps it onto EVERY value-writing `update_node` op reaching either edit
+ *     seam, and `routing/mutation-consent.ts` records those ops applying
+ *     *"regardless of what the user's message asked for"* (ROADMAP 2.628a). So
+ *     a MODEL-AUTHORED write carries the identical stamp to a user edit, and no
+ *     claim that a PERSON supplied the number is true here.
+ *   - Five more literals are in `UNVERIFIED_USER_AUTHORSHIP_LITERALS`: they
+ *     project to `user_set` on the shared contract's account of what other
+ *     surfaces mean by them, and CEE holds no writer evidence either way.
+ *   - `panel_elicited` is a named COLLEAGUE's server-verified answer, and this
+ *     vocabulary has no member meaning "a colleague, not you"
+ *     (`provenance-display.ts:256-267`). So even the one receipted arm cannot
  *     license "you typed this" or name an individual.
- *   - `user_set` also covers every literal in
- *     `FORGEABLE_USER_AUTHORSHIP_LITERALS` (`cee/transforms/provenance-
- *     display.ts`), where a model-authored `update_node` op is stamped
- *     identically to a genuine user edit. So it must never license "you entered
- *     this" either. (The set is NAMED rather than enumerated here: the derived
- *     writer census `no-brief-derived-user-override.writers.test.ts` REDs on
- *     any unreviewed `src/` file carrying that literal, and this module has no
- *     lookup over the vocabulary to review.)
  *
- * What IS true on every path is the negative: the value was SET ON THE MODEL,
- * so the assistant must not call it its own estimate. That negative is the
- * whole defect this change closes — the positive claim was never needed, and
- * asserting it would reintroduce the same class of untruth from the other side.
+ *   (The sets are NAMED rather than enumerated here: the derived writer census
+ *   `no-brief-derived-user-override.writers.test.ts` REDs on any unreviewed
+ *   `src/` file carrying that literal, and this module has no lookup over the
+ *   vocabulary to review.)
+ *
+ * ONE PROPERTY SURVIVES EVERY ARM: the value is SET IN THIS PROJECTION rather
+ * than absent, so it is not the assistant's to estimate. That yields a
+ * PROHIBITION — *do not call this your own estimate, do not offer to replace
+ * it* — and a prohibition cannot be untruthful, whichever arm produced the
+ * stamp. It is fail-safe by construction, and it is the whole defect this
+ * change closes.
+ *
+ * ⚠ AND IT SAYS "IN THIS PROJECTION", NOT "IN THE SAVED MODEL", DELIBERATELY.
+ * The first narrowed draft said "saved model" and that is the same overclaim one
+ * notch down: this block is emitted whenever a display graph exists, and
+ * `graph_context.status` may be `provisional` — the baseline clause above spells
+ * out that provisional structure "is not saved or accepted". A licence must be
+ * true in the arm it is rendered in, and it is rendered in both.
+ *
+ * ⚠ THE OTHER REPAIR IS AVAILABLE AND IS DELIBERATELY NOT TAKEN HERE. Making
+ * the stamp DISCRIMINATE — a distinct literal for model-authored ops — would
+ * earn the positive claim back. It is also a change to the highest-traffic
+ * write path in the estate (`stampUserEditProvenance`, six call sites), it
+ * belongs to the lane that owns that stamper, and `provenance-display.ts`
+ * already records why making that stamp DEFER instead would reopen the
+ * original defect for the COMMON case. Withdrawing an unearned sentence costs
+ * nothing a PoC needs; rewriting the write path to keep it does. The gap stays
+ * pinned in the suite (see `graph-compact-user-authorship.test.ts`), and the
+ * day it is closed this clause is where the positive licence goes back.
+ *
+ * ── ⚠ AND THE SIBLING FIELD IS DISTINGUISHED, NOT REVOKED ─────────────────
+ *
+ * The same first draft told the model that `value_authorship` is *"the ONLY
+ * field that licenses saying a number was supplied rather than estimated"* and
+ * that a `provenance` field elsewhere *"grants nothing about who supplied a
+ * value"*. `FACTOR_VALUES_INSTRUCTION` — which rides the SAME request on any
+ * canonical factor turn (`buildUserMessage` appends both) — says `provenance`
+ * *"says who authored the value that is there"* and *"Report it as where the
+ * value came from"*. Nullifying a sibling authority is not naming apart; it is
+ * handing the model two deterministic instructions with incompatible answers.
+ * Trap 21's remedy is to say WHICH OBJECT each field is about and leave each
+ * field's own rule standing, which is what the last clause now does.
  */
 export const DISPLAY_GRAPH_INSTRUCTION = [
   '## Living Model structure (deterministic grounding)',
@@ -1552,10 +1604,10 @@ export const DISPLAY_GRAPH_INSTRUCTION = [
   '- The sole additional multi-hop authority is `reaches` on an option node. Each listed target licences only that the option has a structural directed route to the named target; it does not identify a direct edge, intermediate path, sign, strength, confidence or analysis consequence. Do not compose a path from edges yourself, and never treat a bidirected edge as contributing to `reaches`. A listed target label must match exactly one node label; zero or multiple matches make that reachability claim ambiguous and unknown, and node order, kind or identifiers must not select a target. A present empty list means that option is a structural dead end. An absent or malformed list makes reachability unknown, and no other prose may fill it.',
   '- Node array order, labels, descriptions, conversation and other prose do not create topology. Do not infer an edge or route from adjacency, wording or narrative sequence.',
   '- Exactly one option node with `is_baseline: true` identifies the baseline or current approach within this projection. No marker means the baseline is absent from this projection; multiple markers are conflicting and make the baseline unknown. Never select one by array order, label, kind or conversation. Only `graph_context.status: canonical` licenses describing the single marked option as the saved baseline; provisional structure is not saved or accepted. The marker never identifies a winner, recommendation, preference or analysis result.',
-  '- `value_authorship: user_set` on a node is the only fact in this block about WHERE A NUMBER CAME FROM. It means that node’s value was supplied to the model by the people using it, not drafted or estimated by you. Where it appears, never describe that value as your estimate, your assumption, your inference or a placeholder, and never offer to replace it with a better guess of your own.',
-  '- That licence stops there. `value_authorship` never identifies WHICH person and is not a receipt that the person you are talking to typed the figure: it also covers a colleague’s verified answer. Never say the user entered, typed, confirmed or approved a particular number on the strength of this field, and never attribute it to a named individual. Say the value was supplied rather than estimated, and offer to check who if it matters.',
+  '- `value_authorship: user_set` on a node marks that node’s value as one that is already SET in this projection, on a stamp from the human-authorship family, rather than a gap left for you to fill. Where it appears, never describe that value as your estimate, your assumption, your inference or a placeholder, and never offer to replace it with a better guess of your own.',
+  '- ⛔ THAT PROHIBITION IS THE WHOLE OF THE LICENCE, AND IT IS NEGATIVE ON PURPOSE. `value_authorship` is NOT evidence that a person supplied the number: the same stamp is written on a value-setting edit the assistant itself proposed, and on several stamps whose writer this system cannot check. So never say the value was supplied, entered, typed, confirmed or approved by the user, by a colleague or by anyone; never say it was supplied rather than estimated; and never attribute it to a named individual. If who supplied a number matters, say you would have to check and offer to.',
   '- Its ABSENCE is not the opposite claim. Most values carry no authorship fact at all, so a node without `value_authorship` means authorship is unknown here — never that you or the system estimated it. Say nothing about where such a value came from rather than filling the gap.',
-  '- This field is deliberately named apart from every other authorship field in this request, and their rules must never be merged. `value_authorship` on a node is the ONLY field that licenses saying a number was supplied rather than estimated. A `provenance` field anywhere else — on a `graph.edges` entry, or under `factor_values` — is a different fact about a different object with its own vocabulary and its own rule, and grants nothing about who supplied a value.',
+  '- This field is deliberately named apart from every other authorship field in this request because they are about DIFFERENT OBJECTS, and their rules must never be merged or carried across. `value_authorship` is about a node’s NUMBER; a `provenance` field on a `graph.edges` entry is about that LINK; `factor_values[].provenance` is about a FACTOR’s recorded authorship and keeps its own rule, given with that block. Each field is governed only by the instruction written for it, and none of the three is a receipt that a particular person supplied a particular figure.',
   '- Never expose internal field names or identifiers to the user; express only the warranted structure in plain language.',
 ].join('\n');
 

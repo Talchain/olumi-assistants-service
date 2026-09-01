@@ -18,7 +18,12 @@ import { formatGraphForContext } from '../../format/format-graph-for-context.js'
 import {
   buildUserMessage,
   DISPLAY_GRAPH_INSTRUCTION,
+  FACTOR_VALUES_INSTRUCTION,
 } from '../../routing/route-with-tool-use.js';
+import {
+  FORGEABLE_USER_AUTHORSHIP_LITERALS,
+  valueSourceAuthorship,
+} from '../../../cee/transforms/provenance-display.js';
 import { observeSerialisedPack } from './observe-serialised-pack.js';
 
 interface RawNode {
@@ -42,6 +47,14 @@ interface RawEdge {
   readonly to?: string;
   readonly strength?: number;
   readonly edge_type?: string;
+  /**
+   * The compactor's LINK-authorship projection — the SECOND of the three
+   * authorship objects, and the one that keeps the key name `provenance` on the
+   * display node. It answers *"who asserted this link?"*, not *"whose number is
+   * this?"*, and the composition block at the end of this file puts it on the
+   * same request as the other two.
+   */
+  readonly provenance?: string;
 }
 
 const NODES: readonly RawNode[] = [
@@ -84,7 +97,25 @@ function graphWith(
   } as unknown as ContextPackGraph;
 }
 
-function packWithGraph(rawGraph: ContextPackGraph): ContextPack {
+/**
+ * The `factor_values` slice, shaped as `ContextPackFactorValuesSchema` requires.
+ * `buildUserMessage` appends `FACTOR_VALUES_INSTRUCTION` on exactly the
+ * condition `contextPack.factor_values !== undefined`, so passing one here is
+ * what puts BOTH code-owned instruction blocks in a single rendered request.
+ */
+interface FactorValuesSlice {
+  readonly factors: ReadonlyArray<{
+    readonly label: string;
+    readonly has_value: boolean;
+    readonly provenance: 'user_stated' | 'ai_drafted' | 'system_repaired' | 'unattributed';
+  }>;
+  readonly without_value_count: number;
+}
+
+function packWithGraph(
+  rawGraph: ContextPackGraph,
+  factorValues?: FactorValuesSlice,
+): ContextPack {
   return {
     version: '2.0',
     scenario_id: 'scenario-display-graph-sanction',
@@ -95,6 +126,7 @@ function packWithGraph(rawGraph: ContextPackGraph): ContextPack {
     analysis_state: null,
     display_analysis: null,
     display_graph: formatGraphForContext(rawGraph),
+    ...(factorValues === undefined ? {} : { factor_values: factorValues }),
     conversation: {
       recent_turns: [],
       turn_count: 0,
@@ -115,8 +147,12 @@ function packWithGraph(rawGraph: ContextPackGraph): ContextPack {
   } as ContextPack;
 }
 
-function render(rawGraph: ContextPackGraph): {
+function render(
+  rawGraph: ContextPackGraph,
+  factorValues?: FactorValuesSlice,
+): {
   readonly prompt: string;
+  readonly pack: Record<string, unknown>;
   readonly graph: {
     readonly nodes: ReadonlyArray<Record<string, unknown>>;
     readonly edges: ReadonlyArray<Record<string, unknown>>;
@@ -124,12 +160,13 @@ function render(rawGraph: ContextPackGraph): {
   };
 } {
   const prompt = buildUserMessage(
-    packWithGraph(rawGraph),
+    packWithGraph(rawGraph, factorValues),
     'Explain the structure of the saved model.',
   );
   const serialised = observeSerialisedPack(prompt);
   return {
     prompt,
+    pack: serialised,
     graph: serialised.graph as {
       readonly nodes: ReadonlyArray<Record<string, unknown>>;
       readonly edges: ReadonlyArray<Record<string, unknown>>;
@@ -548,36 +585,43 @@ describe('node value_authorship — the field and the sentence that licenses it'
     // rendered PROMPT, not on the constant, so a block that stops being emitted
     // REDs here too.
     expect(prompt).toContain(
-      '`value_authorship: user_set` on a node is the only fact in this block about WHERE A NUMBER CAME FROM',
+      '`value_authorship: user_set` on a node marks that node’s value as one that is already SET in this projection',
     );
     expect(prompt).toContain(
       'never describe that value as your estimate, your assumption, your inference or a placeholder',
     );
   });
 
-  it('⭐ the licence is WEAK in both the directions it has to be', () => {
+  it('⭐ the licence is PURELY NEGATIVE — it forbids, and claims nothing about who supplied the number', () => {
     const { prompt } = render(graphWith([], STAMPED_NODES));
 
-    // `user_set` also covers `panel_elicited` — a colleague's verified answer —
-    // and `user_override`, which this repo pins as forgeable. Neither licenses
-    // "you typed this", so the block must forbid it explicitly.
+    // `user_set` covers `panel_elicited` (a colleague's verified answer), the
+    // five UNVERIFIED literals, AND the forgeable stamp a MODEL-AUTHORED
+    // `update_node` write receives. No positive authorship claim is true on all
+    // of those arms, so the block must make none.
     expect(prompt).toContain(
-      'Never say the user entered, typed, confirmed or approved a particular number on the strength of this field',
+      'never say the value was supplied, entered, typed, confirmed or approved by the user, by a colleague or by anyone',
     );
+    expect(prompt).toContain('never attribute it to a named individual');
     // Absence is not a claim (the shared contract's own instruction on this axis).
     expect(prompt).toContain(
       'Its ABSENCE is not the opposite claim',
     );
   });
 
-  it('⭐ the collision is named apart, not reconciled', () => {
+  it('⭐ the collision is named apart, not reconciled — and the sibling authority is NOT revoked', () => {
     const { prompt } = render(graphWith([], STAMPED_NODES));
 
     expect(prompt).toContain(
-      'This field is deliberately named apart from every other authorship field in this request',
+      'This field is deliberately named apart from every other authorship field in this request because they are about DIFFERENT OBJECTS',
     );
+    // Each sibling is named BY ITS OBJECT and keeps its own rule. The first
+    // draft instead told the model a `provenance` field elsewhere "grants
+    // nothing about who supplied a value", which nullifies
+    // `FACTOR_VALUES_INSTRUCTION` in the same request — see the composition
+    // block at the end of this file.
     expect(prompt).toContain(
-      'A `provenance` field anywhere else — on a `graph.edges` entry, or under `factor_values` — is a different fact about a different object',
+      '`factor_values[].provenance` is about a FACTOR’s recorded authorship and keeps its own rule, given with that block',
     );
   });
 
@@ -601,5 +645,217 @@ describe('node value_authorship — the field and the sentence that licenses it'
     // projection with content, so the absence above is a real absence and not a
     // blind probe.
     expect(authored!['label']).toBe('Customer demand');
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE COMPOSITION WITNESS — ALL THREE AUTHORSHIP OBJECTS AND BOTH
+ * CODE-OWNED INSTRUCTION BLOCKS IN ONE ADAPTER-BOUND REQUEST.
+ *
+ * ── THE DEFECT THIS CLOSES, AND WHY NO EXISTING TEST COULD SEE IT ─────────
+ * The first draft of the `value_authorship` clauses told the model that this
+ * field is *"the ONLY field that licenses saying a number was supplied rather
+ * than estimated"* and that a `provenance` field anywhere else *"grants nothing
+ * about who supplied a value"*. `FACTOR_VALUES_INSTRUCTION` — still live, and
+ * appended by `buildUserMessage` on the SAME request whenever the pack carries
+ * a `factor_values` slice — says the opposite in as many words: `provenance`
+ * *"says who authored the value that is there"*, *"Report it as where the value
+ * came from"*.
+ *
+ * That is not a hypothetical composition. On an ordinary canonical factor turn
+ * both slices are projected from the same persisted graph and both blocks are
+ * appended to the same message. Naming a field apart is right; NULLIFYING a
+ * sibling field's established authority is not naming apart — it hands the
+ * model two deterministic instructions with incompatible answers (CLAUDE.md
+ * trap 21: *write down the question each authority answers*, then name them
+ * apart; do not align or revoke).
+ *
+ * ⚠⚠ AND NO TEST IN THIS REPO COULD OBSERVE IT. Every existing witness renders
+ * ONE object at a time: this file's other blocks build a pack with no
+ * `factor_values` slice; `request-authorship.test.ts` assembles a pack with a
+ * `compactedGraph` and no `factorValues`; `factor-values-instruction.route-
+ * level.test.ts` drives the executor with factor values and no stamped node.
+ * Each is green and each is silent about the pair. A conflict that lives in the
+ * COMPOSITION is invisible to a suite that only ever renders the parts.
+ *
+ * ── WHAT THIS BLOCK ASSERTS, AND ON WHAT ─────────────────────────────────
+ * The serialised pack BYTES (not the constants) for all three objects, both
+ * instruction blocks present exactly once in the rendered prompt, and a pinned
+ * WITHDRAWN-CLAUSE corpus asserted ABSENT with a retained-clause contrast
+ * control non-zero in the same sweep — because an absence assertion with no
+ * positive control is vacuous (CLAUDE.md trap 13).
+ */
+describe('three authorship objects, two instruction blocks, ONE request', () => {
+  const AUTHORED = 'factor_demand';
+  const UNSTAMPED = 'factor_cost';
+
+  /** Node authorship — *whose NUMBER is this?* */
+  const STAMPED_NODES: readonly RawNode[] = NODES.map((node) =>
+    node.id === AUTHORED ? { ...node, provenance: 'user_set' } : node,
+  );
+
+  /** Link authorship — *who asserted this LINK?* Same vocabulary, other question. */
+  const EDGES: readonly RawEdge[] = [
+    { from: AUTHORED, to: 'goal_growth', strength: 0.65, provenance: 'user_set' },
+  ];
+
+  /** Factor authorship — *is this factor's value attributable to a person at all?* */
+  const FACTOR_VALUES: FactorValuesSlice = {
+    factors: [
+      { label: 'Customer demand', has_value: true, provenance: 'user_stated' },
+      { label: 'Delivery cost', has_value: false, provenance: 'ai_drafted' },
+    ],
+    without_value_count: 1,
+  };
+
+  function renderComposed() {
+    return render(graphWith(EDGES, STAMPED_NODES), FACTOR_VALUES);
+  }
+
+  it('⭐ the request really carries all three objects at once — asserted on the serialised bytes', () => {
+    const { graph, pack } = renderComposed();
+
+    // OBJECT 1 — the node's number. Bound BY ID, never by a value predicate
+    // (trap 19): `factor_cost` is otherwise interchangeable with it.
+    const authored = graph.nodes.find((n) => n.id === AUTHORED);
+    expect(authored, 'fixture node missing from the projection').toBeDefined();
+    expect(authored!['value_authorship']).toBe('user_set');
+
+    // OBJECT 2 — the link. Still called `provenance`, deliberately.
+    const edge = graph.edges.find((e) => e.from === AUTHORED && e.to === 'goal_growth');
+    expect(edge, 'fixture edge missing from the projection').toBeDefined();
+    expect(edge!['provenance']).toBe('user_set');
+
+    // OBJECT 3 — the factor slice, with its own four-member vocabulary.
+    const factorValues = pack['factor_values'] as
+      | { readonly factors: ReadonlyArray<Record<string, unknown>> }
+      | undefined;
+    expect(factorValues, '`factor_values` did not reach the serialised pack').toBeDefined();
+    expect(factorValues!.factors.map((f) => f['provenance'])).toEqual([
+      'user_stated',
+      'ai_drafted',
+    ]);
+
+    // CONTRAST CONTROL on the same objects: the unstamped node carries neither
+    // key, so the three positives above are real reads and not a blind probe.
+    const unstamped = graph.nodes.find((n) => n.id === UNSTAMPED);
+    expect(unstamped, 'fixture node missing from the projection').toBeDefined();
+    expect(unstamped!['value_authorship']).toBeUndefined();
+    expect(unstamped!['provenance']).toBeUndefined();
+  });
+
+  it('⭐ BOTH code-owned instruction blocks ride that same request, each exactly once', () => {
+    const { prompt } = renderComposed();
+
+    expect(prompt.split(DISPLAY_GRAPH_INSTRUCTION)).toHaveLength(2);
+    expect(prompt.split(FACTOR_VALUES_INSTRUCTION)).toHaveLength(2);
+  });
+
+  /**
+   * ⭐⭐ THE LOAD-BEARING ASSERTION. The two blocks must not contradict each
+   * other in the bytes the adapter receives.
+   *
+   * WITHDRAWN corpus asserted absent + RETAINED corpus asserted present, in the
+   * SAME sweep. A bare `not.toContain` sweep proves nothing about an instrument
+   * that may simply be looking at an empty string (trap 13); the retained half
+   * is the positive control that proves this probe can see the prose at all.
+   */
+  it('⭐ neither block revokes the other — withdrawn clauses absent, sibling authority intact', () => {
+    const { prompt } = renderComposed();
+
+    const WITHDRAWN: readonly string[] = [
+      // The positive supply claim, false on the model-authored `update_node` arm.
+      'supplied to the model by the people using it, not drafted or estimated by you',
+      'Say the value was supplied rather than estimated, and offer to check who if it matters',
+      // The revocation of the sibling field's authority.
+      'is the ONLY field that licenses saying a number was supplied rather than estimated',
+      'grants nothing about who supplied a value',
+    ];
+    for (const clause of WITHDRAWN) {
+      expect(
+        prompt.includes(clause),
+        `the request still carries a WITHDRAWN clause: "${clause}"`,
+      ).toBe(false);
+    }
+
+    const RETAINED: readonly string[] = [
+      // The node licence survives — as a prohibition.
+      'never describe that value as your estimate, your assumption, your inference or a placeholder',
+      'never say the value was supplied, entered, typed, confirmed or approved by the user, by a colleague or by anyone',
+      // `FACTOR_VALUES_INSTRUCTION`'s own authority survives, unrevoked.
+      '`provenance` says who authored the value that is there',
+      'Report it as where the value came from',
+      // ...including its own weakening, which was already correct.
+      'never say the user entered, confirmed or approved a particular figure on the strength of this field alone',
+    ];
+    expect(RETAINED.length, 'the positive control is empty — the sweep proves nothing').toBeGreaterThan(0);
+    for (const clause of RETAINED) {
+      expect(
+        prompt.includes(clause),
+        `the request has LOST a retained clause: "${clause}"`,
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * ⭐⭐ THE FORGED/UNVERIFIED COUNTERPART, AND THE REASON THE LICENCE HAD TO
+   * BE NARROWED.
+   *
+   * `user_set` is reachable through a stamp the estate pins as FORGEABLE — a
+   * MODEL-AUTHORED `update_node` write receives the identical literal to a
+   * genuine user edit. This test proves the consequence for the prompt: the two
+   * arms produce a BYTE-IDENTICAL node in the request, so nothing downstream
+   * can tell them apart, so every sentence in the licence must be true of the
+   * model-authored one.
+   *
+   * DERIVED FROM THE EXPORTED GAP SET, never restated (trap 12): the literals
+   * are not spelled here, so a stamp split moves this test rather than leaving
+   * it asserting a string nothing writes.
+   */
+  it('⭐ the forgeable arm is INDISTINGUISHABLE in the request — which is why no positive claim is licensed', () => {
+    const forgeable = [...FORGEABLE_USER_AUTHORSHIP_LITERALS];
+    expect(forgeable.length, 'the forgeable gap set is empty — this test is vacuous').toBeGreaterThan(0);
+
+    for (const literal of forgeable) {
+      // The compactor projection a model-authored write ends up with.
+      const projected = valueSourceAuthorship(literal)?.provenance;
+      expect(projected, `${literal} is pinned as forgeable but projects to nothing`).toBe('user_set');
+
+      const forgedNodes: readonly RawNode[] = NODES.map((node) =>
+        node.id === AUTHORED ? { ...node, provenance: projected } : node,
+      );
+      const forged = render(graphWith(EDGES, forgedNodes), FACTOR_VALUES);
+      const genuine = renderComposed();
+
+      // Byte-identical requests. The licence cannot discriminate what the
+      // projection does not carry.
+      expect(forged.prompt).toBe(genuine.prompt);
+    }
+
+    // CONTRAST CONTROL (trap 13e): the sweep discriminates. A literal OUTSIDE
+    // the `user_set` family must NOT reach the model on this key at all, so the
+    // byte-equality above is a real finding rather than a probe that agrees
+    // with everything.
+    //
+    // ⚠ THE KEY-LEVEL ASSERTION IS THE LOAD-BEARING HALF, AND IT WAS ADDED
+    // AFTER A SURVIVING MUTANT SAID SO. Widening `asNodeAuthorship` to carry
+    // ANY string left this whole file GREEN when the control only checked that
+    // the two prompts DIFFERED — they still differ, because the mutant carries
+    // `ai_inferred` through instead of dropping it. A control that cannot tell
+    // "dropped" from "carried under a different value" is not controlling the
+    // narrowing. (The estate does catch it, in `request-authorship.test.ts`;
+    // this block should not have needed to borrow that.)
+    const aiNodes: readonly RawNode[] = NODES.map((node) =>
+      node.id === AUTHORED ? { ...node, provenance: 'ai_inferred' } : node,
+    );
+    const ai = render(graphWith(EDGES, aiNodes), FACTOR_VALUES);
+    const aiNode = ai.graph.nodes.find((n) => n.id === AUTHORED);
+    expect(aiNode, 'fixture node missing from the projection').toBeDefined();
+    expect(
+      aiNode!['value_authorship'],
+      'the compactor’s ai_inferred DEFAULT reached the model on the authorship key — ' +
+        'that is the same false-authorship claim this change closes, with the roles swapped',
+    ).toBeUndefined();
+    expect(ai.prompt).not.toBe(renderComposed().prompt);
   });
 });

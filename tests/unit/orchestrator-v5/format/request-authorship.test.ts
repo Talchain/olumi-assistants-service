@@ -236,7 +236,18 @@ function compactNode(c: Capture, id: string): Record<string, unknown> {
   return found!;
 }
 
-describe('the adapter-bound request tells the model which numbers the user gave it', () => {
+/**
+ * ⚠ TITLE CORRECTED 1 Sep 2026. This block was called *"the adapter-bound
+ * request tells the model which numbers the user gave it"*, which is the same
+ * overclaim the `DISPLAY_GRAPH_INSTRUCTION` licence was narrowed to remove: the
+ * governing stamp does NOT establish that a person gave us the number (a
+ * model-authored `update_node` write receives the identical stamp — see
+ * `FORGEABLE_USER_AUTHORSHIP_LITERALS`). What these tests actually prove is
+ * that the AUTHORSHIP AXIS SURVIVES to the adapter — that two graphs differing
+ * only in it produce different request bytes — which is the deliverable, and a
+ * strictly narrower claim.
+ */
+describe('the adapter-bound request carries the authorship axis all the way to the model', () => {
   /**
    * ⭐⭐⭐ THE DELIVERABLE. Two inputs differing in NOTHING BUT AUTHORSHIP must
    * not produce the same request. This is the assertion whose absence let the

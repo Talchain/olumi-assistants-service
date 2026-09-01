@@ -92,23 +92,39 @@ export interface DisplaySafeNode {
    */
   readonly reaches?: readonly string[];
   /**
-   * ⭐⭐ THE ONE AUTHORSHIP FACT THE MODEL IS TOLD: *this node's value was
-   * supplied to the model, not drafted by the model.* Emitted ONLY as
-   * `'user_set'`, and ONLY when the compactor derived it from a governing
+   * ⭐⭐ THE ONE AUTHORSHIP FACT THE MODEL IS TOLD, AND IT LICENSES A
+   * PROHIBITION RATHER THAN A CLAIM: *this node's value is already SET in this
+   * projection, so it is not yours to estimate.* Emitted ONLY as `'user_set'`,
+   * and ONLY when the compactor derived it from a governing
    * `observed_state.source` stamp.
+   *
+   * ⚠ CORRECTED 1 Sep 2026. This line used to read *"supplied to the model, not
+   * drafted by the model"*. That is FALSE on a reachable arm — the user-edit
+   * stamper's own literal is written identically on a MODEL-AUTHORED
+   * `update_node` write, which is why that literal sits in
+   * `FORGEABLE_USER_AUTHORSHIP_LITERALS` — and it is this PR's own defect
+   * inverted. `DISPLAY_GRAPH_INSTRUCTION` carries the narrowed, purely negative
+   * licence and the full reasoning; this field must not be described anywhere
+   * as evidence that a PERSON supplied the number.
    *
    * ── ⚠⚠ WHY THE KEY IS `value_authorship` AND NOT `provenance` ─────────────
    * Because the compactor's key name would have been the THIRD field called
-   * `provenance` in one adapter-bound request, and the three answer three
-   * different questions in three different vocabularies:
+   * `provenance` in one adapter-bound request. THREE QUESTIONS, TWO TYPE
+   * VOCABULARIES — the count is stated precisely because an earlier draft of
+   * this comment said "three vocabularies", which is one more than there are:
    *
    *   `factor_values[].provenance`  (context-pack-schema.ts:604)
    *        `user_stated | ai_drafted | system_repaired | unattributed`
    *        — *is this factor's value attributable to a person at all?*
    *   `graph.edges[].provenance`    (DisplaySafeEdge, this file)
-   *        `from_brief | ai_inferred | user_set`
+   *        `CompactProvenance` = `from_brief | ai_inferred | user_set`
    *        — *who asserted this LINK?*
-   *   this field                     — *whose NUMBER is this?*
+   *   this field                    — *whose NUMBER is this?*
+   *        a ONE-MEMBER `Extract` of that SAME `CompactProvenance` vocabulary
+   *        (see `DisplaySafeValueAuthorship`), not a third one. Sharing a
+   *        vocabulary with the edge field is exactly why the KEY has to differ:
+   *        two questions over one vocabulary is trap 21's shape, and the answer
+   *        is to name the questions apart, not to mint a third alphabet.
    *
    * They are joined only by the label, and they DISAGREE by design: the
    * obligation authority maps the brief-extraction stamp and the user-edit

@@ -38,7 +38,11 @@ import {
   UNVERIFIED_USER_AUTHORSHIP_LITERALS,
   valueSourceAuthorship,
 } from '../../../../src/cee/transforms/provenance-display.js';
-import { USER_EDIT_SOURCE } from '../../../../src/orchestrator/canonicalise-value-ops.js';
+import {
+  USER_EDIT_SOURCE,
+  stampUserEditProvenance,
+} from '../../../../src/orchestrator/canonicalise-value-ops.js';
+import type { PatchOperation } from '../../../../src/orchestrator/types.js';
 import type { GraphV3T } from '../../../../src/schemas/cee-v3.js';
 
 type ObservedState = Record<string, unknown>;
@@ -483,5 +487,217 @@ describe('the unverified authority surface is pinned as an explicit set', () => 
    */
   it('contrast control: the unverified set is a strict subset of the user_set literals', () => {
     expect(UNVERIFIED_USER_AUTHORSHIP_LITERALS.size).toBeLessThan(governing.length);
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE GAP GUARD, BOUND TO THE ACTUAL WRITER — NOT TO A CONSTANT.
+ *
+ * ── WHAT WAS WRONG WITH THE BLOCK ABOVE, MEASURED BY AN INDEPENDENT REVIEW ──
+ * The forged-gap block asserts `FORGEABLE_USER_AUTHORSHIP_LITERALS.has(
+ * USER_EDIT_SOURCE)`. That is a CONSTANT-TO-SET comparison: it imports the
+ * stamper's exported literal and never executes the stamper. An adversarial
+ * review injected a one-line fault into `stampUserEditProvenance` —
+ *
+ *     - source: USER_EDIT_SOURCE,
+ *     + source: observed.source === 'cee_inference' ? 'user_confirmed' : USER_EDIT_SOURCE,
+ *
+ * — leaving `USER_EDIT_SOURCE` and the declared gap set untouched. The writer
+ * then EMITTED a literal outside the declared gap for model-labelled values,
+ * the real classifier still called those `user_set`, and **all four gap tests
+ * above stayed green**, as did the partition, disjointness and vacuity guards
+ * added after them. A guard that tests a mock of the thing it guards is a guard
+ * agreeing with itself.
+ *
+ * ── WHAT THIS BLOCK DOES INSTEAD ──────────────────────────────────────────
+ * It drives `stampUserEditProvenance` itself and composes the whole chain the
+ * product runs:
+ *
+ *     actual emitted `observed_state.source`
+ *       → valueSourceAuthorship()          (the real classifier)
+ *       → declared forgeable-gap membership
+ *
+ * with the two counterparts the prior verdict required, so the alarm is
+ * DISCRIMINATING rather than merely sensitive (CLAUDE.md trap 19): under the
+ * injected fault the model-labelled case REDs while the genuine-user and
+ * label-only cases stay GREEN, and they fail on DIFFERENT assertions.
+ *
+ * ── ⚠ WHAT IT IS NOT ──────────────────────────────────────────────────────
+ * It does NOT make `user_override` defer, does not split the stamp, and does
+ * not touch the consent seam. The gap stays ACCEPTED and explicit; this makes
+ * the ACCEPTANCE observable at the writer rather than at a copy of its name.
+ * Nor is a model's `source` label evidence of consent — `cee_inference` here is
+ * the LLM's own claim about a value write, which is exactly the input
+ * `stampUserEditProvenance` documents itself as OVERRIDING.
+ *
+ * ⚠ NO STAMP LITERAL IS SPELLED IN THIS BLOCK. Every expectation is derived
+ * from the writer's emitted output and from the exported sets (trap 12), so the
+ * day the stamp is split this block moves with it instead of asserting a string
+ * nothing writes.
+ */
+describe('the forged-stamp gap, asserted at the REAL WRITER’s emitted output', () => {
+  const TARGET = 'fac_target';
+  const UNRELATED = 'fac_other';
+
+  /** The one leaf that makes an `update_node` a VALUE write. */
+  function valueWrite(path: string, value: number, source?: string): PatchOperation {
+    return {
+      op: 'update_node',
+      path,
+      value: {
+        observed_state: { value, ...(source === undefined ? {} : { source }) },
+      },
+    } as PatchOperation;
+  }
+
+  /** Read the stamp the writer actually emitted for `path`, by IDENTITY. */
+  function emittedSourceFor(ops: readonly PatchOperation[], path: string): unknown {
+    const out = stampUserEditProvenance(ops);
+    const op = out.find((o) => o.path === path);
+    expect(op, `no operation for ${path} came back from the writer`).toBeDefined();
+    const observed = (op!.value as Record<string, unknown>).observed_state as
+      | Record<string, unknown>
+      | undefined;
+    expect(observed, `${path} came back with no observed_state`).toBeDefined();
+    return observed!.source;
+  }
+
+  /**
+   * ⭐ (1) THE MODEL-LABELLED ARM — the case the whole gap is about.
+   *
+   * The op carries the model's own `cee_inference` label, which the writer
+   * documents itself as OVERRIDING. Whatever it emits instead must still be
+   * inside the declared gap, or this repo is telling the model a value was
+   * user-supplied on a stamp it has NOT recorded as forgeable.
+   *
+   * The two assertions are deliberately separate and they fail differently:
+   * classification is what makes the claim, membership is what records the gap.
+   */
+  it('⭐ a MODEL-LABELLED value write emits a stamp that is BOTH classified user_set AND inside the declared gap', () => {
+    const emitted = emittedSourceFor([valueWrite(TARGET, 0.85, 'cee_inference')], TARGET);
+
+    expect(typeof emitted, 'the writer emitted no string stamp at all').toBe('string');
+
+    expect(
+      valueSourceAuthorship(emitted)?.provenance,
+      `the writer emitted "${String(emitted)}" for a MODEL-LABELLED value write. This block ` +
+        `exists because that stamp makes a user-authorship claim; if it no longer does, the ` +
+        `gap has changed shape — re-read the RE-SURFACE TRIGGER block in ` +
+        `cee/context-integrity/not-modelled-manifest.ts.`,
+    ).toBe('user_set');
+
+    // The load-bearing membership claim, over the EMITTED value.
+    const forgeable: ReadonlySet<string> = FORGEABLE_USER_AUTHORSHIP_LITERALS;
+    expect(
+      forgeable.has(String(emitted)),
+      `stampUserEditProvenance EMITTED "${String(emitted)}" for a model-authored value write, ` +
+        `and that literal is NOT in FORGEABLE_USER_AUTHORSHIP_LITERALS. Either the stamp was ` +
+        `split (good — pin the new literal, or move it out of the gap if it now discriminates) ` +
+        `or a user-authorship claim is being made on evidence this repo has not recorded as ` +
+        `forgeable. Do not silence this by widening the set.`,
+    ).toBe(true);
+  });
+
+  /**
+   * ⭐ (2) COUNTERPART — the GENUINE user edit. It must keep the legitimate
+   * stamp and its exact number.
+   *
+   * This is what stops the gap being "closed" by making the writer defer: the
+   * common case is a person typing a number, and `provenance-display.ts`
+   * records why deferring here would reopen the original defect.
+   */
+  it('⭐ counterpart: a GENUINE unlabelled user value keeps the legitimate stamp and its exact number', () => {
+    const ops = [valueWrite(TARGET, 0.72)];
+    const emitted = emittedSourceFor(ops, TARGET);
+
+    // Derived, not restated: the legitimate-user stamp IS the exported constant.
+    expect(emitted).toBe(USER_EDIT_SOURCE);
+    expect(valueSourceAuthorship(emitted)?.provenance).toBe('user_set');
+
+    const [stamped] = stampUserEditProvenance(ops);
+    const observed = (stamped!.value as Record<string, unknown>).observed_state as Record<
+      string,
+      unknown
+    >;
+    expect(stamped!.path, 'bound by identity, never by the value').toBe(TARGET);
+    expect(observed.value, 'the writer altered the number it was stamping').toBe(0.72);
+  });
+
+  /**
+   * ⭐ (3) COUNTERPART — an UNRELATED, label-only operation. It must come back
+   * untouched and unstamped, BY REFERENCE.
+   *
+   * Without this the first two tests are consistent with a writer that stamps
+   * indiscriminately, which would make the gap far wider than the set records.
+   */
+  it('⭐ counterpart: an unrelated label-only update is returned BY REFERENCE, unstamped', () => {
+    const labelOnly = {
+      op: 'update_node',
+      path: UNRELATED,
+      value: { label: 'Renamed, no value written' },
+    } as PatchOperation;
+
+    const out = stampUserEditProvenance([labelOnly]);
+    expect(out[0], 'a label-only edit was rewritten by the value stamper').toBe(labelOnly);
+    expect((out[0]!.value as Record<string, unknown>).observed_state).toBeUndefined();
+  });
+
+  /**
+   * ⭐ (4) THE GAP ITSELF, STATED AS AN EXECUTABLE CLAIM — and the precondition
+   * every assertion above rests on, pinned in-test (CLAUDE.md trap 13b: a guard
+   * whose discriminating power depends on something nothing pins decays
+   * silently into a tautology).
+   *
+   * The model-labelled and genuine-user value writes must emit the SAME stamp.
+   * That equality IS the accepted gap: the writer cannot tell them apart, which
+   * is why the display licence may make no positive authorship claim. The
+   * label-only arm must be stamped by neither — that is the writer's
+   * precondition, asserted rather than assumed.
+   *
+   * If the stamp is ever SPLIT this test REDs first and says so plainly, which
+   * is the re-surface trigger firing mechanically rather than by memory.
+   */
+  it('⭐ the gap, executably: the model-labelled and genuine arms emit the SAME stamp, and a label-only edit emits none', () => {
+    const modelLabelled = emittedSourceFor([valueWrite(TARGET, 0.85, 'cee_inference')], TARGET);
+    const genuine = emittedSourceFor([valueWrite(TARGET, 0.72)], TARGET);
+    const labelOnly = stampUserEditProvenance([
+      { op: 'update_node', path: UNRELATED, value: { label: 'Renamed' } } as PatchOperation,
+    ])[0];
+
+    // ⚠ THE GAP, IN ONE LINE. Not a tidiness check: if these two ever differ,
+    // the stamp has been split and the accepted gap has changed shape.
+    expect(
+      modelLabelled,
+      `the writer now emits "${String(modelLabelled)}" for a MODEL-AUTHORED value write and ` +
+        `"${String(genuine)}" for a genuine user edit. If that is a deliberate stamp SPLIT, the ` +
+        `known gap is closing: update FORGEABLE_USER_AUTHORSHIP_LITERALS, and revisit the ` +
+        `DISPLAY_GRAPH_INSTRUCTION licence, which is currently narrowed to a pure prohibition ` +
+        `BECAUSE these two are indistinguishable.`,
+    ).toBe(genuine);
+    expect((labelOnly!.value as Record<string, unknown>).observed_state).toBeUndefined();
+
+    // ...and the classifier really does DISCRIMINATE, so the `user_set` reads
+    // above are findings and not a probe that answers `user_set` to everything.
+    // DERIVED from the contract vocabulary rather than naming a literal (trap
+    // 12), and non-zero or the reads above prove nothing (trap 13e).
+    const notUserSet = OBSERVED_STATE_SOURCE_LITERALS.filter((l) => {
+      const projected = valueSourceAuthorship(l)?.provenance;
+      return projected !== undefined && projected !== 'user_set';
+    });
+    expect(
+      notUserSet.length,
+      'valueSourceAuthorship answers user_set (or nothing) to every literal in the vocabulary — ' +
+        'the membership reads above are not discriminating anything',
+    ).toBeGreaterThan(0);
+
+    // ⚠ AND A CORRECTION WORTH KEEPING, because this control was written wrong
+    // first and the suite caught it (trap 13c — an expectation taken from the
+    // reviewer's own reading rather than from the producer). The model's own
+    // `cee_inference` label does NOT classify as `ai_inferred` here: it returns
+    // UNDEFINED, because for that literal `observed_state.source` is a lossy
+    // copy of `extractionType` and this module refuses to decide authorship
+    // from it at all. Absence, not a verdict — which is exactly why the writer
+    // overriding that label is not evidence of anything either way.
+    expect(valueSourceAuthorship('cee_inference')).toBeUndefined();
   });
 });
