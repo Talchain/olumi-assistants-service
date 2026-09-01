@@ -2667,6 +2667,20 @@ export const TelemetryEvents = {
   // tells us whether the "four turns and nothing applies" dead-end is actually
   // being rescued, rather than merely having a rescue path in the code.
   V5StructuralEditToolEntry: "v5.structural_edit_tool.entry",
+
+  // ⭐ DRAFT-QUALITY PASS (src/cee/draft-quality/). CeeDraftQuality is emitted on
+  // EVERY assessed draw — nominated or not, judged or not, redrawn or not, and
+  // on every fail-open arm. That is deliberate: a repair pass whose fail-open is
+  // silent converts a measurable problem into an unmeasurable one, and this
+  // estate cannot currently answer "is the drafter getting better or worse?"
+  // without a bespoke 16-draw experiment. CeeDraftQualityRedraw is emitted once
+  // per turn on which a redraw was actually spent, and carries `improved` — the
+  // acceptance metric for the whole capability (a redraw rate that rises while
+  // `improved` stays flat is money and latency spent reproducing the same
+  // failure; trap 23's shape, and reporting both is the only way to see it).
+  // Coded reasons, counts and model ids only — no labels, no brief content.
+  CeeDraftQuality: "cee.draft.quality",
+  CeeDraftQualityRedraw: "cee.draft.quality_redraw",
 } as const;
 
 /**

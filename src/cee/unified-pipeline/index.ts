@@ -34,6 +34,7 @@ import {
   classifyRetryableDraftFailure,
 } from "./draft-auto-retry.js";
 import { buildPriorAttemptDirective } from "./retry-directive.js";
+import { applyDraftQualityPass } from "../draft-quality/pipeline-hook.js";
 import {
   MIN_DRAFT_RETRY_BUDGET_MS,
   VALIDATION_ATTACH_WAIT_MS,
@@ -672,6 +673,28 @@ function drainEarlyReturn(ctx: StageContext): UnifiedPipelineResult | undefined 
  *    SECOND attempt landed in (`applyRetryExhaustedCopy`) instead of the
  *    now-stale "usually succeeds" / "often clears on a retry" hint.
  */
+/**
+ * The brief the draft-quality judge is handed.
+ *
+ * `input.brief` is the validated field on `DraftGraphInput` and is what every
+ * stage of the pipeline drafts from, so it is the authority. `rawBody.brief` is
+ * read only as a fallback for callers that thread the brief there
+ * (`draft-graph.ts` passes `{ brief }` as rawBody) — never as an override, so
+ * the judge and the drafter can never be looking at different text.
+ *
+ * Returns null when neither carries a usable string; the judge then fails OPEN
+ * with `brief_unavailable` rather than judging a model against nothing, which
+ * would be the worst possible input to a coverage question.
+ */
+function readBriefForQuality(input: DraftInputWithCeeExtras, rawBody: unknown): string | null {
+  if (typeof input.brief === "string" && input.brief.trim().length > 0) return input.brief;
+  if (rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)) {
+    const fallback = (rawBody as Record<string, unknown>).brief;
+    if (typeof fallback === "string" && fallback.trim().length > 0) return fallback;
+  }
+  return null;
+}
+
 export async function runUnifiedPipeline(
   input: DraftInputWithCeeExtras,
   rawBody: unknown,
@@ -726,7 +749,39 @@ export async function runUnifiedPipeline(
         return applyRetryUnaffordableCopy(first, unaffordableClass);
       }
     }
-    return first;
+    // ⭐ THE SECOND AUTHORITY, AND IT ANSWERS A DIFFERENT QUESTION (trap 21).
+    //
+    // `decideDraftAutoRetry` above asks *"did this draft FAIL in a
+    // self-declared-stochastic way?"* and fails CLOSED — an invalid model is
+    // never shipped. The draft-quality pass asks *"did this draft SUCCEED and
+    // still produce a model that does not cover the brief?"* and fails OPEN — a
+    // valid model always ships. The two are deliberately NOT reconciled into one
+    // predicate: their opposite defaults are correct answers to different
+    // questions, and aligning them is how one lane closes a harm its neighbour
+    // reopens.
+    //
+    // It is reached only on the arm the failure classifier did not claim, so a
+    // retryable failure is never double-handled, and `applyDraftQualityPass`
+    // returns `first` byte-identical on every arm except a successful redraw
+    // that is materially richer. It cannot introduce a failure and it cannot
+    // throw.
+    return applyDraftQualityPass({
+      first,
+      brief: readBriefForQuality(input, rawBody),
+      requestId: getRequestId(request),
+      elapsedMs,
+      retryBaselineMs,
+      redraw: (directive) =>
+        runUnifiedPipelineAttempt(input, rawBody, request, {
+          ...opts,
+          // Same composition-safety rule as the failure retry: attempt 2's
+          // budget arithmetic measures elapsed time from where the REQUEST
+          // started, not from where the redraw did, so the whole composition
+          // stays inside DRAFT_REQUEST_BUDGET_MS by construction.
+          requestStartMs: retryBaselineMs,
+          ...(directive ? { priorAttemptDirective: directive } : {}),
+        }),
+    });
   }
 
   const firstDetails = ((first.body as Record<string, unknown> | null)?.details ?? {}) as Record<string, unknown>;
