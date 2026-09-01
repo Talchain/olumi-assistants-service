@@ -63,6 +63,7 @@ import {
   buildVerifiedCorrectionReplay,
   findOutstandingEffectAskCollision,
 } from '../outstanding-effect-ask-misroute.js';
+import { detectConfigureOptionIntent } from '../configure-option-intent.js';
 import type { PendingAction } from '../../session/pending-action.js';
 
 // ---------------------------------------------------------------------------
@@ -483,5 +484,64 @@ describe('the misroute refusal names the option the product asked about', () => 
       recordedAsk: recorded(ASKED_SELF_SERVE()),
     });
     expect(hit!.pairs.map((p) => p.optionId)).toEqual([OPT_ACQUIRE]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('adjust_edge_strength — current option identity cannot release a stale-pair proposal', () => {
+  const explicitEnterpriseOpinion =
+    `I would say ${OPT_ENTERPRISE_LABEL} drives ${FAC_SELF_SERVE_LABEL} fairly strongly, about 0.6.`;
+  const ellipticalSelfServeOpinion =
+    `I would say it drives ${FAC_SELF_SERVE_LABEL} fairly strongly, about 0.6.`;
+  const recordedSelfServe = deriveRecordedEffectAsk({
+    readiness: readiness(),
+    pendings: ASKED_SELF_SERVE(),
+    nowMs: NOW_MS,
+  });
+
+  function edgeCollision(optionId: string, message: string) {
+    return findOutstandingEffectAskCollision({
+      handlerId: 'adjust_edge_strength',
+      entityId: `${optionId}→${FAC_SELF_SERVE}`,
+      message,
+      optionLabels: OPTION_LABELS,
+      nonOptionLabels: [FAC_SELF_SERVE_LABEL, FAC_ACQUIRE_LABEL],
+      readiness: readiness(),
+      chipOriginated: false,
+      recordedAsk: recordedSelfServe,
+    });
+  }
+
+  it('RED — stale A + proposed A + explicit B remains a generic fail-closed refusal', () => {
+    // This is the review counterexample's load-bearing precondition: the broad
+    // configure classifier does NOT rescue the turn. Identity must do it.
+    expect(detectConfigureOptionIntent(explicitEnterpriseOpinion, OPTION_LABELS).matched).toBe(false);
+
+    const mismatch = edgeCollision(OPT_SELF_SERVE, explicitEnterpriseOpinion);
+    expect(mismatch, 'the identity mismatch must refuse rather than release the proposal').not.toBeNull();
+    expect(mismatch!.pairs, 'no stale A pair may reach pair-specific copy or replay').toEqual([]);
+    expect(buildVerifiedCorrectionReplay(mismatch!, {})).toBeNull();
+    expect(buildOutstandingEffectAskDetails(mismatch, null)).toEqual({
+      effect_ask_refused_field: 'edge_strength',
+    });
+  });
+
+  it('OPPOSITE — current B plus proposed B still yields the current B pair', () => {
+    const current = edgeCollision(OPT_ENTERPRISE, explicitEnterpriseOpinion);
+    expect(current).not.toBeNull();
+    expect(current!.pairs.map((pair) => `${pair.optionId}::${pair.factorId}`)).toEqual([
+      `${OPT_ENTERPRISE}::${FAC_SELF_SERVE}`,
+    ]);
+    expect(buildOutstandingEffectAskDetails(current, null).effect_ask_option_labels).toEqual([
+      OPT_ENTERPRISE_LABEL,
+    ]);
+  });
+
+  it('OPPOSITE — a genuinely elliptical answer plus proposed A still uses recorded A', () => {
+    const elliptical = edgeCollision(OPT_SELF_SERVE, ellipticalSelfServeOpinion);
+    expect(elliptical).not.toBeNull();
+    expect(elliptical!.pairs.map((pair) => `${pair.optionId}::${pair.factorId}`)).toEqual([
+      `${OPT_SELF_SERVE}::${FAC_SELF_SERVE}`,
+    ]);
   });
 });

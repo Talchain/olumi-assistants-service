@@ -155,9 +155,12 @@ export interface OutstandingEffectAskCollision {
   /** The field the proposal would have written instead of the effect value. */
   readonly refusedField: OutstandingEffectAskRefusedField;
   /**
-   * The outstanding pair(s) the proposal collides with, in blocker order.
-   * Exactly one ⇒ the copy can name it. Two or more ⇒ the copy must ask.
-   * Never empty (a collision with no pair is not a collision).
+   * The VERIFIED outstanding pair(s) the proposal collides with, in blocker
+   * order. Exactly one ⇒ the copy can name it. Two or more ⇒ the copy must
+   * ask. Empty is reserved for one fail-closed state: the proposal targets an
+   * outstanding recorded pair, but the current turn authoritatively names a
+   * different option. The proposal must still be refused, while no stale pair
+   * may reach pair-specific copy or replay.
    */
   readonly pairs: readonly MissingEffectPair[];
   /**
@@ -195,6 +198,12 @@ export function buildOutstandingEffectAskDetails(
   verifiedReplay: string | null,
 ): Readonly<Record<string, unknown>> {
   if (collision === null) return {};
+  // A current-option/proposal mismatch is still a refusal, but no pair is
+  // truthful enough to name. Keep only the field-level reason so the composer
+  // falls through to generic clarify copy and cannot replay the stale ask.
+  if (collision.pairs.length === 0) {
+    return { effect_ask_refused_field: collision.refusedField };
+  }
   return {
     ...(verifiedReplay !== null ? { effect_ask_replay_message: verifiedReplay } : {}),
     effect_ask_refused_field: collision.refusedField,
@@ -573,9 +582,9 @@ function narrowToRecordedAsk(
  * option-effect writer; this guard does not classify the prose a second time.
  *
  * A current reference can only narrow to outstanding members. If it points at
- * no member, the collision is suppressed so the caller's ordinary
- * option-intervention refusal can handle the turn without minting a replay for
- * the stale record. Two current references remain two candidates: the older
+ * no member, `null` means IDENTITY MISMATCH — not "no collision". The edge arm
+ * converts that signal into a generic fail-closed refusal with no pair-specific
+ * details or replay. Two current references remain two candidates: the older
  * record must never break a tie the user introduced on this turn.
  */
 function narrowToCurrentOrRecordedAsk(
@@ -646,6 +655,11 @@ export function findOutstandingEffectAskCollision(params: {
     const match = pairs.filter(
       (p) => p.optionId === parsed.from && p.factorId === parsed.to,
     );
+    // No outstanding target identity means no collision. This early return is
+    // load-bearing now that `null` from the narrowing helper means something
+    // narrower: an outstanding target exists, but current option identity
+    // contradicts it.
+    if (match.length === 0) return null;
     const narrowed = narrowToCurrentOrRecordedAsk(
       match,
       params.recordedAsk,
@@ -653,13 +667,18 @@ export function findOutstandingEffectAskCollision(params: {
       params.optionLabels,
       params.nonOptionLabels ?? [],
     );
-    return narrowed !== null && narrowed.length > 0
-      ? {
-          refusedField: 'edge_strength',
-          pairs: narrowed,
-          userValue: readUserValue(params.message),
-        }
-      : null;
+    if (narrowed === null) {
+      return {
+        refusedField: 'edge_strength',
+        pairs: [],
+        userValue: null,
+      };
+    }
+    return {
+      refusedField: 'edge_strength',
+      pairs: narrowed,
+      userValue: readUserValue(params.message),
+    };
   }
 
   // set_factor_value — the prose conjuncts apply to a TYPED turn only. On a

@@ -36,11 +36,14 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import { setTestSink } from '../../utils/telemetry.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { safeLabel } from '../compose/helpers.js';
+import { detectConfigureOptionIntent } from '../routing/configure-option-intent.js';
+import { optionCueMatches } from '../routing/option-intervention-guard.js';
 import { resolveOptionEffectWrite } from '../routing/option-effect-write.js';
 import { deriveMissingEffectPairs } from '../routing/repair-value-binding.js';
 import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';
 import { makeMessagePayload } from './fixtures.js';
+import type { PendingAction } from '../session/pending-action.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -110,6 +113,62 @@ const FACTOR_ID = J18.ids.factor_id;
 const OUTSTANDING_EDGE = `${OPTION_ID}→${FACTOR_ID}`;
 /** A factor → outcome link. Nothing is outstanding on it (asserted below). */
 const UNRELATED_EDGE = '4d3256b4→ce6b11d2';
+
+/**
+ * Two captured outstanding cells, used for the stale-A / current-B identity
+ * regression. Keeping B on its own captured factor makes the B→B opposite
+ * independent of whether B actually has an edge to stale A's factor.
+ */
+const STALE_OPTION_ID = 'e755ec33';
+const CURRENT_OPTION_ID = OPTION_ID;
+const STALE_FACTOR_ID = J18.ids.two_option_factor_id;
+const STALE_FACTOR_LABEL = J18.ids.two_option_factor_label;
+const CURRENT_FACTOR_ID = FACTOR_ID;
+const CURRENT_FACTOR_LABEL = J18.ids.factor_label;
+
+function capturedLabel(id: string): string {
+  const label = J18.draft_graph.nodes.find((node) => node.id === id)?.label;
+  if (typeof label !== 'string' || label.trim().length === 0) {
+    throw new Error(`Captured fixture has no label for ${id}`);
+  }
+  return label;
+}
+
+const STALE_OPTION_LABEL = capturedLabel(STALE_OPTION_ID);
+const CURRENT_OPTION_LABEL = capturedLabel(CURRENT_OPTION_ID);
+const STALE_EDGE = `${STALE_OPTION_ID}→${STALE_FACTOR_ID}`;
+const CURRENT_EDGE = `${CURRENT_OPTION_ID}→${CURRENT_FACTOR_ID}`;
+const CURRENT_OPTION_OPINION =
+  `I would say ${CURRENT_OPTION_LABEL} drives ${STALE_FACTOR_LABEL} fairly strongly, about 0.6.`;
+const CURRENT_OPTION_SELF_OPINION =
+  `I would say ${CURRENT_OPTION_LABEL} drives ${CURRENT_FACTOR_LABEL} fairly strongly, about 0.6.`;
+const ELLIPTICAL_STALE_OPTION_OPINION =
+  `I would say it drives ${STALE_FACTOR_LABEL} fairly strongly, about 0.6.`;
+
+function recordedEffectAsk(
+  optionId: string,
+  optionLabel: string,
+  factorId: string,
+  factorLabel: string,
+): PendingAction {
+  return {
+    id: `pa-${optionId}-${factorId}`,
+    scenario_id: SCENARIO_ID,
+    chip_id: 'chip_configure_option_clarify',
+    action: {
+      kind: 'elicit_option_effect',
+      option_id: optionId,
+      option_label: optionLabel,
+      factor_id: factorId,
+      factor_label: factorLabel,
+      attempt: 1,
+    },
+    preconditions: {},
+    expires_at_turn_count: 12,
+    expires_at_iso: '2099-09-01T23:59:59.000Z',
+    emitted_at_iso: '2026-09-01T14:00:00.000Z',
+  } as PendingAction;
+}
 
 function graph(): GraphV3T {
   return JSON.parse(JSON.stringify(J18.draft_graph)) as GraphV3T;
@@ -365,6 +424,92 @@ describe('DEFECT A — the offer against the product’s own blocker', () => {
     );
     const chipLabels = (response.suggested_actions ?? []).map((c) => c.label);
     expect(chipLabels).toContain(WITNESSED_CHIP_LABEL);
+  });
+});
+
+describe('P1 — a current option identity cannot release a stale recorded-pair proposal', () => {
+  function seedStaleAsk(): void {
+    pendingActionsForRead = [
+      recordedEffectAsk(
+        STALE_OPTION_ID,
+        STALE_OPTION_LABEL,
+        STALE_FACTOR_ID,
+        STALE_FACTOR_LABEL,
+      ),
+    ];
+  }
+
+  it('RED — explicit B refuses proposed A without minting A details, replay, chip or write', async () => {
+    seedStaleAsk();
+    const optionLabels = graph().nodes
+      .filter((node) => node.kind === 'option')
+      .map((node) => node.label);
+    const nonOptionLabels = graph().nodes
+      .filter((node) => node.kind !== 'option')
+      .map((node) => node.label);
+    // The review counterexample: the existing broad classifier is FALSE, so
+    // this route is protected only if the identity mismatch remains fail-closed.
+    expect(detectConfigureOptionIntent(CURRENT_OPTION_OPINION, optionLabels).matched).toBe(false);
+    expect(optionCueMatches(CURRENT_OPTION_OPINION, optionLabels, nonOptionLabels)).toEqual([
+      optionLabels.indexOf(CURRENT_OPTION_LABEL),
+    ]);
+
+    const { response } = await runTurnExecutor(
+      payload(CURRENT_OPTION_OPINION),
+      'req-stale-a-current-b-refused',
+      { routingAdapter: edgeStrengthAdapter(STALE_EDGE), graphState: graph() },
+    );
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(edgeStrength(stateAfterTurn(), STALE_OPTION_ID, STALE_FACTOR_ID)).toBe(1);
+    expect((response.suggested_actions ?? []).map((chip) => chip.label)).not.toContain(
+      WITNESSED_CHIP_LABEL,
+    );
+    expect(response.assistant_text.toLowerCase()).not.toContain('applied');
+
+    const surfaced = JSON.stringify({
+      assistant_text: response.assistant_text,
+      suggested_actions: response.suggested_actions ?? [],
+    });
+    expect(surfaced).not.toContain(STALE_OPTION_ID);
+    expect(surfaced).not.toContain(STALE_OPTION_LABEL);
+    expect(surfaced).not.toContain(
+      safeLabel({ label: STALE_OPTION_LABEL, kind: undefined }),
+    );
+  });
+
+  it('OPPOSITE — current B plus proposed B keeps the B-specific refusal', async () => {
+    seedStaleAsk();
+    const { response } = await runTurnExecutor(
+      payload(CURRENT_OPTION_SELF_OPINION),
+      'req-current-b-proposed-b',
+      { routingAdapter: edgeStrengthAdapter(CURRENT_EDGE), graphState: graph() },
+    );
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain(
+      safeLabel({ label: CURRENT_OPTION_LABEL, kind: undefined }),
+    );
+    expect(response.assistant_text).not.toContain(
+      safeLabel({ label: STALE_OPTION_LABEL, kind: undefined }),
+    );
+  });
+
+  it('OPPOSITE — no current option cue plus proposed A keeps recorded A', async () => {
+    seedStaleAsk();
+    const { response } = await runTurnExecutor(
+      payload(ELLIPTICAL_STALE_OPTION_OPINION),
+      'req-elliptical-recorded-a',
+      { routingAdapter: edgeStrengthAdapter(STALE_EDGE), graphState: graph() },
+    );
+
+    expect(graphWrites()).toHaveLength(0);
+    expect(response.assistant_text).toContain(
+      safeLabel({ label: STALE_OPTION_LABEL, kind: undefined }),
+    );
+    expect(response.assistant_text).not.toContain(
+      safeLabel({ label: CURRENT_OPTION_LABEL, kind: undefined }),
+    );
   });
 });
 
