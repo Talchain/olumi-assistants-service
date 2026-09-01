@@ -66,6 +66,7 @@ import { MAX_OPTIONS as MAX_PROJECTED_OPTIONS } from "../../../validators/graph-
 // EXPORTED for exactly this reuse. A local copy would drift from the rule it
 // claims to pre-empt, and this file's own history says the drift reads as green.
 import { buildInterventionSignature } from "../../../validators/graph-validator.js";
+import { retainedDecisionFreeFactorIds } from "../../../validators/decision-free-retention.js";
 // ⭐ THE SINGLE BRIEF-BINDING AUTHORITY. Shared with the V3 response transform so
 // that a node's badge and an option's badge cannot disagree about one fact — they
 // contradicted each other on the wire before this (trap 12, two mirrors).
@@ -2775,7 +2776,9 @@ function projectOnce(
   //                   is the one that happens by default if we do nothing.
   //   DROP IT       — silently lose something the user said. The second worst.
   //   DISCLOSE IT   — keep the RECORD, leave it off the graph, and say so.
-  // Only the third is honest, so it is the only one implemented.
+  // For an action model, disclose rather than invent a causal connection.
+  // In the bounded decision-free shape, an unresolved numberless factor is
+  // itself useful reasoning and remains canonical without a fabricated link.
   //
   // ⭐ WHAT IS DELIBERATELY *NOT* PRUNED, because the reasoning differs per kind:
   //   `goal`     — the graph has no meaning without it.
@@ -2794,6 +2797,7 @@ function projectOnce(
   // is computed on the reverse graph from the goal, so it is a pure function of
   // the record set and stays deterministic.
   const goalNodes = nodes.filter((n) => n.kind === "goal");
+  const retainedForReasoning = retainedDecisionFreeFactorIds({ nodes, edges });
   if (goalNodes.length > 0) {
     /** Reverse-reachability from the goal over a given edge list. */
     const reachingGoal = (links: readonly { from: string; to: string }[]): Set<string> => {
@@ -2831,7 +2835,8 @@ function projectOnce(
         : reachingGoal([...edges, ...refusedByShapeGate]);
 
     const unmodelled = nodes.filter(
-      (n) => (n.kind === "factor" || n.kind === "constraint") && !reachesGoal.has(n.id),
+      (n) => (n.kind === "factor" || n.kind === "constraint")
+        && !reachesGoal.has(n.id) && !retainedForReasoning.has(n.id),
     );
     if (unmodelled.length > 0) {
       const unmodelledIds = new Set(unmodelled.map((n) => n.id));

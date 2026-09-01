@@ -27,6 +27,7 @@ import { scaffoldingProvenance } from "../../../draft/records/projector.js";
 import { fuzzyMatchNodeId } from "../../../../validators/structural-reconciliation.js";
 import { NAN_FIX_SIGNATURE_STD } from "../../../constants.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { retainedDecisionFreeFactorIds } from "../../../../validators/decision-free-retention.js";
 import { sweepNodePath, pathsNameNode } from "../../../../validators/violation-paths.js";
 import { detectEdgeFormat, canonicalStructuralEdge, patchEdgeNumeric } from "../../utils/edge-format.js";
 import type { EdgeFormat } from "../../utils/edge-format.js";
@@ -2154,6 +2155,7 @@ export function fixDisconnectedObservables(
   const repairs: Repair[] = [];
   const nodes = (graph as any).nodes as NodeT[];
   const edges = (graph as any).edges as EdgeT[];
+  const retainedForReasoning = retainedDecisionFreeFactorIds(graph);
 
   const edgeNodes = new Set<string>();
   for (const edge of edges) {
@@ -2167,7 +2169,8 @@ export function fixDisconnectedObservables(
     const disconnectedPrunableFactor =
       node.kind === "factor" &&
       (node.category === "observable" || node.category === "external") &&
-      !edgeNodes.has(node.id);
+      !edgeNodes.has(node.id) &&
+      !retainedForReasoning.has(node.id);
 
     if (disconnectedPrunableFactor) {
       pruned.push(node.id);

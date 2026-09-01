@@ -1,0 +1,204 @@
+{
+  "baseline_source": "ac37890c3fc0d730560e09ffcb88b2c8951cc67d",
+  "node_version": "v22.16.0",
+  "schema_version": "0.50.0",
+  "production_changes": false,
+  "evidence_level": "deterministic_constructed_consumer_acceptance",
+  "source_typecheck": {
+    "command": "pnpm typecheck",
+    "exit_code": 0,
+    "test_files_included": false
+  },
+  "input_sha256": {
+    "src/cee/draft/records/__tests__/class-b-semantic-boundary.test.ts": "1bc1b1f151f0dc41f2a4f43a9a46121601f1a8d493b5163188bda4e84f746b14",
+    "src/cee/draft/records/__tests__/fixtures/class-b-semantic-boundary.json": "aed5f3cd9ba70740f7e3426d7a0d43b9dd3bfd2a7b163c1355933f893cf0834f"
+  },
+  "runs": [
+    {
+      "report": "raw/boundary-baseline.json",
+      "passed": 4,
+      "failed": 3,
+      "cases": [
+        {
+          "name": "ORACLE_CONTROL \u2014 provenance expectations are external to otherwise identical hypothesis records",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "PRODUCER_ROLE_WITNESS \u2014 current wrongly typed records violate the external non-action requirement",
+          "status": "failed",
+          "failure_signatures": [
+            "AssertionError: expected 'option' not to be 'option' // Object.is equality",
+            "AssertionError: expected { Object (id, kind, ...) } to not have property \"interventions\"",
+            "AssertionError: expected true to be false // Object.is equality",
+            "AssertionError: expected true to be false // Object.is equality"
+          ]
+        },
+        {
+          "name": "PRODUCER_ORIGIN_WITNESS \u2014 current records cannot retain explicit user origin through V3",
+          "status": "failed",
+          "failure_signatures": [
+            "AssertionError: expected 'ai_inferred' to be 'from_brief' // Object.is equality",
+            "AssertionError: expected { Object (id, kind, ...) } to have property \"source_quote\" with value 'Poor onboarding is causing churn'"
+          ]
+        },
+        {
+          "name": "INFERENCE_CONTROL \u2014 an AI explanation remains a non-action with AI origin",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "CONNECTED_CONTROL \u2014 competing non-action explanations and a stated diagnostic fact survive without ranking",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "NORMATIVE_RETENTION \u2014 removing a causal link does not erase an unresolved explanation from reasoning/context",
+          "status": "failed",
+          "failure_signatures": [
+            "AssertionError: exactly one retained object with frozen id b639f9c9: expected [] to have a length of 1 but got +0"
+          ]
+        },
+        {
+          "name": "ACTION_CONTROL \u2014 genuine stated and AI-proposed actions retain distinct interventions and origins",
+          "status": "passed",
+          "failure_signatures": []
+        }
+      ]
+    },
+    {
+      "report": "raw/existing-controls.json",
+      "passed": 22,
+      "failed": 0,
+      "cases": [
+        {
+          "name": "replaces the prior saved rationale with the durable edited consequence on the next turn",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "BEFORE \u2014 explanations filed as options are RANKED AS ALTERNATIVES",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "AFTER \u2014 (a) the causes are no longer options, and they are still THERE",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "AFTER \u2014 (c) the analysis COMPLETES, which is the arm that matters",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "AFTER \u2014 it buys the analysis WITHOUT erasing attribution or inventing user facts",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "CONTROL \u2014 flip only the claim role and the analysis stops being reachable",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "two real acts, each attributed to a named team, both stay stated options",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "is well under the serialized-bytes budget",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "is under the object-schema count at the bisect's PASS boundary",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "is under the optional-parameter limit (the budget the protocol names)",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "uses no union-typed parameters at all",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "uses only `minItems` values Anthropic accepts (4 \u2192 HTTP 400, live-probed)",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "contains no keyword the structured-outputs compiler rejects",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "every object schema carries `additionalProperties: false`",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "the forbidden-keyword detector catches a rejected keyword",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "the additionalProperties detector catches a missing guard",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "the minItems collector catches a disallowed value",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "the object-schema counter rises when an object is nested",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "the comparator is real \u2014 the graph schema is non-trivial",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "records schema is smaller in serialized bytes",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "records schema has fewer object schemas",
+          "status": "passed",
+          "failure_signatures": []
+        },
+        {
+          "name": "records schema has no unions where the graph schema has several",
+          "status": "passed",
+          "failure_signatures": []
+        }
+      ]
+    }
+  ],
+  "not_proven": [
+    "provider_role_quality",
+    "approved_source_binding",
+    "canonical_hypothesis_ontology",
+    "future_context_source_origin",
+    "persistence_reload",
+    "routed_subsequent_turn",
+    "completed_analysis",
+    "deployed_or_mounted_successor"
+  ],
+  "isolated_test_typecheck": {
+    "command": "pnpm exec tsc -p Docs/v5/evidence/class-b-semantic-boundary-20260831/typecheck.config.json --noEmit --pretty false",
+    "exit_code": 0,
+    "scope": "new boundary test and its imported dependencies",
+    "full_test_tree_ratchet": false,
+    "report": "raw/test-typecheck.log"
+  }
+}

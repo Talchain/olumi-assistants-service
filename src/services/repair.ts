@@ -1,4 +1,5 @@
 import type { GraphT } from "../schemas/graph.js";
+import { retainedDecisionFreeFactorIds } from "../validators/decision-free-retention.js";
 import { log } from "../utils/telemetry.js";
 import { GRAPH_MAX_NODES, GRAPH_MAX_EDGES } from "../config/graphCaps.js";
 
@@ -221,7 +222,8 @@ function wireOrphansToGoal(
 function wireOrphansFromCausalChain(
   nodes: GraphT["nodes"],
   edges: GraphT["edges"],
-  requestId?: string
+  requestId?: string,
+  retainedForReasoning: ReadonlySet<string> = new Set(),
 ): { edges: GraphT["edges"]; wiredIds: string[] } {
   // Find outcome/risk nodes
   const outcomeRiskIds = new Set<string>();
@@ -241,7 +243,9 @@ function wireOrphansFromCausalChain(
   }
 
   // Find a factor to wire from (prefer controllable, fallback to any)
-  const factors = nodes.filter((n) => n.kind === "factor");
+  // An unresolved hypothesis retained for reasoning is not an authored causal
+  // feeder. Other factors keep the existing preference and repair behaviour.
+  const factors = nodes.filter((n) => n.kind === "factor" && !retainedForReasoning.has(n.id));
   const controllableFactor = factors.find((n) => n.category === "controllable");
   const sourceFactor = controllableFactor || factors[0];
 
@@ -475,6 +479,9 @@ export function simpleRepair(
   opts?: SimpleRepairOptions
 ): GraphT {
   const deferSweepOwnedPatterns = opts?.deferSweepOwnedPatterns === true;
+  // Bind retention to the input, before an outgoing-terminal repair can create
+  // a goal path and make a broader orphan shape look admitted retrospectively.
+  const retainedForReasoning = retainedDecisionFreeFactorIds(g);
   // Separate protected and unprotected nodes
   const protectedNodes = g.nodes.filter((n) => PROTECTED_KINDS.has(n.kind));
   const unprotectedNodes = g.nodes.filter((n) => !PROTECTED_KINDS.has(n.kind));
@@ -514,7 +521,7 @@ export function simpleRepair(
   // Step A.5: Wire orphaned outcomes/risks FROM the causal chain
   // This ensures outcome/risk nodes have INBOUND edges from factors,
   // making them reachable from decision via forward BFS.
-  const wireFromResult = wireOrphansFromCausalChain(nodes, validEdges, requestId);
+  const wireFromResult = wireOrphansFromCausalChain(nodes, validEdges, requestId, retainedForReasoning);
   validEdges = wireFromResult.edges;
 
   // Step B: Prune nodes unreachable from decision
