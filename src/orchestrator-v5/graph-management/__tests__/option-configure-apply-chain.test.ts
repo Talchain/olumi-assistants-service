@@ -47,6 +47,10 @@ import { projectGraphForPersistence } from '../../persisted-graph-projection.js'
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
 import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../../coaching/readiness-recovery.js';
 import { deriveMissingEffectPairs, resolveRecordedOptionEffectAnswer } from '../../routing/repair-value-binding.js';
+import {
+  PENDING_ACTION_ASK_TURN_TTL,
+  PENDING_ACTION_ASK_WALL_TTL_MS,
+} from '../../session/pending-action.js';
 import { buildOptionEffectRawOperation, readCommittedOptionEffect } from '../../routing/option-effect-write.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../routing/validation-registry.js';
 import { generateChips } from '../../compose/chip-generator.js';
@@ -208,7 +212,14 @@ describe('configure-option apply chain (served-prompt op shapes, scenario A)', (
     expect(graphJson).toBe(beforeInvalid);
     store = freshStore();
     const afterInvalid = await store.readMostRecentPendingActions(scenarioId);
-    expect(afterInvalid).toEqual([{ ...initialPending[0], expires_at_turn_count: 1 }]);
+    // Exactly ONE carry-forward decrement, derived from what was actually
+    // armed rather than hardcoded: the literal `1` here was the offer default
+    // minus one, and it silently encoded the ask window as 2. Deriving it binds
+    // this line to the mechanism it is about (a non-consuming turn decrements
+    // once) instead of to a constant that is not this test's subject.
+    expect(afterInvalid).toEqual([
+      { ...initialPending[0], expires_at_turn_count: initialPending[0]!.expires_at_turn_count - 1 },
+    ]);
 
     for (const [index, message] of ['20%', 'Set it to about 0.7'].entries()) {
       store = freshStore();
@@ -287,7 +298,20 @@ describe('configure-option apply chain (served-prompt op shapes, scenario A)', (
         expect(nextAsked?.action).toMatchObject({
           kind: 'elicit_option_effect', option_id: 'opt_acquire', factor_id: 'fac_hiring',
         });
-        expect(coldPending).toEqual([nextAsked]);
+        // The persisted question is the one this turn asked, carrying the
+        // lifetime the commit chokepoint stamps on a recorded ASK — which is
+        // exactly the difference between what a caller constructs and what the
+        // user can still answer. Spelled out rather than elided, so a change to
+        // either half REDs here.
+        expect(coldPending).toEqual([
+          {
+            ...nextAsked,
+            expires_at_turn_count: PENDING_ACTION_ASK_TURN_TTL,
+            expires_at_iso: new Date(
+              Date.parse(nextAsked!.emitted_at_iso) + PENDING_ACTION_ASK_WALL_TTL_MS,
+            ).toISOString(),
+          },
+        ]);
         expect(nextChip?.message).toContain('Hiring Speed');
       } else {
         expect(nextReady?.status).toBe('ready');

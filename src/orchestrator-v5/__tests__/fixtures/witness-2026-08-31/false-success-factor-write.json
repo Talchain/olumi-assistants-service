@@ -1,0 +1,95 @@
+{
+  "_provenance": {
+    "captured_from": "deployed CEE staging, POST /orchestrate/v2/turn",
+    "build_sha": "d054424",
+    "scenario_id": "c0a3484d-3dbd-41a2-bdd9-92ba62d40f91",
+    "state_class": "fresh guest",
+    "captured_at": "2026-08-31T21:50Z",
+    "note": "Captured from the wire, never authored here (CLAUDE.md trap 16). The user was asked for option 9cb78c6e's effect value on factor 06fd579a and answered 'Set it to a third.'"
+  },
+  "user_message": "Set it to a third.",
+  "asked_option_id": "9cb78c6e",
+  "asked_factor_id": "06fd579a",
+  "option_labels": [
+    "switch our final-mile deliveries to a subcontracted courier network next quarter",
+    "Keep Our Own Drivers",
+    "Hybrid model: subcontract overflow volumes only, retain core driver team"
+  ],
+  "readiness_before": {
+    "blockers": [
+      {
+        "option_id": "9cb78c6e",
+        "option_label": "Hybrid model: subcontract overflow volumes only, retain core driver team",
+        "factor_id": "06fd579a",
+        "factor_label": "Operational Control Level",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Operational Control Level\" needs a numeric value for option \"Hybrid model: subcontract overflow volumes only, retain core driver team\"",
+        "suggested_action": "add_value"
+      }
+    ]
+  },
+  "readiness_after": {
+    "blockers": [
+      {
+        "option_id": "9cb78c6e",
+        "option_label": "Hybrid model: subcontract overflow volumes only, retain core driver team",
+        "factor_id": "06fd579a",
+        "factor_label": "Operational Control Level",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Operational Control Level\" is currently 33%. What should option \"Hybrid model: subcontract overflow volumes only, retain core driver team\" set it to?",
+        "suggested_action": "add_value"
+      }
+    ]
+  },
+  "observed": {
+    "exit_path": "turn_executor",
+    "assistant_text": "A third maps to Operational Control Level for the hybrid option, matching the open item still waiting on a value.\n\nUpdated Operational Control Level to 33%. This makes the last analysis stale. Re-run analysis to see how this affects the results.\n\nThis change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.",
+    "graph_hash_before": "accaeb7c6fd9d0e0",
+    "graph_hash_after": "18a2a97fede15253",
+    "graph_patch_blocks": [
+      {
+        "type": "graph_patch",
+        "status": "applied",
+        "operation": "set_factor_value",
+        "target_id": "06fd579a",
+        "before": {},
+        "after": {
+          "value": 0.33,
+          "raw_value": 33,
+          "unit": "%",
+          "cap": 100
+        }
+      }
+    ],
+    "asked_option_interventions_before": {
+      "17d737cf": 0.6,
+      "55d1a102": 0.65,
+      "6ff320a0": 0.55,
+      "c03e00a6": 0.5
+    },
+    "asked_option_interventions_after": {
+      "17d737cf": 0.6,
+      "55d1a102": 0.65,
+      "6ff320a0": 0.55,
+      "c03e00a6": 0.5
+    }
+  },
+  "contrast_control_150pct": {
+    "_note": "same session, same pending ask, immediately prior turn \u2014 the probe is not blind",
+    "exit_path": "edit_graph",
+    "assistant_text": "For \"Hybrid model: subcontract overflow volumes only, retain core driver team\" on \"Operational Control Level\": I can't use 150% as that effect value \u2014 it is outside the range I can hold for this link. Just the percentage is enough \u2014 it is the level the factor reaches, not how much it moves: 0% means zero, 100% means its top.",
+    "graph_hash_key_present": false,
+    "graph_patch_blocks": [],
+    "blockers": [
+      {
+        "option_id": "9cb78c6e",
+        "option_label": "Hybrid model: subcontract overflow volumes only, retain core driver team",
+        "factor_id": "06fd579a",
+        "factor_label": "Operational Control Level",
+        "blocker_type": "missing_value",
+        "message": "Factor \"Operational Control Level\" needs a numeric value for option \"Hybrid model: subcontract overflow volumes only, retain core driver team\"",
+        "suggested_action": "add_value"
+      }
+    ]
+  }
+}

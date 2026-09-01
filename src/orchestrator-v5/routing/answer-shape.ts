@@ -17,6 +17,26 @@
  * tool-schema.ts), and the deterministic answer_text derivation. The
  * enforcement wiring (require-on-coach/converse, forbid-on-execute/clarify,
  * REPAIR_ONCE flow) lives in tool-schema.ts's RawToolCallSchema.
+ *
+ * ── ANSWER-ONLY (2026-09-01) ──────────────────────────────────────────────
+ * `bullets` and `detail` are OPTIONAL. They were not, and that made a concise
+ * direct answer IMPOSSIBLE TO EMIT: a model that correctly answered a factual
+ * lookup in one sentence failed validation on the non-blank `detail` refine
+ * and was sent back through REPAIR_ONCE to pad the reply. Every converse turn
+ * was therefore shaped into headline-plus-explanation whether or not the
+ * question wanted it — a mechanical cause of the product feeling like
+ * operating machinery rather than talking to a reasoning partner.
+ *
+ * It also contradicted the SERVED routing prompt's own SHARP SHAPE rule
+ * (v121, hash bec840a648800928, line 32: "Lookups and state queries: 1 to 3
+ * sentences"). The prompt already granted concision; this schema revoked it.
+ *
+ * What did NOT relax, because it is the actual guarantee: `headline` is still
+ * REQUIRED, still non-blank, and still exactly one sentence. So a valid shape
+ * always yields non-blank user-facing text, and "answer-only" can never
+ * become a wall-of-prose channel. See `classifyAnswerShape` for the two named
+ * outcomes, and `answer-shape-answer-only.test.ts` for the twin-direction
+ * proof (concise becomes legal AND coaching still arrives).
  */
 
 import { z } from 'zod';
@@ -77,6 +97,9 @@ export const AnswerShapeSchema = z
         });
       }
     }),
+    // OPTIONAL since the answer-only lane (2026-09-01). `.default([])` keeps
+    // the OUTPUT type `string[]`, so every existing consumer of a parsed
+    // shape (`shape.bullets.map(...)`) is untouched — only the INPUT relaxes.
     bullets: z
       .array(
         z
@@ -85,14 +108,39 @@ export const AnswerShapeSchema = z
       )
       .max(ANSWER_SHAPE_MAX_BULLETS, {
         message: `bullets must contain at most ${ANSWER_SHAPE_MAX_BULLETS} items — fold extra points into detail`,
-      }),
-    detail: z.string().refine((d) => d.trim().length > 0, {
-      message: 'detail must be non-blank — carry the full supporting explanation here',
-    }),
+      })
+      .default([]),
+    // OPTIONAL since the answer-only lane (2026-09-01) — this was THE
+    // constraint that made a concise direct answer impossible to emit. Same
+    // `.default('')` mechanic: output stays `string`, input relaxes.
+    detail: z.string().default(''),
   })
   .strict();
 
 export type AnswerShape = z.infer<typeof AnswerShapeSchema>;
+
+/**
+ * The two legitimate answer outcomes, DERIVED from the shape's own content.
+ *
+ * - `answer_only` — the complete answer is the headline. One sentence, no
+ *   bullets, no detail: the user asked something simple and gets a simple
+ *   reply, with no manufactured structure around it.
+ * - `coached`     — the headline is accompanied by supporting bullets and/or
+ *   a fuller explanation: a genuine reasoning intervention.
+ *
+ * ⚠ This is DERIVED, never model-authored, and that is deliberate. A `kind`
+ * field the model filled in could claim `answer_only` beside a 400-word
+ * detail — two authorities answering one question, which is the defect class
+ * CLAUDE.md trap 21 exists to prevent. Deriving it from the content means it
+ * cannot disagree with the content (rule 12 — derive, don't mirror).
+ */
+export type AnswerShapeKind = 'answer_only' | 'coached';
+
+export function classifyAnswerShape(shape: AnswerShape): AnswerShapeKind {
+  const hasBullets = shape.bullets.length > 0;
+  const hasDetail = shape.detail.trim().length > 0;
+  return hasBullets || hasDetail ? 'coached' : 'answer_only';
+}
 
 /**
  * Descriptive JSON-schema property advertised to the model on the
@@ -110,31 +158,46 @@ export const ANSWER_SHAPE_TOOL_PROPERTY = {
     'intent_class is "execute" or "clarify" (those carry their answer via ' +
     'action.explanation.answer_text or clarification.question). The user ' +
     'reads headline first, then bullets, then detail — put your whole ' +
-    'answer in this shape, never in leading text before the tool call.',
+    'answer in this shape, never in leading text before the tool call. ' +
+    'TWO SHAPES ARE VALID, and choosing between them is your judgement: ' +
+    'ANSWER-ONLY — send headline ALONE, omitting bullets and detail, when ' +
+    'the honest complete answer is one sentence (a factual lookup, a state ' +
+    'query, a confirmation, a simple yes/no). Do NOT add bullets or detail ' +
+    'to reach a shape; padding a simple answer with structure the user did ' +
+    'not ask for makes the product worse. COACHED — add bullets and/or ' +
+    'detail when the turn genuinely warrants a reasoning intervention ' +
+    '(explaining results, challenging a choice, surfacing risk, handling ' +
+    'contradiction). When it does, do NOT thin it out: the coaching is the ' +
+    'value.',
   properties: {
     headline: {
       type: 'string',
       description:
         'Exactly ONE sentence: the single most important takeaway. ' +
-        'Sentence case, British English.',
+        'Sentence case, British English. On an ANSWER-ONLY turn this is ' +
+        'the entire answer, so make it complete on its own.',
     },
     bullets: {
       type: 'array',
       items: { type: 'string' },
       maxItems: ANSWER_SHAPE_MAX_BULLETS,
       description:
-        'At most 3 short supporting points (one line each). Use [] when ' +
-        'the answer needs no itemised points.',
+        'At most 3 short supporting points (one line each). OMIT this ' +
+        'field entirely on an ANSWER-ONLY turn — never send a bullet that ' +
+        'only restates the headline.',
     },
     detail: {
       type: 'string',
       description:
         'The full supporting explanation — every remaining sentence of ' +
         'your answer. Reference specific values, factor labels and causal ' +
-        'links from the context. Do not use mutation language.',
+        'links from the context. Do not use mutation language. OMIT this ' +
+        'field entirely when the headline is already the complete answer.',
     },
   },
-  required: ['headline', 'bullets', 'detail'],
+  // ONLY headline is required. bullets/detail are the COACHED half of the
+  // shape and are omitted outright on an answer-only turn.
+  required: ['headline'],
 } as const;
 
 /**
@@ -148,9 +211,12 @@ export const ANSWER_SHAPE_TOOL_PROPERTY = {
  *
  *   detail
  *
- * The bullets section is omitted entirely when `bullets` is empty. Parts
- * are trimmed; the result is non-blank by construction (AnswerShapeSchema
- * requires a non-blank headline and detail).
+ * The bullets section is omitted entirely when `bullets` is empty, and so is
+ * the detail section when `detail` is blank — so an ANSWER-ONLY shape derives
+ * to exactly its headline, with no trailing whitespace. Parts are trimmed;
+ * the result is still non-blank by construction, because `headline` remains
+ * required and non-blank (that guarantee did NOT move with the answer-only
+ * relaxation, and `answer-shape-answer-only.test.ts` pins it).
  */
 export function deriveAnswerTextFromShape(shape: AnswerShape): string {
   const bulletLines = shape.bullets.map((b) => `• ${b.trim()}`).join('\n');
@@ -200,10 +266,29 @@ const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
  * Returns `null` — synthesise NOTHING, leave the prose un-shaped — when the
  * prose is a single sentence with no splittable remainder (a terse
  * clarify/receipt one-liner is already a concise headline; there is nothing
- * to disclose), or whenever a schema-valid shape cannot be built (e.g. a
- * headline-plus-bullets with no trailing prose — AnswerShapeSchema requires a
- * NON-BLANK detail, so we fail closed and ship the original text as-is rather
- * than fabricate filler).
+ * to disclose), or when there is no trailing prose to put behind the toggle
+ * (e.g. a headline-plus-bullets with nothing after it).
+ *
+ * ⚠ WHY THIS PATH STAYS CONSERVATIVE AFTER THE ANSWER-ONLY RELAXATION. The
+ * schema now accepts a blank `detail` (module header), but this is the
+ * DETERMINISTIC-RECOVERY path, where no model judged whether the turn wanted
+ * structure. Shipping the prose unchanged is the honest fallback;
+ * synthesising a "Show more" toggle with nothing behind it is not. The
+ * COUPLING block of `answer-shape-answer-only.test.ts` pins that, and it
+ * bites: a mutant that lets a single-sentence prose synthesise into a
+ * headline-only shape REDs two of its cases.
+ *
+ * ⚠ BE PRECISE ABOUT WHICH LINE ENFORCES IT — the `!detail` limb below does
+ * NOT. Measured 2026-09-01 with a differential probe (23 inputs, 13 of which
+ * reach the guard, positive control firing): `!detail` and `!headline` are
+ * BOTH UNREACHABLE, and removing the `!detail` limb is a demonstrated
+ * EQUIVALENT MUTANT. `splitFirstSentence` returns non-null only when its
+ * regex matched with a LOOKAHEAD at `["'([]?[A-Z0-9]`, so the remainder
+ * always begins with that non-whitespace character and can never trim to
+ * empty; the headline always contains the terminator run. The real floor is
+ * `split === null` — no internal sentence boundary. The `!detail` check is
+ * belt-and-braces against a future change to `splitFirstSentence`, and is
+ * documented as such rather than left to read as the load-bearing guard.
  *
  * The caller is responsible for preserving the byte-equality invariant by
  * SETTING `assistant_text := deriveAnswerTextFromShape(result)` — see the
@@ -244,8 +329,11 @@ export function synthesiseAnswerShapeFromText(text: string): AnswerShape | null 
   const detail = [split.remainder.trim(), overflowBulletLines.join('\n').trim()]
     .filter((part) => part.length > 0)
     .join('\n\n');
-  // AnswerShapeSchema requires a NON-BLANK detail; a blank remainder (with no
-  // overflow to fall back on) yields no shape — fail closed, ship as-is.
+  // BELT-AND-BRACES, NOT THE LOAD-BEARING FLOOR — see the jsdoc above. Both
+  // limbs are unreachable given splitFirstSentence's lookahead contract
+  // (demonstrated 2026-09-01, not assumed), so removing this line is an
+  // equivalent mutant. It stays as a fail-closed guard should that contract
+  // ever change; the floor that actually fires is `split === null`.
   if (!headline || !detail) return null;
 
   const parsed = AnswerShapeSchema.safeParse({ headline, bullets, detail });

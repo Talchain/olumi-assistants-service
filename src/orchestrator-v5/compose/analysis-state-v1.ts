@@ -57,6 +57,15 @@
  * ─── STATED LIMITS (visible in a green suite, not assumed closed) ───────────
  *
  * L-A. `running` HAS EXACTLY ONE PRODUCER, AND ITS SCOPE IS NARROW.
+ *      ⚠⚠ THIS LIMIT HAS NOW FLIPPED THREE TIMES AND THE HISTORY IS KEPT
+ *      (trap 14): "no producer" → "EXACTLY ONE" (ROADMAP 2.1271) → "no
+ *      producer" (#1298 deleted the auto-run) → "EXACTLY ONE" again, because
+ *      #1298's deletion was reverted on 2026-09-01: the founder confirmed the
+ *      post-draft analysis is deliberate, and the real gap was that it was
+ *      never labelled AI-only. VERIFY THE PRODUCER COUNT AT YOUR TIP rather
+ *      than trusting any of these four sentences — it is one `rg -a` for
+ *      `kind: 'running'` over `src/`, with `kind: 'never_run'` as the contrast
+ *      control in the same sweep.
  *      ⚠ THIS LIMIT USED TO READ "`running` has NO PRODUCER at this step and is
  *      therefore never emitted … emitting it would require an async run
  *      registry that does not exist". The first clause is now false and the

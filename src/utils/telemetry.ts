@@ -547,6 +547,24 @@ export const TelemetryEvents = {
 
   // Prompt Management events (v2.0)
   PromptStoreError: "prompt.store_error",
+  /**
+   * A prompt-store JSONB list column could not be established as a list, so the
+   * store SUBSTITUTED an empty list rather than failing the whole read.
+   *
+   * WHY IT EXISTS. The tolerant decoder that replaced three
+   * `JSON.parse(x || '[]')` sites correctly stopped one poisoned row taking
+   * down every version of a task — but it originally returned `[]` and emitted
+   * NOTHING, which converts a crash into a silent degradation: exactly the
+   * failure mode of the ~2.5h incident it was written to end (`draft_graph`
+   * served the bundled default while `/healthz` reported `prompts_ready: true`).
+   *
+   * FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS. The returned `[]` is
+   * indistinguishable from a genuinely empty column, so this event is the ONLY
+   * thing that tells the two apart. It carries `outcome: 'unavailable'` and, by
+   * construction, no survivor/recovery vocabulary — there is no per-item
+   * salvage on this path, and an event that claimed some would be lying.
+   */
+  PromptStoreJsonColumnDegraded: "prompt.store.jsonb_column_degraded",
   PromptLoaderError: "prompt.loader.error",
   PromptLoadedFromStore: "prompt.loader.store",
   PromptLoadedFromDefault: "prompt.loader.default",
@@ -1222,7 +1240,13 @@ export const TelemetryEvents = {
   //   intent_class: 'coach' | 'converse'
   //   headline_length: number
   //   bullet_count: number   (≤3 by schema)
-  //   detail_length: number
+  //   detail_length: number  (0 on an answer-only turn — `detail` is optional)
+  //   answer_shape_kind: 'answer_only' | 'coached'
+  //     DERIVED from the shape's own content by `classifyAnswerShape`, never
+  //     model-authored, so it cannot disagree with the lengths beside it.
+  //     This is how we can tell on staging whether concise answers are
+  //     actually being emitted, and — the direction that matters just as
+  //     much — whether coaching is still arriving when it should.
   V5AnswerShapeEmitted: "v5.answer_shape.emitted",
 
   // ROADMAP 1.132 (F2) hardening — the captured answer_shape no longer
@@ -3781,6 +3805,28 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("prompt.store.error", 1, {
             operation: String((eventData.operation as string) || "unknown"),
             error: String((eventData.error as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreJsonColumnDegraded: {
+          // A prompt-store JSONB list column could not be established as a list,
+          // so an empty list was SUBSTITUTED. Nothing downstream can tell that
+          // apart from a genuinely empty column — the substituted `[]` is
+          // byte-identical to a real one at every consumer — so this counter is
+          // the only thing that can ever say it happened. Ops can alert on
+          // `prompt.store.jsonb_column_degraded_total > 0` over a short window.
+          //
+          // Tagged by `column` and `reason` because they are different faults
+          // with the same consequence: "the column is not a list" (data drift
+          // in the row) versus "the string is not JSON" (a bad write), and the
+          // remedies differ. Same reasoning as `session.read_degraded_total`.
+          //
+          // Deliberately NOT tagged with `prompt_id`/`version`: those are
+          // unbounded and belong in the ERROR log line, which carries them.
+          datadogClient.increment("prompt.store.jsonb_column_degraded_total", 1, {
+            column: String((eventData.column as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
           });
           break;
         }

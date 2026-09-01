@@ -392,6 +392,30 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // #1274 — DERIVED, and that is what makes this entry safe rather than an
+    // excuse. `missing-value-answer.ts` reads a SPELLED PERCENTAGE LEVEL
+    // ("thirty percent" -> 0.3). Its first cut re-typed all 27 cardinal words
+    // and the literal `hundred`, which is precisely the fifth-list defect this
+    // guard exists to red — and it DID red it. The fix was not a manifest
+    // entry: the module now imports `CARDINAL_WORD_VALUES` and
+    // `CARDINAL_HUNDRED_WORD` from `utils/cardinal-words.ts` (itself derived
+    // from `MAGNITUDE_MULTIPLIERS`), and DERIVES its tens/ones split from the
+    // values rather than re-listing them. So it declares no alphabet, holds no
+    // magnitude->value map of its own, and cannot drift from the canonical one.
+    // Its only magnitude word is `hundred`, reached through the shared
+    // constant and used as a POSITIONAL compounder inside an integer, never as
+    // a multiplier applied to an extracted figure.
+    // ⚠ It carries exactly ONE additive delta, `zero: 0`, documented at the
+    // declaration: `CARDINAL_WORD_VALUES` omits `zero` to protect the goal
+    // AMOUNT grammar's zero-pair carve-out, a hazard that does not exist for a
+    // percentage level where `0%` already binds. A delta below the alphabet's
+    // 1,000 floor cannot reach any magnitude question.
+    // ⚠ If this file ever maps a SCALE word (thousand, million, grand) to a
+    // number, that makes it a genuine sibling lookup and it must move to
+    // SIBLING_VALUE_LOOKUPS. Today no scale word appears in either map, which
+    // is why `five thousand percent` yields null and is refused.
+    'orchestrator-v5/routing/missing-value-answer.ts':
+      'derived — imports CARDINAL_WORD_VALUES/CARDINAL_HUNDRED_WORD and derives its tens/ones split; declares no alphabet and maps no scale word to a number',
     // Quantities lane (2026-08-18), goal-label conservation rule — NOT a fifth
     // magnitude list, and the distinction is the reason this entry is safe.
     // `compound-goal-label.ts` spells magnitude words (`million`, `billion`,

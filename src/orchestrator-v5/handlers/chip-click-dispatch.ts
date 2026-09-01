@@ -171,9 +171,98 @@ export { RUN_PROVENANCE_ENRICHMENT_KEY };
  * assistant answer (stored copy and would-be wire copy alike), so a resumed
  * conversation never presents the auto-run as something the user asked for.
  * Deterministic template text: no graph labels, no counts, no leader claim.
+ *
+ * ── ⚠ HISTORY, KEPT RATHER THAN OVERWRITTEN (trap 14) ──────────────────────
+ * The whole auto-run was DELETED by #1298 (2026-09-01) on the reading that the
+ * founder's verdict — "far too focused on the analysis rather than enhancing
+ * reasoning" — named this mechanism. **That reading was wrong and the founder
+ * corrected it the same day:** the initial analysis exists to give richer
+ * material for critical and creative thinking, and is deliberate. What was
+ * actually wanted is the half #1298 did not build — making it unmistakable
+ * that this pass is AI-ONLY and UNCONFIRMED. So the behaviour is restored
+ * verbatim from `cb36b1ea^` and only this sentence is rewritten.
+ *
+ * ── WHY THIS WORDING, AND WHERE EVERY CLAUSE COMES FROM ────────────────────
+ * ⭐ NO NEW VOCABULARY WAS MINTED. The product already says "we guessed" in two
+ * registers (model-voice first person; third-person panel voice), and a third
+ * would be the drift this estate keeps paying for. This is the model-voice
+ * register, assembled from sentences already shipping:
+ *
+ *   · "a starting point to argue with, not an answer" — VERBATIM from
+ *     `MODEL_VARIANCE_NOTE` (`coaching/post-draft-narrative.ts`). Its docstring
+ *     warns against two hedges in a row; that warning is about the DRAFT reply,
+ *     and this is a different turn, so there is no double hedge.
+ *   · "tell me what I have got wrong and I will change it" — the correction
+ *     invitation from `context-integrity/brief-audit-answer.ts` ("If something
+ *     matters and is missing, tell me and I will add it") and the terminal
+ *     bridge's "review or replace it".
+ *   · "You have not confirmed any of it yet" — the confirmation register
+ *     (`canonical-readiness.ts`'s "review them whenever you like", the
+ *     "not yet confirmed" family). ⚠ THIS SLOT USED TO READ "Nothing in it
+ *     carries your judgement yet", derived from the "needs your judgement"
+ *     family (`turn-executor.ts`, `routing/readiness-intake.ts`). That
+ *     derivation was sound about the VOCABULARY and wrong about the CLAIM —
+ *     see the two-doors block below. Kept visible rather than deleted (trap
+ *     14) so the next author does not re-derive it from the same family.
+ *   · "where your brief gave me no figure I estimated one" — the
+ *     `estimated by Olumi` / `cee_inference` provenance register.
+ *
+ * ⭐⭐ WHAT IT DELIBERATELY DOES **NOT** SAY, AND THE ASYMMETRY THAT DECIDES IT.
+ * `context-integrity/not-modelled-manifest.ts`: "WRONGLY CLAIMING A USER'S
+ * VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY OMITTING ONE OF OUR OWN
+ * INVENTIONS". ⚠⚠ THAT HARM HAS **TWO DOORS**, AND THIS SENTENCE WALKED
+ * THROUGH THE SECOND ONE AFTER THE FIRST WAS SHUT — both drafts are recorded
+ * because the second was written BY the author who had just rejected the first:
+ *
+ *   · ASSERTION form, rejected pre-merge: "the values it used are my own
+ *     estimates, not yours" — a blanket claim over every value.
+ *   · DENIAL form, shipped at `f7dc0524` and corrected here: "Nothing in it
+ *     carries your judgement yet" — the SAME false claim, reached by denying
+ *     the user's authorship instead of asserting ours.
+ *
+ * The denial is false on a common, WELL-SERVED path, not an edge: a brief that
+ * states figures. `graph-readiness/obligation-provenance.ts:143-146` is the
+ * authority and says so outright — "A brief is the user's own words, so a value
+ * extracted from it is user-stated, not inferred" (`brief_extraction` and
+ * `explicit` both map to `user_stated`), and `:195` adds "`explicit`/`observed`
+ * are the user's own figures". Those nodes display as `from_brief`
+ * (`transforms/provenance-display.ts:26`), so the model demonstrably DOES hold
+ * the user's own numbers, and the clause denied it. A figure-rich brief is MORE
+ * likely to clear `resolveRunAdmission`, so this is the served case.
+ *
+ * ⭐ THE RULE THAT REPLACES BOTH DRAFTS: **CLAIM CONFIRMATION, NEVER
+ * AUTHORSHIP.** "You have not confirmed any of it yet" is invariant to how much
+ * of the model came from the user — stating a figure in a brief is not
+ * confirming a model built from it — whereas any authorship claim's truth
+ * depends on the graph the sentence is attached to. The estimate clause stays
+ * CONDITIONALLY scoped ("where your brief gave me no figure"), so it is equally
+ * true of a brief that stated every figure and of one that stated none.
+ *
+ * ⭐ THIS ALSO COVERS THE NARROWER CLARIFY-V2 RESUME PATH, and for the same
+ * reason rather than by accident. That path drafts from an ANSWER-AUGMENTED
+ * brief (`orchestrator/route-v2.ts:4224`, legacy pending rounds only — round 1
+ * no longer arms new ones, `:4161`), so the model carries the user's own
+ * clarify answers. An authorship denial was false there too; a confirmation
+ * claim is not, because answering a question before the model existed is not
+ * confirming the model. NOT known-dropped — covered.
+ *
+ * ⚠ SCOPE — THIS SENTENCE REACHES THE CONVERSATION SURFACE ONLY. It rides the
+ * auto-run turn's `assistant_text`, so a resumed conversation reads it first
+ * (the "caveat first, top-down" contract `tools/handlers/staleness-prefix.ts`
+ * states). The numbers ALSO land on the canvas via
+ * `routes/scenario-graph-analysis-read.ts` → the UI's provisional-delivery
+ * hook, and THAT surface carries no label, because
+ * `RUN_PROVENANCE_ENRICHMENT_KEY` is not on the transport keep-list. Labelling
+ * the canvas is a UI change plus a schemas keep-list train — the boundary this
+ * lane stops at, reported rather than crossed.
+ *
+ * ⚠ AND IT IS A PROVENANCE CAVEAT, NOT A CURRENCY ONE (trap 21). It answers
+ * "has this had any user input?"; `StalenessCaveat` ('stale' | 'unconfirmed')
+ * answers "is this out of date?". Two different questions — do NOT reuse that
+ * module's `unconfirmed` for this, and do not align their defaults.
  */
 export const AUTO_RUN_PROVISIONAL_DISCLOSURE =
-  'I ran a provisional first analysis automatically after drafting this model.';
+  'I ran a first analysis on the model I have just drafted. You have not confirmed any of it yet, and where your brief gave me no figure I estimated one. Treat it as a starting point to argue with, not an answer: tell me what I have got wrong and I will change it.';
 
 /**
  * R2 — marks a dispatch as the post-draft auto-run rather than a user's chip
@@ -934,6 +1023,21 @@ async function tryComposeRecoverableChipOutcome(
   }
 
   let turnPersisted = false;
+  // ⭐ THE SHIPPED ANSWER MUST BE THE COMMITTED ANSWER (Codex #1286 verdict
+  // `5483244874`, issue (b): "actual commit lapse copy is missing from the
+  // dispatcher-returned answer").
+  //
+  // This path threads `priorPendingActions`, so `commitDirectAnswer`'s
+  // carry-forward pass can retire a live consent hold — and when it does it
+  // APPENDS the honest one-sentence F-HELD lapse notice to the response it
+  // persists, returning that amended copy as `CommitResult.response`
+  // (commit.ts, `buildHeldLapseNotice`). Returning the PRE-COMMIT object here
+  // wrote the notice to the turn row and never spoke it: the user's live
+  // proposal died silently and the row disagreed with the wire about what the
+  // user had been told. `commit.ts`'s own return-site docblock states the
+  // contract this now honours — callers that consume `CommitResult.response`
+  // surface it on the wire, so wire copy == durable copy.
+  let responseForWire = recovered.response;
   if (priorPendingActions !== null) {
     const refusalFact = acquiresRefusalContinuity
       ? buildAnalysisRefusalFact({
@@ -943,7 +1047,7 @@ async function tryComposeRecoverableChipOutcome(
         })
       : null;
     try {
-      await commitDirectAnswer(recovered.response, {
+      const committed = await commitDirectAnswer(recovered.response, {
         scenario_id: scenarioId,
         turn_id: payload.turn_id,
         turn_class: 'handler',
@@ -964,6 +1068,11 @@ async function tryComposeRecoverableChipOutcome(
         contentGraph: graph,
       });
       turnPersisted = true;
+      // `?? recovered.response` is load-bearing, not defensive noise: ~100
+      // suites in this repo stub `commitDirectAnswer`, and a bare `vi.fn()`
+      // resolves to `undefined`. Reading `.response` unguarded would ship an
+      // undefined wire body on every one of those paths.
+      responseForWire = committed?.response ?? recovered.response;
     } catch (commitError) {
       log.error(
         {
@@ -1003,7 +1112,7 @@ async function tryComposeRecoverableChipOutcome(
 
   return {
     outcome: 'handler_recovered',
-    response: recovered.response,
+    response: responseForWire,
     commitPerformed: turnPersisted,
     causeKind: err.cause_kind,
     analysisReady,
@@ -1706,7 +1815,7 @@ export async function dispatchChipClickRunAnalysis(
     );
 
     try {
-      await commitDirectAnswer(response, {
+      const committed = await commitDirectAnswer(response, {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
         turn_class: 'handler',
@@ -1761,7 +1870,19 @@ export async function dispatchChipClickRunAnalysis(
 
       return {
         outcome: 'ok',
-        response,
+        // ⭐ Same contract as the recovery exit above: ship the COMMITTED copy,
+        // so an F-HELD lapse notice the chokepoint attached reaches the user
+        // instead of being persisted into the turn row and never spoken.
+        //
+        // ⚠ SCOPE, STATED EXACTLY (CLAUDE.md trap 20). On `staging` this exit
+        // threads NO `priorPendingActions`, so its carry-forward is inert and
+        // this line changes nothing today. PR #1286 adds that threading, at
+        // which point this exit can build a notice and this line is what makes
+        // it audible. It is fixed here — rather than left for #1286 — because
+        // the two exits are ONE defect, and a harm closed on one path and left
+        // open on its neighbour is how the closed half gets re-opened
+        // (CLAUDE.md trap 21).
+        response: committed?.response ?? response,
         commitPerformed: true,
         analysisReady,
         graph: snapshotGraph,

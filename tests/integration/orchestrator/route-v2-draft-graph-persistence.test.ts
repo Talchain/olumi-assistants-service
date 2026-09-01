@@ -57,6 +57,7 @@ import { StateCommitFailedError } from '../../../src/orchestrator-v5/session/sto
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import { projectGraphForPersistence } from '../../../src/orchestrator-v5/persisted-graph-projection.js';
 import { parsePendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
+import { PENDING_ACTION_ASK_TURN_TTL } from '../../../src/orchestrator-v5/session/pending-action.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -188,7 +189,11 @@ describe('V5 draft_graph persistence integration', () => {
           factor_id: 'fac_capacity', factor_label: 'Delivery capacity',
         },
         preconditions: { graph_hash: projectedHash },
-        expires_at_turn_count: 2,
+        // A recorded ASK, so the commit chokepoint stamps the ask window
+        // (session/pending-action.ts, two-dial note) rather than the offer
+        // default. It stayed 2 until 2026-08-31 and the question was routinely
+        // dead before the user could answer it.
+        expires_at_turn_count: PENDING_ACTION_ASK_TURN_TTL,
       });
     });
 
@@ -219,8 +224,15 @@ describe('V5 draft_graph persistence integration', () => {
       expect(appendMock).toHaveBeenCalledOnce();
       const pending = appendMock.mock.calls[0][0].pending_actions;
       expect(pending).toHaveLength(2);
+      // The two halves of the two-dial rule in one assertion, deliberately:
+      // the recorded ASK gets the ask window, and the carried run_analysis
+      // OFFER is untouched (4, decremented once by carry-forward). If the
+      // widening ever leaked onto offers, the second line REDs.
       expect(pending).toEqual(expect.arrayContaining([
-        expect.objectContaining({ chip_id: 'chip_configure_option_clarify', expires_at_turn_count: 2 }),
+        expect.objectContaining({
+          chip_id: 'chip_configure_option_clarify',
+          expires_at_turn_count: PENDING_ACTION_ASK_TURN_TTL,
+        }),
         expect.objectContaining({ chip_id: 'previous-run-offer', expires_at_turn_count: 3 }),
       ]));
     });

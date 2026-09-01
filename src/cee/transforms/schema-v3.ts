@@ -65,6 +65,7 @@ import {
   type RephraseMergeResult,
 } from "./option-rephrase-merge.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
+import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
 
 // ============================================================================
 // V3 Types
@@ -1117,6 +1118,7 @@ interface RecognizedTypedRecordProvenance {
    *  object would be a mirror to keep in sync. */
   readonly source_quote?: string;
   readonly label_authored?: boolean;
+  readonly label_placeholder?: boolean;
 }
 
 /**
@@ -1147,6 +1149,7 @@ function readTypedRecordProvenance(node: V1Node): RecognizedTypedRecordProvenanc
       : {}),
     ...(typeof quote === "string" && quote.length > 0 ? { source_quote: quote } : {}),
     ...(authored === true ? { label_authored: true } : {}),
+    ...(value.label_placeholder === true ? { label_placeholder: true } : {}),
   };
 }
 
@@ -1186,6 +1189,18 @@ function projectNodeProvenance(
       // move its provenance verdict.
       if (typed.source_quote !== undefined) node.source_quote = typed.source_quote;
       if (typed.label_authored === true) node.label_authored = true;
+      // ⭐ RE-DERIVED, NOT CARRIED. The banked flag says "the producer minted a
+      // placeholder here"; the label says whether it STILL is one. A user
+      // rename changes the label and nothing else, so re-deriving is what makes
+      // the mark clear itself without the rename writer (a different lane,
+      // #1273) having to remember to drop it — the hand-maintained mirror this
+      // estate keeps paying for (trap 12). The comparison is legitimate HERE
+      // and nowhere downstream: this module is inside the boundary that owns
+      // the constant, so it is a single source of truth rather than a copy.
+      // A blank label is deliberately NOT marked — see `NodeV3.label_placeholder`.
+      if (typed.label_placeholder === true && node.label.trim() === UNAUTHORED_DECISION_LABEL) {
+        node.label_placeholder = true;
+      }
       continue;
     }
 

@@ -562,6 +562,33 @@ function comparisonSurvivesDedup(
 }
 
 /**
+ * The next step for a refusal that STRICT READINESS had no complaint about.
+ *
+ * ── WHY THIS CONSTANT EXISTS ───────────────────────────────────────────────
+ * The two admission terms answer different questions (trap 21). Strict
+ * readiness asks *"is each option individually well-formed?"*; the
+ * `IDENTICAL_OPTIONS` floor asks *"is there a comparison here at all?"*. A
+ * graph can pass the first and fail the second — most cleanly when it holds NO
+ * alternatives, which is the legitimate exploratory-map shape a team reaches
+ * when they have named what they think is going on but no course of action yet.
+ *
+ * In that cell `strict.nextStep` is `null`, because strict readiness had
+ * nothing to say. The refusal therefore reached the user with `willProceed:
+ * false` and NO reason and NO next step — measured at `1a3f8c56`. Every other
+ * refusal in the branch space carried a sentence; only this one was silent.
+ *
+ * That silence is the failure mode this product can least afford: a team brings
+ * competing EXPLANATIONS, the model correctly declines to rank them, and says
+ * nothing about why or what would help. The honest answer is not to invent a
+ * comparison so the run can proceed — it is to say plainly that there is
+ * nothing to compare yet, and to ask for the thing that is genuinely missing.
+ *
+ * ⚠ COACHING, NOT AN APOLOGY, and not an error. It names the user's next move.
+ */
+export const NO_COMPARISON_NEXT_STEP =
+  'Name at least two different options you are weighing, then run analysis.';
+
+/**
  * Resolve the two-term admission for a graph. Pure and total.
  */
 export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
@@ -572,10 +599,24 @@ export function resolveRunAdmission(rawGraph: unknown): RunAdmission {
   // disagreeing. Same reasoning as `readinessResultFrom`'s single-assessment
   // rule directly above: a module whose purpose is "one authority, one answer"
   // must not contain two places where that answer is computed.
+  //
+  // ⭐⭐ AND THE COROLLARY THAT WAS MISSING: A REFUSAL MUST NEVER BE SILENT.
+  // `strict.nextStep` is `null` whenever strict readiness had no complaint, so
+  // inheriting it unconditionally produced a refusal with no reason for every
+  // graph refused by the SECOND term alone (see `NO_COMPARISON_NEXT_STEP`).
+  //
+  // ⛔ THE `??` IS EXACT AND MUST STAY EXACT. It fills ONLY an absent reason. A
+  // specific refusal — "Draft or save a model first", "Review all 2 readiness
+  // issues" — keeps its own sentence untouched, because replacing those with
+  // this generic one would delete working guidance from three branches to fix
+  // one, which is strictly worse than the defect. Both directions are pinned in
+  // `tests/unit/analysis-refusal-carries-a-reason.test.ts`.
   const admission = resolveRunAdmissionTerms(rawGraph);
   return {
     ...admission,
-    blockedNextStep: admission.willProceed ? null : admission.strict.nextStep,
+    blockedNextStep: admission.willProceed
+      ? null
+      : admission.strict.nextStep ?? NO_COMPARISON_NEXT_STEP,
   };
 }
 
@@ -901,6 +942,45 @@ export function admittedVerdict(admission: RunAdmission): ReadinessResult {
     issues: admission.strict.issues,
     repairProposal: null,
   };
+}
+
+/**
+ * The REFUSED verdict for a graph the two-term gate turns away — the mirror of
+ * {@link admittedVerdict}, and the hop that was missing.
+ *
+ * ── WHY THIS EXISTS (adversarial review, 2026-08-31) ───────────────────────
+ * {@link RunAdmission.blockedNextStep} is this module's single derivation of
+ * *"the sentence to put to the user"*. It was true and it was UNREACHABLE: a
+ * complete `rg -a` manifest showed its only prose consumer
+ * (`compose/configure-option-clarify-response.ts:238-240`, reached from
+ * `handlers/edit-graph-dispatch.ts:4018`) is gated on a configure-option
+ * outcome that must resolve an OPTION node with `status: 'needs_encoding'`. A
+ * zero-alternatives graph has no option node, so on the exact shape the
+ * constant was written for, the branch cannot fire.
+ *
+ * The surface a user actually reaches is **Run analysis**, and it throws
+ * {@link AnalysisNotReadyError} carrying `admission.strict` — whose `nextStep`
+ * is `null` precisely when strict readiness had no complaint. `run-analysis.ts`
+ * then omits `next_step` from the failure details entirely, and the composer
+ * falls back to *"This scenario needs a quick fix before it can be analysed."*:
+ * a refusal that names nothing and coaches nothing.
+ *
+ * ⛔ A PROJECTION, NOT A SECOND AUTHORITY. Nothing is recomputed and no new
+ * rule is introduced: this only carries `blockedNextStep` — already derived,
+ * once, by {@link resolveRunAdmission} — into the field the run path reads. The
+ * `??` semantics are inherited whole, so a specific refusal ("Draft or save a
+ * model first", "Review all 2 readiness issues") keeps its own sentence byte
+ * for byte; only an ABSENT one is filled.
+ *
+ * TOTAL, and identity-preserving in both no-op cases: an admission that will
+ * proceed (`blockedNextStep === null`) and one whose strict verdict already
+ * carries the same sentence both return `admission.strict` unchanged, so no
+ * caller can acquire a rewritten verdict by accident.
+ */
+export function refusedVerdict(admission: RunAdmission): ReadinessResult {
+  if (admission.blockedNextStep === null) return admission.strict;
+  if (admission.strict.nextStep === admission.blockedNextStep) return admission.strict;
+  return { ...admission.strict, nextStep: admission.blockedNextStep };
 }
 
 /**

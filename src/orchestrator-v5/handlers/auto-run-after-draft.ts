@@ -3,6 +3,23 @@
  * ruling, 2026-08-16): a user should land on a drafted model WITH provisional
  * results, without having to notice and click Run.
  *
+ * ── ⚠⚠ WHY THIS MODULE EXISTS, RESTATED — READ BEFORE PROPOSING ITS DELETION ─
+ * This module was DELETED by #1298 (2026-09-01) and RESTORED the same day.
+ * #1298 read the founder's verdict ("far too focused on the analysis rather
+ * than enhancing reasoning") as naming this mechanism. **The founder corrected
+ * that directly:** the initial analysis is deliberate and its PURPOSE is to
+ * give the user richer material for critical and creative thinking — something
+ * concrete to disagree with. The first analysis is not to be TRUSTED, because
+ * no user input has entered it; that is a labelling obligation, not a reason to
+ * stop running it.
+ *
+ * ⭐ So the deletion's premise is refuted, not merely outvoted, and the code
+ * below is restored VERBATIM from `cb36b1ea^` rather than rewritten — the
+ * `running` producer other surfaces depend on comes back with it. The ONE thing
+ * that changed is the honesty of the label: see
+ * `AUTO_RUN_PROVISIONAL_DISCLOSURE` in `chip-click-dispatch.ts` for the wording
+ * and for the surfaces it does and does not reach.
+ *
  * ── WHAT THIS MODULE IS ─────────────────────────────────────────────────────
  * A scheduler + admission gate around the ONE existing run orchestration.
  * It owns NO run machinery of its own: the dispatch it fires is

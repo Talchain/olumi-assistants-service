@@ -271,6 +271,20 @@ type UiDirectiveSuppressReason =
    */
   | 'ambiguity_targets_unresolved'
   /**
+   * The ambiguity highlight: SOME candidates resolve and at least one does not,
+   * so a highlight would light a PROPER SUBSET of the options the numbered
+   * question lists — which reads as the answer to the question being asked.
+   *
+   * ⚠ THIS IS THE TAG TO COUNT. The mixed case is real and named upstream (a
+   * `run_analysis` or `what_would_flip` pending alongside a proposal carries no
+   * `target_entity_ids` at all), and its live FREQUENCY is unmeasured. Kept
+   * distinct from `ambiguity_targets_unresolved` precisely so it is countable:
+   * the two suppress identically, and merged into one tag the cost of this
+   * choice would be permanently invisible. A high rate here is the signal to
+   * revisit the charter, not a reason to weaken the gate silently.
+   */
+  | 'ambiguity_candidate_coverage_partial'
+  /**
    * The ambiguity highlight: more resolvable candidates than the cap, so the
    * gesture would flood the canvas rather than point at anything.
    */
@@ -1222,18 +1236,39 @@ function readEntityIds(raw: unknown): readonly string[] {
 }
 
 /**
- * Collect the graph-entity ids the ambiguous candidates are about, in
- * candidate order (the order the numbered clarification lists them).
+ * Collect the graph-entity ids the ambiguous candidates are about, ONE GROUP
+ * PER CANDIDATE, in candidate order (the order the numbered clarification lists
+ * them). Exactly one group per input candidate, always — `groups.length ===
+ * candidates.length` is the contract the builder counts on.
  *
- * Pure and total: any shape that is not what it claims to be contributes
- * nothing rather than throwing — this runs on a clarification turn, and a
- * malformed pending must degrade to "no gesture", never to a failed turn.
+ * ⚠ GROUPED RATHER THAN FLATTENED, AND THE SHAPE IS THE WHOLE POINT. A flat
+ * union answers "which entities are these candidates about?". The builder's
+ * question is a different one — "does EVERY option the question numbers have
+ * something to point at?" — and a flat list is structurally incapable of
+ * answering it: once the ids are merged, a candidate that contributed NOTHING
+ * is indistinguishable from one whose id another candidate also carries. The
+ * candidate boundary is the fact, so it is preserved here and collapsed by the
+ * builder only after coverage has been decided.
+ *
+ * ⚠ DEDUP IS WITHIN A CANDIDATE ONLY, and moving it would silently break the
+ * coverage test. An id carried on BOTH carriers of one candidate contributes
+ * once (that is the differently-named-twins case the interface documents).
+ * Cross-candidate dedup deliberately does NOT happen here — it is the builder's
+ * `seen` set, unchanged. Deduping across candidates here would empty the second
+ * group whenever two candidates legitimately name the same node, and the
+ * builder would read that as "candidate 2 has nothing to point at" and suppress
+ * a gesture that is entirely honest.
+ *
+ * Pure and total: any shape that is not what it claims to be contributes an
+ * EMPTY GROUP rather than throwing — this runs on a clarification turn, and a
+ * malformed pending must degrade to "no gesture", never to a failed turn. An
+ * empty group is not nothing: it records that a candidate EXISTS and carries no
+ * entity, which is exactly the fact the builder must see.
  */
 export function collectAmbiguityCandidateEntityIds(
   candidates: readonly AmbiguityCandidateSource[],
-): readonly string[] {
-  const ids: string[] = [];
-  for (const cand of candidates) {
+): readonly (readonly string[])[] {
+  return candidates.map((cand) => {
     const preconditions = asRecord(cand.preconditions);
     const fromPreconditions =
       preconditions === null ? [] : readEntityIds(preconditions.target_entity_ids);
@@ -1241,26 +1276,42 @@ export function collectAmbiguityCandidateEntityIds(
     const inlinePatch = action === null ? null : asRecord(action.inline_patch);
     const fromInlinePatch =
       inlinePatch === null ? [] : readEntityIds(inlinePatch.target_entity_ids);
+    const group: string[] = [];
     for (const id of [...fromPreconditions, ...fromInlinePatch]) {
-      if (!ids.includes(id)) ids.push(id);
+      if (!group.includes(id)) group.push(id);
     }
-  }
-  return ids;
+    return group;
+  });
 }
 
 /**
  * Build the ambiguity-candidate `highlight` directive, or null on any
  * fail-closed condition. Deterministic: no LLM input, no clock, no randomness.
  *
+ * ⚠ COVERAGE IS ALL-OR-NOTHING, AND THIS REVERSES A PREVIOUSLY RATIFIED
+ * POSITION. The first revision dropped unresolvable ids one at a time and
+ * suppressed only when the set emptied, so a MIXED candidate set — one option
+ * that is a graph node, one that is not — pulsed only the resolvable one. That
+ * is a highlight over a PROPER SUBSET of the options the numbered question
+ * lists, and on a turn whose entire purpose is to ask the user which option
+ * they meant, lighting one of two IMPLIES THE ANSWER. It is the same outcome
+ * the cap door above already refuses ("a silently truncated highlight would
+ * point at a SUBSET of what the question asks about, which is the one outcome
+ * worse than no gesture") — the two doors simply disagreed, and this one was
+ * wrong. Suppression here is not a new failure mode: it is exactly the
+ * behaviour that shipped before the gesture existed.
+ *
  * Fail-closed (returns null, never a partial block):
- *   - no candidate entity ids at all (nothing to point at);
+ *   - no candidate carries an entity id at all (nothing to point at);
  *   - NO id resolves in `lookup` — the ids name entities that are not in the
  *     graph the user is looking at, so a highlight would point at nothing.
  *     ⚠ This is the load-bearing gate. `lookup` is built from the turn's
  *     persisted graph and already drops any node whose kind is outside the
  *     `TargetRefKind` union, so a resolved ref is an entity that EXISTS and is
- *     addressable. Unresolvable ids are dropped individually; if that empties
- *     the set the directive is suppressed.
+ *     addressable.
+ *   - ANY candidate contributes no resolved target while another does — the
+ *     partial-coverage arm described above, tagged separately so its live rate
+ *     is countable;
  *   - more resolvable targets than `AMBIGUITY_HIGHLIGHT_MAX_TARGETS`;
  *   - the final strict `UiDirectiveBlockSchema` parse fails (validate before
  *     emit, the discipline every builder in this file follows — drop the
@@ -1273,26 +1324,41 @@ export function collectAmbiguityCandidateEntityIds(
  * change-description on a node reference and make the two disagree on screen.
  */
 export function buildAmbiguityCandidateUiDirective(
-  candidateEntityIds: readonly string[],
+  candidateEntityIdGroups: readonly (readonly string[])[],
   lookup: GraphNodeLookup,
 ): UiDirectiveBlock | null {
-  if (candidateEntityIds.length === 0) {
+  // `[].every()` is true, so a turn with no candidates at all lands here too —
+  // the same arm, and the same tag, as candidates carrying no entity ids.
+  if (candidateEntityIdGroups.every((group) => group.length === 0)) {
     return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_no_candidate_entities');
   }
 
   const targets: { id: string; label: string; kind: GraphNodeRef['kind'] }[] = [];
   const seen = new Set<string>();
-  for (const id of candidateEntityIds) {
-    if (seen.has(id)) continue;
-    const ref = lookup.get(id);
-    // Unresolvable ⇒ not in the graph the user is looking at ⇒ dropped.
-    if (ref === undefined) continue;
-    seen.add(id);
-    targets.push({ id: ref.id, label: ref.label, kind: ref.kind });
+  // Counted PER CANDIDATE, not per id: cross-candidate dedup below must not
+  // make a candidate look uncovered just because an earlier one already
+  // contributed the same node.
+  let candidatesWithNoResolvedTarget = 0;
+  for (const group of candidateEntityIdGroups) {
+    let resolvedInThisGroup = 0;
+    for (const id of group) {
+      const ref = lookup.get(id);
+      // Unresolvable ⇒ not in the graph the user is looking at ⇒ contributes
+      // nothing to THIS candidate's coverage.
+      if (ref === undefined) continue;
+      resolvedInThisGroup += 1;
+      if (seen.has(ref.id)) continue;
+      seen.add(ref.id);
+      targets.push({ id: ref.id, label: ref.label, kind: ref.kind });
+    }
+    if (resolvedInThisGroup === 0) candidatesWithNoResolvedTarget += 1;
   }
 
   if (targets.length === 0) {
     return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_targets_unresolved');
+  }
+  if (candidatesWithNoResolvedTarget > 0) {
+    return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_candidate_coverage_partial');
   }
   if (targets.length > AMBIGUITY_HIGHLIGHT_MAX_TARGETS) {
     return suppressDirective(AMBIGUITY_FACT_TYPE, 'ambiguity_too_many_targets');

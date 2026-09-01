@@ -56,6 +56,9 @@ import type {
   PendingLifecycleSummary,
 } from './session/pending-action.js';
 import {
+  applyRecordedAskLifetimes,
+  clampRecordedAskWindow,
+  recordedAskWindowMustClamp,
   CONFIRMATION_EXPECTING_ACTION_TYPES,
   isPendingActionExpired,
   PENDING_ACTIONS_PER_TURN_CAP,
@@ -467,6 +470,52 @@ export function computeSurvivingPriorPendingsDetailed(
 ): SurvivingPriorPendingsResult {
   const consumed = new Set(consumedRefs);
   const thisTurnKeys = new Set(thisTurn.map(pendingMatchKey));
+  // ⭐⭐ THE CLAIMANT SET MOVES AS ONE (adversarial review, 2026-08-31).
+  //
+  // `applyRecordedAskLifetimes` widens the four recorded-ask kinds at the arm
+  // seam. The other THREE bare-number claimants — `set_factor_value`,
+  // `clarify_v2_round`, `proposed_concept` — keep the default window, so
+  // without this the claimant set decays UNEVENLY: a numbered menu expires at
+  // 2 turns, a widened `elicit_option_effect` runs to 12, the user types the
+  // MENU INDEX, and the elicit is now the sole live claimant at
+  // `repair-value-binding.ts:514-518` and BINDS it into the option/factor cell.
+  // That is the stale-hijack harm the lifetime note exists to prevent,
+  // manufactured by the widening itself.
+  //
+  // ⭐ ENFORCED HERE, NOT AT THE COMMIT SEAM, and the reason is the sequence:
+  // the competitor is routinely armed on a LATER turn than the ask, so a
+  // one-shot guard at arm time would miss it entirely. This function runs on
+  // EVERY carried turn and already owns the turn-count decrement, so a
+  // competitor appearing at any point brings the asks back down with it — and
+  // the clamp is applied BEFORE rules 3-5 below, so both then expire together
+  // rather than one lingering a turn longer.
+  //
+  // ⛔ ONE-DIRECTIONAL: the clamp only ever SHORTENS, so it cannot make any
+  // binding reachable that was not reachable before the widening shipped; the
+  // worst it can do is decline a bind, which is the fail-closed direction. When
+  // no competitor has ever been live alongside the ask — the founder's journey
+  // — it is a no-op.
+  //
+  // ⚠⚠ AND IT IS IRREVERSIBLE. THIS COMMENT PREVIOUSLY SAID "only WHILE a
+  // competing claimant is LIVE", which states an invariant this code does not
+  // have, and a reviewer falsified it here. The DECISION is per turn; the
+  // RESULT is persisted — `survivors.push({ ...pa, ... })` at :565 pushes the
+  // CLAMPED object, and that is what lands in the turn row. Nothing restores
+  // the widened bounds afterwards. So a SINGLE turn of overlap with a
+  // short-window claimant permanently returns that ask to 2 turns / 10 minutes:
+  // a TRANSIENT competitor reverts the widening for that ask for good.
+  //
+  // Accepted, by comparison rather than by a claim of harmlessness: the clamped
+  // state is EXACTLY the pre-PR state, so a stuck-clamped ask is no worse than
+  // shipping nothing, while an unclamped one writes a number the user meant for
+  // a different question into their model. Whether the window SHOULD be
+  // restored once the competitor clears is a real question, deliberately NOT
+  // answered here (it needs the arming bounds carried separately from the
+  // current ones) and reported as a finding instead.
+  //
+  // Pinned by the transient-competitor case in `recorded-ask-lifetime.test.ts`,
+  // which asserts the stickiness rather than the wish.
+  const clampAskWindows = recordedAskWindowMustClamp([...prior, ...thisTurn], nowMs);
   // Diagnosis D2a (live 2026-07-10 stale-resume specimen): proposal memory
   // is a SINGLE-SLOT store — when this turn's assistant text produced a
   // capturable offer (a fresh `proposed_concept` entry in `thisTurn`),
@@ -494,14 +543,18 @@ export function computeSurvivingPriorPendingsDetailed(
   let expiredWallCount = 0;
   let hashInvalidatedCount = 0;
   let expiredTurnsCount = 0;
-  for (const pa of prior) {
-    const key = pendingMatchKey(pa);
+  for (const priorPa of prior) {
+    const key = pendingMatchKey(priorPa);
     if (consumed.has(key)) { consumedCount += 1; continue; } // 1. applied / dismissed
     if (
       thisTurnKeys.has(key)
-      || (pa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
-      || (pa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
+      || (priorPa.action.kind === 'proposed_concept' && thisTurnHasFreshProposedConcept)
+      || (priorPa.action.kind === 'draft_graph' && thisTurnHasFreshDraftOffer)
     ) { supersededCount += 1; continue; } // 2. superseded (same key, or fresher concept/offer capture)
+    // 2b. SYMMETRIC CLAIM WINDOW — clamp before rules 3-5 read the bounds, so a
+    // clamped ask expires on the same turn as the competitor it was outliving.
+    // Identity when the set is unmixed or the pending is not a recorded ask.
+    const pa = clampAskWindows ? clampRecordedAskWindow(priorPa) : priorPa;
     const expiresMs = Date.parse(pa.expires_at_iso);
     if (!Number.isFinite(expiresMs) || nowMs > expiresMs) { expiredWallCount += 1; continue; } // 3. wall TTL
     // 4. graph-hash invalidation — only when both hashes are known.
@@ -698,7 +751,7 @@ export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boo
  *     Mounted at `server.ts:1224`; whether a user reaches it is UNVERIFIED —
  *     no wire witness taken and the UI repo was not inspected.
  */
-function buildHeldLapseNotice(pa: PendingAction): string {
+export function buildHeldLapseNotice(pa: PendingAction): string {
   const a = pa.action;
   const label =
     (a.kind === 'apply_proposed_change' || a.kind === 'proposed_concept') &&
@@ -1099,7 +1152,31 @@ export async function commitDirectAnswer(
   // a later "yes" short-confirm could resume — the "persisted pending ⟹
   // rendered chip" invariant is structural at every derivation site.
   const nowMsForPendings = Date.now();
-  const initialChipDerivedPending =
+  // RECORDED-ASK LIFETIME (2026-08-31). Applied HERE, at the single seam that
+  // ARMS pendings, rather than at each of the ~15 creation sites that arm one.
+  //
+  // ⚠ WORDING CORRECTED AFTER REVIEW. This read "the single seam where pendings
+  // are persisted (`pending_actions: finalPendings` below is the only writer
+  // into the turn row)", which is FALSE — and this very file names the
+  // counter-example at :698: `routes/assist.v1.scenario-graph-register.ts:435`
+  // writes a turn row through `appendCheckedGraphWrite` with NO
+  // `pending_actions`, which `supabase-store.ts` resolves to `[]` (another
+  // wipe). The accurate and load-bearing claim is the narrower one: every
+  // pending that is ARMED is armed here, so a kind-derived window at this seam
+  // cannot be missed by a creation site. An overstated claim about a chokepoint
+  // is how a second writer stays invisible.
+  //
+  // A per-site stamp is a hand-maintained mirror — trap 12 — and
+  // the drift would be invisible: a new ask site that forgot it would simply
+  // expire in two turns and read as "the user never answered". Deriving the
+  // window from the KIND at the chokepoint makes a missed site impossible by
+  // construction.
+  //
+  // THIS TURN'S OWN NEW PENDINGS ONLY. Carry-forward survivors are stamped
+  // nowhere — `computeSurvivingPriorPendingsDetailed` owns their decrement, and
+  // re-stamping a survivor each turn would make a recorded ask immortal (see
+  // the ⚠ on `withRecordedAskLifetime`).
+  const initialChipDerivedPending = applyRecordedAskLifetimes(
     metadata.pending_actions === undefined
       ? derivePendingActionsFromFinalizedChips(
           (response.suggested_actions ?? []) as readonly SuggestedAction[],
@@ -1110,7 +1187,9 @@ export async function commitDirectAnswer(
             graph_hash: effectiveGraphHash,
           },
         )
-      : metadata.pending_actions;
+      : metadata.pending_actions,
+    nowMsForPendings,
+  );
 
   // F-HELD fix 3a (steer-don't-bind): while a confirmation-expecting pending
   // remains live AFTER this commit, do not mint competing run_analysis
@@ -1630,9 +1709,22 @@ export async function commitDirectAnswer(
     // F-HELD: the committed response (lapse notice attached / competing
     // suggestion chips suppressed when those seams fired; the SAME object as
     // the input on the untouched fast path). Callers that consume
-    // `CommitResult.response` (the TurnExecutor commitTurn wrapper — the only
-    // caller that threads `priorPendingActions`) surface it on the wire, so
-    // wire copy == durable copy.
+    // `CommitResult.response` surface it on the wire, so wire copy == durable
+    // copy — and a caller that threads `priorPendingActions` but DISCARDS this
+    // value persists the lapse notice into the turn row without ever speaking
+    // it, which is a silent wipe wearing an honest notice's clothes.
+    //
+    // ⚠ THE PARENTHETICAL THAT STOOD HERE UNTIL 31 Aug 2026 — "the TurnExecutor
+    // commitTurn wrapper, the ONLY caller that threads `priorPendingActions`" —
+    // WAS FALSE, and its falsity had teeth. It went stale as the edit, draft and
+    // chip-click paths each gained threading, and because it read as a settled
+    // single-caller fact it taught every later lane that this return value had
+    // exactly one consumer worth checking. An independent review (Codex, PR
+    // #1286 verdict `5483244874`) found the chip-click `run_analysis` exits
+    // awaiting this commit and then returning their own PRE-COMMIT object.
+    // CLAUDE.md trap 12/14: a hand-maintained claim about who calls you drifts
+    // silently and reads as green. DERIVE the caller set at your tip
+    // (`rg -a 'commitDirectAnswer\(' src/`); do not trust this sentence.
     response: responseWithModelVersionReceipt,
     performed: true,
     persisted_row_id: persistedRowId,

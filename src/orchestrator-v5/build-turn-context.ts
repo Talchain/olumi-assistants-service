@@ -46,6 +46,7 @@ import {
   canonicaliseForAnalysis,
   resolveRunAdmission,
   admittedVerdict,
+  refusedVerdict,
   AnalysisNotReadyError,
   type ReadinessResult,
 } from './tools/handlers/analysis-ready-core.js';
@@ -2840,8 +2841,25 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // `analysisReady: undefined` for NO_GRAPH (:2331) and for a graph that
     // fails GraphV3 (:2400 / :2407). There is no model to name, and inventing
     // one would be the mirror of the defect being closed.
+    //
+    // ⭐⭐ AND THE SENTENCE, which used to stop one hop short of the user.
+    //
+    // This argument was `admission.strict`. `strict.nextStep` is `null`
+    // whenever strict readiness had NO complaint — which is exactly the
+    // zero-alternatives cell the IDENTICAL_OPTIONS floor refuses on the SECOND
+    // term. `run-analysis.ts:337` writes `next_step` only when the verdict
+    // carries one, so on that cell the key was omitted entirely and the
+    // composer fell back to "This scenario needs a quick fix before it can be
+    // analysed." — a refusal naming nothing, on the one press a user makes.
+    //
+    // `refusedVerdict` carries `admission.blockedNextStep`, which this module
+    // already derives once, into the field the run path reads. NOT a second
+    // authority and NOT a rewrite: a refusal that already has its own specific
+    // sentence is returned untouched, so the three explicable branches keep
+    // their copy byte for byte. Both directions are pinned at the SURFACE in
+    // `tests/unit/analysis-refusal-carries-a-reason.test.ts`.
     throw new AnalysisNotReadyError(
-      admission.strict,
+      refusedVerdict(admission),
       admission.assessment.analysisReady
         ? { ...admission.assessment.analysisReady, may_run: admission.willProceed }
         : undefined,

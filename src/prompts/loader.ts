@@ -248,8 +248,14 @@ export async function loadPrompt(
     log.debug({ taskId }, 'No managed prompt found, using default');
     return loadDefaultPrompt(taskId, variables, correlationId, trigger, cache, 'not_found');
   } catch (error) {
-    // Error loading from store, fall back to default
-    log.warn(
+    // Error loading from store, fall back to default.
+    //
+    // LEVEL IS LOAD-BEARING (P0, ~2.5h): `emit()` logs via `log.info`, so the
+    // `prompt.loader.error` event below lands at level 30 and cannot trip
+    // level-based alerting. During the incident five of these fired per probe
+    // and nothing paged. This site logs at ERROR so the store failure is
+    // visible to a level filter even though the throw is swallowed here.
+    log.error(
       { taskId, error, correlationId },
       'Error loading prompt from store, falling back to default'
     );

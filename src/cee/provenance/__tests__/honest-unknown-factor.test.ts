@@ -979,3 +979,234 @@ describe("D — W2 stays dead: no second writer refills the value", () => {
     expect(factorIsExplicitlyUnquantified(nodeById(response, "fac_target"))).toBe(true);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// H — THE COMPOSED PATH BLOCK D DID NOT WALK
+//
+// Block D above asserts "W2 stays dead" on a factor that ALREADY carries
+// `extractionType`, `factor_type` and `uncertainty_drivers`. That is the one
+// shape for which no CONTROLLABLE_MISSING_DATA survives W1's marking, so the
+// assertion is true as stated and silent about every other shape.
+//
+// Thirty lines above it, "the OTHER required fields are still required" proves
+// the violation IS raised when that metadata is absent. Two green tests, in one
+// file, that together describe a live defect — and nothing composed them.
+//
+// ⭐ WHAT THE DEPLOYED PRODUCT ACTUALLY EMITS (cee-staging, 6 fresh guest
+// drafts via /proxy/v5/turn + the canonical graph read, 2026-08-31): 19 of 20
+// controllable factors came back at exactly `0.5`, and ALL 19 carried
+// `prior_is_unquantified: true` on the SAME node as that 0.5 — a node saying it
+// has no stated level while carrying the number the maths multiplies by. Every
+// one of the 19 also carried `factor_type: "other"` and `uncertainty_drivers:
+// ["Not provided"]` — `fixControllableMissingData`'s literal defaults, which is
+// the fingerprint identifying the writer.
+//
+// THE 20TH DISCRIMINATES (trap 13e — an absence claim needs a contrast control
+// in the same run): a brief stating "churn is 4%" produced `value: 0.04`,
+// `extractionType: "explicit"`, `factor_type: "probability"`,
+// `uncertainty_drivers: ["Extracted from brief — confirm value"]`. The same
+// factor label, from a brief carrying no numbers, came back 0.5/other/"Not
+// provided". A real extracted value and this repair's default look nothing
+// alike, so the 19 are not the probe failing to see variation.
+//
+// So the fixture below is the BARE factor — the shape the model actually sends
+// — driven through the REAL composed path: W1 marks it, the validator is asked
+// what it now reports, and the REAL `runDeterministicSweep` runs. Each step
+// pins its own precondition, so this cannot decay into a guard agreeing with
+// itself the way block D did.
+//
+// SCOPE (trap 20): producer assertions about CEE's own output only. Nothing
+// here claims anything about what PLoT computes or what the UI paints.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("H — a BARE controllable factor keeps its explicit unknown through the whole repair sweep", () => {
+  /** ctx shape `runDeterministicSweep` reads: the graph and a request id. */
+  function sweepCtx(graph: unknown): any {
+    return { graph, requestId: "test-honest-unknown-h" };
+  }
+
+  it("PRECONDITION — after W1 marks a BARE factor, CONTROLLABLE_MISSING_DATA is STILL raised", () => {
+    // This is the fact block D's fixture made invisible, and it is what arms
+    // `fixControllableMissingData`. Asserted here so the test below is provably
+    // exercising the gate rather than passing because the gate never opened.
+    const graph = optionConnectedGraph(); // BARE: no data bag at all
+    const { response } = ensureControllableFactorBaselines(graph) as any;
+
+    expect(factorIsExplicitlyUnquantified(nodeById(response, "fac_target"))).toBe(true);
+
+    const result = validateGraph({ graph: response as GraphT });
+    expect(hasErrorCode(result, "CONTROLLABLE_MISSING_DATA")).toBe(true);
+
+    // …and specifically NOT on `value` — the relaxation did its job. The
+    // violation survives on the fields W1 does NOT write, and that is the whole
+    // reason the sweep's value-write stayed reachable.
+    //
+    // ⚠ MEASURED, NOT ASSUMED. This assertion was first written as the three
+    // fields the validator requires; driving it showed `extractionType` is NOT
+    // among them, because W1 stamps that one itself. Pinned as the EXACT set so
+    // it REDs in both directions — if W1 starts writing more, or the validator
+    // starts requiring more, this is the test that notices.
+    const missing = missingFieldsFor(result, "CONTROLLABLE_MISSING_DATA");
+    expect(missing).not.toContain("value");
+    expect(missing).not.toContain("extractionType");
+    expect([...missing].sort()).toEqual(["factor_type", "uncertainty_drivers"]);
+  });
+
+  it("THE DEFECT — the sweep must not write 0.5 back over the explicit unknown", async () => {
+    const { runDeterministicSweep } = await import(
+      "../../unified-pipeline/stages/repair/deterministic-sweep.js"
+    );
+
+    const graph = optionConnectedGraph(); // BARE, exactly as the model emits
+    const { response } = ensureControllableFactorBaselines(graph) as any;
+
+    // Precondition pinned IN-TEST: the node really is in the marked state
+    // before the sweep touches it, so a failure below is the sweep's doing and
+    // not the fixture quietly stopping reproducing the situation.
+    expect(nodeById(response, "fac_target").data?.value).toBeUndefined();
+    expect(factorIsExplicitlyUnquantified(nodeById(response, "fac_target"))).toBe(true);
+
+    await runDeterministicSweep(sweepCtx(response));
+
+    const after = nodeById(response, "fac_target");
+
+    // ⭐ THE ASSERTION, bound to the node by ID, never by value predicate.
+    expect(after.data?.value).toBeUndefined();
+    expect(after.data?.value).not.toBe(0.5);
+    // The explicit unknown survives — the level is still stated, honestly.
+    expect(factorIsExplicitlyUnquantified(after)).toBe(true);
+    expect(after.prior[PRIOR_IS_UNQUANTIFIED_FIELD]).toBe(true);
+    expect(after.prior.range_min).toBe(0);
+    expect(after.prior.range_max).toBe(1);
+    // …and the factor is STILL controllable: an option still acts on it.
+    expect(after.category).toBe("controllable");
+  });
+
+  it("THE OTHER THREE FIELDS ARE STILL FILLED — the narrowing is scoped to the LEVEL alone", async () => {
+    // OPPOSITE-DIRECTION TWIN. Skipping the whole repair would also make the
+    // test above pass, and would ship a factor the validator still rejects.
+    // Only the value write moves; the three genuinely-missing fields are the
+    // sweep's job and it must still do it.
+    const { runDeterministicSweep } = await import(
+      "../../unified-pipeline/stages/repair/deterministic-sweep.js"
+    );
+
+    const graph = optionConnectedGraph();
+    const { response } = ensureControllableFactorBaselines(graph) as any;
+    await runDeterministicSweep(sweepCtx(response));
+
+    const after = nodeById(response, "fac_target");
+    expect(after.data?.extractionType).toBe("inferred");
+    expect(after.data?.factor_type).toBeDefined();
+    expect(after.data?.uncertainty_drivers).toBeDefined();
+
+    // The graph the user's analysis runs on is VALID — the point of filling
+    // them. A "fix" that left the violation standing would be a regression.
+    const result = validateGraph({ graph: response as GraphT });
+    expect(hasErrorCode(result, "CONTROLLABLE_MISSING_DATA")).toBe(false);
+  });
+
+  it("THE SAFETY NET STILL FIRES where it was actually for — no value AND no explicit unknown", async () => {
+    // ⭐ THE DISCRIMINATING TWIN. The guard must key on POSITIVE evidence of an
+    // explicit unknown, not on "the value is absent". A structurally broken node
+    // — valueless AND prior-less — is what the 0.5 net was written for, and it
+    // must still get the default, or this change would ship a factor ISL
+    // silently centres on 0.0 with no disclosure at all.
+    //
+    // Without this case, deleting the value write outright would pass every
+    // assertion above. With it, only the guarded form passes both.
+    const { runDeterministicSweep } = await import(
+      "../../unified-pipeline/stages/repair/deterministic-sweep.js"
+    );
+
+    const graph = optionConnectedGraph(); // bare, and W1 is deliberately NOT run
+    expect(factorIsExplicitlyUnquantified(nodeById(graph, "fac_target"))).toBe(false);
+    expect(nodeById(graph, "fac_target").data?.value).toBeUndefined();
+
+    await runDeterministicSweep(sweepCtx(graph));
+
+    const after = nodeById(graph, "fac_target");
+    expect(after.data?.value).toBe(0.5);
+  });
+
+  it("A MODEL'S OWN NARROWED PRIOR IS NOT OVERWRITTEN EITHER — the SECOND live instance", async () => {
+    // ⭐⭐ THIS CASE FOUND A DEFECT THE LANE WAS NOT SENT TO FIND, and it is why
+    // the guard is `factorHasExpressiblePrior` and not `factorIsExplicitlyUnquantified`.
+    //
+    // A model's own narrowed `uniform(0.6, 1.0)` is an ESTIMATE, not an
+    // admission of ignorance. W1 preserves it (`shouldPreserveModelPrior`) and
+    // the validator accepts it as a stated level — but it carries NO
+    // `prior_is_unquantified` flag, so the first draft of this fix (keyed on
+    // that flag) let `fixControllableMissingData` write 0.5 straight over it.
+    // The centre moves 0.8 → 0.5 on a quantity ISL's elasticity is linear in,
+    // for precisely the factors carrying the MOST information.
+    //
+    // Block C's comment above predicted exactly this and believed the validator
+    // relaxation had closed it. It had not: the relaxation is scoped to `value`,
+    // and this repair gated on the violation CODE.
+    const { runDeterministicSweep } = await import(
+      "../../unified-pipeline/stages/repair/deterministic-sweep.js"
+    );
+
+    const graph = optionConnectedGraph();
+    nodeById(graph, "fac_target").prior = {
+      distribution: "uniform",
+      range_min: 0.6,
+      range_max: 1,
+    };
+    const { response } = ensureControllableFactorBaselines(graph) as any;
+    const target = nodeById(response, "fac_target");
+
+    // The two predicates DISAGREE on this node — which is what makes them two
+    // predicates (trap 21). Pinned in-test so the case cannot silently become a
+    // duplicate of the explicit-unknown one.
+    expect(factorIsExplicitlyUnquantified(target)).toBe(false);
+    expect(target.prior).toEqual({ distribution: "uniform", range_min: 0.6, range_max: 1 });
+
+    await runDeterministicSweep(sweepCtx(response));
+
+    const after = nodeById(response, "fac_target");
+    expect(after.data?.value).toBeUndefined();
+    // The model's own bounds are untouched, and never relabelled as ignorance.
+    expect(after.prior).toEqual({ distribution: "uniform", range_min: 0.6, range_max: 1 });
+    expect(factorIsExplicitlyUnquantified(after)).toBe(false);
+  });
+
+  it("AN UNEXPRESSIBLE PRIOR IS NOT A STATED LEVEL — the net still fires, matching the validator", async () => {
+    // ⭐ THE THIRD DIRECTION, and the one that proves the guard is the
+    // VALIDATOR'S predicate rather than a looser "has a prior". A prior PLoT
+    // cannot express is not a stated level: the validator still reports `value`
+    // missing for these, so the repair must still supply one — otherwise the
+    // graph ships an unrepaired violation.
+    //
+    // Driven over the same shapes block G uses, so the two blocks cannot drift
+    // apart on what "unexpressible" means.
+    const { runDeterministicSweep } = await import(
+      "../../unified-pipeline/stages/repair/deterministic-sweep.js"
+    );
+
+    const unexpressible: Array<[string, Record<string, unknown>]> = [
+      ["degenerate point mass", { distribution: "uniform", range_min: 0.5, range_max: 0.5 }],
+      ["inverted bounds", { distribution: "uniform", range_min: 0.9, range_max: 0.1 }],
+      ["unknown family", { distribution: "beta", range_min: 0, range_max: 1 }],
+    ];
+
+    for (const [name, prior] of unexpressible) {
+      // W1 is deliberately NOT run: this is the raw model output reaching the
+      // sweep with a prior the gate will refuse.
+      const graph = optionConnectedGraph();
+      nodeById(graph, "fac_target").prior = { ...prior };
+
+      // PRECONDITION, pinned per shape: the validator really does still want a
+      // value here, so the repair below is provably firing on an armed gate.
+      const before = validateGraph({ graph: graph as GraphT });
+      expect(
+        missingFieldsFor(before, "CONTROLLABLE_MISSING_DATA"),
+        `an unexpressible prior (${name}) must still leave \`value\` missing`,
+      ).toContain("value");
+
+      await runDeterministicSweep(sweepCtx(graph));
+      expect(nodeById(graph, "fac_target").data?.value, name).toBe(0.5);
+    }
+  });
+});

@@ -199,7 +199,11 @@ import {
   isTypedChipMutationActionType,
   type TypedChipGraphView,
 } from './routing/typed-chip-mutation-proposal.js';
-import { deriveAnswerTextFromShape, type AnswerShape } from './routing/answer-shape.js';
+import {
+  classifyAnswerShape,
+  deriveAnswerTextFromShape,
+  type AnswerShape,
+} from './routing/answer-shape.js';
 import {
   projectGroundedSelection,
   type GroundedSelection,
@@ -4716,9 +4720,19 @@ export async function runTurnExecutor(
         // Point at the candidates the question is about. The set is the SAME
         // one the numbered list above is rendered from, so the gesture asserts
         // nothing the question does not already assert — it relocates it onto
-        // the model. Suppressed entirely when no candidate id resolves in the
-        // turn's persisted graph (see the builder's fail-closed list): a
-        // highlight pointing at nothing is worse than no highlight.
+        // the model.
+        //
+        // ⚠ THAT CLAIM HOLDS ONLY BECAUSE THE BUILDER IS ALL-OR-NOTHING, and it
+        // was FALSE when this comment was first written: the builder dropped
+        // unresolvable ids one at a time, so a mixed set here — the
+        // `run_analysis` / `what_would_flip` pending alongside a proposal that
+        // the block below already names — lit a PROPER SUBSET of the numbered
+        // options, which on a "which one did you mean?" turn implies the
+        // answer. The builder now suppresses unless EVERY candidate resolves
+        // (tag `ambiguity_candidate_coverage_partial`), which is what makes the
+        // sentence above true rather than aspirational. Suppressed likewise
+        // when no candidate id resolves at all: a highlight pointing at nothing
+        // is worse than no highlight.
         const ambiguityDirective = buildAmbiguityCandidateUiDirective(
           collectAmbiguityCandidateEntityIds(shortConfirmDispatch.candidates),
           buildGraphNodeLookupFromGraph(context.persistedGraph),
@@ -5108,7 +5122,10 @@ export async function runTurnExecutor(
             // Same gesture, same charter, at the label-collision twin of the
             // branch above: highlight the proposals whose labels the user's
             // reply matched. `ambiguousProposals` is the exact set the
-            // numbered clarification lists.
+            // numbered clarification lists — and, per the builder's
+            // all-or-nothing coverage rule, the gesture is suppressed unless
+            // EVERY one of them resolves in the persisted graph, so it can
+            // never light a subset and imply the answer.
             const labelAmbiguityDirective = buildAmbiguityCandidateUiDirective(
               collectAmbiguityCandidateEntityIds(ambiguousProposals),
               buildGraphNodeLookupFromGraph(context.persistedGraph),
@@ -9184,7 +9201,58 @@ export async function runTurnExecutor(
       // would silently mutate the factor's own value: the wrong entity, and
       // unrecoverable from the user's point of view. Both the LLM and
       // deterministic producers converge on this execute block BEFORE any
-      // handler runs, so one guard here covers every dispatch path.
+      // handler runs.
+      //
+      // ⚠⚠ THE SENTENCE THAT USED TO END THAT LINE — *"so one guard here covers
+      // every dispatch path"* — WAS FALSE, AND IT WAS LOAD-BEARING. Corrected in
+      // place rather than deleted, because the estate's record of how a false
+      // guarantee got here is what stops it coming back (trap 14).
+      //
+      // This is a PROPOSAL-LANE chokepoint, not a GRAPH-WRITE chokepoint. The
+      // block is nested under `intent_class === 'execute'`, and these production
+      // writers of a factor's own baseline are NOT EXAMINED by it — three
+      // because they never reach it, and one because it runs past it:
+      //
+      //   · the route-level `edit_graph` lane (`route-v2.ts:6213` →
+      //     `src/orchestrator/tools/edit-graph.ts:3019`) — `handleEditGraph`
+      //     owns its own applier and its own commit;
+      //   · the `factor_value_edit` system event (`factor-value-edit.ts:528`);
+      //   · the GM held-consent apply (~:3603);
+      //   · ⚠ a compound chain's parts 2..N REACH THIS BLOCK AND EXECUTE INSIDE
+      //     IT — see the correction below.
+      //
+      // ⚠ CORRECTED #1292 r4, TWICE, AND BOTH ARE RECORDED RATHER THAN QUIETLY
+      // PATCHED (trap 14 — a comfortable replacement sentence is the one nobody
+      // re-checks).
+      //
+      //   (a) THE PATH. The first bullet read `handlers/edit-graph.ts:3019`,
+      //       WHICH DOES NOT EXIST. From inside this v5 tree that relative path
+      //       resolves against `orchestrator-v5/handlers/`, where
+      //       `edit-graph-dispatch.ts:3019` is unrelated proposal-continuation
+      //       telemetry. A reader following it lands on a differently-named
+      //       twin and reads the wrong code — which is how twins start.
+      //
+      //   (b) THE COMPOUND CLAIM. Parts 2..N were listed as "never reaching"
+      //       this block. FALSE: the `execute` block opened at ~:8763 does not
+      //       close until ~:11464 (derived by brace depth, not read off the
+      //       indentation), and the chain runs at ~:10206 — well past this
+      //       guard, inside the same block. What IS true is that they are never
+      //       EXAMINED: this site reads exactly one entity, `action.entity.id`
+      //       off the routed proposal, and parts 2..N (`approved.slice(1)`,
+      //       ~:6428) carry entity ids nothing here ever looks at.
+      //       **"Out of scope" and "downstream, unexamined" are different
+      //       claims about a guard, and only the second one is this.** The
+      //       first invites a reader to stop looking.
+      //
+      // And `add_constraint` PASSES this block — it is short-circuited on
+      // handler id — while writing `{value, baseline}` at
+      // `add-constraint.ts:942`.
+      //
+      // ⭐ WHAT IS STILL TRUE, AND IT IS THE ONLY THING THAT MAY BE RELIED ON:
+      // for the `set_factor_value` HANDLER ID, every producer that reaches THIS
+      // block — LLM and deterministic alike — is covered here, so the guard is
+      // route-agnostic WITHIN that lane. Any argument that needs more than that
+      // must name the writer it is claiming about and derive its path.
       // `set_factor_value` stays a legitimate handler for genuine factor
       // edits — we refuse ONLY this case, re-using the existing recoverable-
       // validator path so the turn composes a clarify and commits a
@@ -11666,6 +11734,7 @@ export async function runTurnExecutor(
           headline_length: capturedAnswerShape.headline.length,
           bullet_count: capturedAnswerShape.bullets.length,
           detail_length: capturedAnswerShape.detail.length,
+          answer_shape_kind: classifyAnswerShape(capturedAnswerShape),
         });
       }
     } else {
@@ -11824,6 +11893,7 @@ export async function runTurnExecutor(
           headline_length: capturedAnswerShape.headline.length,
           bullet_count: capturedAnswerShape.bullets.length,
           detail_length: capturedAnswerShape.detail.length,
+          answer_shape_kind: classifyAnswerShape(capturedAnswerShape),
         });
       }
     }
@@ -14664,6 +14734,24 @@ function serialiseError(err: unknown): { name?: string; message?: string } {
  * dropped — the downstream composer still renders them for the user,
  * but they MUST NOT reach the log sink.
  */
+/**
+ * A bounded, user-content-free descriptor of a rejected parameter's TYPE.
+ * Returns exactly one token from the closed set
+ * { 'null', 'array', 'undefined', 'boolean', 'number', 'bigint', 'string',
+ *   'symbol', 'function', 'object' } and NEVER any part of the value
+ * itself — so a rejected value that is user prose contributes only the
+ * word "string" to the log.
+ *
+ * `null` and arrays are separated from plain objects deliberately:
+ * `typeof` collapses all three to 'object', and that distinction is
+ * precisely what names the rejected shape.
+ */
+function describeValueTypeForLog(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
 function buildSafeValidatorLogDetails(
   error: ValidationError,
 ): Record<string, unknown> {
@@ -14690,6 +14778,61 @@ function buildSafeValidatorLogDetails(
   // Handler-supplied reason string (PRECONDITION_UNMET) — a code-level
   // token like "no_options_defined", not user prose.
   if (typeof raw.reason === 'string') safe.reason = raw.reason;
+  // PARAMETER_INVALID's cause. Every value that reaches `rejection_reason` is
+  // a CODE-AUTHORED LITERAL — never user prose — so it leaks nothing, and that
+  // is the whole privacy claim this whitelist rests on.
+  //
+  // ⚠ CORRECTED (#1283 review). This comment used to ENUMERATE the tokens as
+  // "a CLOSED set of 11", and the list was wrong three ways at the bytes:
+  // it OMITTED two real members of `ProposalRejectionReason`
+  // (`delta_no_cap_and_no_unit`, `cap_redeclares_scale` —
+  // `evaluate-factor-value-proposal.ts:121-137`, both genuinely emitted at
+  // :578 and :540), and it INCLUDED `unit_ambiguous_probability_domain`,
+  // which is not in that union at all (it is an independent literal at
+  // `add-constraint.ts:698`). A twelfth independent literal,
+  // `parameter_schema_mismatch`, comes from `validator.ts:527`.
+  //
+  // The enumeration is DELIBERATELY NOT RESTATED HERE. A hand-copied list of
+  // another module's union is the estate's dominant defect (CLAUDE.md trap
+  // 12) — this one drifted before the PR carrying it even merged, and a
+  // reader who trusted it would have believed two live tokens did not exist.
+  // DERIVE it instead: `ProposalRejectionReason` is the union
+  // (evaluate-factor-value-proposal.ts), it reaches this field through
+  // `rejection_reason: evaluation.reason` (validator.ts:939,
+  // normalise-factor-value.ts:137 `satisfies ProposalRejectionReason`,
+  // set-factor-value.ts:377), and the two independent literals are named
+  // above. The privacy property holds over ALL of them and does not depend on
+  // knowing the count. Its absence made
+  // PARAMETER_INVALID, the largest validator-failure class in the estate,
+  // unattributable from logs: every occurrence logged the same two keys
+  // (handler_id, parameter) regardless of cause. `reason` above was
+  // whitelisted for PRECONDITION_UNMET and this sibling field was not.
+  if (typeof raw.rejection_reason === 'string') {
+    safe.rejection_reason = raw.rejection_reason;
+  }
+  // Which of the two `missing_value` emit sites fired (see
+  // `preexecuteSetFactorValueStructural`): false = the proposal carried no
+  // `value` parameter at all; true = it carried one whose shape the
+  // acceptor refuses. A boolean carries no user content.
+  //
+  // ⚠ SCOPE (#1283 review): in practice this reads `false` or is absent. The
+  // `true` site (`validator.ts:801`) is PRE-EMPTED at this tip — the generic
+  // parameter loop rejects an unsupported shape as `parameter_schema_mismatch`
+  // before the structural precheck runs, which this PR's own
+  // "the structural precheck's 'present but unparseable' branch is PRE-EMPTED
+  // at this tip" test asserts. So the field is a CONSTANT in production, not
+  // the discriminator its name promises. Keeping it is right — it fails loud
+  // the day the ordering changes — but do not read a `true` in a log as
+  // evidence of anything until that test goes red.
+  if (typeof raw.value_param_present === 'boolean') {
+    safe.value_param_present = raw.value_param_present;
+  }
+  // TYPE ONLY, never the value. `actual_value` may echo user prose and
+  // stays dropped; its TYPE is a bounded code-level descriptor that names
+  // the rejected SHAPE without reproducing any user content.
+  if ('actual_value' in raw) {
+    safe.actual_value_type = describeValueTypeForLog(raw.actual_value);
+  }
   // PARAMETER_INVALID — parameter NAME is handler-declared (safe); the
   // actual_value and constraint_description may echo user prose (dropped).
   if (typeof raw.parameter === 'string') safe.parameter = raw.parameter;
