@@ -603,10 +603,169 @@ describe('node value_authorship — the field and the sentence that licenses it'
       'never say the value was supplied, entered, typed, confirmed or approved by the user, by a colleague or by anyone',
     );
     expect(prompt).toContain('never attribute it to a named individual');
+    // The one clause that has ALREADY regressed once inside this PR, pinned by
+    // its exact negative form. The enumeration below is the general guard; this
+    // is the specific sentence that got through, and it is cheap to name.
+    expect(prompt).toContain('never say it was supplied rather than estimated');
     // Absence is not a claim (the shared contract's own instruction on this axis).
     expect(prompt).toContain(
       'Its ABSENCE is not the opposite claim',
     );
+  });
+
+  /**
+   * ⭐⭐ "PURELY" IS ENUMERATED HERE, NOT ASSERTED ABOVE.
+   *
+   * ⚠ THE DEFECT THIS CLOSES, MEASURED BY AN INDEPENDENT REVIEW AT THIS PR'S
+   * OWN HEAD. The guard above is three `toContain` assertions on three
+   * prohibition sentences: it asserts the PRESENCE of negatives and the ABSENCE
+   * of nothing. A reviewer reinstated the withdrawn positive licence
+   * — `you may say it was supplied rather than estimated` — into the shipped
+   * array, between two of the very sentences asserted above, verified it landed
+   * in the assembled constant at runtime (`contains POSITIVE: true /
+   * NEGATIVE: false`), and **125 tests across 8 spec files stayed GREEN**. A
+   * genuine survivor: applied-check 1 file, trailing control 63/63.
+   *
+   * A test whose NAME asserts a property its BODY does not test is the
+   * honest-label defect (CLAUDE.md trap 14) — and it is the same defect class
+   * this PR exists to close, one level up. Trap 11 is binding: never merge a fix
+   * until reverting it turns something RED.
+   *
+   * ── WHY ENUMERATION RATHER THAN ONE MORE BANNED SENTENCE ──────────────
+   * Asserting `toContain('never say it was supplied rather than estimated')`
+   * would have RED'd that exact mutant and nothing else: a guard that bans one
+   * sentence is defeated by rephrasing it. This guard instead DERIVES the set of
+   * occurrences from the licence bytes and requires each one to sit under a
+   * negation, so a newly worded positive licence REDs too.
+   *
+   * ── WHAT IT COVERS, AND WHAT IT DOES NOT ─────────────────────────
+   * COVERS (all four measured RED against this guard): the reviewer's verbatim
+   * clause; a rephrasing that keeps the authorship vocabulary; a rephrasing that
+   * drops that vocabulary but keeps a permission modal; and a BARE IMPERATIVE
+   * rephrasing that drops both (`report that this figure came from the people
+   * using the model...`) — caught because the trigger vocabulary includes
+   * SPEECH-ACT VERBS, not only authorship words.
+   * DOES NOT COVER: a positive licence phrased with neither an authorship word,
+   * nor a speech-act verb, nor a permission modal. That is a natural-language
+   * predicate, and CLAUDE.md trap 22f is explicit that chasing it with one more
+   * rule oscillates. The residual gap is stated here rather than hidden.
+   *
+   * ── ⚠ HOW TO MUTATION-CHECK THIS GUARD (it is not the obvious way) ────
+   * REPLACING the negative clause — which is what the review's own mutant did
+   * — REDs on the NON-VACUITY precondition below before the enumeration ever
+   * runs, because that precondition names the replaced sentence. That is a real
+   * RED and it blocks, but it does not exercise the enumeration.
+   * To exercise the enumeration, INSERT a positive clause as an additional
+   * array element and leave every prohibition intact. Measured this way:
+   *   insert a positive licence on a `value_authorship` line  -> enumeration REDs
+   *   insert a bare-imperative positive, no authorship words   -> enumeration REDs
+   *   insert an authorship word on a NON-licence line          -> scope pin REDs
+   *   insert a permission modal anywhere in the block          -> permission REDs
+   *   insert a correctly NEGATED new prohibition               -> stays GREEN
+   * The last one is the other half of the pair: it proves the guard binds to a
+   * POSITIVE LICENCE specifically, not to change in the block generally.
+   *
+   * ── THE TWO UNNEGATED CLAUSES ARE PINNED AS AN EXACT SET ─────────────
+   * Neither is a positive authorship claim — one DEFERS ("you would have to
+   * check"), the other COMMANDS SILENCE ("Say nothing about where such a value
+   * came from"), and both negate AFTER their verb rather than before it. They
+   * are allowlisted BY EXACT STRING and asserted as a SET, so the suite REDs if
+   * that set grows OR shrinks (trap 22f's known-gap pattern) rather than
+   * carrying a window that quietly widens.
+   */
+  it('⭐⭐ the licence is purely negative BY ENUMERATION — every authorship and speech-act occurrence sits under a negation', () => {
+    const { prompt } = render(graphWith([], STAMPED_NODES));
+
+    // PRECONDITION 1 — the block really is in the rendered prompt, so this is a
+    // claim about prompt BYTES and not about an unemitted constant.
+    expect(
+      prompt.indexOf(DISPLAY_GRAPH_INSTRUCTION),
+      'the display-graph instruction is not in the rendered prompt',
+    ).toBeGreaterThanOrEqual(0);
+
+    const blockLines = DISPLAY_GRAPH_INSTRUCTION.split('\n');
+    const licenceLines = blockLines.filter((line) => line.includes('value_authorship'));
+    expect(licenceLines.length, 'no `value_authorship` licence clause found').toBeGreaterThan(0);
+
+    // PRECONDITION 2 — SCOPE PIN. Every authorship-word occurrence in the WHOLE
+    // instruction block sits on a licence line, so selecting the licence by
+    // `value_authorship` cannot hide a positive claim in a sibling bullet. If a
+    // future clause puts one elsewhere in the block, this REDs rather than
+    // silently narrowing what gets checked.
+    const AUTHORSHIP_WORD_SOURCE =
+      '\\b(?:suppl\\w*|estimat\\w*|entered|typed|confirmed|approved)\\b';
+    const countAuthorshipWords = (lines: readonly string[]): number =>
+      lines.reduce(
+        (total, line) =>
+          total + (line.match(new RegExp(AUTHORSHIP_WORD_SOURCE, 'gi')) ?? []).length,
+        0,
+      );
+    expect(
+      countAuthorshipWords(licenceLines),
+      'an authorship word sits outside the `value_authorship` licence clauses',
+    ).toBe(countAuthorshipWords(blockLines));
+
+    // The trigger vocabulary is DELIBERATELY WIDER than `supplied`/`estimated`:
+    // the speech-act verbs are what catch a bare-imperative rephrasing that uses
+    // none of the authorship words.
+    const TRIGGER_SOURCE =
+      '\\b(?:suppl\\w*|estimat\\w*|entered|typed|confirmed|approved' +
+      '|say|says|saying|tell|telling|describe|describing|report|reporting' +
+      '|state|stating|attribute|attributing|offer|offering)\\b';
+    // The negator must govern the occurrence, i.e. stand BEFORE it in the same
+    // clause. "anywhere in the clause" is too weak: it passes
+    // `...was supplied by a person and not estimated by you`, which is a
+    // positive licence carrying a negation of something else.
+    const NEGATOR = /\b(?:never|not|no|none|nothing|nor|cannot|without)\b/i;
+    const CLAUSE_SPLIT = /(?<=[.;:])\s+|\s+—\s+/;
+
+    const unnegated: string[] = [];
+    let occurrences = 0;
+    for (const line of licenceLines) {
+      for (const rawClause of line.split(CLAUSE_SPLIT)) {
+        const clause = rawClause.trim();
+        const scanner = new RegExp(TRIGGER_SOURCE, 'gi');
+        let hit = scanner.exec(clause);
+        while (hit !== null) {
+          occurrences += 1;
+          if (!NEGATOR.test(clause.slice(0, hit.index))) {
+            unnegated.push(clause);
+          }
+          hit = scanner.exec(clause);
+        }
+      }
+    }
+
+    // PRECONDITION 3 — NON-VACUITY. An enumeration that matched nothing would
+    // pass every assertion below while testing nothing at all (trap 13).
+    expect(occurrences, 'the enumeration matched nothing — a vacuous pass').toBeGreaterThan(0);
+    expect(
+      licenceLines.join('\n'),
+      'the enumeration did not scan the clause that has already regressed once',
+    ).toContain('never say it was supplied rather than estimated');
+
+    // THE ASSERTION THE NAME PROMISES: the only unnegated clauses in the licence
+    // are these two, EXACTLY. Grows or shrinks -> RED.
+    const DEFERS_TO_A_CHECK =
+      'If who supplied a number matters, say you would have to check and offer to.';
+    const COMMANDS_SILENCE =
+      'Say nothing about where such a value came from rather than filling the gap.';
+    expect(
+      [...new Set(unnegated)].sort(),
+      'an unnegated authorship or speech-act clause entered the licence',
+    ).toEqual([DEFERS_TO_A_CHECK, COMMANDS_SILENCE].sort());
+
+    // SECOND CONJUNCT — nothing in this block may GRANT. Scoped to the WHOLE
+    // instruction block, not just the licence lines: a positive clause that
+    // avoids the authorship vocabulary AND is placed in a bullet that never
+    // names `value_authorship` would otherwise fall outside every check above.
+    // Measured at this tip: zero permission phrasings across all block lines.
+    const PERMISSION =
+      /\byou may\b|\byou can\b|\byou are (?:entitled|free|allowed|permitted)\b|\bit is safe to\b|\bfeel free\b/i;
+    expect(
+      blockLines.filter((line) => PERMISSION.test(line)),
+      'the instruction grants a permission — this block may only constrain',
+    ).toEqual([]);
   });
 
   it('⭐ the collision is named apart, not reconciled — and the sibling authority is NOT revoked', () => {
