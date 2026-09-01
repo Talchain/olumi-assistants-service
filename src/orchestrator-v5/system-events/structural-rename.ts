@@ -616,13 +616,14 @@ export function applyStructuralRename(
     );
   }
 
-  // ── 5b. a stale `label_authored` is a FALSE CLAIM about the new label ────
+  // ── 5b. stale label-authority markers are FALSE after a user rename ─────
   // `NodeV3.label_authored` means "this label is OUR authored display string
-  // rather than the user's verbatim words", and its own doc says it is DERIVED
-  // from `label !== source_quote`, never hand-set, with absence meaning "the
-  // label IS the user's own text". After a user types their own name for the
-  // node, absence is exactly the true state — leaving a `true` behind would tell
-  // the inspector Olumi authored a string the user wrote.
+  // rather than the user's verbatim words". `NodeV3.label_placeholder` means
+  // the current display string is the producer's generic mint rather than a
+  // name the user chose. After a user types the label, BOTH claims are false —
+  // including when the user deliberately chooses the literal `Question`.
+  // Leaving either `true` behind would let a reloaded GraphV3 contradict the
+  // authoritative `provenance: 'user_set'` written just above.
   //
   // ⚠ `source_quote` is DELIBERATELY LEFT ALONE. It is the user's exact words
   // from the brief — a historic record, append-only, and deleting it would
@@ -637,8 +638,10 @@ export function applyStructuralRename(
   // `applyPatchOperations` returns a fresh structuredClone of `{nodes, edges}`,
   // so this mutates nothing the caller can observe.
   const renamedNode = candidate.nodes.find((n) => n.id === event.node_id);
-  if (renamedNode !== undefined && 'label_authored' in renamedNode) {
-    delete (renamedNode as Record<string, unknown>).label_authored;
+  if (renamedNode !== undefined) {
+    const mutableRenamedNode = renamedNode as Record<string, unknown>;
+    if ('label_authored' in mutableRenamedNode) delete mutableRenamedNode.label_authored;
+    if ('label_placeholder' in mutableRenamedNode) delete mutableRenamedNode.label_placeholder;
   }
 
   // ── 6. put the rest of the graph back ────────────────────────────────────

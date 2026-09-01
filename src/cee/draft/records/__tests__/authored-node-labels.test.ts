@@ -1223,14 +1223,14 @@ describe("label_placeholder — an un-chosen mint, marked as one", () => {
   });
 
   /**
-   * ⭐⭐ A USER RENAME CLEARS IT — BY DERIVATION, NOT BY A WRITER REMEMBERING.
+   * ⭐⭐ A USER RENAME CLEARS IT ON THE V1→V3 RESPONSE LIFT.
    *
    * The flag is RE-DERIVED at the lift on every response (the RESPONSE-ONLY
    * rule its two siblings already follow), so it clears when the label stops
-   * being the placeholder REGARDLESS of whether a rename writer thought to
-   * drop it. That matters because the rename writer is a different lane
-   * (#1273): a design that required it to remember would be the
-   * hand-maintained mirror this estate keeps paying for (trap 12).
+   * being the placeholder rather than carrying a stale V1 mark onto the wire.
+   * The distinct authoritative GraphV3 rename path does not re-enter this lift
+   * and separately clears the marker at its writer; its composition
+   * discriminator lives with that writer.
    *
    * Both renames below carry the STALE `label_placeholder: true` banked at
    * draft time — that is the whole point. If the field were merely carried
