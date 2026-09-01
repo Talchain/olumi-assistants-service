@@ -115,6 +115,7 @@ const RECORDS = {
 };
 
 let draftGraphWithAnthropic: typeof import("../../../../adapters/llm/anthropic.js").draftGraphWithAnthropic;
+let AnthropicAdapter: typeof import("../../../../adapters/llm/anthropic.js").AnthropicAdapter;
 const prior: Record<string, string | undefined> = {};
 
 beforeAll(async () => {
@@ -123,7 +124,7 @@ beforeAll(async () => {
   process.env.CEE_ANTHROPIC_STRUCTURED_OUTPUTS = "true";
   const { _resetConfigCache } = await import("../../../../config/index.js");
   _resetConfigCache();
-  ({ draftGraphWithAnthropic } = await import("../../../../adapters/llm/anthropic.js"));
+  ({ draftGraphWithAnthropic, AnthropicAdapter } = await import("../../../../adapters/llm/anthropic.js"));
 });
 
 afterAll(async () => {
@@ -156,6 +157,26 @@ it("PRODUCER: the adapter emits the projector's disclosures instead of only logg
   expect(Array.isArray(carried), "the adapter must carry the disclosures out").toBe(true);
   expect((carried as unknown[]).length).toBeGreaterThan(0);
   expect((carried as { reason: string }[]).map((d) => d.reason)).toContain(
+    "constraint_direction_unstated",
+  );
+});
+
+it("PRODUCER WRAPPER: AnthropicAdapter carries non-empty disclosures to its caller", async () => {
+  const seam = projectDraftRecords(RECORDS, BRIEF);
+  expect(seam.ok).toBe(true);
+  if (!seam.ok) return;
+  expect(seam.projection.dropped.length, "fixture must produce a disclosure").toBeGreaterThan(0);
+
+  h.payload = JSON.stringify(RECORDS);
+  const adapter = new AnthropicAdapter("claude-sonnet-4-6");
+  const result = await adapter.draftGraph(
+    { brief: BRIEF, docs: [], seed: 1 },
+    { requestId: "r1-wrapper-carrier", timeoutMs: 120_000, forceDefault: true },
+  );
+
+  expect(Array.isArray(result.record_disclosures), "the public adapter wrapper must not drop disclosures").toBe(true);
+  expect((result.record_disclosures as unknown[]).length).toBeGreaterThan(0);
+  expect((result.record_disclosures as { reason: string }[]).map((d) => d.reason)).toContain(
     "constraint_direction_unstated",
   );
 });
