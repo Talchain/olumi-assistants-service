@@ -21,7 +21,7 @@ import {
   type PendingAction,
 } from '../../session/pending-action.js';
 import { formatEffectSlotReask } from '../../tools/handlers/d1-shared/format-confirmation.js';
-import { resolveAnswerForKnownSlot } from '../repair-value-binding.js';
+import { resolveAnswerForKnownSlot, resolveRecordedOptionEffectAnswer } from '../repair-value-binding.js';
 
 const SLOT = { optionId: 'opt-a', factorId: 'fac-a' };
 
@@ -100,6 +100,50 @@ describe('the record validates its new fields rather than trusting them', () => 
     for (const reason of ['imprecise_quantity', 'scale_ambiguous'] as const) {
       expect(ELICIT_OPTION_EFFECT_FAILURE_REASONS).toContain(reason);
     }
+  });
+});
+
+/**
+ * ⭐⭐ THE WIDENING IS ADDITIVE — it may add a BIND or a CONFIRM, never a REFUSAL.
+ *
+ * `stale` / `ambiguous` / `unavailable` are TERMINAL exits at route-v2 that emit
+ * "I cannot safely match that answer to the previous question" and return.
+ * Before this lane they could only fire for a message the context-free grammar
+ * had already read as a number. The widened gate admits any message carrying a
+ * digit, so without the additive-only clamp an ordinary edit instruction would
+ * be hijacked by a refusal about a question the user was not answering.
+ */
+describe('the widened gate can never add a refusal', () => {
+  const graph = {
+    nodes: [
+      { id: 'opt-a', kind: 'option', label: 'Two Developers' },
+      { id: 'fac-a', kind: 'factor', label: 'Development throughput' },
+    ],
+    edges: [],
+  } as never;
+  // An EXPIRED effect ask lying around — the state that made this reachable.
+  const expired = { ...pendingWith({}), expires_at_iso: '2020-01-01T00:00:00.000Z' } as PendingAction;
+
+  it.each([
+    'add factor Q3 revenue',
+    'run analysis 2',
+    'rename option 1 to Pilot',
+  ])('%s is UNRELATED, never a refusal about the previous question', message => {
+    const result = resolveRecordedOptionEffectAnswer({
+      message, pendings: [expired], graph, readiness: undefined,
+      scenarioId: 'scenario', nowMs: Date.parse('2026-08-30T20:00:00Z'),
+    });
+    expect(result.kind).toBe('unrelated');
+  });
+
+  // ── OPPOSITE-DIRECTION TWIN: a context-free numeric answer KEEPS the honest
+  //    stale refusal it has always had. The clamp must not silence that.
+  it('a bare number against an expired ask still reports stale, as it always did', () => {
+    const result = resolveRecordedOptionEffectAnswer({
+      message: '0.7', pendings: [expired], graph, readiness: undefined,
+      scenarioId: 'scenario', nowMs: Date.parse('2026-08-30T20:00:00Z'),
+    });
+    expect(result.kind).toBe('stale');
   });
 });
 
