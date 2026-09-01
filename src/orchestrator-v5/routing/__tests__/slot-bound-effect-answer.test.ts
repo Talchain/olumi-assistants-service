@@ -73,6 +73,30 @@ describe('resolveAnswerForKnownSlot — the asked cell binds by arithmetic, not 
     expect(result.reason).toBe('names_other_entity');
   });
 
+  /**
+   * ⚠⚠ THE WRONG-ENTITY WRITE THIS LANE NEARLY SHIPPED, pinned so it cannot
+   * come back. An earlier cut guarded only against labels PRESENT IN THE GRAPH,
+   * and bound `Set Some other factor to 0.9` onto the asked cell — because a
+   * guard that only knows the entities that EXIST is blind to the ones a user
+   * invents. Caught by an existing spec before merge; these are its twins,
+   * owned by this contract.
+   *
+   * The rule that closes it is an ALLOWLIST over what may surround the figure:
+   * an unrecognised noun declines, whether or not it names a real node.
+   */
+  it.each([
+    'Set Some other factor to 0.9',
+    'set the burn rate to 0.9',
+    'put revenue at 0.4',
+    'raise headcount by a third',
+    'increase the budget to 0.5',
+  ])('%s names a target we cannot verify and is declined, never bound', message => {
+    const result = read(message);
+    expect(result.kind).toBe('declined');
+    if (result.kind !== 'declined') return;
+    expect(result.reason).toBe('names_other_entity');
+  });
+
   it('naming the ASKED entities is not a foreign subject', () => {
     const result = read('Two Developers on Development throughput should be 0.7');
     expect(result.kind).toBe('value');

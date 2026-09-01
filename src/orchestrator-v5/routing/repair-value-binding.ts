@@ -72,7 +72,21 @@ import { buildConfigureOptionAdvisedFormat } from '../configure-option-chip-text
  *
  * Re-exported so this module's existing consumers and specs are unaffected.
  */
-import { readMissingValueAnswer, toModelUnitText } from './missing-value-answer.js';
+import {
+  readMissingValueAnswer,
+  toModelUnitText,
+  BARE_REFERENTS as BARE_REFERENT_PHRASES,
+} from './missing-value-answer.js';
+
+/**
+ * The individual WORDS the estate's bare-referent phrases are built from,
+ * derived from {@link BARE_REFERENT_PHRASES} rather than re-typed. "the effect
+ * value" contributes `the`, `effect`, `value`; a phrase the owner gains is
+ * readable here the instant it lands (trap 12).
+ */
+const BARE_REFERENT_WORDS: readonly string[] = [
+  ...new Set(BARE_REFERENT_PHRASES.flatMap(phrase => phrase.toLowerCase().split(/\s+/u))),
+];
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import {
@@ -599,6 +613,98 @@ const FRACTION_WORDS: readonly (readonly [RegExp, string])[] = [
  */
 const QUANTITY_SCAN = /(?<![\w.])(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%|percent|per cent)?/giu;
 
+/**
+ * ⭐⭐⭐ WHAT MAY SURROUND THE NUMBER — an ALLOWLIST, and the direction is the
+ * entire safety argument.
+ *
+ * ⚠⚠ IT EXISTS BECAUSE THE GRAPH-LABEL GUARD ALONE SHIPPED A WRONG-ENTITY
+ * WRITE, caught by an existing spec before merge:
+ *
+ *     "Set Some other factor to 0.9"  →  BIND (0.9 onto the asked cell)
+ *
+ * The user NAMED a target. `namesForeignEntity` could not see it, because
+ * "Some other factor" is not a node in the graph — and a guard that only knows
+ * the entities that EXIST is blind to the ones a user invents. This is the
+ * `ANSWERED_ASK_RESOLVED_LIMIT` residual that `option-effect-write.ts` records
+ * for its own rule 3c, reached from the other side.
+ *
+ * ⭐ THE RULE, and why it is not a fifth round of trap 22f. The lexicon that
+ * oscillated was an ACCEPTANCE list of verbs: a phrasing missing from it was
+ * silently LOST, so every round added more and the widening never converged.
+ * This is the opposite polarity — a list of words that may appear ALONGSIDE the
+ * figure, where anything unknown DECLINES. A word missing from this set costs a
+ * fall-through to today's behaviour; it can never cost a write. The same
+ * "one unknown word and the whole reading declines, no partial credit and no
+ * cliff" shape `missing-value-answer.ts` already ratified for its hedges.
+ *
+ * So a NOUN the product does not recognise — "factor", "revenue", "headcount",
+ * "Some other factor" — always declines, whether or not it names a real node.
+ *
+ * DERIVED, NOT RETYPED: the referent half comes from {@link BARE_REFERENTS},
+ * the estate's owner of "words that point at the thing being set rather than
+ * naming a new one". A second spelling of those would drift (trap 12).
+ */
+const FILLER_WORDS: ReadonlySet<string> = new Set([
+  // The referent vocabulary, derived from the owner rather than re-typed.
+  ...BARE_REFERENT_WORDS,
+  // Affirmative lead + politeness, mirroring `AFFIRMATIVE_LEAD`'s own set.
+  'yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'please', 'thanks', 'thank',
+  'cheers', 'ta',
+  // Setting verbs and their auxiliaries. Membership here only ever ADMITS a
+  // message that contains nothing else, so breadth is cheap and safety is not
+  // bought by keeping it short.
+  'set', 'change', 'update', 'adjust', 'put', 'make', 'made', 'use', 'using',
+  'try', 'go', 'goes', 'going', 'went', 'reach', 'reaches', 'keep', 'leave',
+  'be', 'is', 'was', 'get', 'gets', 'give', 'gives', 'take', 'takes', 'have',
+  'has', 'do', 'does', 'let', 'lets', 'call', 'say', 'says', 'think', 'thinks',
+  'reckon', 'guess', 'want', 'need', 'like', 'prefer', 'stick', 'move',
+  // Modals and contractions (apostrophes are stripped before lookup).
+  'should', 'would', 'could', 'will', 'shall', 'can', 'may', 'might', 'must',
+  'id', 'ill', 'im', 'ive', 'well', 'wed', 'youd', 'theyd', 'lets',
+  // Pronouns and determiners.
+  'i', 'we', 'you', 'they', 'them', 'there', 'a', 'an', 'one', 'about',
+  // Prepositions and connectives.
+  'to', 'at', 'on', 'of', 'for', 'with', 'by', 'in', 'into', 'as', 'and',
+  'or', 'but', 'than', 'then', 'up', 'down', 'over', 'under', 'just',
+  // Hedges, mirroring the hedge sets in `missing-value-answer.ts`.
+  'approximately', 'approx', 'roughly', 'around', 'maybe', 'perhaps',
+  'possibly', 'probably', 'ish', 'so', 'thereabouts', 'sounds', 'seems',
+  'feels', 'looks', 'right', 'makes', 'sense', 'good', 'fine', 'nearer',
+  'near', 'close', 'circa', 'say',
+]);
+
+/**
+ * Is everything the message contains APART from the figure ordinary filler?
+ *
+ * FAILS TOWARD DECLINE by construction: an unknown token returns false, and a
+ * false here means the contract does not claim the message at all.
+ */
+function remainderIsAllFiller(
+  message: string,
+  quantityText: string,
+  slot?: KnownEffectSlot,
+): boolean {
+  // ⭐ THE ASKED CELL'S OWN LABELS ARE KNOWN-GOOD CONTEXT, not unknown nouns.
+  // "Two Developers on Development throughput should be 0.7" names exactly the
+  // pair we asked about, so it is the CLEAREST possible answer and must bind.
+  // They are removed BEFORE the filler test because they are, by construction,
+  // the one target this contract is entitled to write to; `namesForeignEntity`
+  // has already refused any message naming a different one.
+  const known = slot === undefined ? '' : message.toLowerCase()
+    .replace(normaliseLabel(slot.optionLabel), ' ')
+    .replace(normaliseLabel(slot.factorLabel), ' ');
+  const withoutQuantity = (slot === undefined ? message.toLowerCase() : known)
+    // Drop the figure the caller already read, plus any percent marker.
+    .replace(quantityText.toLowerCase(), ' ')
+    .replace(/\b(?:percent|per cent)\b/gu, ' ')
+    // Apostrophes are part of the word ("i'd", "it's"), not separators.
+    .replace(/['’]/gu, '')
+    .replace(/[^a-z]+/gu, ' ')
+    .trim();
+  if (withoutQuantity.length === 0) return true;
+  return withoutQuantity.split(/\s+/u).every(word => word.length === 0 || FILLER_WORDS.has(word));
+}
+
 function normaliseLabel(label: string): string {
   return label.toLowerCase().replace(/\s+/gu, ' ').trim();
 }
@@ -681,6 +787,11 @@ export function resolveAnswerForKnownSlot(params: {
     for (const [pattern, suggested] of FRACTION_WORDS) {
       const hit = pattern.exec(lower);
       if (hit !== null) {
+        // Same rule on this branch: "raise the burn rate by a third" names a
+        // target and must not be offered against the asked cell.
+        if (!remainderIsAllFiller(message, hit[0]!, slot)) {
+          return { kind: 'declined', reason: 'names_other_entity' };
+        }
         return {
           kind: 'confirm',
           reason: 'imprecise_quantity',
@@ -698,6 +809,13 @@ export function resolveAnswerForKnownSlot(params: {
   const percentMarker = found[2];
   const isPercent = percentMarker !== undefined;
   const quantityText = isPercent ? `${digits}${percentMarker}` : digits;
+  // ⭐ EVERYTHING ELSE IN THE MESSAGE MUST BE FILLER. An unrecognised noun means
+  // the user may have named a target we cannot verify — "Set Some other factor
+  // to 0.9" is not an answer to a question about a DIFFERENT cell, and binding
+  // it would be the wrong-entity write this contract exists to make unreachable.
+  if (!remainderIsAllFiller(message, found[0]!, slot)) {
+    return { kind: 'declined', reason: 'names_other_entity' };
+  }
   // ⭐ THE CANONICAL SPELLING COMES FROM THE ONE OWNER, never re-derived here.
   const modelUnitText = toModelUnitText(digits, isPercent);
   if (modelUnitText === null) return { kind: 'declined', reason: 'no_quantity' };
@@ -821,38 +939,66 @@ export function resolveRecordedOptionEffectAnswer(params: {
   if (!contextFreeNumeric && !messagePlausiblyCarriesQuantity(params.message)) {
     return { kind: 'unrelated' };
   }
+  // ⭐⭐ THE WIDENING IS ADDITIVE BY CONSTRUCTION — it may add a BIND or a
+  // CONFIRM, and it may NEVER add a refusal.
+  //
+  // ⚠ THIS GUARD EXISTS BECAUSE THE WIDENED GATE WOULD OTHERWISE HAVE
+  // REGRESSED THE ROUTE, and the regression is not obvious from the diff.
+  // `stale` / `ambiguous` / `unavailable` are TERMINAL exits at `route-v2.ts`:
+  // they emit "I cannot safely match that answer to the previous question" and
+  // return. Before this lane they could only fire for a message the
+  // context-free grammar had already read as a number. Admitting every message
+  // containing a DIGIT would have let them fire on "add factor Q3 revenue" or
+  // "run analysis 2" whenever an expired effect ask happened to be lying
+  // around — hijacking an unrelated turn with a refusal about a question the
+  // user was not answering.
+  //
+  // So a message admitted ONLY by the new gate is held to a stricter rule: it
+  // may reach the slot-aware arm, but every non-answer outcome collapses to
+  // `unrelated`, which is byte-identical to today's route. The blast radius of
+  // the widening is therefore exactly "more answers bind", by construction
+  // rather than by inspection.
+  const additiveOnly = !contextFreeNumeric;
+  const conservative = (
+    verdict: RecordedEffectAnswerResolution,
+  ): RecordedEffectAnswerResolution => (
+    additiveOnly && verdict.kind !== 'bind' && verdict.kind !== 'confirm'
+      ? { kind: 'unrelated' }
+      : verdict
+  );
+
   if (params.pendings === null || params.pendings.some(
     (pa) => parsePendingAction(pa) === null || pa.scenario_id !== params.scenarioId,
-  )) return { kind: 'unavailable' };
+  )) return conservative({ kind: 'unavailable' });
 
   const claimants = filterLivePendingActions(params.pendings, params.nowMs).filter(
     (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
   );
-  if (claimants.length > 1) return { kind: 'ambiguous' };
+  if (claimants.length > 1) return conservative({ kind: 'ambiguous' });
   const pending = claimants[0];
   if (pending === undefined) {
     // A known expired question cannot be reconstructed from today's blocker order.
-    return { kind: params.pendings.some(pa => pa.action.kind === 'elicit_option_effect')
-      ? 'stale' : 'unrecorded' };
+    return conservative({ kind: params.pendings.some(pa => pa.action.kind === 'elicit_option_effect')
+      ? 'stale' : 'unrecorded' });
   }
-  if (pending.action.kind !== 'elicit_option_effect') return { kind: 'other_question' };
+  if (pending.action.kind !== 'elicit_option_effect') return conservative({ kind: 'other_question' });
   const asked = pending.action;
   const graph = params.graph;
-  if (graph === null) return { kind: 'unavailable' };
+  if (graph === null) return conservative({ kind: 'unavailable' });
   try {
     if (!pending.preconditions.graph_hash
       || pending.preconditions.graph_hash !== computeAnalysisAffectingGraphHash(graph)) {
-      return { kind: 'stale' };
+      return conservative({ kind: 'stale' });
     }
-  } catch { return { kind: 'unavailable' }; }
+  } catch { return conservative({ kind: 'unavailable' }); }
   const options = graph.nodes.filter(node => node.id === asked.option_id);
   const factors = graph.nodes.filter(node => node.id === asked.factor_id);
   if (options.length !== 1 || factors.length !== 1
-    || options[0]!.kind !== 'option' || factors[0]!.kind !== 'factor') return { kind: 'stale' };
+    || options[0]!.kind !== 'option' || factors[0]!.kind !== 'factor') return conservative({ kind: 'stale' });
   const pair = deriveMissingEffectPairs(params.readiness).find(
     p => p.optionId === asked.option_id && p.factorId === asked.factor_id,
   );
-  if (pair === undefined) return { kind: 'stale' };
+  if (pair === undefined) return conservative({ kind: 'stale' });
 
   // ── ARM 1 — the context-free reading, UNCHANGED. Anything that bound at
   // `915da5a3` binds identically here, by the same predicate, to the same cell.
@@ -905,8 +1051,11 @@ export function resolveRecordedOptionEffectAnswer(params: {
       };
     case 'out_of_scale':
       // Same exit as arm 1's refused value: named, never converted, never
-      // written, and no success receipt.
-      return { kind: 'ask', pair };
+      // written, and no success receipt. Under `additiveOnly` this collapses to
+      // `unrelated` rather than emitting a refusal the old gate would not have
+      // emitted — a figure outside 0-1 in a context-bearing sentence is as
+      // likely to be "add 5000 customers" as an answer to this ask.
+      return conservative({ kind: 'ask', pair });
     case 'declined':
     default:
       // Names another entity, several figures, or no figure at all. Not ours —
