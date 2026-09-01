@@ -30,6 +30,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { GraphT } from "../../src/schemas/graph.js";
+// IMPORTED, NOT COPIED. This suite asserts the decision node's placeholder as
+// it comes off the real draft path, so it is a second consumer of the producer's
+// display word. Spelling it here as a literal is the hand-maintained mirror
+// (trap 12) that let the UI rename this node's vocabulary while the server kept
+// minting the old one — the defect this whole change exists to close.
+import { UNAUTHORED_DECISION_LABEL } from "../../src/cee/draft/records/objective-label.js";
 
 // ---------------------------------------------------------------------------
 // SDK mock — capture the spy before vi.mock() hoists it
@@ -264,15 +270,21 @@ describe("Anthropic adapter — thinking-first response handling (ROADMAP 1.55a)
     // ⚠ The GOAL's label is now an authored objective and not the raw quote
     // (quality bar §8 A1); its verbatim rides on `provenance.source_quote`,
     // asserted immediately below so the binding to the user's own words is not
-    // lost. `Decision` survives here because this brief states no decision
-    // sentence to derive one from — the honest generic, exercised for real.
-    expect(result.graph.nodes.map((n) => n.label).sort()).toEqual([
-      "Decision",
-      "Grow Revenue Without Over-Hiring",
-      "delivery capacity",
-      "hire a contractor",
-      "hire a full-time employee",
-    ]);
+    // lost. The unauthored placeholder survives here because this brief states
+    // no decision sentence to derive one from — the honest generic, exercised
+    // for real, off the adapter's own draft path rather than a hand-built
+    // fixture. The expected set is sorted rather than hand-ordered so the
+    // assertion stays bound to the producer's constant and not to where that
+    // constant happens to fall in a collation.
+    expect(result.graph.nodes.map((n) => n.label).sort()).toEqual(
+      [
+        UNAUTHORED_DECISION_LABEL,
+        "Grow Revenue Without Over-Hiring",
+        "delivery capacity",
+        "hire a contractor",
+        "hire a full-time employee",
+      ].sort(),
+    );
     expect(
       result.graph.nodes
         .map((n) => (n.provenance as { source_quote?: string } | undefined)?.source_quote)
