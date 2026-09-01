@@ -5741,11 +5741,38 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // Keep the existing question on a refused value. Do not reissue/reset its
         // TTL, consume it, or replace an unreadable history with an empty row.
         if (repairPriorPendings !== null) {
+          // ⭐⭐⭐ THE ATTEMPT COUNT ADVANCES IN THE CARRY-FORWARD LIST, AND
+          // NOWHERE ELSE.
+          //
+          // ⚠⚠ WITHOUT THIS THE COUNTER IS DARK. `pending_actions: []` plus
+          // `priorPendingActions` carries the recorded ask forward VERBATIM
+          // (`computeSurvivingPriorPendingsDetailed` pushes `{ ...pa,
+          // expires_at_turn_count: nextTurnCount }`), so `attempt` stayed at
+          // its first value for ever: every re-ask composed at attempt 1, the
+          // attempt-2 copy was unreachable in production, and two identical
+          // unreadable replies produced BYTE-IDENTICAL re-asks — the very
+          // repetition this exit was added to end.
+          //
+          // ⚠ AND IT MUST NOT BECOME ONE OF THIS TURN'S OWN PENDINGS.
+          // `applyRecordedAskLifetimes` re-stamps those, and the lifetime note
+          // is explicit that re-stamping a survivor "would reset that decrement
+          // every turn and make the ask immortal". Rewriting the row inside the
+          // carry-forward list advances the count while leaving BOTH TTL dials
+          // exactly where they were — the turn count still decrements this turn,
+          // the wall clock is untouched.
+          const carriedWithAttempt = recorded.kind === 'confirm'
+            ? repairPriorPendings.map(pa => (
+              pa.id === recorded.pending.id
+                && pa.action.kind === 'elicit_option_effect'
+                ? { ...pa, action: { ...pa.action, attempt: recorded.attempt } }
+                : pa
+            ))
+            : repairPriorPendings;
           const committed = await commitDirectAnswer(response, {
             scenario_id: ingress.scenario_id, turn_id: ingress.turn_id,
             turn_class: 'clarify', handler_id: null, request_hash: computeRequestHash(ingress),
             llm_calls_used: 0, duration_ms: Date.now() - routeStartedAt,
-            handler_facts: [], pending_actions: [], priorPendingActions: repairPriorPendings,
+            handler_facts: [], pending_actions: [], priorPendingActions: carriedWithAttempt,
             coaching_state: null, userMessage: ingress.message,
           });
           response = committed.response;

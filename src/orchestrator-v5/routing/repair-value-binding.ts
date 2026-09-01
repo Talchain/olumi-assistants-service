@@ -582,7 +582,19 @@ export type SlotBoundAnswer =
   /** Not ours. The caller keeps today's behaviour exactly. */
   | {
       readonly kind: 'declined';
-      readonly reason: 'names_other_entity' | 'no_quantity' | 'several_quantities';
+      readonly reason:
+        | 'names_other_entity'
+        | 'no_quantity'
+        | 'several_quantities'
+        /**
+         * A sign glyph sits beside the figure but is not attached to it, so we
+         * cannot tell a minus from a dash used as a separator. DECLINES rather
+         * than guessing in either direction. Named apart from
+         * `names_other_entity` because they are different facts about the
+         * message and a shared name is how the next reader inherits a fiction
+         * (trap 21) — both still fall through to today's route unchanged.
+         */
+        | 'ambiguous_sign';
     };
 
 /**
@@ -608,10 +620,72 @@ const FRACTION_WORDS: readonly (readonly [RegExp, string])[] = [
 ];
 
 /**
- * Every quantity in the message, as written, with its percent marker if any.
- * A COUNT, not a choice: two matches mean the contract asks rather than picks.
+ * ⭐⭐⭐ THE SIGN GLYPHS — read as part of the figure, NEVER erased.
+ *
+ * ⚠⚠ THIS SET EXISTS BECAUSE THE FIRST VERSION OF THIS CONTRACT SILENTLY WROTE
+ * THE POSITIVE. `(?<![\w.])` does not exclude `-`, so `-0.9` matched as `0.9`;
+ * the leftover `-` was then erased by `remainderIsAllFiller`'s `[^a-z]+`; and
+ * the contract returned `value 0.9` for a message stating minus nine tenths.
+ * AT BASE every negative form returned `null` — a safe LOSS. Erasing the sign
+ * converted that loss into a WRONG WRITE, in a domain where negative effects
+ * are ordinary ("Two Developers" on "Burn rate" is naturally negative), so the
+ * product would have recorded the OPPOSITE DIRECTION of what the user said.
+ *
+ * `−` (U+2212), `–` (U+2013) and `—` (U+2014) are here beside plain `-`
+ * because word processors and phone keyboards substitute them for a typed
+ * hyphen. A glyph absent from this set is not a silent positive: it is an
+ * unknown character, and {@link remainderIsAllFiller} declines on those.
  */
-const QUANTITY_SCAN = /(?<![\w.])(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%|percent|per cent)?/giu;
+const NEGATIVE_SIGN_GLYPHS: ReadonlySet<string> = new Set([
+  '-', '−', '–', '—',
+]);
+
+/** Every glyph that may denote a sign, negative or otherwise. */
+const SIGN_GLYPH_CLASS = '-+\\u00B1\\u2212\\u2013\\u2014';
+
+/**
+ * Any sign glyph, anywhere — used to keep them out of the filler collapse.
+ *
+ * ⚠ TWO REGEXES, ON PURPOSE. A `g`-flagged regex carries `lastIndex` ACROSS
+ * `.test()` calls, so a shared instance would return `false` on every other
+ * call and the answer would depend on how many times it had been asked before.
+ * The replace form needs `g`; the predicate form must not have it.
+ */
+const SIGN_GLYPH_REPLACE_RE = new RegExp(`[${SIGN_GLYPH_CLASS}]`, 'gu');
+const SIGN_GLYPH_TEST_RE = new RegExp(`[${SIGN_GLYPH_CLASS}]`, 'u');
+
+/**
+ * ⭐ A SIGN WORD, and it is REFUSE-ONLY BY CONSTRUCTION — the same
+ * bounded-by-what-it-can-DO argument {@link FRACTION_WORDS} rests on.
+ *
+ * `minus` and `negative` can only ever push a figure BELOW zero, i.e. outside
+ * the consumer's `[0,1]` interval, so a member of this pair can never enable a
+ * write — only a refusal. `plus`/`positive` are deliberately ABSENT: admitting
+ * them would mean a word list that ENABLES a write, which is the polarity this
+ * module refuses. They decline as unknown tokens instead, which costs a
+ * fall-through to today's route and never a value.
+ *
+ * The capture keeps the trailing whitespace so the caller knows exactly how
+ * many characters the sign word consumed.
+ */
+const SIGN_WORD_TAIL = /(?:^|[^a-z])((?:minus|negative)\s*)$/iu;
+
+/**
+ * Every quantity in the message, as written, WITH ITS SIGN and its percent
+ * marker if any. A COUNT, not a choice: two matches mean the contract asks
+ * rather than picks.
+ *
+ * ⚠ THE SIGN IS ONLY READ WHEN IT IS ATTACHED (no space). A DETACHED `-` is
+ * genuinely ambiguous between a minus and a dash used as a separator
+ * ("Development throughput - 0.9"), and this contract does not guess: an
+ * unattached glyph survives into {@link remainderIsAllFiller} as an unknown
+ * token and DECLINES. Both readings are safe; neither is a wrong write.
+ */
+const QUANTITY_SCAN = new RegExp(
+  `(?<![\\w.])(?<sign>[${SIGN_GLYPH_CLASS}])?(?<digits>\\d+(?:,\\d{3})*(?:\\.\\d+)?)`
+  + `\\s*(?<percent>%|percent|per cent)?`,
+  'giu',
+);
 
 /**
  * ⭐⭐⭐ WHAT MAY SURROUND THE NUMBER — an ALLOWLIST, and the direction is the
@@ -699,6 +773,14 @@ function remainderIsAllFiller(
     .replace(/\b(?:percent|per cent)\b/gu, ' ')
     // Apostrophes are part of the word ("i'd", "it's"), not separators.
     .replace(/['’]/gu, '')
+    // ⭐⭐ A SIGN IS NOT PUNCTUATION, AND `[^a-z]+` BELOW CANNOT TELL THE
+    // DIFFERENCE. Any sign glyph the scan did NOT attach to the figure would
+    // otherwise vanish here and the message would read as ordinary filler —
+    // which is precisely how `-0.9` came to bind as `0.9`. Mapped to a token
+    // that is deliberately NOT in the allowlist, so an unattached sign
+    // DECLINES: the module's own polarity, and the safe direction, because a
+    // detached glyph is genuinely ambiguous between a minus and a separator.
+    .replace(SIGN_GLYPH_REPLACE_RE, ' signglyph ')
     .replace(/[^a-z]+/gu, ' ')
     .trim();
   if (withoutQuantity.length === 0) return true;
@@ -760,6 +842,19 @@ function namesForeignEntity(
  * scale is ambiguous; and every fraction word, which is offered and never
  * written.
  *
+ * ⭐⭐⭐ THE ONE INVARIANT THIS FUNCTION IS JUDGED BY, written against the
+ * CONSUMER'S SPEC rather than against any failure mode:
+ *
+ *   For every message, if the verdict is `kind: 'value'`, then
+ *   `Number(modelUnitText)` EQUALS the signed value the message states, and
+ *   lies within the closed interval [0, 1].
+ *
+ * That interval is the consumer's actual gate and it is SIGN-SYMMETRIC, so the
+ * invariant subsumes the sign question rather than treating it as a case: a
+ * stated negative is never a write, because no negative is in [0, 1]. Pinned
+ * over a corpus in `__tests__/slot-bound-effect-answer.test.ts`, whose
+ * expectations are computed from the message rather than listed beside it.
+ *
  * PURE. No graph mutation, no I/O, no clock.
  */
 export function resolveAnswerForKnownSlot(params: {
@@ -805,23 +900,81 @@ export function resolveAnswerForKnownSlot(params: {
   }
 
   const found = quantities[0]!;
-  const digits = found[1]!;
-  const percentMarker = found[2];
+  const digits = found.groups!['digits']!;
+  const percentMarker = found.groups!['percent'];
   const isPercent = percentMarker !== undefined;
-  const quantityText = isPercent ? `${digits}${percentMarker}` : digits;
+
+  // ⭐⭐⭐ THE SIGN, READ RATHER THAN ERASED — glyph first, then the refuse-only
+  // word pair. `found.index` points at the sign glyph when one was attached, so
+  // `before` is everything the scan did not consume to the left of the figure.
+  const glyphSign = found.groups!['sign'];
+  const before = message.slice(0, found.index);
+  const wordSign = glyphSign === undefined ? SIGN_WORD_TAIL.exec(before) : null;
+  const negative = glyphSign !== undefined
+    ? NEGATIVE_SIGN_GLYPHS.has(glyphSign)
+    : wordSign !== null;
+  // What the figure CONSUMED, so a recognised sign word is not then met as an
+  // unknown noun by the filler test.
+  const consumed = wordSign === null
+    ? found[0]!
+    : message.slice(found.index - wordSign[1]!.length, found.index + found[0]!.length);
+  // The user's own bytes, quoted back in every refusal. A refusal that quoted
+  // `0.9` at someone who wrote `-0.9` would be the sign erasure one seam later.
+  const signText = glyphSign ?? (wordSign === null ? '' : wordSign[1]!);
+  const quantityText = `${signText}${digits}${isPercent ? percentMarker : ''}`;
+
   // ⭐ EVERYTHING ELSE IN THE MESSAGE MUST BE FILLER. An unrecognised noun means
   // the user may have named a target we cannot verify — "Set Some other factor
   // to 0.9" is not an answer to a question about a DIFFERENT cell, and binding
   // it would be the wrong-entity write this contract exists to make unreachable.
-  if (!remainderIsAllFiller(message, found[0]!, slot)) {
-    return { kind: 'declined', reason: 'names_other_entity' };
+  if (!remainderIsAllFiller(message, consumed, slot)) {
+    // A sign glyph the scan could not attach is its OWN honest verdict, not a
+    // claim that the user named another entity. Same fall-through either way;
+    // saying which is which is what stops the next reader inheriting a fiction.
+    return {
+      kind: 'declined',
+      reason: SIGN_GLYPH_TEST_RE.test(message.replace(consumed, ' '))
+        ? 'ambiguous_sign'
+        : 'names_other_entity',
+    };
+  }
+  // ⭐ `±` IS AN INTERVAL, NOT A FIGURE, and it is the reason this test is a
+  // membership check rather than `glyph !== '-'`. Only `+` asserts a positive
+  // value; every other glyph either asserts a negative (refused by the interval
+  // below) or asserts nothing definite, and picking one end of "plus or minus
+  // nine tenths" would be the sign erasure wearing a different glyph.
+  if (glyphSign !== undefined
+    && glyphSign !== '+'
+    && !NEGATIVE_SIGN_GLYPHS.has(glyphSign)) {
+    return { kind: 'declined', reason: 'ambiguous_sign' };
   }
   // ⭐ THE CANONICAL SPELLING COMES FROM THE ONE OWNER, never re-derived here.
+  // It is the MAGNITUDE: `toModelUnitText` is the estate's shared reader and
+  // takes unsigned digits, so the sign is applied here rather than smuggled
+  // into a module four other consumers depend on.
   const modelUnitText = toModelUnitText(digits, isPercent);
   if (modelUnitText === null) return { kind: 'declined', reason: 'no_quantity' };
 
-  const parsed = Number(modelUnitText);
-  if (!Number.isFinite(parsed)) return { kind: 'declined', reason: 'no_quantity' };
+  const magnitude = Number(modelUnitText);
+  if (!Number.isFinite(magnitude)) return { kind: 'declined', reason: 'no_quantity' };
+
+  /**
+   * ⭐⭐⭐ THE SPEC INVARIANT, IN ONE LINE OF CODE.
+   *
+   * The consumer's gate is the closed interval [0, 1], which is SIGN-SYMMETRIC.
+   * So the obligation is NOT "handle a leading minus" — that would be an
+   * invariant written against the failure mode in hand, and the next asymmetry
+   * would reproduce the defect (CLAUDE.md trap 13d). It is:
+   *
+   *   IF this function returns `kind: 'value'`, THEN Number(modelUnitText)
+   *   EQUALS the signed value the message states, AND lies within [0, 1].
+   *
+   * Every gate below reads `stated`, never `magnitude`. A negative can then
+   * never be a write — not because minus is special-cased, but because no
+   * negative is inside [0, 1] — and the same sentence covers `-0.9`, `−90%`,
+   * `minus 0.9` and any sign spelling added later.
+   */
+  const stated = negative ? -magnitude : magnitude;
 
   // ⭐ THE RATIFIED SCALE CLIFF, HONOURED RATHER THAN RE-LITIGATED, AND IT IS
   // TESTED BEFORE THE RANGE — the order is load-bearing. A bare integer is
@@ -832,9 +985,14 @@ export function resolveAnswerForKnownSlot(params: {
   // the truth is that we cannot tell WHICH scale they used. It is OFFERED,
   // never chosen. `0` is excluded: it means the same on either scale.
   const bareInteger = !isPercent && /^\d+$/u.test(digits.replace(/,/gu, ''));
-  if (bareInteger && parsed !== 0) {
+  if (bareInteger && stated !== 0) {
     const asPercent = toModelUnitText(digits, true);
-    const asPercentValue = asPercent === null ? Number.NaN : Number(asPercent);
+    const asPercentMagnitude = asPercent === null ? Number.NaN : Number(asPercent);
+    // ⭐ THE SIGN TRAVELS WITH BOTH READINGS. `-25` is not "25 or 25%": both
+    // readings are negative, so neither is inside the interval and there is
+    // nothing to disambiguate. Offering `0.25` here would be the sign erasure
+    // returning through the confirm door.
+    const asPercentValue = negative ? -asPercentMagnitude : asPercentMagnitude;
     // Only ambiguous if the percentage reading is itself usable — a bare `150`
     // is not "25 or 25%", it is off the scale on both readings.
     if (Number.isFinite(asPercentValue) && asPercentValue >= 0 && asPercentValue <= 1) {
@@ -849,7 +1007,7 @@ export function resolveAnswerForKnownSlot(params: {
     return { kind: 'out_of_scale', quantityText, slot };
   }
 
-  if (parsed < 0 || parsed > 1) {
+  if (stated < 0 || stated > 1) {
     return { kind: 'out_of_scale', quantityText, slot };
   }
 
@@ -882,11 +1040,32 @@ export type RecordedEffectAnswerResolution =
       readonly heardText: string;
       readonly reason: 'imprecise_quantity' | 'scale_ambiguous';
       /**
-       * How many times this cell has been asked, off the pending being
-       * answered. THE READER for `ElicitOptionEffectFields.attempt` — a field
-       * with no reader cannot change anything and should not exist (trap 10).
+       * ⭐⭐ THE ATTEMPT NUMBER OF THE ASK WE ARE ABOUT TO EMIT — i.e. the
+       * recorded ask's own count PLUS ONE, because emitting this re-ask IS the
+       * next attempt.
+       *
+       * ⚠⚠ IT USED TO BE THE PRIOR ROW'S COUNT, AND THAT MADE THE WHOLE
+       * COUNTER DARK. The route's confirm exit commits with `pending_actions:
+       * []` and carries the prior row forward VERBATIM, so the stored `attempt`
+       * never moved: every re-ask composed at 1, the attempt-2 copy was
+       * unreachable in production, and two identical unreadable replies
+       * produced BYTE-IDENTICAL re-asks — the exact defect this lane exists to
+       * close, surviving inside its own fix. The route now writes {@link
+       * pending} back with this number, so the count advances turn over turn.
        */
       readonly attempt: number;
+      /**
+       * The recorded ask being answered, so the caller can carry it forward
+       * with the advanced count WITHOUT re-stamping its lifetime.
+       *
+       * ⚠ IT IS HANDED BACK RATHER THAN RE-EMITTED FOR A REASON:
+       * `applyRecordedAskLifetimes` re-stamps THIS TURN'S OWN pendings, and
+       * `computeSurvivingPriorPendingsDetailed`'s own note says re-stamping a
+       * SURVIVOR "would reset that decrement every turn and make the ask
+       * immortal". So the route must mutate the row IN THE CARRY-FORWARD LIST,
+       * never move it into `pending_actions`.
+       */
+      readonly pending: PendingAction;
     }
   | { readonly kind: 'bind'; readonly answer: RecordedEffectAnswer };
 
@@ -1047,7 +1226,12 @@ export function resolveRecordedOptionEffectAnswer(params: {
         suggestedModelUnitText: slotted.suggestedModelUnitText,
         heardText: slotted.heardText,
         reason: slotted.reason,
-        attempt: typeof asked.attempt === 'number' ? asked.attempt : 1,
+        // ⭐ PLUS ONE — emitting this re-ask IS the next attempt. A row written
+        // before this field existed reads as attempt 1, so its re-ask is 2.
+        attempt: (typeof asked.attempt === 'number' && Number.isFinite(asked.attempt)
+          ? Math.floor(asked.attempt)
+          : 1) + 1,
+        pending,
       };
     case 'out_of_scale':
       // Same exit as arm 1's refused value: named, never converted, never

@@ -272,8 +272,28 @@ export function formatBaselineReask(input: {
 }
 
 /**
- * ⭐⭐ THE EFFECT-SLOT RE-ASK — {@link formatBaselineReask}'s shape, generalised
- * to the option×factor effect ask rather than re-invented beside it.
+ * ⭐⭐ THE EFFECT-SLOT RE-ASK — {@link formatBaselineReask}'s SHAPE, applied to
+ * the option×factor effect ask.
+ *
+ * ⚠⚠ THIS COMMENT USED TO SAY "generalised … rather than re-invented beside
+ * it", AND THAT WAS FALSE OF THE CODE UNDER IT. This is a second function with
+ * a second reason vocabulary standing next to the first, and the two sets are
+ * DIFFERENTLY-NAMED TWINS — this estate's chronic defect (CLAUDE.md trap 21),
+ * asserted away by the one sentence a reader would check it against:
+ *
+ *     out_of_range      (baseline)  ≡  out_of_scale       (effect)
+ *     ambiguous_scale   (baseline)  ≡  scale_ambiguous    (effect)
+ *     unreadable        (baseline)  ≡  no_quantity        (effect)
+ *
+ * The producers diverge with them: `classifyElicitedBaselineAnswer` mints the
+ * left column, `resolveAnswerForKnownSlot` mints the right.
+ *
+ * NOT RECONCILED HERE, and the reason is scope rather than merit: the left
+ * column is the baseline-elicitation seam (R2918B), owned elsewhere, with its
+ * own suite and its own live callers, and renaming across it from this lane is
+ * exactly the "while we're here" widening the scope rule bans. Recorded as a
+ * finding for whoever owns both seams together. What this comment must not do
+ * is claim the fold already happened.
  *
  * THE DEFECT IT CLOSES. Measured at `915da5a3`, nine of nine unrecognised
  * replies to the effect ask received the BYTE-IDENTICAL demand back. The cause
@@ -320,10 +340,32 @@ export function formatEffectSlotReask(input: {
   const parsed = Number(input.suggestedModelUnitText);
   const percent = Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
   const cell = `"${input.optionLabel}" on "${input.factorLabel}"`;
+  const attempt = Math.max(1, Math.floor(input.attempt ?? 1));
+  // ⭐⭐ THIRD ATTEMPT: A DIFFERENT STRATEGY, NOT A THIRD PHRASING.
+  //
+  // Two rounds of explaining the scale have not landed, so the third stops
+  // explaining and reduces the exchange to a binary the user can close in one
+  // word. Placed BEFORE the reason switch deliberately: at this point the
+  // distinction between "I could not tell which scale" and "I will not round
+  // your approximation" has stopped being useful to the person typing.
+  //
+  // ⚠ AND IT PLATEAUS HERE, ON PURPOSE AND ON THE RECORD. Attempts 4, 5 and 6
+  // repeat this sentence for an identical reply. Endless novelty is not the
+  // goal and would be noise; what the product owes is that the SECOND ask is
+  // not the first and the THIRD is not the second, which is where the
+  // information actually is. The plateau is pinned by name in
+  // `effect-slot-reask-differs.test.ts` so it stays a decision rather than
+  // becoming an accident — and REDs if the escalation band moves.
+  if (attempt >= 3 && percent !== null) {
+    return (
+      `I do not want to keep asking you the same thing. I read "${input.heardText}" `
+      + `and my best reading of it is ${percent}%. Reply ${percent}% and I will record `
+      + `that for ${cell}, or give me any other percentage and I will use that instead.`
+    );
+  }
   // From the second attempt the product says so, and changes strategy: it stops
   // restating the scale and offers the single figure as something to accept.
-  const repeat = (input.attempt ?? 1) >= 2;
-  const opener = repeat ? `I am still not certain I have this right. ` : '';
+  const opener = attempt >= 2 ? `I am still not certain I have this right. ` : '';
   if (percent === null) {
     return (
       `${opener}I read "${input.heardText}" but could not turn it into a level for ${cell}. ` +

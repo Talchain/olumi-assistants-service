@@ -186,6 +186,139 @@ describe('resolveAnswerForKnownSlot — the asked cell binds by arithmetic, not 
     expect(result.reason).toBe('several_quantities');
   });
 
+  /**
+   * ⭐⭐⭐ THE SIGN CASES — the defect this suite could not see, and the reason
+   * it could not see it.
+   *
+   * MEASURED at `e777309f`, end to end through `resolveRecordedOptionEffectAnswer`
+   * on this very fixture:
+   *
+   *     "-0.9"                 ->  bind valueText=0.9
+   *     "set it to -0.9"       ->  bind valueText=0.9
+   *     "make it -90% please"  ->  bind valueText=0.9
+   *
+   * The scan's lookbehind `(?<![\w.])` does not exclude `-`, and the leftover
+   * sign was then erased by `remainderIsAllFiller`'s `[^a-z]+`. AT BASE every
+   * one of these returned `null` — a safe LOSS — so the contract converted a
+   * safe loss into a WRONG WRITE, in a domain where negative effects are
+   * ordinary ("Two Developers" on "Burn rate" is naturally negative). The
+   * product would have recorded the OPPOSITE DIRECTION of what the user said.
+   *
+   * ⚠ THIS SUITE CONTAINED ZERO NEGATIVE CASES. The contrast control that
+   * proves the omission was real rather than a blind grep: `0.7` appeared 12
+   * times in the same file. The corpus excluded a value class the contract
+   * admits, so it could not certify the contract over that class — which is
+   * why the cases below are written from the SPEC's domain (`[0,1]` is
+   * sign-symmetric, so BOTH signs are in the input space) rather than from the
+   * shapes that happened to occur to the author.
+   */
+  it.each([
+    ['-0.9', '-0.9'],
+    ['set it to -0.9', '-0.9'],
+    ['make it -90% please', '-90%'],
+    ['−0.9', '−0.9'],
+    ['minus 0.9', 'minus 0.9'],
+    ['negative 0.9', 'negative 0.9'],
+    ['-25', '-25'],
+    ['put it at -0.25', '-0.25'],
+  ])('%s states a NEGATIVE and is refused, quoting the sign back', (message, quoted) => {
+    const result = read(message);
+    expect(result.kind).toBe('out_of_scale');
+    if (result.kind !== 'out_of_scale') return;
+    // The refusal quotes what the user typed. A refusal that echoed `0.9` at
+    // someone who wrote `-0.9` would be the sign erasure one seam later.
+    expect(result.quantityText).toBe(quoted);
+  });
+
+  it('an explicit PLUS is read as positive and binds, because it says so', () => {
+    const result = read('+0.9');
+    expect(result.kind).toBe('value');
+    if (result.kind !== 'value') return;
+    expect(result.modelUnitText).toBe('0.9');
+    expect(result.slot.factorId).toBe('fac-asked');
+  });
+
+  /**
+   * ⭐ THE OPPOSITE-DIRECTION TWIN of the negative cases, and it is what keeps
+   * the fix from being "refuse anything with a dash in it": a sign glyph that
+   * is NOT attached to the figure is genuinely ambiguous between a minus and a
+   * dash used as a separator, so it DECLINES — no write, and no false refusal
+   * claiming the user's value was off the scale.
+   */
+  it.each([
+    '− 0.9',
+    'Development throughput - 0.9',
+    '±0.9',
+  ])('%s carries an undecidable sign and DECLINES, neither bound nor refused as out of scale', message => {
+    const result = read(message);
+    expect(result.kind).toBe('declined');
+    if (result.kind !== 'declined') return;
+    expect(result.reason).toBe('ambiguous_sign');
+  });
+
+  /**
+   * ⭐⭐⭐ THE SPEC INVARIANT, EXECUTED — written against the CONSUMER'S GATE,
+   * never against the failure mode in hand.
+   *
+   * The consumer's gate is the closed interval [0, 1], which is SIGN-SYMMETRIC.
+   * A fix that only handled `-0.9` because that was the case in hand would
+   * reproduce this defect on the next asymmetry (CLAUDE.md trap 13d), so the
+   * property asserted here is the whole contract rather than the incident:
+   *
+   *   IF the verdict is `value`, THEN Number(modelUnitText) EQUALS the signed
+   *   value the message states, AND lies within [0, 1].
+   *
+   * The expected value is COMPUTED FROM THE MESSAGE by an independent reader
+   * written here, not listed beside each case — a table of hand-written answers
+   * would agree with whatever the code does the day it is written.
+   */
+  describe('SPEC INVARIANT — a bound value equals the signed value stated, inside [0,1]', () => {
+    /** An independent signed reading of a message, deliberately naive. */
+    const statedValue = (message: string): number | null => {
+      const m = /(-|−|–|—|\+)?\s*(\d+(?:\.\d+)?)\s*(%|percent)?/u.exec(message);
+      if (m === null) return null;
+      const word = /\b(minus|negative)\s+\d/iu.test(message);
+      const magnitude = Number(m[2]) / (m[3] === undefined ? 1 : 100);
+      const isNegative = word || m[1] === '-' || m[1] === '−' || m[1] === '–' || m[1] === '—';
+      return isNegative ? -magnitude : magnitude;
+    };
+
+    const corpus = [
+      '0.25', '25%', '0.7', '70 percent', '+0.9', '0', '1', '100%',
+      '-0.9', '-90%', 'set it to -0.9', 'make it -90% please', '−0.9',
+      'minus 0.9', 'negative 0.9', '-25', '150%', '1.5', '-1.5',
+      'make it 0.8 please', 'about 25%', 'put it at -0.25',
+    ];
+
+    it.each(corpus)('%s never binds a value that misstates the sign or leaves [0,1]', message => {
+      const result = read(message);
+      if (result.kind !== 'value') return; // refusing is always permitted
+      const bound = Number(result.modelUnitText);
+      const stated = statedValue(message);
+      expect(stated).not.toBeNull();
+      // The two halves of the invariant, asserted separately so a failure says
+      // WHICH half broke.
+      expect(bound).toBe(stated);
+      expect(bound).toBeGreaterThanOrEqual(0);
+      expect(bound).toBeLessThanOrEqual(1);
+    });
+
+    /**
+     * ⚠ THE POSITIVE CONTROL. The property above is vacuously true for a
+     * contract that declines everything, so it cannot certify anything on its
+     * own (trap 13). This asserts the corpus actually EXERCISES the `value`
+     * arm, and that every stated negative in it is refused — the discrimination
+     * the property is there to make.
+     */
+    it('the corpus exercises both arms — some bind, and every negative refuses', () => {
+      const verdicts = corpus.map(m => ({ m, kind: read(m).kind, stated: statedValue(m) }));
+      expect(verdicts.filter(v => v.kind === 'value').length).toBeGreaterThanOrEqual(8);
+      const negatives = verdicts.filter(v => (v.stated ?? 0) < 0);
+      expect(negatives.length).toBeGreaterThanOrEqual(7);
+      for (const v of negatives) expect(v.kind).not.toBe('value');
+    });
+  });
+
   // ── THE FACTOR BASELINE MUST NOT MOVE ────────────────────────────────────
   it('resolution is pure and names only the asked slot — no baseline writer reachable', () => {
     const result = read('25%');

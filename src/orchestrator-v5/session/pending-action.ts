@@ -124,56 +124,22 @@ export interface ElicitOptionEffectFields {
    */
   readonly attempt?: number;
   /**
-   * The user's reply that this ask could NOT interpret, verbatim and bounded.
+   * ⚠⚠ `last_user_reply` AND `failure_reason` WERE HERE AND WERE DELETED
+   * BEFORE MERGE, ON EVIDENCE. Both were minted with a closed-set guard and a
+   * bounded length, and both had ZERO production writers and ZERO production
+   * readers (swept with `attempt` — 142 files — as the contrast control, so the
+   * sweep was discriminating rather than blind). Three of the five members of
+   * the closed set were unreachable from any contract verdict.
    *
-   * Carried so the re-ask can QUOTE what they said rather than restate the
-   * demand. Quoting is the whole difference between "I couldn't tell what
-   * value to use" (which the founder received twice) and "I read 'a third' as
-   * a fraction, but I need the level as a percentage".
+   * A write-only column with no reader cannot fork anything and cannot change
+   * a single byte a user sees (trap 10), and a pin over a fictional set is
+   * worse than no pin: it reads as settled contract and is the thing later
+   * sessions inherit. The re-ask quotes the user from the LIVE message on the
+   * turn, which is where that text actually is — it never needed a column.
    *
-   * ⚠ BOUNDED AT {@link ELICIT_OPTION_EFFECT_REPLY_MAX} AND NEVER PARSED. It is
-   * quoted copy, not a second input to the binder: a reader that re-interpreted
-   * this field would be a second answer grammar with no owner (trap 12).
+   * They come back the day a composer reads them, not before.
    */
-  readonly last_user_reply?: string;
-  /**
-   * Why the previous reply did not bind — a CLOSED set, so the re-ask composer
-   * is a total function of it and cannot fall through to the generic demand.
-   */
-  readonly failure_reason?: ElicitOptionEffectFailureReason;
 }
-
-/**
- * Why an answer to the effect ask did not land. CLOSED, and deliberately about
- * the SHAPE of the failure rather than about the words used, so the re-ask
- * composer needs no lexicon of its own.
- */
-export const ELICIT_OPTION_EFFECT_FAILURE_REASONS = [
-  /** A figure was read but sits outside the 0–1 effect scale ("150%"). */
-  'out_of_scale',
-  /** A bare integer, ambiguous between 25 and 25% — never guessed. */
-  'scale_ambiguous',
-  /** A fraction or hedge word denoting a quantity we will not silently round. */
-  'imprecise_quantity',
-  /** More than one figure in the message; we ask rather than pick. */
-  'several_quantities',
-  /** No quantity at all ("high", "a bit more"). */
-  'no_quantity',
-] as const;
-
-/**
- * ⚠ THE TYPE IS DERIVED FROM THE ARRAY, never declared beside it. The parse
- * block validates against the ARRAY and the composers switch on the TYPE; two
- * hand-written spellings of one closed set is the drift this estate pays for
- * (trap 12), and here the drift would be a row that parses and then falls
- * through every composer arm to the generic demand — i.e. silently back to the
- * repetition this change exists to remove.
- */
-export type ElicitOptionEffectFailureReason =
-  (typeof ELICIT_OPTION_EFFECT_FAILURE_REASONS)[number];
-
-/** Upper bound on the quoted reply carried for the re-ask. */
-export const ELICIT_OPTION_EFFECT_REPLY_MAX = 200;
 
 /**
  * ⭐ THE ATTEMPT CARRY-FORWARD — the ONE place a re-ask learns it is a re-ask.
@@ -1453,20 +1419,11 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (typeof a.option_label !== 'string' || a.option_label.length === 0) return null;
     if (typeof a.factor_id !== 'string' || a.factor_id.length === 0) return null;
     if (typeof a.factor_label !== 'string' || a.factor_label.length === 0) return null;
-    // The three re-ask fields are OPTIONAL (rows written before this change
-    // carry none) but are validated when present — an unvalidated optional is
-    // how a corrupted row reaches a composer that then renders it.
+    // `attempt` is OPTIONAL (rows written before this change carry none) but is
+    // validated when present — an unvalidated optional is how a corrupted row
+    // reaches a composer that then renders it.
     if (a.attempt !== undefined
       && (typeof a.attempt !== 'number' || !Number.isInteger(a.attempt) || a.attempt < 1)) return null;
-    if (a.last_user_reply !== undefined
-      && (typeof a.last_user_reply !== 'string'
-        || a.last_user_reply.length === 0
-        || a.last_user_reply.length > ELICIT_OPTION_EFFECT_REPLY_MAX)) return null;
-    if (a.failure_reason !== undefined
-      && (typeof a.failure_reason !== 'string'
-        || !ELICIT_OPTION_EFFECT_FAILURE_REASONS.includes(
-          a.failure_reason as ElicitOptionEffectFailureReason,
-        ))) return null;
   }
   if (a.kind === 'elicit_effect_target') {
     // ROADMAP 2.1353 — all three fields REQUIRED, and `candidates` NON-EMPTY.

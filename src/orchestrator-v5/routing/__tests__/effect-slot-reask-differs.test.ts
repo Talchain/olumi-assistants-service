@@ -16,10 +16,9 @@ import { describe, expect, it } from 'vitest';
 import {
   carryForwardOptionEffectAttempt,
   parsePendingAction,
-  ELICIT_OPTION_EFFECT_FAILURE_REASONS,
-  ELICIT_OPTION_EFFECT_REPLY_MAX,
   type PendingAction,
 } from '../../session/pending-action.js';
+import { projectReadinessRecovery } from '../../coaching/readiness-recovery.js';
 import { formatEffectSlotReask } from '../../tools/handlers/d1-shared/format-confirmation.js';
 import { resolveAnswerForKnownSlot, resolveRecordedOptionEffectAnswer } from '../repair-value-binding.js';
 
@@ -73,33 +72,40 @@ describe('attempt carry-forward — off the superseded row, by identity', () => 
   });
 });
 
-describe('the record validates its new fields rather than trusting them', () => {
-  it('accepts a row carrying all three re-ask fields', () => {
-    const parsed = parsePendingAction(pendingWith({
-      attempt: 2, last_user_reply: 'a third', failure_reason: 'imprecise_quantity',
-    }));
-    expect(parsed).not.toBeNull();
+/**
+ * ⚠⚠ TWO FIELDS THAT USED TO BE PINNED HERE ARE GONE — `last_user_reply` and
+ * `failure_reason`, together with the closed `ELICIT_OPTION_EFFECT_FAILURE_REASONS`
+ * set and its length bound. THE PIN WAS VACUOUS IN ONE DIRECTION AND THE FIELDS
+ * HAD NO ONE TO SERVE:
+ *
+ *   · ADDING `zzz_bogus_member` to the closed set left the suite fully GREEN —
+ *     the pin bit on REMOVAL only, so it could never have caught the drift it
+ *     was written for;
+ *   · both fields had ZERO production writers and ZERO production readers
+ *     (contrast control in the same sweep: `attempt` hit 142 files, so the
+ *     sweep discriminated rather than reading blind), and three of the five
+ *     reasons were unreachable from any verdict the contract can emit.
+ *
+ * A write-only column with no reader cannot fork anything (trap 10), and a pin
+ * over a fictional set is worse than no pin because it reads as settled
+ * contract. Deleted rather than better-pinned. What remains below is `attempt`,
+ * which has a real writer (`readiness-recovery.ts`) and a real reader
+ * (`repair-value-binding.ts`'s confirm arm).
+ */
+describe('the record validates `attempt` rather than trusting it', () => {
+  it('accepts a row carrying the attempt count', () => {
+    expect(parsePendingAction(pendingWith({ attempt: 2 }))).not.toBeNull();
   });
 
-  it('accepts a row carrying none of them (rows written before this change)', () => {
+  it('accepts a row carrying none (rows written before this change)', () => {
     expect(parsePendingAction(pendingWith({}))).not.toBeNull();
   });
 
   it.each([
     ['attempt below 1', { attempt: 0 }],
     ['a non-integer attempt', { attempt: 1.5 }],
-    ['an over-long reply', { last_user_reply: 'x'.repeat(ELICIT_OPTION_EFFECT_REPLY_MAX + 1) }],
-    ['an empty reply', { last_user_reply: '' }],
-    ['a failure reason outside the closed set', { failure_reason: 'made_up' }],
   ])('refuses %s', (_label, over) => {
     expect(parsePendingAction(pendingWith(over))).toBeNull();
-  });
-
-  it('the closed reason set is the one the contract can actually produce', () => {
-    // DERIVED, not mirrored: every reason the contract emits must be storable.
-    for (const reason of ['imprecise_quantity', 'scale_ambiguous'] as const) {
-      expect(ELICIT_OPTION_EFFECT_FAILURE_REASONS).toContain(reason);
-    }
   });
 });
 
@@ -150,11 +156,51 @@ describe('the widened gate can never add a refusal', () => {
 describe('⭐ NO RE-ASK IS BYTE-IDENTICAL TO THE ASK THAT PRECEDED IT', () => {
   const cell = { optionLabel: 'Two Developers', factorLabel: 'Development throughput' };
 
-  // The opening demand, verbatim from `readiness-recovery.ts`'s provide_value
-  // branch — the sentence the founder received twice.
-  const OPENING_ASK =
-    'Next, choose the missing effect value for "Two Developers" on '
-    + '"Development throughput" so the comparison can be prepared.';
+  /**
+   * ⭐⭐ THE OPENING DEMAND, DERIVED FROM THE PRODUCT — never re-typed here.
+   *
+   * ⚠⚠ IT USED TO BE A HAND-COPIED LITERAL AND THE COPY WAS ALREADY WRONG. It
+   * omitted the ` ${MISSING_VALUE_ASK_FORMAT_HINT}` clause that
+   * `readiness-recovery.ts`'s `provide_value` branch APPENDS, so every
+   * `not.toBe(OPENING_ASK)` below was asserting inequality against a string the
+   * product has never emitted — a test that passes because it is pointed at
+   * nothing (CLAUDE.md trap 12: a hand-maintained mirror inside the guard
+   * written to stop repetition).
+   *
+   * Now taken from `projectReadinessRecovery` itself, on a readiness payload
+   * shaped like the one the founder's journey produced. If the ask's wording
+   * moves, this moves with it, and the inequality stays a real claim.
+   */
+  const OPENING_ASK = projectReadinessRecovery(
+    {
+      status: 'needs_user_input',
+      blockers: [{
+        blocker_type: 'missing_value',
+        option_id: 'opt-a', option_label: 'Two Developers',
+        factor_id: 'fac-a', factor_label: 'Development throughput',
+      }],
+    },
+    [
+      { id: 'opt-a', kind: 'option', label: 'Two Developers' },
+      { id: 'fac-a', kind: 'factor', label: 'Development throughput' },
+    ],
+  ).nextStep;
+
+  /**
+   * ⚠ THE POSITIVE CONTROL for the derivation above. A projection that fell
+   * through to some other branch would yield an unrelated sentence, and every
+   * `not.toBe` below would then pass for the wrong reason — the same vacuity
+   * the hand-copied literal had. This asserts we are holding the
+   * `provide_value` ask, and that it carries the format hint the literal
+   * dropped.
+   */
+  it('the derived opening ask IS the provide_value demand, hint included', () => {
+    expect(OPENING_ASK).toContain('choose the missing effect value');
+    expect(OPENING_ASK).toContain('"Two Developers"');
+    expect(OPENING_ASK).toContain('"Development throughput"');
+    // The clause the hand-copied literal omitted.
+    expect(OPENING_ASK).toContain('Just the percentage is enough');
+  });
 
   const reask = (over: Parameters<typeof formatEffectSlotReask>[0]) =>
     formatEffectSlotReask(over);
@@ -182,12 +228,67 @@ describe('⭐ NO RE-ASK IS BYTE-IDENTICAL TO THE ASK THAT PRECEDED IT', () => {
     for (const text of texts) expect(text).toMatch(/%/u);
   });
 
-  it('the SECOND attempt differs from the FIRST on identical input', () => {
+  /**
+   * ⭐⭐⭐ TURN N VERSUS TURN N+1, WHICH IS THE CLAIM THAT ACTUALLY MATTERS.
+   *
+   * ⚠⚠ THE OLD TEST COMPARED `attempt: 1` WITH `attempt: 2` AND STOPPED THERE.
+   * That proves the composer VARIES with its input; it says nothing about
+   * whether the input ever varies in production — and it did not. The route's
+   * confirm exit commits `pending_actions: []` and carries the recorded ask
+   * forward VERBATIM, so the stored `attempt` never moved: every re-ask
+   * composed at 1, the attempt-2 copy was UNREACHABLE, and two identical
+   * unreadable replies produced BYTE-IDENTICAL re-asks. The counter was dark
+   * inside the fix that introduced it.
+   *
+   * So this walks the count the way the route now advances it — the ask's own
+   * number PLUS ONE, because emitting the re-ask IS the next attempt — and
+   * asserts consecutive turns differ on IDENTICAL user input, which is the
+   * only condition under which the repetition defect can reproduce.
+   */
+  it('consecutive turns differ on identical input, walking the attempt as the route does', () => {
     const args = {
       ...cell, heardText: 'a third', suggestedModelUnitText: '0.33',
       reason: 'imprecise_quantity' as const,
     };
-    expect(reask({ ...args, attempt: 2 })).not.toBe(reask({ ...args, attempt: 1 }));
+    // The route composes at the RECORDED ask's count PLUS ONE, so the first
+    // re-ask a user can receive is attempt 2, the second is 3, and so on.
+    const turn = (n: number) => reask({ ...args, attempt: n + 1 });
+
+    // ⭐ THE DEFECT, CLOSED: turn 1's re-ask is not the ask that preceded it,
+    // and turn 2's is not turn 1's. Both were byte-identical before this fix.
+    expect(turn(1)).not.toBe(OPENING_ASK);
+    expect(turn(2)).not.toBe(OPENING_ASK);
+    expect(turn(2)).not.toBe(turn(1));
+
+    // ⚠ AND THE HONEST LIMIT, STATED RATHER THAN IMPLIED: from turn 2 the copy
+    // has changed strategy and stops changing. A user who sends the SAME
+    // unreadable reply a third time gets turn 2's sentence again. That is
+    // deliberate — the information is in the two transitions, and inventing a
+    // fourth phrasing would be noise — but it IS a plateau, so it is pinned
+    // here rather than left for the next reader to discover as a surprise.
+    expect(turn(3)).toBe(turn(2));
+  });
+
+  /**
+   * ⭐ AND THE HONEST GAP, PINNED BY NAME RATHER THAN LEFT TO BE DISCOVERED.
+   *
+   * The escalation has THREE bands — first ask, "still not certain", and a
+   * strategy change that stops explaining the scale and reduces the exchange to
+   * a binary. From band three it PLATEAUS: attempts 4, 5 and 6 repeat band
+   * three for an identical reply. That is a decision, not an oversight —
+   * endless novelty is noise, and the information is in the first two
+   * transitions. This test REDs if the plateau moves, in either direction.
+   */
+  it('escalates over exactly three bands and then deliberately plateaus', () => {
+    const args = {
+      ...cell, heardText: 'a third', suggestedModelUnitText: '0.33',
+      reason: 'imprecise_quantity' as const,
+    };
+    const at = (attempt: number) => reask({ ...args, attempt });
+    expect(new Set([at(1), at(2), at(3)]).size).toBe(3);
+    // KNOWN AND ACCEPTED: band three is terminal.
+    expect(at(4)).toBe(at(3));
+    expect(at(9)).toBe(at(3));
   });
 
   // ── THE EGRESS RULE: percentages, never a raw internal decimal ───────────
