@@ -8379,7 +8379,7 @@ export async function runTurnExecutor(
         // kills with its imperative-re-run twin.
         //
         // ⚠ AND THE SANCTIONED PROVISIONAL ANALYSIS IS NOT REACHABLE FROM
-        // HERE AT ALL. `scheduleAutoRunAfterFreshDraft` dispatches through
+        // HERE AT ALL. The post-draft auto-run (REMOVED 2026-09-01) dispatched through
         // `dispatchChipClickRunAnalysis`, which builds its own turn context
         // and never calls `routeWithToolUse` or `runTurnExecutor`; the
         // user-clicked chip is claimed by route-v2 dispatch branch (b), ahead
@@ -9197,7 +9197,58 @@ export async function runTurnExecutor(
       // would silently mutate the factor's own value: the wrong entity, and
       // unrecoverable from the user's point of view. Both the LLM and
       // deterministic producers converge on this execute block BEFORE any
-      // handler runs, so one guard here covers every dispatch path.
+      // handler runs.
+      //
+      // ⚠⚠ THE SENTENCE THAT USED TO END THAT LINE — *"so one guard here covers
+      // every dispatch path"* — WAS FALSE, AND IT WAS LOAD-BEARING. Corrected in
+      // place rather than deleted, because the estate's record of how a false
+      // guarantee got here is what stops it coming back (trap 14).
+      //
+      // This is a PROPOSAL-LANE chokepoint, not a GRAPH-WRITE chokepoint. The
+      // block is nested under `intent_class === 'execute'`, and these production
+      // writers of a factor's own baseline are NOT EXAMINED by it — three
+      // because they never reach it, and one because it runs past it:
+      //
+      //   · the route-level `edit_graph` lane (`route-v2.ts:6213` →
+      //     `src/orchestrator/tools/edit-graph.ts:3019`) — `handleEditGraph`
+      //     owns its own applier and its own commit;
+      //   · the `factor_value_edit` system event (`factor-value-edit.ts:528`);
+      //   · the GM held-consent apply (~:3603);
+      //   · ⚠ a compound chain's parts 2..N REACH THIS BLOCK AND EXECUTE INSIDE
+      //     IT — see the correction below.
+      //
+      // ⚠ CORRECTED #1292 r4, TWICE, AND BOTH ARE RECORDED RATHER THAN QUIETLY
+      // PATCHED (trap 14 — a comfortable replacement sentence is the one nobody
+      // re-checks).
+      //
+      //   (a) THE PATH. The first bullet read `handlers/edit-graph.ts:3019`,
+      //       WHICH DOES NOT EXIST. From inside this v5 tree that relative path
+      //       resolves against `orchestrator-v5/handlers/`, where
+      //       `edit-graph-dispatch.ts:3019` is unrelated proposal-continuation
+      //       telemetry. A reader following it lands on a differently-named
+      //       twin and reads the wrong code — which is how twins start.
+      //
+      //   (b) THE COMPOUND CLAIM. Parts 2..N were listed as "never reaching"
+      //       this block. FALSE: the `execute` block opened at ~:8763 does not
+      //       close until ~:11464 (derived by brace depth, not read off the
+      //       indentation), and the chain runs at ~:10206 — well past this
+      //       guard, inside the same block. What IS true is that they are never
+      //       EXAMINED: this site reads exactly one entity, `action.entity.id`
+      //       off the routed proposal, and parts 2..N (`approved.slice(1)`,
+      //       ~:6428) carry entity ids nothing here ever looks at.
+      //       **"Out of scope" and "downstream, unexamined" are different
+      //       claims about a guard, and only the second one is this.** The
+      //       first invites a reader to stop looking.
+      //
+      // And `add_constraint` PASSES this block — it is short-circuited on
+      // handler id — while writing `{value, baseline}` at
+      // `add-constraint.ts:942`.
+      //
+      // ⭐ WHAT IS STILL TRUE, AND IT IS THE ONLY THING THAT MAY BE RELIED ON:
+      // for the `set_factor_value` HANDLER ID, every producer that reaches THIS
+      // block — LLM and deterministic alike — is covered here, so the guard is
+      // route-agnostic WITHIN that lane. Any argument that needs more than that
+      // must name the writer it is claiming about and derive its path.
       // `set_factor_value` stays a legitimate handler for genuine factor
       // edits — we refuse ONLY this case, re-using the existing recoverable-
       // validator path so the turn composes a clarify and commits a

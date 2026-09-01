@@ -227,6 +227,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Prompt Management events (v2.0)
         PromptStoreError: "prompt.store_error",
+        // Minted for the prompt-store JSONB decode degradation (PR #1288). A
+        // list column that cannot be established as a list is SUBSTITUTED with
+        // `[]`, and this event is the only thing distinguishing that from a
+        // genuinely empty column — "failure to know is not knowledge that
+        // nothing exists".
+        PromptStoreJsonColumnDegraded: "prompt.store.jsonb_column_degraded",
         PromptLoaderError: "prompt.loader.error",
         PromptLoadedFromStore: "prompt.loader.store",
         PromptLoadedFromDefault: "prompt.loader.default",
@@ -534,7 +540,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5DecisionReviewInvoked: "v5.decision_review.invoked",
         V5DecisionReviewSkipped: "v5.decision_review.skipped",
         // R2 (2026-08-16) — post-draft auto-run of a provisional analysis.
-        V5AutoRunAfterDraft: "v5.run_analysis.auto_run_after_draft",
         // F6 — the defaulted-value egress invariant fired on an analysis-bearing
         // answer over a run the engine defaulted. Log-only (see debugOnlyEvents).
         V5DefaultedValueEgressApplied: "v5.egress.defaulted_value_applied",
@@ -779,7 +784,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // wave1-mint (2026-08-09): added v5.collab and cee.context_integrity
       // namespace tokens for the four-lane wave's step-zero registry mint.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|context_integrity|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|claim_safety|collab|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|typed_coaching_intent_route|typed_coaching_intent_unrouted|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|selection|session|structural_edit_tool|summary)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|context_integrity|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$|jsonb_column_degraded$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|claim_safety|collab|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|typed_coaching_intent_route|typed_coaching_intent_unrouted|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|selection|session|structural_edit_tool|summary)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1146,6 +1151,16 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "prompt.store.cache.warmed": [TelemetryEvents.PromptStoreCacheWarmed],
         "prompt.store.background_refresh": [TelemetryEvents.PromptStoreBackgroundRefresh],
 
+        // Prompt store JSONB decode degradation (PR #1288). Carries BOTH an
+        // ERROR-level log (emit() writes via log.info, which cannot trip
+        // level-based alerting — the incident's five level-30 events per probe
+        // paged nobody) AND a Datadog counter
+        // `prompt.store.jsonb_column_degraded_total`, split by `column` and
+        // `reason`. The counter is not decoration: the substituted `[]` is
+        // byte-identical to a genuinely empty column at every consumer, so this
+        // metric is the only thing that can ever say the degradation happened.
+        "prompt.store.jsonb_column_degraded": [TelemetryEvents.PromptStoreJsonColumnDegraded],
+
         // Prompt Test Sandbox events (v2.1)
         "prompt.test.executed": [TelemetryEvents.PromptTestExecuted],
         "prompt.test.validation_passed": [TelemetryEvents.PromptTestValidationPassed],
@@ -1488,7 +1503,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // R2 (2026-08-16) — post-draft auto-run outcome. Diagnostic-only:
         // structured logs are the operational signal; no Datadog metric
         // mapping until dashboards pick the event up.
-        TelemetryEvents.V5AutoRunAfterDraft,
         // Lane CEE-D (edit-loop reliability) — diagnostic-only parse-shape
         // recovery + relative-delta resolution events. Structured logs are
         // the operational signal; no Datadog metric mapping yet.
@@ -1940,6 +1954,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
 
         // Prompt Management events (v2.0)
         "prompt.store_error",
+        "prompt.store.jsonb_column_degraded",
         "prompt.loader.error",
         "prompt.loader.store",
         "prompt.loader.default",
@@ -2162,7 +2177,6 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.decision_review.skipped",
         "v5.decision_review_degraded",
         // R2 (2026-08-16) — post-draft auto-run of a provisional analysis.
-        "v5.run_analysis.auto_run_after_draft",
         "v5.deterministic_value_update",
         "v5.edit_graph.graph_state_present",
         "v5.edit_graph.graph_state_reloaded",

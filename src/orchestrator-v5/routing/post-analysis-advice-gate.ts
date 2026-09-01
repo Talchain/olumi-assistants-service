@@ -345,7 +345,15 @@ export type AdviceGateUnmatchedReason =
   | 'mutation_signal'
   | 'no_advice_signal'
   | 'empty_message'
-  | 'data_unavailable_for_class';
+  | 'data_unavailable_for_class'
+  /**
+   * The message asks for help THINKING about the user's problem, not for a
+   * reading of the analysis. The gate must never claim these: a matched turn
+   * commits with `llm_calls_used: 0` (`turn-executor.ts:8008`), so claiming a
+   * reasoning request answers it with a status report on the model and no
+   * model call at all. See `isReasoningRequest`.
+   */
+  | 'reasoning_request';
 
 /**
  * Action chip emitted alongside a matched advice-gate response.
@@ -1248,6 +1256,90 @@ function evaluateAvailability(
   return missing;
 }
 
+/**
+ * Words that make a request a request about the ANALYSIS OUTPUT.
+ *
+ * Deliberately a CLOSED set drawn from this file's OWN existing patterns, not
+ * from the author's model of English (trap 22 — a corpus from the author's
+ * head cannot see the class the author did not imagine). Two groups:
+ *
+ *   1. The analysis NOUNS the sibling `meaning` / `explain_results_free_text`
+ *      patterns already enumerate (`:591`, `:563`).
+ *   2. The leader-POSITION vocabulary lifted verbatim from the
+ *      `explain_results_free_text` pattern at `:584`. "Why is X ahead" carries
+ *      no analysis noun but is unambiguously about the analysis, and without
+ *      this group the guard below would steal it.
+ *
+ * ⚠ HAND-MAINTAINED MIRROR (trap 12). It cannot be derived from
+ * `CLASS_PATTERNS` — those are regexes, and a regex-over-regexes extraction
+ * would be a second, drifting derivation. The completeness check is therefore
+ * a CORPUS, not a derivation: `advice-gate-reasoning-request.test.ts` drives
+ * every claimed-side twin through the real gate and REDs if any legitimate
+ * analysis question starts being declined.
+ */
+const ANALYSIS_REFERENT =
+  /\b(?:results?|analysis|analyses|outcomes?|findings?|numbers?|scores?|charts?|rankings?|probabilit(?:y|ies)|percentages?|margins?|simulations?|forecasts?|projections?|odds|ahead|leading|in\s+front|on\s+top|the\s+leader|the\s+favourite|the\s+favorite)\b/i;
+
+/**
+ * Openers that introduce a request for help reasoning. Every one of these is
+ * already matched by a `meaning`-class pattern above, EXCEPT the `us` variants
+ * — which the gate does not match today, so including them changes no
+ * outcome, only the honesty of the telemetry reason.
+ */
+const REASONING_HELP_OPENERS: readonly RegExp[] = [
+  /\bhelp\s+(?:me|us)\s+(?:interpret|understand|make\s+sense\s+of|read)\b/i,
+  /\bhow\s+(?:should|do|can)\s+(?:i|we)\s+(?:read|interpret|understand|think\s+about)\b/i,
+  /\bwalk\s+(?:me|us)\s+through\b/i,
+];
+
+/**
+ * A wh-word GOVERNED BY the opener — i.e. the thing the user wants understood
+ * is a CLAUSE ABOUT THE WORLD ("what's causing this", "why retention is
+ * slipping"), not a thing on screen.
+ *
+ * ⚠ Anchored with `^` and tested against the text AFTER the opener, never
+ * against the whole message. Scanning the whole message reads the opener's OWN
+ * interrogative as its object: "How should I read this" would match on its
+ * leading "How" and be declined, silently converting the ambiguous
+ * bare-demonstrative case (b) into case (c). Caught by the KNOWN-NOT-CLAIMED
+ * block, which is exactly what it is for.
+ */
+const WH_OBJECT = /^\W*(?:\w+\W+){0,2}?(?:what|why|whether|how|where|when|who|which)\b/i;
+
+/**
+ * True iff the message asks for help thinking about the user's PROBLEM.
+ *
+ * THREE cases, not two — the one-predicate-two-harms shape CEE #888 paid four
+ * oscillating rounds for (trap 22b/22f):
+ *
+ *   (a) an analysis referent is present  → NOT a reasoning request. The gate
+ *       keeps it and answers with grounded copy.
+ *   (b) a BARE DEMONSTRATIVE object ("help me understand this") → AMBIGUOUS,
+ *       and deliberately NOT claimed as a reasoning request. On a
+ *       post-analysis turn it is dominantly about the analysis; declining
+ *       would be a guess, and guessing here degrades every legitimate reading
+ *       request. Pinned as a KNOWN-NOT-CLAIMED set in the spec so the gap is
+ *       visible rather than silent.
+ *   (c) opener + wh-object + no analysis referent → a reasoning request.
+ *
+ * The two parameters are separate on purpose: a false positive here DROPS a
+ * grounded answer (a degradation — the turn still reaches the model), while a
+ * false negative serves a status report to someone who asked to think (the
+ * defect). They are different harms and cannot share one window.
+ */
+function isReasoningRequest(message: string): boolean {
+  if (ANALYSIS_REFERENT.test(message)) return false;
+  for (const opener of REASONING_HELP_OPENERS) {
+    const hit = opener.exec(message);
+    if (hit === null) continue;
+    // The object is what FOLLOWS the opener. Testing the remainder — never
+    // the whole message — is what keeps the opener's own "how"/"what" from
+    // being read as its own object.
+    if (WH_OBJECT.test(message.slice(hit.index + hit[0].length))) return true;
+  }
+  return false;
+}
+
 export function tryPostAnalysisAdviceGate(
   input: AdviceGateInput,
 ): AdviceGateResult {
@@ -1305,6 +1397,24 @@ export function tryPostAnalysisAdviceGate(
       }
       break;
     }
+  }
+
+  // Reasoning-request precedence. Placed HERE deliberately:
+  //  - AFTER `no_analysis` / `not_fresh` / `empty_message`, which are more
+  //    informative reasons and stay primary;
+  //  - AFTER mutation precedence, which is the gate's strongest existing rule —
+  //    a concrete edit must still reach edit_graph dispatch even when it is
+  //    wrapped in "help me understand …";
+  //  - BEFORE the `no_advice_signal` return, so a reasoning request the gate
+  //    would otherwise have claimed (`meaning`) AND one it would have dropped
+  //    silently both report the same honest reason.
+  //
+  // The turn falls through to the LLM router with the turn's context pack
+  // attached — which is the whole point: the user asked to think, so the model
+  // answers, grounded in the model state, instead of the gate reciting the
+  // standings with `llm_calls_used: 0`.
+  if (isReasoningRequest(message)) {
+    return { matched: false, reason: 'reasoning_request' };
   }
 
   if (matchedClass === null) {

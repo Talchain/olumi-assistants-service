@@ -547,6 +547,24 @@ export const TelemetryEvents = {
 
   // Prompt Management events (v2.0)
   PromptStoreError: "prompt.store_error",
+  /**
+   * A prompt-store JSONB list column could not be established as a list, so the
+   * store SUBSTITUTED an empty list rather than failing the whole read.
+   *
+   * WHY IT EXISTS. The tolerant decoder that replaced three
+   * `JSON.parse(x || '[]')` sites correctly stopped one poisoned row taking
+   * down every version of a task — but it originally returned `[]` and emitted
+   * NOTHING, which converts a crash into a silent degradation: exactly the
+   * failure mode of the ~2.5h incident it was written to end (`draft_graph`
+   * served the bundled default while `/healthz` reported `prompts_ready: true`).
+   *
+   * FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS. The returned `[]` is
+   * indistinguishable from a genuinely empty column, so this event is the ONLY
+   * thing that tells the two apart. It carries `outcome: 'unavailable'` and, by
+   * construction, no survivor/recovery vocabulary — there is no per-item
+   * salvage on this path, and an event that claimed some would be lying.
+   */
+  PromptStoreJsonColumnDegraded: "prompt.store.jsonb_column_degraded",
   PromptLoaderError: "prompt.loader.error",
   PromptLoadedFromStore: "prompt.loader.store",
   PromptLoadedFromDefault: "prompt.loader.default",
@@ -1505,12 +1523,6 @@ export const TelemetryEvents = {
   V5DecisionReviewInvoked: "v5.decision_review.invoked",
   V5DecisionReviewSkipped: "v5.decision_review.skipped",
   V5DecisionReviewFailed: "v5.decision_review.failed",
-
-  // R2 (2026-08-16) — post-draft auto-run of a provisional analysis
-  // (auto-run-after-draft.ts). ONE event, discriminated by `outcome`:
-  // 'skipped' (+ reason: not_admissible | already_analysed), 'dispatched'
-  // (+ dispatch_outcome, commit_performed, run_turn_id), or 'failed'.
-  V5AutoRunAfterDraft: "v5.run_analysis.auto_run_after_draft",
 
   // Phase 3A content-thinness diagnostic (F1, 2026-05-18). Fires once the
   // decision_review LLM call returned a non-null parsed output AND the
@@ -3781,6 +3793,28 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("prompt.store.error", 1, {
             operation: String((eventData.operation as string) || "unknown"),
             error: String((eventData.error as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreJsonColumnDegraded: {
+          // A prompt-store JSONB list column could not be established as a list,
+          // so an empty list was SUBSTITUTED. Nothing downstream can tell that
+          // apart from a genuinely empty column — the substituted `[]` is
+          // byte-identical to a real one at every consumer — so this counter is
+          // the only thing that can ever say it happened. Ops can alert on
+          // `prompt.store.jsonb_column_degraded_total > 0` over a short window.
+          //
+          // Tagged by `column` and `reason` because they are different faults
+          // with the same consequence: "the column is not a list" (data drift
+          // in the row) versus "the string is not JSON" (a bad write), and the
+          // remedies differ. Same reasoning as `session.read_degraded_total`.
+          //
+          // Deliberately NOT tagged with `prompt_id`/`version`: those are
+          // unbounded and belong in the ERROR log line, which carries them.
+          datadogClient.increment("prompt.store.jsonb_column_degraded_total", 1, {
+            column: String((eventData.column as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
           });
           break;
         }
