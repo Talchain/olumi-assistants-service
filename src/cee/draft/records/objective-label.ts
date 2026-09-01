@@ -6,7 +6,8 @@
  * A goal node reading
  *   `Compound Goal: we'd like to spend less + increase productivity, while
  *    maintaining code quality`
- * and, beside it, a decision node reading `Decision`.
+ * and, beside it, a decision node reading `Decision` (today's placeholder is
+ * `Question` — see {@link UNAUTHORED_DECISION_LABEL}; the capture is historic).
  *
  * ── THE PRODUCER, READ RATHER THAN INFERRED (P7) ───────────────────────────
  * `instruction.ts:132-189` is the producer of every stated record, and it
@@ -389,7 +390,8 @@ const MINOR_WORDS: ReadonlySet<string> = new Set([
 
 /**
  * Nouns that name the decision APPARATUS rather than its subject. A label built
- * on one of these is the same defect as labelling the decision node "Decision":
+ * on one of these is the same defect as labelling the decision node with its
+ * own kind:
  * it tells the reader the node's category and nothing about their situation.
  */
 const APPARATUS_NOUNS: ReadonlySet<string> = new Set([
@@ -1007,6 +1009,33 @@ function decisionLabelFromCandidate(
 }
 
 /**
+ * ⭐⭐ THE DECISION NODE'S UNAUTHORED PLACEHOLDER — one constant, because it is
+ * a CROSS-SERVICE VOCABULARY WORD, not a local string.
+ *
+ * This is the label the decision node carries when nothing in the brief yields
+ * a faithful decision statement. It is USER-FACING DISPLAY COPY: it is what a
+ * person reads on the node itself. It must therefore match the word the UI
+ * shows for that node's KIND — `DECISION_NODE_LABEL` in
+ * `DecisionGuideAI:src/canvas/domain/vocabulary.ts` — or a freshly-drafted
+ * graph contradicts its own legend on screen.
+ *
+ * ⚠ IT IS NOT A WIRE VALUE. The node's kind is the lowercase `"decision"`
+ * enum member, which is the contract shared with the UI, PLoT and every
+ * persisted graph, and which this constant does not touch. Renaming this
+ * string changes what a user reads; renaming the kind would be a `NodeKind`
+ * contract train across four repos.
+ *
+ * ⚠ IT IS ALSO A SENTINEL, AND THAT IS WHY IT IS EXPORTED. The post-draft
+ * narrative reads it to decide whether the product may claim it built a
+ * decision model or must hedge (`post-draft-narrative.ts`,
+ * `hasProvisionalDecision`). That consumer used to hold a hand-copied literal
+ * with a test to keep the copy honest — the hand-maintained mirror this estate
+ * keeps paying for (trap 12). It now imports this constant, so there is one
+ * string and no copy to drift.
+ */
+export const UNAUTHORED_DECISION_LABEL = "Question";
+
+/**
  * ⭐ THE DECISION NODE'S LABEL — the user's own statement of what they are
  * deciding, never a join of the option labels.
  *
@@ -1018,7 +1047,8 @@ function decisionLabelFromCandidate(
  *
  * Stated goal quotes are searched FIRST because the model already judged those
  * sentences decision-bearing; the brief is the fallback. When neither yields a
- * short, faithful, subject-naming statement the literal `Decision` is kept and
+ * short, faithful, subject-naming statement {@link UNAUTHORED_DECISION_LABEL}
+ * is kept and
  * `authored` is false — an honest generic in preference to a confident wrong
  * one, which is the same rule the quality bar applies to numbers.
  */
@@ -1042,5 +1072,9 @@ export function deriveDecisionLabel(input: {
     const label = decisionLabelFromCandidate(sentence);
     if (label !== undefined) return { label, authored: true };
   }
-  return { label: "Decision", authored: false, reason: "no_derivable_decision_statement" };
+  return {
+    label: UNAUTHORED_DECISION_LABEL,
+    authored: false,
+    reason: "no_derivable_decision_statement",
+  };
 }

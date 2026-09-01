@@ -290,6 +290,13 @@ export interface RecordProvenance {
    * — `deriveGoalObjectiveLabel` returns the two together from one computation.
    */
   readonly label_authored?: boolean;
+  /**
+   * TRUE when the label is the generic mint rather than a derived or
+   * user-chosen name — see `NodeV3.label_placeholder` for the two questions
+   * this keeps apart. DERIVED from the producer's own refusal
+   * (`authored === false`), never from a string comparison.
+   */
+  readonly label_placeholder?: boolean;
 }
 
 /** A reference the model emitted that the projector could not resolve. */
@@ -3201,7 +3208,11 @@ function projectOnce(
     // they do not have.
     const decisionProv: RecordProvenance = {
       ...structuralProv,
-      ...(authoredDecision.authored ? { label_authored: true } : {}),
+      ...(authoredDecision.authored
+        ? { label_authored: true }
+        : // The producer REFUSED, so this label is our generic mint. Marked from
+          // the refusal itself — never by comparing the label to a known word.
+          { label_placeholder: true }),
     };
     provenance[decisionId] = decisionProv;
     // Unshifted so the decision precedes its options in emission order.
