@@ -468,11 +468,22 @@ export function completionRegressesProtectedContent(
         }
       }
     }
-    const beforeMerged = before.provenance[node.id]?.merged_refinements ?? [];
-    if (beforeMerged.length > 0) {
-      const afterMerged = new Set(after.provenance[node.id]?.merged_refinements ?? []);
+    // ⭐ BOTH ABSORPTION RECEIPTS ARE PROTECTED, NOT JUST THE OPTION-SIDE ONE.
+    // `merged_restatements` is the cause-side twin of `merged_refinements`: same
+    // append-only discipline, same direction (MODEL content into a USER-stated
+    // node), same accounting in `completionRegressesProtectedContent` above. A
+    // guard that watched only one of them would let a completion pass silently
+    // drop a label the other had legitimately absorbed — an asymmetric guard is
+    // a guard watching one door.
+    for (const [field, tag] of [
+      ["merged_refinements", "refinement_reclassified"],
+      ["merged_restatements", "restatement_reclassified"],
+    ] as const) {
+      const beforeMerged = before.provenance[node.id]?.[field] ?? [];
+      if (beforeMerged.length === 0) continue;
+      const afterMerged = new Set(after.provenance[node.id]?.[field] ?? []);
       for (const label of beforeMerged) {
-        if (!afterMerged.has(label)) violations.push(`refinement_reclassified:${node.id}:${label}`);
+        if (!afterMerged.has(label)) violations.push(`${tag}:${node.id}:${label}`);
       }
     }
   }

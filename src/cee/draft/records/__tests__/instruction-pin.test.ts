@@ -392,9 +392,16 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * v11 read as working: 6 of 9 draws on the diagnostic briefs stopped filing the
  * competing explanations as options. **All six were clean only by emitting
  * `stated_items[].kind = "claim"` — a value that does not exist.**
- * `DRAFT_RECORD_STATED_KINDS` is `["goal","option","constraint","figure"]`, and
- * `grammar.ts:453` puts exactly that enum in the structured-outputs schema the
- * deployed draft sends (`structured_outputs_used: true` in the capture). The
+ * `DRAFT_RECORD_STATED_KINDS` was `["goal","option","constraint","figure"]` AT
+ * THE TIME OF THAT MEASUREMENT — it carries a fifth member, `cause`, since this
+ * PR, and the past tense is load-bearing rather than tidy. This paragraph is a
+ * RECORD of why v11 failed on a dated build; restating the enum in the present
+ * tense would make it a hand-maintained mirror of a list that has now moved
+ * (trap 12), and updating the sentence to today's enum would falsify the
+ * measurement it explains. Read the enum at `grammar.ts` for what it is now;
+ * read this for what it was when v11 was measured. `grammar.ts` puts exactly
+ * that enum in the structured-outputs schema the deployed draft sends
+ * (`structured_outputs_used: true` in the capture). The
  * escape route is CLOSED ON THE WIRE, so those six draws could not happen in
  * production. Of the 3 draws that stayed inside the legal enum, 3 of 3 filed the
  * causes as options, and 0 of 27 cause-instances reached the intended

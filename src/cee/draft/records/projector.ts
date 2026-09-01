@@ -245,8 +245,29 @@ export interface RecordProvenance {
    * Labels of `factor` claims merged into this STATED cause. The cause-side twin
    * of `merged_refinements`, kept apart from it for the same reason the
    * disclosure reasons are: a restatement of an explanation is not a refinement
-   * of an alternative. APPEND-ONLY and additive, and read by `completion.ts`'s
-   * content accounting alongside its twin.
+   * of an alternative. APPEND-ONLY and additive.
+   *
+   * ⭐ THE COMPLETE READER MANIFEST for the twin field `merged_refinements`,
+   * swept with `rg -a` across the whole repo (contrast control:
+   * `undeveloped_duplicates`, its same-family sibling, present in 3 files). FOUR
+   * sites in `src/`, and each is named with its verdict rather than left to be
+   * inferred from a count — an absence claim needs the manifest, not a number:
+   *
+   *   · `completion.ts` content accounting  — TWIN ADDED. Without it a
+   *     legitimately-absorbed label reads as lost content and a FALSE completion
+   *     gap is manufactured.
+   *   · `completion.ts` reclassification guard — TWIN ADDED. It watched only the
+   *     option-side receipt, so a completion pass could silently drop a label
+   *     the cause-side merge had absorbed. An asymmetric guard is a guard
+   *     watching one door.
+   *   · `projector.ts` the write site — this file.
+   *   · `option-framing.ts` the recovery receipt — **DELIBERATELY NOT TWINNED,
+   *     and listed here so the absence is a decision rather than an omission.**
+   *     `recoverableRefinement` runs only on a node carrying a
+   *     `decision_framing_not_an_option` disclosure, which is raised on OPTION
+   *     nodes. A merged cause is a FACTOR node and can never reach it, so a
+   *     cause-side branch there would be unreachable code pretending to be
+   *     coverage.
    */
   readonly merged_restatements?: readonly string[];
   /**
@@ -1426,6 +1447,44 @@ function causalTargetKey(claim: DraftInferenceClaim): string | null {
  * A refinement is not the same alternative when it assigns a different value
  * to a factor the stated option already assigns. Compare the raw record values,
  * before either route aliases to a minted option id.
+ *
+ * ⚠⚠ KNOWN GAP, MEASURED AND DELIBERATELY LEFT OPEN — READ BEFORE "FIXING" IT.
+ *
+ * This is the right question for an `option_refinement`, where BOTH sides are
+ * options and both carry option→factor magnitudes. **On the cause side it is
+ * STRUCTURALLY INERT**: a `factor` carries no `sets_to` on its outgoing links —
+ * the instruction asks for one only FROM an option — so both magnitude maps come
+ * back empty, no conflict can ever be found, and every single `factor` citing a
+ * stated `cause` merges. A factor that cites the cause as EVIDENCE rather than
+ * restating it is therefore absorbed and its own identity deleted. `factor` is
+ * the general-purpose claim kind, so this net is far wider than
+ * `option_refinement`'s.
+ *
+ * ── WHY NO GUARD IS SHIPPED HERE, AND THE MEASUREMENT THAT SETTLED IT ───────
+ * The obvious fix — require POSITIVE evidence of restatement, i.e. the cause's
+ * own outgoing links all land on that factor — was implemented and **refuted by
+ * this repo's own suite**: in the mixed-brief case (`cause-stated-kind.test.ts`
+ * A2) a stated cause draws NO outgoing link at all. The factor expresses the
+ * cause and the OPTION acts on that factor, which is the correct modelling shape
+ * and the one the model actually produces. The guard would have blocked the
+ * merge the feature exists to perform.
+ *
+ * The deeper reason is the one `misfiled-explanation.test.ts` measures over
+ * three rounds: **a restatement and a distinct claim are isomorphic in the
+ * record set.** Nothing here can tell them apart, and a guard that guesses would
+ * trade a silent over-merge for a silent under-merge — the exact oscillation
+ * this estate has paid for. A wrong guard is worse than a recorded gap.
+ *
+ * ── WHAT BOUNDS THE HARM TODAY ──────────────────────────────────────────────
+ * `cause` spans occur ZERO times across the complete corpus of raw record sets
+ * in this repo (one deployed-wire capture, six fixtures, 18 stated options;
+ * pinned with a contrast control by `misfiled-explanation.test.ts` C1). The gap
+ * is unreachable until a producer emits `cause` at all — and closing it is a
+ * precondition for that producer landing, not a follow-up to it.
+ *
+ * ⚠ Note the one shape that is already safe: two factors citing the same cause
+ * make `claimIndices.length === 2`, and NEITHER merges. The gap is exactly the
+ * single-candidate case.
  */
 function claimConflictsWithStatedParent(
   claims: readonly DraftInferenceClaim[],
