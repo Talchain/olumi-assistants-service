@@ -70,6 +70,7 @@ export const TASK_TO_CONFIG_KEY: Record<string, keyof typeof config.cee.models> 
   'orchestrator': 'orchestrator',
   'edit_graph': 'edit_graph',
   'm2_graph_review': 'm2_review', // V6 dual-draft M2 review (CEE_MODEL_M2_REVIEW)
+  'draft_quality_review': 'draft_quality', // Draft-quality judge (CEE_MODEL_DRAFT_QUALITY)
 };
 
 const CONFIG_KEY_TO_MODEL_ENV_KEY: Partial<
@@ -85,6 +86,7 @@ const CONFIG_KEY_TO_MODEL_ENV_KEY: Partial<
   orchestrator: 'CEE_MODEL_ORCHESTRATOR',
   edit_graph: 'CEE_MODEL_EDIT_GRAPH',
   m2_review: 'CEE_MODEL_M2_REVIEW',
+  draft_quality: 'CEE_MODEL_DRAFT_QUALITY',
 };
 
 function getTaskModelSourceKey(

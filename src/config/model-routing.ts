@@ -161,6 +161,12 @@ export type CeeTask =
   // `getAdapter('validate')` has zero callers (scope: rg over src/), so that alias
   // stays declared env-only rather than being given a default it can never use.
   | "validate_graph"
+  // Draft-quality semantic-coverage judge. CROSS-PROVIDER ON PURPOSE, for the
+  // same reason as validate_graph directly above: a judge drawn from the
+  // drafter's own family is a weaker independent check, and leaving its
+  // identity to fall through to the global provider makes independence an
+  // accident of deployment env. Overridable by CEE_MODEL_DRAFT_QUALITY.
+  | "draft_quality_review"
   // V6 dual-draft M2 graph review. Model must be EXPLICITLY set via
   // CEE_MODEL_M2_REVIEW at activation (the dual-draft model-resolution gate
   // stays inert otherwise); this union entry exists so startup/admin model
@@ -276,6 +282,14 @@ export const TASK_MODEL_DEFAULTS: Record<CeeTask, string> = {
   // Provider is derived from this winning model, so this remains cross-provider
   // from the Anthropic drafter even if the global provider changes.
   validate_graph: "o4-mini",
+  // Draft-quality semantic-coverage judge. CROSS-PROVIDER from the Anthropic
+  // drafter for independence (the validate_graph precedent, ROADMAP 2.146), but
+  // deliberately a FAST NON-REASONING model rather than o4-mini: validate_graph
+  // takes 10-28s and the pipeline hides that behind the coaching pass, whereas
+  // this call cannot be hidden — the redraw decision waits on it. Registered at
+  // config/models.ts, provider openai, so the independence survives a change to
+  // the global provider. Overridable by CEE_MODEL_DRAFT_QUALITY.
+  draft_quality_review: "gpt-4.1-2025-04-14",
   // V6 dual-draft M2 review — display default only (D3 recommendation).
   // NEVER governs a live call: the dual-draft gate requires the explicit
   // CEE_MODEL_M2_REVIEW env override to match the resolved model.
@@ -462,6 +476,14 @@ export const AI_TASK_LIFECYCLE: Readonly<
     gate: 'CEE_V6_DUAL_DRAFT_ENABLED + provisioned prompt + explicit CEE_MODEL_M2_REVIEW',
     note: 'Code path exists but remains inert unless every activation gate passes.',
   },
+  draft_quality_review: {
+    executable: true,
+    state: 'live_router',
+    note:
+      'The draft-quality semantic-coverage judge. Called only for drafts the ' +
+      'deterministic pre-filter nominates, and every failure arm ships the draft ' +
+      'unchanged (fail open), so it is executable-by-default without a gate.',
+  },
   extraction: {
     executable: true,
     state: 'dedicated_adapter',
@@ -495,7 +517,8 @@ export type RuntimeAiTaskId =
   | 'extraction'
   | 'rolling_summary'
   | 'decision_review_decompose'
-  | 'm2_graph_review';
+  | 'm2_graph_review'
+  | 'draft_quality_review';
 
 export interface RuntimeAiTaskAuthority {
   /** Static production code path; current availability lives in lifecycle. */
@@ -597,6 +620,19 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
     promptIdentity: 'runtime_source_version_hash',
     structuredContract: 'json_object response + Pass2Response parser/schema',
     fallback: 'checked-in validate_graph prompt and independent registered model',
+    promotionGate: 'none_no_real_pack',
+  },
+  draft_quality_review: {
+    hasExecutablePath: true,
+    modelAuthority: 'router_task_chain',
+    checkedInModel: TASK_MODEL_DEFAULTS.draft_quality_review,
+    promptAuthority: 'pms_or_checked_in_default',
+    promptTask: 'draft_quality_review',
+    promptIdentity: 'runtime_source_version_hash',
+    structuredContract:
+      'reject-only verdict JSON ({verdict, grounds[]}) parsed by a strict ' +
+      'enum-bound parser that fails OPEN on anything unrecognised',
+    fallback: 'checked-in draft_quality_review prompt; every failure ships the draft unjudged',
     promotionGate: 'none_no_real_pack',
   },
   orchestrator: {

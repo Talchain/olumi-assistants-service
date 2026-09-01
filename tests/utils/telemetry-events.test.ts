@@ -615,6 +615,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // grounding validator's structural rejection CODE and counts, never the
         // reason prose (which quotes node ids and labels); the entry event
         // carries which gate stopped the tool engaging.
+        // Draft-quality pass (src/cee/draft-quality/) — the continuous
+        // draft-quality metric. Emitted on EVERY assessed draw, including every
+        // fail-open arm; coded reasons, counts and model ids only.
+        CeeDraftQuality: "cee.draft_graph.quality",
+        CeeDraftQualityRedraw: "cee.draft_graph.quality_redraw",
         V5StructuralEditToolComposed: "v5.structural_edit_tool.composed",
         V5StructuralEditToolEntry: "v5.structural_edit_tool.entry",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites.
@@ -1717,6 +1722,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V6DualDraftM2Outcome,
         TelemetryEvents.V6DualDraftMergeReport,
         TelemetryEvents.V6DualDraftDegraded,
+        // Draft-quality pass — deliberately NOT Datadog-mapped yet. The
+        // metric these support (impoverished rate over the NOMINATED
+        // population, and `improved` on redraws) needs a dashboard before a
+        // counter is worth minting; until then they are structured logs.
+        TelemetryEvents.CeeDraftQuality,
+        TelemetryEvents.CeeDraftQualityRedraw,
         // CEE_REQUIRE_USER_JWT (flag default OFF, login 3.4 CEE-half, ships
         // dark) — user-JWT identity events are diagnostic-only structured
         // logs until the Paul-gated flip; no Datadog metric mapping yet.
@@ -2253,6 +2264,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v6.dual_draft.m2_outcome",
         "v6.dual_draft.merge_report",
         "v6.dual_draft.degraded",
+        // Draft-quality pass
+        "cee.draft_graph.quality",
+        "cee.draft_graph.quality_redraw",
         "v5.structural_edit_tool.composed",
         "v5.structural_edit_tool.entry",
         // Lane CEE-D (edit-loop reliability) — parse-shape recovery +

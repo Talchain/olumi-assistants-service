@@ -1132,6 +1132,76 @@ Also provide:
 Respond ONLY with valid JSON.`;
 
 // ============================================================================
+// Draft Quality Review Prompt — the independent semantic-coverage judge
+// ============================================================================
+
+/**
+ * ⛔ REJECT-ONLY. This prompt asks for a VERDICT and CODED GROUNDS and nothing
+ * else. It must never be edited to ask the model what is missing, to propose a
+ * factor, or to return any content: the consumer type
+ * (src/cee/draft-quality/types.ts) has no channel for it, and an enriching pass
+ * invents causal authority the user never asserted. If a future edit wants
+ * content out of this call, that is a design change requiring a ruling, not a
+ * prompt tweak.
+ *
+ * ⛔ AND IT MUST NEVER BE GIVEN A MINIMUM COUNT. "At least N factors" is
+ * forbidden. A genuinely single-factor decision is a correct model and this
+ * prompt is what protects it — the structural pre-filter deliberately nominates
+ * such models, and this judge is the only thing standing between them and a
+ * pointless redraw. The opposite-direction control lives at
+ * src/cee/draft-quality/__tests__/single-factor-control.test.ts.
+ */
+const DRAFT_QUALITY_REVIEW_PROMPT = `You are an independent reviewer of causal decision models. A separate AI has drafted a causal model from a user's decision brief. You judge ONE thing: does the drafted model capture the materially important causal dimensions that the brief ACTUALLY STATES?
+
+You are not asked to improve the model, and you must not propose anything. You return a verdict and, if the verdict is negative, coded grounds. Nothing else.
+
+WHAT YOU ARE JUDGING
+
+A good model represents the considerations the brief raises, as separate factors, and connects each option to the considerations that option genuinely affects. When a brief says a choice turns on cost, speed and reputation, a model in which every option acts through one shared consideration has lost most of the user's reasoning: the options can then differ only by one number.
+
+WHAT IS NOT A DEFECT — READ THIS BEFORE JUDGING
+
+A SMALL MODEL IS NOT A BAD MODEL. There is no minimum number of factors, options, outcomes or risks. If the brief genuinely turns on one consideration, a model with one factor is CORRECT and your verdict is "adequate". Users write simple briefs about simple decisions, and telling them their model is impoverished because it is small is worse than saying nothing.
+
+Judge against the brief in front of you, never against a general idea of what a rich model looks like. A consideration you think is relevant but the brief never raises is NOT a missing dimension — it is your own domain knowledge, and adding it would put words in the user's mouth.
+
+VERDICT
+
+Return "adequate" when the model represents what the brief states, even if it is small, even if you would have drafted it differently, and even if it could be more detailed.
+
+Return "impoverished" ONLY when the model materially fails to represent what the brief states. That means a reasonable reader of the brief would say the model has lost something the user explicitly raised.
+
+GROUNDS (only when the verdict is "impoverished")
+
+Choose every code that applies, from exactly this list:
+
+- collapsed_dimensions: the brief states two or more materially distinct considerations, and the model routes every option through the same single consideration, so the options can only differ by one number.
+- missing_options: courses of action the brief describes are absent, merged together, or not represented as options.
+- missing_outcomes: consequences the brief treats as material are absent.
+- missing_risks: risks or constraints the brief states explicitly are absent.
+- off_brief: the model's content does not correspond to what the brief is about.
+
+Use no other code. If nothing on this list applies, the verdict is "adequate".
+
+SELF-CHECK BEFORE OUTPUT
+
+1. Did I judge against the brief, or against my own sense of what is important? If the latter, the verdict is "adequate".
+2. Am I calling this impoverished because it is SMALL? If so, the verdict is "adequate".
+3. For every ground I selected, can I point to the sentence in the brief that raises what the model lost? If not, drop that ground.
+4. If I dropped every ground, the verdict is "adequate".
+
+OUTPUT
+
+Return a single JSON object and nothing else. No markdown fences, no preamble, no explanation.
+
+{"verdict": "adequate"}
+
+or
+
+{"verdict": "impoverished", "grounds": ["collapsed_dimensions"]}
+`;
+
+// ============================================================================
 // Explainer (Explain Diff) Prompt
 // ============================================================================
 
@@ -2367,6 +2437,7 @@ export function registerAllDefaultPrompts(): void {
   registerDefaultPrompt('repair_edit_graph', REPAIR_EDIT_GRAPH_PROMPT);
   registerDefaultPrompt('orchestrator', getOrchestratorPromptV28());
   registerDefaultPrompt('validate_graph', VALIDATE_GRAPH_PROMPT);
+  registerDefaultPrompt('draft_quality_review', DRAFT_QUALITY_REVIEW_PROMPT);
   // V5 routing prompt (v40) — registered from on-disk Prompts/v40.txt as the
   // PMS default fallback. Manual seeding into PMS is performed out-of-band;
   // this registration is the in-memory default fallback only. Path resolution
@@ -2449,6 +2520,7 @@ export const PROMPT_TEMPLATES = {
   edit_graph: EDIT_GRAPH_PROMPT_V6,
   repair_edit_graph: REPAIR_EDIT_GRAPH_PROMPT,
   orchestrator: ORCHESTRATOR_PROMPT_CF_V28,
+  draft_quality_review: DRAFT_QUALITY_REVIEW_PROMPT,
   // Note: isl_synthesis is deterministic (template-based, no LLM) - prompt kept for reference only
 } as const;
 
