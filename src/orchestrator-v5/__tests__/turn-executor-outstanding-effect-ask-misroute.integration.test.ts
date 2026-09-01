@@ -99,6 +99,7 @@ const TEST_SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const ASKED_OPTION = 'o-launch';
 const ASKED_FACTOR = 'f-quality';
 const ASKED_FACTOR_LABEL = 'Product quality';
+const ASKED_OPTION_LABEL = 'Launch now';
 
 /**
  * The witnessed graph shape: an option connected to a factor with NO recorded
@@ -124,6 +125,34 @@ function outstandingPairIds(graph: GraphV3T): string[] {
   return deriveMissingEffectPairs(readiness)
     .map((p) => `${p.optionId}::${p.factorId}`)
     .sort();
+}
+
+/**
+ * ⭐⭐⭐ CANONICAL READBACK READS THE **COMMITTED** GRAPH, NOT THE INGRESS ONE —
+ * AND THIS IS A CORRECTED PREMISE, MEASURED, NOT REASONED.
+ *
+ * My first cut of this file asserted the ingress `graphState` object was
+ * byte-identical after the turn. That assertion is VACUOUS: measured under the
+ * mutant that disables the guard entirely, the ingress graph still reads
+ * `{value: 0.7}` while the turn commits `{value: 0.33, raw_value: 0.33,
+ * source: 'user_override'}` and answers *"Updated Product quality from 0.7 to
+ * 0.33."* The handler does not mutate the caller's object; it commits a
+ * mutated copy. So the ingress object reads unchanged in BOTH the fixed and the
+ * broken world, and a test bound to it passes on the defect.
+ *
+ * The canonical entity is the graph that PERSISTS. Everything below binds to
+ * that, which is the difference between an assertion about a write and an
+ * assertion about a variable.
+ */
+function committedAskedFactorStates(): string[] {
+  return appendCalls
+    .map((call) =>
+      JSON.stringify(
+        (call.graph as GraphV3T | undefined)?.nodes?.find((n) => n.id === ASKED_FACTOR)
+          ?.observed_state ?? null,
+      ),
+    )
+    .filter((state) => state !== 'null');
 }
 
 function mkToolUseResult(input: unknown): ChatWithToolsResult {
@@ -233,9 +262,14 @@ describe('a wrong-slot factor write is refused at the turn level', () => {
     // The witnessed success sentence — and the invented number inside it — must
     // not be composable. Bound to the ASKED FACTOR'S LABEL, not to a substring
     // another factor could satisfy.
+    //
+    // ⚠ `0.33` IS THE STRING THAT ACTUALLY APPEARS, AND `33%` IS NOT. Measured
+    // under the guard-disabled mutant, the emitted sentence is *"Updated
+    // Product quality from 0.7 to 0.33."* — the wire witness said "33%" because
+    // the deployed factor rendered as a percentage, and inheriting that spelling
+    // here would have been an assertion that can never fire.
     expect(response.assistant_text.toLowerCase()).toContain("haven't changed anything");
     expect(response.assistant_text).not.toContain(`Updated ${ASKED_FACTOR_LABEL}`);
-    expect(response.assistant_text).not.toContain('33%');
     expect(response.assistant_text).not.toContain('0.33');
 
     // Nothing was COMMITTED as this handler.
@@ -243,11 +277,13 @@ describe('a wrong-slot factor write is refused at the turn level', () => {
       expect(call.handler_id).not.toBe('set_factor_value');
     }
 
-    // ── CANONICAL READBACK: the asked factor is byte-identical ──────────────
+    // ── CANONICAL READBACK on the COMMITTED graph ───────────────────────────
     // This is the limb a predicate spec cannot reach, and it is the whole
-    // point: the defect was a real write to a real field.
+    // point: the defect was a real write to a real field that really persisted.
+    expect(committedAskedFactorStates()).toEqual([]);
+    // The ingress object is asserted too, but ONLY as a secondary check — see
+    // `committedAskedFactorStates` for why it cannot carry this claim alone.
     expect(JSON.stringify(graph.nodes.find((n) => n.id === ASKED_FACTOR))).toBe(factorBefore);
-    expect(graph.nodes.find((n) => n.id === ASKED_FACTOR)?.observed_state?.value).toBe(0.7);
   });
 
   it('⭐⭐ THE PENDING REQUEST IS NOT CLEARED — the same pair is still outstanding, by identity', async () => {
@@ -262,7 +298,6 @@ describe('a wrong-slot factor write is refused at the turn level', () => {
       message: 'Set it to a third.',
     });
 
-    const factorBefore = JSON.stringify(graph.nodes.find((n) => n.id === ASKED_FACTOR));
     const { response } = await runTurnExecutor(payload, 'req-oea-pending', {
       routingAdapter,
       graphState: graph,
@@ -286,20 +321,30 @@ describe('a wrong-slot factor write is refused at the turn level', () => {
     // ASSERTION ABOVE IS A GUARD AGREEING WITH ITSELF — measured, not reasoned.
     //
     // Under the mutant that disables the guard entirely, every assertion above
-    // still PASSES. That is not a flaw in the mutant: in the witnessed defect
-    // the obligation ALSO survived — the product wrote the factor's own
-    // baseline, which is not the option's lever, so `options_ready` stayed 0/4
-    // and the ask was re-asked. "Still pending" is therefore true in BOTH the
-    // fixed and the broken world, and a test asserting only that cannot tell
-    // them apart.
+    // still PASSES. That is not a weak mutant: in the witnessed defect the
+    // obligation ALSO survived — the product wrote the factor's own baseline,
+    // which is not the option's lever, so `options_ready` stayed 0/4 and the ask
+    // was re-asked with the user's own number embedded in it. "Still pending" is
+    // true in BOTH the fixed and the broken world, and a test asserting only
+    // that cannot tell them apart.
     //
-    // What distinguishes them is the PAIRING the requirement actually states:
-    // the request is still pending AND nothing was written AND nothing was
-    // claimed. The defect satisfied the first and violated the other two. So
-    // the two conjuncts below are what give this test its discriminating power,
-    // and removing them would leave a test that passes on the defect.
-    expect(JSON.stringify(graph.nodes.find((n) => n.id === ASKED_FACTOR))).toBe(factorBefore);
-    expect(response.assistant_text).not.toContain('33%');
+    // What distinguishes them is the PAIRING the requirement states: the request
+    // is still pending AND nothing was written AND nothing was claimed. The
+    // defect satisfied the first and violated the other two. These three
+    // conjuncts are what give this test its discriminating power — each is
+    // measured to flip under the guard-disabled mutant.
+    expect(committedAskedFactorStates()).toEqual([]);
+    for (const call of appendCalls) {
+      expect(call.handler_id).not.toBe('set_factor_value');
+    }
+    expect(response.assistant_text).not.toContain('0.33');
+
+    // ⭐ AND THE COPY ITSELF RE-STATES THE OBLIGATION, bound to the asked pair by
+    // BOTH labels rather than to a generic refusal sentence. This is the
+    // difference between "nothing happened" and "nothing happened, and here is
+    // the question you are still answering" — the second is what stops the loop.
+    expect(response.assistant_text).toContain(ASKED_FACTOR_LABEL);
+    expect(response.assistant_text).toContain(ASKED_OPTION_LABEL);
   });
 });
 
