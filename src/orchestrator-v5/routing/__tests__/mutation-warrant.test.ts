@@ -497,3 +497,100 @@ describe('DEMOTION COPY', () => {
     expect(residual).toContain('stay in place');
   });
 });
+
+/**
+ * ⭐⭐ THE DEMOTION COPY MAY DESCRIBE WHAT THE PRODUCT DID, NEVER WHAT THE USER
+ * ASKED FOR (INV-3).
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WITNESSED THREE TIMES, on three different builds, from the SAME clause.
+ *
+ *   1. 20 Aug 2026, fresh-guest browser walk (`outstanding-effect-ask-misroute
+ *      .ts:15`): the product ASKED for a missing effect value, the user
+ *      answered it, and the reply opened "You did not ask me to edit the
+ *      model."
+ *   2. The consent-loop dead end pinned in `mutation-warrant-consent-parity
+ *      .test.ts:727` — offer → the user says yes → "You did not ask me to edit
+ *      the model." Closed by widening the warrant, not by touching this copy.
+ *   3. 1 Sep 2026, deployed build. The user asked three times ("Change Warm
+ *      Introduction Access" / "let's say 50% for now until I've checked" /
+ *      "Warm Introduction Access — the 50% was for that one") and was told
+ *      they had not asked, in the same message that then offered them exactly
+ *      what they had asked for.
+ *
+ * ⭐ THE FIX IS THE COPY, DELIBERATELY — NOT THE PREDICATE. `hasMutationWarrant
+ * Signal`'s own docstring (line ~290) closes with a standing ruling: four
+ * consecutive rounds and PR #1107 were burned trying to tell a scope fence from
+ * a retraction, and "no further punctuation-only or lexical rule will settle
+ * it". So the warrant gate WILL keep missing a real instruction sometimes. That
+ * is survivable when the reply merely declines to write; it is a lie when the
+ * reply also asserts the user never spoke. Removing the assertion makes the
+ * residual predicate error BENIGN IN BOTH DIRECTIONS instead of insulting, and
+ * it needs no new predicate to do it.
+ *
+ * ⚠ IT IS ALSO A STANDING RULING THIS ESTATE ALREADY RATIFIED ELSEWHERE.
+ * `coaching/pick-defaulted-assumptions.ts:217` — "IT DESCRIBES WHAT THE PRODUCT
+ * DID, NEVER WHAT THE USER DID … 'you did not set X' would be a statement about
+ * the user". This module simply never got the ruling applied to it.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE TWO DIRECTIONS. They fail on DIFFERENT assertions, which is the point —
+ * a fix that merely deleted the sentence would satisfy TWIN B and break TWIN A.
+ */
+describe('DEMOTION COPY — INV-3, the two opposite-direction twins', () => {
+  const CHANGE = 'setting "Warm Introduction Access" to 50%';
+
+  /**
+   * The claim class, written against the SPEC ("no assertion about what the
+   * user communicated"), never against the one witnessed literal — CLAUDE.md
+   * trap 13d. A predicate shaped to the failure mode in hand cannot see the
+   * next phrasing of the same harm.
+   */
+  const USER_INTENT_CLAIM =
+    /\byou\s+(?:did\s+not|didn['’]t|have\s+not|haven['’]t|never)\s+(?:ask|request|say|state|tell|mention)/i;
+
+  /** Verbatim, from the dated live corpus (`digit-bearing-replies.json:79`). */
+  const WITNESSED_2026_08_17 =
+    'Nothing has been changed. You did not ask me to edit the model, so I have not — ' +
+    'but a limit keeping "Monthly Churn Rate" at or below 4% looks like it would help. ' +
+    'Say the word and I will make it.';
+
+  it('POSITIVE CONTROL — the claim detector matches the sentence actually emitted on a dated build, so TWIN B cannot pass vacuously', () => {
+    expect(WITNESSED_2026_08_17).toMatch(USER_INTENT_CLAIM);
+  });
+
+  it('TWIN A (gate) — a turn that genuinely instructs nothing still carries NO warrant, so the demotion branch is still reached', () => {
+    expect(
+      detectMutationWarrant(
+        {
+          message: 'Show me the constraints.',
+          turnSource: 'composer',
+          chipActionType: undefined,
+          isConfirmResume: false,
+        },
+        GRAPH_MUTATING_HANDLER_IDS,
+      ),
+    ).toEqual({ granted: false });
+  });
+
+  it('TWIN A (copy) — the no-write disclosure STILL FIRES and the change is STILL offered', () => {
+    const text = buildMutationWarrantDemotionText(CHANGE, null);
+    expect(text.startsWith('Nothing has been changed.')).toBe(true);
+    expect(text).toContain(CHANGE);
+    expect(text).toContain('Say the word and I will make it.');
+  });
+
+  it('TWIN B — the copy asserts NOTHING about what the user did or did not ask for', () => {
+    const text = buildMutationWarrantDemotionText(CHANGE, null);
+    expect(text).not.toMatch(USER_INTENT_CLAIM);
+  });
+
+  it('TWIN B holds for the residual-disclosure shape too, which is a second composed string', () => {
+    const text = buildMutationWarrantDemotionText(
+      CHANGE,
+      buildResidualConstraintDisclosure('churn could rise floor'),
+    );
+    expect(text).not.toMatch(USER_INTENT_CLAIM);
+    expect(text).toContain('stay in place');
+  });
+});
