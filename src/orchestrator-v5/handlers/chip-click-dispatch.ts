@@ -152,9 +152,10 @@ import type { ComposeContext } from '../compose/types.js';
  * browser is a schemas-train keep-list change, deliberately not made here.
  */
 // ⭐ MOVED to `../context/run-initiator.js` (2026-08-20) — the ONE owner of the
-// auto-run marker vocabulary, imported by the writer below AND by the coaching
-// layer's reader. Re-exported here so this module's existing consumers and
-// specs keep their import path (CLAUDE.md trap #12: one definition, no copies).
+// auto-run marker vocabulary. ⚠ The WRITER here was deleted on 2026-09-01 with
+// the auto-run; the key survives for the coaching layer's reader of facts
+// persisted BEFORE that date (`v5_handler_facts` is append-only). Re-exported
+// so existing consumers keep their import path (trap #12: one definition).
 export { RUN_PROVENANCE_ENRICHMENT_KEY };
 
 export interface DispatchChipClickRunAnalysisParams {
@@ -1656,12 +1657,10 @@ export async function dispatchChipClickRunAnalysis(
         coaching_state: context.coaching_state,
         // V5 Conversation Context Reliability: persist the user's turn text;
         // the assistant answer auto-derives from `response.assistant_text`.
-        // R2 — on the auto-run trigger the user typed NOTHING, so nothing may
-        // be stored as their words: omit the key entirely (capConversationText
-        // maps the absence to a NULL user_message — the established
-        // system-event turn shape). The synthesised payload.message exists
-        // only to satisfy the boundary contract and must never enter the
-        // conversation record as user speech.
+        // ⚠ UNCONDITIONAL SINCE 2026-09-01. This was previously omitted on the
+        // post-draft auto-run trigger, whose synthesised turn had no user
+        // words to store. That trigger is gone: every run now starts because
+        // a user asked for one, so there is always a real message to record.
         userMessage: payload.message,
         // Same GraphV3T the egress sanitiser uses for this turn — resolves
         // entity-id labels in the stored assistant answer so stored == wire.
