@@ -230,6 +230,20 @@ function isUnanchoredEffectFraming(
  * (trap 22f's honest-gap protocol, as used by `MISSING_VALUE_ANSWER_KNOWN_DROPPED`
  * and `CONTENTFUL_SUBJECT_KNOWN_DROPPED`).
  *
+ * ⚠⚠ THAT SENTENCE WAS FALSE UNTIL #1292 r4, AND THE CORRECTION IS RECORDED
+ * RATHER THAN THE SENTENCE QUIETLY FIXED (trap 14 — an honest label overwritten
+ * by a comfortable one is how this estate loses evidence). The spec's guard was
+ * a loop OVER this array, which can only see members the array still contains.
+ * Measured at `36d2213b`: removing ONE member left the suite GREEN, removing
+ * FOUR left it GREEN, and only ADDING a claimed member RED. One direction.
+ * **The sentence was copied verbatim from `CONTENTFUL_SUBJECT_KNOWN_DROPPED`,
+ * whose own comment documents this exact shape as vacuous and names the remedy
+ * — a literal `toEqual([...])`.** The claim travelled; the fix did not.
+ * What makes it true now is the literal in
+ * `__tests__/outstanding-effect-ask-answer-misroute.test.ts`
+ * (*"THE PINNED SET IS EXACTLY THESE SIXTEEN"*). If that literal is ever
+ * replaced by anything derived FROM this array, this sentence is false again.
+ *
  * Every member is a value-word answer that `messageAnswersMissingValueAsk`
  * returns FALSE for, so {@link isUnanchoredAnswerToOutstandingAsk} cannot see it.
  * Each is genuinely answer-shaped, and on each the wrong-entity factor write
@@ -272,12 +286,31 @@ function isUnanchoredEffectFraming(
  * not the value-word: this reader recognises `"Set it to X"` and does not
  * recognise a bare `"X"`.
  *
- * ⚠ WHAT IS **NOT** PINNED HERE, stated so the boundary is not over-read again.
- * Relative/comparative replies that name no quantity at all (`"lower it"`,
- * `"halve it"`, `"double it"`) also escape, and they are DELIBERATELY EXCLUDED:
- * they are a different seam (relative-delta resolution) whose reachability this
- * lane has not derived, and pinning them here would claim a survey of a class
- * nobody has measured. They are reported on #1292, not silently absorbed.
+ * ⚠ WHAT IS NOT IN **THIS** ARRAY, AND WHERE IT IS INSTEAD — stated so the
+ * boundary is not over-read again. Relative/comparative replies that name no
+ * quantity at all (`"lower it"`, `"halve it"`, `"double it"`, and measured
+ * alongside them `"raise it"`, `"increase it"`, `"reduce it"`) also escape.
+ * They stay OUT of this array because its stated contract is *"every member is
+ * a VALUE-WORD answer"* and these name a DIRECTION with no quantity — resolving
+ * them belongs to relative-delta resolution, a different seam whose reachability
+ * this lane has not derived.
+ *
+ * ⚠⚠ BUT THE PREVIOUS VERSION OF THIS PARAGRAPH DISCHARGED THEM WITH *"They are
+ * reported on #1292, not silently absorbed."* — **AND THAT WAS FALSE WHEN IT WAS
+ * WRITTEN.** Measured at `36d2213b` over a COMPLETE, NAMED manifest — the PR
+ * body, 12 issue comments, 0 review comments and 3 reviews, all fetched from the
+ * API rather than read off a page: `lower it` 0, `halve it` 0, `double it` 0.
+ * CONTRAST CONTROLS in the SAME sweep, so the probe is not blind: `a third` 26
+ * matches over 22 lines, `quite high` 1, `baseline` 70. (The lone `halve*` hit
+ * is the word *"halves"* in an unrelated sentence — checked, not assumed.)
+ * The class was INVISIBLE, which is the exact condition the paragraph below
+ * bans. **A pointer at a document nobody has written is not a record** — and it
+ * reads as one, which is why it survived a review.
+ *
+ * They are now pinned in the spec, beside `POSITIONAL_KNOWN_DROPPED` and for the
+ * same reason (they exist relative to a seam rather than to this constant), with
+ * a contrast control in the same run. That pin is a SAMPLE, not a survey, and it
+ * says so.
  *
  * ⚠ AND THE LIMIT THAT APPLIES TO EVERY MEMBER, unchanged from this set's first
  * version: whether the router would in fact PROPOSE `set_factor_value` for a
@@ -310,7 +343,19 @@ export const OUTSTANDING_EFFECT_ASK_ANSWER_KNOWN_DROPPED: readonly string[] = [
   // Measured against its own contrast in one run: `Set it to a third.`,
   // `Change it to a third.` and `Update it to a third.` are all recognised
   // (`qualitative`, refused); `Make it a third.` is not (`null`, written).
-  // The verb list is the discriminator, and it is one verb short.
+  //
+  // ⚠ THE DISCRIMINATOR IS THE REQUIRED `to`, NOT THE VERB LIST — CORRECTED
+  // #1292 r4, at the bytes. This comment previously read *"The verb list is the
+  // discriminator, and it is one verb short."* **`make` IS in the alternation**
+  // (`missing-value-answer.ts:743`:
+  // `(?:set|change|update|adjust|make|put|use)`), so nothing is missing from it.
+  // What the pattern also requires is `\bto\s+`, and `Make it a third.` has no
+  // `to`. Measured, both directions in one run:
+  //     "Make it to a third."  → qualitative ⇒ REFUSED
+  //     "Set it a third."      → null        ⇒ WRITTEN
+  // i.e. adding `to` to the `make` form claims it, and removing `to` from the
+  // `set` form releases it. A reader who acted on the old sentence would have
+  // added a verb that was already there and left the gap open.
   'Make it a third.',
 ];
 
@@ -391,11 +436,15 @@ function isUnanchoredAnswerToOutstandingAsk(
  * module:
  *   · a CHIP-ORIGINATED turn skips every prose arm here by design (identity
  *     alone decides), so this sentence says nothing about that path;
- *   · FOUR PRODUCTION WRITERS of a factor's own baseline never reach the caller
- *     at all — the route-level `edit_graph` lane, the `factor_value_edit`
- *     system event, a compound chain's parts 2..N, and the GM held-consent
- *     apply — and `add_constraint` passes that block while writing
- *     `{value, baseline}`. See `turn-executor.ts`'s own corrected note.
+ *   · FOUR PRODUCTION WRITERS of a factor's own baseline are never EXAMINED by
+ *     the caller — the route-level `edit_graph` lane, the `factor_value_edit`
+ *     system event and the GM held-consent apply never reach it at all, while
+ *     ⚠ a compound chain's parts 2..N DO reach it and execute inside the same
+ *     block, downstream of the guard, carrying entity ids it never reads
+ *     (corrected #1292 r4 — this said all four "never reach the caller", and
+ *     "out of scope" and "downstream" are different claims about a guard).
+ *     `add_constraint` passes that block while writing `{value, baseline}`.
+ *     See `turn-executor.ts`'s own corrected note.
  *
  * ⭐ THE LESSON, RECORDED BECAUSE IT IS THE SHARPEST ONE AVAILABLE: the false
  * version of this sentence was written in the SAME COMMIT that removed a false
@@ -532,7 +581,7 @@ export function findOutstandingEffectAskCollision(params: {
     //     "Change its baseline to a third."   ·  "Set the baseline to half."
     //     "Set its baseline to high."         ·  "Change the <factor> baseline to a third."
     //
-    // ⭐ THE HOIST CANNOT COST A LEGITIMATE TWIN, AND THAT IS DERIVABLE RATHER
+    // ⭐ THE HOIST CANNOT COST A **BINDABLE** TWIN, AND THAT IS DERIVABLE RATHER
     // THAN MERELY MEASURED. `qualitative` is the reading returned when there is
     // NO DIGIT in the value slot, so a BINDABLE baseline request — one that
     // carries the number it wants written — can never read `qualitative`.
@@ -540,8 +589,24 @@ export function findOutstandingEffectAskCollision(params: {
     // ("…to 0.4.", "…to 40%.", "…to 0.25", "…to 0.7", "baselines: set it to
     // 0.5"): every one reads `null`, none reads `qualitative`.
     //
-    // So `baseline` vocabulary still suppresses everything it ever suppressed —
-    // it simply no longer licenses writing a number the binder refused to read.
+    // ⚠⚠ THE SCOPE WORD `BINDABLE` IS LOAD-BEARING AND WAS ADDED IN #1292 r4.
+    // This read *"THE HOIST CANNOT COST A LEGITIMATE TWIN"*, full stop, and the
+    // unscoped claim is FALSE: a baseline request whose value is a WORD ZERO
+    // carries no digit, so it reads `qualitative` and this arm claims it.
+    // Measured:
+    //     "Change its baseline to zero."    · "…to nothing." · "…to none."
+    //         → qualitative ⇒ REFUSED   (they were WRITTEN before the hoist)
+    //     "Change its baseline to 0."       → null ⇒ still WRITES
+    // The direction is fail-safe and the words are genuinely ambiguous against a
+    // factor whose scale nobody has stated, so the hoist stands — but the
+    // asymmetry is DECLARED rather than denied, and pinned in the spec
+    // ("THE HOIST'S ASYMMETRY, DECLARED RATHER THAN DENIED"). A "cannot" stated
+    // wider than the code supports is how the next reader stops checking, which
+    // is the failure this very block's header was rewritten for once already.
+    //
+    // So `baseline` vocabulary still suppresses everything it ever suppressed
+    // EXCEPT the word-zero forms above — it no longer licenses writing a number
+    // the binder refused to read.
     if (!isAnswerTheBinderRefusedToNumber(params.message)) {
       // ⭐⭐ THE OTHER TWO WAYS A TYPED TURN CAN BE THE WRONG FIELD OF THE ASKED
       // PAIR. These are genuinely different questions, not one predicate

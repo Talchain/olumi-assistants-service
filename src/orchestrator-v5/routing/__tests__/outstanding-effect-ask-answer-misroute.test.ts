@@ -63,6 +63,7 @@ import {
 } from '../outstanding-effect-ask-misroute.js';
 import {
   MISSING_VALUE_ANSWER_KNOWN_DROPPED,
+  messageAnswersMissingValueAsk,
   readMissingValueAnswer,
 } from '../missing-value-answer.js';
 
@@ -274,10 +275,47 @@ describe('CASE 1b — echoing the factor name back does not license the write', 
     }
   });
 
-  it('⭐⭐ THE HOIST CANNOT COST A TWIN — no BINDABLE baseline request reads `qualitative`', () => {
+  it('⚠ THE HOIST\'S ASYMMETRY, DECLARED RATHER THAN DENIED — word-zero baselines ARE refused', () => {
+    // ⚠⚠ REVIEW FINDING, #1292 r4. The claim next door reads *"THE HOIST CANNOT
+    // COST A LEGITIMATE TWIN"*, and it is true only as scoped to BINDABLE
+    // requests — ones carrying a digit. A baseline request whose value is a
+    // WORD ZERO carries no digit, so it reads `qualitative` and the hoisted arm
+    // claims it. Measured, not reasoned:
+    //
+    //     "Change its baseline to zero."     → qualitative ⇒ REFUSED
+    //     "Change its baseline to nothing."  → qualitative ⇒ REFUSED
+    //     "Change its baseline to none."     → qualitative ⇒ REFUSED
+    //     "Change its baseline to 0."        → null        ⇒ WRITES
+    //
+    // The direction is fail-safe (a refusal costs one clarify turn on a graph
+    // that is already blocked, which is this module's declared and unchanged
+    // asymmetry) and the words are genuinely ambiguous against a factor whose
+    // scale nobody has stated. But an unstated asymmetry is how "cannot" gets
+    // inherited as a guarantee, so it is pinned here rather than argued away.
+    for (const message of [
+      'Change its baseline to zero.',
+      'Change its baseline to nothing.',
+      'Change its baseline to none.',
+      'Set the baseline to zero.',
+    ]) {
+      expect(readMissingValueAnswer(message)?.kind, message).toBe('qualitative');
+      expect(
+        collide(message)?.pairs.map((p) => `${p.optionId}::${p.factorId}`),
+        message,
+      ).toEqual([ASKED_PAIR]);
+    }
+    // CONTRAST CONTROL in the same run: the DIGIT form of the same sentence
+    // still writes, so this block is not merely observing a blanket refusal.
+    expect(collide('Change its baseline to 0.')).toBeNull();
+  });
+
+  it('⭐⭐ THE HOIST CANNOT COST A **BINDABLE** TWIN — no digit-carrying baseline reads `qualitative`', () => {
     // This is the derivation the hoist rests on, asserted rather than assumed:
     // `qualitative` is returned when there is NO DIGIT in the value slot, so a
     // baseline request carrying the number it wants written can never read it.
+    // ⚠ SCOPE, because the unscoped version of this sentence was a review
+    // finding: it is a claim about BINDABLE requests only — see the word-zero
+    // asymmetry pinned directly above.
     // If this ever REDs, the hoist has become unsafe and must be re-derived.
     for (const message of [
       'Change its baseline to 0.4.',
@@ -441,7 +479,62 @@ describe('CASE 3 — the arms that already worked are unchanged', () => {
 // (trap 22f's protocol, already used by this estate's sibling sets).
 // ═══════════════════════════════════════════════════════════════════════════
 describe('the residual gap is pinned, not invisible', () => {
-  it('⭐ every pinned member is STILL NOT CLAIMED — the set is exact in both directions', () => {
+  /**
+   * ⭐⭐ THE PIN ITSELF — A LITERAL, WRITTEN HERE INDEPENDENTLY OF THE SET.
+   *
+   * ⚠⚠ THIS ASSERTION REPLACES A VACUOUS ONE, AND THE MEASUREMENT IS RECORDED
+   * BECAUSE THE DOCBLOCK'S CLAIM SURVIVED A ROUND OF REVIEW WHILE BEING FALSE.
+   * The previous version was a per-member loop asserting each member is still
+   * unclaimed, under a title reading *"the set is exact in both directions"* and
+   * a module docblock reading *"REDs if the set GROWS **or** SHRINKS"*. A loop
+   * OVER the set can only ever see members the set still contains, so it is
+   * structurally incapable of observing a removal. Measured at `36d2213b`, in an
+   * isolated worktree:
+   *
+   *     remove 1 member  ('Make it a third.')                 → GREEN (survived)
+   *     remove 4 members ('two thirds' … 'half')              → GREEN (survived)
+   *     add a claimed member ('Set it to a third.')           → RED   (bitten)
+   *
+   * One direction only. The sentence promising both was copied verbatim from
+   * `CONTENTFUL_SUBJECT_KNOWN_DROPPED`, **whose own comment documents this exact
+   * shape as vacuous and states that only a literal `toEqual([...])` makes the
+   * sentence true** — so the remedy was already in the repo, one module over,
+   * with its reasoning written out, and the copy took the claim without the fix.
+   *
+   * ⭐ WHY THE LITERAL AND NOT A DERIVATION. A filter OF the set compared AGAINST
+   * the set is a projection of the set onto itself: both sides move together
+   * (trap 12d — a derived guard proves agreement and can never prove
+   * completeness). The literals below are the only thing that makes the docblock
+   * true, and they are what a reader must consciously edit when the gap changes.
+   */
+  it('⭐⭐ THE PINNED SET IS EXACTLY THESE SIXTEEN — REDs if it GROWS **or** SHRINKS', () => {
+    expect(
+      [...OUTSTANDING_EFFECT_ASK_ANSWER_KNOWN_DROPPED],
+      'the pinned set grew or shrank — a known gap changed and needs re-review',
+    ).toStrictEqual([
+      'a third',
+      'About a third.',
+      'Make it a quarter.',
+      'quite high',
+      'two thirds',
+      'three quarters',
+      'a fifth',
+      'half',
+      'roughly a third',
+      'About half.',
+      'somewhere around a third',
+      'a bit less than half',
+      'Make it high.',
+      'fairly low',
+      'very low',
+      'Make it a third.',
+    ]);
+  });
+
+  it('⭐ every pinned member is STILL NOT CLAIMED — which member, not merely that one moved', () => {
+    // This direction alone is NOT the pin (see the literal above) — it is kept
+    // because it NAMES the member that started being claimed, which an equality
+    // check on the whole array cannot.
     for (const message of OUTSTANDING_EFFECT_ASK_ANSWER_KNOWN_DROPPED) {
       expect(collide(message), `pinned as dropped, but now claimed: ${message}`).toBeNull();
     }
@@ -516,5 +609,66 @@ describe('the residual gap is pinned, not invisible', () => {
     // CONTRAST CONTROL in the same run: the assignment-framed form of the same
     // sentence, with the same label, IS claimed.
     expect(collide(`Set ${FACTOR_LABEL} to a third.`)).not.toBeNull();
+  });
+
+  /**
+   * ⚠⚠ THE RELATIVE / COMPARATIVE REPLIES — PINNED HERE BECAUSE "REPORTED
+   * ELSEWHERE" TURNED OUT NOT TO BE A PLACE.
+   *
+   * The module constant's docblock excluded `lower it` / `halve it` /
+   * `double it` on the ground that *"They are reported on #1292, not silently
+   * absorbed."* **That sentence was false when it was written.** Measured at
+   * `36d2213b` over a COMPLETE, NAMED manifest — the PR body, 12 issue comments,
+   * 0 review comments, 3 reviews, all fetched from the API: `lower it` 0,
+   * `halve it` 0, `double it` 0. CONTRAST CONTROLS in the SAME sweep, so the
+   * probe is not blind: `a third` 26 matches / 22 lines, `quite high` 1,
+   * `baseline` 70. The gap class was therefore INVISIBLE — the exact condition
+   * this module's own doctrine bans, produced by a pointer at a document nobody
+   * had written.
+   *
+   * ⭐ WHY HERE AND NOT IN THE MODULE CONSTANT. The constant's stated contract is
+   * *"every member is a VALUE-WORD answer"*, and these are not: they name a
+   * DIRECTION with no quantity, and resolving them belongs to relative-delta
+   * resolution, a different seam. Folding them into the constant would make its
+   * own contract false. This is the same reason `POSITIONAL_KNOWN_DROPPED` above
+   * is pinned in the spec rather than in the module.
+   *
+   * ⭐ THIS IS A SAMPLE, NOT A SURVEY, AND SAYING SO IS THE POINT. The module
+   * docblock's own warning applies with full force here: *"a short honest-gap set
+   * is worse than an obviously absent one — it reads as a surveyed boundary when
+   * it is a sample."* Six escaping forms were MEASURED in one run (below).
+   * Nobody has derived the reachability of the class, and nothing here claims to
+   * have. What is pinned is exactly: these six specific messages escape today,
+   * and the suite REDs the moment any of them starts being claimed — which is
+   * the direction that matters, because a gap closing silently turns this
+   * record into a lie.
+   */
+  it('⚠ RELATIVE/COMPARATIVE replies escape — pinned, with a contrast control in the same run', () => {
+    const RELATIVE_COMPARATIVE_KNOWN_DROPPED = [
+      'lower it',
+      'halve it',
+      'double it',
+      'raise it',
+      'increase it',
+      'reduce it',
+    ];
+    for (const message of RELATIVE_COMPARATIVE_KNOWN_DROPPED) {
+      // WHY each escapes, pinned alongside the fact: the shared answer-reader
+      // does not recognise a direction-without-a-quantity as an answer at all,
+      // so `isUnanchoredAnswerToOutstandingAsk` never sees it.
+      expect(messageAnswersMissingValueAsk(message), message).toBe(false);
+      expect(readMissingValueAnswer(message), message).toBeNull();
+      expect(collide(message), `pinned as dropped, but now claimed: ${message}`).toBeNull();
+    }
+    // ⭐⭐ CONTRAST CONTROL, SAME RUN — without it this block is satisfied by a
+    // guard that claims nothing at all (trap 13: every assertion above points
+    // the same way). A blind probe cannot fake a discrimination it is not
+    // making, so the assignment-framed forms must come back REFUSED.
+    for (const framed of ['Set it to a third.', 'Set it to half.']) {
+      expect(
+        collide(framed)?.pairs.map((p) => `${p.optionId}::${p.factorId}`),
+        `contrast control did not fire: ${framed}`,
+      ).toEqual([ASKED_PAIR]);
+    }
   });
 });
