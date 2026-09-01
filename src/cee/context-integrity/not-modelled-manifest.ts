@@ -653,6 +653,18 @@ const VALUE_FIELDS = ["value", "raw", "raw_value", "cap"] as const;
  * module's trust set is still a hand-reviewed list, so this paragraph is the
  * mechanism, and it is the thing to re-read before closing 2.628a.
  *
+ * ⚠ AND THE GAP IS WIDER THAN ONE LITERAL, WHICH THAT FIRST PIN DID NOT SAY.
+ * SEVEN literals project to `user_set`; only the forged-stamp one is EVIDENCED
+ * here. Five more (`UNVERIFIED_USER_AUTHORSHIP_LITERALS`, same file) have NO
+ * writer anywhere in this repo — measured 1 Sep 2026 with contrast controls —
+ * so their `user_set` verdict rests on documentation of what other surfaces
+ * mean by them, which CEE cannot check. That is a THIRD state, neither
+ * known-safe nor known-forgeable, and it is pinned as its own set with a
+ * PARTITION spec: every `user_set` literal must be accounted for as forgeable,
+ * unverified, or receipted, so a thirteenth contract literal REDs rather than
+ * defaulting to trusted. The same widening applies to the trust set BELOW —
+ * five of its `true` rows are literals nothing in this repo writes.
+ *
  * ── ⚠ THE ASYMMETRY, STATED BECAUSE IT DECIDES EVERY OPEN CASE ─────────────
  * WRONGLY CLAIMING A USER'S VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY
  * OMITTING ONE OF OUR OWN INVENTIONS FROM THE LIST. Where authorship cannot be

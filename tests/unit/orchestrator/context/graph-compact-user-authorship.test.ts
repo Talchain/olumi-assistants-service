@@ -35,6 +35,7 @@ import { OBSERVED_STATE_SOURCE_LITERALS } from '@talchain/schemas';
 import { compactGraph } from '../../../../src/orchestrator/context/graph-compact.js';
 import {
   FORGEABLE_USER_AUTHORSHIP_LITERALS,
+  UNVERIFIED_USER_AUTHORSHIP_LITERALS,
   valueSourceAuthorship,
 } from '../../../../src/cee/transforms/provenance-display.js';
 import { USER_EDIT_SOURCE } from '../../../../src/orchestrator/canonicalise-value-ops.js';
@@ -366,5 +367,121 @@ describe('the forged-stamp gap is pinned, not merely described', () => {
     const notForgeable = governing.filter((l) => !FORGEABLE_USER_AUTHORSHIP_LITERALS.has(l));
     expect(notForgeable.length).toBeGreaterThan(0);
     expect(notForgeable).toContain('panel_elicited');
+  });
+});
+
+/**
+ * ⚠⚠ THE KNOWN-UNPINNED SET — the OTHER half of the authority surface, and the
+ * half the first two commits left implicit.
+ *
+ * ── THE FINDING THIS ANSWERS ──────────────────────────────────────────────
+ * SEVEN literals project to `user_set`; only ONE was pinned as forgeable. The
+ * remaining six were justified in prose as *"written by surfaces that are not
+ * this stamper"* — which reads as a safety property and is not one: it is a
+ * claim about writers in OTHER repos that CEE cannot verify. An independent
+ * review measured the writer census and reached the same conclusion from the
+ * arithmetic alone.
+ *
+ * ── AND A CORRECTION TO THE COUNT, RE-DERIVED HERE ────────────────────────
+ * The review's census named FOUR literals with zero CEE writers. Re-measured at
+ * this tip it is FIVE: `user` also has no `observed_state.source` writer in this
+ * repo. Its single apparent hit — `graph-compact.ts:714`, `n.source = 'user'` —
+ * writes the COMPACT node source (`user | assumption | system`), a different
+ * field in a different vocabulary. Contrast controls in the same sweep were
+ * non-zero (`brief_extraction` 25, `user_specified` 10), so the probe
+ * discriminates.
+ *
+ * ── WHY A SECOND SET AND NOT A WIDER FIRST ONE ────────────────────────────
+ * "Forgeable" is an EVIDENCED claim about `stampUserEditProvenance`. Asserting
+ * it of a literal nothing here writes would be a fabricated finding, and a gap
+ * set naming every `user_set` literal would be unfalsifiable-by-breadth. Two
+ * questions, two sets (CLAUDE.md trap 21): *"is this stamp forgeable?"* and
+ * *"has anyone here checked?"*
+ */
+describe('the unverified authority surface is pinned as an explicit set', () => {
+  const governing = OBSERVED_STATE_SOURCE_LITERALS.filter(
+    (l) => valueSourceAuthorship(l)?.provenance === 'user_set',
+  );
+
+  /**
+   * `toEqual` on the whole set. It REDs if a literal is ADDED and if one is
+   * REMOVED — the estate's honest-gap rule. A `toContain` would stay green as
+   * the unverified surface grew, which is the blindness being closed.
+   */
+  it('⭐ the KNOWN-UNPINNED set is EXACTLY the user_set literals no CEE writer stamps', () => {
+    expect([...UNVERIFIED_USER_AUTHORSHIP_LITERALS].sort()).toEqual([
+      'user',
+      'user_assumption',
+      'user_calibration',
+      'user_confirmed',
+      'user_edited',
+    ]);
+  });
+
+  /**
+   * ⭐ THE PARTITION — this is what makes the two sets fail loud instead of
+   * ageing quietly. Every literal that projects to `user_set` must be accounted
+   * for by exactly one of three verdicts. A thirteenth contract literal landing
+   * on `user_set`, or a table row changing verdict, REDs here and forces the
+   * decision to be made rather than defaulted.
+   */
+  it('⭐ every user_set literal is accounted for — forgeable, unverified, or receipted', () => {
+    expect(governing.length, 'no literal projects to user_set — the partition is vacuous').toBeGreaterThan(0);
+
+    // `panel_elicited` is the one literal with an in-repo VERIFIED writer:
+    // `system-events/factor-value-edit.ts:346` stamps it only behind
+    // `verifyAppliedFrom` against the collab store.
+    const RECEIPTED = new Set<string>(['panel_elicited']);
+
+    const unaccounted = governing.filter(
+      (l) =>
+        !FORGEABLE_USER_AUTHORSHIP_LITERALS.has(l) &&
+        !UNVERIFIED_USER_AUTHORSHIP_LITERALS.has(l) &&
+        !RECEIPTED.has(l),
+    );
+    expect(
+      unaccounted,
+      `these literals tell the model a value was supplied by a person, and no set in ` +
+        `cee/transforms/provenance-display.ts records what we know about them. Pin each one ` +
+        `as FORGEABLE (a stamper here writes it and the stamp is not single-meaning), as ` +
+        `UNVERIFIED (nothing here writes it), or as receipted (a verified writer here).`,
+    ).toEqual([]);
+  });
+
+  /**
+   * DISJOINTNESS. The two sets answer different questions; a literal in both
+   * would mean one of the two answers is wrong, and both assertions above would
+   * still pass.
+   */
+  it('the two gap sets are disjoint — a literal cannot be both evidenced and unevidenced', () => {
+    const both = [...UNVERIFIED_USER_AUTHORSHIP_LITERALS].filter((l) =>
+      FORGEABLE_USER_AUTHORSHIP_LITERALS.has(l),
+    );
+    expect(both).toEqual([]);
+  });
+
+  /**
+   * CONTRAST CONTROL (CLAUDE.md trap 13e). The set must name literals that
+   * actually GOVERN. A set naming inert literals would satisfy every assertion
+   * above while recording nothing.
+   */
+  it('contrast control: every unpinned literal really does project to user_set', () => {
+    expect(UNVERIFIED_USER_AUTHORSHIP_LITERALS.size).toBeGreaterThan(0);
+    for (const literal of UNVERIFIED_USER_AUTHORSHIP_LITERALS) {
+      expect(
+        valueSourceAuthorship(literal)?.provenance,
+        `${literal} is recorded as an unverified authorship claim but makes none`,
+      ).toBe('user_set');
+    }
+  });
+
+  /**
+   * CONTRAST CONTROL 2. The set must be a STRICT subset — if it named every
+   * governing literal it would be recording "we know nothing", which is both
+   * false (we do know about `user_override` and `panel_elicited`) and
+   * unfalsifiable.
+   */
+  it('contrast control: the unverified set is a strict subset of the user_set literals', () => {
+    expect(UNVERIFIED_USER_AUTHORSHIP_LITERALS.size).toBeLessThan(governing.length);
   });
 });

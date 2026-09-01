@@ -27,6 +27,14 @@ interface RawNode {
   readonly label: string;
   readonly is_baseline?: boolean;
   readonly reaches?: readonly string[];
+  /**
+   * The COMPACTOR's authorship projection (`from_brief | ai_inferred |
+   * user_set`) — the input side, still called `provenance` because that is what
+   * `compactGraph` emits. Only `user_set` survives the display projection, and
+   * it survives under the DIFFERENT key `value_authorship`. That rename is the
+   * subject of the final describe block in this file.
+   */
+  readonly provenance?: string;
 }
 
 interface RawEdge {
@@ -486,5 +494,112 @@ describe('display_graph structural grounding — exact prompt bytes', () => {
     const serialised = observeSerialisedPack(prompt);
     expect(serialised.graph).toBeUndefined();
     expect(prompt).not.toContain(DISPLAY_GRAPH_INSTRUCTION);
+  });
+});
+
+/**
+ * ⭐⭐ THE FIELD AND ITS LICENCE, PINNED TOGETHER SO THEY CANNOT DRIFT APART.
+ *
+ * ── THE DEFECT THIS CLOSES ────────────────────────────────────────────────
+ * An independent review of this PR's first two commits measured, at the
+ * adapter boundary, that node authorship reached the model with NO LICENSING
+ * TEXT while every sibling fact in `DISPLAY_GRAPH_INSTRUCTION` (`reaches`,
+ * `is_baseline`, `edge_type`, `relationship`) had one — and that the SAME
+ * request carried `FACTOR_VALUES_INSTRUCTION`, whose only rule about a field
+ * called `provenance` says *"never say the user entered, confirmed or approved
+ * a particular figure on the strength of this field alone"*. A third field of
+ * that name would have arrived unlicensed AND name-colliding with a rule
+ * pointing the other way.
+ *
+ * ── WHY THIS FILE, AND WHY BOTH HALVES IN ONE ASSERTION ───────────────────
+ * The estate's prompt↔pack sanction gate CANNOT catch this class here, and the
+ * reason is worth recording because it is not the one first proposed. Its
+ * `proseLeaves` >= 4-word threshold is real, but it is NOT what makes the gate
+ * blind: `findUnsanctionedFields` iterates `Object.keys(serialised)` — the
+ * TOP-LEVEL pack keys — and `graph` is prose-bearing and IS named in the
+ * corpus, so the gate is green whatever leaf keys `graph` gains. Lowering the
+ * word threshold would not change that verdict by one field. The right-sized
+ * instrument is this one: bind the leaf to the sentence that licenses it, in
+ * the real serialised prompt bytes, so deleting either half REDs.
+ */
+describe('node value_authorship — the field and the sentence that licenses it', () => {
+  const AUTHORED = 'factor_demand';
+  const UNSTAMPED = 'factor_cost';
+
+  /**
+   * Bound BY IDENTITY, never by a value predicate (CLAUDE.md trap 19): the two
+   * factors are otherwise interchangeable, and every assertion resolves its
+   * node by id.
+   */
+  const STAMPED_NODES: readonly RawNode[] = NODES.map((node) =>
+    node.id === AUTHORED ? { ...node, provenance: 'user_set' } : node,
+  );
+
+  it('⭐ the licence names the exact key the request carries — neither half can move alone', () => {
+    const { graph, prompt } = render(graphWith([], STAMPED_NODES));
+
+    const authored = graph.nodes.find((n) => n.id === AUTHORED);
+    expect(authored, 'fixture node missing from the projection').toBeDefined();
+
+    // HALF ONE: the request really carries the field, under this exact key.
+    expect(authored!['value_authorship']).toBe('user_set');
+
+    // HALF TWO: the prompt really licenses that exact key. `toContain` on the
+    // rendered PROMPT, not on the constant, so a block that stops being emitted
+    // REDs here too.
+    expect(prompt).toContain(
+      '`value_authorship: user_set` on a node is the only fact in this block about WHERE A NUMBER CAME FROM',
+    );
+    expect(prompt).toContain(
+      'never describe that value as your estimate, your assumption, your inference or a placeholder',
+    );
+  });
+
+  it('⭐ the licence is WEAK in both the directions it has to be', () => {
+    const { prompt } = render(graphWith([], STAMPED_NODES));
+
+    // `user_set` also covers `panel_elicited` — a colleague's verified answer —
+    // and `user_override`, which this repo pins as forgeable. Neither licenses
+    // "you typed this", so the block must forbid it explicitly.
+    expect(prompt).toContain(
+      'Never say the user entered, typed, confirmed or approved a particular number on the strength of this field',
+    );
+    // Absence is not a claim (the shared contract's own instruction on this axis).
+    expect(prompt).toContain(
+      'Its ABSENCE is not the opposite claim',
+    );
+  });
+
+  it('⭐ the collision is named apart, not reconciled', () => {
+    const { prompt } = render(graphWith([], STAMPED_NODES));
+
+    expect(prompt).toContain(
+      'This field is deliberately named apart from every other authorship field in this request',
+    );
+    expect(prompt).toContain(
+      'A `provenance` field anywhere else — on a `graph.edges` entry, or under `factor_values` — is a different fact about a different object',
+    );
+  });
+
+  it('contrast control: the unstamped twin carries no authorship key at all', () => {
+    const { graph } = render(graphWith([], STAMPED_NODES));
+
+    const unstamped = graph.nodes.find((n) => n.id === UNSTAMPED);
+    expect(unstamped, 'fixture node missing from the projection').toBeDefined();
+    expect(unstamped!['value_authorship']).toBeUndefined();
+    // ...and the compactor's other members never reach the model under EITHER
+    // key, so the sweep above is not merely finding a renamed default.
+    expect(unstamped!['provenance']).toBeUndefined();
+  });
+
+  it('contrast control: the old key is gone from the node projection', () => {
+    const { graph } = render(graphWith([], STAMPED_NODES));
+
+    const authored = graph.nodes.find((n) => n.id === AUTHORED);
+    expect(authored!['provenance']).toBeUndefined();
+    // Positive control on the same object — the fixture DID reach the
+    // projection with content, so the absence above is a real absence and not a
+    // blind probe.
+    expect(authored!['label']).toBe('Customer demand');
   });
 });

@@ -301,13 +301,80 @@ const SOURCE_AUTHORSHIP: Readonly<
  * ── WHAT IS DELIBERATELY *NOT* IN THIS SET ────────────────────────────────
  * `panel_elicited` is server-VERIFIED against the collab store by
  * `collab/apply-verification.ts` before it is stamped, so it is the one
- * human-authorship literal with an independent receipt. The remaining user
- * literals are written by surfaces that are not this stamper. Listing them
- * would make the set unfalsifiable-by-breadth — a gap set that names every
- * literal records nothing.
+ * human-authorship literal with an independent receipt.
+ *
+ * ⚠⚠ AN EARLIER REVISION OF THIS PARAGRAPH ALSO SAID *"the remaining user
+ * literals are written by surfaces that are not this stamper"*, AND THAT
+ * SENTENCE IS WITHDRAWN. It reads as a safety property and is not one: it is a
+ * claim about writers in OTHER repos, which this repo cannot verify, dressed as
+ * a reason for leaving them unpinned. Measured here at this tip (`rg -a`,
+ * `src/`, tests and the three classifier tables excluded, scoped to
+ * `source:`/`SOURCE =` assignment shapes, with a CONTRAST CONTROL non-zero in
+ * the same sweep — `brief_extraction` 25, `user_specified` 10):
+ *
+ *   user_override    6  ← the stamper (`USER_EDIT_SOURCE`) and its call sites
+ *   panel_elicited   1  ← `system-events/factor-value-edit.ts:346`, gated on
+ *                         `verifyAppliedFrom`
+ *   user             0  ⚠ the single `= 'user'` hit in this repo is
+ *                         `graph-compact.ts:714`, which writes the COMPACT node
+ *                         `source` (`user | assumption | system`) — a different
+ *                         field in a different vocabulary, not this stamp
+ *   user_confirmed   0
+ *   user_edited      0
+ *   user_calibration 0
+ *   user_assumption  0
+ *
+ * ⚠ SCOPE, STATED NARROWLY (CLAUDE.md trap 20): that is *no assignment site
+ * found in this repo's `src/` at this tip, by the shapes swept*. It is NOT
+ * "these literals are never written" — `schema-v3.ts:361-362` proves this
+ * estate assigns through VARIABLES, which a literal sweep cannot see, and a
+ * filesystem sweep cannot reach another repo or an unmerged branch.
+ *
+ * So the five below are not KNOWN-SAFE and not KNOWN-FORGEABLE: they are
+ * UNVERIFIABLE FROM HERE. That is a third state, and collapsing it into either
+ * of the other two is how an absence of evidence becomes evidence of absence.
  */
 export const FORGEABLE_USER_AUTHORSHIP_LITERALS: ReadonlySet<KnownObservedStateSourceLiteral> =
   new Set<KnownObservedStateSourceLiteral>(["user_override"]);
+
+/**
+ * ⚠⚠ THE KNOWN-UNPINNED SET — the literals that project to `user_set` on
+ * evidence this repo does not hold.
+ *
+ * ── WHY THIS EXISTS AS A SET AND NOT AS PROSE ─────────────────────────────
+ * `FORGEABLE_USER_AUTHORSHIP_LITERALS` records a gap we have MEASURED: one
+ * literal, written by a stamper in this repo, whose stamp cannot distinguish a
+ * genuine user edit from a model-authored `update_node` op. These five are a
+ * different thing — we have measured NOTHING about them, because nothing in
+ * this repo writes them (see the census above). Their `user_set` verdict rests
+ * on the shared contract's documentation of what other surfaces mean by them,
+ * and CEE cannot check that.
+ *
+ * ⛔ THEY ARE DELIBERATELY *NOT* FOLDED INTO THE FORGEABLE SET. Forgeability is
+ * a specific, evidenced claim about `stampUserEditProvenance`; asserting it of a
+ * literal nothing here writes would be a fabricated finding, and a gap set that
+ * named every `user_set` literal would be unfalsifiable-by-breadth — it would
+ * "cover" the gap by declaring everything suspect, which records nothing. The
+ * two sets are kept apart for the same reason the three authorities over this
+ * vocabulary are kept apart (CLAUDE.md trap 21): they answer different
+ * questions — *"is this stamp forgeable?"* versus *"has anyone here checked?"*
+ *
+ * ── THE RE-SURFACE TRIGGER, MECHANICAL RATHER THAN REMEMBERED ─────────────
+ * The spec asserts this set EXACTLY (`toEqual`), so it REDs if a literal is
+ * added AND if one is removed, and a companion PARTITION assertion REDs if any
+ * `user_set`-projecting literal is in NEITHER set nor the receipted one. So the
+ * day CEE gains a writer for one of these — or the contract mints a thirteenth
+ * literal that lands on `user_set` — the suite forces the decision here instead
+ * of letting it default to green.
+ */
+export const UNVERIFIED_USER_AUTHORSHIP_LITERALS: ReadonlySet<KnownObservedStateSourceLiteral> =
+  new Set<KnownObservedStateSourceLiteral>([
+    "user",
+    "user_confirmed",
+    "user_edited",
+    "user_calibration",
+    "user_assumption",
+  ]);
 
 /**
  * Project one `observed_state.source` stamp, or `undefined` when this stamp is

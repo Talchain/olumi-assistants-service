@@ -92,9 +92,50 @@ export interface DisplaySafeNode {
    */
   readonly reaches?: readonly string[];
   /**
-   * ⭐⭐ THE ONE AUTHORSHIP FACT THE MODEL IS TOLD: *the user supplied this
-   * number.* Emitted ONLY as `'user_set'`, and ONLY when the compactor derived
-   * it from a governing `observed_state.source` stamp.
+   * ⭐⭐ THE ONE AUTHORSHIP FACT THE MODEL IS TOLD: *this node's value was
+   * supplied to the model, not drafted by the model.* Emitted ONLY as
+   * `'user_set'`, and ONLY when the compactor derived it from a governing
+   * `observed_state.source` stamp.
+   *
+   * ── ⚠⚠ WHY THE KEY IS `value_authorship` AND NOT `provenance` ─────────────
+   * Because the compactor's key name would have been the THIRD field called
+   * `provenance` in one adapter-bound request, and the three answer three
+   * different questions in three different vocabularies:
+   *
+   *   `factor_values[].provenance`  (context-pack-schema.ts:604)
+   *        `user_stated | ai_drafted | system_repaired | unattributed`
+   *        — *is this factor's value attributable to a person at all?*
+   *   `graph.edges[].provenance`    (DisplaySafeEdge, this file)
+   *        `from_brief | ai_inferred | user_set`
+   *        — *who asserted this LINK?*
+   *   this field                     — *whose NUMBER is this?*
+   *
+   * They are joined only by the label, and they DISAGREE by design: the
+   * obligation authority maps the brief-extraction stamp and the user-edit
+   * stamp both to `user_stated`, while this axis exists precisely to keep those
+   * two apart (`cee/transforms/provenance-display.ts:81-87`). ⚠ Neither stamp
+   * literal is spelled here on purpose: `no-brief-derived-user-override.
+   * writers.test.ts` sweeps `src/` for the user-edit literal and REDs on any
+   * file outside its REVIEWED manifest, and this module has no lookup over that
+   * vocabulary to review — naming the derived sets rather than restating their
+   * members keeps that manifest meaning what it says (CLAUDE.md trap 12). Worse, the one instruction
+   * the model already holds about a field of that name — `FACTOR_VALUES_
+   * INSTRUCTION` (`routing/route-with-tool-use.ts:1866`) — says *"never say the
+   * user entered, confirmed or approved a particular figure on the strength of
+   * this field alone"*, and it rides the SAME request. Shipping a third
+   * `provenance` would have handed the model a field whose name its own rules
+   * point the other way about.
+   *
+   * CLAUDE.md trap 21's remedy is NOT to reconcile the defaults — it is to
+   * *"name the concepts apart and pick which one the surface consumes"*. So the
+   * key is named apart, the licence in `DISPLAY_GRAPH_INSTRUCTION` names it
+   * apart from both siblings in as many words, and
+   * `display-graph-instruction.route-level.test.ts` binds the field to that
+   * licence so the two cannot drift.
+   *
+   * The LITERAL stays `user_set`, deliberately: it is `Extract`ed from
+   * `CompactProvenance` (trap 12 — derived, not restated), and renaming it
+   * would replace a derivation with a hand-copied string.
    *
    * ── WHY THIS FIELD EXISTS AT ALL ──────────────────────────────────────────
    * `compactGraph` has always computed a `provenance` projection, and this
@@ -154,12 +195,12 @@ export interface DisplaySafeNode {
    * `_raw_provenance` remain dropped, as do `value` / `raw_value` / `cap`. This
    * adds one closed display literal, not a channel.
    */
-  readonly provenance?: DisplaySafeNodeProvenance;
+  readonly value_authorship?: DisplaySafeValueAuthorship;
 }
 
 /**
  * The only authorship literal a display-safe NODE may carry — see
- * {@link DisplaySafeNode.provenance} for why the other two members of
+ * {@link DisplaySafeNode.value_authorship} for why the other two members of
  * `CompactProvenance` are withheld.
  *
  * DERIVED FROM THE VOCABULARY, NOT RESTATED BESIDE IT (CLAUDE.md trap 12): if
@@ -167,7 +208,7 @@ export interface DisplaySafeNode {
  * to `never` and every emitter fails typecheck, rather than a hand-copied
  * literal quietly outliving the vocabulary it came from.
  */
-export type DisplaySafeNodeProvenance = Extract<CompactProvenance, 'user_set'>;
+export type DisplaySafeValueAuthorship = Extract<CompactProvenance, 'user_set'>;
 
 export interface DisplaySafeEdge {
   readonly from: string;
@@ -281,7 +322,8 @@ interface RawNodeShape {
   readonly display_value?: unknown;
   /**
    * The compactor's authorship projection (`from_brief | ai_inferred |
-   * user_set`). Only `user_set` survives into `DisplaySafeNode.provenance` —
+   * user_set`). Only `user_set` survives into `DisplaySafeNode.value_authorship`
+   * — and under a DIFFERENT KEY, see that field —
    * see that field for why the other two are withheld.
    */
   readonly provenance?: unknown;
@@ -346,7 +388,7 @@ function asProvenance(value: unknown): CompactProvenance | undefined {
  * Narrow an upstream authorship projection to the single literal a display-safe
  * NODE may carry. Everything else — including the two other perfectly valid
  * members of `CompactProvenance` — returns `undefined`, so the field is simply
- * absent. See {@link DisplaySafeNode.provenance} for why.
+ * absent. See {@link DisplaySafeNode.value_authorship} for why.
  *
  * Deliberately NOT `asProvenance` (which edges use). Edge provenance answers
  * *"who asserted this link?"* and has no catch-all default arm behind it; node
@@ -354,7 +396,7 @@ function asProvenance(value: unknown): CompactProvenance | undefined {
  * share a vocabulary are still two questions (CLAUDE.md trap 21), and folding
  * them into one narrowing helper is how the default would leak.
  */
-function asNodeAuthorship(value: unknown): DisplaySafeNodeProvenance | undefined {
+function asNodeAuthorship(value: unknown): DisplaySafeValueAuthorship | undefined {
   return value === 'user_set' ? value : undefined;
 }
 
@@ -589,7 +631,7 @@ function projectNode(
     uncertainty_drivers_disclosure?: CompactUncertaintyDriversDisclosure;
     display_value?: string;
     reaches?: readonly string[];
-    provenance?: DisplaySafeNodeProvenance;
+    value_authorship?: DisplaySafeValueAuthorship;
   } = { id, label, kind };
   // One narrow authority: only a literal producer field on an option can
   // identify the saved current approach. Labels such as "status quo" are not
@@ -686,9 +728,9 @@ function projectNode(
   //
   // Narrowed to `user_set` by `asNodeAuthorship`; every other value, including
   // the compactor's `ai_inferred` default arm, is simply absent. Absence is not
-  // a claim. See `DisplaySafeNode.provenance`.
+  // a claim. See `DisplaySafeNode.value_authorship`.
   const authorship = asNodeAuthorship(raw.provenance);
-  if (authorship !== undefined) node.provenance = authorship;
+  if (authorship !== undefined) node.value_authorship = authorship;
 
   return node;
 }
@@ -847,12 +889,13 @@ function projectOption(raw: unknown): DisplaySafeOption | null {
  *     numerics for handlers, freshness hashing, and edit_graph
  *     dispatch — Sonnet just doesn't see them. Internal `source` /
  *     `_raw_provenance` are dropped (diagnostic-only).
- *     ⭐ `provenance` survives, but ONLY as `'user_set'` — the single
+ *     ⭐ The compactor's authorship projection survives, but ONLY as
+ *     `'user_set'` and ONLY under the distinct key `value_authorship` — the single
  *     authorship fact the compactor derives from positive evidence rather than
  *     from a default arm. Carrying it is what makes the compactor's authorship
  *     correction observable on the wire at all; carrying the rest would state
  *     the default `ai_inferred` as a finding and mislabel brief-stated goals
- *     and targets as the model's own. See `DisplaySafeNode.provenance`.
+ *     and targets as the model's own. See `DisplaySafeNode.value_authorship`.
  *     A literal producer-attested `is_baseline: true` survives only on option
  *     nodes; the formatter does not infer it from labels or IDs.
  *     The `unit` extractor still reads compact top-level `unit`

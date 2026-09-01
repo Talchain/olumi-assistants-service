@@ -284,15 +284,24 @@ describe('the adapter-bound request tells the model which numbers the user gave 
     expect(target.display_value).toBe('85%');
     expect(decoy.display_value).toBe(target.display_value);
 
-    expect(target.provenance).toBe('user_set');
-    expect(decoy.provenance).toBeUndefined();
+    expect(target.value_authorship).toBe('user_set');
+    expect(decoy.value_authorship).toBeUndefined();
+
+    // ⭐ THE COLLISION RESOLUTION, PINNED. The compactor's key is `provenance`;
+    // the model-facing NODE key is `value_authorship`, named apart because the
+    // same request already carries two other fields called `provenance`
+    // answering two other questions (`factor_values[]` and `graph.edges[]`).
+    // If a later change renames this back, this REDs before the model ever
+    // meets a third `provenance`.
+    expect(target.provenance, 'the node key collided with factor_values/edge provenance again').toBeUndefined();
   });
 
   /**
    * ⚠ THE ASSERTION IS SCOPED TO NODES, AND THE FIRST DRAFT OF IT WAS WRONG.
    * A blanket `not.toContain('user_set')` over the request FAILED here — and
    * correctly so: `DisplaySafeEdge.provenance` has carried the same literal
-   * across this boundary since long before this change, and the edge in this
+   * across this boundary since long before this change — which is also why the
+   * NODE key is `value_authorship` and not a third `provenance`. The edge in this
    * fixture is `user_specified`. A whole-request string search cannot tell a
    * node's authorship claim from an edge's, so it is the wrong instrument;
    * the same mistake would have made the positive control below vacuous, since
@@ -302,7 +311,7 @@ describe('the adapter-bound request tells the model which numbers the user gave 
     const inferred = await capture(fixture('cee_inference'));
     for (const id of [TARGET, DECOY, GOAL, 'opt_a']) {
       expect(
-        requestNode(inferred.requestBytes, id).provenance,
+        requestNode(inferred.requestBytes, id).value_authorship,
         `node ${id} claims authorship in a graph where nobody authored anything`,
       ).toBeUndefined();
     }
@@ -380,11 +389,11 @@ describe('the adapter-bound request tells the model which numbers the user gave 
     // search would be asserting about the wrong objects.
     for (const id of [GOAL, DECOY]) {
       const node = requestNode(authored.requestBytes, id);
-      expect(node.provenance, `the compactor's default leaked to the model on ${id}`).toBeUndefined();
+      expect(node.value_authorship, `the compactor's default leaked to the model on ${id}`).toBeUndefined();
     }
     // The target is the one node that SHOULD carry a claim — otherwise this
     // test could pass on a projection that transports nothing at all.
-    expect(requestNode(authored.requestBytes, TARGET).provenance).toBe('user_set');
+    expect(requestNode(authored.requestBytes, TARGET).value_authorship).toBe('user_set');
   });
 
   /**
