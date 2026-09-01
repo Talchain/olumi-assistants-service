@@ -196,8 +196,14 @@ export { RUN_PROVENANCE_ENRICHMENT_KEY };
  *     invitation from `context-integrity/brief-audit-answer.ts` ("If something
  *     matters and is missing, tell me and I will add it") and the terminal
  *     bridge's "review or replace it".
- *   · "Nothing in it carries your judgement yet" — the "needs your judgement"
- *     family (`turn-executor.ts`, `routing/readiness-intake.ts`).
+ *   · "You have not confirmed any of it yet" — the confirmation register
+ *     (`canonical-readiness.ts`'s "review them whenever you like", the
+ *     "not yet confirmed" family). ⚠ THIS SLOT USED TO READ "Nothing in it
+ *     carries your judgement yet", derived from the "needs your judgement"
+ *     family (`turn-executor.ts`, `routing/readiness-intake.ts`). That
+ *     derivation was sound about the VOCABULARY and wrong about the CLAIM —
+ *     see the two-doors block below. Kept visible rather than deleted (trap
+ *     14) so the next author does not re-derive it from the same family.
  *   · "where your brief gave me no figure I estimated one" — the
  *     `estimated by Olumi` / `cee_inference` provenance register.
  *
