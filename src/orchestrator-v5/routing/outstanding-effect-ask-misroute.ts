@@ -526,6 +526,46 @@ function readUserValue(message: string): number | null {
  * never from a request field, or the refusal could speak about a model the user
  * is not looking at.
  */
+/**
+ * ⭐⭐ COLLAPSE A GENUINE AMBIGUITY TO THE PAIR THE PRODUCT ITSELF NAMED — and
+ * do NOTHING ELSE.
+ *
+ * THE DEFECT, captured 1 Sep 2026 on deployed staging (turn 2 of four). Two
+ * options were outstanding on one factor, so `pairs` carried both and
+ * `composeOutstandingEffectAskMisroute` emitted *"I'm not sure which option you
+ * mean"* — one turn after the product had asked about exactly one of them and
+ * written down which. The estate's ruling that two candidates must be ASKED
+ * about rather than guessed between (trap 22f) was correct and was being applied
+ * to a question that was never ambiguous.
+ *
+ * ⚠⚠ DIRECTION OF THE CHANGE, STATED AND BOUNDED — every one of these is cased
+ * in `recorded-effect-ask.test.ts`:
+ *   · it can only NARROW, never widen: the result is always a subset;
+ *   · it cannot CREATE a collision (an empty `pairs` is returned untouched, and
+ *     the caller has already returned null on it);
+ *   · it cannot DELETE one: a record naming a pair that is not a member leaves
+ *     the set alone rather than emptying it;
+ *   · it cannot alter a set that already has exactly one member.
+ * So the reachable behavioural change is exactly "an ambiguous refusal becomes
+ * the specific one the product owed the user", by construction rather than by
+ * inspection.
+ *
+ * ⚠ THE FALLBACK IS THE AMBIGUOUS SET, NOT THE HEAD BLOCKER. Narrowing by list
+ * position would put a confidently-named, possibly-wrong option in a sentence
+ * about the user's own model — trading an honest "which one?" for a quiet lie,
+ * which is the wrong direction on every axis this module was built for.
+ */
+function narrowToRecordedAsk(
+  pairs: readonly MissingEffectPair[],
+  recordedAsk: MissingEffectPair | null,
+): readonly MissingEffectPair[] {
+  if (recordedAsk === null || pairs.length <= 1) return pairs;
+  const named = pairs.filter(
+    (p) => p.optionId === recordedAsk.optionId && p.factorId === recordedAsk.factorId,
+  );
+  return named.length === 1 ? named : pairs;
+}
+
 export function findOutstandingEffectAskCollision(params: {
   readonly handlerId: OutstandingEffectAskHandlerId;
   /** `proposal.entity.id`: a node id, or the `from→to` edge form. */
@@ -541,6 +581,17 @@ export function findOutstandingEffectAskCollision(params: {
    * every caller instead (trap 12 — fail loud on drift, never assume-good).
    */
   readonly chipOriginated: boolean;
+  /**
+   * ⭐⭐ THE PAIR THE PRODUCT'S OWN LIVE `elicit_option_effect` RECORD NAMES, or
+   * `null` — from {@link deriveRecordedEffectAsk}, the one owner of that
+   * question (`repair-value-binding.ts`). It is passed IN rather than derived
+   * here because only the caller holds the turn's pending rows.
+   *
+   * REQUIRED rather than optional, for the same reason `chipOriginated` is: an
+   * omitted argument would silently restore the hole it closes, so the compiler
+   * is made to point at every caller instead (trap 12 — fail loud on drift).
+   */
+  readonly recordedAsk: MissingEffectPair | null;
 }): OutstandingEffectAskCollision | null {
   const pairs = deriveMissingEffectPairs(params.readiness);
   if (pairs.length === 0) return null;
@@ -555,7 +606,11 @@ export function findOutstandingEffectAskCollision(params: {
       (p) => p.optionId === parsed.from && p.factorId === parsed.to,
     );
     return match.length > 0
-      ? { refusedField: 'edge_strength', pairs: match, userValue: readUserValue(params.message) }
+      ? {
+          refusedField: 'edge_strength',
+          pairs: narrowToRecordedAsk(match, params.recordedAsk),
+          userValue: readUserValue(params.message),
+        }
       : null;
   }
 
@@ -632,7 +687,11 @@ export function findOutstandingEffectAskCollision(params: {
   // `match` is non-empty by the early return above — no second, unreachable
   // emptiness guard here. A guard that cannot fail reads as protection and is
   // not, which is the shape this estate hunts.
-  return { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) };
+  return {
+    refusedField: 'factor_value',
+    pairs: narrowToRecordedAsk(match, params.recordedAsk),
+    userValue: readUserValue(params.message),
+  };
 }
 
 /**

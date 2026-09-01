@@ -253,8 +253,89 @@ function nonEmpty(value: unknown): string | null {
 }
 
 /**
- * ⭐⭐ THE PAIR THE PRODUCT IS CURRENTLY ASKING ABOUT — `blockers[0]`, and the
- * identity of that index is DERIVED FROM THE PRODUCER, not chosen here (P7).
+ * ⭐⭐⭐ WHICH PAIR DID THE PRODUCT ITSELF ASK ABOUT? — read off the RECORD, not
+ * guessed from a list position.
+ *
+ * THE DEFECT, captured 1 Sep 2026 on deployed staging (turn 2 of four). CEE had
+ * asked for the missing effect value of ONE option on ONE factor. The user
+ * replied, and the product answered *"I haven't changed anything, because I'm
+ * not sure which option you mean. <A> and <B> are both still missing their
+ * effect on <factor>…"* — having asked about exactly one of them, one turn
+ * earlier, and having WRITTEN DOWN which one.
+ *
+ * The `elicit_option_effect` pending carries the exact `(option_id, factor_id)`.
+ * Nothing on the refusal path read it: {@link deriveAskedEffectPair} resolved
+ * the asked pair as `blockers.slice(0, 1)`, and `findOutstandingEffectAskCollision`
+ * built its candidate set from EVERY outstanding pair. The product held the
+ * answer to its own question and did not consult it.
+ *
+ * ⭐ TWO AUTHORITIES, TWO QUESTIONS, NAMED APART (trap 21) — and BOTH are
+ * required, which is why this is a conjunction rather than a replacement:
+ *   · the PENDING answers *"which cell did we ask about?"*. It is a RECORD.
+ *     Nothing else in the system can answer it, and the blocker order certainly
+ *     cannot — `blockers[]` has no defined order.
+ *   · READINESS answers *"is that cell still missing?"*. A pending must never
+ *     outlive the fact: if the value was written between the ask and this turn,
+ *     the record is a true record of a question that no longer stands, and
+ *     binding to it would be answering a question nobody is still asking.
+ * So a recorded pair is claimed ONLY when the readiness authority still lists it
+ * as missing; otherwise this returns null and every caller keeps today's route.
+ *
+ * ⚠ IT REFUSES ON TWO LIVE ASKS RATHER THAN PICKING ONE. Two live
+ * `elicit_option_effect` rows mean the product genuinely asked two questions, and
+ * a reply is genuinely ambiguous between them — the estate's ruling for that
+ * state is to ask, never to guess (trap 22f).
+ *
+ * ⚠ THE LABELS COME FROM READINESS, NOT FROM THE PENDING. The pending's labels
+ * are frozen at ask time; the blocker's are the live model's. Since the copy the
+ * user reads is composed from the same readiness payload, taking labels from the
+ * record could put a stale name in a sentence about a current fact. The pending
+ * supplies IDENTITY; readiness supplies the words.
+ */
+export function deriveRecordedEffectAsk(params: {
+  readonly readiness: { readonly blockers?: unknown } | null | undefined;
+  readonly pendings: readonly PendingAction[] | null | undefined;
+  readonly nowMs: number;
+}): MissingEffectPair | null {
+  const pendings = params.pendings;
+  if (!Array.isArray(pendings) || pendings.length === 0) return null;
+  const asks = filterLivePendingActions(pendings, params.nowMs).filter(
+    (pa) => pa.action.kind === 'elicit_option_effect',
+  );
+  // Exactly one, or the reply is genuinely ambiguous and this must not choose.
+  if (asks.length !== 1) return null;
+  const asked = asks[0]!.action;
+  if (asked.kind !== 'elicit_option_effect') return null;
+  const optionId = nonEmpty(asked.option_id);
+  const factorId = nonEmpty(asked.factor_id);
+  if (!optionId || !factorId) return null;
+  return (
+    deriveMissingEffectPairs(params.readiness).find(
+      (pair) => pair.optionId === optionId && pair.factorId === factorId,
+    ) ?? null
+  );
+}
+
+/**
+ * ⭐⭐ THE PAIR THE PRODUCT IS CURRENTLY ASKING ABOUT.
+ *
+ * ⚠⚠ AMENDED 1 Sep 2026, AND THE AMENDED SENTENCE IS RECORDED RATHER THAN
+ * QUIETLY REPLACED (trap 14). This header read *"`blockers[0]`, and the
+ * identity of that index is DERIVED FROM THE PRODUCER"*, and concluded below
+ * that *"which pair did Olumi ask about?" has ONE answer in this system and it
+ * is the head of the blocker list*. **That conclusion is false.** The
+ * derivation it rests on is sound about the COMPOSER — `readiness-recovery.ts`
+ * really does render the head — but the head is a position in a list with no
+ * defined order, so it answers *"which pair would the composer render IF it
+ * rendered one NOW?"*, never *"which pair did we actually ask about?"*. The
+ * system does hold that second answer, in the `elicit_option_effect` pending,
+ * and nothing read it: on 1 Sep 2026 the product asked about one option and
+ * then told the user it was not sure which option they meant.
+ *
+ * {@link deriveRecordedEffectAsk} above is that reader. This function now
+ * PREFERS it when the caller supplies the record, and falls back to the head
+ * only when there is no live one. Everything below remains true OF THE
+ * FALLBACK, which is why it is kept verbatim rather than deleted.
  *
  * `coaching/readiness-recovery.ts` composes the sentence the user is answering
  * from exactly one element:
@@ -292,9 +373,29 @@ function nonEmpty(value: unknown): string | null {
  */
 export function deriveAskedEffectPair(
   readiness: { readonly blockers?: unknown } | null | undefined,
+  /**
+   * ⭐ THE PRODUCT'S OWN RECORD OF WHAT IT ASKED, when the caller holds it.
+   *
+   * OPTIONAL, and omitting it is BYTE-IDENTICAL to the pre-1-Sep behaviour —
+   * deliberately, because this function's six existing consumers resolve their
+   * antecedent from the USER'S OWN PROSE and changing which pair they bind is a
+   * WRITE-path change with its own blast radius. They are not moved here.
+   */
+  askRecord?: {
+    readonly pendings: readonly PendingAction[] | null | undefined;
+    readonly nowMs: number;
+  },
 ): MissingEffectPair | null {
   const blockers = readiness?.blockers;
   if (!Array.isArray(blockers) || blockers.length === 0) return null;
+  if (askRecord !== undefined) {
+    const recorded = deriveRecordedEffectAsk({
+      readiness,
+      pendings: askRecord.pendings,
+      nowMs: askRecord.nowMs,
+    });
+    if (recorded !== null) return recorded;
+  }
   const head = deriveMissingEffectPairs({ blockers: blockers.slice(0, 1) });
   return head.length === 1 ? head[0]! : null;
 }
