@@ -2,17 +2,18 @@
  * #1281 + #1273 composition: a generic decision-label marker must not survive
  * an authoritative user rename.
  *
- * This deliberately crosses the real semantic transitions rather than testing
- * a hand-built renamed node in isolation:
+ * This crosses the real in-process semantic transitions rather than testing a
+ * hand-built renamed node in isolation:
  *
- * records -> draft projector -> V1/V3 lift -> persisted GraphV3 read
- *         -> real structural_rename dispatcher -> commit projection/readback
- *         -> returned draft_graph + JSON reload.
+ * records -> draft projector -> V1/V3 lift -> mocked authoritative reads
+ *         -> real structural_rename adapter/dispatcher
+ *         -> mocked commit contract using the real persistence projector
+ *         -> returned draft_graph -> JSON round-trip.
  *
- * The store is the only mocked boundary. Its mock serialises the graph handed
- * to `commitDirectAnswer`, projects it exactly as the commit chokepoint does,
- * and returns those bytes as the commit receipt. The rename adapter and
- * dispatcher are production code.
+ * There is no real database append or post-commit SELECT readback here. The
+ * commit mock serialises and projects the graph it receives, then returns those
+ * bytes under the real commit-result contract. The rename adapter, dispatcher,
+ * and persistence projector are production code.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
