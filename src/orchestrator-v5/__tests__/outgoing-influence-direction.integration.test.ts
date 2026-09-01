@@ -240,7 +240,11 @@ describe('the safety verdicts and the authored-prose licence are unchanged', () 
   it('still refuses the witnessed SHORTHAND — the subject-binding gap is not silently closed here', async () => {
     const text = await drive(WITNESSED_Q1, { kind: 'outgoing_influence', element_id: 'fit' });
 
-    expect(text).toContain('I could not tell which part of your model you are asking about');
+    // The refusal's WORDS moved (the whole-model copy lane): it no longer claims
+    // a comprehension failure, because the same branch also serves a user who
+    // asked about the model as a whole and was perfectly clear. The VERDICT and
+    // the direction clause are unchanged, and those are what this test guards.
+    expect(text).toContain('That question did not pin down a single part of your model');
     expect(text).toContain('so I will not guess at what it affects');
     for (const label of [INVESTOR_LABEL, TRACTION_LABEL, GOAL_LABEL]) {
       expect(text, 'a refusal must name no canonical element').not.toContain(label);

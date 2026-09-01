@@ -330,14 +330,19 @@ describe('explain_from_structure — answer-carrying contract', () => {
         status: 'ambiguous', subject_selection: 'single_resolved',
       },
     });
-    expect(marked.assistant_text.toLowerCase()).not.toContain('name it, or select it');
+    // The unmarked branch's instruction was reworded by the whole-model copy
+    // lane ("name it" → "name that part exactly as it appears in your model").
+    // Both halves of this guard track the CURRENT phrase, so the marked/unmarked
+    // discrimination stays real instead of decaying into a check for a string
+    // that no longer exists anywhere.
+    expect(marked.assistant_text.toLowerCase()).not.toContain('select it on the canvas');
     expect(marked.assistant_text).toContain('will not guess at what connects to it');
     // In-suite CONTRAST: the unmarked verdict still carries the instruction.
     const unmarked = await handler({
       ...makeInvocation(),
       selectedDependenciesEvidence: { status: 'ambiguous' },
     });
-    expect(unmarked.assistant_text).toContain('name it, or select it on the canvas');
+    expect(unmarked.assistant_text).toContain('select it on the canvas');
   });
 
   it('selected neighbourhood ambiguity and unavailable coverage fail weak instead of restoring authored prose', async () => {
