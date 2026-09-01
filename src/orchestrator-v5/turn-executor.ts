@@ -14215,8 +14215,14 @@ export async function runTurnExecutor(
     // Read this before rewording any string below. EVERY path into this
     // helper is a MODEL-OUTPUT failure — `commitBoundedRoutingFallback`
     // (`schema_repair_failed` / `empty_response` / `unexpected_stop_reason`,
-    // the last being max_tokens on BOTH the 2048 call and the escalated 8192
-    // retry) and the three empty-composed-answer backstops (coach branch,
+    // the last being max_tokens on BOTH the initial `V5_ROUTING_MAX_OUTPUT_TOKENS`
+    // call and the escalated `V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY` retry — 3072
+    // and 8192 respectively, read at `routing/route-with-tool-use.ts:61` and
+    // `:75` on 2026-09-02; cite the SYMBOLS, not the digits, because an earlier
+    // draft of this comment carried 2048 from a superseded cap and propagated
+    // it into three other documents. The literals are pinned by
+    // `routing/__tests__/routing-max-tokens-caps.test.ts`)
+    // and the three empty-composed-answer backstops (coach branch,
     // converse branch, STEP 7). NOT ONE of them is caused, or cured, by the
     // state of the analysis.
     //

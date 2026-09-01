@@ -15,6 +15,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import { setTestSink } from '../../utils/telemetry.js';
+import { V5_ROUTING_MAX_OUTPUT_TOKENS } from '../routing/route-with-tool-use.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { makeMessagePayload } from './fixtures.js';
 
@@ -488,7 +489,14 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
       .mockResolvedValue({
         content: [{ type: 'text', text: 'Partial answer cut off at...' }],
         stop_reason: 'max_tokens',
-        usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],
+        // The first attempt burns exactly its budget when it truncates. IMPORTED,
+        // never typed in: this literal read 2048 — a cap superseded before this
+        // test was last touched (`V5_ROUTING_MAX_OUTPUT_TOKENS` is 3072 at
+        // `routing/route-with-tool-use.ts:61`, read 2026-09-02).
+        usage: {
+          input_tokens: 10,
+          output_tokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
+        } as unknown as ChatWithToolsResult['usage'],
         model: 'claude-sonnet-4-6',
         latencyMs: 200,
       });
@@ -514,8 +522,18 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
 
     // Stale-safe copy: must NOT promise the current analysis is
     // still available; must name the staleness.
-    expect(result.response.assistant_text).not.toContain(
-      'your current analysis is still available',
+    //
+    // ⚠ CASE-INSENSITIVE DELIBERATELY. This PR recased the fresh-branch
+    // sentence to `Your current analysis is still available…` (the remedy
+    // clause now precedes it, so it is sentence-initial), which silently
+    // HOLLOWED the case-sensitive `not.toContain` that stood here: a negative
+    // assertion that stops matching stays GREEN, so the stale branch could
+    // have emitted the fresh copy verbatim and this guard would have applauded.
+    // The sibling positive assertion at the fresh test below failed loudly on
+    // the same recasing and was fixed; this one could not, which is exactly
+    // why negative guards need matching that survives cosmetic edits.
+    expect(result.response.assistant_text).not.toMatch(
+      /your current analysis is still available/i,
     );
     expect(result.response.assistant_text).toContain(
       'model has changed since the last analysis',
@@ -561,7 +579,14 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
       .mockResolvedValue({
         content: [{ type: 'text', text: 'Partial answer cut off at...' }],
         stop_reason: 'max_tokens',
-        usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],
+        // The first attempt burns exactly its budget when it truncates. IMPORTED,
+        // never typed in: this literal read 2048 — a cap superseded before this
+        // test was last touched (`V5_ROUTING_MAX_OUTPUT_TOKENS` is 3072 at
+        // `routing/route-with-tool-use.ts:61`, read 2026-09-02).
+        usage: {
+          input_tokens: 10,
+          output_tokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
+        } as unknown as ChatWithToolsResult['usage'],
         model: 'claude-sonnet-4-6',
         latencyMs: 200,
       });

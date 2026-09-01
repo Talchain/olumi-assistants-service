@@ -9,8 +9,12 @@
  *     `RoutingError.cause`): `schema_repair_failed` | `empty_response` |
  *     `unexpected_stop_reason`. The last of these is `tryInterpret`
  *     (routing/route-with-tool-use.ts) classifying `stop_reason ===
- *     'max_tokens'` on BOTH the initial 2048-token call and the escalated
- *     8192-token retry.
+ *     'max_tokens'` on BOTH the initial `V5_ROUTING_MAX_OUTPUT_TOKENS` call
+ *     and the escalated `V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY` retry — 3072 and
+ *     8192 respectively, read at `routing/route-with-tool-use.ts:61` and `:75`
+ *     on 2026-09-02. An earlier draft of this file said 2048, a cap that was
+ *     superseded before this suite existed, so both budgets are now IMPORTED
+ *     and asserted below rather than described in prose (`expectDoubleExhaustion`).
  *   - the coach-branch empty-answer recovery,
  *   - the converse-branch empty-answer recovery,
  *   - the STEP 7 unconditional empty-answer backstop.
@@ -45,6 +49,10 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { setTestSink } from '../../utils/telemetry.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import {
+  V5_ROUTING_MAX_OUTPUT_TOKENS,
+  V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY,
+} from '../routing/route-with-tool-use.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -195,7 +203,11 @@ function mkPayload(message: string): MessageTurnPayload {
 
 /** Both routing calls end `stop_reason: 'max_tokens'` → `tryInterpret`
  *  returns non_repairable `unexpected_stop_reason` → the bounded routing
- *  fallback. This is the live-witnessed failure cause. */
+ *  fallback. This is the live-witnessed failure cause.
+ *
+ *  `output_tokens` is the IMPORTED first-call cap, not a typed-in number: a
+ *  truncated first attempt burns exactly its budget, and a hardcoded literal
+ *  here is how the superseded 2048 figure survived a cap change. */
 function maxTokensAdapter() {
   return {
     chatWithTools: vi
@@ -203,11 +215,41 @@ function maxTokensAdapter() {
       .mockResolvedValue({
         content: [{ type: 'text', text: 'Partial answer cut off at...' }],
         stop_reason: 'max_tokens',
-        usage: { input_tokens: 10, output_tokens: 2048 } as unknown as ChatWithToolsResult['usage'],
+        usage: {
+          input_tokens: 10,
+          output_tokens: V5_ROUTING_MAX_OUTPUT_TOKENS,
+        } as unknown as ChatWithToolsResult['usage'],
         model: 'claude-sonnet-4-6',
         latencyMs: 200,
       }),
   };
+}
+
+/**
+ * The retry path this suite NAMES, asserted rather than assumed.
+ *
+ * `stop_reason: 'max_tokens'` on the first call makes `routeWithToolUse` retry
+ * ONCE at the escalated budget; only when that second call ALSO ends
+ * `max_tokens` does `tryInterpret` classify `unexpected_stop_reason` and the
+ * bounded fallback fire. Without this, the suite's commentary described a
+ * two-call double-exhaustion that nothing in it bound: the mocked
+ * `usage.output_tokens` is a RESPONSE field and constrains neither budget, so
+ * a single-call failure shape would have satisfied every assertion.
+ *
+ * Both budgets are IMPORTED from the producer — the literal values live in
+ * exactly one place, `routing/__tests__/routing-max-tokens-caps.test.ts`.
+ */
+function expectDoubleExhaustion(adapter: ReturnType<typeof maxTokensAdapter>): void {
+  // Precondition for the pair below: if the two caps were ever equal, the two
+  // budget assertions would agree with each other while discriminating
+  // nothing. Pin it in-test (trap 13b) rather than trusting the constants.
+  expect(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY).toBeGreaterThan(V5_ROUTING_MAX_OUTPUT_TOKENS);
+
+  expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+  const firstArgs = adapter.chatWithTools.mock.calls[0]![0];
+  const retryArgs = adapter.chatWithTools.mock.calls[1]![0];
+  expect(firstArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS);
+  expect(retryArgs.maxTokens).toBe(V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY);
 }
 
 type Event = { event: string; data: Record<string, unknown> };
@@ -266,6 +308,7 @@ describe('turn-executor — the bounded routing-failure copy names the TRUE unbl
     expect(findBoundedFallbackEvent()?.data.routing_error_cause).toBe(
       'unexpected_stop_reason',
     );
+    expectDoubleExhaustion(adapter);
 
     const text = result.response.assistant_text;
     // The failure is still disclosed, not papered over.
@@ -302,6 +345,7 @@ describe('turn-executor — the bounded routing-failure copy names the TRUE unbl
     expect(findBoundedFallbackEvent()?.data.routing_error_cause).toBe(
       'unexpected_stop_reason',
     );
+    expectDoubleExhaustion(adapter);
 
     const text = result.response.assistant_text;
     expect(text).toContain("I couldn't complete that turn cleanly");
@@ -310,7 +354,17 @@ describe('turn-executor — the bounded routing-failure copy names the TRUE unbl
     expect(text.toLowerCase()).toContain('still available');
     // A fresh analysis has nothing to refresh, so this branch must NOT
     // instruct a re-run: that would be the same false-remedy defect mirrored.
+    //
+    // ⚠ Excluding only the change-assertion is NOT enough, and that was the
+    // shape of the gap here. `has changed` is the CAVEAT; the harm is the
+    // INSTRUCTION. A fresh-copy regression reading "…Ask me again. Re-run
+    // analysis to be sure." asserts no change and would have passed the line
+    // above while committing the exact defect this suite exists to pin, so
+    // the re-run instruction gets its own negative assertion — and so does
+    // the staleness claim it usually travels with.
     expect(text).not.toMatch(/has changed/i);
+    expect(text.toLowerCase()).not.toMatch(/re-?run analysis/);
+    expect(text.toLowerCase()).not.toContain('out of date');
   });
 
   it('UNCONFIRMED CURRENCY + routing max_tokens failure: names asking again, still refuses to assert a change', async () => {
@@ -334,6 +388,7 @@ describe('turn-executor — the bounded routing-failure copy names the TRUE unbl
     expect(findBoundedFallbackEvent()?.data.routing_error_cause).toBe(
       'unexpected_stop_reason',
     );
+    expectDoubleExhaustion(adapter);
 
     const text = result.response.assistant_text;
     expect(text).toContain("I couldn't complete that turn cleanly");
@@ -362,6 +417,7 @@ describe('turn-executor — the bounded routing-failure copy names the TRUE unbl
     );
 
     expect(findPreHandlerFreshnessEvent()?.data.freshness).toBe('none');
+    expectDoubleExhaustion(adapter);
     expect(result.response.assistant_text).toBe(
       "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.",
     );
