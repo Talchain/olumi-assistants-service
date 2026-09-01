@@ -199,7 +199,11 @@ import {
   isTypedChipMutationActionType,
   type TypedChipGraphView,
 } from './routing/typed-chip-mutation-proposal.js';
-import { deriveAnswerTextFromShape, type AnswerShape } from './routing/answer-shape.js';
+import {
+  classifyAnswerShape,
+  deriveAnswerTextFromShape,
+  type AnswerShape,
+} from './routing/answer-shape.js';
 import {
   projectGroundedSelection,
   type GroundedSelection,
@@ -11679,6 +11683,7 @@ export async function runTurnExecutor(
           headline_length: capturedAnswerShape.headline.length,
           bullet_count: capturedAnswerShape.bullets.length,
           detail_length: capturedAnswerShape.detail.length,
+          answer_shape_kind: classifyAnswerShape(capturedAnswerShape),
         });
       }
     } else {
@@ -11837,6 +11842,7 @@ export async function runTurnExecutor(
           headline_length: capturedAnswerShape.headline.length,
           bullet_count: capturedAnswerShape.bullets.length,
           detail_length: capturedAnswerShape.detail.length,
+          answer_shape_kind: classifyAnswerShape(capturedAnswerShape),
         });
       }
     }
