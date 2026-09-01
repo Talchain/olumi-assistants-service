@@ -262,7 +262,11 @@ describe('a wrong-slot factor write is refused at the turn level', () => {
       message: 'Set it to a third.',
     });
 
-    await runTurnExecutor(payload, 'req-oea-pending', { routingAdapter, graphState: graph });
+    const factorBefore = JSON.stringify(graph.nodes.find((n) => n.id === ASKED_FACTOR));
+    const { response } = await runTurnExecutor(payload, 'req-oea-pending', {
+      routingAdapter,
+      graphState: graph,
+    });
 
     // The obligation survives BY IDENTITY. A refusal that quietly satisfied the
     // ask would be the same lie one level down: the user would believe the
@@ -277,6 +281,25 @@ describe('a wrong-slot factor write is refused at the turn level', () => {
       | undefined;
     const interventions = JSON.stringify(option?.interventions ?? null);
     expect(interventions).not.toContain(ASKED_FACTOR);
+
+    // ⭐⭐⭐ THE CONJUNCTION IS THE REQUIREMENT, AND ON ITS OWN THE SURVIVAL
+    // ASSERTION ABOVE IS A GUARD AGREEING WITH ITSELF — measured, not reasoned.
+    //
+    // Under the mutant that disables the guard entirely, every assertion above
+    // still PASSES. That is not a flaw in the mutant: in the witnessed defect
+    // the obligation ALSO survived — the product wrote the factor's own
+    // baseline, which is not the option's lever, so `options_ready` stayed 0/4
+    // and the ask was re-asked. "Still pending" is therefore true in BOTH the
+    // fixed and the broken world, and a test asserting only that cannot tell
+    // them apart.
+    //
+    // What distinguishes them is the PAIRING the requirement actually states:
+    // the request is still pending AND nothing was written AND nothing was
+    // claimed. The defect satisfied the first and violated the other two. So
+    // the two conjuncts below are what give this test its discriminating power,
+    // and removing them would leave a test that passes on the defect.
+    expect(JSON.stringify(graph.nodes.find((n) => n.id === ASKED_FACTOR))).toBe(factorBefore);
+    expect(response.assistant_text).not.toContain('33%');
   });
 });
 
