@@ -9302,6 +9302,9 @@ export async function runTurnExecutor(
               entityId: action.entity.id,
               message: userMessageForTurn ?? '',
               optionLabels: outstandingEffectAskOptionLabels(),
+              nonOptionLabels: graphLookupForValidate
+                ? collectOptionGuardLabels(graphLookupForValidate).nonOptionLabels
+                : [],
               readiness: readOutstandingEffectAskReadiness(),
               chipOriginated: turnIsChipOriginated,
               recordedAsk: readOutstandingEffectAskRecordedPair(),
@@ -9383,6 +9386,9 @@ export async function runTurnExecutor(
               entityId: action.entity.id,
               message: userMessageForTurn ?? '',
               optionLabels: outstandingEffectAskOptionLabels(),
+              nonOptionLabels: graphLookupForValidate
+                ? collectOptionGuardLabels(graphLookupForValidate).nonOptionLabels
+                : [],
               readiness: readOutstandingEffectAskReadiness(),
               chipOriginated: turnIsChipOriginated,
               recordedAsk: readOutstandingEffectAskRecordedPair(),

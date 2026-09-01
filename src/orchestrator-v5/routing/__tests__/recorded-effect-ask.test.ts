@@ -35,9 +35,10 @@
  *
  * ── DIRECTION OF THE CHANGE, STATED
  * At the misroute the recorded ask can only NARROW an ALREADY-AMBIGUOUS set to
- * the one member the product itself named. It cannot widen one, cannot create a
- * collision, cannot delete one, and cannot alter a set that already has exactly
- * one member. Every one of those directions is cased below.
+ * the one member the product itself named. A later current-turn option identity
+ * outranks that older record; when the current turn points outside the collision
+ * the record is suppressed rather than replayed. Neither authority can widen or
+ * create a collision. Every direction is cased below.
  *
  * ── FIXTURE SCOPE, DECLARED (trap 16: a fixture I wrote is not evidence about
  * the wire). The identities are the 20 Aug 2026 fresh-guest capture's, verbatim,
@@ -49,6 +50,8 @@
  * TRAP 19 — every assertion binds by IDENTITY (exact option_id, exact
  * factor_id), never by a value predicate another pair could satisfy.
  */
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -57,6 +60,7 @@ import {
 } from '../repair-value-binding.js';
 import {
   buildOutstandingEffectAskDetails,
+  buildVerifiedCorrectionReplay,
   findOutstandingEffectAskCollision,
 } from '../outstanding-effect-ask-misroute.js';
 import type { PendingAction } from '../../session/pending-action.js';
@@ -160,6 +164,22 @@ const ASKED_ENTERPRISE = (): readonly PendingAction[] => [
 
 const identity = (p: { optionId: string; factorId: string } | null): string | null =>
   p === null ? null : `${p.optionId}::${p.factorId}`;
+
+const REPLAY_CAPTURE = JSON.parse(
+  readFileSync(
+    new URL(
+      '../../__tests__/fixtures/witness-2026-08-18/model-compiler-option-effect.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ),
+) as {
+  draft_graph: {
+    nodes: Array<{ id: string; kind: string; label: string }>;
+    edges: Array<Record<string, unknown>>;
+  };
+  ids: Record<string, string>;
+};
 
 // ---------------------------------------------------------------------------
 describe('deriveRecordedEffectAsk — the product’s own record of what it asked', () => {
@@ -284,18 +304,24 @@ describe('deriveAskedEffectPair — the record outranks the positional heuristic
     ).toBeNull();
   });
 
-  it('⭐ OPPOSITE DIRECTION — an empty / expired / ambiguous record falls back to the head, never to null', () => {
+  it('⭐ THE AUTHORITY BOUNDARY — an inspected empty / expired / ambiguous record never guesses blockers[0]', () => {
+    expect(deriveAskedEffectPair(readiness(), { pendings: [], nowMs: NOW_MS })).toBeNull();
     expect(
-      identity(deriveAskedEffectPair(readiness(), { pendings: [], nowMs: NOW_MS })),
-    ).toBe(`${OPT_ACQUIRE}::${FAC_ACQUIRE}`);
+      deriveAskedEffectPair(readiness(), {
+        pendings: [
+          elicit(OPT_SELF_SERVE, OPT_SELF_SERVE_LABEL, FAC_SELF_SERVE, FAC_SELF_SERVE_LABEL, {
+            expires_at_iso: '2026-09-01T11:00:00.000Z',
+          }),
+        ],
+        nowMs: NOW_MS,
+      }),
+    ).toBeNull();
     expect(
-      identity(
-        deriveAskedEffectPair(readiness(), {
-          pendings: [...ASKED_SELF_SERVE(), ...ASKED_ENTERPRISE()],
-          nowMs: NOW_MS,
-        }),
-      ),
-    ).toBe(`${OPT_ACQUIRE}::${FAC_ACQUIRE}`);
+      deriveAskedEffectPair(readiness(), {
+        pendings: [...ASKED_SELF_SERVE(), ...ASKED_ENTERPRISE()],
+        nowMs: NOW_MS,
+      }),
+    ).toBeNull();
   });
 });
 
@@ -313,6 +339,7 @@ describe('the misroute refusal names the option the product asked about', () => 
       entityId: opts?.entityId ?? FAC_SELF_SERVE,
       message: opts?.message ?? TYPED,
       optionLabels: OPTION_LABELS,
+      nonOptionLabels: [FAC_SELF_SERVE_LABEL, FAC_ACQUIRE_LABEL],
       readiness: readiness(),
       chipOriginated: opts?.chipOriginated ?? false,
       recordedAsk,
@@ -343,6 +370,73 @@ describe('the misroute refusal names the option the product asked about', () => 
     expect(buildOutstandingEffectAskDetails(hit, null).effect_ask_option_labels).toEqual([
       OPT_ENTERPRISE_LABEL,
     ]);
+  });
+
+  it('⭐ P1 — a current turn explicitly naming option B outranks the stale recorded ask for A', () => {
+    const hit = collide(recorded(ASKED_SELF_SERVE()), {
+      message:
+        `For ${OPT_ENTERPRISE_LABEL}, let's make it 50% until I've had a chance to vet it more thoroughly.`,
+    });
+    expect(hit).not.toBeNull();
+    expect(hit!.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
+      `${OPT_ENTERPRISE}::${FAC_SELF_SERVE}`,
+    ]);
+    expect(buildOutstandingEffectAskDetails(hit, null).effect_ask_option_labels).toEqual([
+      OPT_ENTERPRISE_LABEL,
+    ]);
+  });
+
+  it('⭐ OPPOSITE TWIN — the genuinely elliptical answer still narrows to recorded option A', () => {
+    const hit = collide(recorded(ASKED_SELF_SERVE()), {
+      message: "Let's make it 50% until I've had a chance to vet it more thoroughly.",
+    });
+    expect(hit).not.toBeNull();
+    expect(hit!.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
+      `${OPT_SELF_SERVE}::${FAC_SELF_SERVE}`,
+    ]);
+  });
+
+  it('⭐ REPLAY CONSEQUENCE — explicit B can never produce a verified correction payload for stale A', () => {
+    const graph = JSON.parse(
+      JSON.stringify(REPLAY_CAPTURE.draft_graph),
+    ) as typeof REPLAY_CAPTURE.draft_graph;
+    const factorId = REPLAY_CAPTURE.ids.factor_id!;
+    const factorLabel = REPLAY_CAPTURE.ids.factor_label!;
+    const optionA = graph.nodes.find((n) => n.id === 'e755ec33')!;
+    const optionB = graph.nodes.find((n) => n.id === REPLAY_CAPTURE.ids.option_id)!;
+    optionA.label = 'Invest in self-serve product';
+    const replayReadiness = {
+      blockers: [optionA, optionB].map((option) => ({
+        code: 'MISSING_OPTION_VALUE',
+        option_id: option.id,
+        option_label: option.label,
+        factor_id: factorId,
+        factor_label: factorLabel,
+      })),
+    };
+    const hit = findOutstandingEffectAskCollision({
+      handlerId: 'set_factor_value',
+      entityId: factorId,
+      message: `For ${optionB.label}, set it to 0.5.`,
+      optionLabels: graph.nodes.filter((n) => n.kind === 'option').map((n) => n.label),
+      nonOptionLabels: graph.nodes.filter((n) => n.kind !== 'option').map((n) => n.label),
+      readiness: replayReadiness,
+      chipOriginated: false,
+      recordedAsk: {
+        optionId: optionA.id,
+        optionLabel: optionA.label,
+        factorId,
+        factorLabel,
+      },
+    });
+    expect(hit).not.toBeNull();
+    expect(hit!.pairs.map((p) => p.optionId)).toEqual([optionB.id]);
+
+    const replay = buildVerifiedCorrectionReplay(hit!, graph);
+    expect(replay).not.toBeNull();
+    expect(replay).toContain(optionB.label);
+    expect(replay).not.toContain(optionA.label);
+    expect(buildOutstandingEffectAskDetails(hit, replay).effect_ask_replay_message).toBe(replay);
   });
 
   it('⭐ the same narrowing on a CHIP-ORIGINATED turn, where identity is the only conjunct', () => {
@@ -383,6 +477,7 @@ describe('the misroute refusal names the option the product asked about', () => 
       entityId: FAC_ACQUIRE,
       message: `Set its effect on ${FAC_ACQUIRE_LABEL} to 0.5`,
       optionLabels: OPTION_LABELS,
+      nonOptionLabels: [FAC_SELF_SERVE_LABEL, FAC_ACQUIRE_LABEL],
       readiness: readiness(),
       chipOriginated: false,
       recordedAsk: recorded(ASKED_SELF_SERVE()),

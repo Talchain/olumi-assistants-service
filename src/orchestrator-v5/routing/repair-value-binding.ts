@@ -332,9 +332,11 @@ export function deriveRecordedEffectAsk(params: {
  * and nothing read it: on 1 Sep 2026 the product asked about one option and
  * then told the user it was not sure which option they meant.
  *
- * {@link deriveRecordedEffectAsk} above is that reader. This function now
- * PREFERS it when the caller supplies the record, and falls back to the head
- * only when there is no live one. Everything below remains true OF THE
+ * {@link deriveRecordedEffectAsk} above is that reader. Supplying `askRecord`
+ * means the caller HAS inspected that authority: exactly one live record
+ * resolves, while empty, expired or ambiguous records return null rather than
+ * guessing from blocker order. Only callers that OMIT the record retain the
+ * legacy head fallback. Everything below remains true OF THAT OMITTED-RECORD
  * FALLBACK, which is why it is kept verbatim rather than deleted.
  *
  * `coaching/readiness-recovery.ts` composes the sentence the user is answering
@@ -380,6 +382,8 @@ export function deriveAskedEffectPair(
    * deliberately, because this function's six existing consumers resolve their
    * antecedent from the USER'S OWN PROSE and changing which pair they bind is a
    * WRITE-path change with its own blast radius. They are not moved here.
+   * Supplying it is an authoritative inspection, including when the inspection
+   * finds no unique live ask; null must not be converted back into blockers[0].
    */
   askRecord?: {
     readonly pendings: readonly PendingAction[] | null | undefined;
@@ -389,12 +393,11 @@ export function deriveAskedEffectPair(
   const blockers = readiness?.blockers;
   if (!Array.isArray(blockers) || blockers.length === 0) return null;
   if (askRecord !== undefined) {
-    const recorded = deriveRecordedEffectAsk({
+    return deriveRecordedEffectAsk({
       readiness,
       pendings: askRecord.pendings,
       nowMs: askRecord.nowMs,
     });
-    if (recorded !== null) return recorded;
   }
   const head = deriveMissingEffectPairs({ blockers: blockers.slice(0, 1) });
   return head.length === 1 ? head[0]! : null;

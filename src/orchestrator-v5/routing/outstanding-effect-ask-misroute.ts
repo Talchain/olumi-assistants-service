@@ -132,6 +132,7 @@ import {
 import {
   BASELINE_FRAMING,
   EFFECT_FRAMED_TRIGGERS,
+  normaliseOptionLabel,
   readOptionEffectValue,
   resolveOptionEffectWrite,
 } from './option-effect-write.js';
@@ -142,7 +143,7 @@ import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value
 //   · "does this message name this label?" — the same word-bounded reader
 //     `configure-option-intent` / `-advice` / `-clarify` already use.
 import { messageAnswersMissingValueAsk, readMissingValueAnswer } from './missing-value-answer.js';
-import { containsPhrase } from './option-intervention-guard.js';
+import { containsPhrase, optionCueMatches } from './option-intervention-guard.js';
 
 /** The handlers this module can refuse. Both are D1 graph-mutating writers. */
 export type OutstandingEffectAskHandlerId = 'set_factor_value' | 'adjust_edge_strength';
@@ -566,12 +567,50 @@ function narrowToRecordedAsk(
   return named.length === 1 ? named : pairs;
 }
 
+/**
+ * The current turn outranks an older recorded ask when it identifies an
+ * option. Identity comes from `optionCueMatches`, the same reader used by the
+ * option-effect writer; this guard does not classify the prose a second time.
+ *
+ * A current reference can only narrow to outstanding members. If it points at
+ * no member, the collision is suppressed so the caller's ordinary
+ * option-intervention refusal can handle the turn without minting a replay for
+ * the stale record. Two current references remain two candidates: the older
+ * record must never break a tie the user introduced on this turn.
+ */
+function narrowToCurrentOrRecordedAsk(
+  pairs: readonly MissingEffectPair[],
+  recordedAsk: MissingEffectPair | null,
+  message: string,
+  optionLabels: readonly string[],
+  nonOptionLabels: readonly string[],
+): readonly MissingEffectPair[] | null {
+  const prior = recordedAsk ?? null;
+  if (prior !== null && pairs.length > 0) {
+    const currentKeys = new Set(
+      optionCueMatches(message, optionLabels, nonOptionLabels)
+        .map((index) => optionLabels[index])
+        .filter((label): label is string => typeof label === 'string')
+        .map(normaliseOptionLabel),
+    );
+    if (currentKeys.size > 0) {
+      const current = pairs.filter((pair) =>
+        currentKeys.has(normaliseOptionLabel(pair.optionLabel)),
+      );
+      return current.length > 0 ? current : null;
+    }
+  }
+  return narrowToRecordedAsk(pairs, prior);
+}
+
 export function findOutstandingEffectAskCollision(params: {
   readonly handlerId: OutstandingEffectAskHandlerId;
   /** `proposal.entity.id`: a node id, or the `from→to` edge form. */
   readonly entityId: string;
   readonly message: string;
   readonly optionLabels: readonly string[];
+  /** Non-option graph labels used by the shared option-identity reader. */
+  readonly nonOptionLabels?: readonly string[];
   readonly readiness: { readonly blockers?: unknown } | null | undefined;
   /**
    * ⭐ Is `message` the PRODUCT'S OWN CHIP COPY rather than the user's prose?
@@ -590,6 +629,8 @@ export function findOutstandingEffectAskCollision(params: {
    * REQUIRED rather than optional, for the same reason `chipOriginated` is: an
    * omitted argument would silently restore the hole it closes, so the compiler
    * is made to point at every caller instead (trap 12 — fail loud on drift).
+   * On free-typed prose, a current option identity resolved by the existing
+   * option-cue reader outranks this older record.
    */
   readonly recordedAsk: MissingEffectPair | null;
 }): OutstandingEffectAskCollision | null {
@@ -605,10 +646,17 @@ export function findOutstandingEffectAskCollision(params: {
     const match = pairs.filter(
       (p) => p.optionId === parsed.from && p.factorId === parsed.to,
     );
-    return match.length > 0
+    const narrowed = narrowToCurrentOrRecordedAsk(
+      match,
+      params.recordedAsk,
+      params.message,
+      params.optionLabels,
+      params.nonOptionLabels ?? [],
+    );
+    return narrowed !== null && narrowed.length > 0
       ? {
           refusedField: 'edge_strength',
-          pairs: narrowToRecordedAsk(match, params.recordedAsk),
+          pairs: narrowed,
           userValue: readUserValue(params.message),
         }
       : null;
@@ -687,9 +735,17 @@ export function findOutstandingEffectAskCollision(params: {
   // `match` is non-empty by the early return above — no second, unreachable
   // emptiness guard here. A guard that cannot fail reads as protection and is
   // not, which is the shape this estate hunts.
+  const narrowed = narrowToCurrentOrRecordedAsk(
+    match,
+    params.recordedAsk,
+    params.message,
+    params.optionLabels,
+    params.nonOptionLabels ?? [],
+  );
+  if (narrowed === null || narrowed.length === 0) return null;
   return {
     refusedField: 'factor_value',
-    pairs: narrowToRecordedAsk(match, params.recordedAsk),
+    pairs: narrowed,
     userValue: readUserValue(params.message),
   };
 }

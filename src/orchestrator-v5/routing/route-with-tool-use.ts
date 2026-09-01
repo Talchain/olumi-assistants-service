@@ -839,8 +839,12 @@ export async function routeWithToolUse(
     forcedHandlerId,
     parseTelemetry,
   );
-  if (parsedOrError.kind === 'ok')
-    return applyForcedExplanationHandler(parsedOrError.result, forcedHandlerId);
+  if (parsedOrError.kind === 'ok') {
+    return normaliseWholeModelStructureQuery(
+      applyForcedExplanationHandler(parsedOrError.result, forcedHandlerId),
+      message,
+    );
+  }
   if (parsedOrError.kind === 'non_repairable') throw parsedOrError.error;
 
   // REPAIR_ONCE — parse failed. Build protocol-compliant retry messages
@@ -910,8 +914,12 @@ export async function routeWithToolUse(
     forcedHandlerId,
     repairTelemetry,
   );
-  if (secondAttempt.kind === 'ok')
-    return applyForcedExplanationHandler(secondAttempt.result, forcedHandlerId);
+  if (secondAttempt.kind === 'ok') {
+    return normaliseWholeModelStructureQuery(
+      applyForcedExplanationHandler(secondAttempt.result, forcedHandlerId),
+      message,
+    );
+  }
   throw new RoutingError(
     'schema_repair_failed',
     `Routing tool-call repair attempt failed: ${secondAttempt.kind === 'non_repairable' ? secondAttempt.error.message : secondAttempt.detail}`,
@@ -1427,6 +1435,71 @@ export function applyForcedExplanationHandler(
       },
     },
   };
+}
+
+/**
+ * The captured router error was not a missing entity. The user asked why the
+ * product had built the model as a whole with one factor, while the frontier
+ * typed the question as `dependencies` for one factor. That type activates an
+ * identity-bound dependency reader and produces an honest refusal to answer a
+ * question the user did not ask.
+ *
+ * This post-route correction is deliberately narrower than a structure-query
+ * classifier. It only changes an already-valid `explain_from_structure` /
+ * `dependencies` proposal when the current message contains both:
+ *   1. an explicit request to explain why Olumi/the product built, produced or
+ *      drafted the model as a whole; and
+ *   2. an explicit one-factor description of that model.
+ *
+ * Named or selected dependency questions therefore stay dependencies. Existing
+ * general, direct_relationship and reachability queries are returned by exact
+ * reference, as are every non-structure route. The entity and authored answer
+ * are preserved; only the incorrectly narrowed predicate is replaced.
+ */
+function normaliseWholeModelStructureQuery(
+  result: RoutingResult,
+  message: string,
+): RoutingResult {
+  if (result.type !== 'tool_call') return result;
+  if (result.proposal.intent_class !== 'execute') return result;
+  const action = result.proposal.action;
+  if (action.handler_id !== 'explain_from_structure') return result;
+  if (action.structure_query?.kind !== 'dependencies') return result;
+  if (!isWholeModelSingleFactorBuildQuestion(message)) return result;
+  return {
+    ...result,
+    proposal: {
+      ...result.proposal,
+      action: {
+        ...action,
+        structure_query: { kind: 'general' },
+      },
+    },
+  };
+}
+
+function isWholeModelSingleFactorBuildQuestion(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  const normalised = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (normalised.length === 0) return false;
+
+  const productBuiltWholeModel =
+    /\b(?:explain\s+)?why\s+(?:did\s+)?(?:you|olumi|the\s+product|the\s+assistant)\s+(?:produce|produced|build|built|draft|drafted)\b[^?!.]{0,120}\b(?:(?:this|that|the|a|your)\s+)?(?:whole\s+)?(?:living\s+)?model\b/i.test(
+      normalised,
+    )
+    || /\b(?:explain\s+)?why\s+(?:was|is)\s+(?:(?:this|that|the|a|your)\s+)?(?:whole\s+)?(?:living\s+)?model\s+(?:produced|built|drafted)\b/i.test(
+      normalised,
+    );
+  if (!productBuiltWholeModel) return false;
+
+  return (
+    /\b(?:you|olumi|the\s+product|the\s+assistant|this\s+model|that\s+model|the\s+model)\s+(?:only\s+)?(?:have|has|had|contain|contains|contained|include|includes|included)\s+(?:(?:only|just)\s+)?(?:one|1|a\s+single)\s+factor\b/i.test(
+      normalised,
+    )
+    || /\b(?:with|around|using|from)\s+(?:(?:only|just)\s+(?:one|1)|(?:a\s+)?single)\s+factor\b/i.test(
+      normalised,
+    )
+  );
 }
 
 /**
