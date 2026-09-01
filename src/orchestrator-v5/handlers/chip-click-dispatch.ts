@@ -202,15 +202,43 @@ export { RUN_PROVENANCE_ENRICHMENT_KEY };
  *     `estimated by Olumi` / `cee_inference` provenance register.
  *
  * ⭐⭐ WHAT IT DELIBERATELY DOES **NOT** SAY, AND THE ASYMMETRY THAT DECIDES IT.
- * An earlier draft read "the values it used are my own estimates, not yours".
- * That is a BLANKET claim over every value, and on any brief that stated
- * figures it claims the USER's numbers as our invention — the exact direction
- * `context-integrity/not-modelled-manifest.ts` rules out: "WRONGLY CLAIMING A
- * USER'S VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY OMITTING ONE OF OUR
- * OWN INVENTIONS". So the copy claims only what is unambiguously true of EVERY
- * post-draft auto-run: the user has confirmed nothing (they have taken no turn
- * yet), and the gaps were filled by estimate. Both hold whatever the brief
- * contained, so the sentence cannot become false for a particular user.
+ * `context-integrity/not-modelled-manifest.ts`: "WRONGLY CLAIMING A USER'S
+ * VALUE AS OUR INVENTION IS FAR WORSE THAN WRONGLY OMITTING ONE OF OUR OWN
+ * INVENTIONS". ⚠⚠ THAT HARM HAS **TWO DOORS**, AND THIS SENTENCE WALKED
+ * THROUGH THE SECOND ONE AFTER THE FIRST WAS SHUT — both drafts are recorded
+ * because the second was written BY the author who had just rejected the first:
+ *
+ *   · ASSERTION form, rejected pre-merge: "the values it used are my own
+ *     estimates, not yours" — a blanket claim over every value.
+ *   · DENIAL form, shipped at `f7dc0524` and corrected here: "Nothing in it
+ *     carries your judgement yet" — the SAME false claim, reached by denying
+ *     the user's authorship instead of asserting ours.
+ *
+ * The denial is false on a common, WELL-SERVED path, not an edge: a brief that
+ * states figures. `graph-readiness/obligation-provenance.ts:143-146` is the
+ * authority and says so outright — "A brief is the user's own words, so a value
+ * extracted from it is user-stated, not inferred" (`brief_extraction` and
+ * `explicit` both map to `user_stated`), and `:195` adds "`explicit`/`observed`
+ * are the user's own figures". Those nodes display as `from_brief`
+ * (`transforms/provenance-display.ts:26`), so the model demonstrably DOES hold
+ * the user's own numbers, and the clause denied it. A figure-rich brief is MORE
+ * likely to clear `resolveRunAdmission`, so this is the served case.
+ *
+ * ⭐ THE RULE THAT REPLACES BOTH DRAFTS: **CLAIM CONFIRMATION, NEVER
+ * AUTHORSHIP.** "You have not confirmed any of it yet" is invariant to how much
+ * of the model came from the user — stating a figure in a brief is not
+ * confirming a model built from it — whereas any authorship claim's truth
+ * depends on the graph the sentence is attached to. The estimate clause stays
+ * CONDITIONALLY scoped ("where your brief gave me no figure"), so it is equally
+ * true of a brief that stated every figure and of one that stated none.
+ *
+ * ⭐ THIS ALSO COVERS THE NARROWER CLARIFY-V2 RESUME PATH, and for the same
+ * reason rather than by accident. That path drafts from an ANSWER-AUGMENTED
+ * brief (`orchestrator/route-v2.ts:4224`, legacy pending rounds only — round 1
+ * no longer arms new ones, `:4161`), so the model carries the user's own
+ * clarify answers. An authorship denial was false there too; a confirmation
+ * claim is not, because answering a question before the model existed is not
+ * confirming the model. NOT known-dropped — covered.
  *
  * ⚠ SCOPE — THIS SENTENCE REACHES THE CONVERSATION SURFACE ONLY. It rides the
  * auto-run turn's `assistant_text`, so a resumed conversation reads it first
@@ -228,7 +256,7 @@ export { RUN_PROVENANCE_ENRICHMENT_KEY };
  * module's `unconfirmed` for this, and do not align their defaults.
  */
 export const AUTO_RUN_PROVISIONAL_DISCLOSURE =
-  'I ran a first analysis on the model I have just drafted. Nothing in it carries your judgement yet — you have not confirmed any of it, and where your brief gave me no figure I estimated one. Treat it as a starting point to argue with, not an answer: tell me what I have got wrong and I will change it.';
+  'I ran a first analysis on the model I have just drafted. You have not confirmed any of it yet, and where your brief gave me no figure I estimated one. Treat it as a starting point to argue with, not an answer: tell me what I have got wrong and I will change it.';
 
 /**
  * R2 — marks a dispatch as the post-draft auto-run rather than a user's chip
