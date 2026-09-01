@@ -80,6 +80,7 @@ import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapter
 // rather than reimplemented — a second copy of a scale convention is the
 // hand-maintained-twin defect this module's header exists to warn about.
 import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { unitPinnedScaleFrame } from '../cee/draft/records/unit-scale-class.js';
 import {
   PAIR_COHERENCE_RELATIVE_EPSILON,
   resolveScaleFrame,
@@ -798,6 +799,83 @@ export function reconcileObservedValuePair(
     const storedFrameAdmits =
       typeof storedScaleFrame === 'number' &&
       !(unitAtGuard === '%' && storedScaleFrame !== 100);
+    // ── ⭐⭐ A PERCENTAGE STATES ITS OWN SCALE, AND THIS WRITER WAS THE ONLY
+    // ONE NOT LISTENING (reproduced live 2026-09-02, CEE `3575b18` / UI
+    // `05ca160b`; the P0 "the analysis never runs").
+    //
+    // THE MEASURED DEFECT. A guest set a percent factor to 40% and every
+    // analysis attempt refused, naming that factor: "recorded as a bare amount
+    // with no range". Its PERSISTED record, read out of the deployed session:
+    //
+    //     83c01b53  { value: 40, unit: '%', source: 'user_override' }
+    //
+    // — no `raw_value`, while its FOUR sibling percent factors in the SAME
+    // graph all carried `{ value: 0.x, unit: '%', raw_value: x0 }`. The raw
+    // magnitude was sitting in the LEVEL slot, so the analysis seam's baseline
+    // gate refused it, correctly and permanently.
+    //
+    // ⚠ THE GATE IS RIGHT AND IS NOT TOUCHED. `resolveExistingRawValue`
+    // independently calls `{value: 40, unit: '%'}` `ambiguous` — "a `%` value
+    // OUTSIDE [0,1] ... is genuinely ambiguous → fail closed". Two readers
+    // agree the RECORD is incoherent. The first failure is HERE, at the
+    // writer that produced it.
+    //
+    // ⭐ THIS IS A TWINS DEFECT, NOT A NEW OPINION (trap 12). Given the same
+    // "40%", the V5 writer `normaliseFactorValue` already writes
+    // `{value: 0.4, raw_value: 40}` — through `unitPinnedScaleFrame`. This
+    // op-path writer returned the op UNTOUCHED. One input, two writers, two
+    // answers. The remedy is to consult the SAME authority the other writer
+    // consults, never to mint a second opinion about frames here.
+    //
+    // ⚠ WHY `unitPinnedScaleFrame` IS THE SAFE AUTHORITY, AND WHY THE CLASS
+    // THE EXCLUSION ABOVE PROTECTS IS UNTOUCHED. It returns a CONSTANT that is
+    // a function of the UNIT ALONE (percent → 100, basis points → 10,000) and
+    // abstains everywhere else, so it can never hand back a laddered,
+    // sibling-dependent number and can never silently rescale a sibling
+    // intervention. Critically it abstains ABOVE 100 — exactly the NRR-115% /
+    // ROI-300% class the `storedFrameAdmits` exclusion above exists to keep
+    // REFUSING (where the ladder frames at 200/500 and a hard-coded 100 is a
+    // 2–5x error). That exclusion is preserved BY THE AUTHORITY ITSELF, not by
+    // a second guard here that could drift from it. It also abstains at
+    // `magnitude <= 1`, so a value that is already a level is never re-framed.
+    //
+    // ⚠ NARROW BY CONSTRUCTION, and each conjunct is load-bearing:
+    //   · no cap        — a capped factor has its own convention and the
+    //                     clamping writer owns it;
+    //   · no stored frame — a framed factor is owned by `storedFrameAdmits`
+    //                     and the frame branch below; this limb is only for the
+    //                     factor that has NO frame at all;
+    //   · no payload `raw_value` — a payload carrying one is the stale-carry-
+    //                     forward class the existing lanes own.
+    // A currency or a count classes `unknown`, pins nothing, and still falls
+    // through to the honest refusal — closing the percent gap must not open the
+    // currency lie.
+    const capAtGuard =
+      typeof observed.cap === 'number'
+        ? observed.cap
+        : typeof nodeObserved.cap === 'number'
+          ? nodeObserved.cap
+          : undefined;
+    if (
+      capAtGuard === undefined &&
+      storedScaleFrame === undefined &&
+      !Object.prototype.hasOwnProperty.call(observed, 'raw_value')
+    ) {
+      const pinnedFrame = unitPinnedScaleFrame(unitAtGuard, newValue);
+      if (pinnedFrame !== undefined) {
+        const framedValue = newValue / pinnedFrame;
+        if (Number.isFinite(framedValue)) {
+          return {
+            ...op,
+            value: {
+              ...value,
+              [OBSERVED_ROOT]: { ...observed, value: framedValue, raw_value: newValue },
+            },
+          };
+        }
+      }
+    }
+
     if (!Object.prototype.hasOwnProperty.call(observed, 'raw_value') && !storedFrameAdmits) {
       return op;
     }

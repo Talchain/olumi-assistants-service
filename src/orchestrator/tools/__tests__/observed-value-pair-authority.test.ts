@@ -266,6 +266,32 @@ describe('2.1033 — the committed pair, the receipt and the rendered value all 
   it('THE #884 MEASURED SHAPE still works (control — no raw_value to begin with)', async () => {
     // The exact fixture `edit-graph-mutation-correctness-wiring.test.ts`
     // pins. This lane must not disturb it.
+    //
+    // ⚠⚠ EXPECTATION CHANGED 2026-09-02, DELIBERATELY, AND IT IS THE POINT OF
+    // THE P0 FIX — NOT A TEST TIDIED TO SUIT A CHANGE.
+    //
+    // This control asserted the edit persists `{value: 40, unit: '%'}` — the
+    // RAW magnitude in the LEVEL slot. That state was measured on deployed
+    // staging (CEE `3575b18`, 2026-09-02) as the cause of a P0: the analysis
+    // seam's baseline gate refuses such a factor with `baseline_scale_unresolved`
+    // ("recorded as a bare amount with no range") and NO user action clears it,
+    // so the whole model became permanently unanalysable. One live factor in
+    // this state blocked every analysis attempt; its four sibling percent
+    // factors all carried `{value: 0.x, raw_value: x0}` and were fine.
+    //
+    // SIX independent derivations say the LEVEL convention is the contract, and
+    // exactly one thing said otherwise — this assertion:
+    //   1. `compound-goal/extractor.ts:708` — `return { value: num / 100, unit }`
+    //   2. `deriveFactorScaleFrame` / projector pass 3d — percent pins frame 100
+    //   3. `normaliseFactorValue`'s unit-pinned limb — writes {0.4, raw 40}
+    //   4. `resolveExistingRawValue` — inverts ONLY `value ∈ [0,1]`, else ambiguous
+    //   5. `graph-data-integrity.ts` — for '%', recomputes `value = raw_value/100`
+    //   6. 4 of 5 percent factors in a real deployed session
+    //
+    // What this control genuinely protects is UNCHANGED and still asserted: the
+    // user's number survives the edit and the screen still reads "40%". Only the
+    // internal representation moves onto the contract, which is what makes the
+    // model analysable again.
     const graph = buildGraph();
     (graph.nodes[2] as Record<string, unknown>).observed_state = {
       value: 20,
@@ -277,7 +303,9 @@ describe('2.1033 — the committed pair, the receipt and the rendered value all 
 
     const result = await runEdit(graph, [valueOp('fac_spend', 40, 20)], 'Change it to 40');
 
-    expect(observedOf(result.appliedGraph, 'fac_spend').value).toBe(40);
+    const observed = observedOf(result.appliedGraph, 'fac_spend');
+    expect(observed.value).toBeCloseTo(0.4, 12);
+    expect(observed.raw_value).toBe(40);
     expect(nodeById(result.appliedGraph, 'fac_spend').display_value).toBe('40%');
   });
 });
