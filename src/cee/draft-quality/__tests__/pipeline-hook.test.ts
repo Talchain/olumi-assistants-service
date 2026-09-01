@@ -238,6 +238,9 @@ describe('draft-quality seam — ship the better of the two', () => {
       judge: async () => impoverished,
     });
     expect(redrawEvents()[0]?.data.shipped).toBe('first');
+    // Bound to the object, not just the event: the graph the user receives is
+    // the FIRST draw, not the equal-but-different second one.
+    expect((result.body as { graph: unknown }).graph).toBe(THIN_GRAPH);
   });
 });
 

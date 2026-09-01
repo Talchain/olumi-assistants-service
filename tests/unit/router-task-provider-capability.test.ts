@@ -186,9 +186,16 @@ const PINNED_TASK_RESOLUTIONS: Readonly<Record<string, string>> = Object.freeze(
   suggest_options: "openai / gpt-5.2",
   validate: "openai / gpt-4o-mini",
   validate_graph: "openai / o4-mini",
-  // The two tasks this lane moves, pinned to their post-fix identities.
+  // The two tasks the ORIGINAL lane moved, pinned to their post-fix identities.
   critique_graph: "anthropic / claude-sonnet-5",
   explain_diff: "anthropic / claude-sonnet-5",
+  // The draft-quality semantic-coverage judge. CROSS-PROVIDER from the
+  // Anthropic drafter BY DESIGN (the validate_graph precedent, ROADMAP 2.146):
+  // a judge drawn from the drafter's own family is a weaker independent check.
+  // Pinned here so a later change that quietly moves it onto the drafting
+  // family REDs — that would weaken "independent review" to "same-model blind
+  // re-read" with nothing else in the tree to notice.
+  draft_quality_review: "openai / gpt-4.1-2025-04-14",
 });
 
 describe("router task provider assignment is per-task", () => {
