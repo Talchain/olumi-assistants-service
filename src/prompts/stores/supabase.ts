@@ -87,19 +87,50 @@ function getJwtClaim(token: string, claim: string): string | undefined {
  * Tolerates, by design: a JSON string, an empty string, `null`/`undefined`, and
  * an already-parsed array. Anything else that is not decodable to a list yields
  * `[]` rather than throwing — a prompt row is not worth taking the store down
- * for, and the caller's health surface now reports a store failure loudly
- * (see `promptStoreDegradationReasons`).
+ * for.
  *
  * ⚠ AND THE SECOND HALF, WHICH THE FIRST VERSION OF THIS HELPER OMITTED. As
  * first written, the `catch` and the trailing `return []` emitted NOTHING, so a
- * row holding `test_cases: {}` degraded to `[]` with a clean health surface and
- * no log at any level. Nothing threw, so `loadPrompt` never reached its catch,
- * `fallbackReason` never became `fetch_error`, and this PR's own
- * `critical_prompt_fetch_error` alarm could not fire for the class the helper
- * had just started tolerating. **That is the same silent degradation the
- * incident was — a guard that logs nothing and continues is the same outage
- * with better manners.** Undecodable input now emits
- * `TelemetryEvents.PromptStoreJsonColumnDegraded` and logs at ERROR.
+ * row holding `test_cases: {}` degraded to `[]` with no log at any level.
+ * **That is the same silent degradation the incident was — a guard that logs
+ * nothing and continues is the same outage with better manners.**
+ *
+ * ⚠⚠ WHAT THAT SECOND HALF DELIVERS, AND EXACTLY WHERE IT STOPS. An earlier
+ * version of this docblock said the caller's health surface "now reports a
+ * store failure loudly (see `promptStoreDegradationReasons`)". **That was
+ * false, and it was false about the one thing this helper is read for.** State
+ * it plainly, in both directions:
+ *
+ * COVERED — an undecodable column is ATTRIBUTABLE. `parseJsonColumn` below
+ * emits `TelemetryEvents.PromptStoreJsonColumnDegraded`, writes a separate
+ * `log.error` (level 50) naming `column`, `prompt_id`, `version`, `reason` and
+ * `value_type`, and — where Datadog is configured — increments
+ * `prompt.store.jsonb_column_degraded_total` with bounded `column`/`reason`
+ * tags (see the arm in `utils/telemetry.ts`). Ops can alert on that counter or
+ * on the ERROR level. Whether such an alert is actually CONFIGURED is not
+ * established here.
+ *
+ * NOT COVERED — it is not PREVENTABLE, and health does not move. Nothing
+ * throws, so `loadPrompt`'s catch is never reached; `fallbackReason` therefore
+ * never becomes `fetch_error`; `coverage.fetch_error` stays empty;
+ * `promptStoreDegradationReasons()` returns `[]`; and
+ * `critical_prompt_fetch_error` **cannot fire for this class**. `/healthz`
+ * continues to answer 200 with `prompts_ready: true` and `degraded: false`.
+ * The prompt still serves — this is ancillary list metadata, not prompt body —
+ * but do not read the alarm wired in this PR as covering it.
+ *
+ * NOT COVERED — no consumer can branch on it. `malformed`, `unavailable` and
+ * `known-empty` are three distinct states, and only the last may honestly
+ * author `[]`. `PromptVersionSchema` types BOTH columns as ordinary
+ * `z.array(...).default([])` (schema.ts), so past the governed Zod boundary a
+ * substituted `[]` is BYTE-IDENTICAL to a genuinely empty column. **There is
+ * no channel for "unknown" and this change does not build one.** The telemetry
+ * above is the only surviving discriminator, and it is an observability
+ * signal, not a program-branchable one.
+ *
+ * NOT COVERED — this is a SUPABASE decoder contract, not a store-independent
+ * guarantee. The sibling `stores/postgres.ts` has different tolerance at the
+ * same seam and raises none of these signals.
  */
 
 /** Why a column could not be established as a list. */
@@ -193,6 +224,14 @@ function parseJsonColumn<T>(value: unknown, context: JsonColumnContext): T[] {
   // column — turning a transient decode failure into permanent data loss. That
   // hazard lives in the admin route, not here, and is reported rather than
   // fixed by this lane; it is the reason this event exists at all.
+  // Rowed as issue #1297, with the full chain: the read at
+  // `routes/admin.ui.ts:2752`, the modify at `:2814` (and the delete at
+  // `:2849`), the whole-array PATCH at `:2818-2828`, and the unconditional
+  // column overwrite in `updateTestCases` at `stores/supabase.ts:742`.
+  // ⚠ Note the direction: before this helper existed an undecodable column
+  // THREW, so the admin never reached that write. Making the store tolerant
+  // made the write REACHABLE. That is an argument for fixing #1297, not for
+  // restoring the throw — one poisoned row must not disable a whole task.
   //
   // It is emitted AND logged at ERROR because `emit()` writes via `log.info`
   // (utils/telemetry.ts), and during the incident five level-30 events fired
