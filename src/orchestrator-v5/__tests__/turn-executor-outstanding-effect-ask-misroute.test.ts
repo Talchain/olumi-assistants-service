@@ -97,6 +97,8 @@ interface WitnessFixture {
     readonly option_label: string;
     readonly factor_id: string;
     readonly factor_label: string;
+    readonly two_option_factor_id: string;
+    readonly two_option_factor_label: string;
   };
   readonly draft_graph: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
 }

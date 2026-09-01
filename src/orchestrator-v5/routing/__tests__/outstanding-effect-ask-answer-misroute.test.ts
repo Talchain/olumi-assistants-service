@@ -106,6 +106,7 @@ function collide(message: string, entityId: string = ASKED_FACTOR, chipOriginate
     optionLabels: OPTION_LABELS,
     readiness,
     chipOriginated,
+    recordedAsk: null,
   });
 }
 
