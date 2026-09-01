@@ -379,6 +379,10 @@ export function completionRegressesProtectedContent(
   for (const [survivorId, prov] of Object.entries(after.provenance)) {
     if (!afterById.has(survivorId)) continue; // an absorber that itself vanished excuses nothing
     for (const label of prov.merged_refinements ?? []) accountedFor.add(`${survivorId}␟${label}`);
+    // The cause-side twin. Omitting it would leave a legitimately-absorbed label
+    // unaccounted and manufacture a false completion gap — the absorption is the
+    // same shape and the same direction, only the parent's kind differs.
+    for (const label of prov.merged_restatements ?? []) accountedFor.add(`${survivorId}␟${label}`);
     for (const label of prov.undeveloped_duplicates ?? []) accountedFor.add(`${survivorId}␟${label}`);
   }
   /**
@@ -464,11 +468,22 @@ export function completionRegressesProtectedContent(
         }
       }
     }
-    const beforeMerged = before.provenance[node.id]?.merged_refinements ?? [];
-    if (beforeMerged.length > 0) {
-      const afterMerged = new Set(after.provenance[node.id]?.merged_refinements ?? []);
+    // ⭐ BOTH ABSORPTION RECEIPTS ARE PROTECTED, NOT JUST THE OPTION-SIDE ONE.
+    // `merged_restatements` is the cause-side twin of `merged_refinements`: same
+    // append-only discipline, same direction (MODEL content into a USER-stated
+    // node), same accounting in `completionRegressesProtectedContent` above. A
+    // guard that watched only one of them would let a completion pass silently
+    // drop a label the other had legitimately absorbed — an asymmetric guard is
+    // a guard watching one door.
+    for (const [field, tag] of [
+      ["merged_refinements", "refinement_reclassified"],
+      ["merged_restatements", "restatement_reclassified"],
+    ] as const) {
+      const beforeMerged = before.provenance[node.id]?.[field] ?? [];
+      if (beforeMerged.length === 0) continue;
+      const afterMerged = new Set(after.provenance[node.id]?.[field] ?? []);
       for (const label of beforeMerged) {
-        if (!afterMerged.has(label)) violations.push(`refinement_reclassified:${node.id}:${label}`);
+        if (!afterMerged.has(label)) violations.push(`${tag}:${node.id}:${label}`);
       }
     }
   }
@@ -672,9 +687,10 @@ export function enumerateCompletionAsk(
       //     `stated_items` whether or not it becomes a node, and that is what the
       //     fidelity postcondition measures.
       //
-      // `option_budget_exceeded` and `refinement_merged_into_stated_option` are
-      // likewise projector DECISIONS, not gaps: asking about either would ask the
-      // model to undo a deliberate, disclosed choice.
+      // `option_budget_exceeded`, `refinement_merged_into_stated_option` and
+      // `factor_merged_into_stated_cause` are likewise projector DECISIONS, not
+      // gaps: asking about any of them would ask the model to undo a deliberate,
+      // disclosed choice.
       //
       // ⭐ AND THE THREE DEMOTE REASONS ARE LISTED EXPLICITLY BELOW rather than
       // left to `default`, so their silence is a DECISION. A demote is a

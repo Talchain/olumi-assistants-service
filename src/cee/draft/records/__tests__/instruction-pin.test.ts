@@ -392,9 +392,16 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * v11 read as working: 6 of 9 draws on the diagnostic briefs stopped filing the
  * competing explanations as options. **All six were clean only by emitting
  * `stated_items[].kind = "claim"` — a value that does not exist.**
- * `DRAFT_RECORD_STATED_KINDS` is `["goal","option","constraint","figure"]`, and
- * `grammar.ts:453` puts exactly that enum in the structured-outputs schema the
- * deployed draft sends (`structured_outputs_used: true` in the capture). The
+ * `DRAFT_RECORD_STATED_KINDS` was `["goal","option","constraint","figure"]` AT
+ * THE TIME OF THAT MEASUREMENT — it carries a fifth member, `cause`, since this
+ * PR, and the past tense is load-bearing rather than tidy. This paragraph is a
+ * RECORD of why v11 failed on a dated build; restating the enum in the present
+ * tense would make it a hand-maintained mirror of a list that has now moved
+ * (trap 12), and updating the sentence to today's enum would falsify the
+ * measurement it explains. Read the enum at `grammar.ts` for what it is now;
+ * read this for what it was when v11 was measured. `grammar.ts` puts exactly
+ * that enum in the structured-outputs schema the deployed draft sends
+ * (`structured_outputs_used: true` in the capture). The
  * escape route is CLOSED ON THE WIRE, so those six draws could not happen in
  * production. Of the 3 draws that stayed inside the legal enum, 3 of 3 filed the
  * causes as options, and 0 of 27 cause-instances reached the intended
@@ -451,15 +458,33 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * sets NO quota of options: manufacturing alternatives to green the readiness
  * gate is the failure mode this instruction has to avoid, not its objective.
  */
-const PREREGISTERED_V12_INSTRUCTION_SHA256 =
+const PREREGISTERED_V13_INSTRUCTION_SHA256 =
+  "2c9c4ae5e108156a0d0008c9c3d265730b3d66db57b95b5878ff833a3bb73a0f";
+const PREREGISTERED_V13_INSTRUCTION_BYTES = 12557;
+/**
+ * SUPERSEDED — v12's bytes. Retained and asserted DISTINCT for the same reason
+ * v11's are: v12 is the artefact the SERVED-AND-IGNORED measurement belongs to.
+ * It was live at `d0544243` (`anthropic.ts:518` pushes it as a code constant, so
+ * the prompt store cannot override it) and #1287 was captured ~18 hours later
+ * with all four hypotheses filed as stated options anyway. Re-pointing this
+ * literal would let that finding read as a finding about v13.
+ */
+const SUPERSEDED_V12_INSTRUCTION_SHA256 =
   "9c3906151c4a6abec7906fc430c3c26bc8d6c92559a8e859401dd03b9682f232";
-const PREREGISTERED_V12_INSTRUCTION_BYTES = 12280;
+const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v12 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V12_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v13 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V13_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V12_INSTRUCTION_BYTES,
+      PREREGISTERED_V13_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v12 bytes, so v12's served-and-ignored measurement stays its own", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V12_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V12_INSTRUCTION_BYTES,
     );
   });
 
@@ -610,10 +635,21 @@ describe("the draft records instruction is the measured artefact", () => {
     // in its entirety and the connect half is byte-identical to v10 (asserted in
     // the next test). That asymmetry is the point of pinning the halves apart:
     // this edit is legible as "the option bullet changed" without reading a diff.
+    // ⚠⚠ AND AGAIN IN v13 — the SIXTH version to touch it. A new stated `kind`
+    // and where a cause-span goes are both statements about what goes in a
+    // field, so v13 is shape-half in its entirety and the connect half is
+    // byte-identical to v12 (asserted in the next test). The asymmetry is again
+    // the point: this edit is legible as "the stated-kind list changed" without
+    // reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "7d248f513405b3b0c32ac3319e70318318591cbda975224d77b97c21039b858c",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(8013);
+    // SUPERSEDED — v12's shape half, the bytes the #1287 capture was drawn under.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "aa3d7c18d26326260476ce5ae674f7dfee91fc8bf10b5eaf0ce5996625f28b3f",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(7736);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(7736);
     // WITHDRAWN — v11's shape half. Asserted DISTINCT because the illegal-`kind`
     // draws were produced by exactly these bytes and must stay attributable to
     // them; v12 replaced this paragraph's DESTINATION, not its rule.
@@ -733,9 +769,12 @@ describe("the draft records instruction is the measured artefact", () => {
     expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
       "A proposed CAUSE is the case this catches most often.",
     );
-    // and where the demoted span is to go, or the rule only says "not here"
+    // and where the demoted span is to go, or the rule only says "not here".
+    // v13 moved the destination from `claims` to a stated `cause`: the span is
+    // the USER'S WORDS, and `stated_items` is the half of the record set that
+    // holds them. Naming a destination is the invariant; which one it is moved.
     expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "with `claim_kind` `factor` for what it says varies\n  and `risk` for what it says threatens the goal",
+      "Quote it as a stated_item with `kind` `cause`.",
     );
     // (b) the opposite-direction half — the one that keeps this fix from being
     // worse than the defect it closes.
@@ -755,14 +794,18 @@ describe("the draft records instruction is the measured artefact", () => {
    * separate because a fix for any one alone leaves the others open.
    */
   it("routes a demoted cause to a destination that EXISTS on the wire", () => {
-    // (1) THE ILLEGAL ESCAPE, closed in the list the model was standing in when
-    // it invented a fifth value. Bound to the grammar's own enum rather than to
-    // a phrase, so it fails loud if `DRAFT_RECORD_STATED_KINDS` ever widens
-    // without this sentence moving with it.
+    // (1) THE ILLEGAL ESCAPE. ⚠ THIS GUARD FIRED AS DESIGNED and is re-pinned,
+    // not relaxed: its invariant was never "there are four kinds", it was "the
+    // destination this instruction names EXISTS on the wire". v11 named `claim`,
+    // which did not exist, and 0 of 27 cause-instances arrived. v13 names
+    // `cause`, and the assertion below is what keeps that honest — the enum and
+    // the sentence must move together or this REDs.
     expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "It is not a stated_item of any kind: the four above are the\n  only values `kind` takes, and there is no fifth.",
+      "Quote it as a stated_item with `kind` `cause`.",
     );
-    expect(DRAFT_RECORD_STATED_KINDS).toHaveLength(4);
+    expect([...DRAFT_RECORD_STATED_KINDS]).toContain("cause");
+    expect(DRAFT_RECORD_STATED_KINDS).toHaveLength(5);
+    // The v11 escape itself stays closed: `claim` is still not a stated kind.
     expect([...DRAFT_RECORD_STATED_KINDS]).not.toContain("claim");
 
     // (2) THE CARRIER, NAMED. v11 described an end state ("the options are what
