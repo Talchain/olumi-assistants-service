@@ -109,8 +109,8 @@ beforeEach(() => {
 });
 afterEach(() => setTestSink(null));
 
-const qualityEvents = () => events.filter((e) => e.name === 'cee.draft.quality');
-const redrawEvents = () => events.filter((e) => e.name === 'cee.draft.quality_redraw');
+const qualityEvents = () => events.filter((e) => e.name === 'cee.draft_graph.quality');
+const redrawEvents = () => events.filter((e) => e.name === 'cee.draft_graph.quality_redraw');
 
 // ── The pairs ───────────────────────────────────────────────────────────────
 

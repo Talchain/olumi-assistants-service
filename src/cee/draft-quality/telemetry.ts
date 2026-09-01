@@ -10,7 +10,7 @@
  * silently absorbed by the redraw: we would trade a visible problem for an
  * invisible one, which is worse than the defect.
  *
- * So `cee.draft.quality` is emitted on EVERY draft — nominated or not, judged
+ * So `cee.draft_graph.quality` is emitted on EVERY draft — nominated or not, judged
  * or not, redrawn or not, and on every fail-open arm. **Fail open must be
  * observable, not silent.** A draft that emits nothing is a bug in this file.
  *
@@ -28,7 +28,7 @@
  * events with an explicit `case` in `telemetry.ts`'s switch — these have none,
  * so they are stdout/Render-log only today). There is NO Postgres telemetry
  * store in CEE. Building the quality metric therefore means a Render/Datadog
- * log query over `event = "cee.draft.quality"`, subject to that retention.
+ * log query over `event = "cee.draft_graph.quality"`, subject to that retention.
  * That is a real limitation and it is named here rather than discovered later.
  */
 

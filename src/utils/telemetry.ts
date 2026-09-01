@@ -2679,8 +2679,8 @@ export const TelemetryEvents = {
   // `improved` stays flat is money and latency spent reproducing the same
   // failure; trap 23's shape, and reporting both is the only way to see it).
   // Coded reasons, counts and model ids only — no labels, no brief content.
-  CeeDraftQuality: "cee.draft.quality",
-  CeeDraftQualityRedraw: "cee.draft.quality_redraw",
+  CeeDraftQuality: "cee.draft_graph.quality",
+  CeeDraftQualityRedraw: "cee.draft_graph.quality_redraw",
 } as const;
 
 /**

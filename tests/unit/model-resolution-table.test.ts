@@ -57,6 +57,12 @@ const RESOLUTION_TABLE: ReadonlyArray<{
   { site: "assist sensitivity_coach", source: "TASK_MODEL_DEFAULTS.sensitivity_coach", expected: "gpt-4.1-2025-04-14" },
   { site: "bias_check", source: "TASK_MODEL_DEFAULTS.bias_check", expected: "claude-sonnet-4-20250514" },
   { site: "options (alias base of C15 suggest_options)", source: "TASK_MODEL_DEFAULTS.options", expected: "gpt-5.2" },
+  // Draft-quality semantic-coverage judge (LIVE). CROSS-PROVIDER from the
+  // Anthropic drafter by design — the validate_graph precedent two rows up.
+  // Pinned so a later move onto the drafting family REDs here as well as in
+  // router-task-provider-capability: independence that is an accident of
+  // deployment env is not independence.
+  { site: "draft-quality judge (LIVE)", source: "TASK_MODEL_DEFAULTS.draft_quality_review", expected: "gpt-4.1-2025-04-14" },
 ];
 
 /**
