@@ -269,15 +269,26 @@ const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
  * to disclose), or when there is no trailing prose to put behind the toggle
  * (e.g. a headline-plus-bullets with nothing after it).
  *
- * ⚠ THAT SECOND FLOOR IS NOW THIS FUNCTION'S OWN, NOT THE SCHEMA'S. Until
- * 2026-09-01 it was a restatement of `AnswerShapeSchema`'s non-blank `detail`
- * requirement; that requirement is gone (see the ANSWER-ONLY block in the
- * module header), so the floor is kept here DELIBERATELY and for a different
- * reason: this is the DETERMINISTIC-RECOVERY path, where there is no model
- * judgement about whether the turn wanted structure. Shipping the prose
- * unchanged is the honest fallback; synthesising a "Show more" toggle with
- * nothing behind it is not. Pinned by `answer-shape-answer-only.test.ts`
- * (COUPLING block) so the relaxation cannot silently leak in here later.
+ * ⚠ WHY THIS PATH STAYS CONSERVATIVE AFTER THE ANSWER-ONLY RELAXATION. The
+ * schema now accepts a blank `detail` (module header), but this is the
+ * DETERMINISTIC-RECOVERY path, where no model judged whether the turn wanted
+ * structure. Shipping the prose unchanged is the honest fallback;
+ * synthesising a "Show more" toggle with nothing behind it is not. The
+ * COUPLING block of `answer-shape-answer-only.test.ts` pins that, and it
+ * bites: a mutant that lets a single-sentence prose synthesise into a
+ * headline-only shape REDs two of its cases.
+ *
+ * ⚠ BE PRECISE ABOUT WHICH LINE ENFORCES IT — the `!detail` limb below does
+ * NOT. Measured 2026-09-01 with a differential probe (23 inputs, 13 of which
+ * reach the guard, positive control firing): `!detail` and `!headline` are
+ * BOTH UNREACHABLE, and removing the `!detail` limb is a demonstrated
+ * EQUIVALENT MUTANT. `splitFirstSentence` returns non-null only when its
+ * regex matched with a LOOKAHEAD at `["'([]?[A-Z0-9]`, so the remainder
+ * always begins with that non-whitespace character and can never trim to
+ * empty; the headline always contains the terminator run. The real floor is
+ * `split === null` — no internal sentence boundary. The `!detail` check is
+ * belt-and-braces against a future change to `splitFirstSentence`, and is
+ * documented as such rather than left to read as the load-bearing guard.
  *
  * The caller is responsible for preserving the byte-equality invariant by
  * SETTING `assistant_text := deriveAnswerTextFromShape(result)` — see the
@@ -318,11 +329,11 @@ export function synthesiseAnswerShapeFromText(text: string): AnswerShape | null 
   const detail = [split.remainder.trim(), overflowBulletLines.join('\n').trim()]
     .filter((part) => part.length > 0)
     .join('\n\n');
-  // This path's OWN floor — no longer a restatement of the schema's (the
-  // schema now accepts a blank detail; see the jsdoc above for why the
-  // deterministic-recovery path deliberately keeps requiring one). A blank
-  // remainder with no overflow to fall back on yields no shape: fail closed
-  // and ship the prose as-is rather than fabricate a toggle over nothing.
+  // BELT-AND-BRACES, NOT THE LOAD-BEARING FLOOR — see the jsdoc above. Both
+  // limbs are unreachable given splitFirstSentence's lookahead contract
+  // (demonstrated 2026-09-01, not assumed), so removing this line is an
+  // equivalent mutant. It stays as a fail-closed guard should that contract
+  // ever change; the floor that actually fires is `split === null`.
   if (!headline || !detail) return null;
 
   const parsed = AnswerShapeSchema.safeParse({ headline, bullets, detail });

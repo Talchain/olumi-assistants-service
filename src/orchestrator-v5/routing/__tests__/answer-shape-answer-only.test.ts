@@ -254,10 +254,20 @@ describe('DIRECTION B — coaching still arrives, and the other floors still bit
 // ───────────────────────────────────────────────────────────────────────────
 
 describe('COUPLING — the relaxation must not leak into the prose-synthesis path', () => {
+  // These bite: the mutant that lets the relaxation leak in here (a
+  // single-sentence prose synthesising into a headline-only shape instead of
+  // being shipped as prose) REDs two of the cases below.
+  //
+  // ⚠ Note which line they bind to. `synthesiseAnswerShapeFromText`'s
+  // `if (!headline || !detail)` limb is UNREACHABLE — removing it is a
+  // demonstrated equivalent mutant (differential probe, 2026-09-01). The
+  // floor these cases actually exercise is `split === null`: no internal
+  // sentence boundary, so there is nothing to disclose. Naming the wrong
+  // mechanism here would leave the next reader guarding a line that cannot
+  // fire.
   it('synthesiseAnswerShapeFromText still returns null for SINGLE-SENTENCE prose', () => {
-    // It has its own explicit floor, deliberately independent of the schema:
-    // a one-sentence answer is ALREADY concise, so shaping it would add a
-    // "Show more" toggle with nothing behind it.
+    // A one-sentence answer is ALREADY concise; shaping it would add a "Show
+    // more" toggle with nothing behind it.
     expect(synthesiseAnswerShapeFromText('Your revenue factor is set to £2.4m.')).toBeNull();
   });
 
