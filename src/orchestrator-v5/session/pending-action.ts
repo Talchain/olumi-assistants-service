@@ -99,6 +99,77 @@ export interface ElicitOptionEffectFields {
   readonly option_label: string;
   readonly factor_id: string;
   readonly factor_label: string;
+  /**
+   * ⭐⭐ HOW MANY TIMES THIS SLOT HAS BEEN ASKED — 1 on the first ask.
+   *
+   * THE DEFECT IT CLOSES, measured at this tip: nine of nine unrecognised
+   * replies re-issued the BYTE-IDENTICAL demand. The reason is structural
+   * rather than a copy oversight — `projectReadinessRecovery` is a pure
+   * function of `(analysisReady, nodes)` and receives the user's message
+   * nowhere, so it composes the ask from the GRAPH, which has not changed,
+   * rather than from the EXCHANGE, which has. A second ask computed from an
+   * unchanged input is necessarily the first ask again.
+   *
+   * ⚠ IT MUST BE READ OFF THE SUPERSEDED ROW, NOT MINTED FRESH. `chip_id` is
+   * the stable synthetic handle `chip_configure_option_clarify` precisely so
+   * key-level supersession RETIRES the previous ask instead of accumulating
+   * one row per re-ask (`route-v2.ts`'s carry-forward note). So a counter that
+   * is simply constructed at the emit site resets to 1 on every turn and can
+   * never exceed it. `carryForwardOptionEffectAttempt` below is the ONE reader
+   * of the prior row, and the emit sites go through it.
+   *
+   * OPTIONAL so rows persisted before this change parse unchanged as "no
+   * attempt recorded" — never refused (same rule as `clarify_v2_round`'s
+   * `reoffered`, the estate's only prior art for "we already asked once").
+   */
+  readonly attempt?: number;
+  /**
+   * ⚠⚠ `last_user_reply` AND `failure_reason` WERE HERE AND WERE DELETED
+   * BEFORE MERGE, ON EVIDENCE. Both were minted with a closed-set guard and a
+   * bounded length, and both had ZERO production writers and ZERO production
+   * readers (swept with `attempt` — 142 files — as the contrast control, so the
+   * sweep was discriminating rather than blind). Three of the five members of
+   * the closed set were unreachable from any contract verdict.
+   *
+   * A write-only column with no reader cannot fork anything and cannot change
+   * a single byte a user sees (trap 10), and a pin over a fictional set is
+   * worse than no pin: it reads as settled contract and is the thing later
+   * sessions inherit. The re-ask quotes the user from the LIVE message on the
+   * turn, which is where that text actually is — it never needed a column.
+   *
+   * They come back the day a composer reads them, not before.
+   */
+}
+
+/**
+ * ⭐ THE ATTEMPT CARRY-FORWARD — the ONE place a re-ask learns it is a re-ask.
+ *
+ * Given the pendings read back from the PREVIOUS turn and the slot being asked
+ * about NOW, return the attempt number this ask should carry. Pure; the caller
+ * owns the read.
+ *
+ * BINDS BY IDENTITY, never by chip handle: the prior row counts only when it is
+ * an `elicit_option_effect` for the SAME (option_id, factor_id). A different
+ * cell is a different question and starts again at 1 — otherwise moving on to
+ * the next missing value would inherit the previous cell's frustration count
+ * and open with an apology for something that never happened.
+ */
+export function carryForwardOptionEffectAttempt(
+  priorPendings: readonly PendingAction[] | null | undefined,
+  slot: { readonly optionId: string; readonly factorId: string },
+): number {
+  if (!Array.isArray(priorPendings)) return 1;
+  let highest = 0;
+  for (const pa of priorPendings) {
+    const action = pa?.action;
+    if (action === undefined || action.kind !== 'elicit_option_effect') continue;
+    if (action.option_id !== slot.optionId || action.factor_id !== slot.factorId) continue;
+    const prior = typeof action.attempt === 'number' && Number.isFinite(action.attempt)
+      ? Math.floor(action.attempt)
+      : 1;
+    if (prior > highest) highest = prior;
+  }
+  return highest === 0 ? 1 : highest + 1;
 }
 
 /**
@@ -1348,6 +1419,11 @@ export function parsePendingAction(input: unknown): PendingAction | null {
     if (typeof a.option_label !== 'string' || a.option_label.length === 0) return null;
     if (typeof a.factor_id !== 'string' || a.factor_id.length === 0) return null;
     if (typeof a.factor_label !== 'string' || a.factor_label.length === 0) return null;
+    // `attempt` is OPTIONAL (rows written before this change carry none) but is
+    // validated when present — an unvalidated optional is how a corrupted row
+    // reaches a composer that then renders it.
+    if (a.attempt !== undefined
+      && (typeof a.attempt !== 'number' || !Number.isInteger(a.attempt) || a.attempt < 1)) return null;
   }
   if (a.kind === 'elicit_effect_target') {
     // ROADMAP 2.1353 — all three fields REQUIRED, and `candidates` NON-EMPTY.

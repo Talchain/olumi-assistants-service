@@ -569,7 +569,7 @@ function readSpelledPercent(text: string): NumericClause | null {
  * not be produced at all: the writer's own grammar would decline it and the turn
  * would dead-end. Refusing here makes the refusal visible one seam earlier.
  */
-function toModelUnitText(digits: string, isPercent: boolean): string | null {
+export function toModelUnitText(digits: string, isPercent: boolean): string | null {
   const bare = digits.replace(/,/g, '');
   const parsed = Number(bare);
   if (!Number.isFinite(parsed)) return null;
