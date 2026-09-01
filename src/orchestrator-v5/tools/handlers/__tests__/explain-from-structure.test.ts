@@ -318,35 +318,61 @@ describe('explain_from_structure — answer-carrying contract', () => {
   });
 
   // PR #1229 review guard (4), at the surface the user actually reads.
-  it('does not tell a user with one resolved selected element to name or select one', async () => {
+  //
+  // ⚠ AMENDED 1 Sep 2026. This test previously asserted that the UNMARKED
+  // ambiguous verdict still reached the user carrying "Name or select one
+  // element" — i.e. it PINNED the witnessed defect in place. Neither ambiguous
+  // shape reaches the user now; the guard's real property (never tell a user to
+  // do what they have already done) holds a fortiori, and is asserted for both.
+  // The DISCRIMINATING contrast between the two copies still lives at the
+  // composer level, in explanation-fallback.test.ts ("never asks a user with one
+  // resolved selected element to name or select one"), where the branches remain
+  // as defence-in-depth — so removing it here does not leave a test that cannot
+  // tell the two verdicts apart.
+  it('never tells any user with an ambiguous dependency verdict to name or select an element', async () => {
     const handler = createExplainFromStructureHandler();
-    const marked = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: {
-        status: 'ambiguous', subject_selection: 'single_resolved',
-      },
-    });
-    expect(marked.assistant_text.toLowerCase()).not.toContain('select one element');
-    expect(marked.assistant_text).toContain('will not guess its relationships');
-    // In-suite CONTRAST: the unmarked verdict still carries the instruction.
-    const unmarked = await handler({
-      ...makeInvocation(),
-      selectedDependenciesEvidence: { status: 'ambiguous' },
-    });
-    expect(unmarked.assistant_text).toContain('Name or select one element');
+    for (const evidence of [
+      { status: 'ambiguous' } as const,
+      { status: 'ambiguous', subject_selection: 'single_resolved' } as const,
+    ]) {
+      const outcome = await handler({
+        ...makeInvocation(),
+        structureProjection: STRUCTURE_PROJECTION,
+        selectedDependenciesEvidence: evidence,
+      });
+      expect(outcome.assistant_text.toLowerCase()).not.toContain('select one element');
+      expect(outcome.assistant_text).not.toContain('will not guess its relationships');
+      // Positive control: the fall-through is a real grounded answer, bound by
+      // identity to the projection's own labels — not an empty string that
+      // would satisfy every negative assertion above.
+      expect(outcome.assistant_text).toContain('Engineering Capacity');
+      expect(outcome.assistant_text).toContain('Q3 Throughput');
+    }
   });
 
   it('selected neighbourhood ambiguity and unavailable coverage fail weak instead of restoring authored prose', async () => {
     const handler = createExplainFromStructureHandler();
     const authored =
       'The selected item definitely has a direct relationship from the phased pilot and no other inputs.';
+    // ⚠ HOSTILE FIXTURE — the opposite-direction twin of the ambiguous
+    // fall-through. `makeInvocation` defaults `structure_query.kind` to
+    // 'general', a pairing production cannot produce (an ambiguous verdict only
+    // ever accompanies kind 'dependencies'), which is exactly why it is kept:
+    // it proves the handler refuses authored prose on an ambiguous verdict on
+    // its OWN authority, not by borrowing an invariant from
+    // buildSelectedDependenciesEvidence. Deleting the `!ambiguous` conjunct
+    // from `useSonnetAnswer` restores the invented "phased pilot" dependency
+    // here verbatim.
     const ambiguous = await handler({
       ...makeInvocation(),
+      structureProjection: STRUCTURE_PROJECTION,
       explanation: { answer_text: authored, answer_text_valid: true },
       selectedDependenciesEvidence: { status: 'ambiguous' },
     });
-    expect(ambiguous.assistant_text).toContain('cannot establish one unique Living Model element');
+    expect(ambiguous.assistant_text).not.toContain('phased pilot');
     expect(ambiguous.assistant_text).not.toBe(authored);
+    // …and the fall-through is the grounded projection, bound by identity.
+    expect(ambiguous.assistant_text).toContain('Engineering Capacity');
 
     const unavailable = await handler({
       ...makeInvocation(),
@@ -680,4 +706,196 @@ describe('explain_from_structure — Test A calibration (validator-rejection fai
     expect(outcome.assistant_text).not.toMatch(/-?\d+\.\d/);
     expect(outcome.assistant_text.length).toBeGreaterThan(80);
   });
+});
+
+/**
+ * WITNESSED FAILURE, deployed build, fresh guest session (1 Sep 2026).
+ *
+ * A falsifier asked, in plain chat, "why do you think investor fit matters
+ * here?" against a GOOD drafted model. The router classified
+ * `structure_query.kind = 'dependencies'`,
+ * `buildSelectedDependenciesEvidence` could not tie the question to exactly
+ * one element and returned `{status:'ambiguous'}`, and the handler's gate —
+ * which tested PRESENCE of the evidence, not its VERDICT — let that
+ * non-verdict outrank every other answer the turn could give. The user got:
+ *
+ *   "I cannot establish one unique Living Model element and matching
+ *    dependency question, so I will not guess its relationships."
+ *
+ * An ambiguous verdict is the topology authority DECLINING TO SPEAK. It
+ * carries no structural fact, so it may not silence the grounded structural
+ * explanation. A CONCLUSIVE verdict — `resolved`, or either
+ * `coverage_unavailable` reason — still outranks free prose; that gate exists
+ * because authored prose invented an unlisted option-to-factor dependency,
+ * and nothing here relaxes it.
+ */
+describe('explain_from_structure — an ambiguous dependency verdict must not outrank the structural answer', () => {
+  const WITNESSED_LABEL = 'Fit with target investor thesis and deal size';
+  const WITNESSED_GOAL = 'Secure the round on acceptable terms';
+  /** Named-factor projection whose only recorded connector is OUTGOING — the
+   *  exact canvas shape the falsifier saw beside the refusal. */
+  const WITNESSED_PROJECTION: StructureProjectionSummary = {
+    relationship_detail_status: 'canonical_strict',
+    goal_label: WITNESSED_GOAL,
+    top_causal_links: [
+      { label_from: WITNESSED_LABEL, label_to: WITNESSED_GOAL, edge_type: 'directed', strength: 0.62 },
+    ],
+    named_factor_label: WITNESSED_LABEL,
+    named_factor_pathways: [
+      { label_from: WITNESSED_LABEL, label_to: WITNESSED_GOAL, edge_type: 'directed', strength: 0.62 },
+    ],
+    factor_count: 5,
+    option_count: 3,
+  };
+  /** The two inhabitants of the `ambiguous` arm of SelectedDependenciesEvidence. */
+  const AMBIGUOUS_SHAPES = [
+    ['bare', { status: 'ambiguous' } as const],
+    ['single_resolved-marked', { status: 'ambiguous', subject_selection: 'single_resolved' } as const],
+  ] as const;
+
+  // ── TWIN 1 (the fix direction) ─────────────────────────────────────────
+  it.each(AMBIGUOUS_SHAPES)(
+    'falls through to the grounded structural answer on an ambiguous verdict (%s)',
+    async (_shape, evidence) => {
+      const handler = createExplainFromStructureHandler();
+      const outcome = await handler({
+        ...makeInvocation(),
+        structureProjection: WITNESSED_PROJECTION,
+        selectedDependenciesEvidence: evidence,
+      });
+
+      // The witnessed refusal, bound by its exact emitted sentence.
+      expect(outcome.assistant_text).not.toContain(
+        'I cannot establish one unique Living Model element and matching dependency question',
+      );
+      expect(outcome.assistant_text).not.toContain(
+        'I cannot tie this dependency question to exactly one element',
+      );
+      // …replaced by the answer the question actually asked for: what this
+      // element DRIVES. Bound by IDENTITY — the exact factor and goal labels,
+      // in the exact direction, not by "is it long enough".
+      expect(outcome.assistant_text).toContain(
+        `Its strongest direct influence runs from ${WITNESSED_LABEL} to ${WITNESSED_GOAL}`,
+      );
+      expect(outcome.assistant_text).toContain(`${WITNESSED_LABEL} is connected to other elements`);
+    },
+  );
+
+  it('reports the ambiguous fall-through as a deterministic fallback, not a suppressed answer', async () => {
+    const handler = createExplainFromStructureHandler();
+    const outcome = await handler({
+      ...makeInvocation(),
+      structureProjection: WITNESSED_PROJECTION,
+      selectedDependenciesEvidence: { status: 'ambiguous' },
+    });
+    expect(outcome.handler_facts[0]).toMatchObject({
+      result: { answer_source: 'deterministic_fallback' },
+    });
+  });
+
+  // Part C — the refusal copy carries schema vocabulary ("dependency
+  // question") that the served prompt's Rule 4 forbids, and a prompt cannot
+  // govern a hardcoded string. After the gate fix no ambiguous verdict can
+  // reach it through the handler, which is the only production consumer of
+  // composeSelectedDependenciesEvidenceAnswer.
+  it.each(AMBIGUOUS_SHAPES)(
+    'never emits schema vocabulary to the user on an ambiguous verdict (%s)',
+    async (_shape, evidence) => {
+      const handler = createExplainFromStructureHandler();
+      const outcome = await handler({
+        ...makeInvocation(),
+        structureProjection: WITNESSED_PROJECTION,
+        selectedDependenciesEvidence: evidence,
+      });
+      expect(outcome.assistant_text).not.toMatch(/dependency question/i);
+      expect(outcome.assistant_text).not.toMatch(/will not guess its relationships/i);
+    },
+  );
+
+  // ── TWIN 1b (the OTHER direction of the SAME change) ───────────────────
+  // Falling through must not become a licence for the model to speak freely
+  // about the structure it was just declined on. Faithful to the wire: an
+  // ambiguous verdict only ever accompanies `kind: 'dependencies'`, because
+  // buildSelectedDependenciesEvidence returns null for every other kind.
+  it('an ambiguous verdict falls through to the projection, never to authored prose', async () => {
+    const handler = createExplainFromStructureHandler();
+    const invented =
+      `${WITNESSED_LABEL} is driven by the phased pilot, which feeds it before it reaches the outcome.`;
+    const outcome = await handler({
+      ...makeInvocation(),
+      structureProjection: WITNESSED_PROJECTION,
+      explanation: { answer_text: invented, answer_text_valid: true },
+      proposal: buildProposal({
+        structure_query: { kind: 'dependencies', element_id: GOAL_ID },
+      }),
+      selectedDependenciesEvidence: { status: 'ambiguous' },
+    });
+    expect(outcome.assistant_text).not.toContain('phased pilot');
+    expect(outcome.assistant_text).not.toBe(invented);
+    expect(outcome.assistant_text).toContain(
+      `Its strongest direct influence runs from ${WITNESSED_LABEL} to ${WITNESSED_GOAL}`,
+    );
+    expect(outcome.handler_facts[0]).toMatchObject({
+      result: { answer_source: 'deterministic_fallback' },
+    });
+  });
+
+  // ── TWIN 2 (the OPPOSITE direction — the harm the gate exists to stop) ──
+  // These are GREEN at pristine and MUST STAY GREEN. Their proof of
+  // discrimination is the mutant pair: an over-wide fix that stops consulting
+  // structural evidence (or that also excludes a conclusive verdict) turns
+  // them RED while Twin 1 stays GREEN. Neither twin alone shows binding.
+  it('a CONCLUSIVE resolved verdict still outranks valid prose that invents an unlisted dependency', async () => {
+    const handler = createExplainFromStructureHandler();
+    const invented =
+      `${WITNESSED_LABEL} is driven by the phased pilot, which feeds it before it reaches the outcome.`;
+    const outcome = await handler({
+      ...makeInvocation(),
+      structureProjection: WITNESSED_PROJECTION,
+      explanation: { answer_text: invented, answer_text_valid: true },
+      proposal: buildProposal({ structure_query: { kind: 'general' } }),
+      selectedDependenciesEvidence: {
+        status: 'resolved',
+        selected_label: WITNESSED_LABEL,
+        dependencies: [
+          {
+            from_label: 'Traction and revenue quality',
+            to_label: WITNESSED_LABEL,
+            edge_type: 'directed',
+            relationship: 'moderate positive link',
+          },
+        ],
+        bidirected: [],
+      },
+    });
+    // Binds by IDENTITY to the canonical dependency, not to a length or a
+    // "contains something" predicate another answer could satisfy.
+    expect(outcome.assistant_text).toContain(
+      `from Traction and revenue quality to ${WITNESSED_LABEL}`,
+    );
+    expect(outcome.assistant_text).not.toContain('phased pilot');
+    expect(outcome.assistant_text).not.toBe(invented);
+  });
+
+  it.each([
+    ['graph_coverage_unavailable', 'was withheld from this turn'],
+    ['structural_semantics_unlicensed', 'cannot safely treat'],
+  ] as const)(
+    'a CONCLUSIVE coverage_unavailable verdict (%s) still outranks valid prose',
+    async (reason, marker) => {
+      const handler = createExplainFromStructureHandler();
+      const invented =
+        `${WITNESSED_LABEL} is driven by the phased pilot and no other inputs.`;
+      const outcome = await handler({
+        ...makeInvocation(),
+        structureProjection: WITNESSED_PROJECTION,
+        explanation: { answer_text: invented, answer_text_valid: true },
+        proposal: buildProposal({ structure_query: { kind: 'general' } }),
+        selectedDependenciesEvidence: { status: 'coverage_unavailable', reason },
+      });
+      expect(outcome.assistant_text).toContain(marker);
+      expect(outcome.assistant_text).not.toContain('phased pilot');
+      expect(outcome.assistant_text).not.toBe(invented);
+    },
+  );
 });
