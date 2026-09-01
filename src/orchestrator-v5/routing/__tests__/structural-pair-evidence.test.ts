@@ -942,6 +942,43 @@ describe('buildSelectedDependenciesEvidence', () => {
     // CONTRAST CONTROL in the same run: the dependencies kind DOES produce
     // evidence, so the nulls above are the gate and not a blind builder.
     expect(buildSelected()).toMatchObject({ status: 'resolved' });
+
+    // ⭐ THE OPPOSITE-DIRECTION TWIN of this very guard. The outgoing carrier
+    // must be just as tightly keyed, or "each builder answers its own question"
+    // is a claim proved in one direction only. Asserted here rather than in the
+    // new file so the two keying guards live side by side and cannot drift.
+    const buildOutgoing = (
+      structureQuery: StructureQuery | undefined,
+    ) => buildSelectedOutgoingInfluenceEvidence(selectedGraph, {
+      structureQuery,
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: [] },
+      focus: {
+        elements: [{
+          id: 'selling_time', kind: 'outcome',
+          label: 'Sales rep time on selling activities', analysis_link: 'no_analysis',
+        }],
+        unresolved: 'none', requested_count: 1, unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'none' },
+      proposalEntity: {
+        id: 'selling_time', label: 'Sales rep time on selling activities',
+        resolution_status: 'resolved',
+      },
+      graphContextStatus: 'canonical', graphAuthority: 'canonical_strict',
+      graphWasTrimmed: false,
+    });
+    const otherKindsForOutgoing: readonly StructureQuery[] = [
+      ...others.filter((query) => query.kind !== 'outgoing_influence'),
+      { kind: 'dependencies', element_id: 'selling_time' },
+    ];
+    for (const structureQuery of otherKindsForOutgoing) {
+      expect(buildOutgoing(structureQuery), `kind ${structureQuery.kind} must claim nothing`)
+        .toBeNull();
+    }
+    expect(buildOutgoing(undefined)).toBeNull();
+    // CONTRAST CONTROL for the twin, same run.
+    expect(buildOutgoing({ kind: 'outgoing_influence', element_id: 'selling_time' }))
+      .toMatchObject({ status: 'resolved' });
   });
 
   it('requires selected focus, validated proposal target and canonical graph identity to agree', () => {
