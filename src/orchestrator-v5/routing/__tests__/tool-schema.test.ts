@@ -13,6 +13,7 @@ import {
   parseToolCallResponse,
 } from '../tool-schema.js';
 import { deriveAnswerTextFromShape } from '../answer-shape.js';
+import { deriveStructureQueryKinds } from './derive-structure-query-kinds.js';
 
 const VALID_EXECUTE_INPUT = {
   intent_class: 'execute' as const,
@@ -535,6 +536,30 @@ describe('OLUMI_ACTION_TOOL.action.structure_query field', () => {
     element_ids: ['factor-a', 'goal-b'] as [string, string],
   };
 
+  /**
+   * ⭐ DERIVED, NOT MIRRORED. This assertion used to hand-list the four advertised
+   * kinds, so adding a fifth arm to the enforcing Zod union left it GREEN while
+   * the tool advert never mentioned the new question — the frontier model would
+   * then be structurally unable to choose it, and nothing would go red. The enum
+   * is now derived from `StructureQuerySchema` itself: the advert and the
+   * enforcer must name the SAME set, and a kind added to either alone REDs here.
+   */
+  it('advertises exactly the kinds the enforcing schema accepts, derived from it', () => {
+    const enforcedKinds = deriveStructureQueryKinds();
+    // Positive control: the derivation must actually SEE kinds, or "the sets
+    // match" is two empty sets agreeing.
+    expect(enforcedKinds.length).toBeGreaterThanOrEqual(5);
+    expect(enforcedKinds).toContain('dependencies');
+    expect(enforcedKinds).toContain('outgoing_influence');
+
+    const advertised = (
+      (OLUMI_ACTION_TOOL.input_schema.properties.action as {
+        properties: { structure_query: { properties: { kind: { enum: readonly string[] } } } };
+      }).properties.structure_query.properties.kind.enum
+    );
+    expect([...advertised].sort()).toEqual([...enforcedKinds].sort());
+  });
+
   it('declares closed optional dependency, direct-relationship and reachability questions', () => {
     const action = OLUMI_ACTION_TOOL.input_schema.properties.action as {
       properties: {
@@ -551,7 +576,13 @@ describe('OLUMI_ACTION_TOOL.action.structure_query field', () => {
       required: ['kind'],
       properties: {
         kind: expect.objectContaining({
-          enum: ['general', 'dependencies', 'direct_relationship', 'reachability'],
+          enum: [
+            'general',
+            'dependencies',
+            'outgoing_influence',
+            'direct_relationship',
+            'reachability',
+          ],
         }),
         element_id: expect.objectContaining({ minLength: 1 }),
         element_ids: expect.objectContaining({

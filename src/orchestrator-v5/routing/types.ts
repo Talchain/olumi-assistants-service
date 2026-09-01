@@ -207,6 +207,30 @@ const DependenciesQuerySchema = z
   })
   .strict();
 
+/**
+ * ⭐ THE OPPOSITE DIRECTION, AND DELIBERATELY NOT A FLAG ON `dependencies`.
+ *
+ * `dependencies` answers "what feeds INTO this?" — its incoming-only reading is
+ * load-bearing (#1229 closed a seam where fluent prose invented an unlisted
+ * option-to-factor edge, and the whole carrier exists to make that
+ * unrepresentable). "Why does X matter?" / "why is X important?" / "what does X
+ * drive?" is the OUTGOING question, and it is a DIFFERENT QUESTION rather than a
+ * parameter of the same one.
+ *
+ * Folding a direction switch into `DependenciesQuerySchema` would put two
+ * questions under one name — this estate's trap 21 — and every existing reader
+ * of `kind === 'dependencies'` would silently inherit a meaning it was never
+ * written for. A separate literal makes each reader state which question it
+ * answers, and makes a direction inversion a TYPE ERROR rather than a plausible
+ * sentence.
+ */
+const OutgoingInfluenceQuerySchema = z
+  .object({
+    kind: z.literal('outgoing_influence'),
+    element_id: z.string().min(1),
+  })
+  .strict();
+
 const GeneralStructureQuerySchema = z
   .object({
     kind: z.literal('general'),
@@ -216,6 +240,7 @@ const GeneralStructureQuerySchema = z
 export const StructureQuerySchema = z.union([
   GeneralStructureQuerySchema,
   DependenciesQuerySchema,
+  OutgoingInfluenceQuerySchema,
   DirectRelationshipQuerySchema,
   ReachabilityQuerySchema,
 ]);

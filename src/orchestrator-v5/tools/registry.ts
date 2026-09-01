@@ -82,6 +82,7 @@ import type {
 import type { ProposalAction } from '../routing/types.js';
 import type {
   SelectedDependenciesEvidence,
+  SelectedOutgoingInfluenceEvidence,
   StructuralPairEvidence,
 } from '../routing/structural-pair-evidence.js';
 import type { ExplanationAnswerErrorReason } from '../routing/validator-explanation.js';
@@ -326,6 +327,15 @@ export interface HandlerInvocation {
    * two-element carrier above does for pair questions.
    */
   readonly selectedDependenciesEvidence?: SelectedDependenciesEvidence;
+  /**
+   * Canonical direct OUTGOING-INFLUENCE evidence for one identified item —
+   * what it drives. Structurally parallel to the dependencies carrier above and
+   * deliberately a SEPARATE field: the two answer opposite predicates, and a
+   * single field would let one be rendered as the other without a type error.
+   * At most one of the two is ever populated on a turn, because each is keyed to
+   * its own `structure_query.kind`.
+   */
+  readonly outgoingInfluenceEvidence?: SelectedOutgoingInfluenceEvidence;
   /**
    * V5 D1: per-turn graph (post-fallback selection between
    * `options.graphState` and persisted scenarios.graph). Mutation
