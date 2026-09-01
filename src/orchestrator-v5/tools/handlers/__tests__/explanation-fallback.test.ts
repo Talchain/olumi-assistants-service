@@ -876,12 +876,21 @@ describe('composeExplainFromStructureFallback', () => {
       status: 'ambiguous', subject_selection: 'single_resolved',
     });
     for (const phrase of forbidden) expect(marked).not.toContain(phrase);
-    expect(marked).toContain('will not guess its relationships');
+    expect(marked).not.toMatch(/name or select/i);
+    for (const pattern of FORBIDDEN_INTERNAL) expect(marked).not.toMatch(pattern);
+    expect(marked).not.toMatch(/\b(?:updated|changed|applied|wrote|written)\b/i);
+    expect(marked).not.toMatch(/\bI (?:have )?saved\b/i);
+    expect(marked).toBe(
+      'I could not match your question to a single part of your saved model, so I will not guess at what connects to it. ' +
+      'Check that the one you mean appears only once in the model, and ask again.',
+    );
     // In-suite CONTRAST: the unmarked verdict — no selection, or a selection
     // that did not resolve to one element — still carries the instruction, so
     // the assertions above discriminate rather than testing an empty string.
     const unmarked = composeSelectedDependenciesEvidenceAnswer({ status: 'ambiguous' });
-    expect(unmarked).toContain('Name or select one element and ask again.');
+    expect(unmarked).toContain(
+      'Point me at one — name it, or select it on the canvas — and ask again.',
+    );
     expect(unmarked).not.toBe(marked);
   });
 
