@@ -106,6 +106,7 @@ function collide(message: string, entityId: string = ASKED_FACTOR, chipOriginate
     optionLabels: OPTION_LABELS,
     readiness,
     chipOriginated,
+    recordedAsk: null,
   });
 }
 
@@ -414,6 +415,7 @@ describe('CASE 2b — naming a DIFFERENT outstanding factor does not license the
       optionLabels: OPTION_LABELS,
       readiness: twoBlockers,
       chipOriginated: false,
+      recordedAsk: null,
     });
     // Bound by IDENTITY: only the pair whose factor IS the write target.
     expect(hit?.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([ASKED_PAIR]);
@@ -428,6 +430,7 @@ describe('CASE 2b — naming a DIFFERENT outstanding factor does not license the
         optionLabels: OPTION_LABELS,
         readiness: twoBlockers,
         chipOriginated: false,
+        recordedAsk: null,
       }),
     ).toBeNull();
   });
@@ -456,6 +459,7 @@ describe('CASE 3 — the arms that already worked are unchanged', () => {
       optionLabels: OPTION_LABELS,
       readiness,
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit?.refusedField).toBe('edge_strength');
   });
@@ -469,6 +473,7 @@ describe('CASE 3 — the arms that already worked are unchanged', () => {
         optionLabels: OPTION_LABELS,
         readiness: { blockers: [] },
         chipOriginated: false,
+        recordedAsk: null,
       }),
     ).toBeNull();
   });

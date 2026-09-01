@@ -231,6 +231,7 @@ import {
   buildVerifiedCorrectionReplay,
   findOutstandingEffectAskCollision,
 } from './routing/outstanding-effect-ask-misroute.js';
+import { deriveRecordedEffectAsk } from './routing/repair-value-binding.js';
 import { classifyValueUnitAgainstFactor } from './routing/value-unit-resolution.js';
 import {
   deriveContextReadiness,
@@ -9180,6 +9181,31 @@ export async function runTurnExecutor(
           },
         };
       }
+      // ⭐⭐ THE PAIR THE PRODUCT'S OWN RECORD SAYS IT ASKED ABOUT — memoised and
+      // lazy, the same shape as `readOutstandingEffectAskReadiness` above and
+      // for the same reason: it only runs on a turn that reaches one of the two
+      // misroute guards with a valid mutating proposal.
+      //
+      // ⚠ IT READS `context.most_recent_pending_actions`, the SINGLE PERSISTED
+      // AUTHORITY for the prior turn's offers, and the SAME list the pending
+      // resolvers elsewhere in this file read — not a second spelling of "what
+      // did we ask" (trap 12). Liveness is decided by the shared read-time
+      // predicate inside `deriveRecordedEffectAsk`, so this seam agrees with the
+      // short-confirm / ordinal resolvers about what "live" means.
+      let outstandingEffectAskRecordedPair:
+        | ReturnType<typeof deriveRecordedEffectAsk>
+        | undefined;
+      const readOutstandingEffectAskRecordedPair = ():
+        ReturnType<typeof deriveRecordedEffectAsk> => {
+        if (outstandingEffectAskRecordedPair === undefined) {
+          outstandingEffectAskRecordedPair = deriveRecordedEffectAsk({
+            readiness: readOutstandingEffectAskReadiness(),
+            pendings: context.most_recent_pending_actions ?? [],
+            nowMs: Date.now(),
+          });
+        }
+        return outstandingEffectAskRecordedPair;
+      };
       const outstandingEffectAskOptionLabels = (): readonly string[] =>
         graphLookupForValidate
           ? graphLookupForValidate
@@ -9276,8 +9302,12 @@ export async function runTurnExecutor(
               entityId: action.entity.id,
               message: userMessageForTurn ?? '',
               optionLabels: outstandingEffectAskOptionLabels(),
+              nonOptionLabels: graphLookupForValidate
+                ? collectOptionGuardLabels(graphLookupForValidate).nonOptionLabels
+                : [],
               readiness: readOutstandingEffectAskReadiness(),
               chipOriginated: turnIsChipOriginated,
+              recordedAsk: readOutstandingEffectAskRecordedPair(),
             })
           : null;
       // ⭐ THE CORRECTION IS VERIFIED AGAINST THE WRITER BEFORE IT IS OFFERED.
@@ -9356,8 +9386,12 @@ export async function runTurnExecutor(
               entityId: action.entity.id,
               message: userMessageForTurn ?? '',
               optionLabels: outstandingEffectAskOptionLabels(),
+              nonOptionLabels: graphLookupForValidate
+                ? collectOptionGuardLabels(graphLookupForValidate).nonOptionLabels
+                : [],
               readiness: readOutstandingEffectAskReadiness(),
               chipOriginated: turnIsChipOriginated,
+              recordedAsk: readOutstandingEffectAskRecordedPair(),
             })
           : null;
       const edgeStrengthVerifiedReplay =

@@ -132,6 +132,7 @@ import {
 import {
   BASELINE_FRAMING,
   EFFECT_FRAMED_TRIGGERS,
+  normaliseOptionLabel,
   readOptionEffectValue,
   resolveOptionEffectWrite,
 } from './option-effect-write.js';
@@ -142,7 +143,7 @@ import { deriveMissingEffectPairs, type MissingEffectPair } from './repair-value
 //   · "does this message name this label?" — the same word-bounded reader
 //     `configure-option-intent` / `-advice` / `-clarify` already use.
 import { messageAnswersMissingValueAsk, readMissingValueAnswer } from './missing-value-answer.js';
-import { containsPhrase } from './option-intervention-guard.js';
+import { containsPhrase, optionCueMatches } from './option-intervention-guard.js';
 
 /** The handlers this module can refuse. Both are D1 graph-mutating writers. */
 export type OutstandingEffectAskHandlerId = 'set_factor_value' | 'adjust_edge_strength';
@@ -154,9 +155,12 @@ export interface OutstandingEffectAskCollision {
   /** The field the proposal would have written instead of the effect value. */
   readonly refusedField: OutstandingEffectAskRefusedField;
   /**
-   * The outstanding pair(s) the proposal collides with, in blocker order.
-   * Exactly one ⇒ the copy can name it. Two or more ⇒ the copy must ask.
-   * Never empty (a collision with no pair is not a collision).
+   * The VERIFIED outstanding pair(s) the proposal collides with, in blocker
+   * order. Exactly one ⇒ the copy can name it. Two or more ⇒ the copy must
+   * ask. Empty is reserved for one fail-closed state: the proposal targets an
+   * outstanding recorded pair, but the current turn authoritatively names a
+   * different option. The proposal must still be refused, while no stale pair
+   * may reach pair-specific copy or replay.
    */
   readonly pairs: readonly MissingEffectPair[];
   /**
@@ -194,6 +198,12 @@ export function buildOutstandingEffectAskDetails(
   verifiedReplay: string | null,
 ): Readonly<Record<string, unknown>> {
   if (collision === null) return {};
+  // A current-option/proposal mismatch is still a refusal, but no pair is
+  // truthful enough to name. Keep only the field-level reason so the composer
+  // falls through to generic clarify copy and cannot replay the stale ask.
+  if (collision.pairs.length === 0) {
+    return { effect_ask_refused_field: collision.refusedField };
+  }
   return {
     ...(verifiedReplay !== null ? { effect_ask_replay_message: verifiedReplay } : {}),
     effect_ask_refused_field: collision.refusedField,
@@ -526,12 +536,90 @@ function readUserValue(message: string): number | null {
  * never from a request field, or the refusal could speak about a model the user
  * is not looking at.
  */
+/**
+ * ⭐⭐ COLLAPSE A GENUINE AMBIGUITY TO THE PAIR THE PRODUCT ITSELF NAMED — and
+ * do NOTHING ELSE.
+ *
+ * THE DEFECT, captured 1 Sep 2026 on deployed staging (turn 2 of four). Two
+ * options were outstanding on one factor, so `pairs` carried both and
+ * `composeOutstandingEffectAskMisroute` emitted *"I'm not sure which option you
+ * mean"* — one turn after the product had asked about exactly one of them and
+ * written down which. The estate's ruling that two candidates must be ASKED
+ * about rather than guessed between (trap 22f) was correct and was being applied
+ * to a question that was never ambiguous.
+ *
+ * ⚠⚠ DIRECTION OF THE CHANGE, STATED AND BOUNDED — every one of these is cased
+ * in `recorded-effect-ask.test.ts`:
+ *   · it can only NARROW, never widen: the result is always a subset;
+ *   · it cannot CREATE a collision (an empty `pairs` is returned untouched, and
+ *     the caller has already returned null on it);
+ *   · it cannot DELETE one: a record naming a pair that is not a member leaves
+ *     the set alone rather than emptying it;
+ *   · it cannot alter a set that already has exactly one member.
+ * So the reachable behavioural change is exactly "an ambiguous refusal becomes
+ * the specific one the product owed the user", by construction rather than by
+ * inspection.
+ *
+ * ⚠ THE FALLBACK IS THE AMBIGUOUS SET, NOT THE HEAD BLOCKER. Narrowing by list
+ * position would put a confidently-named, possibly-wrong option in a sentence
+ * about the user's own model — trading an honest "which one?" for a quiet lie,
+ * which is the wrong direction on every axis this module was built for.
+ */
+function narrowToRecordedAsk(
+  pairs: readonly MissingEffectPair[],
+  recordedAsk: MissingEffectPair | null,
+): readonly MissingEffectPair[] {
+  if (recordedAsk === null || pairs.length <= 1) return pairs;
+  const named = pairs.filter(
+    (p) => p.optionId === recordedAsk.optionId && p.factorId === recordedAsk.factorId,
+  );
+  return named.length === 1 ? named : pairs;
+}
+
+/**
+ * The current turn outranks an older recorded ask when it identifies an
+ * option. Identity comes from `optionCueMatches`, the same reader used by the
+ * option-effect writer; this guard does not classify the prose a second time.
+ *
+ * A current reference can only narrow to outstanding members. If it points at
+ * no member, `null` means IDENTITY MISMATCH — not "no collision". The edge arm
+ * converts that signal into a generic fail-closed refusal with no pair-specific
+ * details or replay. Two current references remain two candidates: the older
+ * record must never break a tie the user introduced on this turn.
+ */
+function narrowToCurrentOrRecordedAsk(
+  pairs: readonly MissingEffectPair[],
+  recordedAsk: MissingEffectPair | null,
+  message: string,
+  optionLabels: readonly string[],
+  nonOptionLabels: readonly string[],
+): readonly MissingEffectPair[] | null {
+  const prior = recordedAsk ?? null;
+  if (prior !== null && pairs.length > 0) {
+    const currentKeys = new Set(
+      optionCueMatches(message, optionLabels, nonOptionLabels)
+        .map((index) => optionLabels[index])
+        .filter((label): label is string => typeof label === 'string')
+        .map(normaliseOptionLabel),
+    );
+    if (currentKeys.size > 0) {
+      const current = pairs.filter((pair) =>
+        currentKeys.has(normaliseOptionLabel(pair.optionLabel)),
+      );
+      return current.length > 0 ? current : null;
+    }
+  }
+  return narrowToRecordedAsk(pairs, prior);
+}
+
 export function findOutstandingEffectAskCollision(params: {
   readonly handlerId: OutstandingEffectAskHandlerId;
   /** `proposal.entity.id`: a node id, or the `from→to` edge form. */
   readonly entityId: string;
   readonly message: string;
   readonly optionLabels: readonly string[];
+  /** Non-option graph labels used by the shared option-identity reader. */
+  readonly nonOptionLabels?: readonly string[];
   readonly readiness: { readonly blockers?: unknown } | null | undefined;
   /**
    * ⭐ Is `message` the PRODUCT'S OWN CHIP COPY rather than the user's prose?
@@ -541,6 +629,19 @@ export function findOutstandingEffectAskCollision(params: {
    * every caller instead (trap 12 — fail loud on drift, never assume-good).
    */
   readonly chipOriginated: boolean;
+  /**
+   * ⭐⭐ THE PAIR THE PRODUCT'S OWN LIVE `elicit_option_effect` RECORD NAMES, or
+   * `null` — from {@link deriveRecordedEffectAsk}, the one owner of that
+   * question (`repair-value-binding.ts`). It is passed IN rather than derived
+   * here because only the caller holds the turn's pending rows.
+   *
+   * REQUIRED rather than optional, for the same reason `chipOriginated` is: an
+   * omitted argument would silently restore the hole it closes, so the compiler
+   * is made to point at every caller instead (trap 12 — fail loud on drift).
+   * On free-typed prose, a current option identity resolved by the existing
+   * option-cue reader outranks this older record.
+   */
+  readonly recordedAsk: MissingEffectPair | null;
 }): OutstandingEffectAskCollision | null {
   const pairs = deriveMissingEffectPairs(params.readiness);
   if (pairs.length === 0) return null;
@@ -554,9 +655,30 @@ export function findOutstandingEffectAskCollision(params: {
     const match = pairs.filter(
       (p) => p.optionId === parsed.from && p.factorId === parsed.to,
     );
-    return match.length > 0
-      ? { refusedField: 'edge_strength', pairs: match, userValue: readUserValue(params.message) }
-      : null;
+    // No outstanding target identity means no collision. This early return is
+    // load-bearing now that `null` from the narrowing helper means something
+    // narrower: an outstanding target exists, but current option identity
+    // contradicts it.
+    if (match.length === 0) return null;
+    const narrowed = narrowToCurrentOrRecordedAsk(
+      match,
+      params.recordedAsk,
+      params.message,
+      params.optionLabels,
+      params.nonOptionLabels ?? [],
+    );
+    if (narrowed === null) {
+      return {
+        refusedField: 'edge_strength',
+        pairs: [],
+        userValue: null,
+      };
+    }
+    return {
+      refusedField: 'edge_strength',
+      pairs: narrowed,
+      userValue: readUserValue(params.message),
+    };
   }
 
   // set_factor_value — the prose conjuncts apply to a TYPED turn only. On a
@@ -632,7 +754,19 @@ export function findOutstandingEffectAskCollision(params: {
   // `match` is non-empty by the early return above — no second, unreachable
   // emptiness guard here. A guard that cannot fail reads as protection and is
   // not, which is the shape this estate hunts.
-  return { refusedField: 'factor_value', pairs: match, userValue: readUserValue(params.message) };
+  const narrowed = narrowToCurrentOrRecordedAsk(
+    match,
+    params.recordedAsk,
+    params.message,
+    params.optionLabels,
+    params.nonOptionLabels ?? [],
+  );
+  if (narrowed === null || narrowed.length === 0) return null;
+  return {
+    refusedField: 'factor_value',
+    pairs: narrowed,
+    userValue: readUserValue(params.message),
+  };
 }
 
 /**

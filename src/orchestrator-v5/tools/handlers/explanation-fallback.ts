@@ -940,19 +940,47 @@ export function composeSelectedDependenciesEvidenceAnswer(
   evidence: SelectedDependenciesEvidence,
 ): string {
   if (evidence.status === 'ambiguous') {
+    // ⭐⭐ THE REFUSAL IS RIGHT; THE WORDS WERE NOT. Captured 1 Sep 2026, deployed
+    // staging, turn 4 of four: *"I cannot establish one unique Living Model
+    // element and matching dependency question, so I will not guess its
+    // relationships."* "Living Model element" and "dependency question" are OUR
+    // words for OUR data structures. Served prompt v121 Rule 4 forbids internal
+    // vocabulary in user-facing copy — and a prompt cannot govern a string in
+    // this repo, which is why the fix is here.
+    //
+    // ⚠⚠ THE VERDICT ITSELF IS DELIBERATELY UNTOUCHED, AND THAT IS A CORRECTED
+    // PREMISE RATHER THAN CAUTION. The obvious fix — let an `ambiguous` verdict
+    // fall through to the deterministic structure projection — was implemented
+    // and MEASURED, and it turns an honest refusal into a confident answer to a
+    // DIFFERENT question: four route-level guards in
+    // `__tests__/b2-bounded-answer-routing.integration.test.ts` go RED, each one
+    // a case where the user named or selected a specific element, the identity
+    // could not be established, and the projection then described whatever
+    // relationships it could see. That is the inverse defect, and the worse one.
+    // Turn 4's root cause is upstream: the router proposed
+    // `structure_query.kind: 'dependencies'` for a whole-model question ("explain
+    // why you produced this model"), whose correct kind is `general` — and a
+    // `general` query produces no dependency evidence at all (derived over the
+    // whole StructureQuery union in `structural-pair-evidence.test.ts`).
+    //
+    // ⚠ THE SIBLING PATH STILL CARRIES THE SAME JARGON and is NOT changed here:
+    // `composeStructuralPairEvidenceAnswer`'s ambiguous branch below says "I
+    // cannot establish two unique Living Model elements from that wording", and
+    // reaches users on `direct_relationship` and `reachability` queries. Named
+    // rather than silently widened into.
     if (evidence.subject_selection === 'single_resolved') {
       // The user already has exactly one resolved element selected, so the
       // name-or-select instruction below would state a condition that is
       // already true. What is unresolved here is the question or the saved
       // model, and the copy says only that.
       return (
-        'I cannot tie this dependency question to exactly one element of the saved Living Model, so I will not guess its relationships. ' +
-        'Check that the element you mean appears once in the model, and ask again.'
+        'I could not match your question to a single part of your saved model, so I will not guess at what connects to it. ' +
+        'Check that the one you mean appears only once in the model, and ask again.'
       );
     }
     return (
-      'I cannot establish one unique Living Model element and matching dependency question, so I will not guess its relationships. ' +
-      'Name or select one element and ask again.'
+      'I could not tell which part of your model you are asking about, so I will not guess at what connects to it. ' +
+      'Point me at one — name it, or select it on the canvas — and ask again.'
     );
   }
   if (evidence.status === 'coverage_unavailable') {

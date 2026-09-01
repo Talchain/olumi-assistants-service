@@ -892,6 +892,31 @@ describe('buildSelectedDependenciesEvidence', () => {
     expect((body.match(/ambiguousForTurn\(options\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
   });
 
+  /**
+   * ⭐⭐ THE UNREACHABILITY THE HANDLER'S FIX LEANS ON, PINNED RATHER THAN
+   * ASSUMED. `explain-from-structure.ts` keeps barring an authored `general`
+   * answer whenever typed selected-dependency evidence is present, INCLUDING an
+   * `ambiguous` one — and that bar is only meaningful because a `general` query
+   * can never produce this evidence in the first place. Derived over the whole
+   * StructureQuery union, so a kind added later fails here rather than silently
+   * opening the seam.
+   */
+  it('produces NOTHING for any structure query other than `dependencies`', () => {
+    const others: readonly StructureQuery[] = [
+      { kind: 'general' },
+      { kind: 'direct_relationship', element_ids: ['automation', 'selling_time'] },
+      { kind: 'reachability', source_element_id: 'automation', target_element_id: 'goal' },
+    ];
+    for (const structureQuery of others) {
+      expect(buildSelected({ structureQuery }), `kind ${structureQuery.kind} must claim nothing`)
+        .toBeNull();
+    }
+    expect(buildSelected({ structureQuery: undefined })).toBeNull();
+    // CONTRAST CONTROL in the same run: the dependencies kind DOES produce
+    // evidence, so the nulls above are the gate and not a blind builder.
+    expect(buildSelected()).toMatchObject({ status: 'resolved' });
+  });
+
   it('requires selected focus, validated proposal target and canonical graph identity to agree', () => {
     expect(buildSelected({
       requestedSelection: { node_ids: ['selling_time'], edge_ids: ['automation→selling_time'] },

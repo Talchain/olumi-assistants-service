@@ -119,6 +119,29 @@ function explanationToolUse(handlerId: string, answerText: string): ToolResponse
   } as unknown as ToolResponseBlock;
 }
 
+function structuralToolUse(
+  structureQuery:
+    | { kind: 'general' }
+    | { kind: 'dependencies'; element_id: string }
+    | { kind: 'direct_relationship'; element_ids: [string, string] }
+    | { kind: 'reachability'; source_element_id: string; target_element_id: string },
+): ToolResponseBlock {
+  const block = explanationToolUse(
+    'explain_from_structure',
+    'A complete authored explanation of the current Living Model structure and why it has this shape.',
+  ) as Extract<ToolResponseBlock, { type: 'tool_use' }>;
+  const input = block.input as { action: Record<string, unknown> };
+  input.action.structure_query = structureQuery;
+  return block;
+}
+
+function structureQueryOf(result: RoutingResult): unknown {
+  if (result.type !== 'tool_call' || result.proposal.intent_class !== 'execute') {
+    throw new Error('expected execute tool_call');
+  }
+  return result.proposal.action.structure_query;
+}
+
 describe('routeWithToolUse — F2 forced explanation intent', () => {
   it('disables thinking and forces the olumi_action tool on the pill path', async () => {
     const adapter = {
@@ -211,6 +234,131 @@ describe('routeWithToolUse — F2 forced explanation intent', () => {
 
     const args = adapter.chatWithTools.mock.calls[0]![0];
     expect(args.tool_choice).toEqual({ type: 'auto' });
+  });
+});
+
+describe('routeWithToolUse — whole-model structure question normalisation', () => {
+  it.each([
+    'You only have one factor. Explain why you produced this model.',
+    'Why did you build this model with just one factor?',
+    'Explain why you drafted the whole model around a single factor.',
+  ])('INTENDED: dependencies is corrected to general for %s', async (message) => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult([structuralToolUse({ kind: 'dependencies', element_id: 'factor-a' })]),
+        ),
+    };
+    const result = await routeWithToolUse(packWithConversation(), message, {
+      requestId: 'req-whole-model-normalise',
+      adapter,
+    });
+    expect(structureQueryOf(result)).toEqual({ kind: 'general' });
+  });
+
+  it('OPPOSITE: an explicit named-factor dependency question stays dependencies', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult([structuralToolUse({ kind: 'dependencies', element_id: 'factor-a' })]),
+        ),
+    };
+    const result = await routeWithToolUse(
+      packWithConversation(),
+      'What does Team Capacity Consumed directly depend on in this model?',
+      { requestId: 'req-named-dependency', adapter },
+    );
+    expect(structureQueryOf(result)).toEqual({
+      kind: 'dependencies',
+      element_id: 'factor-a',
+    });
+  });
+
+  it('OPPOSITE: a selected-element dependency question stays dependencies', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult([structuralToolUse({ kind: 'dependencies', element_id: 'factor-a' })]),
+        ),
+    };
+    const result = await routeWithToolUse(packWithConversation(), 'What does this depend on?', {
+      requestId: 'req-selected-dependency',
+      adapter,
+    });
+    expect(structureQueryOf(result)).toEqual({
+      kind: 'dependencies',
+      element_id: 'factor-a',
+    });
+  });
+
+  it('MUTANT: keyword overlap in a named dependency question is not a whole-model build question', async () => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(
+          mkResult([structuralToolUse({ kind: 'dependencies', element_id: 'factor-a' })]),
+        ),
+    };
+    const result = await routeWithToolUse(
+      packWithConversation(),
+      'Why does Model Build Cost depend on only one other factor in this model?',
+      { requestId: 'req-dependency-keyword-mutant', adapter },
+    );
+    expect(structureQueryOf(result)).toEqual({
+      kind: 'dependencies',
+      element_id: 'factor-a',
+    });
+  });
+
+  it.each([
+    {
+      kind: 'direct_relationship' as const,
+      element_ids: ['factor-a', 'goal-b'] as [string, string],
+    },
+    {
+      kind: 'reachability' as const,
+      source_element_id: 'option-a',
+      target_element_id: 'goal-b',
+    },
+  ])('UNTOUCHED: $kind remains byte-for-byte typed', async (query) => {
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([structuralToolUse(query)])),
+    };
+    const result = await routeWithToolUse(
+      packWithConversation(),
+      'You only have one factor. Explain why you produced this model.',
+      { requestId: `req-${query.kind}-untouched`, adapter },
+    );
+    expect(structureQueryOf(result)).toEqual(query);
+  });
+
+  it('REPAIR TWIN: a valid repaired dependencies proposal is normalised too', async () => {
+    const malformed = {
+      type: 'tool_use',
+      id: 'toolu_malformed',
+      name: OLUMI_ACTION_TOOL_NAME,
+      input: { intent_class: 'execute', action: { handler_id: 'explain_from_structure' } },
+    } as unknown as ToolResponseBlock;
+    const adapter = {
+      chatWithTools: vi
+        .fn<(args: ChatWithToolsArgs, opts: unknown) => Promise<ChatWithToolsResult>>()
+        .mockResolvedValueOnce(mkResult([malformed]))
+        .mockResolvedValueOnce(
+          mkResult([structuralToolUse({ kind: 'dependencies', element_id: 'factor-a' })]),
+        ),
+    };
+    const result = await routeWithToolUse(
+      packWithConversation(),
+      'You only have one factor. Explain why you produced this model.',
+      { requestId: 'req-whole-model-repair', adapter },
+    );
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(structureQueryOf(result)).toEqual({ kind: 'general' });
   });
 });
 

@@ -144,6 +144,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
 
     expect(hit).not.toBeNull();
@@ -162,6 +163,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit?.pairs).toHaveLength(1);
   });
@@ -176,6 +178,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -188,6 +191,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -208,6 +212,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -220,6 +225,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -232,6 +238,7 @@ describe('DEFECT A — an adjust_edge_strength proposal on the pair the product 
       optionLabels: OPTION_LABELS,
       readiness: { blockers: [] },
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -246,6 +253,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
 
     expect(hit).not.toBeNull();
@@ -266,6 +274,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -278,6 +287,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -293,6 +303,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -305,6 +316,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -317,6 +329,7 @@ describe('DEFECT B — a set_factor_value proposal on a factor the product is as
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -331,6 +344,7 @@ describe('the user\'s own value rides on the collision — read by the WRITER\'s
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit?.userValue).toBe(0.7);
   });
@@ -346,6 +360,7 @@ describe('the user\'s own value rides on the collision — read by the WRITER\'s
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).not.toBeNull();
     expect(hit?.userValue).toBeNull();
@@ -359,6 +374,7 @@ describe('the user\'s own value rides on the collision — read by the WRITER\'s
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit?.userValue).toBeNull();
   });
@@ -383,6 +399,7 @@ describe('the pair set is read from ONE owner, in both of its spellings', () => 
         ],
       },
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(byType?.pairs).toHaveLength(1);
   });
@@ -405,6 +422,7 @@ describe('the pair set is read from ONE owner, in both of its spellings', () => 
         ],
       },
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -436,6 +454,7 @@ describe('AMBIGUITY IS THE PRODUCT — two outstanding options on one factor are
         ],
       },
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit?.pairs.map((p) => p.optionId)).toEqual([OPT_ENTERPRISE, OPT_ACQUIRE]);
   });
@@ -465,6 +484,7 @@ describe('⭐⭐ THE WITNESS\'S TWIN — a chip-originated turn is matched on ID
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: true,
+      recordedAsk: null,
     });
     expect(hit?.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([
       `${OPT_ENTERPRISE}::${FAC_ENTERPRISE}`,
@@ -481,6 +501,7 @@ describe('⭐⭐ THE WITNESS\'S TWIN — a chip-originated turn is matched on ID
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: false,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -501,6 +522,7 @@ describe('⭐⭐ THE WITNESS\'S TWIN — a chip-originated turn is matched on ID
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: true,
+      recordedAsk: null,
     });
     expect(hit).toBeNull();
   });
@@ -516,6 +538,7 @@ describe('⭐⭐ THE WITNESS\'S TWIN — a chip-originated turn is matched on ID
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: true,
+      recordedAsk: null,
     });
     const asFactor = findOutstandingEffectAskCollision({
       handlerId: 'set_factor_value',
@@ -524,6 +547,7 @@ describe('⭐⭐ THE WITNESS\'S TWIN — a chip-originated turn is matched on ID
       optionLabels: OPTION_LABELS,
       readiness: witnessedReadiness(),
       chipOriginated: true,
+      recordedAsk: null,
     });
     expect(asEdge).not.toBeNull();
     expect(asFactor).not.toBeNull();

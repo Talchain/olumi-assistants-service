@@ -391,3 +391,84 @@ describe('ContextPack readiness — the wire', () => {
     expect(READINESS_INSTRUCTION).toContain('this block governs');
   });
 });
+
+/**
+ * ⭐⭐⭐ THE READINESS BLOCK CAPTURED THE CONVERSATION — 1 Sep 2026, deployed
+ * staging, four consecutive turns.
+ *
+ * After CEE asked the user for a missing effect value, the user asked *"What do
+ * these terms mean?"* and was given the effect-setting flow again; two turns
+ * later *"You were talking about 'Keep Sending Cold Emails'."* got the IDENTICAL
+ * question back. The served system prompt v121 already says ANSWER FIRST, COACH
+ * SECOND — but `READINESS_INSTRUCTION` is appended to the USER turn AFTER it,
+ * self-labels authoritative, and its disclosure bullet was UNCONDITIONAL and
+ * MESSAGE-BLIND: *"If anything is still open, say plainly that the analysis
+ * cannot run yet…"* fires on every turn readiness exists, including the ones
+ * where the user asked something else entirely.
+ *
+ * ⚠⚠ SCOPE, STATED BEFORE THE ASSERTIONS RATHER THAN AFTER (trap 20). This is a
+ * predicate the MODEL evaluates, in prose, so the only thing a deterministic
+ * test can bind to is THE BYTES THE MODEL RECEIVES. These cases prove the
+ * subordination clause exists, that it is attached to the SAME bullet as the
+ * disclosure obligation, and that both reach the served user turn. They prove
+ * NOTHING about what the model then answers — that is a wire/journey witness
+ * against a deployed build. Rung reached here: TESTED.
+ *
+ * ⚠ AND THE RISK IS SYMMETRIC, so both directions are cased. Too weak and the
+ * drag persists; too strong and the product stops telling a blocked user that
+ * the analysis cannot run. The disclosure survives in BOTH branches — that is
+ * what `THE OPPOSITE DIRECTION` below pins.
+ */
+describe('READINESS_INSTRUCTION — subordinate to the user’s own message', () => {
+  /** The instruction's bullets, structurally rather than as one soup string. */
+  const bullets = (): readonly string[] =>
+    READINESS_INSTRUCTION.split('\n').filter((line) => line.startsWith('- '));
+
+  it('⭐ THE FIX: the block tells the model to answer the user’s own message first', () => {
+    expect(READINESS_INSTRUCTION).toContain('Answer the user’s own message first');
+    expect(READINESS_INSTRUCTION).toContain('readiness never displaces it');
+  });
+
+  it('⭐ THE OPPOSITE DIRECTION: the disclosure obligation still fires when the turn asks nothing else', () => {
+    // Bound to the ONE bullet that carries the obligation, so the condition and
+    // the obligation cannot be separated by a later edit without a RED. A
+    // substring check over the whole block would pass if someone moved the
+    // condition onto a different bullet and left this one unconditional.
+    const disclosure = bullets().filter((b) => b.includes('the analysis cannot run yet'));
+    expect(disclosure).toHaveLength(1);
+    expect(disclosure[0]).toContain('When the turn does not ask something else');
+    expect(disclosure[0]).toContain(
+      'name what is open, and give the user the next step it carries',
+    );
+    expect(disclosure[0]).toContain('Never leave them with only a refusal');
+  });
+
+  it('⭐ THE OPPOSITE DIRECTION, second arm: the disclosure is not DELETED on the answering branch either', () => {
+    // A fix that simply removed the readiness sentence whenever the user asks
+    // something would be the inverse defect: a blocked model that never says so.
+    const disclosure = bullets().filter((b) => b.includes('the analysis cannot run yet'));
+    expect(disclosure[0]).toContain('add what is open in one closing sentence');
+  });
+
+  it('the subordination reaches the SERVED USER TURN on a blocked model (the wire)', async () => {
+    CURRENT_GRAPH = BLOCKED_GRAPH;
+    // Turn 1 of the capture, verbatim.
+    const prompt = await runTurn('What do these terms mean?');
+    expect(readinessSection(prompt)?.status).toBe('blocked');
+    expect(prompt).toContain(READINESS_INSTRUCTION);
+    expect(prompt).toContain('Answer the user’s own message first');
+    expect(prompt).toContain('When the turn does not ask something else');
+  });
+
+  it('THE READY CONTROL still carries no readiness drag to subordinate — the block is absent-or-ready, never invented', async () => {
+    // Discrimination, not decoration: on a READY model the same served turn
+    // still carries the block (its own sibling test pins that) and the
+    // disclosure branch is the one that cannot fire. This case exists so the
+    // wire assertion above is not passing merely because the string is
+    // unconditional in a different way.
+    CURRENT_GRAPH = READY_GRAPH;
+    const prompt = await runTurn('What do these terms mean?');
+    expect(readinessSection(prompt)?.status).toBe('ready');
+    expect(prompt).toContain('Answer the user’s own message first');
+  });
+});
