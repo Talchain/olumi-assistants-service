@@ -113,7 +113,18 @@ function normaliseJudgeResult(
   return { verdict: { kind: 'unavailable', reason: 'parse_failed' }, latencyMs: 0, tokens: null, model: null };
 }
 
-/** Total over the three legal kinds; anything else becomes `unavailable`. */
+/**
+ * Total over the kinds a JUDGE may legally return; anything else becomes
+ * `unavailable`.
+ *
+ * ⛔ `not_assessed` IS DELIBERATELY ABSENT FROM THIS LIST. It is not a verdict
+ * the judge may claim — it is the record of the judge never having been asked,
+ * and only the code that did not ask may write it. Accepting it here would open
+ * exactly the hole the state closes: a model able to mark itself unassessed
+ * could leave the judged population at will, and the impoverished rate would go
+ * back to being uninterpretable. Pinned by the forgery case in
+ * `__tests__/metric-honesty.test.ts`.
+ */
 function coerceVerdict(v: DraftQualityVerdict | undefined): DraftQualityVerdict {
   if (v === null || typeof v !== 'object') return { kind: 'unavailable', reason: 'parse_failed' };
   if (v.kind === 'adequate') return v;
@@ -149,22 +160,36 @@ export async function assessDraftQuality(
     retryBudgetMs,
   });
 
+  // ⭐ THE THREE UNJUDGED ARMS. Each returns `not_assessed` with the reason that
+  // matches its own gate — NEVER `adequate`, which is a claim about the brief
+  // that nothing here has read. See the `not_assessed` note in `types.ts` for
+  // what the old spelling cost the metric.
   if (!nominated) {
     // The coverage facts are still produced and still emitted. An un-nominated
     // draft is measured — that is what makes the continuous quality metric
     // continuous, and what makes the pre-filter's recall estimable later.
-    return noRedraw('not_nominated', { kind: 'adequate' });
+    return noRedraw('not_nominated', { kind: 'not_assessed', reason: 'not_nominated' });
   }
 
   // ⭐ ORDER MATTERS, AND THIS IS THE CHEAP ONE FIRST. Spending a judge call to
   // discover we cannot act on the answer is pure cost. The two gates below are
   // both "we will not redraw" — checked before the money is spent.
   if (input.isRedraw) {
-    return noRedraw('redraw_already_spent', { kind: 'adequate' });
+    return noRedraw('redraw_already_spent', {
+      kind: 'not_assessed',
+      reason: 'redraw_already_spent',
+    });
   }
   const retryBudgetMs = getDraftLlmRetryBudgetMs(input.elapsedMs);
   if (retryBudgetMs < MIN_DRAFT_RETRY_BUDGET_MS) {
-    return noRedraw('budget_unaffordable', { kind: 'adequate' }, 0, null, null, retryBudgetMs);
+    return noRedraw(
+      'budget_unaffordable',
+      { kind: 'not_assessed', reason: 'budget_unaffordable' },
+      0,
+      null,
+      null,
+      retryBudgetMs,
+    );
   }
 
   let judged;
@@ -207,4 +232,109 @@ export async function assessDraftQuality(
     return { assessment, shouldRedraw: false, noRedrawReason: 'judged_adequate', retryBudgetMs };
   }
   return { assessment, shouldRedraw: false, noRedrawReason: 'judge_unavailable', retryBudgetMs };
+}
+
+/**
+ * ⭐⭐ THE SELECTION QUESTION — a THIRD authority, deliberately not folded into
+ * the two above (trap 21: write down the question each one answers before you
+ * reconcile them).
+ *
+ *   `classifyRetryableDraftFailure` — "did this draft FAIL?"            fails CLOSED
+ *   `assessDraftQuality`            — "is one more draw worth buying?"  fails OPEN
+ *   `assessRedrawForSelection`      — "may this draw REPLACE a graph
+ *                                      that has already been reviewed?" fails CLOSED
+ *
+ * ## Why the third one exists
+ *
+ * The redraw was selected on STRUCTURAL COVERAGE ONLY. The judge reads draw
+ * ONE; nothing read draw TWO. So a second draw that invents off-brief factors
+ * scores richer on every dimension the selector consults — waist, private
+ * factors, depth — and replaces the first, semantically reviewed graph. That is
+ * the enrichment risk returning through the SELECTION step: the content does
+ * not arrive through the verdict type (which has no channel), it arrives
+ * through the DRAW, and the old rule let it in.
+ *
+ * ## Why a judge call and not a cheap grounding check
+ *
+ * A deterministic check would have to decide whether node labels are "about"
+ * the brief — a predicate over natural language. This estate has measured what
+ * that costs: four consecutive rounds on one such predicate, each fixing one
+ * direction and reopening the other, settling on arbitrary length constants
+ * with hard cliffs (trap 22f). Off-brief-ness is semantic by definition, so a
+ * token-overlap heuristic is exactly the shape that oscillates, and the exit
+ * doctrine says to stop guessing and ask.
+ *
+ * ## The asymmetry, which is the whole rule
+ *
+ * `normaliseJudgeResult` already holds that *a verdict that costs money must be
+ * positively asserted*. Its selection twin: **a draw that replaces a reviewed
+ * graph must be positively cleared.** Unavailable, timed out, unparseable, out
+ * of headroom, unreadable — every one keeps the first draw. Note this does NOT
+ * weaken the pass's fail-open contract: the user receives a valid model either
+ * way; the only question here is WHICH of two valid models ships, and the
+ * default is the one that was read against the brief.
+ *
+ * ## Cost, bounded
+ *
+ * No nomination gate — nomination is a cost pre-filter for the REJECT decision,
+ * and this question needs a positive answer whatever the structure says. The
+ * judge's own headroom gate bounds it (`insufficient_headroom`, no call made,
+ * first draw kept), and this arm is reached only when a redraw was already
+ * spent, which is already the rare and expensive path.
+ */
+export interface RedrawSelectionInput {
+  readonly graph: unknown;
+  readonly brief: string;
+  readonly requestId: string;
+  readonly elapsedMs: number;
+  readonly judge?: JudgeFn;
+}
+
+export interface RedrawSelectionAssessment {
+  /** Derived from the SECOND draw's own graph — never copied from the first. */
+  readonly assessment: DraftQualityAssessment;
+  /** True only on a positively asserted `adequate`. */
+  readonly cleared: boolean;
+}
+
+export async function assessRedrawForSelection(
+  input: RedrawSelectionInput,
+): Promise<RedrawSelectionAssessment> {
+  const coverage = computeDraftCoverage(input.graph);
+  // ⭐ DERIVED FROM THIS DRAW. The old code copied the first draw's nomination
+  // onto the second draw's telemetry row, so the one field reporting what the
+  // redraw changed structurally reported its input instead.
+  const nominated = nominatesForReview(coverage);
+
+  let judged;
+  try {
+    const judge = input.judge ?? judgeDraftCoverage;
+    judged = normaliseJudgeResult(
+      await judge({
+        graph: input.graph,
+        brief: input.brief,
+        requestId: input.requestId,
+        elapsedMs: input.elapsedMs,
+      }),
+    );
+  } catch {
+    judged = {
+      verdict: { kind: 'unavailable', reason: 'llm_error' } as DraftQualityVerdict,
+      latencyMs: 0,
+      tokens: null,
+      model: null,
+    };
+  }
+
+  return {
+    assessment: {
+      coverage,
+      nominated,
+      verdict: judged.verdict,
+      judgeLatencyMs: judged.latencyMs,
+      judgeTokens: judged.tokens,
+      judgeModel: judged.model,
+    },
+    cleared: judged.verdict.kind === 'adequate',
+  };
 }

@@ -257,6 +257,27 @@ function longestOptionToGoalDepth(
  *     the options act through both does not;
  *   · it is not conditioned on graph size at all.
  *
+ * ## ⭐ THE GOAL PRECONDITION, and why it is not a size rule in disguise
+ *
+ * The waist is DEFINED on option → … → goal paths. With no goal node,
+ * `reachesGoal` never succeeds, no factor joins the waist, and `causal_waist`
+ * is 0 for EVERY goal-less graph — a structurally healthy one with three
+ * options acting through three private factors included (measured: 3 options,
+ * 3 private factors, no goal → waist 0 → NOMINATED). Zero-because-no-goal and
+ * zero-because-the-options-share-no-dimension are TWO DIFFERENT FACTS wearing
+ * one number, which is trap 21 at the level of a field.
+ *
+ * So the pre-filter stops reading the waist when there is no goal to read it
+ * against. It does NOT redefine the waist: `causal_waist` and `goal_count` both
+ * ride every telemetry row, so an analyst can still separate the two zeros and
+ * the hole stays MEASURABLE rather than hidden — the same treatment the recall
+ * limitation below already gets. Exposure was cost and latency only: the pass
+ * is reject-only and the judge, which reads the brief, passes a healthy model.
+ *
+ * ⚠ This lane's whole fixture corpus carried a goal node, so it was
+ * structurally unable to observe any of the above. The fixture that can is
+ * `__tests__/goal-less-nomination.test.ts`.
+ *
  * ## The recall limitation, stated plainly rather than buried
  *
  * Gating the judge on structure means a draft that is semantically impoverished
@@ -270,6 +291,8 @@ function longestOptionToGoalDepth(
  */
 export function nominatesForReview(facts: DraftCoverageFacts | null): boolean {
   if (facts === null) return false;
+  // The waist is undefined without a goal — see THE GOAL PRECONDITION above.
+  if (facts.goal_count === 0) return false;
   return facts.option_count >= 2 && facts.causal_waist <= 1;
 }
 

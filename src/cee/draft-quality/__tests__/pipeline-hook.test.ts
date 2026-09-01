@@ -94,6 +94,26 @@ const impoverished: DraftQualityVerdict = {
   grounds: ['collapsed_dimensions'],
 };
 
+/**
+ * ⭐ A JUDGE THAT READS THE GRAPH, for the arms where the SECOND draw is meant
+ * to win.
+ *
+ * These arms previously used the constant `impoverished` judge above and were
+ * green — because nothing read draw two. Now that selection requires the second
+ * draw to be positively cleared against the brief (P1b: a structurally richer
+ * but off-brief draw must not replace a reviewed graph), a judge that returns
+ * the same answer for every input cannot clear anything, and the arms that
+ * should ship the redraw would fail for the wrong reason.
+ *
+ * The constant judge is KEPT on the arms where the second draw loses on
+ * structure anyway (`not_richer`, the tie) — there it is still the honest
+ * fixture, and the two cases now differ, which is the point.
+ */
+const graphAwareJudge = async ({ graph }: { graph: unknown }) =>
+  JSON.stringify(graph).includes('fac_speed')
+    ? ({ kind: 'adequate' } as const)
+    : impoverished;
+
 /** Affordable: the retry gate funds a redraw only when the remaining window
  *  clears MIN_DRAFT_RETRY_BUDGET_MS (55s of a 120s budget), i.e. attempt 1 has
  *  to have been fast. 1s is comfortably inside that. */
@@ -126,7 +146,7 @@ describe('draft-quality seam — catch / leave-alone', () => {
       elapsedMs: AFFORDABLE_MS,
       retryBaselineMs: Date.now(),
       redraw,
-      judge: async () => impoverished,
+      judge: graphAwareJudge as never,
     });
 
     expect(redraw).toHaveBeenCalledTimes(1);
@@ -200,7 +220,7 @@ describe('draft-quality seam — ship the better of the two', () => {
       elapsedMs: AFFORDABLE_MS,
       retryBaselineMs: Date.now(),
       redraw: async () => ok(RICH_GRAPH),
-      judge: async () => impoverished,
+      judge: graphAwareJudge as never,
     });
     expect((result.body as { graph: unknown }).graph).toEqual(RICH_GRAPH);
     expect(redrawEvents()[0]?.data).toMatchObject({ shipped: 'second', improved: true });
@@ -415,7 +435,7 @@ describe('draft-quality seam — the discarded draw is preserved for inspection'
       elapsedMs: AFFORDABLE_MS,
       retryBaselineMs: Date.now(),
       redraw: async () => ok(RICH_GRAPH),
-      judge: async () => impoverished,
+      judge: graphAwareJudge as never,
     });
 
     const dq = (result.body as { trace?: { pipeline?: { draft_quality?: Record<string, unknown> } } })

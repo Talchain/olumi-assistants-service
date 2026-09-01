@@ -771,6 +771,7 @@ export async function runUnifiedPipeline(
       requestId: getRequestId(request),
       elapsedMs,
       retryBaselineMs,
+      attemptSource: "first",
       redraw: (directive) =>
         runUnifiedPipelineAttempt(input, rawBody, request, {
           ...opts,
@@ -847,7 +848,26 @@ export async function runUnifiedPipeline(
     }, "The automatic retry hit a retryable draft-failure gate again — returning the typed failure with honest exhausted copy");
     return applyRetryExhaustedCopy(second, secondClass);
   }
-  return second;
+  // ⭐ THE ARM THE METRIC WAS BLIND TO. A successful enforcement retry used to
+  // return here directly, so an entire population of shipped drafts — precisely
+  // the ones that had already failed a validator once, i.e. the turns most
+  // worth watching — emitted NO quality row at all. A continuous metric with a
+  // silent hole is worse than none, because its numbers look complete.
+  //
+  // `attemptSource: 'enforcement_retry'` makes this arm OBSERVE ONLY: the
+  // assessment and the coverage facts are emitted, `redraw` is not supplied at
+  // all (so a further draw is structurally impossible rather than merely
+  // gated), and the result is returned byte-identical. It also keeps this
+  // population separable from a quality redraw on the wire — the two are
+  // different diagnoses about the drafter.
+  return applyDraftQualityPass({
+    first: second,
+    brief: readBriefForQuality(input, rawBody),
+    requestId: getRequestId(request),
+    elapsedMs: Date.now() - retryBaselineMs,
+    retryBaselineMs,
+    attemptSource: "enforcement_retry",
+  });
 }
 
 async function runUnifiedPipelineAttempt(

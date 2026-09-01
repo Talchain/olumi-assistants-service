@@ -33,7 +33,12 @@
  */
 
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
-import type { DraftQualityAssessment, NoRedrawReason } from './types.js';
+import type {
+  DraftAttemptSource,
+  DraftQualityAssessment,
+  NoRedrawReason,
+  RedrawOutcome,
+} from './types.js';
 
 export interface DraftQualityEventInput {
   readonly requestId: string;
@@ -42,8 +47,12 @@ export interface DraftQualityEventInput {
   readonly assessment: DraftQualityAssessment;
   readonly noRedrawReason: NoRedrawReason | null;
   readonly retryBudgetMs: number | null;
-  /** True when the draft being reported IS the redraw (attempt 2). */
-  readonly isRedraw: boolean;
+  /**
+   * WHICH DRAW this row is about. `is_redraw` is DERIVED from it below rather
+   * than passed alongside, so the two can never disagree — a boolean and an
+   * enum describing the same fact is a mirror waiting to drift.
+   */
+  readonly attemptSource: DraftAttemptSource;
   /** Milliseconds spent on the request when the assessment was taken. */
   readonly elapsedMs: number;
 }
@@ -53,11 +62,18 @@ export interface DraftQualityEventInput {
  * TWO, discriminated by `is_redraw`.
  *
  * Reading the metric:
- *   · impoverished rate  = count(verdict="impoverished") / count(nominated=true)
- *     — over the NOMINATED population only; the un-nominated population is
- *     un-judged by design and must not be silently counted as adequate.
+ *   · impoverished rate  = count(verdict="impoverished")
+ *                          / count(verdict IN ("impoverished","adequate"))
+ *     — over the JUDGED population only. ⭐ This denominator is now expressible:
+ *     the three never-asked arms report `not_assessed` with a coded reason
+ *     instead of `adequate`, so an unjudged draw can be excluded rather than
+ *     silently counted as a pass.
  *   · nomination rate    = count(nominated=true) / count(*)
  *   · judge availability = 1 − count(verdict="unavailable") / count(judged)
+ *   · ⚠ `causal_waist = 0` means one of two things and `goal_count`
+ *     discriminates them: with no goal node the waist is undefined, not zero
+ *     (see the goal precondition in `coverage.ts`). Filter on
+ *     `goal_count >= 1` before reading any waist distribution.
  *   · structural trend   = the causal_waist / option_count / factor_count
  *     distributions over time — available on EVERY draft, including the ones
  *     nothing else in this pass touches. This is the free continuous metric.
@@ -68,7 +84,10 @@ export function emitDraftQuality(input: DraftQualityEventInput): void {
     request_id: input.requestId,
     ...(input.scenarioId ? { scenario_id: input.scenarioId } : {}),
     ...(input.turnId ? { turn_id: input.turnId } : {}),
-    is_redraw: input.isRedraw,
+    is_redraw: input.attemptSource !== 'first',
+    // ⭐ WHICH attempt-2 population, when there is one. A quality redraw and an
+    // enforcement retry are different diagnoses and used to share one boolean.
+    attempt_source: input.attemptSource,
     elapsed_ms: input.elapsedMs,
     // ── The verdict half ──────────────────────────────────────────────────
     nominated: a.nominated,
@@ -78,6 +97,10 @@ export function emitDraftQuality(input: DraftQualityEventInput): void {
     // Named on BOTH fail-open arms so a silent skip is impossible: a draft that
     // was not judged says WHY it was not judged.
     ...(a.verdict.kind === 'unavailable' ? { unavailable_reason: a.verdict.reason } : {}),
+    // ⭐ AND ON THE NEVER-ASKED ARM. `not_assessed` used to be spelled
+    // `adequate`, which made the impoverished RATE uninterpretable: it is a
+    // ratio over the judged population, and an unjudged draw counted as a pass.
+    ...(a.verdict.kind === 'not_assessed' ? { not_assessed_reason: a.verdict.reason } : {}),
     ...(input.noRedrawReason ? { no_redraw_reason: input.noRedrawReason } : {}),
     ...(input.retryBudgetMs !== null ? { retry_budget_ms: input.retryBudgetMs } : {}),
     // ── The cost half, reported honestly ──────────────────────────────────
@@ -125,15 +148,26 @@ export interface DraftQualityRedrawEventInput {
   /**
    * Coded outcome of the second draw.
    *
-   * ⚠ NOTE WHAT THIS IS AND IS NOT. The second draw is NOT re-judged by the
-   * LLM: by the time it returns, the request budget that funded it is largely
-   * spent, and a second judge call would add its latency to a turn the user is
-   * already waiting on. `richer` / `not_richer` is therefore the DETERMINISTIC
-   * comparison (`isMaterallyRicher`), not a semantic verdict. Reading it as
-   * "the second draw was adequate" would be an over-read — it means only that
-   * the second draw covers more causal dimensions than the first.
+   * ⚠⚠ THIS NOTE PREVIOUSLY SAID THE SECOND DRAW IS NOT RE-JUDGED, AND THAT WAS
+   * THE DEFECT, NOT A LIMITATION. Selecting on `isMaterallyRicher` alone means
+   * selecting on SHAPE — which is exactly what a fabricating drawer gets right,
+   * so a second draw inventing off-brief factors scored richer and replaced a
+   * graph the judge had already reviewed. The second draw IS now read against
+   * the brief before it may win (`assessRedrawForSelection`), bounded by the
+   * judge's own headroom gate.
+   *
+   *   · `richer`                — richer AND cleared against the brief. This is
+   *                               a CONJUNCTION; reading either half alone is an
+   *                               over-read.
+   *   · `richer_but_not_cleared`— structurally richer, not vouched for. The
+   *                               fabricated-redraw signature. Deliberately NOT
+   *                               folded into `not_richer`: "cannot do better"
+   *                               and "did something we will not stand behind"
+   *                               are opposite diagnoses.
+   *   · `not_richer`            — the deterministic comparison said no.
+   *   · `draft_failed`          — the redraw produced no shippable graph.
    */
-  readonly secondOutcome: 'richer' | 'not_richer' | 'draft_failed';
+  readonly secondOutcome: RedrawOutcome;
   readonly totalElapsedMs: number;
 }
 

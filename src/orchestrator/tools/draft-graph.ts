@@ -22,6 +22,7 @@ import { buildCanonicalAnalysisReadyFromGraph, carryCanonicalOnlyFields } from "
 import { detectCurrency, buildCurrencyInstruction } from "../../cee/signals/currency-signal.js";
 import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 import { buildModelBuildingNotices } from "../../cee/draft/records/model-building-notices.js";
+import type { DraftQualityTraceRecord } from "../../cee/draft-quality/types.js";
 import type { ModelBuildingNotices } from "@talchain/schemas/boundary";
 import type { CurrencySignal } from "../../cee/signals/currency-signal.js";
 
@@ -144,6 +145,30 @@ export interface DraftGraphResult {
    * gates on the same flag).
    */
   draftGraphTimings?: import('../../orchestrator-v5/telemetry/turn-timings.js').DraftGraphTimings;
+  /**
+   * ⭐⭐ THE REJECTED DRAFT, CARRIED PAST THIS BOUNDARY.
+   *
+   * The draft-quality pass may spend a second draw and ship the better graph.
+   * The owner's ruling is that a repair pass which silently hides bad drafts
+   * destroys the only signal we have about draft quality — so the discarded
+   * draw, both coverage records and the second draw's verdict must reach the
+   * product, not stop inside the pipeline.
+   *
+   * ⚠ AND THIS INTERFACE IS WHERE IT STOPPED. The pass attaches the record to
+   * `body.trace.pipeline.draft_quality`, but the return literal below NAMES ITS
+   * KEYS — the same construct this file's own comment calls the "THIRD
+   * SILENT-DROP POINT", closed there for `record_disclosures` and reopened here
+   * for exactly the same reason. Measured before the fix: `DraftGraphResult`
+   * carried neither the raw trace nor any `draft_quality` field, so the
+   * rejected original disappeared before the V5 response and the debug export.
+   *
+   * Undefined when no redraw was spent — which is the overwhelming majority of
+   * turns, so an absent block honestly means "the pass did not fire", never
+   * "we dropped it". Read on to `V5DiagnosticTrace.draft_quality`, which is
+   * flag-gated behind `CEE_DIAGNOSTIC_TRACE_ENABLED`; that gate is why a field
+   * carrying user-derived labels may ride the trace and may not ride telemetry.
+   */
+  draftQuality?: DraftQualityTraceRecord;
 }
 
 // ============================================================================
@@ -556,6 +581,12 @@ export async function handleDraftGraph(
     body.record_disclosures_omitted,
   );
 
+  // ⭐⭐ FOURTH SILENT-DROP POINT, CLOSED. See `draftQuality` on the interface
+  // above: the draft-quality record was attached to the pipeline trace and then
+  // dropped by this very return literal, so a rejected draft never reached the
+  // product. Read off the SAME `body` everything else here reads.
+  const draftQuality = readDraftQualityRecord(body);
+
   return {
     blocks: [block],
     assistantText,
@@ -573,7 +604,29 @@ export async function handleDraftGraph(
     pipelineOutcome,
     ...(modelBuildingNotices !== undefined ? { modelBuildingNotices } : {}),
     ...(draftGraphTimings !== undefined ? { draftGraphTimings } : {}),
+    ...(draftQuality !== undefined ? { draftQuality } : {}),
   };
+}
+
+/**
+ * Lift the draft-quality record off `body.trace.pipeline.draft_quality`.
+ *
+ * Shape-tolerant and total: any body that does not carry the record returns
+ * `undefined`, so an absent block means "no redraw was spent" and never "the
+ * read threw". `redraw_spent` is asserted rather than assumed — the pass writes
+ * the key only when it spent a draw, and requiring the marker means a
+ * differently-shaped `draft_quality` from some future writer cannot be mistaken
+ * for this one.
+ */
+function readDraftQualityRecord(body: Record<string, unknown>): DraftQualityTraceRecord | undefined {
+  const trace = body.trace;
+  if (!trace || typeof trace !== 'object' || Array.isArray(trace)) return undefined;
+  const pipeline = (trace as Record<string, unknown>).pipeline;
+  if (!pipeline || typeof pipeline !== 'object' || Array.isArray(pipeline)) return undefined;
+  const record = (pipeline as Record<string, unknown>).draft_quality;
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return undefined;
+  if ((record as Record<string, unknown>).redraw_spent !== true) return undefined;
+  return record as DraftQualityTraceRecord;
 }
 
 // ============================================================================
