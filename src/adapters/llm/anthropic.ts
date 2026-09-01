@@ -4462,6 +4462,9 @@ export class AnthropicAdapter implements LLMAdapter {
       rationales: result.rationales,
       usage: result.usage,
       ...((result as any).coaching ? { coaching: (result as any).coaching } : {}),
+      ...(result.record_disclosures !== undefined
+        ? { record_disclosures: result.record_disclosures }
+        : {}),
       ...(result.debug ? { debug: result.debug } : {}),
       ...(result.meta ? { meta: result.meta } : {}),
     };
