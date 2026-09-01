@@ -979,9 +979,33 @@ export function composeSelectedDependenciesEvidenceAnswer(
         'Check that the one you mean appears only once in the model, and ask again.'
       );
     }
+    // ⭐⭐ THE VERDICT IS RIGHT; THE DIAGNOSIS WAS FALSE. Captured 1 Sep 2026 on
+    // deployed `d545535`, reproducible 2/2: *"Why does the goal matter?"* →
+    // *"I could not tell which part of your model you are asking about."* The
+    // user was perfectly clear and asked about the whole thing; the product
+    // replied that it could not understand them. A false diagnosis inside a
+    // refusal is worse than the refusal.
+    //
+    // ⚠ THE SUBJECT IS NOT RESOLVABLE HERE, AND THAT IS WHY ONLY THE WORDS MOVE.
+    // This carrier's subject is `structure_query.element_id` and nothing else, and
+    // both query arms declare it `z.string().min(1)` under `.strict()`. A
+    // whole-model referent is therefore UNREPRESENTABLE in this carrier — no
+    // amount of subject resolution binds "the goal" or "this decision" to a node
+    // that is not in the graph. Widening the identity gate to make this class
+    // pass re-opens #1229 (fluent prose inventing an unlisted connector);
+    // discarding the verdict is #1310, rejected.
+    //
+    // So the copy states the SCOPE of the answer instead of asserting a
+    // comprehension failure — true for BOTH classes that land here, the
+    // unbindable shorthand and the whole-model question — and gives the remedy
+    // that is DERIVED to work. "Name it" was the old advice and it told the user
+    // to do the thing they believed they had just done; the full canonical label
+    // is what actually resolves, and a canvas selection bypasses the prose gate
+    // entirely. Both are pinned by contrast controls in
+    // `__tests__/whole-model-subject-refusal-copy.integration.test.ts`.
     return (
-      'I could not tell which part of your model you are asking about, so I will not guess at what connects to it. ' +
-      'Point me at one — name it, or select it on the canvas — and ask again.'
+      'That question did not pin down a single part of your model, and I answer what connects to something one part at a time, so I will not guess at what connects to it. ' +
+      'Name that part exactly as it appears in your model, or select it on the canvas, and ask again.'
     );
   }
   if (evidence.status === 'coverage_unavailable') {
@@ -1064,9 +1088,17 @@ export function composeSelectedOutgoingInfluenceEvidenceAnswer(
         'Check that the one you mean appears only once in the model, and ask again.'
       );
     }
+    // The outgoing twin of the dependencies branch above, and changed for the
+    // same measured reason: *"Why does this decision matter?"* was refused on
+    // deployed `d545535` with *"I could not tell which part of your model you are
+    // asking about"*. Same false diagnosis, same scope truth, opposite predicate.
+    //
+    // ⚠ The direction word is the one thing that must NOT be shared with the
+    // dependencies branch: neither string may contain the other's, so a
+    // direction inversion cannot read as correct prose. Pinned as its own test.
     return (
-      'I could not tell which part of your model you are asking about, so I will not guess at what it affects. ' +
-      'Point me at one — name it, or select it on the canvas — and ask again.'
+      'That question did not pin down a single part of your model, and I answer what something affects one part at a time, so I will not guess at what it affects. ' +
+      'Name that part exactly as it appears in your model, or select it on the canvas, and ask again.'
     );
   }
   if (evidence.status === 'coverage_unavailable') {

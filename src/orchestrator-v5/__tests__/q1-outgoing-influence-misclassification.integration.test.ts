@@ -249,7 +249,12 @@ describe('the witnessed Q1 is a misclassified predicate, not an unbound subject'
     const text = await drive(WITNESSED_Q1, { kind: 'dependencies', element_id: 'fit' });
 
     // The verdict is preserved: no relationship is claimed for any element.
-    expect(text).toContain('I could not tell which part of your model you are asking about');
+    // ⚠ THE COPY MOVED AGAIN, AND THE HEADER'S SCOPE NOTE STILL APPLIES: this
+    // asserts the CURRENT wording, not the captured one. The whole-model copy
+    // lane replaced the comprehension claim with a scope statement, because the
+    // same branch also serves a user who asked about the whole model and was
+    // perfectly clear. The BEHAVIOUR this file exists to pin is unchanged.
+    expect(text).toContain('That question did not pin down a single part of your model');
     expect(text).toContain('so I will not guess at what connects to it');
 
     // Subject safety: the refusal must not name ANY canonical element, because
@@ -301,7 +306,7 @@ describe('the witnessed Q1 is a misclassified predicate, not an unbound subject'
     expect(text).toContain(INVESTOR_LABEL);
     // ...and it binds to the RIGHT element's real incoming connector.
     expect(text).toContain(TRACTION_LABEL);
-    expect(text).not.toContain('I could not tell which part of your model');
+    expect(text).not.toContain('did not pin down a single part of your model');
     expect(text).not.toContain('phased pilot');
   });
 
@@ -340,7 +345,7 @@ describe('the witnessed Q1 is a misclassified predicate, not an unbound subject'
     // Subject bound AND the asked predicate answered — on the unchanged tip.
     expect(text).toContain(INVESTOR_LABEL);
     expect(text).toContain(GOAL_LABEL);
-    expect(text).not.toContain('I could not tell which part of your model');
+    expect(text).not.toContain('did not pin down a single part of your model');
   });
 
   it('keeps authored prose off the ambiguous turn — the guard whose mutant restores an invented dependency', async () => {

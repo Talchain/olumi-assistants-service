@@ -889,7 +889,7 @@ describe('composeExplainFromStructureFallback', () => {
     // the assertions above discriminate rather than testing an empty string.
     const unmarked = composeSelectedDependenciesEvidenceAnswer({ status: 'ambiguous' });
     expect(unmarked).toContain(
-      'Point me at one — name it, or select it on the canvas — and ask again.',
+      'Name that part exactly as it appears in your model, or select it on the canvas, and ask again.',
     );
     expect(unmarked).not.toBe(marked);
   });
