@@ -125,9 +125,10 @@ describe('reader-only refusal — the capability denial must be true', () => {
     it('⭐ THE WITNESSED FALSE SENTENCES — bound VERBATIM, by identity', () => {
       // Value predicates could be satisfied by a different sentence (trap 19);
       // these are the exact strings #1138 shipped.
-      expect(textFor('structural_add')).not.toContain(
-        "i can't add a factor to the model in this version",
-      );
+      // `structural_add` is no longer reader-only — it has a writer — so its
+      // refusal branch is unreachable and there is no sentence left to pin here.
+      // The pin migrated to `structural-add.test.ts`, which asserts the WRITER's
+      // copy states what actually happened AND what is still missing.
       expect(textFor('structural_add_edge')).not.toContain(
         "i can't add a link between factors in this version",
       );
@@ -190,7 +191,6 @@ describe('reader-only refusal — the capability denial must be true', () => {
 
     it('⭐ the route table is EXACT — it REDs if it grows or shrinks', () => {
       expect(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).sort()).toEqual([
-        'structural_add',
         'structural_add_edge',
       ]);
     });
