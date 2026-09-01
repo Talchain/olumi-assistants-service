@@ -23,6 +23,17 @@ const graph = {
     { id: 'opt-other', kind: 'option', label: 'One Contractor' },
     { id: 'fac-asked', kind: 'factor', label: 'Development throughput' },
     { id: 'fac-other', kind: 'factor', label: 'Burn rate' },
+    /**
+     * ⚠ A REAL FACTOR WHOSE LABEL IS MADE ENTIRELY OF ORDINARY WORDS.
+     *
+     * This node exists to discriminate the two guards, which a mutation run
+     * proved my first suite could not tell apart. "Take Up" is a perfectly
+     * ordinary business metric AND both its words are in the filler allowlist,
+     * so `remainderIsAllFiller` cannot see it — only `namesForeignEntity`,
+     * reading the GRAPH, can. Without this fixture the graph-label guard could
+     * be deleted with the whole suite still green (the M1 survivor).
+     */
+    { id: 'fac-plain', kind: 'factor', label: 'Take Up' },
   ],
   edges: [],
 };
@@ -92,6 +103,26 @@ describe('resolveAnswerForKnownSlot — the asked cell binds by arithmetic, not 
     'increase the budget to 0.5',
   ])('%s names a target we cannot verify and is declined, never bound', message => {
     const result = read(message);
+    expect(result.kind).toBe('declined');
+    if (result.kind !== 'declined') return;
+    expect(result.reason).toBe('names_other_entity');
+  });
+
+  /**
+   * ⭐⭐ THE TWO GUARDS ARE NOT REDUNDANT, and this is the case that proves it.
+   *
+   * A mutation run showed `namesForeignEntity` could be disabled entirely with
+   * the suite still green: every foreign-entity case I had written contained an
+   * unusual NOUN, so the filler allowlist was refusing them first and the
+   * graph-label guard was doing no observable work.
+   *
+   * "Take Up" is a real factor in the fixture graph and BOTH its words are
+   * ordinary filler, so the allowlist is structurally blind to it. Only a guard
+   * that reads the GRAPH can refuse this — which is exactly the class the
+   * allowlist cannot cover, and why both guards stay.
+   */
+  it('refuses a foreign entity whose label is made entirely of ordinary words', () => {
+    const result = read('set take up to 0.7');
     expect(result.kind).toBe('declined');
     if (result.kind !== 'declined') return;
     expect(result.reason).toBe('names_other_entity');
