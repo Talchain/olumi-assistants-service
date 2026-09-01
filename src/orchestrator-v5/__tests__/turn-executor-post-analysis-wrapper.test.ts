@@ -577,7 +577,14 @@ describe('TurnExecutor → post-analysis coaching wrapper integration', () => {
       graphState: baseGraph,
     });
 
-    expect(result.response.assistant_text).toContain('your current analysis is still available');
+    // The reassurance that the prior analysis survives is unchanged in
+    // substance (sentence-initial since the remedy clause now precedes it).
+    expect(result.response.assistant_text).toContain('Your current analysis is still available');
+    // …and the turn now also names the TRUE remedy for the FAILURE. Every path
+    // into this copy is a model-output failure, so asking again is the unblock;
+    // re-running the analysis is not. See
+    // `turn-executor-bounded-recovery-true-unblock.test.ts`.
+    expect(result.response.assistant_text).toMatch(/ask me again/i);
     const actionTypes = result.response.suggested_actions.map((c) => c.action_type);
     expect(actionTypes).toEqual(
       expect.arrayContaining(['explain_results', 'run_analysis']),
