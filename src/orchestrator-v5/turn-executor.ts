@@ -494,6 +494,7 @@ import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
 import {
   buildSelectedDependenciesEvidence,
+  buildSelectedOutgoingInfluenceEvidence,
   buildStructuralPairEvidence,
   type StructuralGraphAuthority,
 } from './routing/structural-pair-evidence.js';
@@ -10054,6 +10055,29 @@ export async function runTurnExecutor(
               graphWasTrimmed: contextGraphWasTrimmed,
             }) ?? undefined
           : undefined;
+      // The OUTGOING half of the selected-element structural answer. Built from
+      // the same inputs as the dependencies carrier above and keyed to its own
+      // `structure_query.kind`, so at most one of the two is ever defined on a
+      // turn. Kept as a SEPARATE local (rather than one "selected element
+      // evidence" variable) so the handler cannot render one predicate's payload
+      // through the other's composer.
+      const outgoingInfluenceEvidence =
+        proposedHandlerId === 'explain_from_structure' && contextPackForLog
+          ? buildSelectedOutgoingInfluenceEvidence(contextPackForLog.graph, {
+              messageText: payload.message,
+              structureQuery: action.structure_query,
+              requestedSelection: options.selectedElements,
+              focus: contextPackForLog.focus,
+              groundedSelection: projectGroundedSelection(
+                contextPackForLog.focus,
+                context.selection,
+              ),
+              proposalEntity: action.entity,
+              graphContextStatus: contextPackForLog.graph_context?.status,
+              graphAuthority: structuralGraphAuthority,
+              graphWasTrimmed: contextGraphWasTrimmed,
+            }) ?? undefined
+          : undefined;
 
       // P0b-2: the routed `what_would_flip` deterministic fallback must not name
       // an option-pinned lever as "the clearest one to test". The chip-click path
@@ -10135,6 +10159,7 @@ export async function runTurnExecutor(
           structureProjection,
           structuralPairEvidence,
           selectedDependenciesEvidence,
+          outgoingInfluenceEvidence,
           graphForTurn: graphStateForTurn ?? undefined,
           analysisFreshness: routingFreshness ?? undefined,
           // V5 P0-B (Codex review): thread the SAME robustness + flip evidence

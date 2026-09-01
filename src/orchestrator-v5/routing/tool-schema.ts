@@ -143,6 +143,14 @@ export const OLUMI_ACTION_TOOL = {
               'or conflicting reference from a nearby object. ' +
               'This asks only for direct incoming dependencies; do not include ' +
               'upstream-of-upstream or outgoing connectors. ' +
+              'When the user instead asks why one explicitly named or selected element ' +
+              'MATTERS, why it is important, what it affects, drives or influences, ' +
+              'populate action.structure_query with kind "outgoing_influence" and that ' +
+              'element\'s exact canonical graph id. That is the OPPOSITE direction from ' +
+              'dependencies and a different question: "why does X matter" is never ' +
+              'kind "dependencies". It asks only for direct connectors leading AWAY from ' +
+              'the element; do not include what feeds into it, do not extend one step ' +
+              'further forward, and do not rank the connectors. ' +
               'When — and only when — the user asks about the direct ' +
               'relationship between two named model elements, populate ' +
               'action.structure_query with kind "direct_relationship" and ' +
@@ -395,7 +403,10 @@ export const OLUMI_ACTION_TOOL = {
             description:
               'Populate whenever handler_id is explain_from_structure. Use ' +
               'dependencies when the user asks what one explicitly named or selected ' +
-              'Living Model element directly depends on. Use ' +
+              'Living Model element directly depends on, and outgoing_influence ' +
+              'when the user asks why that element matters, why it is important, ' +
+              'or what it affects or drives. Those two are opposite directions and ' +
+              'must never be swapped. Use ' +
               'direct_relationship when the user specifically asks whether two ' +
               'Living Model elements have a direct relationship, and use ' +
               'reachability when the user asks whether a named option reaches ' +
@@ -408,11 +419,20 @@ export const OLUMI_ACTION_TOOL = {
             properties: {
               kind: {
                 type: 'string',
-                enum: ['general', 'dependencies', 'direct_relationship', 'reachability'],
+                enum: [
+                  'general',
+                  'dependencies',
+                  'outgoing_influence',
+                  'direct_relationship',
+                  'reachability',
+                ],
                 description:
                   'The exact structural question. general preserves an open ' +
                   'explanation; dependencies asks only for direct incoming ' +
-                  'connectors to element_id; direct_relationship asks only ' +
+                  'connectors to element_id; outgoing_influence asks only for ' +
+                  'direct connectors leading away from element_id, which is the ' +
+                  'question behind "why does this matter" and "what does this ' +
+                  'affect"; direct_relationship asks only ' +
                   'about a connector between element_ids; reachability asks only ' +
                   'whether source_element_id reaches target_element_id.',
               },
@@ -429,7 +449,7 @@ export const OLUMI_ACTION_TOOL = {
                 type: 'string',
                 minLength: 1,
                 description:
-                  'Required only for dependencies: the exact canonical id of the element whose direct incoming dependencies were asked about.',
+                  'Required for dependencies and for outgoing_influence: the exact canonical id of the one element the question is about. dependencies asks what flows INTO it; outgoing_influence asks what it drives.',
               },
               source_element_id: {
                 type: 'string',

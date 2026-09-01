@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { ContextPackGraph } from '../../context/context-pack-assembler.js';
 import {
   buildSelectedDependenciesEvidence,
+  buildSelectedOutgoingInfluenceEvidence,
   buildStructuralPairEvidence,
 } from '../structural-pair-evidence.js';
 import type { StructureQuery } from '../types.js';
+import { deriveStructureQueryKinds } from './derive-structure-query-kinds.js';
 
 function graph(
   nodes: readonly Record<string, unknown>[],
@@ -878,18 +880,33 @@ describe('buildSelectedDependenciesEvidence', () => {
     const source = readFileSync(
       new URL('../structural-pair-evidence.ts', import.meta.url), 'utf8',
     );
-    const start = source.indexOf('export function buildSelectedDependenciesEvidence(');
-    expect(start).toBeGreaterThan(-1);
-    const rest = source.slice(start);
-    const end = rest.indexOf('\n}\n');
-    expect(end).toBeGreaterThan(-1);
-    const body = rest.slice(0, end);
+    // ⚠ SCOPE RE-DERIVED, NOT WEAKENED. The ambiguous returns now live in the
+    // shared identity core that BOTH selected-element builders delegate to, so
+    // this reads that function — and additionally asserts the two thin public
+    // wrappers introduce no ambiguous literal of their own. Pointing it at the
+    // old name would have left it passing over a body that no longer contains
+    // the returns it was written to police.
+    const bodyOf = (name: string): string => {
+      const start = source.indexOf(`function ${name}(`);
+      expect(start, `${name} must exist`).toBeGreaterThan(-1);
+      const rest = source.slice(start);
+      const end = rest.indexOf('\n}\n');
+      expect(end, `${name} must terminate`).toBeGreaterThan(-1);
+      return rest.slice(0, end);
+    };
+    const body = bodyOf('buildSelectedElementEdgeEvidence');
     const bare = /\{\s*status:\s*'ambiguous'\s*\}/g;
     // Positive control: the probe must be able to SEE a bare literal somewhere,
     // or "zero in the builder" is an absence proved by a blind instrument.
     expect(source.match(bare)?.length ?? 0).toBeGreaterThan(0);
     expect(body.match(bare)).toBeNull();
     expect((body.match(/ambiguousForTurn\(options\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    for (const wrapper of [
+      'buildSelectedDependenciesEvidence',
+      'buildSelectedOutgoingInfluenceEvidence',
+    ]) {
+      expect(bodyOf(wrapper).match(bare), `${wrapper} must not mint its own verdict`).toBeNull();
+    }
   });
 
   /**
@@ -904,9 +921,19 @@ describe('buildSelectedDependenciesEvidence', () => {
   it('produces NOTHING for any structure query other than `dependencies`', () => {
     const others: readonly StructureQuery[] = [
       { kind: 'general' },
+      { kind: 'outgoing_influence', element_id: 'selling_time' },
       { kind: 'direct_relationship', element_ids: ['automation', 'selling_time'] },
       { kind: 'reachability', source_element_id: 'automation', target_element_id: 'goal' },
     ];
+    // ⭐ COMPLETENESS, DERIVED. The list above is hand-written and was therefore
+    // a mirror: a kind added to the union used to leave this GREEN while the new
+    // kind went unexercised — the exact drift this file's own comment claimed it
+    // prevented. Assert the covered set EQUALS the union's set, so a sixth arm
+    // REDs here instead of slipping past.
+    const enforcedKinds = deriveStructureQueryKinds();
+    expect(enforcedKinds.length).toBeGreaterThanOrEqual(5);
+    expect([...others.map((query) => query.kind), 'dependencies'].sort())
+      .toEqual([...enforcedKinds].sort());
     for (const structureQuery of others) {
       expect(buildSelected({ structureQuery }), `kind ${structureQuery.kind} must claim nothing`)
         .toBeNull();
@@ -915,6 +942,43 @@ describe('buildSelectedDependenciesEvidence', () => {
     // CONTRAST CONTROL in the same run: the dependencies kind DOES produce
     // evidence, so the nulls above are the gate and not a blind builder.
     expect(buildSelected()).toMatchObject({ status: 'resolved' });
+
+    // ⭐ THE OPPOSITE-DIRECTION TWIN of this very guard. The outgoing carrier
+    // must be just as tightly keyed, or "each builder answers its own question"
+    // is a claim proved in one direction only. Asserted here rather than in the
+    // new file so the two keying guards live side by side and cannot drift.
+    const buildOutgoing = (
+      structureQuery: StructureQuery | undefined,
+    ) => buildSelectedOutgoingInfluenceEvidence(selectedGraph, {
+      structureQuery,
+      requestedSelection: { node_ids: ['selling_time'], edge_ids: [] },
+      focus: {
+        elements: [{
+          id: 'selling_time', kind: 'outcome',
+          label: 'Sales rep time on selling activities', analysis_link: 'no_analysis',
+        }],
+        unresolved: 'none', requested_count: 1, unresolved_count: 0,
+      },
+      groundedSelection: { element_ids: ['selling_time'], unresolved: 'none' },
+      proposalEntity: {
+        id: 'selling_time', label: 'Sales rep time on selling activities',
+        resolution_status: 'resolved',
+      },
+      graphContextStatus: 'canonical', graphAuthority: 'canonical_strict',
+      graphWasTrimmed: false,
+    });
+    const otherKindsForOutgoing: readonly StructureQuery[] = [
+      ...others.filter((query) => query.kind !== 'outgoing_influence'),
+      { kind: 'dependencies', element_id: 'selling_time' },
+    ];
+    for (const structureQuery of otherKindsForOutgoing) {
+      expect(buildOutgoing(structureQuery), `kind ${structureQuery.kind} must claim nothing`)
+        .toBeNull();
+    }
+    expect(buildOutgoing(undefined)).toBeNull();
+    // CONTRAST CONTROL for the twin, same run.
+    expect(buildOutgoing({ kind: 'outgoing_influence', element_id: 'selling_time' }))
+      .toMatchObject({ status: 'resolved' });
   });
 
   it('requires selected focus, validated proposal target and canonical graph identity to agree', () => {

@@ -30,6 +30,7 @@ import type {
 } from '../../context/projection-summaries.js';
 import type {
   SelectedDependenciesEvidence,
+  SelectedOutgoingInfluenceEvidence,
   StructuralPairEvidence,
   StructuralPairRelationship,
 } from '../../routing/structural-pair-evidence.js';
@@ -1010,6 +1011,91 @@ export function composeSelectedDependenciesEvidenceAnswer(
   const sentences = relationships.map(composeDependencyRelationship);
   sentences.push(
     'These are the complete direct incoming dependencies and bidirected associations recorded for this item; bidirected associations do not establish a dependency direction, and this answer does not add an indirect route or rank importance.',
+  );
+  return sentences.join(' ');
+}
+
+function composeOutgoingInfluenceRelationship(
+  relationship: StructuralPairRelationship,
+): string {
+  const confidence = relationship.coefficient_confidence === undefined
+    ? ''
+    : ` Its recorded strength-confidence band is ${relationship.coefficient_confidence}.`;
+  if (relationship.edge_type === 'bidirected') {
+    return (
+      `The saved connector between ${relationship.from_label} and ${relationship.to_label} is bidirected. ` +
+      `It is described as ${relationship.relationship ?? 'co-movement with unavailable detail'}; that does not license influence in either direction.${confidence}`
+    );
+  }
+  return (
+    `The saved Living Model has a direct, directed connector from ${relationship.from_label} to ${relationship.to_label}, ` +
+    `described as ${relationship.relationship ?? 'having unavailable relationship detail'}.${confidence}`
+  );
+}
+
+/**
+ * Render the complete direct OUTGOING influence set of one canonically
+ * identified item — what it drives, which is what "why does this matter?" asks.
+ *
+ * ⭐⭐ THIS IS A SEPARATE COMPOSER FROM
+ * {@link composeSelectedDependenciesEvidenceAnswer} AND MUST STAY ONE. The two
+ * render opposite predicates from structurally identical payloads, so a single
+ * shared composer with a direction flag would make an inversion a one-token
+ * edit that still reads perfectly. Their prose is deliberately different in the
+ * one place that matters: neither string contains the other's direction word.
+ *
+ * Its freedoms are the same as the dependencies composer's: none. It never
+ * walks one step further forward, never composes a pathway, and never says which
+ * outgoing connector matters most. "Why does X matter" invites a ranking, and a
+ * ranking is exactly the licence that let fluent prose invent structure. The
+ * honest answer is the complete direct outgoing set with its scope stated.
+ */
+export function composeSelectedOutgoingInfluenceEvidenceAnswer(
+  evidence: SelectedOutgoingInfluenceEvidence,
+): string {
+  if (evidence.status === 'ambiguous') {
+    // The verdict is the dependencies carrier's verdict, unchanged and equally
+    // load-bearing: an unestablished subject is refused, never guessed. Only the
+    // predicate wording differs, because the user asked a different question and
+    // the refusal should say what it is declining to invent.
+    if (evidence.subject_selection === 'single_resolved') {
+      return (
+        'I could not match your question to a single part of your saved model, so I will not guess at what it affects. ' +
+        'Check that the one you mean appears only once in the model, and ask again.'
+      );
+    }
+    return (
+      'I could not tell which part of your model you are asking about, so I will not guess at what it affects. ' +
+      'Point me at one — name it, or select it on the canvas — and ask again.'
+    );
+  }
+  if (evidence.status === 'coverage_unavailable') {
+    if (evidence.reason === 'structural_semantics_unlicensed') {
+      return (
+        'The saved Living Model includes a structural connector for this item, but this response cannot safely treat that connector as causal influence. ' +
+        'I will not infer causal direction or strength from it.'
+      );
+    }
+    return (
+      'Some relationship detail needed to answer this influence question was withheld from this turn. ' +
+      'I therefore cannot safely say what this item does or does not affect, and I will not reconstruct it from conversation or caller state.'
+    );
+  }
+
+  const relationships = [
+    ...evidence.influences,
+    ...evidence.bidirected,
+  ];
+  if (relationships.length === 0) {
+    return (
+      `The saved Living Model records no direct outgoing influence from ${evidence.selected_label}. ` +
+      'That statement is limited to direct, directed connectors leading away from it; it does not prove that no indirect route or non-causal association exists.'
+    );
+  }
+
+  const sentences = relationships.map(composeOutgoingInfluenceRelationship);
+  sentences.push(
+    `These are the complete direct outgoing influences and bidirected associations recorded for ${evidence.selected_label}; bidirected associations do not establish a direction, and this answer does not add an indirect route or rank these connectors against each other.`,
   );
   return sentences.join(' ');
 }
