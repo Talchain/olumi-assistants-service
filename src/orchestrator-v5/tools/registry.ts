@@ -252,6 +252,36 @@ export interface HandlerInvocation {
    */
   readonly edgeStrengthDirectionAuthority?: 'positive' | 'negative';
   /**
+   * ⭐⭐ THIS TURN IS AN ANSWER TO A BASELINE QUESTION THE PRODUCT ASKED, AND
+   * THE AUTHORITY IT CARRIES IS FOR THE BASELINE FIELD ONLY.
+   *
+   * Threaded in as a SERVER FACT, on the same terms as `appliedProvenance`
+   * above: the executor sets it only when `tryBaselineElicitationResume`
+   * resolved the message as an answer that names its own subject, against a
+   * live server-minted `elicit_target_baseline` pending for `targetId`. A
+   * routing model cannot populate it, and absence means "an ordinary edit"
+   * with byte-unchanged behaviour.
+   *
+   * ⚠ WHY THE TARGET ALONE IS NOT ENOUGH, and why this exists. The warrant that
+   * lets an answer through is scoped to (handler, target) — but a single target
+   * carries TWO semantic quantities: its BASELINE (where it is now) and its
+   * SUCCESS CONSTRAINT (where the user needs it to get to). Granting authority
+   * for one conferred it on the other, so a user answering "Churn rate is 30%"
+   * had their own 10% success limit rewritten to 30% and its `value_frame`
+   * dropped, while no baseline was recorded at all. Same node and same handler
+   * is NOT baseline-only authority.
+   *
+   * So the answer states a CURRENT LEVEL and never a new limit: under this
+   * authority the existing constraint's operator, value, unit and frame are
+   * preserved exactly. That is the handler's own "omission means UNCHANGED"
+   * doctrine — already applied to unit (the gc-cdd6eb74 silent nullification)
+   * and to frame (2.877) — reaching the field those two left exposed.
+   *
+   * An EXPLICIT limit change is untouched: it carries its own mutation warrant,
+   * never arrives with this side band, and writes exactly as it does today.
+   */
+  readonly baselineAnswerAuthority?: { readonly targetId: string };
+  /**
    * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
    *
    * The legacy natural-language lane addresses an edge with a composite

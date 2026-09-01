@@ -193,7 +193,10 @@ import {
   tryBaselineElicitationResume,
   tryClarificationResume,
 } from './routing/clarification-resume.js';
-import { formatBaselineReask } from './tools/handlers/d1-shared/format-confirmation.js';
+import {
+  formatBaselineReask,
+  formatBaselineAskCollision,
+} from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -1243,6 +1246,74 @@ export async function runTurnExecutor(
   // `routing/mutation-warrant.ts`. A missed warrant costs one chip click; a
   // wrongly-granted one is the defect itself. Judgement calls resolve toward
   // NOT granting.
+  /**
+   * ⭐⭐ THE FOURTH WARRANT SOURCE: THE PRODUCT ASKED, AND THIS REPLY ANSWERED.
+   *
+   * Set ONLY when `tryBaselineElicitationResume` resolved this turn's message
+   * as an answer that names its own subject, against a LIVE baseline question
+   * about `targetId`. Null on every other turn.
+   *
+   * WHY IT HAS TO EXIST. The warrant gate's message signal is LEXICAL, and on
+   * an answer turn the lexicon is an accident of phrasing rather than a
+   * statement of intent. Measured at this tip, with a live baseline question
+   * and a competing ask:
+   *
+   *     "Churn rate is at 30%"  → warrant granted   → the baseline commits
+   *     "Churn rate is 30%"     → warrant ABSENT    → demoted, nothing lands
+   *
+   * One token apart, same question, same answer, same target. And the second
+   * is the sentence the product ITSELF offers ("Naming it is enough, for
+   * example ..."). A user cannot be expected to guess which spelling of their
+   * own answer the model will accept, and the product must not tell them to
+   * say a thing it then refuses.
+   *
+   * ⚠ WHAT THIS IS NOT, because each of these would license unrelated edits
+   * and re-open the exact harm the warrant gate exists to prevent:
+   *
+   *   - NOT a whole-turn warrant. It is checked against the PROPOSAL at each
+   *     gate — the handler must be `add_constraint` and the entity must be
+   *     THIS baseline question's target. A numeric sentence with no live
+   *     baseline question grants nothing, and neither does one whose proposal
+   *     names a different node or a different action.
+   *   - NOT "answers are confirmations". It is a distinct source and mints no
+   *     consumed-pending ref: the question stays live, nothing is dismissed,
+   *     and `confirm_resume` continues to mean what it meant.
+   *   - NOT a relaxation of the backstop. LAYER 2 still runs and still strips;
+   *     it simply asks the same scoped question rather than a blanket one.
+   *
+   * FAIL-SAFE DIRECTION IS PRESERVED: this is `null` unless the resume — which
+   * requires a server-minted pending and a reply that resolves its own subject
+   * by identity with competitor unanimity — says otherwise.
+   */
+  let resolvedBaselineAnswerAuthority: {
+    readonly targetId: string;
+    readonly targetLabel: string;
+  } | null = null;
+
+  /**
+   * Scoped read of the authority above. Grants ONLY for the named object and
+   * the named action; every other proposal on the same turn sees no warrant.
+   */
+  const baselineAnswerWarrantCovers = (
+    handlerId: string | null | undefined,
+    entityId: string | null | undefined,
+  ): boolean =>
+    resolvedBaselineAnswerAuthority !== null &&
+    handlerId === 'add_constraint' &&
+    typeof entityId === 'string' &&
+    entityId === resolvedBaselineAnswerAuthority.targetId;
+
+  /**
+   * WHAT THE SCOPED WARRANT WAS ACTUALLY SPENT ON, recorded at the STEP 2 gate
+   * — the one place the proposal's handler AND entity are both known and
+   * checked. LAYER 2 reads THIS rather than re-deriving the scope from a
+   * commit that no longer carries the entity: re-asking
+   * `baselineAnswerWarrantCovers` down there could only compare the target
+   * against itself, which is a guard agreeing with itself. Null unless STEP 2
+   * genuinely let a covered proposal through.
+   */
+  let baselineAnswerWarrantExercised: { readonly handlerId: string } | null = null;
+
   const ingressMutationWarrant: MutationWarrant = detectMutationWarrant(
     {
       message: payload.message,
@@ -1342,9 +1413,20 @@ export async function runTurnExecutor(
     const consumedRefsOnCommit = meta.consumedPendingRefs;
     const commitResumedAConfirmedProposal =
       Array.isArray(consumedRefsOnCommit) && consumedRefsOnCommit.length > 0;
+    // ⭐ FOURTH CONJUNCT — the scoped baseline-answer warrant, spent at STEP 2.
+    // Same shape and same discipline as `commitResumedAConfirmedProposal`
+    // above: a DERIVED record of an authority that was established and scoped
+    // upstream, never a re-derivation from text down here. It is non-null only
+    // when STEP 2 admitted an `add_constraint` proposal on the exact node the
+    // live baseline question named, so it cannot cover a second handler that
+    // happened to run on the same turn — the handler id is re-checked.
+    const commitSpentTheBaselineAnswerWarrant =
+      baselineAnswerWarrantExercised !== null &&
+      meta.handler_id === baselineAnswerWarrantExercised.handlerId;
     if (
       !ingressMutationWarrant.granted &&
       !commitResumedAConfirmedProposal &&
+      !commitSpentTheBaselineAnswerWarrant &&
       handlerEmittedMutatedGraph &&
       meta.graph !== undefined &&
       meta.graph !== null
@@ -5988,6 +6070,114 @@ export async function runTurnExecutor(
             );
           }
           return finalizeRun();
+        } else if (baselineAnswer.skip_reason === 'subject_bound_answer') {
+          // ⭐⭐ THE ANSWER NAMES ITS OWN SUBJECT, SO IT CARRIES ITS OWN
+          // AUTHORITY — for that subject, and for nothing else.
+          //
+          // This turn falls through to normal routing exactly as before; the
+          // only thing recorded here is WHO the user answered about, so the
+          // warrant gate downstream can tell "the product asked and this is
+          // the reply" apart from "an unrelated sentence with a number in it".
+          // Without it the gate reads the message LEXICALLY and demotes the
+          // very example the product offered.
+          //
+          // Nothing is consumed, dismissed or committed on this line: both
+          // questions stay live, and if the model proposes something other
+          // than a constraint on this node, the authority covers none of it.
+          resolvedBaselineAnswerAuthority = {
+            targetId: baselineAnswer.pending.action.target_id,
+            targetLabel: baselineAnswer.targetLabel,
+          };
+        } else if (baselineAnswer.skip_reason === 'competing_ask') {
+          // ⭐⭐ TWO OF OUR OWN QUESTIONS ARE OPEN AND THIS ANSWERS BOTH SHAPES.
+          //
+          // THE DEFECT, wire-witnessed on the deployed build: with a baseline
+          // question live AND a second bare-number ask live, the sole-pending
+          // gate refused (correctly — a bare number is genuinely ambiguous
+          // between them) and the turn fell through HERE IN SILENCE. It then
+          // reached a lane that does not refuse, and the user's number was
+          // written as an effect value on a node they were never asked about.
+          // Answering "Roughly what percentage is X at right now?" minted a
+          // value somewhere else, disclosed only in the receipt.
+          //
+          // Measured at the pristine tip, the numeral FORM decided nothing: a
+          // bare "30" and "roughly 30" collapse to the same silent fall-through
+          // as "30%" the moment a competing ask is live. The competing pending
+          // is the whole mechanism, so the fix belongs here and not in a
+          // grammar.
+          //
+          // WHY AN ASK AND NOT A PRECEDENCE RULE. "Baseline always wins" would
+          // trade this harm for its mirror: a user with a live baseline
+          // question may legitimately want an effect set, and that instruction
+          // must still reach the edit lane. The resume's classifier draws
+          // exactly that line — an INSTRUCTION carrying a number classifies
+          // `not_an_answer` and never arrives here — and where the line cannot
+          // be drawn from the user's own text, the product asks rather than
+          // writes.
+          //
+          // NOTHING IS MINTED AND BOTH QUESTIONS SURVIVE, structurally: this
+          // returns before any handler runs, and the commit passes no
+          // `pending_actions` override, so the default carry-forward keeps both
+          // asks live for the disambiguating reply (same mechanism, and the
+          // same reason, as the re-ask branch above).
+          emit(TelemetryEvents.PendingActionSkipped, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            reason: 'baseline_elicitation_competing_ask',
+          });
+          const collisionResponse = composeAnswer({
+            answerKind: 'functional',
+            assistant_text: formatBaselineAskCollision({
+              targetLabel: baselineAnswer.targetLabel,
+              competing: baselineAnswer.competing,
+            }),
+            stage: context.stage,
+            suggested_actions: [],
+          });
+          sonnetTextForLog = collisionResponse.assistant_text;
+          resolvedTurnClass = 'direct_answer';
+          intentClass = 'converse';
+          responseTypeForObs = 'direct_answer';
+          llmCallsUsed = 0;
+          stagesCompleted.push('orient');
+          stagesCompleted.push('compose');
+          try {
+            const committed = await commitTurn(collisionResponse, {
+              scenario_id: context.session_id,
+              turn_id: context.request_id,
+              turn_class: 'direct_answer',
+              handler_id: null,
+              request_hash: computeRequestHash(payload),
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+              handler_facts: [],
+              // NO `pending_actions` OVERRIDE — see the re-ask branch above.
+              // An explicit list REPLACES the carried-forward set; here that
+              // would drop the very ask we are asking the user to choose.
+            });
+            commitPerformed = committed.performed;
+            stagesCompleted.push('commit');
+            response = committed.response;
+          } catch (error) {
+            log.error(
+              {
+                event: 'v5.state_commit_failed',
+                request_id: requestId,
+                session_id: context.session_id,
+                path: 'baseline_elicitation_competing_ask',
+                err: serialiseError(error),
+              },
+              'V5 TurnExecutor commit failure on baseline elicitation competing-ask',
+            );
+            failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+            response = buildFailureResponse(
+              'STATE_COMMIT_FAILED',
+              context.stage,
+              { phase: 'commit' },
+              recoveryCtx(),
+            );
+          }
+          return finalizeRun();
         }
       }
 
@@ -9726,8 +9916,30 @@ export async function runTurnExecutor(
       // registry-miss invariant test lost its typed error to a generic offer.)
       const warrantGateHandlerExecutable =
         resolveHandler(options.handlerRegistry ?? getDefaultRegistry(), proposedHandlerId) !== null;
+      // ⭐⭐ THE FOURTH SOURCE, AND THE ONLY PLACE IT CAN BE SCOPED: here the
+      // proposal's handler AND entity are both resolved, so "the product asked
+      // about X and the user answered about X" can be checked against what the
+      // turn is actually about to do.
+      //
+      // A whole-turn warrant here would be the mirror harm — every numeric
+      // sentence licensing any edit — so the grant is conjunctive and narrow:
+      // a live baseline question whose subject THIS reply resolved by identity,
+      // the `add_constraint` action, and that question's own target node. A
+      // proposal for a different node, or a different handler, on the very same
+      // turn still meets the gate exactly as it does today.
+      const warrantedByBaselineAnswer = baselineAnswerWarrantCovers(
+        proposedHandlerId,
+        typeof action.entity?.id === 'string' ? action.entity.id : null,
+      );
+      if (warrantedByBaselineAnswer) {
+        // Recorded for LAYER 2, which cannot re-derive the entity scope from
+        // the commit meta. Only ever set on a proposal that passed the
+        // conjunction above.
+        baselineAnswerWarrantExercised = { handlerId: proposedHandlerId };
+      }
       if (
         !warrantForTurn.granted &&
+        !warrantedByBaselineAnswer &&
         warrantGateHandlerExecutable &&
         GRAPH_MUTATING_HANDLER_IDS.has(proposedHandlerId)
       ) {
@@ -10040,6 +10252,20 @@ export async function runTurnExecutor(
           signal: turnAbort.signal,
           orientationText: routingResult.orientationText,
           proposal: action,
+          // ⭐ BASELINE-ANSWER AUTHORITY — threaded ONLY when this turn is a
+          // reply to a live baseline question that named its own subject. The
+          // handler uses it to record the baseline WITHOUT touching the success
+          // constraint on the same node: one target carries two semantic
+          // quantities, and answering about one is not permission to rewrite
+          // the other. Absent on every ordinary edit, and absence changes
+          // nothing.
+          ...(resolvedBaselineAnswerAuthority !== null
+            ? {
+                baselineAnswerAuthority: {
+                  targetId: resolvedBaselineAnswerAuthority.targetId,
+                },
+              }
+            : {}),
           analysisReady: analysisReadyForTurn,
           explanation: explanationInvocationPayload,
           analysisProjection,

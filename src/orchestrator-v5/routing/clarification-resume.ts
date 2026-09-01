@@ -50,6 +50,7 @@ import type { ElicitTargetBaselinePending, PendingAction } from '../session/pend
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
+  findBaselineAskCollision,
 } from '../session/pending-action.js';
 import { classifyElicitedBaselineAnswer } from '../../cee/factor-extraction/stated-level.js';
 
@@ -693,11 +694,85 @@ export type BaselineElicitationResumeDispatch =
       readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';
     }
   | {
+      /**
+       * TWO OF OUR OWN QUESTIONS ARE OPEN AND THIS MESSAGE ANSWERS THE SHAPE OF
+       * BOTH. Nothing is minted and nothing binds: the caller ASKS which
+       * question was meant, and both questions stay live.
+       *
+       * Distinct from `no_pending_question` on purpose. Before this verdict the
+       * two were the same silent fall-through, and the turn landed in a lane
+       * that does not refuse — writing the user's number onto an unrelated
+       * cell. `competing` is non-empty by construction, so the ask can name the
+       * other question rather than gesture at it.
+       */
+      readonly matched: false;
+      readonly skip_reason: 'competing_ask';
+      readonly pending: ElicitTargetBaselinePending;
+      readonly targetLabel: string;
+      readonly competing: readonly PendingAction[];
+    }
+  | {
+      /**
+       * ⭐⭐ THE REPLY BROUGHT ITS OWN SUBJECT, so the collision does not govern
+       * it and this path must NOT claim it.
+       *
+       * A competing ask makes an ELLIPTICAL answer ambiguous — "30%" has no
+       * subject and has to borrow the question's, so with two questions open we
+       * cannot tell which one lent it. A reply that NAMES what it is talking
+       * about ("Churn rate is 30%", "Churn is about 12%.") borrows nothing: it
+       * binds by identity against the target's label with competitor unanimity,
+       * exactly as it would on a turn with no pending question at all.
+       *
+       * Named apart from `no_pending_question` deliberately, even though both
+       * fall through. They are different facts — "we were not asked" versus "we
+       * were asked, two questions are open, and this reply resolves its own
+       * subject anyway" — and collapsing two facts into one value is the defect
+       * class this whole transition exists to close. A test can bind to this by
+       * identity; telemetry can count it; a future reader cannot mistake it for
+       * silence.
+       *
+       * WHAT HAPPENS NEXT is the pre-existing behaviour, unchanged: the turn
+       * continues to the handler, whose own gate (`ellipticalAllowed === false`
+       * when the sole-pending rule refuses) runs the subject-bearing limb and
+       * records the baseline against the node the user named. This verdict
+       * RESTORES that route; it does not add one.
+       */
+      readonly matched: false;
+      readonly skip_reason: 'subject_bound_answer';
+      readonly pending: ElicitTargetBaselinePending;
+      readonly targetLabel: string;
+    }
+  | {
       readonly matched: true;
       readonly pending: ElicitTargetBaselinePending;
       /** The LIVE label of the target node (used for the receipt and replay). */
       readonly targetLabel: string;
     };
+
+/**
+ * The LIVE label of a baseline question's target, or `null` when the node has
+ * gone or carries no usable label. One derivation, shared by both refusal
+ * paths, so a target that vanished can never be named in copy.
+ */
+function resolveLiveTargetLabel(
+  pending: ElicitTargetBaselinePending,
+  graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined,
+): string | null {
+  const target = graphNodes?.find((n) => n.id === pending.action.target_id);
+  const label = typeof target?.label === 'string' ? target.label : undefined;
+  if (target === undefined || label === undefined || label.trim() === '') return null;
+  return label;
+}
+
+/** 2.960 R2 population: EVERY other labelled node in the live graph. */
+function competingNodeLabels(
+  graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined,
+  targetId: string,
+): readonly (string | undefined)[] {
+  return (graphNodes ?? [])
+    .filter((n) => n.id !== targetId)
+    .map((n) => (typeof n.label === 'string' ? n.label : undefined));
+}
 
 export function tryBaselineElicitationResume(input: {
   readonly message: string;
@@ -709,22 +784,80 @@ export function tryBaselineElicitationResume(input: {
 }): BaselineElicitationResumeDispatch {
   const pending = findSoleLiveElicitBaselinePending(input.pendingActions, input.nowMs);
   if (pending === null) {
-    return { matched: false, skip_reason: 'no_pending_question' };
+    // THE SOLE-PENDING GATE REFUSES FOR TWO REASONS AND ONLY ONE OF THEM IS
+    // SILENCE. If a baseline question is live and merely COMPETING with another
+    // bare-number ask, an answer-shaped reply must resolve here — by asking
+    // which question it answers — never by falling through to a lane that binds
+    // it to something the user was not asked about.
+    const collision = findBaselineAskCollision(input.pendingActions, input.nowMs);
+    if (collision === null) {
+      return { matched: false, skip_reason: 'no_pending_question' };
+    }
+    const collisionLabel = resolveLiveTargetLabel(collision.baseline, input.graphNodes);
+    // No target ⇒ nothing truthful to ask about ⇒ the pre-2.918 silence.
+    if (collisionLabel === null) {
+      return { matched: false, skip_reason: 'no_pending_question' };
+    }
+    // ONE classifier decides "is this an answer at all", the SAME one the
+    // non-collision path uses — never a second text predicate (trap 12). This
+    // is what keeps the counterpart harm safe: "set the pilot's effect on cost
+    // to 0.3" is `not_an_answer`, so a genuine new INSTRUCTION still reaches
+    // the edit lane untouched. Only a message shaped like a reply to the
+    // question we asked is claimed here.
+    //
+    // NO GRAPH-HASH GATE, deliberately, and the asymmetry is the point: the
+    // mutating path below fails closed on divergence because it REPLAYS a
+    // persisted value. This branch mints nothing and writes nothing — it asks a
+    // question — so the only thing it owes the user is that the target it names
+    // still exists, which is checked immediately above.
+    const collisionVerdict = classifyElicitedBaselineAnswer(
+      input.message,
+      collisionLabel,
+      competingNodeLabels(input.graphNodes, collision.baseline.action.target_id),
+    );
+    if (collisionVerdict.outcome === 'not_an_answer') {
+      return { matched: false, skip_reason: 'no_pending_question' };
+    }
+    // ⭐⭐ INDEPENDENT SUBJECT AUTHORITY BEATS THE COLLISION.
+    //
+    // The soleness rule is the licence for ELLIPTICAL CARRY — for a reply with
+    // no subject that must borrow the question's. A reply that names its own
+    // subject never borrowed anything, so a second open question cannot make it
+    // ambiguous, and refusing it is a false positive that DROPS a legitimate
+    // answer. The two harms cannot share one window: dropping a real answer is a
+    // gap, minting an unasked-for edit is a lie.
+    //
+    // ⚠ NOT "accept every bound result" — that is the over-correction this
+    // guard is written to avoid. A bare "30%" is ALSO `bound`; it is bound
+    // `elliptical`, and it stays intercepted below. The discriminator is WHICH
+    // LIMB bound it, which is recorded by the classifier itself rather than
+    // re-derived here, so there is no second predicate over user text to drift
+    // against the first.
+    if (collisionVerdict.outcome === 'bound' && collisionVerdict.authority === 'subject') {
+      return {
+        matched: false,
+        skip_reason: 'subject_bound_answer',
+        pending: collision.baseline,
+        targetLabel: collisionLabel,
+      };
+    }
+    return {
+      matched: false,
+      skip_reason: 'competing_ask',
+      pending: collision.baseline,
+      targetLabel: collisionLabel,
+      competing: collision.competing,
+    };
   }
   // Mutating kind: missing hash on either side is a conflict (fail closed).
   if (graphHashConflicts(pending, input.currentGraphHash)) {
     return { matched: false, skip_reason: 'graph_diverged' };
   }
-  const targetId = pending.action.target_id;
-  const target = input.graphNodes?.find((n) => n.id === targetId);
-  const liveLabel = typeof target?.label === 'string' ? target.label : undefined;
-  if (target === undefined || liveLabel === undefined || liveLabel.trim() === '') {
+  const liveLabel = resolveLiveTargetLabel(pending, input.graphNodes);
+  if (liveLabel === null) {
     return { matched: false, skip_reason: 'target_missing' };
   }
-  // 2.960 R2 population: EVERY other labelled node in the live graph.
-  const competingLabels = (input.graphNodes ?? [])
-    .filter((n) => n.id !== targetId)
-    .map((n) => (typeof n.label === 'string' ? n.label : undefined));
+  const competingLabels = competingNodeLabels(input.graphNodes, pending.action.target_id);
   const verdict = classifyElicitedBaselineAnswer(input.message, liveLabel, competingLabels);
   if (verdict.outcome === 'unresolved') {
     // The user answered; the product cannot read it. Told, not swallowed.
