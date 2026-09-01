@@ -457,4 +457,64 @@ describe('the residual gap is pinned, not invisible', () => {
       expect(readMissingValueAnswer(message), message).toBeNull();
     }
   });
+
+  /**
+   * ⭐⭐ THE CONTRAST CONTROL FOR THE WHOLE PINNED SET — WITHOUT IT, THE TWO
+   * ASSERTIONS ABOVE ARE SATISFIED BY A GUARD THAT CLAIMS NOTHING AT ALL.
+   *
+   * Both tests above assert an ABSENCE (`collide(...)` is null, the reading is
+   * null). An absence suite with no positive control cannot tell "these
+   * specific answers escape" from "this guard is inert" — trap 13, and it is
+   * the shape a pinned-gap set is most exposed to, because every one of its
+   * assertions points the same way.
+   *
+   * So: the ASSIGNMENT-FRAMED form of the very same value-word must be
+   * REFUSED. That is also the discriminator itself, made visible — what
+   * separates a pinned member from the witnessed defect is the assignment
+   * frame, not the value-word.
+   */
+  it('⭐⭐ CONTRAST CONTROL: the assignment-framed twin of a pinned value-word IS claimed', () => {
+    // ⚠ THESE THREE VERBS ARE MEASURED, NOT ASSUMED. My first cut of this
+    // control used `"Make it a third."` and the control ITSELF went red —
+    // `Make it X` is NOT recognised as an assignment by the shared reader,
+    // which is why its sibling `"Make it a quarter."` was already a pinned
+    // member. A contrast control written from the author's head is the same
+    // defect as a corpus written from it.
+    // Bound by identity to the asked pair, not merely "some collision".
+    for (const framed of ['Set it to a third.', 'Change it to a third.', 'Update it to a third.']) {
+      const collision = collide(framed);
+      expect(collision, `contrast control did not fire: ${framed}`).not.toBeNull();
+      expect(collision?.pairs.map((p) => `${p.optionId}::${p.factorId}`)).toEqual([ASKED_PAIR]);
+    }
+    // And the bare value-word it is built from is pinned as dropped, so the two
+    // readings genuinely differ in the SAME run (a blind probe cannot fake a
+    // discrimination it is not making).
+    expect(OUTSTANDING_EFFECT_ASK_ANSWER_KNOWN_DROPPED).toContain('a third');
+    expect(collide('a third')).toBeNull();
+  });
+
+  /**
+   * ⚠ THE LABEL-BEARING POSITIONAL FORMS, pinned HERE rather than in the module
+   * constant because they only exist relative to a factor label, and the label
+   * belongs to the captured fixture rather than to the module.
+   *
+   * These matter more than the bare forms: the product's own blocker copy puts
+   * the factor label in front of the user, so echoing it back is invited
+   * phrasing — and these three still escape, because the shared reader does not
+   * recognise a colon/positional frame as an assignment.
+   */
+  it('⭐ label-bearing positional answers are ALSO dropped, and pinned rather than invisible', () => {
+    const POSITIONAL_KNOWN_DROPPED = [
+      `${FACTOR_LABEL}: a third`,
+      `For ${FACTOR_LABEL}, a third.`,
+      `put ${FACTOR_LABEL} at a third`,
+    ];
+    for (const message of POSITIONAL_KNOWN_DROPPED) {
+      expect(readMissingValueAnswer(message), message).toBeNull();
+      expect(collide(message), `pinned as dropped, but now claimed: ${message}`).toBeNull();
+    }
+    // CONTRAST CONTROL in the same run: the assignment-framed form of the same
+    // sentence, with the same label, IS claimed.
+    expect(collide(`Set ${FACTOR_LABEL} to a third.`)).not.toBeNull();
+  });
 });

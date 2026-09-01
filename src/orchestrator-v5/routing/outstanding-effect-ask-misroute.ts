@@ -245,12 +245,73 @@ function isUnanchoredEffectFraming(
  *
  * A gap recorded in the suite is honest; a gap invisible to it is how the
  * witnessed defect shipped.
+ *
+ * ⚠⚠ THIS SET WAS FOUR MEMBERS LONG AND THE CLASS IS EIGHTEEN — WIDENED FROM AN
+ * INDEPENDENT SWEEP, #1292 r3. The four originals were the ones the review that
+ * created this set happened to type. They are not the class.
+ *
+ * ⭐ WHY A SHORT PIN IS THE DANGEROUS KIND, and why no derivation could have
+ * caught it (trap 12d). The spec's guard iterates THIS ARRAY and asserts every
+ * member is still unclaimed — so it proves the set does not DRIFT and is
+ * structurally incapable of proving the set is COMPLETE. A short honest-gap set
+ * is worse than an obviously absent one: it reads as a surveyed boundary when it
+ * is a sample, and the next reader inherits "we know where the edge is". The
+ * only instrument that can find a short list is a corpus written from OUTSIDE
+ * the author's head, which is what produced the fourteen below.
+ *
+ * ⭐ THE SWEEP, so the number is reproducible rather than asserted. A corpus of
+ * plausible replies to the product's OWN on-screen ask was run through
+ * `findOutstandingEffectAskCollision` against the witnessed fixture readiness.
+ * Every member below measured, in one run:
+ *   `messageAnswersMissingValueAsk` → FALSE · `readMissingValueAnswer` → null ·
+ *   `collide(...)` → null  (i.e. the wrong-entity write still proceeds)
+ * CONTRAST CONTROL in the SAME run, so the sweep is not blind: the assignment
+ * forms of the very same value-words — `"Set it to a third."`,
+ * `"Set <factor> to a third."`, `"Change its baseline to a third."` — all read
+ * `qualitative` and are all REFUSED. The discriminator is the ASSIGNMENT FRAME,
+ * not the value-word: this reader recognises `"Set it to X"` and does not
+ * recognise a bare `"X"`.
+ *
+ * ⚠ WHAT IS **NOT** PINNED HERE, stated so the boundary is not over-read again.
+ * Relative/comparative replies that name no quantity at all (`"lower it"`,
+ * `"halve it"`, `"double it"`) also escape, and they are DELIBERATELY EXCLUDED:
+ * they are a different seam (relative-delta resolution) whose reachability this
+ * lane has not derived, and pinning them here would claim a survey of a class
+ * nobody has measured. They are reported on #1292, not silently absorbed.
+ *
+ * ⚠ AND THE LIMIT THAT APPLIES TO EVERY MEMBER, unchanged from this set's first
+ * version: whether the router would in fact PROPOSE `set_factor_value` for a
+ * given member is INFERRED from the witnessed run, not measured. What is
+ * measured is only that this guard does not claim them.
  */
 export const OUTSTANDING_EFFECT_ASK_ANSWER_KNOWN_DROPPED: readonly string[] = [
+  // The four this set shipped with.
   'a third',
   'About a third.',
   'Make it a quarter.',
   'quite high',
+  // Bare fractional answers — the witnessed value-word with no assignment frame.
+  'two thirds',
+  'three quarters',
+  'a fifth',
+  'half',
+  // Hedged fractional answers. The hedge is exactly what a user types when they
+  // are estimating, which is the situation this ask creates.
+  'roughly a third',
+  'About half.',
+  'somewhere around a third',
+  'a bit less than half',
+  // Bare qualitative magnitudes, the same family as the original 'quite high'.
+  'Make it high.',
+  'fairly low',
+  'very low',
+  // ⭐ `Make it X` IS AN ASSIGNMENT TO A HUMAN AND NOT TO THE READER, which is
+  // why 'Make it a quarter.' was already here and why this belongs beside it.
+  // Measured against its own contrast in one run: `Set it to a third.`,
+  // `Change it to a third.` and `Update it to a third.` are all recognised
+  // (`qualitative`, refused); `Make it a third.` is not (`null`, written).
+  // The verb list is the discriminator, and it is one verb short.
+  'Make it a third.',
 ];
 
 /**
