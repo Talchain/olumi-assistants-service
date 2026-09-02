@@ -33,6 +33,7 @@ import type { OlumiResponse, HeldProposalBlock } from '@talchain/schemas/boundar
 
 import { GraphV3 } from '../../schemas/cee-v3.js';
 import {
+  buildNeedsEncodingAddNotice,
   evaluateEditGraphMutations,
   type EditGmChip,
   type EditGmGoverningVerdict,
@@ -83,8 +84,11 @@ export type AddOptionTransactionOutcome =
       /** The held pending (with the GM_HELD_HANDLER_ID inline_patch) to commit. */
       readonly pendingActions: readonly PendingAction[];
       readonly optionId: string;
+      readonly optionLabel: string;
       /** True when the option lands with effect values (analysable on commit). */
       readonly configured: boolean;
+      /** Factors linked with NO value — the explicit unknowns this hold discloses. */
+      readonly linkedUnvaluedFactorIds: readonly string[];
     };
 
 /** Positive completeness disclosure — the option lands analysable. */
@@ -92,6 +96,30 @@ function buildConfiguredNotice(label: string): string {
   return (
     `'${label}' comes with its effect values, so once you apply this it is ` +
     `configured and the analysis can run.`
+  );
+}
+
+/**
+ * The linked-but-unvalued disclosure: name the factors this option was linked
+ * to, and say plainly that the SIZE of each effect is not known.
+ *
+ * It exists because the gate's generic notice ("… has no effect values yet.
+ * Tell me what it changes and I'll write in the real numbers.") is correct for
+ * a bare option and slightly wrong here — the model HAS said what it changes;
+ * what is missing is only the magnitude. The caller REMOVES the generic
+ * sentence (derived from the gate's own builder, never re-typed) and puts this
+ * in its place, so the user is asked one question rather than two overlapping
+ * ones.
+ */
+function buildLinkedUnvaluedNotice(label: string, factorLabels: readonly string[]): string {
+  const named =
+    factorLabels.length === 1
+      ? `'${factorLabels[0]}'`
+      : `${factorLabels.slice(0, -1).map((l) => `'${l}'`).join(', ')} and '${factorLabels[factorLabels.length - 1]}'`;
+  return (
+    `I've linked '${label}' to ${named}, without a size of effect on ` +
+    `${factorLabels.length === 1 ? 'it' : 'either'} — I don't have those numbers. ` +
+    `Tell me what ${factorLabels.length === 1 ? 'it' : 'each'} changes by and I'll write them in.`
   );
 }
 
@@ -145,7 +173,8 @@ export function dispatchAddOptionTransaction(
 
   const built = buildAddOptionTransaction(input.parameters, graphView);
   if (!built.matched) return { kind: 'skip', reason: built.reason };
-  const { operations, optionId, optionLabel, configured } = built.proposal;
+  const { operations, optionId, optionLabel, configured, linkedUnvaluedFactorIds } =
+    built.proposal;
 
   // Referee the batch through the SAME gate the free-text edit uses. The ops
   // were built against `currentGraph`, so `baseGraphHash === currentGraphHash`
@@ -191,13 +220,36 @@ export function dispatchAddOptionTransaction(
   // which is precisely `configured === false` here (one factor edge per value),
   // so relying on it never drops the disclosure.
   const disclosure = configured ? buildConfiguredNotice(optionLabel) : null;
-  const baseText = decision.assistantText ?? '';
-  const assistantText =
-    disclosure === null || disclosure.length === 0
-      ? baseText
-      : baseText.length === 0
-        ? disclosure
-        : `${baseText} ${disclosure}`;
+  let baseText = decision.assistantText ?? '';
+
+  // ⭐ THE LINKED-BUT-UNVALUED CASE (text leg). The option lands with factor
+  // edges and no magnitudes, so the honest ask is "how big?", not "what does
+  // it change?". Swap the gate's generic sentence for the specific one, and
+  // DERIVE the sentence to remove by calling the gate's OWN builder rather
+  // than re-typing it here — if that copy changes, this keeps matching
+  // (trap 12: the dominant defect is the hand-maintained mirror). If it ever
+  // stops matching, the worst case is both sentences shipping, never a
+  // silently dropped disclosure.
+  let linkedNotice: string | null = null;
+  if (linkedUnvaluedFactorIds.length > 0) {
+    const labelOf = (id: string): string =>
+      graphView.nodes.find((n) => n.id === id)?.label ?? id;
+    linkedNotice = buildLinkedUnvaluedNotice(
+      optionLabel,
+      linkedUnvaluedFactorIds.map(labelOf),
+    );
+    const generic = buildNeedsEncodingAddNotice(operations, input.currentGraph);
+    if (generic !== null && baseText.includes(generic)) {
+      baseText = baseText.replace(generic, '').replace(/\s{2,}/g, ' ').trim();
+    }
+  }
+
+  const trailing = [disclosure, linkedNotice].filter(
+    (t): t is string => t !== null && t.length > 0,
+  );
+  const assistantText = [baseText, ...trailing]
+    .filter((t) => t.length > 0)
+    .join(' ');
 
   const blocks: OlumiResponse['blocks'] =
     decision.heldProposalBlock != null
@@ -219,6 +271,8 @@ export function dispatchAddOptionTransaction(
     response,
     pendingActions: decision.pendingActions,
     optionId,
+    optionLabel,
     configured,
+    linkedUnvaluedFactorIds,
   };
 }
