@@ -50,7 +50,9 @@
  *      the same oscillation as every other round, and a coordination-boundary
  *      predicate over `", and"` is the one this estate has already proved
  *      unwinnable. So the example is corrected rather than the code, and the
- *      behaviour is pinned in `KNOWN_OPEN_COORDINATED_INSTRUCTION` below.
+ *      class is CLOSED at 051c964d+ by `COORDINATED_EDIT_INSTRUCTION`; the sets
+ *      `CLOSED_COORDINATED_INSTRUCTION` and `KNOWN_OPEN_COORDINATED_NAME`
+ *      below pin the fix and the gaps it costs.
  *
  * PURE + TOTAL: no I/O, never throws, never reads the graph. The label is
  * taken from the ORIGINAL message (casing preserved); detection runs on a
@@ -396,6 +398,40 @@ export function isTargetReference(rawRemainder: string): boolean {
   return false;
 }
 
+/**
+ * ⭐ A SECOND INSTRUCTION COORDINATED ONTO THE FIRST, INSIDE AN INFERRED LABEL.
+ *
+ * An inferred label runs to the end of the sentence, so "… and remove the old
+ * one" lands INSIDE THE LABEL and never reaches `screenRemainder`. The quoted
+ * form declines correctly because the quotes bound the label; the unquoted
+ * forms were claimed with the dropped instruction swallowed into the option's
+ * name. That is a LIE, not a gap: the user asked for two things and silently
+ * got one, wearing a nonsense name.
+ *
+ * ⚠ WHY THIS SHAPE AND NOT THE OBVIOUS ONE. Screening on the EDIT VERB ALONE
+ * was written and reverted in this PR: `set` is both an edit verb and an
+ * ordinary verb, so it declined "add an option to SET UP a joint venture" and
+ * re-opened the verb-collision class closed one commit earlier. This screen
+ * requires the CONJUNCTION BEFORE the verb and excludes `set` and `add`, so a
+ * label that merely BEGINS with an edit verb ("Remove the middleman", "Change
+ * supplier", "Merge with a rival") is untouched. Proposed and measured by an
+ * independent reviewer, 8 of 8 coordinated phrasings declining and 19 of 19 of
+ * their legitimate names surviving; reproduced here.
+ *
+ * ⚠⚠ AND THE COST, MEASURED RATHER THAN ASSUMED — it is NOT free, and the
+ * reviewer's corpus could not see this because none of its nineteen rows
+ * coordinates a SECOND VERB drawn from this list. A single option whose NAME
+ * coordinates two actions now declines: 11 of 12 such names, pinned by name in
+ * `KNOWN_OPEN_COORDINATED_NAME`. Those are GAPS — the generic edit lane serves
+ * them unchanged — and by this module's standing asymmetry a gap is the lesser
+ * harm than a dropped instruction. That is the trade, made deliberately and
+ * recorded rather than discovered later.
+ */
+export const COORDINATED_EDIT_INSTRUCTION_SOURCE =
+  '(?:,\\s*)?(?:and|then|and then)\\s+(?:remove|delete|drop|rename|replace|update|change|increase|decrease|raise|lower|configure|split|merge|reset|edit|adjust)';
+const COORDINATED_EDIT_INSTRUCTION =
+  /\b(?:,\s*)?(?:and|then|and then)\s+(?:remove|delete|drop|rename|replace|update|change|increase|decrease|raise|lower|configure|split|merge|reset|edit|adjust)\b/i;
+
 const PLURAL_OPTION_WORD = /\b(?:options|alternatives|choices)\b/;
 const OPTION_WORD_IN_LABEL = /\b(?:options?|alternatives?|choices?)\b/i;
 const GENERIC_LABELS = new Set([
@@ -581,6 +617,13 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
     if (isTarget) return NO_MATCH('target_not_a_label');
   }
 
+  // Scoped by QUOTING, not by `explicitlyNamed`: an unquoted `called` label is
+  // explicitly named AND runs to the end of the sentence, so it carries the
+  // same swallowed instruction. A quoted label is already bounded.
+  if (!candidate.labelWasQuoted && COORDINATED_EDIT_INSTRUCTION.test(candidate.label)) {
+    return NO_MATCH('compound_edit');
+  }
+
   const label = tidyLabel(candidate.label, explicitlyNamed);
   if (!labelIsSafe(label)) return NO_MATCH('label_unsafe');
   // An UNQUOTED label that carries a number is a value statement swallowed
@@ -658,14 +701,48 @@ export const KNOWN_OPEN_CONTAINER_GAP: readonly string[] = [
   'Add an option to every driver',
   'Add an option to any lever',
   'Add an option to each outcome',
+  // Added by the independent reviewer at 0e703c71 — declared scope must match
+  // what is actually measured, not what was first imagined.
+  'Add an option to said decision',
+  'Add an option to each workspace',
 ];
 
 /**
- * The second gap shipped open by name: a coordinated second instruction inside
- * an INFERRED label. See scope boundary 2 above for why the fix was reverted.
- * The spec asserts this set exactly, in both directions.
+ * ⭐ CLOSED at 051c964d+ by `COORDINATED_EDIT_INSTRUCTION`. Kept as a
+ * REGRESSION set, not a known-open one: these must now DECLINE, and the spec
+ * asserts that. Retiring the constant would delete the evidence that the class
+ * was ever open.
  */
-export const KNOWN_OPEN_COORDINATED_INSTRUCTION: readonly string[] = [
+export const CLOSED_COORDINATED_INSTRUCTION: readonly string[] = [
   'Add an option to partner with a distributor and remove the old one',
   'Add an option to open a Berlin office and delete the Munich one',
+  'Add an option to partner with Siemens, and remove the old one',
+  'Add an option called Launch the pilot and then rename the product line',
+];
+
+/**
+ * ⚠ THE PRICE OF THE SCREEN ABOVE, PINNED BY NAME. A single option whose NAME
+ * coordinates two actions, where the second verb happens to sit in the closed
+ * edit-verb list, now declines. These are GAPS — the generic edit lane serves
+ * them unchanged — and the asymmetry says a gap costs less than a dropped
+ * instruction. Recorded so the trade is visible rather than discovered.
+ *
+ * The reviewer's own 19-row corpus contained no row of this shape, and neither
+ * did mine before the screen was proposed: `buy and build`,
+ * `acquire and integrate a competitor` and `partner with Siemens and Bosch`
+ * all coordinate a noun or a verb OUTSIDE the list. A corpus assembled to
+ * defend a predicate tends to share its blind spot.
+ */
+export const KNOWN_OPEN_COORDINATED_NAME: readonly string[] = [
+  'Add an option to rebrand and update the website',
+  'Add an option to automate and replace manual QA',
+  'Add an option to restructure and merge the two teams',
+  'Add an option to relaunch and rename the product',
+  'Add an option to modernise and replace the ERP',
+  'Add an option to simplify and split the portfolio',
+  'Add an option to refinance and lower the debt cost',
+  'Add an option to insource and drop the vendor contract',
+  'Add an option to downsize and change the operating model',
+  'Add an option to digitise and replace paper records',
+  'Add an option to renegotiate and lower the lease',
 ];

@@ -26,7 +26,9 @@ import {
   OPTION_NOUN_DETERMINERS,
   DETERMINER_FRAGMENT,
   KNOWN_OPEN_CONTAINER_GAP,
-  KNOWN_OPEN_COORDINATED_INSTRUCTION,
+  CLOSED_COORDINATED_INSTRUCTION,
+  KNOWN_OPEN_COORDINATED_NAME,
+  COORDINATED_EDIT_INSTRUCTION_SOURCE,
   mentionsContainer,
   TARGET_DEFINITE_DETERMINERS,
   TARGET_QUANTIFIER_DETERMINERS,
@@ -515,8 +517,12 @@ describe('⚠ the gaps this module ships OPEN, pinned exactly', () => {
   });
 
   it('...and the set has not GROWN silently', () => {
-    expect(KNOWN_OPEN_CONTAINER_GAP.length).toBe(8);
-    expect(KNOWN_OPEN_COORDINATED_INSTRUCTION.length).toBe(2);
+    // 8 at 0e703c71; 10 after the independent reviewer's two rows
+    // ("said decision", "each workspace") were added so the DECLARED scope
+    // matches what is actually measured rather than what was first imagined.
+    expect(KNOWN_OPEN_CONTAINER_GAP.length).toBe(10);
+    expect(CLOSED_COORDINATED_INSTRUCTION.length).toBe(4);
+    expect(KNOWN_OPEN_COORDINATED_NAME.length).toBe(11);
     // Positive control: the set is not vacuous and these really are container
     // references a human would call targets.
     expect(KNOWN_OPEN_CONTAINER_GAP).toContain('Add an option to each node');
@@ -524,12 +530,11 @@ describe('⚠ the gaps this module ships OPEN, pinned exactly', () => {
   });
 
   it('a coordinated second instruction is swallowed into an INFERRED label', () => {
-    for (const message of KNOWN_OPEN_COORDINATED_INSTRUCTION) {
+    for (const message of CLOSED_COORDINATED_INSTRUCTION) {
       const d = detectAddOptionIntent(message);
-      expect(d.matched, message).toBe(true);
-      if (!d.matched) continue;
-      // The tell: the dropped instruction is INSIDE the option's name.
-      expect(d.label.toLowerCase()).toMatch(/\band (?:remove|delete)\b/);
+      expect(d.matched, `"${message}" drops a user instruction and must decline`).toBe(false);
+      if (d.matched) continue;
+      expect(d.reason).toBe('compound_edit');
     }
     // ...and the QUOTED form, whose label is bounded, correctly declines.
     const quoted = detectAddOptionIntent(
@@ -634,12 +639,12 @@ describe('⭐⭐ THE GAPS THIS MODULE SHIPS OPEN, ASSERTED AS AN EXACT SET', () 
     }
   });
 
-  it('KNOWN_OPEN_COORDINATED_INSTRUCTION: the label still swallows the second instruction', () => {
-    for (const message of KNOWN_OPEN_COORDINATED_INSTRUCTION) {
+  it('CLOSED: a coordinated second instruction no longer rides inside the label', () => {
+    for (const message of CLOSED_COORDINATED_INSTRUCTION) {
       const d = detectAddOptionIntent(message);
-      expect(d.matched, `"${message}"`).toBe(true);
-      if (!d.matched) continue;
-      expect(d.label.toLowerCase()).toMatch(/\band\b/);
+      expect(d.matched, `"${message}" drops a user instruction and must decline`).toBe(false);
+      if (d.matched) continue;
+      expect(d.reason).toBe('compound_edit');
     }
   });
 
@@ -654,7 +659,7 @@ describe('⭐⭐ THE GAPS THIS MODULE SHIPS OPEN, ASSERTED AS AN EXACT SET', () 
 
   it('both known-open sets are non-empty — an empty set would pass vacuously', () => {
     expect(KNOWN_OPEN_CONTAINER_GAP.length).toBeGreaterThan(3);
-    expect(KNOWN_OPEN_COORDINATED_INSTRUCTION.length).toBeGreaterThan(1);
+    expect(CLOSED_COORDINATED_INSTRUCTION.length).toBeGreaterThan(1);
   });
 });
 
@@ -712,5 +717,89 @@ describe('the screen’s two conjunctions each bite, on their own case', () => {
         'map', 'mix', 'model', 'page', 'plan', 'project', 'scenario', 'set',
       ].sort(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐ THE COORDINATED-INSTRUCTION SCREEN — both columns, measured independently.
+// Proposed by an independent reviewer after this PR reverted an edit-verb-only
+// screen that collided with "set up a joint venture". This one requires the
+// CONJUNCTION BEFORE the verb and excludes `set` and `add`.
+// ---------------------------------------------------------------------------
+describe('a coordinated second instruction is a DROPPED INSTRUCTION, not a name', () => {
+  it.each(CLOSED_COORDINATED_INSTRUCTION)('LIE: %j must decline', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" silently drops half of what the user asked for`).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('compound_edit');
+  });
+
+  it.each([
+    // OPPOSITE DIRECTION. Labels that BEGIN with an edit verb, and
+    // coordinations of nouns, must be untouched — this is where the reverted
+    // verb-only screen died.
+    'Add an option to set up a joint venture',
+    'Add an option to remove the middleman',
+    'Add an option to change supplier',
+    'Add an option to merge with a rival',
+    'Add an option to increase prices gradually',
+    'Add an option to buy and build',
+    'Add an option to expand into Germany and France',
+    'Add an option to partner with Siemens and Bosch',
+    'Add an option to acquire and integrate a competitor',
+    'Add an option to open a Berlin office and a Munich hub',
+    'Add an option to hire and train locally',
+  ])('GAP: %j is a legitimate name and must stay claimed', (message) => {
+    expect(detectAddOptionIntent(message).matched, `"${message}" must survive`).toBe(true);
+  });
+
+  it('⭐ IMMUNE to the historical ", and" class this estate ruled unwinnable', () => {
+    // Four rounds oscillated on a coordination-boundary predicate over ", and".
+    // This screen only fires when an EDIT VERB follows the conjunction, so the
+    // constraint sentences from that work cannot reach it. Claimed immunity is
+    // still a claim — this is the measurement.
+    for (const s of [
+      'Do not, and this is firm, let gross margin drop below 78%',
+      'Do not, under any circumstances, let gross margin drop below 78%',
+      'Keep churn under 5%, and margin above 40%',
+      'We must not, and I mean this, drop below 78% margin',
+      'Hold price, and do not discount',
+    ]) {
+      expect(
+        /\b(?:,\s*)?(?:and|then|and then)\s+(?:remove|delete|drop|rename|replace|update|change|increase|decrease|raise|lower|configure|split|merge|reset|edit|adjust)\b/i.test(s),
+        `the screen must not fire on "${s}"`,
+      ).toBe(false);
+    }
+  });
+
+  it('⚠ THE PRICE, pinned: a NAME that coordinates two actions now declines', () => {
+    // Not free, and the reviewer's 19-row corpus could not see it — none of its
+    // rows coordinates a SECOND VERB from the list. These are GAPS (the generic
+    // edit lane serves them), traded deliberately against a dropped
+    // instruction, which is a LIE.
+    for (const message of KNOWN_OPEN_COORDINATED_NAME) {
+      const d = detectAddOptionIntent(message);
+      expect(
+        d.matched,
+        `"${message}" now CLAIMS — the gap closed; move it out of KNOWN_OPEN_COORDINATED_NAME and say so`,
+      ).toBe(false);
+    }
+  });
+
+  it('⭐ the EDIT-VERB list is pinned BY HAND — a derived check cannot see it shrink', () => {
+    // Same lesson as CONTAINER_NOUNS: every other assertion here is generated
+    // from the screen itself, so only a hand-written list observes a deletion.
+    const src = COORDINATED_EDIT_INSTRUCTION_SOURCE;
+    for (const v of [
+      'remove', 'delete', 'drop', 'rename', 'replace', 'update', 'change',
+      'increase', 'decrease', 'raise', 'lower', 'configure', 'split', 'merge',
+      'reset', 'edit', 'adjust',
+    ]) {
+      expect(src, `"${v}" must remain in the coordinated-edit verb list`).toContain(v);
+    }
+    // ...and the two deliberate EXCLUSIONS, which are what let the screen
+    // coexist with the verb-collision class.
+    expect(src).not.toContain('|set|');
+    expect(src).not.toContain('|add|');
   });
 });
