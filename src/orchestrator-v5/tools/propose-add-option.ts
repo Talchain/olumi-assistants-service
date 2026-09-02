@@ -478,7 +478,11 @@ function decisionSubject(label: string): string {
  * TYPE, not a fifth rule. Where a single word appears in the parent decision's
  * label, the honest answer is neither refuse nor accept but ASK — "an option
  * called Build, or are you naming the decision?" `AddOptionValidation` already
- * carries `kind: 'clarify'` and the route already renders it. Make the
+ * carries `kind: 'clarify'`. ⚠ THE ROUTE DOES NOT RENDER IT — `route-v2.ts`
+ * branches only on `composed.status === 'composed'` and every other status
+ * falls through to the generic edit lane (`fell_through:text_clarify`). The
+ * clarify arm that IS wired asks WHICH DECISION owns the option, not what the
+ * LABEL should be. The successor has to WIRE this as well as call it. Make the
  * ambiguity the product; that is the documented exit for an unwinnable parse.
  */
 function labelIsTheDecisionItself(label: string, decisionLabel: string): boolean {

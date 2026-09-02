@@ -96,9 +96,23 @@ const NO_MATCH = (reason: AddOptionIntentNoMatchReason): AddOptionIntentDetectio
 
 /**
  * Courtesy / framing prefixes stripped before the imperative test. SMALL on
- * purpose: every entry widens the match. Deliberative openers ("should we",
- * "would it be worth", "what if") are absent by design — those are questions
- * for the coach, not commands.
+ * purpose: every entry widens the match.
+ *
+ * ⚠ WHAT IS AND IS NOT EXCLUDED — corrected 3 Sep 2026, because the previous
+ * wording overclaimed and a reviewer measured the gap. INTERROGATIVE
+ * deliberation is excluded ("should we…", "would it be worth…", "what if…"),
+ * but by `QUESTION_LEAD` and the `?` test, not by this list. DIRECTIVE
+ * first-person openers — "we should", "we need to", "we want to" — are
+ * DELIBERATELY ACCEPTED here: "we should add an option called Outsource" is a
+ * decision, not a question.
+ *
+ * The consequence, measured and pinned rather than papered over: a directive
+ * opener carrying a DEFERRAL as its label is claimed —
+ * `We should add an option to think about this later` -> "Think about this
+ * later". The opener is fine; the LABEL is the problem, and hedge/deferral
+ * phrases are an OPEN class ("later", "TBD", "we'll see", "park this",
+ * "circle back"), so by this module's standing ruling they are pinned rather
+ * than chased. See `KNOWN_OPEN_DEFERRAL_LABEL`.
  */
 const COURTESY_PREFIX =
   /^(?:(?:please|ok|okay|yes|sure|also|now|next|then|and)[,\s]+|(?:can|could|would|will)\s+you\s+(?:please\s+)?|(?:can|could)\s+we\s+(?:please\s+)?|i(?:'d|\s+would|\s+want|\s+need)\s+(?:like\s+)?to\s+|i(?:'d|\s+would)\s+like\s+you\s+to\s+|let'?s\s+|we\s+(?:should|need\s+to|want\s+to)\s+|go\s+ahead\s+and\s+)+/i;
@@ -158,8 +172,42 @@ const P_UNQUOTED_AS_OPTION = new RegExp(
   'i',
 );
 /** Pattern 3 — `add an option called/named/: X …`. */
+/**
+ * ⭐ THE NAMING WORDS — WORDS ONLY, NEVER PUNCTUATION.
+ *
+ * A naming word is what makes a label EXPLICITLY NAMED, and `explicitlyNamed`
+ * switches the whole target screen off. So this alternation is a permission
+ * list, and four punctuation marks were sitting in it: `:` `-` `–` `—`.
+ *
+ * Anything after a colon or a dash was therefore treated as a name the user
+ * had chosen, and walked past every screen in this module:
+ *   `Add an option: the model`             -> "The model"
+ *   `Add an option - the pricing decision` -> "The pricing decision"
+ *   `Add an option: each decision`         -> "Each decision"
+ *   `Add an option - Paul's model`         -> "Paul's model"
+ *   `Add an option — the canvas`           -> "The canvas"   (em dash too)
+ * and the hedges are worse, because the product mints them as option names:
+ *   `Add an option: TBD`                        -> "TBD"
+ *   `Add an option - not sure which yet`        -> "Not sure which yet"
+ *   `Add an option: can we brainstorm together` -> "Can we brainstorm together"
+ *   `Add an option - your call`                 -> "Your call"
+ * and the hyphen matched INSIDE a word:
+ *   `Add an option-level breakdown of the risks` -> "Level breakdown of the risks"
+ *
+ * REMOVING FOUR ENTRIES FROM AN ENUMERATION, not a new predicate — the same
+ * safe class as the `plan` head noun. Punctuation is a SEPARATOR; only a word
+ * is evidence that the user is naming something. `called`/`named`/`titled`/
+ * `labelled` keep working unchanged.
+ *
+ * ⚠ THE PRICE, ACCEPTED: `Add an option: Outsource to Poland` is now a GAP —
+ * the generic edit lane serves it, and by this module's standing asymmetry a
+ * gap costs less than minting "TBD" as the name of a strategic option. Pinned
+ * in `KNOWN_OPEN_SEPARATOR_NAMING`.
+ */
+export const NAMING_WORDS = ['called', 'named', 'titled', 'labelled', 'labeled'] as const;
+
 const P_OPTION_CALLED = new RegExp(
-  `^${ADD_VERB}\\s+${DETERMINER}${ADJ}${OPTION_NOUN}\\s*(?:called|named|titled|labelled|labeled|:|-|–|—)\\s*(.+)$`,
+  `^${ADD_VERB}\\s+${DETERMINER}${ADJ}${OPTION_NOUN}\\s+(?:${NAMING_WORDS.join('|')})\\s+(.+)$`,
   'i',
 );
 /** Pattern 4 — `add an option to/of/for/where X`. */
@@ -681,7 +729,20 @@ export function buildAddOptionClarifyChipMessage(label: string, decisionLabel: s
  * ⭐ THE EXIT IS NOT A FIFTH ROUND. Where the label is a determiner-led phrase
  * whose head noun this list does not carry, the honest answer is neither
  * refuse nor accept but ASK. `AddOptionValidation`'s `kind: 'clarify'` arm
- * (`propose-add-option.ts`) already exists and the route already renders it.
+ * (`propose-add-option.ts`) already exists as a TYPE and as a VALIDATOR
+ * OUTCOME. ⚠ THE ROUTE DOES NOT RENDER IT: `route-v2.ts:6385` branches only on
+ * `composed.status === 'composed'`, and every other status — `clarify`
+ * included — falls through to the generic edit lane, emitting
+ * `fell_through:text_clarify` (`route-v2.ts:6509`). The clarify arm that IS
+ * wired asks WHICH DECISION the option belongs under; it does not ask WHAT THE
+ * LABEL SHOULD BE, which is the question this successor needs.
+ *
+ * ⚠⚠ THIS SENTENCE PREVIOUSLY SAID THE ROUTE "already renders it" — false, and
+ * it is the second time in this PR that a comment claimed a mechanism that did
+ * not exist (the first was an "asserted byte-identical" check with no
+ * assertion). Landing on the one sentence describing the named successor work
+ * is the worst place for it: it tells whoever picks this up that the hard half
+ * is done. The successor has to WIRE the arm as well as call it.
  * Rowed as successor work; deliberately not built here.
  *
  * Severity, stated exactly: a survivor here reaches the VALIDATOR as a hint,
@@ -745,4 +806,64 @@ export const KNOWN_OPEN_COORDINATED_NAME: readonly string[] = [
   'Add an option to downsize and change the operating model',
   'Add an option to digitise and replace paper records',
   'Add an option to renegotiate and lower the lease',
+];
+
+/**
+ * ⚠ ANAPHORA — A POINTER IS NOT A NAME, AND POINTERS ARE AN OPEN CLASS.
+ *
+ * The `as an option` frame screens on `isTargetReference(raw) &&
+ * mentionsContainer(raw)`, so a determiner-led POINTER carrying no container
+ * noun is minted as the option's name: "All of the above", "Last one",
+ * "Either of them". `GENERIC_LABELS` — ten strings — is the only defence, and
+ * it is a hand-maintained list of an OPEN class.
+ *
+ * ⭐ BY THE RULING THIS PR ESTABLISHED, THIS IS NOT CHASED. Closed classes
+ * close; open classes do not. Determiners closed because English has ~45 of
+ * them and no more. Pointers, like container nouns, compose freely ("that last
+ * one", "the two we discussed", "whichever you prefer") and no list reaches
+ * them. Adding five strings would close these five rows and nothing else,
+ * while reading as though the class were handled — which is how four rounds
+ * happened.
+ *
+ * The exit is the same `clarify` arm named above, and the discriminating
+ * control is that `Add the Berlin office as an option` must keep yielding
+ * "Berlin office": a determiner-led phrase with a real referent is a NAME.
+ */
+export const KNOWN_OPEN_ANAPHORA: readonly string[] = [
+  'Add all of the above as an option',
+  'Add the last one as an option',
+  'Add either of them as an option',
+  'Add both of those as an option',
+  'Add the first one as an option',
+];
+
+/**
+ * ⚠ THE PRICE OF REMOVING THE PUNCTUATION SEPARATORS, PINNED BY NAME. A real
+ * option name introduced by a colon or a dash is now a GAP the generic edit
+ * lane serves. Deliberate: the same alternation was minting "TBD" and "your
+ * call" as strategic options, and a gap costs less than a lie.
+ */
+export const KNOWN_OPEN_SEPARATOR_NAMING: readonly string[] = [
+  'Add an option: Outsource to Poland',
+  'Add an option: Remote-first German team',
+  "Let's add another option: Licence the technology",
+  'Add a third option: partner with a local distributor',
+];
+
+/**
+ * ⚠ A DEFERRAL IS NOT AN OPTION, and deferral phrases are an OPEN class.
+ *
+ * `GENERIC_LABELS` already refuses ten pointer-ish strings; these are the same
+ * shape one step out. Extending that list would close exactly these rows and
+ * read as though the class were handled — the pattern this PR has now measured
+ * to fail four times. Pinned, with the `clarify` arm as the exit.
+ *
+ * ⭐ NOTE THE OVERLAP THAT IS ALREADY CLOSED: the colon/dash forms of the same
+ * hedges (`Add an option: TBD`, `Add an option - not sure which yet`) DO now
+ * decline, because punctuation no longer confers `explicitlyNamed`. What
+ * remains open is the hedge arriving through a real preposition.
+ */
+export const KNOWN_OPEN_DEFERRAL_LABEL: readonly string[] = [
+  'We should add an option to think about this later',
+  'We need to add an option to decide later',
 ];

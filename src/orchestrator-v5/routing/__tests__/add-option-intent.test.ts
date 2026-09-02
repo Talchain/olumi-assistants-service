@@ -28,6 +28,10 @@ import {
   KNOWN_OPEN_CONTAINER_GAP,
   CLOSED_COORDINATED_INSTRUCTION,
   KNOWN_OPEN_COORDINATED_NAME,
+  KNOWN_OPEN_ANAPHORA,
+  KNOWN_OPEN_SEPARATOR_NAMING,
+  KNOWN_OPEN_DEFERRAL_LABEL,
+  NAMING_WORDS,
   COORDINATED_EDIT_INSTRUCTION_SOURCE,
   mentionsContainer,
   TARGET_DEFINITE_DETERMINERS,
@@ -40,19 +44,22 @@ const WIDENING_CARD_PROMPT = (label: string): string =>
   `Add "${label}" as an option on the model.`;
 
 describe('detectAddOptionIntent — POSITIVE: ordinary confirmed add-option requests', () => {
+  // ⚠ THREE COLON-NAMED ROWS WERE REMOVED FROM THIS CORPUS on 3 Sep 2026 and
+  // are now GAPS, pinned in `KNOWN_OPEN_SEPARATOR_NAMING`. Punctuation no
+  // longer counts as a naming word, because granting `explicitlyNamed` on a
+  // colon or a dash switched the whole target screen off and the product was
+  // minting "TBD", "your call" and "the model" as strategic option names. The
+  // capability loss is real and deliberate: a gap costs less than a lie.
   const POSITIVE: ReadonlyArray<readonly [string, string]> = [
     // [message, expected label]
-    ['Add a third option: partner with a local distributor', 'Partner with a local distributor'],
     [WIDENING_CARD_PROMPT('Licence the technology'), 'Licence the technology'],
     ['Add "Partner with a local distributor" as an option', 'Partner with a local distributor'],
     ['Add Partner with a local distributor as an option', 'Partner with a local distributor'],
     ['Please add an option called Open a Berlin office', 'Open a Berlin office'],
     ['Add an option named "Acquire a local competitor"', 'Acquire a local competitor'],
-    ['Add an option: Remote-first German team', 'Remote-first German team'],
     ['Create an option to partner with a distributor', 'Partner with a distributor'],
     ['Add a "Do nothing" option', 'Do nothing'],
     ["I'd like to add an option called Stay UK-only", 'Stay UK-only'],
-    ["Let's add another option: Licence the technology", 'Licence the technology'],
     ['Include an alternative called Joint venture', 'Joint venture'],
     ['Introduce a new option named Franchise model', 'Franchise model'],
     ['Can you add an option called Hire a country manager', 'Hire a country manager'],
@@ -801,5 +808,121 @@ describe('a coordinated second instruction is a DROPPED INSTRUCTION, not a name'
     // coexist with the verb-collision class.
     expect(src).not.toContain('|set|');
     expect(src).not.toContain('|add|');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐ PUNCTUATION IS A SEPARATOR, NOT A NAMING WORD.
+// `explicitlyNamed` switches the entire target screen off, so the naming
+// alternation is a PERMISSION LIST — and `:` `-` `–` `—` were in it.
+// ---------------------------------------------------------------------------
+describe('a separator never confers "the user named this"', () => {
+  it.each([
+    // Determiner-led targets straight through the bypass.
+    'Add an option: the model',
+    'Add an option - the pricing decision',
+    'Add an option: each decision',
+    "Add an option - Paul's model",
+    'Add an option — the canvas',
+    'Add an option – the graph',
+    // ⭐ The hedges, which are the worst of it: the product was minting these
+    // as the NAME of a strategic option.
+    'Add an option: TBD',
+    'Add an option - not sure which yet',
+    'Add an option: can we brainstorm together',
+    'Add an option - your call',
+    // ...and the hyphen matched INSIDE a word.
+    'Add an option-level breakdown of the risks',
+  ])('LIE: %j must not be minted as an option name', (message) => {
+    expect(detectAddOptionIntent(message).matched, `"${message}" must decline`).toBe(false);
+  });
+
+  it.each([
+    // CONTROL: real naming WORDS are untouched.
+    ['Add an option called Outsource to Poland', 'Outsource to Poland'],
+    ['Add an option named "Acquire a local competitor"', 'Acquire a local competitor'],
+    ['Add an option called The Big Bet', 'The Big Bet'],
+    ['Add an option titled Stay UK-only', 'Stay UK-only'],
+  ])('GAP: %j is named by a WORD and must survive', (message, expected) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must survive`).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it('a naming word needs WHITESPACE on both sides — it is a word, not a substring', () => {
+    // Demonstrating a survivor rather than asserting it was equivalent:
+    // loosening the two `\\s+` back to `\\s*` makes "calledOutsource" claim
+    // "Outsource". Degenerate input, real discrimination, one line to pin.
+    expect(detectAddOptionIntent('Add an option calledOutsource').matched).toBe(false);
+    expect(detectAddOptionIntent('Add an optioncalled Outsource').matched).toBe(false);
+    expect(detectAddOptionIntent('Add an option called Outsource').matched).toBe(true);
+  });
+
+  it('⭐ NAMING_WORDS is pinned BY HAND — a corpus generated from it shrinks with it', () => {
+    // The defect found at 0e703c71: every derived assertion loses its own case
+    // when the list loses a member. This is the only assertion that can see a
+    // deletion, and the only one that can see punctuation creep back in.
+    expect([...NAMING_WORDS]).toEqual(['called', 'named', 'titled', 'labelled', 'labeled']);
+    for (const sep of [':', '-', '–', '—']) {
+      expect(NAMING_WORDS as readonly string[], `"${sep}" must never be a naming word`).not.toContain(sep);
+    }
+  });
+
+  it.each(KNOWN_OPEN_SEPARATOR_NAMING)('⚠ THE PRICE, pinned: %j is now a gap', (message) => {
+    expect(
+      detectAddOptionIntent(message).matched,
+      `"${message}" now CLAIMS — the gap closed; move it out of KNOWN_OPEN_SEPARATOR_NAMING and say so`,
+    ).toBe(false);
+  });
+});
+
+describe('⚠ ANAPHORA ships OPEN — a pointer is not a name, and pointers are an open class', () => {
+  it.each(KNOWN_OPEN_ANAPHORA)('KNOWN-OPEN, still open: %j', (message) => {
+    expect(
+      detectAddOptionIntent(message).matched,
+      `"${message}" now DECLINES — the gap closed; move it out of KNOWN_OPEN_ANAPHORA and say so`,
+    ).toBe(true);
+  });
+
+  it('the DISCRIMINATING CONTROL: a determiner-led phrase with a real referent is a NAME', () => {
+    // This is why the class is not closed by widening GENERIC_LABELS: the
+    // pointers and the names have the same shape.
+    const d = detectAddOptionIntent('Add the Berlin office as an option');
+    expect(d.matched).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe('Berlin office');
+  });
+
+  it('both new sets are exact-length — they RED if they grow or shrink', () => {
+    expect(KNOWN_OPEN_ANAPHORA.length).toBe(5);
+    expect(KNOWN_OPEN_SEPARATOR_NAMING.length).toBe(4);
+    expect(KNOWN_OPEN_DEFERRAL_LABEL.length).toBe(2);
+  });
+});
+
+describe('the courtesy-prefix header now matches the code', () => {
+  it('INTERROGATIVE deliberation is excluded — by QUESTION_LEAD, as the header now says', () => {
+    for (const m of [
+      'Should we add an option to think about this later',
+      'Would it be worth adding an option to expand',
+      'What if we add an option to expand',
+    ]) {
+      expect(detectAddOptionIntent(m).matched, m).toBe(false);
+    }
+  });
+
+  it('DIRECTIVE first-person openers are accepted — deliberately, and the header says so', () => {
+    const d = detectAddOptionIntent('We should add an option called Outsource to Poland');
+    expect(d.matched).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe('Outsource to Poland');
+  });
+
+  it.each(KNOWN_OPEN_DEFERRAL_LABEL)('KNOWN-OPEN, still open: %j', (message) => {
+    expect(
+      detectAddOptionIntent(message).matched,
+      'this now DECLINES — move it out of KNOWN_OPEN_DEFERRAL_LABEL and say so',
+    ).toBe(true);
   });
 });
