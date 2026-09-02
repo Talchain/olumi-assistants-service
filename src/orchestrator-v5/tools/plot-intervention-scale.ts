@@ -286,11 +286,53 @@ function scaleNumeric(
     } else {
       inconsistent = !approxEqual(value, rawValue);
     }
-    // A CONSISTENT pair on a usable cap carries its own unit representation:
-    // `value` and `raw_value` are the same magnitude in two scales, proven by
-    // `value * cap ≈ raw_value`. That, and only that, makes rule 1 demotable.
+    // ⭐ THE UNIT FORM OF A RULE-1 EMISSION IS DERIVED FROM THE FIELD THAT WINS.
+    //
+    // This used to read `!inconsistent && capUsable && value >= 0 && value <= 1`
+    // and then write `value` as the unit form — i.e. it answered "what is this
+    // emission's unit-interval representation?" with the field the deterministic
+    // conflict policy directly above says LOSES. The emitted VALUE has honoured
+    // `raw_value` since rule 1 was written; the unit form did not, so the two
+    // halves of one rule disagreed about which number is authoritative.
+    //
+    // WHAT THAT COST, measured at the wire on deployed staging CEE c110c5e3
+    // (2026-09-02, fresh guest, pre-registered brief B3; banked verbatim at
+    // `__tests__/fixtures/staging-capped-inconsistent-pair-capture-2026-09-02.json`):
+    // a draft emitted `{value: 0.96, raw_value: 960000}` on a factor declaring
+    // `cap: 10_000_000`. `0.96 * 1_000_000 === 960_000` exactly — the model
+    // normalised the INTERVENTION's level against 1e6 while the FACTOR node
+    // declares 1e7, and nothing binds the two (the served prompt's CAP SELECTION
+    // rule is per-factor and per-value). So `inconsistent` fired, no unit form
+    // was recorded, the emission was UNDEMOTABLE, and one stranded unit-scale
+    // sibling was then enough to refuse the whole analysis
+    // `mixed_scale_unresolved` — the dead end whose own copy admits it has no
+    // step to offer.
+    //
+    // The emitted magnitude is `raw_value`. Its representation on the factor's
+    // own frame is therefore `raw_value / cap` — the exact inverse of
+    // `cap_denormalised`'s `value * cap` below, asked of the winning field.
+    //
+    // ⭐ AND IT IS VALUE-PRESERVING AGAINST PLoT, WHICH IS WHY IT IS NOT A
+    // RELAXATION. PLoT's normalisation is request-level and bimodal
+    // (`needsNormalisation`: any value outside [0,1] normalises the WHOLE
+    // request — re-derived at PLoT staging `d37c8cfd`,
+    // `src/lib/intervention-normaliser.ts` + `src/routes/v2/run.ts`), and when it
+    // fires it divides by a range whose priority-0 source is that factor's own
+    // `observed_state.cap`. Emitting `raw_value / cap` under a SKIPPED gate hands
+    // ISL the identical number it would have computed itself — while the stranded
+    // unit-scale siblings, which the fired gate would have annihilated, survive
+    // verbatim. That is the whole purpose of demotion.
+    //
+    // NOTHING IS SILENTLY REPAIRED: `inconsistent` is still set above and still
+    // reaches the `inconsistent_scale` diagnostic. Only DEMOTABILITY changes.
+    //
+    // The `[0,1]` bound is asserted on the DERIVED form, not on `value`: a
+    // `raw_value` above the cap has no unit-interval representation, so it stays
+    // undemotable and the request still blocks. The demotion postcondition
+    // downstream re-checks the emitted payload against the same spec.
+    const cappedUnitForm = capUsable ? rawValue / cap : undefined;
     const pairProvesUnitForm =
-      !inconsistent && capUsable && value >= 0 && value <= 1;
+      cappedUnitForm !== undefined && cappedUnitForm >= 0 && cappedUnitForm <= 1;
     // ⭐ THE CAPLESS FRAMED PAIR — the SAME question, asked of the SAME owner
     // the baseline gate already asks (2026-08-29).
     //
@@ -332,9 +374,14 @@ function scaleNumeric(
       rule: 'raw_value_used',
       inputValue: value,
       inconsistent,
-      ...(pairProvesUnitForm || caplessPairProvesUnitForm
-        ? { unitIntervalEquivalent: value }
-        : {}),
+      // Capped: the derived form (`raw_value / cap`). Capless framed pair: the
+      // level itself, which IS that pair's unit form — the frame is recovered
+      // from the pair rather than declared, so there is no cap to divide by.
+      ...(pairProvesUnitForm
+        ? { unitIntervalEquivalent: cappedUnitForm! }
+        : caplessPairProvesUnitForm
+          ? { unitIntervalEquivalent: value }
+          : {}),
     };
   }
 
