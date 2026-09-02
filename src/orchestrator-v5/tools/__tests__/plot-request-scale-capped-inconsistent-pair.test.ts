@@ -1,42 +1,53 @@
 /**
- * THE CAPPED INCONSISTENT PAIR — an intervention normalised against a DIFFERENT
- * cap than its own factor declares, and the dead end it produces.
+ * THE CAPPED INCONSISTENT PAIR — a KNOWN, PINNED DEAD END, recorded rather than fixed.
  *
- * ── THE DEFECT, MEASURED AT THE WIRE (2026-09-02, deployed staging CEE c110c5e3)
- * A fresh guest's draft of the pre-registered B3 brief emitted, on one option:
+ * ── WHAT THE PRODUCT DOES TO A USER, measured at the wire
+ * Deployed staging CEE `c110c5e3`, 2026-09-02, fresh guest, pre-registered brief
+ * B3. The draft emitted, on one option:
  *
  *   factor "Copilot Engineering Cost"  observed_state.cap = 10_000_000
  *   intervention                        value = 0.96   raw_value = 960_000   unit "£"
  *
- * `0.96 * 1_000_000 === 960_000` exactly — the model normalised the INTERVENTION's
+ * `0.96 * 1_000_000 === 960_000` EXACTLY: the model normalised the INTERVENTION's
  * level against a cap of 1e6 while the FACTOR node declares 1e7. Nothing binds the
- * two: the served prompt's CAP SELECTION rule is per-factor and per-value.
+ * two — the served prompt's CAP SELECTION rule is per-factor and per-value, so the
+ * cap used for an intervention's level is not constrained to the cap stored on its
+ * target factor. The two halves of the pair then disagree by 10x.
  *
- * Consequence in `scaleNumeric` rule 1: `value * cap` (9_600_000) disagrees with
- * `raw_value` (960_000) by 10x, so `inconsistent` is set, `pairProvesUnitForm` is
- * false, and the emission carries NO `unitIntervalEquivalent` — it is UNDEMOTABLE.
- * One undemotable outside value beside one stranded unit-scale sibling makes the
- * whole request `mixedUnresolved`, and `run_analysis` refuses
- * `mixed_scale_unresolved` with copy that admits it has no step to offer.
+ * `scaleNumeric` rule 1 flags `inconsistent`, withholds `unitIntervalEquivalent`,
+ * and the emission becomes UNDEMOTABLE. Put one stranded unit-scale sibling beside
+ * it and the whole request is `mixedUnresolved` — `run_analysis` refuses
+ * `mixed_scale_unresolved`, with copy that admits *"I don't have a step I can
+ * promise will clear it"*. Witnessed as a fresh-guest dead end the same day.
  *
- * ── WHY THE FIX IS NOT A RELAXATION
- * The module's own deterministic conflict policy already rules that `raw_value` is
- * the explicit user-scale field and WINS over `value * cap`. The emitted VALUE has
- * honoured that since rule 1 was written. The `unitIntervalEquivalent` did not: it
- * was taken from `value` — the field the policy says LOSES. Deriving it from the
- * winning field (`raw_value / cap`) makes the two halves of rule 1 agree about
- * which number is authoritative.
+ * ── WHY THIS SUITE PINS THE BLOCK RATHER THAN REMOVING IT
+ * An earlier revision of this lane "fixed" it by deriving the unit form from
+ * `raw_value / cap`, reasoning that rule 1's own conflict policy makes `raw_value`
+ * the winner. That reasoning was WRONG, and `plot-request-scale-homogeneity.test.ts`
+ * caught it:
  *
- * It is exactly value-preserving against PLoT. When PLoT's request-level gate fires
- * it computes `raw_value / deriveRange`, and `deriveRange` takes the target factor's
- * `observed_state.cap` at priority 0 (plot-lite-service `src/lib/intervention-
- * normaliser.ts`, re-derived at PLoT staging d37c8cfd). Emitting `raw_value / cap`
- * under a SKIPPED gate therefore hands ISL the identical number.
+ *   *"What is genuinely not ours to touch is a pair whose halves DISAGREE — there
+ *    the true magnitude is unknown, and the request blocks."*
  *
- * `inconsistent` is still set and still reaches the `inconsistent_scale` diagnostic:
- * the disagreement is surfaced, never silently repaired. Only DEMOTABILITY changes.
+ * The conflict policy answers *"which number do we EMIT when we must emit one?"*.
+ * It does NOT answer *"do we know enough to ASSERT this magnitude's unit form?"*.
+ * Those are two questions under one name, and collapsing them is the estate's
+ * signature defect — committed here while claiming to fix an instance of it.
+ * With `{value: 0.96, raw_value: 960_000}` the author's own two numbers are 10x
+ * apart; picking one and computing would ship a confidently wrong result. Blocking
+ * is correct.
  *
- * The fixture is a VERBATIM wire capture (append-only record, trap 14b).
+ * ── SO THE GAP IS RECORDED, NOT PAPERED OVER
+ * This is an explicit KNOWN-BLOCKED pin: the suite stays green for the RIGHT
+ * reason, and it REDs if the behaviour changes in either direction — if the block
+ * silently disappears (someone demotes an ambiguous pair) or if a case that should
+ * still block stops being named. The real remedy is UPSTREAM: bind an
+ * intervention's normalising cap to its target factor's declared cap at
+ * extraction, so the pair cannot disagree in the first place. Until then a user who
+ * hits this shape has no route out, and that is a stated, visible gap rather than a
+ * silent one.
+ *
+ * The fixture is a VERBATIM wire capture (append-only record, CLAUDE.md trap 14b).
  */
 import { readFileSync } from 'node:fs';
 import { describe, it, expect } from 'vitest';
@@ -63,45 +74,40 @@ const FACTOR_ID = capture.factor_id;
 const CAP = 10_000_000;
 const RAW = 960_000;
 
-describe('capped inconsistent {value, raw_value} pair (verbatim staging capture 2026-09-02)', () => {
-  it('the capture still has the shape this suite is about — precondition, pinned in-test', () => {
+describe('capped inconsistent {value, raw_value} pair — KNOWN BLOCKED (staging capture 2026-09-02)', () => {
+  it('PRECONDITION, pinned in-test: the capture still has the shape this suite is about', () => {
     const obs = capture.factor_node.observed_state as Record<string, unknown>;
     expect(obs.cap).toBe(CAP);
     expect(capture.intervention.raw_value).toBe(RAW);
     expect(capture.intervention.value).toBe(0.96);
-    // The pair really is inconsistent against the factor's declared cap.
-    expect((capture.intervention.value as number) * CAP).not.toBeCloseTo(RAW, 0);
+    // The disagreement is real and it is 10x — not a rounding artefact.
+    expect((capture.intervention.value as number) * CAP).toBe(9_600_000);
+    // And it is exactly a cap-of-1e6 normalisation, which is what identifies the
+    // upstream defect (the intervention's cap is not the factor's cap).
+    expect((capture.intervention.value as number) * 1_000_000).toBeCloseTo(RAW, 6);
   });
 
-  it('carries a unit-interval equivalent derived from raw_value/cap, so it is DEMOTABLE', () => {
+  it('is flagged inconsistent, emits the raw magnitude, and carries NO unit form', () => {
     const scaleById = buildFactorScaleMap([capture.factor_node]);
     const r = resolveRawInterventionValue(capture.intervention, scaleById.get(FACTOR_ID));
 
-    // Unchanged: raw_value still wins as the emitted value, and the disagreement
-    // is still reported.
     expect(r.rule).toBe('raw_value_used');
     expect(r.value).toBe(RAW);
     expect(r.inconsistent).toBe(true);
-
-    // THE FIX: the unit form comes from the field the conflict policy says wins.
-    expect(r.unitIntervalEquivalent).toBeCloseTo(RAW / CAP, 12);
-    expect(r.unitIntervalEquivalent).toBe(0.096);
+    // THE PIN: no unit form is asserted for a pair whose halves disagree.
+    expect(r.unitIntervalEquivalent).toBeUndefined();
   });
 
-  it('a request mixing it with a stranded unit-scale sibling DEMOTES instead of dead-ending', () => {
-    // The sibling supplies the OTHER conjunct of the request-level predicate: a
-    // value in [0,1] on a rule outside RAW_SCALE_EMITTING_RULES. A capped factor
-    // whose observed_state does not prove the normalised convention yields
-    // `ambiguous_no_evidence` — the class PLoT's gate would annihilate, and the
-    // reason this request must never ship un-demoted.
+  it('THE DEAD END: beside a stranded unit-scale sibling the whole request blocks, and names the factor', () => {
     const strandedFactor = {
       id: 'fac_stranded',
       kind: 'factor',
       label: 'Stranded unit-scale factor',
       observed_state: { value: 0.4, cap: 500_000 },
     };
-    const nodes = [capture.factor_node, strandedFactor];
-    const scaleById = buildFactorScaleMap(nodes);
+    const scaleById = buildFactorScaleMap([capture.factor_node, strandedFactor]);
+    // The sibling supplies the other conjunct: a [0,1] value on a rule outside
+    // RAW_SCALE_EMITTING_RULES — the class PLoT's fired gate would annihilate.
     expect(resolveRawInterventionValue({ value: 0.5 }, scaleById.get('fac_stranded')).rule).toBe(
       'ambiguous_no_evidence',
     );
@@ -112,36 +118,46 @@ describe('capped inconsistent {value, raw_value} pair (verbatim staging capture 
       [new Set<string>()],
     );
 
+    expect(proj.mixedUnresolved).toBe(true);
+    expect(proj.demoted).toBe(false);
+    // The user-facing consequence, asserted rather than described.
+    const block = decideAnalysisScaleBlock(proj, []);
+    expect(block.blocked).toBe(true);
+    expect((block as { reason_code?: string }).reason_code).toBe('mixed_scale_unresolved');
+    // The factor the user would be told about is the one CEE cannot resolve.
+    expect(proj.unresolvedFactorIds).toContain(FACTOR_ID);
+  });
+
+  it('CONTRAST: the SAME shape with a COHERENT pair demotes and runs — so the block is about the disagreement, not about money', () => {
+    // Identical structure, identical magnitudes, one difference: value * cap
+    // agrees with raw_value. This is the discrimination — it proves the block
+    // above is caused by the inconsistency and not by the presence of a large
+    // number or by the stranded sibling alone.
+    const coherentFactor = {
+      id: 'fac_cost',
+      kind: 'factor',
+      label: 'Coherent cost',
+      observed_state: { value: 0.096, raw_value: RAW, cap: CAP },
+    };
+    const strandedFactor = {
+      id: 'fac_stranded',
+      kind: 'factor',
+      label: 'Stranded unit-scale factor',
+      observed_state: { value: 0.4, cap: 500_000 },
+    };
+    const scaleById = buildFactorScaleMap([coherentFactor, strandedFactor]);
+    const proj = projectRequestInterventionsToWireScale(
+      [{ fac_cost: { value: 0.096, raw_value: RAW }, fac_stranded: { value: 0.5 } }],
+      scaleById,
+      [new Set<string>()],
+    );
+
     expect(proj.mixedUnresolved).toBe(false);
     expect(proj.demoted).toBe(true);
     expect(proj.allWithinUnitInterval).toBe(true);
-    expect(proj.postconditionViolated).toBe(false);
-    // The stranded sibling survives VERBATIM — that is the whole point of demoting.
+    expect(proj.perOption[0].fac_cost).toBeCloseTo(0.096, 12);
+    // The stranded sibling survives verbatim — what demotion exists to protect.
     expect(proj.perOption[0].fac_stranded).toBe(0.5);
-    expect(proj.perOption[0][FACTOR_ID]).toBeCloseTo(RAW / CAP, 12);
-
     expect(decideAnalysisScaleBlock(proj, []).blocked).toBe(false);
-  });
-
-  it('FAILS CLOSED when raw_value exceeds the cap — no fabricated unit form', () => {
-    const factor = {
-      id: 'fac_over',
-      kind: 'factor',
-      label: 'Over-cap',
-      observed_state: { value: 0.5, cap: 1_000 },
-    };
-    const scaleById = buildFactorScaleMap([factor]);
-    // raw_value 5_000 on cap 1_000 has no unit-interval representation.
-    const r = resolveRawInterventionValue({ value: 0.5, raw_value: 5_000 }, scaleById.get('fac_over'));
-    expect(r.value).toBe(5_000);
-    expect(r.unitIntervalEquivalent).toBeUndefined();
-
-    const proj = projectRequestInterventionsToWireScale(
-      [{ fac_over: { value: 0.5, raw_value: 5_000 }, fac_stranded2: { value: 0.5 } }],
-      buildFactorScaleMap([factor, { id: 'fac_stranded2', kind: 'factor', observed_state: { value: 0.4, cap: 9 } }]),
-      [new Set<string>()],
-    );
-    expect(proj.mixedUnresolved).toBe(true);
-    expect(decideAnalysisScaleBlock(proj, []).blocked).toBe(true);
   });
 });
