@@ -3,9 +3,12 @@
  * affordances stop degrading to generic free prose.
  *
  * ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────
- * Four strategic-reasoning sparks are on screen today (`pressure_test_frame`,
- * `define_success`, `widen_options`, `reflect_bias` — DGAI
- * `pre-analysis-v3/constants.ts`). Each carries an English `prompt` and
+ * SEVEN strategic-reasoning sparks are on screen today. The first four
+ * (`pressure_test_frame`, `define_success`, `widen_options`, `reflect_bias`)
+ * were routed when this module landed; `outside_view`, `pre_mortem` and
+ * `risks_upside` were MOUNTED AND DECLARED but routed by nobody, so a user
+ * clicking "Run a pre-mortem" got generic prose instead of the method — DGAI
+ * `pre-analysis-v3/constants.ts`. Each carries an English `prompt` and
  * `action_type: null`. The UI's send gate (`buildPayload.ts`,
  * `isSendableToken`) requires membership of BOTH `KNOWN_INTENTS` (published in
  * the vendored `Intent` enum) AND `CEE_ACCEPTED_INTENTS` (routed by the
@@ -69,6 +72,29 @@
  * this id name the exercise this card performs". So the citation is attached
  * ONLY when the bundle's OWN `stage_applicability` contains the turn's stage
  * token, compared by EXACT IDENTITY.
+ *
+ * ⭐⭐ AND THE THREE INTENTS ADDED LATER CARRY NO CITATION EITHER — WHICH NEEDS
+ * SAYING OUT LOUD, BECAUSE FOR TWO OF THEM A PROTOCOL GENUINELY DOES NAME THE
+ * EXERCISE. Unlike `challenge_frame`/`define_success`, where the honest answer
+ * is that no published protocol fits, `data/dsk/v1.json` contains:
+ *   - DSK-P-001 "Pre-mortem exercise", `stage_applicability` ["evaluate","decide"]
+ *   - DSK-P-002 "Outside view exercise", `stage_applicability` ["frame","evaluate"]
+ * These are EXACT NAME MATCHES for two of the three, and DSK-P-002 would be
+ * reachable today (`frame` is a live turn stage). `elicit_risks` has no
+ * counterpart.
+ *
+ * They are still uncited here, and the reason is SCOPE, not applicability: a
+ * grounding badge is a user-visible claim of scientific provenance, it must be
+ * adjudicated against each protocol's `required_inputs` and
+ * `contraindications` as well as its stage, and that is a different review from
+ * "does CEE route this intent". DSK-P-001's `required_inputs` are "analysis
+ * results with fragile edges or evidence gaps" and "identified winning option"
+ * — the pre-mortem spark fires PRE-ANALYSIS, where neither exists, so the
+ * cell that looks citable is exactly the cell that needs the argument made
+ * properly rather than assumed. Adding the rows is rowed as separate work.
+ * Until then this arm UNDER-serves by construction: a missing badge, never a
+ * wrong one, which is the same direction of error the rest of this module
+ * takes.
  *
  * ⚠⚠ CORRECTED BEFORE MERGE, AND THE CORRECTION IS THE INTERESTING PART. The
  * first version of this docblock asserted that the DSK vocabulary
@@ -141,12 +167,32 @@ import type { DSKProtocol } from '../../dsk/types.js';
  *   define_success       — SPARK_PROMPTS.defineSuccess (panel-only spark)
  *   elicit_options       — ACTIONS_MENU `widen_options` + SPARK_PROMPTS.widenOptions
  *   challenge_assumption — SPARK_PROMPTS.reflectBias (panel-only spark)
+ *   outside_view         — pre-analysis-v3 spark `outside_view`   (constants.ts:542)
+ *   pre_mortem           — pre-analysis-v3 spark `pre_mortem`     (constants.ts:553)
+ *   elicit_risks         — pre-analysis-v3 spark `risks_upside`   (constants.ts:562)
+ *
+ * ⚠ `estimate_help` IS DELIBERATELY ABSENT, and it is the one member of the
+ * mounted-but-unrouted set that must NOT simply be appended here. Its spark
+ * (`calibrate_estimates`, constants.ts:571-585) carries BOTH a typed intent AND
+ * `action_type: 'analysis_readiness'` — a deterministic pre-route that CLAIMS
+ * the turn and skips the LLM entirely. This arm runs at the LLM call and must
+ * not claim the turn. Routing it would put two authorities on one affordance
+ * and the directive would die on the primary path, unobserved: the readiness
+ * pre-route returns before this code is reached, so the arm would look wired
+ * and never fire. The invariant that makes the ordering safe today is stated at
+ * `turn-executor.ts:8277-8284` — "no affordance carries both" — and
+ * `estimate_help` is the affordance that would falsify it. Routing it is
+ * separate work that must first decide WHICH authority owns the turn; it is not
+ * a registry edit.
  */
 export const ROUTED_COACHING_INTENTS = [
   'challenge_frame',
   'define_success',
   'elicit_options',
   'challenge_assumption',
+  'outside_view',
+  'pre_mortem',
+  'elicit_risks',
 ] as const;
 
 export type RoutedCoachingIntent = (typeof ROUTED_COACHING_INTENTS)[number];
@@ -161,9 +207,15 @@ const ROUTED_SET: ReadonlySet<string> = new Set(ROUTED_COACHING_INTENTS);
  * `stage_applicability`, read at resolve time and never restated. An intent
  * absent from this map can never carry a citation.
  *
- * `challenge_frame` and `define_success` are ABSENT ON PURPOSE. See the module
- * docblock: no published protocol names either exercise at the stage these
- * sparks fire, and the honest badge is no badge.
+ * `challenge_frame` and `define_success` are ABSENT ON PURPOSE: no published
+ * protocol names either exercise at the stage these sparks fire, and the honest
+ * badge is no badge.
+ *
+ * `outside_view`, `pre_mortem` and `elicit_risks` are ABSENT FOR A DIFFERENT
+ * REASON, and the two must not be collapsed — DSK-P-002 and DSK-P-001 DO name
+ * the first two exercises. Their omission is a SCOPE boundary held by the
+ * routing lane, not a finding that no protocol applies. See the module
+ * docblock; do not "fix" this by pattern-matching the ids in.
  */
 const INTENT_PROTOCOL_ID: Partial<Record<RoutedCoachingIntent, string>> = {
   elicit_options: 'DSK-P-004',
@@ -226,6 +278,46 @@ const INTENT_METHOD: Record<
       'Name the specific assumption or estimate that, if wrong, would most change the picture — and say what evidence would settle it.',
       'Separate what the model asserts from what the user has actually observed, and say which is which.',
       'Ask whether the user wants to adjust anything, and be explicit that nothing has been changed.',
+    ],
+  },
+  outside_view: {
+    clicked: 'take the outside view on this decision',
+    method: [
+      'Name the REFERENCE CLASS first: the wider set of comparable past decisions this one belongs to, and what specifically makes them comparable.',
+      // ⭐ THE FABRICATION GUARD IS A METHOD STEP, NOT A POSTSCRIPT. A base rate
+      // is the single most inventable number in this whole arm — it sounds
+      // authoritative, the user cannot check it, and "roughly 70% of these
+      // fail" is exactly the confident wrongness this estate keeps shipping.
+      // The instruction to decline is placed IN the step that asks for the
+      // number, not in the general grounding line below, because a model that
+      // has already produced a figure will not retract it two steps later.
+      'Give the base rate for that class only if you can say where it comes from. If you cannot, say plainly that you do not have a defensible base rate and describe the shape of the comparison instead — never invent a percentage to fill the gap.',
+      'Contrast the outside view with the estimates the user has actually stated, and name the gap in the direction it genuinely runs. Do not assume the user is over-optimistic; check, and say so if they are not.',
+      'Say what would justify THIS case departing from the class, and what would just be optimism wearing a reason.',
+      'Ask whether the user wants any estimate revisited. Never overwrite a stated number with a base rate on your own initiative.',
+    ],
+  },
+  pre_mortem: {
+    clicked: 'run a pre-mortem on this decision',
+    method: [
+      'Set the frame properly: it is a year from now and this decision has clearly failed. Reason backwards from that failure. Do not soften it into a balanced list of risks — the prospective-hindsight framing is what makes this work.',
+      'Give two or three concrete failure stories, each traced to something actually in the model or conspicuously missing from it — not generic project risks that would apply to any decision.',
+      'For each story, name the earliest warning sign the user could actually observe, early enough to act on rather than at the post-mortem.',
+      'Propose at least one preventive or detective action per story, and say which assumption it protects.',
+      'Ask which failure the user finds most plausible and whether they want it represented in the model. Do not add anything yourself.',
+    ],
+  },
+  elicit_risks: {
+    clicked: 'find the risks and upside missing from their model',
+    method: [
+      'This asks what is MISSING, not what is present. Say briefly what the model already covers first, so the gaps are visibly gaps and not a restatement.',
+      'Name specific downside risks the model does not represent, each tied to a factor, option or assumption that IS present, so the gap is locatable.',
+      // Upside is omitted from "what are my risks" answers almost every time,
+      // and the spark's own label is "Find risks and upside" — a risk-only
+      // answer silently delivers half the affordance the user clicked.
+      'Name the omitted UPSIDE as well: best-case outcomes and second-order benefits go missing at least as often as risks, and a risk-only answer does half the job the user asked for.',
+      'For each, say roughly how much it would change the picture if true, and whether it earns a place in the model or is better left as context.',
+      'Ask which of these the user wants added. Never add one yourself, and never present something you generated as something the user raised.',
     ],
   },
 };
