@@ -62,7 +62,7 @@
  * preconditions are pinned in-test so a fixture that stopped exercising the
  * canonicaliser could not make this agree for the wrong reason (trap 13b).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import {
   canonicaliseValueOps,
@@ -73,7 +73,10 @@ import {
   findScaleIncoherentBaselineFactorIds,
   decideAnalysisScaleBlock,
 } from '../../../orchestrator-v5/tools/plot-intervention-scale.js';
+import { handleEditGraph } from '../edit-graph.js';
 import type { PatchOperation } from '../../types.js';
+import type { ConversationContext } from '../../types.js';
+import type { LLMAdapter } from '../../../adapters/llm/types.js';
 
 const TARGET = 'fac_share';
 const DECOY = 'fac_decoy';
@@ -197,5 +200,122 @@ describe('a percentage set through the op path survives to the analysis seam', (
       reason_code: 'baseline_scale_unresolved',
       unresolvedFactorIds: [TARGET],
     });
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⭐⭐ THE SEQUENCE, THROUGH THE REAL SEAM — the case the rest of this file was
+// STRUCTURALLY UNABLE TO CONTAIN.
+//
+// Every case above builds a FRESH graph, so every fixture starts with no
+// `raw_value` — which was exactly the first version of the fix's precondition.
+// A corpus that shares the code's asymmetry cannot see the code's defect
+// (CLAUDE.md trap 13d), and this one could not: the first version's own
+// successful write ADDS `raw_value`, so the NEXT edit on that same factor was
+// excluded by that very conjunct, fell through to `resolveExistingRawValue`,
+// resolved `ambiguous`, deleted `raw_value` — and left the raw magnitude in
+// the level slot. The witnessed P0 record, re-created by its own fix, on every
+// second edit. Measured: 40 -> COMPUTES, 55 -> BLOCKED, 60 -> COMPUTES.
+//
+// The predicate is now about whether the INCOMING VALUE needs re-framing —
+// a function of (unit, newValue) alone — so it is idempotent across repeated
+// edits by construction rather than by a second patch to the conjunct.
+// ────────────────────────────────────────────────────────────────────────────
+
+function buildSeqGraph(): Record<string, unknown> {
+  return {
+    nodes: [
+      { id: 'dec_x', kind: 'decision', label: 'Budget' },
+      { id: 'opt_a', kind: 'option', label: 'Push enterprise' },
+      {
+        id: 'fac_share',
+        kind: 'factor',
+        label: 'Share of deals the product is too shallow for',
+        display_value: '20%',
+        observed_state: { value: 20, unit: '%' },
+      },
+      { id: 'goal_g', kind: 'goal', label: 'Net revenue retention' },
+    ],
+    edges: [
+      { from: 'dec_x', to: 'opt_a', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'opt_a', to: 'fac_share', strength: { mean: 1, std: 0.01 }, exists_probability: 1, effect_direction: 'positive' },
+      { from: 'fac_share', to: 'goal_g', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
+    ],
+  };
+}
+
+function seqAdapter(to: number, from: number): LLMAdapter {
+  return {
+    name: 'fixtures',
+    model: 'test-model',
+    chat: vi.fn().mockResolvedValue({
+      content: JSON.stringify({
+        operations: [
+          {
+            op: 'update_node',
+            path: `/nodes/${TARGET}/data/value`,
+            value: to,
+            old_value: from,
+            impact: 'moderate',
+            rationale: 'User set the value.',
+          },
+        ],
+        removed_edges: [],
+        warnings: [],
+      }),
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      model: 'test-model',
+      latencyMs: 1,
+      stopReason: 'end_turn',
+    }),
+  } as unknown as LLMAdapter;
+}
+
+describe('the SAME factor edited repeatedly stays analysable after EVERY edit', () => {
+  it('⭐ 20% -> 40 -> 55 -> 60 through handleEditGraph: coherent and computable at each step', async () => {
+    let graph = buildSeqGraph();
+
+    // PRECONDITION PINNED IN-TEST: the fixture really does start in the
+    // witnessed P0 shape (raw magnitude in the level slot, no pair).
+    const pre = (graph.nodes as Record<string, unknown>[]).find((n) => n.id === TARGET)!;
+    expect((pre.observed_state as Record<string, unknown>).value).toBe(20);
+    expect((pre.observed_state as Record<string, unknown>).raw_value).toBeUndefined();
+
+    const steps: Array<{ to: number; from: number }> = [
+      { to: 40, from: 20 },
+      { to: 55, from: 40 },
+      { to: 60, from: 55 },
+    ];
+
+    for (const step of steps) {
+      const result = await handleEditGraph(
+        { graph, analysis_response: null, framing: null, messages: [], scenario_id: 'scn-seq' } as unknown as ConversationContext,
+        `Change it to ${step.to}`,
+        seqAdapter(step.to, step.from),
+        `req-seq-${step.to}`,
+        `turn-seq-${step.to}`,
+      );
+
+      expect(result.wasRejected, `edit -> ${step.to} was rejected`).toBe(false);
+      expect(result.appliedGraph, `edit -> ${step.to} produced no graph`).not.toBeNull();
+
+      graph = result.appliedGraph as Record<string, unknown>;
+      const nodes = graph.nodes as Record<string, unknown>[];
+      // IDENTITY BINDING: by id, never by a value predicate.
+      const edited = nodes.find((n) => n.id === TARGET)!;
+      const obs = edited.observed_state as Record<string, unknown>;
+
+      // The record is on the analysis scale after EVERY edit — this is the
+      // assertion the alternation defect failed on the SECOND iteration.
+      expect(obs.value, `after edit -> ${step.to}, value`).toBeCloseTo(step.to / 100, 12);
+      expect(obs.raw_value, `after edit -> ${step.to}, raw_value`).toBe(step.to);
+
+      // And the analysis seam admits it after EVERY edit.
+      const blockedIds = findScaleIncoherentBaselineFactorIds(nodes, []);
+      expect(blockedIds, `after edit -> ${step.to}, gate`).not.toContain(TARGET);
+      expect(
+        decideAnalysisScaleBlock({ mixedUnresolved: false, unresolvedFactorIds: [] }, blockedIds),
+      ).toEqual({ blocked: false });
+    }
   });
 });

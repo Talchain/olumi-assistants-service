@@ -242,11 +242,27 @@ describe('2.1033 — the committed pair, the receipt and the rendered value all 
     expect(nodeById(result.appliedGraph, 'fac_spend').display_value).toBe('40%');
   });
 
-  it('CLEARS an unrecoverable raw_value rather than letting it lie, and still renders 40%', async () => {
-    // A `%` factor whose new value is OUTSIDE [0,1]: the scale genuinely
-    // cannot be recovered (5 -> 500% or legacy 5%?), so `resolveExistingRawValue`
-    // returns `ambiguous`. The stale 20 must NOT survive; the formatter's own
-    // `value` fallback then renders the honest number.
+  it('RESOLVES the stale raw_value onto the unit\'s own scale rather than letting it lie, and still renders 40%', async () => {
+    // A `%` factor whose new value is OUTSIDE [0,1]. The stale 20 must NOT
+    // survive — that half is unchanged and still asserted.
+    //
+    // ⚠⚠ WHAT CHANGED, 2026-09-02: the premise "the scale genuinely cannot be
+    // recovered (5 -> 500% or legacy 5%?)" is TRUE IN GENERAL and FALSE ON THE
+    // BOUNDED CLASS this fixture occupies. `unitPinnedScaleFrame` pins the
+    // percent family's divisor at 100 for a magnitude in `(1, 100]` — a
+    // constant fixed by the UNIT, not a laddered guess — and abstains outside
+    // it, so 150% or a currency still reaches the honest `ambiguous` and its
+    // raw_value is still cleared. Within the bound the scale IS recoverable,
+    // and the previous outcome (`{value: 40, unit: '%'}`, no pair) was measured
+    // on deployed staging as a P0: the analysis seam refuses that record with
+    // `baseline_scale_unresolved` and no user action clears it.
+    //
+    // Deleting the pair does not make the record honest — it makes it
+    // UNANALYSABLE while leaving a `value` that still claims 40 is already on
+    // the analysis scale. Writing the resolved pair is strictly more truthful
+    // than clearing it. The display assertion below is unchanged and still
+    // renders "40%", now through `synthesiseDisplayValue`'s `raw_value + %`
+    // branch rather than its `value` fallback.
     const graph = buildGraph();
     (graph.nodes[2] as Record<string, unknown>).observed_state = {
       value: 20,
@@ -258,8 +274,9 @@ describe('2.1033 — the committed pair, the receipt and the rendered value all 
     const result = await runEdit(graph, [valueOp('fac_spend', 40, 20)], 'Change it to 40');
 
     const observed = observedOf(result.appliedGraph, 'fac_spend');
-    expect(observed.value).toBe(40);
-    expect(observed.raw_value).toBeUndefined();
+    expect(observed.value).toBeCloseTo(0.4, 12);
+    // The STALE 20 is gone — the half this test has always protected.
+    expect(observed.raw_value).toBe(40);
     expect(nodeById(result.appliedGraph, 'fac_spend').display_value).toBe('40%');
   });
 

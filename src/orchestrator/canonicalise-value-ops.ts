@@ -827,26 +827,52 @@ export function reconcileObservedValuePair(
     // answers. The remedy is to consult the SAME authority the other writer
     // consults, never to mint a second opinion about frames here.
     //
-    // ⚠ WHY `unitPinnedScaleFrame` IS THE SAFE AUTHORITY, AND WHY THE CLASS
-    // THE EXCLUSION ABOVE PROTECTS IS UNTOUCHED. It returns a CONSTANT that is
-    // a function of the UNIT ALONE (percent → 100, basis points → 10,000) and
-    // abstains everywhere else, so it can never hand back a laddered,
-    // sibling-dependent number and can never silently rescale a sibling
-    // intervention. Critically it abstains ABOVE 100 — exactly the NRR-115% /
-    // ROI-300% class the `storedFrameAdmits` exclusion above exists to keep
-    // REFUSING (where the ladder frames at 200/500 and a hard-coded 100 is a
-    // 2–5x error). That exclusion is preserved BY THE AUTHORITY ITSELF, not by
-    // a second guard here that could drift from it. It also abstains at
-    // `magnitude <= 1`, so a value that is already a level is never re-framed.
+    // ⚠ WHY `unitPinnedScaleFrame` IS THE SAFE AUTHORITY. It returns a CONSTANT
+    // determined by TWO things, and BOTH are load-bearing — an earlier version
+    // of this comment named only the magnitude bound, which understated it:
+    //   · the UNIT FAMILY, via `classifyUnitScaleClass` — percent → 100,
+    //     basis points → 10,000, and EVERY other family (currency, counts,
+    //     unit-less) → nothing. The family is matched on the unit's own
+    //     spelling, so '%', 'percent' and '% NRR' all class percent while '£'
+    //     does not;
+    //   · the MAGNITUDE, admitted only within that family's true bound —
+    //     percent on `(1, 100]`, basis points on `(1, 10000]`.
+    // So it can never hand back a laddered, sibling-dependent number and can
+    // never silently rescale a sibling intervention. It abstains at
+    // `magnitude <= 1` (a value already on the analysis scale is never
+    // re-framed) and ABOVE the family bound — which is how the NRR-115% /
+    // ROI-300% class the `storedFrameAdmits` exclusion protects keeps
+    // REFUSING, preserved BY THE AUTHORITY ITSELF rather than by a second
+    // guard here that could drift from it.
     //
-    // ⚠ NARROW BY CONSTRUCTION, and each conjunct is load-bearing:
-    //   · no cap        — a capped factor has its own convention and the
-    //                     clamping writer owns it;
+    // ⚠⚠ THE PREDICATE IS ABOUT THE INCOMING VALUE, NOT ABOUT PRIOR WRITE
+    // STATE — AND THAT IS A CORRECTION THAT COST A DEFECT IN THE OPPOSITE
+    // DIRECTION (review of #1317, measured through `handleEditGraph`).
+    // This block was first conjoined on `!hasOwnProperty(observed,
+    // 'raw_value')`. Its OWN successful write ADDS `raw_value`, so the next
+    // edit on the same factor was excluded by that very conjunct, fell through
+    // to `resolveExistingRawValue`, resolved `ambiguous`, deleted `raw_value`
+    // — and re-created the exact P0 record this fix exists to close. Measured:
+    // 40 → COMPUTES, 55 → BLOCKED, 60 → COMPUTES. The fix ALTERNATED.
+    //
+    // Asking "does this incoming value need re-framing onto the analysis
+    // scale?" — a function of (unit, newValue) ALONE — is idempotent across
+    // repeated edits BY CONSTRUCTION, not by a second patch to the conjunct.
+    // It also subsumes the stale-carry-forward case correctly: a merged
+    // payload whose `raw_value` belongs to the PREVIOUS value is rewritten to
+    // the new pair rather than deleted, which is what the lane below was
+    // trying and could not do (it refuses `value > 1` on a percent factor).
+    // Pinned by the three-edit sequence in
+    // `percent-value-edit-survives-to-analysis.test.ts` — the case a corpus of
+    // fresh-graph fixtures was structurally unable to contain (trap 13d).
+    //
+    // ⚠ NARROW BY CONSTRUCTION, and each surviving conjunct is load-bearing:
+    //   · factor only    — the consumer skips non-factors (see below);
+    //   · no cap         — a capped factor has its own convention and the
+    //                      clamping writer owns it;
     //   · no stored frame — a framed factor is owned by `storedFrameAdmits`
-    //                     and the frame branch below; this limb is only for the
-    //                     factor that has NO frame at all;
-    //   · no payload `raw_value` — a payload carrying one is the stale-carry-
-    //                     forward class the existing lanes own.
+    //                      and the frame branch below; this limb is only for
+    //                      the factor that has NO frame at all.
     // A currency or a count classes `unknown`, pins nothing, and still falls
     // through to the honest refusal — closing the percent gap must not open the
     // currency lie.
@@ -867,8 +893,7 @@ export function reconcileObservedValuePair(
     if (
       currentNode?.kind === 'factor' &&
       capAtGuard === undefined &&
-      storedScaleFrame === undefined &&
-      !Object.prototype.hasOwnProperty.call(observed, 'raw_value')
+      storedScaleFrame === undefined
     ) {
       const pinnedFrame = unitPinnedScaleFrame(unitAtGuard, newValue);
       if (pinnedFrame !== undefined) {
