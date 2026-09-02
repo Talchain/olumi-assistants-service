@@ -24,6 +24,10 @@ import {
   buildAddOptionClarifyChipMessage,
   isTargetReference,
   OPTION_NOUN_DETERMINERS,
+  DETERMINER_FRAGMENT,
+  KNOWN_OPEN_CONTAINER_GAP,
+  KNOWN_OPEN_COORDINATED_INSTRUCTION,
+  mentionsContainer,
   TARGET_DEFINITE_DETERMINERS,
   TARGET_QUANTIFIER_DETERMINERS,
   CONTAINER_NOUNS,
@@ -428,5 +432,228 @@ describe('tidyLabel — BOTH directions of the article rule are pinned', () => {
       if (!d.matched) continue;
       expect(d.label, `"${message}" must keep the name the user wrote`).toBe(expected);
     }
+  });
+});
+
+describe('the target screen is on EVERY trigger that INFERS a label', () => {
+  // ⭐ The flagship defect was still alive at 2d935680 through a sibling door:
+  // the screen was on `option_to` alone, so `Add the model as an option` went
+  // through `unquoted_as_option` and minted "Model".
+  const INFERRED_TARGETS = [
+    'Add the model as an option',
+    'Add the pricing decision as an option',
+    'Add my model as an option',
+    'Add each decision as an option',
+    'Add our analysis as an option',
+    'Add the canvas as an option',
+    'Create the scenario as an option',
+  ];
+  it.each(INFERRED_TARGETS)('LIE: %j must not mint the container', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must not mint the user's own container`).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('target_not_a_label');
+  });
+
+  // ⚠ ...and NOT on the triggers that are HANDED a label. Screening all five
+  // declines these three; one of them is this module's own discriminator.
+  const EXPLICITLY_NAMED: ReadonlyArray<readonly [string, string]> = [
+    ['Add an option called The Big Bet', 'The Big Bet'],
+    ['Add "The Berlin office" as an option', 'The Berlin office'],
+    ['Add a "The Big Bet" option', 'The Big Bet'],
+    ['Add an option named "A Clean Break"', 'A Clean Break'],
+  ];
+  it.each(EXPLICITLY_NAMED)('GAP: %j is a name the user wrote — keep it verbatim', (message, expected) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, message).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  // ⭐ THE DISCRIMINATING PAIR for the two inferring triggers. `as an option`
+  // already says X is the option, so a determiner alone proves nothing there;
+  // the prepositional form has no such marker. Screening `as an option` with
+  // the prepositional rule REDs line 1; not screening it REDs line 2.
+  it('the two inferring triggers ask DIFFERENT questions, and both bite', () => {
+    const named = detectAddOptionIntent('Add the Berlin office as an option');
+    expect(named.matched).toBe(true);
+    if (named.matched) expect(named.label).toBe('Berlin office');
+    expect(detectAddOptionIntent('Add the model as an option').matched).toBe(false);
+    // ...while the prepositional form screens on the determiner alone.
+    expect(detectAddOptionIntent('Add an option to the big bet').matched).toBe(false);
+  });
+});
+
+describe('⭐ the DERIVED determiner fragment really is what it replaced', () => {
+  // The file's comment claimed this was asserted and no assertion existed.
+  // A comment claiming a guard that is not there is worse than neither.
+  it('rebuilds the exact regex source the hand-written literal carried', () => {
+    const HAND_WRITTEN =
+      '(?:(?:a|an|another|one\\s+more|the|a\\s+new|a\\s+further|a\\s+possible|' +
+      'a\\s+second|a\\s+third|a\\s+fourth|a\\s+fifth)\\s+)?';
+    const derived =
+      '(?:(?:' + OPTION_NOUN_DETERMINERS.map((d) => d.replace(/ /g, '\\s+')).join('|') + ')\\s+)?';
+    expect(derived).toBe(HAND_WRITTEN);
+  });
+});
+
+describe('⚠ the gaps this module ships OPEN, pinned exactly', () => {
+  // A derived corpus proves the copies agree and can NEVER prove the list is
+  // right: `LIE_CASES` above is generated from the very alphabets it certifies,
+  // so it is structurally blind to a short list. `CONTAINER_NOUNS` is an OPEN
+  // class of English common nouns and no list closes it. Rather than hide that,
+  // it is pinned: this REDs if a case starts declining (someone closed one —
+  // move it out and say so) and REDs if the set grows (a new one was found).
+  it('every KNOWN-OPEN container case is still claimed — the set has not SHRUNK', () => {
+    for (const message of KNOWN_OPEN_CONTAINER_GAP) {
+      const d = detectAddOptionIntent(message);
+      expect(
+        d.matched,
+        `"${message}" now DECLINES. That is an improvement — remove it from KNOWN_OPEN_CONTAINER_GAP and say so.`,
+      ).toBe(true);
+    }
+  });
+
+  it('...and the set has not GROWN silently', () => {
+    expect(KNOWN_OPEN_CONTAINER_GAP.length).toBe(8);
+    expect(KNOWN_OPEN_COORDINATED_INSTRUCTION.length).toBe(2);
+    // Positive control: the set is not vacuous and these really are container
+    // references a human would call targets.
+    expect(KNOWN_OPEN_CONTAINER_GAP).toContain('Add an option to each node');
+    expect(KNOWN_OPEN_CONTAINER_GAP).toContain('Add an option to six decisions');
+  });
+
+  it('a coordinated second instruction is swallowed into an INFERRED label', () => {
+    for (const message of KNOWN_OPEN_COORDINATED_INSTRUCTION) {
+      const d = detectAddOptionIntent(message);
+      expect(d.matched, message).toBe(true);
+      if (!d.matched) continue;
+      // The tell: the dropped instruction is INSIDE the option's name.
+      expect(d.label.toLowerCase()).toMatch(/\band (?:remove|delete)\b/);
+    }
+    // ...and the QUOTED form, whose label is bounded, correctly declines.
+    const quoted = detectAddOptionIntent(
+      'Add "Partner with a distributor" as an option and remove the old one',
+    );
+    expect(quoted.matched).toBe(false);
+    if (!quoted.matched) expect(quoted.reason).toBe('compound_edit');
+  });
+});
+
+describe('the derived DETERMINER fragment is byte-for-byte the literal it replaced', () => {
+  // ⚠ A HISTORIC RECORD, APPEND-ONLY. This is the exact source string the
+  // hand-written literal produced before it became a derived list. It is not a
+  // fixture to keep current: if the list legitimately grows, this constant does
+  // NOT move — a new one is added beside it and this one keeps pinning the
+  // migration that already happened.
+  const LITERAL_AT_2d935680 =
+    "(?:(?:a|an|another|one\\s+more|the|a\\s+new|a\\s+further|a\\s+possible|a\\s+second|a\\s+third|a\\s+fourth|a\\s+fifth)\\s+)?";
+
+  it('produces the identical fragment, ORDER INCLUDED', () => {
+    expect(DETERMINER_FRAGMENT).toBe(LITERAL_AT_2d935680);
+  });
+
+  it('positive control: the assertion can fail — reordering the list breaks it', () => {
+    const reordered = [...OPTION_NOUN_DETERMINERS].reverse();
+    const rebuilt = `(?:(?:${reordered.map((d) => d.replace(/ /g, '\\s+')).join('|')})\\s+)?`;
+    expect(rebuilt).not.toBe(LITERAL_AT_2d935680);
+  });
+});
+
+describe('the target screen is wired to EVERY inferring trigger, not one', () => {
+  // ⭐ The flagship defect survived four rounds through a SIBLING TRIGGER:
+  // `Add the model as an option` minted "Model" while `Add an option to the
+  // model` correctly declined. The scope is now derived from the file's own
+  // `explicitlyNamed` predicate — the same one `tidyLabel` already used.
+  it.each([
+    'Add the model as an option',
+    'Add the pricing decision as an option',
+    'Add my model as an option',
+    'Add each decision as an option',
+    'Add every decision as an option',
+    'Add the canvas as an option',
+    'Add an option to the model',
+    'Add an option for each decision',
+  ])('LIE: %j names the container through its own trigger', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must not mint the container`).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('target_not_a_label');
+  });
+
+  it.each([
+    ['Add an option called The Big Bet', 'The Big Bet'],
+    ['Add "The Berlin office" as an option', 'The Berlin office'],
+    ['Add an option named "A Clean Break"', 'A Clean Break'],
+    ['Add a "The Big Bet" option', 'The Big Bet'],
+    // ⚠ AND THE TWIN THAT MAKES THE TWO TRIGGERS DIFFERENT QUESTIONS. The
+    // `as an option` frame ALREADY says X is the option, so a determiner there
+    // proves nothing — only a CONTAINER reference is a target. Screening this
+    // trigger with the prepositional rule declines all three of these.
+    ['Add the Berlin office as an option', 'Berlin office'],
+    ['Add the Poland joint venture as an option', 'Poland joint venture'],
+    // NB the possessive is NOT stripped — tidyLabel strips the|a|an only, so
+    // 'my' stays as part of what the user wrote. Oracle corrected at the bytes.
+    ['Add my preferred supplier as an option', 'My preferred supplier'],
+  ])('GAP: %j is the user’s own name and must survive', (message, expected) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must survive`).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it('the two inferring triggers apply DIFFERENT predicates — the discriminating pair', () => {
+    // Same words, different frame, opposite answers. Collapse the two and one
+    // of these flips.
+    expect(detectAddOptionIntent('Add an option to the big bet').matched).toBe(false);
+    expect(detectAddOptionIntent('Add the big bet as an option').matched).toBe(true);
+    // ...and the container test is what separates them.
+    expect(mentionsContainer('the model')).toBe(true);
+    expect(mentionsContainer('the big bet')).toBe(false);
+  });
+});
+
+describe('⭐⭐ THE GAPS THIS MODULE SHIPS OPEN, ASSERTED AS AN EXACT SET', () => {
+  // A gap recorded in the suite is honest; a gap invisible to it is how four
+  // rounds happened. These REDs if the set SHRINKS (someone closed one — move
+  // it out and say so) and if it GROWS (a new gap arrived — say so).
+  it('every KNOWN_OPEN_CONTAINER_GAP case still mints the container — the set has not shrunk', () => {
+    for (const message of KNOWN_OPEN_CONTAINER_GAP) {
+      const d = detectAddOptionIntent(message);
+      expect(d.matched, `"${message}" now DECLINES — the gap closed; move it out of the set`).toBe(true);
+    }
+  });
+
+  it('...and nothing outside the set is silently in it — the container class is otherwise closed', () => {
+    // The contrast control. Every noun the alphabet DOES carry must decline, so
+    // a shrinking CONTAINER_NOUNS list REDs here rather than quietly widening
+    // the known-open set.
+    for (const n of CONTAINER_NOUNS) {
+      const d = detectAddOptionIntent(`Add an option to each ${n}`);
+      expect(d.matched, `"each ${n}" is in the alphabet and must decline`).toBe(false);
+    }
+  });
+
+  it('KNOWN_OPEN_COORDINATED_INSTRUCTION: the label still swallows the second instruction', () => {
+    for (const message of KNOWN_OPEN_COORDINATED_INSTRUCTION) {
+      const d = detectAddOptionIntent(message);
+      expect(d.matched, `"${message}"`).toBe(true);
+      if (!d.matched) continue;
+      expect(d.label.toLowerCase()).toMatch(/\band\b/);
+    }
+  });
+
+  it('...while the QUOTED form of the same message still declines — the bound is the quoting', () => {
+    const d = detectAddOptionIntent(
+      'Add "Partner with a distributor" as an option and remove the old one',
+    );
+    expect(d.matched).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('compound_edit');
+  });
+
+  it('both known-open sets are non-empty — an empty set would pass vacuously', () => {
+    expect(KNOWN_OPEN_CONTAINER_GAP.length).toBeGreaterThan(3);
+    expect(KNOWN_OPEN_COORDINATED_INSTRUCTION.length).toBeGreaterThan(1);
   });
 });

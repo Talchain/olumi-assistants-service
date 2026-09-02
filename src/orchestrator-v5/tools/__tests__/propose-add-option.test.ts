@@ -447,6 +447,47 @@ describe('validateProposedAddOption — the remaining refusals', () => {
     }
   });
 
+  it('⭐ `plan` is a decision head noun too — "Hiring" under "Hiring plan"', () => {
+    // A CLOSED-LIST EXTENSION of an existing enumeration, not a new predicate.
+    // `plan` names a decision the same way `strategy` and `decision` do, and it
+    // was the one head noun missing from the list. Same safe class as the
+    // determiner alphabet: a list may be short, but extending it cannot
+    // oscillate, because it adds no judgement over natural language.
+    const graph = {
+      nodes: [
+        { id: 'dec_hiring', kind: 'decision', label: 'Hiring plan' },
+        { id: 'goal_growth', kind: 'goal', label: 'Grow the team' },
+        { id: 'fac_cost', kind: 'factor', label: 'Payroll cost' },
+      ],
+    };
+    const g = grounded(graph);
+    const b = { parent_decision_id: 'dec_hiring', parent_decision_label: 'Hiring plan', links: [], unknowns: [] };
+    for (const label of ['Hiring', 'hiring', 'The hiring']) {
+      const v = validateProposedAddOption({ ...b, label }, g);
+      expect(v.ok, `"${label}" is the decision itself`).toBe(false);
+      if (v.ok || v.kind !== 'rejected') continue;
+      expect(v.code).toBe('LABEL_IS_THE_PARENT_DECISION');
+    }
+  });
+
+  it('OPPOSITE DIRECTION: an option that legitimately ENDS in "plan" still passes', () => {
+    // The twin. Adding a head noun must not start refusing real option names
+    // that happen to carry it.
+    const graph = {
+      nodes: [
+        { id: 'dec_hiring', kind: 'decision', label: 'Hiring plan' },
+        { id: 'goal_growth', kind: 'goal', label: 'Grow the team' },
+        { id: 'fac_cost', kind: 'factor', label: 'Payroll cost' },
+      ],
+    };
+    const g = grounded(graph);
+    const b = { parent_decision_id: 'dec_hiring', parent_decision_label: 'Hiring plan', links: [], unknowns: [] };
+    for (const label of ['Contractor-only plan', 'Phased rollout plan', 'Freeze hiring', 'Hire in Berlin']) {
+      const v = validateProposedAddOption({ ...b, label }, g);
+      expect(v.ok, `"${label}" is a legitimate option and must survive`).toBe(true);
+    }
+  });
+
   it('...and after a GOAL or a FACTOR too — same confusion, different kind', () => {
     for (const id of ['goal_arr', F_NRR]) {
       const existing = GROWTH_G.labelById.get(id);

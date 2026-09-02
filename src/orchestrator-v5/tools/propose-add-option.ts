@@ -410,9 +410,19 @@ function normaliseLabel(label: string): string {
 
 /**
  * The nouns a decision's label ends in when it is named after its subject —
- * "Pricing decision", "Expansion strategy", "The build-or-buy question".
+ * "Pricing decision", "Expansion strategy", "Hiring plan", "The build-or-buy
+ * question".
+ *
+ * ⭐ A CLOSED LIST, AND THAT IS THE POINT. Extending this list adds no
+ * judgement over natural language, so it cannot oscillate: a member is either
+ * a head noun or it is not. Contrast the rule that was PROPOSED and rejected
+ * for this seam — "refuse a single-word label that is a whole word of the
+ * decision's subject" — which closes 4 lies and opens 14 gaps on the
+ * archetypal decision shape ("Build or buy" -> the options ARE "Build" and
+ * "Buy"), and whose disjunction-aware escape re-opens 5 lies. See the note on
+ * `labelIsTheDecisionItself` for where that class actually has to be solved.
  */
-const DECISION_HEAD_NOUN = /\s+(?:decision|decisions|strategy|choice|question|problem|call)$/;
+const DECISION_HEAD_NOUN = /\s+(?:decision|decisions|strategy|choice|question|problem|call|plan)$/;
 const LEADING_ARTICLE_IN_LABEL = /^(?:the|a|an)\s+/;
 
 /** A decision label reduced to its SUBJECT: "Pricing decision" -> "pricing". */
@@ -440,6 +450,36 @@ function decisionSubject(label: string): string {
  * case the corpus found without that cost. A false refusal here is only a GAP
  * (the generic edit lane serves the turn); a false accept is a LIE. That
  * asymmetry justifies a rule this tight, not a rule this loose.
+ *
+ * ⭐⭐ KNOWN-OPEN, AND THE RULE-ADDING APPROACH IS FINISHED HERE. A single-word
+ * label that is only PART of the decision's subject still passes: "Expansion"
+ * under "Geographic expansion strategy", "Germany" under "Should we expand
+ * into Germany?". The obvious next rule was run as a probe BEFORE being
+ * written, and it oscillates:
+ *
+ *   · refuse a single-word label that is a whole word of the subject
+ *       -> closes 4 lies, OPENS 14 GAPS on the archetypal decision shape,
+ *          where the label names its own alternatives: "Build or buy" ->
+ *          "Build"/"Buy"; "Lease vs purchase"; "Repair or replace";
+ *          "Should we expand into Germany or France?" -> "Germany"/"France".
+ *   · switch that off when the subject carries a disjunction marker
+ *       -> closes the 14, RE-OPENS 5 LIES, because a marker ANYWHERE disables
+ *          the rule for EVERY word: "Expansion" under "Expansion strategy for
+ *          Germany or France", "Vendor" under "Vendor selection: Oracle or SAP".
+ *
+ * The discriminator is whether the single word is a DISJUNCT of the decision
+ * or a FRAGMENT of its topic — a syntactic-role judgement. "Expansion or
+ * consolidation strategy" and "Expansion strategy for Germany or France" carry
+ * the same word and the same marker and need opposite answers. No string rule
+ * reaches that, and a sixth round would be sunk cost wearing engineering
+ * clothes.
+ *
+ * ⭐ THE SUCCESSOR WORK IS THE `clarify` ARM OF THIS FUNCTION'S OWN RETURN
+ * TYPE, not a fifth rule. Where a single word appears in the parent decision's
+ * label, the honest answer is neither refuse nor accept but ASK — "an option
+ * called Build, or are you naming the decision?" `AddOptionValidation` already
+ * carries `kind: 'clarify'` and the route already renders it. Make the
+ * ambiguity the product; that is the documented exit for an unwinnable parse.
  */
 function labelIsTheDecisionItself(label: string, decisionLabel: string): boolean {
   const l = normaliseLabel(label).replace(LEADING_ARTICLE_IN_LABEL, '').trim();

@@ -31,9 +31,26 @@
  *      unit resolution. The focused path never writes a number, so it must
  *      not claim a message that states one — that would be the
  *      "typed value silently discarded" class.
- *   2. A remainder carrying a further edit verb ("… and set price to 40",
- *      "… and remove the old one") is a multi-part edit; the edit lane's
- *      part accounting owns those. Not claimed.
+ *   2. A REMAINDER carrying a further edit verb ("… and set price to 40") is a
+ *      multi-part edit; the edit lane's part accounting owns those. Not
+ *      claimed.
+ *      ⚠ CORRECTED 2 Sep 2026, MEASURED — this bullet used to offer "… and
+ *      remove the old one" as a second example and that example is FALSE for
+ *      the prepositional trigger. An INFERRED label runs to the end of the
+ *      sentence, so a coordinated second instruction lands INSIDE THE LABEL,
+ *      never in the remainder, and the screen above never sees it:
+ *        `Add "Partner with a distributor" as an option and remove the old one`
+ *            -> DECLINED `compound_edit`   (quoted: the label is bounded)
+ *        `Add an option to partner with a distributor and remove the old one`
+ *            -> CLAIMED, label "Partner with a distributor and remove the old one"
+ *      The obvious fix — run the edit-verb screen over the label too — was
+ *      written and REVERTED the same hour: `set` is both an edit verb and an
+ *      ordinary verb, so it declined "add an option to SET UP a joint venture",
+ *      re-opening the verb-collision class closed one commit earlier. That is
+ *      the same oscillation as every other round, and a coordination-boundary
+ *      predicate over `", and"` is the one this estate has already proved
+ *      unwinnable. So the example is corrected rather than the code, and the
+ *      behaviour is pinned in `KNOWN_OPEN_COORDINATED_INSTRUCTION` below.
  *
  * PURE + TOTAL: no I/O, never throws, never reads the graph. The label is
  * taken from the ORIGINAL message (casing preserved); detection runs on a
@@ -96,8 +113,15 @@ const ADD_VERB = '(?:add|create|include|introduce|insert)';
  * the target screen, which needed it, hand-listed twelve words of its own. The
  * test file asserts every lead word here is known to the target alphabets, so
  * the next addition cannot go missing the same way. Order is load-bearing
- * (regex alternation is first-match-wins) and is asserted against the exact
- * source string the hand-written literal produced.
+ * (regex alternation is first-match-wins), and `DETERMINER_FRAGMENT` is
+ * exported so the spec can pin it byte-for-byte against the literal it
+ * replaced.
+ *
+ * ⚠ THIS COMMENT PREVIOUSLY CLAIMED THAT ASSERTION WHILE NO SUCH ASSERTION
+ * EXISTED — caught by an independent review. The measurement had been run
+ * once, by hand, and never written down. A comment claiming a guard that is
+ * not there is worse than no comment: it is the hand-maintained mirror one
+ * level up, and it tells every later reader to stop looking.
  */
 export const OPTION_NOUN_DETERMINERS: readonly string[] = [
   'a',
@@ -114,7 +138,8 @@ export const OPTION_NOUN_DETERMINERS: readonly string[] = [
   'a fifth',
 ];
 
-const DETERMINER = `(?:(?:${OPTION_NOUN_DETERMINERS.map((d) => d.replace(/ /g, '\\s+')).join('|')})\\s+)?`;
+export const DETERMINER_FRAGMENT = `(?:(?:${OPTION_NOUN_DETERMINERS.map((d) => d.replace(/ /g, '\\s+')).join('|')})\\s+)?`;
+const DETERMINER = DETERMINER_FRAGMENT;
 const ADJ = '(?:(?:new|strategic|further|possible|additional|extra|alternative)\\s+)?';
 const OPTION_NOUN = '(?:option|alternative|choice)\\b(?!s)';
 const QUOTE = `["'‘’“”]`;
@@ -294,6 +319,14 @@ export const TARGET_QUANTIFIER_DETERMINERS: readonly string[] = [
  *
  * ⚠ EIGHT OF THESE ARE ALSO COMMON ENGLISH VERBS (`plan`, `map`, `list`,
  * `set`, `mix`, `project`, `model`, `graph`, `board`, `page`), so this
+ * ⭐⭐ THIS LIST IS AN OPEN CLASS AND CANNOT BE CLOSED — see
+ * `KNOWN_OPEN_CONTAINER_GAP` at the bottom of this file. Determiners are a
+ * CLOSED class and are now genuinely closed against it. English common nouns
+ * are not. `node`, `key question`, `element`, `driver`, `lever` and `outcome`
+ * all name the container in this product's own vocabulary and none of them can
+ * be enumerated in advance. Do not start a fifth round of adding words: the
+ * exit is the `clarify` arm, rowed as successor work.
+ *
  * alphabet may only ever be matched where a NOUN is grammatically required:
  * as the WHOLE remainder (`BARE_CONTAINER`), or inside a determiner-led noun
  * phrase (`quantifier + container`). The version of this rule that matched on
@@ -350,6 +383,10 @@ const BARE_CONTAINER = new RegExp(`^(?:${alt(CONTAINER_NOUNS)})s?[\\s.,;:!?-]*$`
  * Is this remainder a reference to the CONTAINER rather than an option name?
  * Exported so the corpus can bind to the rule itself, not only to its effect.
  */
+export function mentionsContainer(raw: string): boolean {
+  return CONTAINER_MENTION.test(raw.trim());
+}
+
 export function isTargetReference(rawRemainder: string): boolean {
   const raw = rawRemainder.trim();
   if (raw.length === 0) return false;
@@ -494,19 +531,57 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
     return NO_MATCH(PLURAL_OPTION_WORD.test(lower) ? 'plural_or_deliberative' : 'not_add_option_shape');
   }
 
-  // ⭐ Applied to the RAW capture, before `tidyLabel` strips the leading
-  // article — "the model" must still look like "the model" here, or the very
-  // determiner that identifies it as a target has already been removed.
-  if (candidate.trigger === 'option_to') {
-    if (isTargetReference(candidate.label)) {
-      return NO_MATCH('target_not_a_label');
-    }
+  // ⭐ WHETHER THE USER NAMED THE LABEL IS ONE QUESTION, ASKED ONCE.
+  //
+  // It decides two things that were previously decided separately: whether
+  // `tidyLabel` may strip a grammatical article, and whether the target screen
+  // applies. They are the same question — "are these the user's own words for
+  // the option, or the grammar's words for its container?" — and splitting it
+  // is what left the screen on ONE of the five triggers while
+  // `Add the model as an option` went straight through `unquoted_as_option`
+  // and minted "Model". The flagship defect, alive through a sibling door.
+  //
+  // ⚠ AND IT IS NOT "SCREEN ALL FIVE TRIGGERS". Measured: that declines
+  // `Add an option called The Big Bet`, `Add "The Berlin office" as an option`
+  // and `Add a "The Big Bet" option` — three explicitly-named labels, one of
+  // them this module's own pinned discriminator. A quoted or `called` label is
+  // a name the user actually wrote, determiner and all. Deriving the scope
+  // from THIS predicate screens exactly the triggers that infer a label and
+  // exactly none of the triggers that are handed one.
+  const explicitlyNamed = candidate.labelWasQuoted || candidate.trigger === 'option_called';
+
+  // ⚠ AND THE TWO INFERRING TRIGGERS STILL ASK DIFFERENT QUESTIONS — measured,
+  // after the first attempt at one shared rule broke this module's own
+  // article-strip pin.
+  //
+  //   · `add an option TO/FOR X`  — X is genuinely ambiguous. A verb phrase
+  //     names the option, a noun phrase names the container. A DETERMINER is
+  //     the discriminator, whatever the head noun: "the big bet" declines.
+  //
+  //   · `add X AS AN OPTION`      — the construction ALREADY says X is the
+  //     option, so a determiner proves nothing: "add the Berlin office as an
+  //     option" is a perfectly good add and its article is scaffolding. Only a
+  //     reference to the CONTAINER is a target here — "add the model as an
+  //     option", "add each decision as an option".
+  //
+  // So this trigger takes the INTERSECTION of the two existing predicates
+  // rather than a third rule. Screening it with the prepositional rule
+  // declines "the Berlin office"; not screening it at all is how "Model" was
+  // still being minted at 2d935680.
+  //
+  // Applied to the RAW capture, before `tidyLabel` strips the leading article —
+  // "the model" must still look like "the model" here, or the very determiner
+  // that identifies it as a target has already been removed.
+  if (!explicitlyNamed) {
+    const raw = candidate.label;
+    const isTarget =
+      candidate.trigger === 'option_to'
+        ? isTargetReference(raw)
+        : isTargetReference(raw) && mentionsContainer(raw);
+    if (isTarget) return NO_MATCH('target_not_a_label');
   }
 
-  const label = tidyLabel(
-    candidate.label,
-    candidate.labelWasQuoted || candidate.trigger === 'option_called',
-  );
+  const label = tidyLabel(candidate.label, explicitlyNamed);
   if (!labelIsSafe(label)) return NO_MATCH('label_unsafe');
   // An UNQUOTED label that carries a number is a value statement swallowed
   // into a name ("… called Outsource that cuts support cost to 30") — the
@@ -535,3 +610,62 @@ export function buildAddOptionClarifyChipMessage(label: string, decisionLabel: s
   const safeDecision = decisionLabel.replace(/["'‘’“”]/g, '');
   return `Add "${safeLabel}" as an option under "${safeDecision}".`;
 }
+
+/**
+ * ⭐⭐ THE GAP THIS MODULE SHIPS OPEN, ON PURPOSE AND BY NAME.
+ *
+ * `isTargetReference`'s quantifier arm is a CONJUNCTION: a closed determiner
+ * class AND `CONTAINER_NOUNS`. The determiner half is genuinely closed. The
+ * noun half is an OPEN CLASS of English common nouns and no list will close
+ * it — an independent corpus found 48 of 52 container-shaped probes minting
+ * the user's own container as an option label, on nouns this product uses
+ * daily (`node`, `key question`, `element`, `driver`, `lever`, `outcome`).
+ * Cardinal number words beyond `five` are open in the same way (`six
+ * decisions`); digits are not, because a digit trips the value screen first.
+ *
+ * ⚠ AND THE REASON THE GENERATED CORPUS CANNOT SEE ANY OF IT: the corpus is
+ * generated FROM these lists, so it proves the copies agree and can never
+ * prove the list is right. The determiner class was closed against an
+ * enumeration correctly and the container class was certified against itself.
+ * A derived guard and a hand-written one are not redundant — this is what it
+ * costs to ship only the first.
+ *
+ * So the gap is PINNED rather than hidden. The spec asserts this set EXACTLY:
+ * it REDs if a case starts declining (someone closed one — move it out) and
+ * REDs if a new case is added (the set grew — say so). A gap recorded in the
+ * suite is honest; a gap invisible to it is how four rounds happened.
+ *
+ * ⭐ THE EXIT IS NOT A FIFTH ROUND. Where the label is a determiner-led phrase
+ * whose head noun this list does not carry, the honest answer is neither
+ * refuse nor accept but ASK. `AddOptionValidation`'s `kind: 'clarify'` arm
+ * (`propose-add-option.ts`) already exists and the route already renders it.
+ * Rowed as successor work; deliberately not built here.
+ *
+ * Severity, stated exactly: a survivor here reaches the VALIDATOR as a hint,
+ * not as the final label — `route-v2.ts` passes `detectedLabel` to the
+ * composer and the label that ships is `composed.proposal.label`. So this
+ * requires the composer to echo the fragment back. Plausible, one step
+ * removed, and NOT WIRE-WITNESSED in either direction.
+ */
+export const KNOWN_OPEN_CONTAINER_GAP: readonly string[] = [
+  // Reported by the independent re-review at 2d935680, by name.
+  'Add an option to each node',
+  'Add an option to every key question',
+  'Add an option to node',
+  'Add an option to six decisions',
+  // The same class, in this product's own vocabulary.
+  'Add an option to each element',
+  'Add an option to every driver',
+  'Add an option to any lever',
+  'Add an option to each outcome',
+];
+
+/**
+ * The second gap shipped open by name: a coordinated second instruction inside
+ * an INFERRED label. See scope boundary 2 above for why the fix was reverted.
+ * The spec asserts this set exactly, in both directions.
+ */
+export const KNOWN_OPEN_COORDINATED_INSTRUCTION: readonly string[] = [
+  'Add an option to partner with a distributor and remove the old one',
+  'Add an option to open a Berlin office and delete the Munich one',
+];
