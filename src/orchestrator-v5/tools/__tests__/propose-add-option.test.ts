@@ -40,6 +40,7 @@ import {
   type AddOptionGrounding,
 } from '../propose-add-option.js';
 import { buildAddOptionTransaction } from '../../routing/add-option-transaction.js';
+import type { ChatWithToolsArgs, CallOpts } from '../../../adapters/llm/types.js';
 
 // ---------------------------------------------------------------------------
 // Real captured strategic models.
@@ -427,7 +428,11 @@ describe('validateProposedAddOption — the remaining refusals', () => {
 function adapterReturning(input: Record<string, unknown>) {
   return {
     name: 'test',
-    chatWithTools: vi.fn(async () => ({
+    // The parameters are DECLARED so `mock.calls[n][m]` is typed. Without them
+    // the call tuple is empty and every argument assertion below is a
+    // full-tree typecheck error (the build gate excludes tests and would not
+    // have seen it; the Typecheck Drift ratchet does).
+    chatWithTools: vi.fn(async (_args: ChatWithToolsArgs, _opts: CallOpts) => ({
       content: [{ type: 'tool_use' as const, id: 't1', name: PROPOSE_ADD_OPTION_TOOL_NAME, input }],
       stop_reason: 'tool_use' as const,
       usage: { input_tokens: 1, output_tokens: 1 },

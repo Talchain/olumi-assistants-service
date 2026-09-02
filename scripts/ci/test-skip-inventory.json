@@ -9,6 +9,10 @@
       "skipIf": 1,
       "reason": "Compiled-boot check: it.skipIf(!dist). Executes in the required job now that CI builds dist (O-6); skips only on unbuilt local checkouts."
     },
+    "src/orchestrator-v5/tools/__tests__/propose-add-option.test.ts": {
+      "skipIf": 1,
+      "reason": "One key-gated arm: the live-model quality check runs only when ANTHROPIC_API_KEY/OPENAI_API_KEY is present, and is skipped in CI (no key). It is a supplement, not the coverage — the same file's scripted arms prove the system's guarantees (grounding, label echo, no-value-field) against good AND adversarial model output, and the file logs which arm ran so a green suite can never be read as 'the real model was measured'."
+    },
     "tests/benchmarks/edge-stability.bench.test.ts": {
       "skip": 1,
       "reason": "On-demand: this test is skipped (warnings only, no hard fail)"
