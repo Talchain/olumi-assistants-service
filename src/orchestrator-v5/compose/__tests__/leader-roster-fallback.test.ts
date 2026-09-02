@@ -353,12 +353,24 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       expect(args).toContain('analysisReady: ctx.analysisReady');
     });
 
-    it('TRIPWIRE: the exit population is 24 — a new exit must be looked at, not assumed', () => {
+    it('TRIPWIRE: the exit population is 25 — a new exit must be looked at, not assumed', () => {
       const calls = enumerateSendCalls(source);
       // Not a mirror to keep green: if you added an exit, confirm it funnels
       // through sendFinalised200 (it must, or the guard above fails too) and
       // then update this number deliberately.
-      expect(calls.length).toBe(24);
+      //
+      // 2026-09-01, 24 -> 25: the add-option TEXT leg's held exit
+      // (`'add_option_transaction'`, route-v2). LOOKED AT, not assumed:
+      //  · it funnels through `sendFinalised200`, so it inherits the single
+      //    `enforceLeadingOptionClaimsAtWire` call the assertion above pins,
+      //    with both roster sources threaded — the "24th exit inherits this by
+      //    construction" case, now realised;
+      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
+      //    add-option CHIP exit beside it, so it adds no new claim authority;
+      //  · its copy is a held PROPOSAL — a receipt and a question about a change
+      //    that has not happened — so it cannot assert a leading option, and
+      //    `answerKind: 'functional'` keeps it out of the prose lane entirely.
+      expect(calls.length).toBe(25);
       // #1246's additional exit is a functional recorded-answer refusal, not
       // a new claim authority. It still funnels through the shared finalizer,
       // forwards claim safety, and uses only the canonical repair graph roster.
