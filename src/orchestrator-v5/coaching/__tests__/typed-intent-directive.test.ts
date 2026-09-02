@@ -362,6 +362,37 @@ describe('buildCoachingMethodDirective', () => {
     }
   });
 
+  /**
+   * ⭐⭐ EACH METHOD IS PINNED BY THE MOVE THAT MAKES IT THAT METHOD — because
+   * the step-count floor above is a VALUE PREDICATE and a gutted method
+   * satisfies it.
+   *
+   * Measured, not supposed: a mutant deleting the prospective-hindsight framing
+   * from `pre_mortem` — the single instruction that makes a pre-mortem a
+   * pre-mortem rather than a risk list — SURVIVED the whole suite, because five
+   * steps minus one is still ≥ 3. That is CLAUDE.md trap 19 at the level of the
+   * directive: the assertion bound to a count another shape could satisfy, not
+   * to the thing it was written to protect.
+   *
+   * These assert the DEFINING MOVE only, never the full wording, so the prose
+   * can be improved without a red — but it cannot be hollowed out.
+   */
+  it.each([
+    ['pre_mortem', ['has clearly failed', 'backwards'],
+     'prospective hindsight — without it this is a risk list, not a pre-mortem'],
+    ['outside_view', ['REFERENCE CLASS', 'never invent a percentage'],
+     'the reference class AND the fabrication guard — a base rate is the most ' +
+     'inventable number in this arm'],
+    ['elicit_risks', ['UPSIDE'],
+     'the spark is "Find risks and upside"; a risk-only answer silently ' +
+     'delivers half the affordance'],
+  ] as const)('%s keeps the move that makes it that method', (intent, needles, why) => {
+    const { directive } = buildCoachingMethodDirective(intent as 'pre_mortem', 'frame');
+    for (const needle of needles) {
+      expect(directive, `${intent} lost: ${why}`).toContain(needle);
+    }
+  });
+
   it('always demands grounding and forbids inventing the user\'s numbers', () => {
     for (const intent of ROUTED_COACHING_INTENTS) {
       const { directive } = buildCoachingMethodDirective(intent, 'frame');
