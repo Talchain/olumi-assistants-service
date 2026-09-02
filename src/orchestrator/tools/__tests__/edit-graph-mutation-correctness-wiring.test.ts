@@ -141,7 +141,26 @@ describe('2.1003 wiring — the applied graph reaching the caller is display-con
     // IDENTITY BINDING: the edited node, by id — never by a value predicate
     // another node could satisfy.
     const edited = nodes.find((n) => n.id === FACTOR_ID)!;
-    expect((edited.observed_state as Record<string, unknown>).value).toBe(40);
+    // ⚠⚠ EXPECTATION CHANGED 2026-09-02 — the internal representation only.
+    // This asserted `value === 40`: the RAW percent magnitude in the LEVEL
+    // slot. That state was measured on deployed staging (CEE `3575b18`) as a
+    // P0: the analysis seam's baseline gate refuses such a factor
+    // (`baseline_scale_unresolved`, "recorded as a bare amount with no range")
+    // and no user action clears it, so the model is permanently unanalysable.
+    // The level convention is the contract — `compound-goal/extractor.ts:708`
+    // (`value: num / 100`), projector pass 3d, `normaliseFactorValue`'s
+    // unit-pinned limb, `resolveExistingRawValue` (inverts only `value ∈
+    // [0,1]`), `graph-data-integrity.ts` (`%` → `raw_value/100`), and 4 of 5
+    // percent factors in a real deployed session. This is the SAME pin as
+    // `observed-value-pair-authority.test.ts`' "#884 MEASURED SHAPE" control,
+    // which this file's fixture is cited by; both move together, deliberately.
+    //
+    // ⭐ WHAT THIS TEST EXISTS TO PROTECT IS UNCHANGED AND STILL ASSERTED: the
+    // display string is not stale, and the producer's declared priority order
+    // still yields "40%" — now through the `raw_value + %` branch it names
+    // below, rather than the `value only` branch.
+    expect((edited.observed_state as Record<string, unknown>).value).toBeCloseTo(0.4, 12);
+    expect((edited.observed_state as Record<string, unknown>).raw_value).toBe(40);
     expect(edited.display_value).not.toBe('20%');
     // Derived from the PRODUCER's declared priority order
     // (`synthesiseDisplayValue`: raw_value+% -> "N%"; value only -> "N"),

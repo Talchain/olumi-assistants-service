@@ -856,7 +856,16 @@ export function reconcileObservedValuePair(
         : typeof nodeObserved.cap === 'number'
           ? nodeObserved.cap
           : undefined;
+    //
+    // ⚠ SCOPED TO `kind === 'factor'`, AND CI IS WHY. The first version of this
+    // block omitted that conjunct and moved an OPTION's own observed value
+    // (`gm-held-option-own-value-withhold.test.ts` S3 twin, 30 → 0.3). The
+    // consumer this fix serves — `findScaleIncoherentBaselineFactorIds` — reads
+    // `node.kind !== 'factor' → continue`, so an option's value can never reach
+    // the gate and re-framing it buys nothing while changing a pinned wire
+    // number. Serve exactly the consumer that needs it, and no more.
     if (
+      currentNode?.kind === 'factor' &&
       capAtGuard === undefined &&
       storedScaleFrame === undefined &&
       !Object.prototype.hasOwnProperty.call(observed, 'raw_value')
