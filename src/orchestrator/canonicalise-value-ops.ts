@@ -84,6 +84,7 @@ import { unitPinnedScaleFrame } from '../cee/draft/records/unit-scale-class.js';
 import {
   PAIR_COHERENCE_RELATIVE_EPSILON,
   resolveScaleFrame,
+  checkPairCoherence,
 } from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 
 /**
@@ -890,14 +891,65 @@ export function reconcileObservedValuePair(
     // `node.kind !== 'factor' → continue`, so an option's value can never reach
     // the gate and re-framing it buys nothing while changing a pinned wire
     // number. Serve exactly the consumer that needs it, and no more.
+    //
+    // ⚠⚠⚠ ROUND 3 — THE ORDERING AXIS. THIS LANE NO LONGER HAS AN ORDERING OF
+    // ITS OWN; IT ADOPTS THE ESTATE'S.
+    //
+    // The previous version resolved the unit-pinned constant FIRST and consulted
+    // no frame the factor already carried. A legacy percent factor whose
+    // `{value, raw_value}` PAIR encodes a non-100 frame carries NO stored
+    // `scale_frame`, so it fell into this limb and the constant 100 OVERRODE the
+    // pair's 200. Measured on `{value: 0.575, raw_value: 115, unit: '%'}` edited
+    // to 40: this lane wrote `{0.4, 40}` while `normaliseFactorValue` wrote
+    // `{0.2, 40}` — ONE INPUT, TWO WRITERS, TWO ANSWERS, i.e. the twins defect
+    // this whole change exists to close, reappearing inside the fix. It lands on
+    // the founder-named NRR-115% class: a baseline level of 0.4 beside siblings
+    // framed at 200 is a 2x distortion with NO refusal anywhere.
+    //
+    // ⭐ THE PRECEDENCE BELOW IS NOT INVENTED HERE. It is verbatim the order
+    // `normaliseFactorValue` uses for a capless factor:
+    //     resolveScaleFrame (stored -> pair)
+    //       -> else, when the carriers do NOT contradict each other,
+    //          unitPinnedScaleFrame
+    //       -> else raw (and the analysis seam refuses, honestly).
+    // Adopting it is what finally makes the two writers AGREE, which was the
+    // point of the change; `percent-value-edit-survives-to-analysis.test.ts`
+    // asserts that agreement directly rather than restating it here.
+    //
+    // ⚠ THE `incoherent` SUPPRESSION IS PART OF THE PRECEDENCE, NOT AN EXTRA.
+    // `resolveScaleFrame` collapses "no frame recorded" and "a frame was
+    // recorded and it CONTRADICTS the pair" to the same `undefined`. A
+    // contradicted frame is POSITIVE evidence the factor's scale is corrupt, and
+    // pinning a unit constant onto it yields a level incomparable to the
+    // siblings the real frame framed — the same sibling-distortion harm reached
+    // through a different door, and the conflation a sibling PR was closed for.
+    //
+    // ⚠ WHY THIS LIMB STILL GATES ON `pinnedFrame !== undefined` FIRST. Where
+    // the unit family pins nothing — every currency, count and unit-less factor,
+    // and percent above its bound — this limb does not run AT ALL, so the
+    // pre-existing frame branch below keeps those classes, including its
+    // deliberate `AmbiguousScaleValueError` throw on a sub-1 input. This limb
+    // only ever covers what that branch excludes (`unit !== '%'`).
     if (
       currentNode?.kind === 'factor' &&
-      capAtGuard === undefined &&
-      storedScaleFrame === undefined
+      capAtGuard === undefined
     ) {
       const pinnedFrame = unitPinnedScaleFrame(unitAtGuard, newValue);
       if (pinnedFrame !== undefined) {
-        const framedValue = newValue / pinnedFrame;
+        const carriedFrame = resolveScaleFrame({
+          storedFrame: storedScaleFrame,
+          value: nodeObserved.value,
+          raw_value: nodeObserved.raw_value,
+        });
+        const recordedScaleContradictsItself =
+          checkPairCoherence({
+            storedFrame: storedScaleFrame,
+            value: nodeObserved.value,
+            raw_value: nodeObserved.raw_value,
+          }) === 'incoherent';
+        const frame =
+          carriedFrame ?? (recordedScaleContradictsItself ? undefined : pinnedFrame);
+        const framedValue = frame === undefined ? Number.NaN : newValue / frame;
         if (Number.isFinite(framedValue)) {
           return {
             ...op,

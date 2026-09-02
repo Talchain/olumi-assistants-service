@@ -74,6 +74,7 @@ import {
   decideAnalysisScaleBlock,
 } from '../../../orchestrator-v5/tools/plot-intervention-scale.js';
 import { handleEditGraph } from '../edit-graph.js';
+import { normaliseFactorValue } from '../../../orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.js';
 import type { PatchOperation } from '../../types.js';
 import type { ConversationContext } from '../../types.js';
 import type { LLMAdapter } from '../../../adapters/llm/types.js';
@@ -317,5 +318,109 @@ describe('the SAME factor edited repeatedly stays analysable after EVERY edit', 
         decideAnalysisScaleBlock({ mixedUnresolved: false, unresolvedFactorIds: [] }, blockedIds),
       ).toEqual({ blocked: false });
     }
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⭐⭐ THE ORDERING AXIS — round 3 (review of #1317 at `8e2e9d94`).
+//
+// The limb resolved the UNIT-PINNED CONSTANT first and consulted no frame the
+// factor already carried. A legacy percent factor whose `{value, raw_value}`
+// PAIR encodes a non-100 frame has NO stored `scale_frame`, so it fell into the
+// limb and the constant 100 OVERRODE the pair's 200 — one input, two writers,
+// two answers, which is the twins defect this PR exists to close, reappearing
+// inside the fix. It lands on the founder-named NRR-115% class: a baseline
+// level of 0.4 beside siblings framed at 200 is a 2x distortion with NO
+// refusal anywhere.
+//
+// THE FIX IS NOT A FOURTH PATCH — IT DELETES THIS LANE'S OWN ORDERING in favour
+// of the estate's single existing precedence, which `normaliseFactorValue`
+// already uses at `d1-shared/normalise-factor-value.ts`:
+//     resolveScaleFrame (stored -> pair) -> else, if the carriers do NOT
+//     contradict each other, unitPinnedScaleFrame -> else raw.
+// Adopting it is what finally makes the two writers AGREE, which was the whole
+// point of the PR. The parity case below asserts that directly rather than
+// restating it in a comment.
+//
+// ⚠ THE `incoherent` SUPPRESSION IS PART OF THE PRECEDENCE, NOT AN EXTRA.
+// `resolveScaleFrame` collapses "no frame recorded" and "a frame was recorded
+// and it CONTRADICTS the pair" to the same `undefined`. A contradicted frame is
+// POSITIVE evidence the factor's scale is corrupt, and pinning a unit constant
+// onto it produces a number incomparable to the siblings that were framed by
+// the real frame — the same harm by another door. `normaliseFactorValue` guards
+// this with `checkPairCoherence(...) === 'incoherent'`; so does this lane.
+// ────────────────────────────────────────────────────────────────────────────
+
+/** A capless percent factor whose PAIR encodes frame 200 (115 / 0.575). */
+function framedPairGraph(extra: Record<string, unknown> = {}): unknown {
+  return {
+    nodes: [
+      {
+        id: TARGET,
+        kind: 'factor',
+        label: 'Net revenue retention',
+        observed_state: { value: 0.575, raw_value: 115, unit: '%' },
+        ...extra,
+      },
+      { id: DECOY, kind: 'factor', label: 'Decoy', observed_state: { value: 0.4, raw_value: 40, unit: '%' } },
+    ],
+  };
+}
+
+function applyTo(graph: unknown, to: number): Record<string, unknown> {
+  const ops = [leafPatch(TARGET, to)];
+  const applied = reconcileObservedValuePair(
+    stampUserEditProvenance(canonicaliseValueOps(ops, graph).operations, ops),
+    graph,
+  );
+  return ((applied[0]!.value as Record<string, unknown>).observed_state as Record<string, unknown>) ?? {};
+}
+
+describe('a frame the factor ALREADY carries outranks the unit-pinned constant', () => {
+  it('⭐ PAIR-recovered frame 200 wins over the percent constant 100 (no stored scale_frame)', () => {
+    const written = applyTo(framedPairGraph(), 40);
+    // PRECONDITION PINNED IN-TEST: the fixture really has no stored frame, so
+    // this case is genuinely about the PAIR and not about `scale_frame`.
+    expect((framedPairGraph() as { nodes: Record<string, unknown>[] }).nodes[0]!.scale_frame).toBeUndefined();
+    expect(written.value).toBeCloseTo(0.2, 12); // 40 / 200, NOT 40 / 100
+    expect(written.raw_value).toBe(40);
+  });
+
+  it('its STORED-frame twin answers identically (scale_frame: 200)', () => {
+    const written = applyTo(framedPairGraph({ scale_frame: 200 }), 40);
+    expect(written.value).toBeCloseTo(0.2, 12);
+    expect(written.raw_value).toBe(40);
+  });
+
+  it('⭐ CROSS-WRITER PARITY: this lane and `normaliseFactorValue` agree on the same factor', () => {
+    for (const fixture of [framedPairGraph(), framedPairGraph({ scale_frame: 200 })]) {
+      const node = (fixture as { nodes: Record<string, unknown>[] }).nodes[0]!;
+      const obs = node.observed_state as Record<string, unknown>;
+      const twin = normaliseFactorValue({
+        rawInput: 40,
+        unit: '%',
+        inputHasUnit: true,
+        factorUnit: '%',
+        factorObservedValue: obs.value as number,
+        factorObservedRawValue: obs.raw_value as number,
+        factorScaleFrame: node.scale_frame as number | undefined,
+      } as never);
+      const mine = applyTo(fixture, 40);
+      expect(mine.value).toBeCloseTo(twin.value as number, 12);
+      expect(mine.raw_value).toBe(twin.raw_value);
+    }
+  });
+
+  it('CONTRADICTED carriers are not unit-pinned — the corrupt factor keeps refusing', () => {
+    // `{storedFrame: 5, value: 7, raw_value: 7}` is `incoherent`: a recorded
+    // frame the code refuses to trust. Pinning 100 onto it would produce a
+    // level incomparable to siblings framed by the real frame.
+    const graph = {
+      nodes: [
+        { id: TARGET, kind: 'factor', label: 'Corrupt', scale_frame: 5, observed_state: { value: 7, raw_value: 7, unit: '%' } },
+      ],
+    };
+    const written = applyTo(graph, 40);
+    expect(written.value).toBe(40); // raw — never 0.4
   });
 });
