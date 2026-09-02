@@ -422,9 +422,11 @@ describe('4. records-projector goal targets at the legacy scrub boundary', () =>
     const seam = projectDraftRecords(responseObject, brief);
     expect(seam.ok).toBe(true);
     if (!seam.ok) return;
-    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')! as Record<string, unknown>;
-    goal.goal_baseline = 0.72;
-    goal.goal_baseline_raw = 72;
+    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
+    Object.assign(goal, {
+      goal_baseline: 0.72,
+      goal_baseline_raw: 72,
+    });
 
     const scrubbed = scrubProjectedDraftGoalTargets({
       rawJson: seam.projection.graph,
@@ -472,7 +474,7 @@ describe('4. records-projector goal targets at the legacy scrub boundary', () =>
     expect(seam.ok).toBe(true);
     if (!seam.ok) return;
     const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
-    for (const field of CEE_MINTED_GOAL_FIELDS) delete (goal as Record<string, unknown>)[field];
+    for (const field of CEE_MINTED_GOAL_FIELDS) Reflect.deleteProperty(goal, field);
 
     expect(scrubProjectedDraftGoalTargets({
       rawJson: seam.projection.graph,
