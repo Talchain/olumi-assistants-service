@@ -80,9 +80,11 @@ import { parseEdgeTargetPath } from '../orchestrator-v5/graph-management/adapter
 // rather than reimplemented — a second copy of a scale convention is the
 // hand-maintained-twin defect this module's header exists to warn about.
 import { resolveExistingRawValue } from '../orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { unitPinnedScaleFrame } from '../cee/draft/records/unit-scale-class.js';
 import {
   PAIR_COHERENCE_RELATIVE_EPSILON,
   resolveScaleFrame,
+  checkPairCoherence,
 } from '../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js';
 
 /**
@@ -798,6 +800,168 @@ export function reconcileObservedValuePair(
     const storedFrameAdmits =
       typeof storedScaleFrame === 'number' &&
       !(unitAtGuard === '%' && storedScaleFrame !== 100);
+    // ── ⭐⭐ A PERCENTAGE STATES ITS OWN SCALE, AND THIS WRITER WAS THE ONLY
+    // ONE NOT LISTENING (reproduced live 2026-09-02, CEE `3575b18` / UI
+    // `05ca160b`; the P0 "the analysis never runs").
+    //
+    // THE MEASURED DEFECT. A guest set a percent factor to 40% and every
+    // analysis attempt refused, naming that factor: "recorded as a bare amount
+    // with no range". Its PERSISTED record, read out of the deployed session:
+    //
+    //     83c01b53  { value: 40, unit: '%', source: 'user_override' }
+    //
+    // — no `raw_value`, while its FOUR sibling percent factors in the SAME
+    // graph all carried `{ value: 0.x, unit: '%', raw_value: x0 }`. The raw
+    // magnitude was sitting in the LEVEL slot, so the analysis seam's baseline
+    // gate refused it, correctly and permanently.
+    //
+    // ⚠ THE GATE IS RIGHT AND IS NOT TOUCHED. `resolveExistingRawValue`
+    // independently calls `{value: 40, unit: '%'}` `ambiguous` — "a `%` value
+    // OUTSIDE [0,1] ... is genuinely ambiguous → fail closed". Two readers
+    // agree the RECORD is incoherent. The first failure is HERE, at the
+    // writer that produced it.
+    //
+    // ⭐ THIS IS A TWINS DEFECT, NOT A NEW OPINION (trap 12). Given the same
+    // "40%", the V5 writer `normaliseFactorValue` already writes
+    // `{value: 0.4, raw_value: 40}` — through `unitPinnedScaleFrame`. This
+    // op-path writer returned the op UNTOUCHED. One input, two writers, two
+    // answers. The remedy is to consult the SAME authority the other writer
+    // consults, never to mint a second opinion about frames here.
+    //
+    // ⚠ WHY `unitPinnedScaleFrame` IS THE SAFE AUTHORITY. It returns a CONSTANT
+    // determined by TWO things, and BOTH are load-bearing — an earlier version
+    // of this comment named only the magnitude bound, which understated it:
+    //   · the UNIT FAMILY, via `classifyUnitScaleClass` — percent → 100,
+    //     basis points → 10,000, and EVERY other family (currency, counts,
+    //     unit-less) → nothing. The family is matched on the unit's own
+    //     spelling, so '%', 'percent' and '% NRR' all class percent while '£'
+    //     does not;
+    //   · the MAGNITUDE, admitted only within that family's true bound —
+    //     percent on `(1, 100]`, basis points on `(1, 10000]`.
+    // So it can never hand back a laddered, sibling-dependent number and can
+    // never silently rescale a sibling intervention. It abstains at
+    // `magnitude <= 1` (a value already on the analysis scale is never
+    // re-framed) and ABOVE the family bound — which is how the NRR-115% /
+    // ROI-300% class the `storedFrameAdmits` exclusion protects keeps
+    // REFUSING, preserved BY THE AUTHORITY ITSELF rather than by a second
+    // guard here that could drift from it.
+    //
+    // ⚠⚠ THE PREDICATE IS ABOUT THE INCOMING VALUE, NOT ABOUT PRIOR WRITE
+    // STATE — AND THAT IS A CORRECTION THAT COST A DEFECT IN THE OPPOSITE
+    // DIRECTION (review of #1317, measured through `handleEditGraph`).
+    // This block was first conjoined on `!hasOwnProperty(observed,
+    // 'raw_value')`. Its OWN successful write ADDS `raw_value`, so the next
+    // edit on the same factor was excluded by that very conjunct, fell through
+    // to `resolveExistingRawValue`, resolved `ambiguous`, deleted `raw_value`
+    // — and re-created the exact P0 record this fix exists to close. Measured:
+    // 40 → COMPUTES, 55 → BLOCKED, 60 → COMPUTES. The fix ALTERNATED.
+    //
+    // Asking "does this incoming value need re-framing onto the analysis
+    // scale?" — a function of (unit, newValue) ALONE — is idempotent across
+    // repeated edits BY CONSTRUCTION, not by a second patch to the conjunct.
+    // It also subsumes the stale-carry-forward case correctly: a merged
+    // payload whose `raw_value` belongs to the PREVIOUS value is rewritten to
+    // the new pair rather than deleted, which is what the lane below was
+    // trying and could not do (it refuses `value > 1` on a percent factor).
+    // Pinned by the three-edit sequence in
+    // `percent-value-edit-survives-to-analysis.test.ts` — the case a corpus of
+    // fresh-graph fixtures was structurally unable to contain (trap 13d).
+    //
+    // ⚠ NARROW BY CONSTRUCTION, and each surviving conjunct is load-bearing:
+    //   · factor only    — the consumer skips non-factors (see below);
+    //   · no cap         — a capped factor has its own convention and the
+    //                      clamping writer owns it;
+    //   · no stored frame — a framed factor is owned by `storedFrameAdmits`
+    //                      and the frame branch below; this limb is only for
+    //                      the factor that has NO frame at all.
+    // A currency or a count classes `unknown`, pins nothing, and still falls
+    // through to the honest refusal — closing the percent gap must not open the
+    // currency lie.
+    const capAtGuard =
+      typeof observed.cap === 'number'
+        ? observed.cap
+        : typeof nodeObserved.cap === 'number'
+          ? nodeObserved.cap
+          : undefined;
+    //
+    // ⚠ SCOPED TO `kind === 'factor'`, AND CI IS WHY. The first version of this
+    // block omitted that conjunct and moved an OPTION's own observed value
+    // (`gm-held-option-own-value-withhold.test.ts` S3 twin, 30 → 0.3). The
+    // consumer this fix serves — `findScaleIncoherentBaselineFactorIds` — reads
+    // `node.kind !== 'factor' → continue`, so an option's value can never reach
+    // the gate and re-framing it buys nothing while changing a pinned wire
+    // number. Serve exactly the consumer that needs it, and no more.
+    //
+    // ⚠⚠⚠ ROUND 3 — THE ORDERING AXIS. THIS LANE NO LONGER HAS AN ORDERING OF
+    // ITS OWN; IT ADOPTS THE ESTATE'S.
+    //
+    // The previous version resolved the unit-pinned constant FIRST and consulted
+    // no frame the factor already carried. A legacy percent factor whose
+    // `{value, raw_value}` PAIR encodes a non-100 frame carries NO stored
+    // `scale_frame`, so it fell into this limb and the constant 100 OVERRODE the
+    // pair's 200. Measured on `{value: 0.575, raw_value: 115, unit: '%'}` edited
+    // to 40: this lane wrote `{0.4, 40}` while `normaliseFactorValue` wrote
+    // `{0.2, 40}` — ONE INPUT, TWO WRITERS, TWO ANSWERS, i.e. the twins defect
+    // this whole change exists to close, reappearing inside the fix. It lands on
+    // the founder-named NRR-115% class: a baseline level of 0.4 beside siblings
+    // framed at 200 is a 2x distortion with NO refusal anywhere.
+    //
+    // ⭐ THE PRECEDENCE BELOW IS NOT INVENTED HERE. It is verbatim the order
+    // `normaliseFactorValue` uses for a capless factor:
+    //     resolveScaleFrame (stored -> pair)
+    //       -> else, when the carriers do NOT contradict each other,
+    //          unitPinnedScaleFrame
+    //       -> else raw (and the analysis seam refuses, honestly).
+    // Adopting it is what finally makes the two writers AGREE, which was the
+    // point of the change; `percent-value-edit-survives-to-analysis.test.ts`
+    // asserts that agreement directly rather than restating it here.
+    //
+    // ⚠ THE `incoherent` SUPPRESSION IS PART OF THE PRECEDENCE, NOT AN EXTRA.
+    // `resolveScaleFrame` collapses "no frame recorded" and "a frame was
+    // recorded and it CONTRADICTS the pair" to the same `undefined`. A
+    // contradicted frame is POSITIVE evidence the factor's scale is corrupt, and
+    // pinning a unit constant onto it yields a level incomparable to the
+    // siblings the real frame framed — the same sibling-distortion harm reached
+    // through a different door, and the conflation a sibling PR was closed for.
+    //
+    // ⚠ WHY THIS LIMB STILL GATES ON `pinnedFrame !== undefined` FIRST. Where
+    // the unit family pins nothing — every currency, count and unit-less factor,
+    // and percent above its bound — this limb does not run AT ALL, so the
+    // pre-existing frame branch below keeps those classes, including its
+    // deliberate `AmbiguousScaleValueError` throw on a sub-1 input. This limb
+    // only ever covers what that branch excludes (`unit !== '%'`).
+    if (
+      currentNode?.kind === 'factor' &&
+      capAtGuard === undefined
+    ) {
+      const pinnedFrame = unitPinnedScaleFrame(unitAtGuard, newValue);
+      if (pinnedFrame !== undefined) {
+        const carriedFrame = resolveScaleFrame({
+          storedFrame: storedScaleFrame,
+          value: nodeObserved.value,
+          raw_value: nodeObserved.raw_value,
+        });
+        const recordedScaleContradictsItself =
+          checkPairCoherence({
+            storedFrame: storedScaleFrame,
+            value: nodeObserved.value,
+            raw_value: nodeObserved.raw_value,
+          }) === 'incoherent';
+        const frame =
+          carriedFrame ?? (recordedScaleContradictsItself ? undefined : pinnedFrame);
+        const framedValue = frame === undefined ? Number.NaN : newValue / frame;
+        if (Number.isFinite(framedValue)) {
+          return {
+            ...op,
+            value: {
+              ...value,
+              [OBSERVED_ROOT]: { ...observed, value: framedValue, raw_value: newValue },
+            },
+          };
+        }
+      }
+    }
+
     if (!Object.prototype.hasOwnProperty.call(observed, 'raw_value') && !storedFrameAdmits) {
       return op;
     }
