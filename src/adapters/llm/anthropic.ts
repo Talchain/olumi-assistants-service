@@ -23,7 +23,13 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAuthoredGoalThreshold } from "./normalisation.js";
+import {
+  CEE_MINTED_GOAL_FIELDS,
+  normaliseDraftResponse,
+  ensureControllableFactorBaselines,
+  stripModelAuthoredGoalThreshold,
+  type GoalThresholdStripResult,
+} from "./normalisation.js";
 import { isUsableDraftDocument } from "./draft-document-acceptance.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
@@ -87,8 +93,14 @@ import {
   mergeCompletionClaims,
   RECORDS_COMPLETION_MAX_TOKENS,
   RECORDS_COMPLETION_WALL_MS,
+  canonicalText,
+  type DraftRecordSet,
   type DraftInferenceClaim,
+  type RecordProjection,
 } from '../../cee/draft/records/index.js';
+import { bindStatedItemToBrief } from '../../cee/provenance/brief-binding.js';
+import { isAmountStatedInBrief } from '../../cee/provenance/stated-amounts.js';
+import { goalValueIsATarget } from '../../cee/draft/records/projector.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
 import { reconcileDraftOptionFraming } from '../../cee/draft/records/option-framing.js';
 
@@ -126,6 +138,155 @@ export type DraftArgs = {
    */
   attachment?: BuiltDraftAttachment;
 };
+
+const RECORDS_PROJECTOR_GOAL_TARGET_FIELDS = CEE_MINTED_GOAL_FIELDS.filter(
+  (field) => field.startsWith('goal_threshold'),
+);
+
+type ProjectedGoalTargetScrubResult =
+  | {
+      ok: true;
+      stripped: GoalThresholdStripResult;
+    }
+  | {
+      ok: false;
+      issues: Array<{
+        statedItemIndex: number;
+        reason: 'target_unrepresented' | 'unit_ambiguous';
+      }>;
+    };
+
+/**
+ * Apply the legacy draft ingress scrub without deleting a target that this
+ * request's records projector just derived from an independently verified
+ * target record.
+ *
+ * The exemption is intentionally narrower than "projected" or "stated": the
+ * projector also represents unverified model transcriptions, and duplicate
+ * goals can carry a later record's value on a survivor whose provenance belongs
+ * to the first record. Each protected value therefore has to bind on its OWN
+ * quote + value + unit against the brief, then match the stated projector-owned
+ * node by source quote and typed target tuple. The survivor's `brief_binding`
+ * is deliberately not reused as target attestation: after duplicate collapse it
+ * describes the first record, which may be a separately unverified baseline.
+ * Target-role interpretation delegates to the projector's own predicate; a
+ * second local rule would otherwise let the projector mint an optional-role
+ * target only for this scrub to delete it again.
+ * Baseline fields are never protected; the records projector does not mint
+ * them, and leaving them outside this derived `goal_threshold*` set keeps the
+ * existing anti-fabrication scrub intact.
+ *
+ * The fields are hidden from the existing scrub rather than restored from a
+ * second derivation. That keeps the projector as the sole numeric authority and
+ * keeps `GoalThresholdStripResult` truthful: its telemetry reports only fields
+ * that remain deleted after this function returns.
+ */
+export function scrubProjectedDraftGoalTargets(args: {
+  rawJson: unknown;
+  records: DraftRecordSet;
+  projection: RecordProjection;
+  brief: string;
+}): ProjectedGoalTargetScrubResult {
+  const rawNodes =
+    args.rawJson !== null && typeof args.rawJson === 'object'
+      ? (args.rawJson as { nodes?: unknown }).nodes
+      : undefined;
+  if (!Array.isArray(rawNodes)) {
+    return {
+      ok: false,
+      issues: [{ statedItemIndex: -1, reason: 'target_unrepresented' }],
+    };
+  }
+
+  const trustedNodes = new Set<Record<string, unknown>>();
+  const issues: Array<{
+    statedItemIndex: number;
+    reason: 'target_unrepresented' | 'unit_ambiguous';
+  }> = [];
+
+  args.records.stated_items.forEach((item, index) => {
+    if (
+      item.kind !== 'goal'
+      || !goalValueIsATarget(item.role)
+      || typeof item.value !== 'number'
+      || !Number.isFinite(item.value)
+    ) return;
+
+    if (bindStatedItemToBrief({
+      quote: item.source_quote,
+      value: item.value,
+      unit: item.unit,
+      brief: args.brief,
+    }) !== 'verified') return;
+
+    // `bindStatedItemToBrief` accepts equivalent percent spellings, while the
+    // projector's cap authority currently recognises only the exact `%` unit.
+    // An omitted, incompatible, aliased, or padded unit can therefore turn an
+    // 88% target into 88 / 110 = 0.8. Keep the projector as the sole numeric
+    // authority and refuse that unsafe tuple instead of canonicalising it here.
+    if (
+      item.unit !== '%'
+      && isAmountStatedInBrief(item.value, '%', item.source_quote)
+    ) {
+      issues.push({ statedItemIndex: index, reason: 'unit_ambiguous' });
+      return;
+    }
+
+    const sourceQuote = canonicalText(item.source_quote);
+    const matchingNodes = (rawNodes as unknown[]).filter(
+      (candidate): candidate is Record<string, unknown> => {
+        if (candidate === null || typeof candidate !== 'object') return false;
+        const node = candidate as Record<string, unknown>;
+        const nodeId = typeof node.id === 'string' ? node.id : undefined;
+        const provenance = nodeId === undefined ? undefined : args.projection.provenance[nodeId];
+        return node.kind === 'goal'
+          && provenance?.provenance_class === 'stated'
+          && typeof provenance.source_quote === 'string'
+          && canonicalText(provenance.source_quote) === sourceQuote
+          && node.goal_threshold_raw === item.value
+          && (item.unit === undefined || node.goal_threshold_unit === item.unit);
+      },
+    );
+
+    if (matchingNodes.length === 0) {
+      issues.push({ statedItemIndex: index, reason: 'target_unrepresented' });
+      return;
+    }
+    for (const node of matchingNodes) trustedNodes.add(node);
+  });
+
+  if (issues.length > 0) {
+    return { ok: false, issues };
+  }
+
+  const protectedFields = new Map<
+    Record<string, unknown>,
+    Array<readonly [string, unknown]>
+  >();
+  for (const node of trustedNodes) {
+    const fields = RECORDS_PROJECTOR_GOAL_TARGET_FIELDS.flatMap((field) =>
+      field in node && node[field] !== undefined
+        ? [[field, node[field]] as const]
+        : [],
+    );
+    protectedFields.set(node, fields);
+    for (const [field] of fields) delete node[field];
+  }
+
+  let stripped: GoalThresholdStripResult;
+  try {
+    stripped = stripModelAuthoredGoalThreshold(args.rawJson);
+  } finally {
+    for (const [node, fields] of protectedFields) {
+      for (const [field, value] of fields) node[field] = value;
+    }
+  }
+
+  return {
+    ok: true,
+    stripped: stripped!,
+  };
+}
 
 // PERF 2.1 - Anthropic prompt caching:
 // Extract static system instructions into Anthropic system text blocks and (optionally)
@@ -2196,14 +2357,45 @@ export async function draftGraphWithAnthropic(
         .filter(Boolean)
       : [];
 
-    const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
+    // The legacy raw-graph draft path needed an unconditional scrub because the
+    // model could write CEE-owned target fields directly. This Anthropic path is
+    // now different: immediately above, a deterministic records projector may
+    // have minted those same fields from a brief-verified target record. Apply
+    // the same scrub to everything EXCEPT that narrowly attested
+    // tuple. Unverified transcriptions and every baseline field remain subject
+    // to the existing deletion policy.
+    const goalTargetScrub = scrubProjectedDraftGoalTargets({
+      rawJson,
+      records: activeRecords,
+      projection: activeProjection,
+      brief: args.brief,
+    });
+    if (!goalTargetScrub.ok) {
+      log.error({
+        event: 'cee.draft.verified_goal_target_contract_refused',
+        issues: goalTargetScrub.issues,
+      }, '[Anthropic] refusing a verified numeric goal target whose typed carrier is unsafe or absent');
+      throw Object.assign(
+        new Error(
+          'anthropic_response_invalid_schema: ' +
+          `verified_goal_target_contract_refused:${goalTargetScrub.issues
+            .map((issue) => `${issue.statedItemIndex}:${issue.reason}`)
+            .join(',')}`,
+        ),
+        {
+          _llm_meta: failedCallLlmMeta,
+          ...(truncatedAtMaxTokens ? { truncated_at_max_tokens: true } : {}),
+        },
+      );
+    }
+    const strippedGoal = goalTargetScrub.stripped;
     if (strippedGoal.nodeIds.length > 0) {
       log.info({
         event: "cee.draft.model_authored_goal_threshold_stripped",
         node_ids: strippedGoal.nodeIds,
         fields: strippedGoal.fields,
         structured_outputs_enabled: structuredOutputsEnabled,
-      }, "Discarded a model-authored goal-threshold contract from the draft — the enricher is the only mint (2.281)");
+      }, "Discarded an unattested goal-threshold contract from the draft (2.281)");
     }
     const normalised = normaliseDraftResponse(rawJson);
 
