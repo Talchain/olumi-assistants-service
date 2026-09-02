@@ -56,7 +56,8 @@ export type AddOptionIntentNoMatchReason =
   | 'plural_or_deliberative'
   | 'label_unsafe'
   | 'compound_edit'
-  | 'carries_values';
+  | 'carries_values'
+  | 'target_not_a_label';
 
 export type AddOptionIntentDetection =
   | {
@@ -120,6 +121,34 @@ const P_QUOTED_OPTION_NOUN = new RegExp(
   'i',
 );
 
+/**
+ * ⭐ THE TARGET/LABEL BOUNDARY — the defect this exists to close (2 Sep 2026).
+ *
+ * "Add an option TO <X>" is two different sentences wearing one shape:
+ *   · X is a VERB PHRASE  → X names the option ("to partner with a distributor")
+ *   · X is a NOUN PHRASE  → X names the thing the option is added TO
+ *                           ("to the model", "for the pricing decision")
+ * The second was being claimed and X MINTED AS THE LABEL, so the product
+ * proposed an option called "Model", or one called after its own parent
+ * decision. That is worse than the generic lane, which handles those turns
+ * correctly — a regression dressed as a capability.
+ *
+ * The discriminator is that a legitimate option name after this preposition is
+ * a VERB ("partner", "expand"), never a determiner. So a remainder that opens
+ * with a determiner, demonstrative or possessive is a TARGET, and the option
+ * label is ABSENT — decline, and let the generic lane ask. Never mint X.
+ *
+ * ⚠ NOT SHARED WITH THE OTHER TRIGGERS, deliberately. `option_called`
+ * ("an option called The Big Bet") has an explicit naming word in front of the
+ * label, so a determiner there is part of a name the user actually wrote.
+ * Two harms, two thresholds: dropping a real add is a gap, minting a name the
+ * user never said is a lie, and they must not share one rule.
+ */
+const TARGET_LEAD = /^(?:the|this|that|these|those|my|our|your|its|their|his|her)\s+/i;
+/** A bare frame noun is the container, never the option ("add an option to model"). */
+const FRAME_NOUN_LEAD =
+  /^(?:model|decision|canvas|graph|scenario|analysis|board|map|diagram|list|set|page|project|plan|mix)\b/i;
+
 const PLURAL_OPTION_WORD = /\b(?:options|alternatives|choices)\b/;
 const OPTION_WORD_IN_LABEL = /\b(?:options?|alternatives?|choices?)\b/i;
 const GENERIC_LABELS = new Set([
@@ -153,8 +182,20 @@ function stripQuotedSpans(text: string): string {
   return text.replace(/["'‘’“”][^"'‘’“”]*["'‘’“”]/g, ' ');
 }
 
-function tidyLabel(raw: string): string {
-  const trimmed = raw.replace(/\s+/g, ' ').trim().replace(TRAILING_PUNCT, '').replace(LEADING_ARTICLE, '');
+/**
+ * Tidy a captured label WITHOUT rewriting the user's own name.
+ *
+ * The leading article is scaffolding in "Add THE Berlin office as an option"
+ * and part of the NAME in `Add an option called "The Big Bet"`. So it is
+ * stripped only where the grammar put it there, never where the user did:
+ * `explicitlyNamed` is true for a quoted label and for the `called`/`named`
+ * forms, and those keep every word the user typed. A product that quietly
+ * renames what someone just told it is the small version of the defect this
+ * module exists to prevent.
+ */
+function tidyLabel(raw: string, explicitlyNamed: boolean): string {
+  let trimmed = raw.replace(/\s+/g, ' ').trim().replace(TRAILING_PUNCT, '');
+  if (!explicitlyNamed) trimmed = trimmed.replace(LEADING_ARTICLE, '');
   if (trimmed.length === 0) return '';
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
@@ -243,7 +284,20 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
     return NO_MATCH(PLURAL_OPTION_WORD.test(lower) ? 'plural_or_deliberative' : 'not_add_option_shape');
   }
 
-  const label = tidyLabel(candidate.label);
+  // ⭐ Applied to the RAW capture, before `tidyLabel` strips the leading
+  // article — "the model" must still look like "the model" here, or the very
+  // determiner that identifies it as a target has already been removed.
+  if (candidate.trigger === 'option_to') {
+    const raw = candidate.label.trim();
+    if (TARGET_LEAD.test(raw) || FRAME_NOUN_LEAD.test(raw)) {
+      return NO_MATCH('target_not_a_label');
+    }
+  }
+
+  const label = tidyLabel(
+    candidate.label,
+    candidate.labelWasQuoted || candidate.trigger === 'option_called',
+  );
   if (!labelIsSafe(label)) return NO_MATCH('label_unsafe');
   // An UNQUOTED label that carries a number is a value statement swallowed
   // into a name ("… called Outsource that cuts support cost to 30") — the

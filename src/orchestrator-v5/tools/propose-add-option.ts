@@ -372,6 +372,7 @@ export const ADD_OPTION_REJECTION_CODES = [
   'DUPLICATE_FACTOR',
   'TOO_MANY_LINKS',
   'DUPLICATE_OPTION_LABEL',
+  'LABEL_COLLIDES_WITH_EXISTING_NODE',
   'LABEL_UNUSABLE',
 ] as const;
 export type AddOptionRejectionCode = (typeof ADD_OPTION_REJECTION_CODES)[number];
@@ -488,6 +489,30 @@ export function validateProposedAddOption(
       kind: 'rejected',
       code: 'DECISION_LABEL_MISMATCH',
       reason: 'the parent decision named does not match the id given',
+    };
+  }
+
+  // ⭐ AN OPTION MAY NOT BE NAMED AFTER SOMETHING THE MODEL ALREADY IS.
+  //
+  // The second layer under the recogniser's target/label boundary, and it is
+  // deliberately GRAPH-AWARE where that one is graph-blind. If a target
+  // reference ever reaches here as a label — "Pricing decision", or the parent
+  // decision's own name — this refuses it even though every id resolved and
+  // every label echoed perfectly. That is the point: a guard binding LABEL to
+  // ID cannot see a correctly-labelled WRONG target, so the check that can see
+  // it has to ask a different question — is this name already something else
+  // on this model?
+  //
+  // Checked over EVERY node, not just decisions: an option named after a goal
+  // or a factor is the same confusion wearing a different kind.
+  for (const [id, existing] of grounding.labelById) {
+    if (normaliseLabel(existing) !== normaliseLabel(label)) continue;
+    if (grounding.kindById.get(id) === 'option') break; // the option-specific code below owns it
+    return {
+      ok: false,
+      kind: 'rejected',
+      code: 'LABEL_COLLIDES_WITH_EXISTING_NODE',
+      reason: 'the proposed name is already the name of something else on the model',
     };
   }
 

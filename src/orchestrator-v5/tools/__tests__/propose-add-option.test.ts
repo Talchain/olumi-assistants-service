@@ -383,6 +383,39 @@ describe('validateProposedAddOption — the remaining refusals', () => {
     expect(v.code).toBe('DUPLICATE_OPTION_LABEL');
   });
 
+  it('⭐ named after its own PARENT DECISION → LABEL_COLLIDES_WITH_EXISTING_NODE', () => {
+    // The graph-aware second layer under the recogniser's target/label
+    // boundary. Every id here resolves and every label echoes perfectly — the
+    // id-echo rule cannot see this, which is exactly why this check asks a
+    // different question.
+    const v = validateProposedAddOption(
+      { ...base, label: GROWTH_G.labelById.get('dec_expansion')! },
+      GROWTH_G,
+    );
+    expect(v.ok).toBe(false);
+    if (v.ok || v.kind !== 'rejected') throw new Error('expected rejection');
+    expect(v.code).toBe('LABEL_COLLIDES_WITH_EXISTING_NODE');
+  });
+
+  it('...and after a GOAL or a FACTOR too — same confusion, different kind', () => {
+    for (const id of ['goal_arr', F_NRR]) {
+      const existing = GROWTH_G.labelById.get(id);
+      if (existing === undefined) continue;
+      const v = validateProposedAddOption({ ...base, label: existing }, GROWTH_G);
+      expect(v.ok, `label "${existing}" must be refused`).toBe(false);
+      if (v.ok || v.kind !== 'rejected') throw new Error('expected rejection');
+      expect(v.code).toBe('LABEL_COLLIDES_WITH_EXISTING_NODE');
+    }
+  });
+
+  it('OPPOSITE DIRECTION: a genuinely new name is still accepted (no over-correction)', () => {
+    const v = validateProposedAddOption(
+      { ...base, label: 'Partner with a local distributor' },
+      GROWTH_G,
+    );
+    expect(v.ok).toBe(true);
+  });
+
   it('the same factor twice → DUPLICATE_FACTOR', () => {
     const link = { factor_id: F_NRR, factor_label: GROWTH_G.labelById.get(F_NRR)!, rationale: 'x' };
     const v = validateProposedAddOption({ ...base, label: 'A new route', links: [link, link] }, GROWTH_G);

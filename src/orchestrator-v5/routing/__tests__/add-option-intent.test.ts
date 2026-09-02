@@ -155,6 +155,74 @@ describe('detectAddOptionIntent — OPPOSITE DIRECTION: every neighbour keeps it
   });
 });
 
+/**
+ * ⭐⭐ THE TARGET/LABEL BOUNDARY (independent review of PR #1319, 2 Sep 2026).
+ *
+ * REPRODUCED before it was fixed: `Add an option to the model` was CLAIMED with
+ * label `"Model"`, and `Add an option for the pricing decision` with label
+ * `"Pricing decision"` — the product proposing an option named after the thing
+ * it was being added to, and in the second case after its own parent decision.
+ *
+ * ⚠ WHY MY EXISTING GUARDS COULD NOT SEE IT, because that is the transferable
+ * part: the id-echo rule holds perfectly here. Every id resolved and echoed its
+ * entity's exact label. The WRONG ENTITY was selected, and then labelled
+ * correctly — so a guard binding label to id is pointed at the wrong bytes by
+ * construction. The fix had to be a different question, asked in two places:
+ * "is this a target rather than a name?" (the recogniser, graph-blind) and
+ * "is this name already something else on this model?" (the validator,
+ * graph-aware).
+ *
+ * ⭐ EVERY CASE HAS ITS OPPOSITE-DIRECTION TWIN, and the two harms are NOT
+ * symmetric: dropping a legitimate add is a GAP (the generic lane still serves
+ * the user), minting an option the user never named is a LIE. They must never
+ * share one threshold, so the pairs below are asserted together — if a future
+ * widening reopens the lie, the left column REDs; if it over-corrects into a
+ * gap, the right column REDs.
+ */
+describe('detectAddOptionIntent — TARGET vs LABEL, in matched pairs', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    // [must be DECLINED — X is the target] , [must be CLAIMED — X names the option]
+    ['Add an option to the model', 'Add an option to partner with a local distributor'],
+    ['Add an option for the pricing decision', 'Add an option for licensing the technology'],
+    ['Add an option to my model', 'Add an option to move manufacturing offshore'],
+    ['Add an option to this scenario', 'Add an option to acquire a competitor'],
+    ['Add an option to the canvas', 'Add an option to open a Berlin office'],
+    ['Add an option for the expansion decision', 'Add an option for entering Germany directly'],
+    ['Add an option to the graph', 'Add an option to run a six-month trial'],
+    ['Add an option to that decision', 'Add an option to hire a country manager'],
+    ['Add an option to our analysis', 'Add an option to franchise the model'],
+    ['Create an option for the board', 'Create an option to expand into Germany'],
+  ];
+
+  it.each(PAIRS)('DECLINES the target %j', (target, _twin) => {
+    const d = detectAddOptionIntent(target);
+    expect(d.matched, `"${target}" must not mint a label`).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('target_not_a_label');
+  });
+
+  it.each(PAIRS)('...while still CLAIMING its twin (no over-correction): %j -> %j', (_target, twin) => {
+    const d = detectAddOptionIntent(twin);
+    expect(d.matched, `"${twin}" is a legitimate add and must survive the fix`).toBe(true);
+    if (!d.matched) return;
+    // And the label is the OPTION, never a frame word.
+    expect(d.label.toLowerCase()).not.toMatch(/^(?:model|decision|canvas|graph|scenario|analysis|board)$/);
+    expect(d.label.length).toBeGreaterThan(3);
+  });
+
+  it('the screen is bound to the prepositional trigger ONLY — an explicit name keeps its determiner', () => {
+    // A determiner after `called` is part of a name the user actually wrote, so
+    // the two triggers must NOT share the rule. This is the discriminating pair
+    // that proves the screen is scoped rather than global.
+    const named = detectAddOptionIntent('Add an option called The Big Bet');
+    expect(named.matched).toBe(true);
+    if (!named.matched) return;
+    expect(named.label).toBe('The Big Bet');
+    // ...and the prepositional form with the same words still declines.
+    expect(detectAddOptionIntent('Add an option to the big bet').matched).toBe(false);
+  });
+});
+
 describe('detectAddOptionIntent — totality', () => {
   it('never throws on hostile input', () => {
     const hostile: unknown[] = [
