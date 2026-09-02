@@ -657,3 +657,60 @@ describe('⭐⭐ THE GAPS THIS MODULE SHIPS OPEN, ASSERTED AS AN EXACT SET', () 
     expect(KNOWN_OPEN_COORDINATED_INSTRUCTION.length).toBeGreaterThan(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ THE THREE DISCRIMINATORS A MUTANT KIT FORCED, AND WHY THEY ARE NOT
+// REDUNDANT WITH THE CASES ABOVE.
+//
+// Three mutations SURVIVED the first kit against this file: dropping
+// `explicitlyNamed` entirely, replacing the `as an option` conjunction with the
+// container test alone, and DELETING A NOUN from `CONTAINER_NOUNS`. None was an
+// equivalent mutant — each was a real hole:
+//   · no explicitly-named case in the corpus mentioned a container, so the
+//     screen could be widened to every trigger and nothing noticed;
+//   · no verb phrase in the corpus mentioned a container, so `isTargetReference`
+//     could be dropped from that branch and nothing noticed;
+//   · the container control is GENERATED FROM the alphabet it certifies, so it
+//     shrank with the list and stayed green — a derived guard proving the copies
+//     agree and never that the list is right.
+// A survivor is a claim either way and has to be demonstrated. These are the
+// demonstrations.
+// ---------------------------------------------------------------------------
+
+describe('the screen’s two conjunctions each bite, on their own case', () => {
+  it.each([
+    ['Add an option called The Model Overhaul', 'The Model Overhaul'],
+    ['Add "The pricing decision review" as an option', 'The pricing decision review'],
+    ['Add a "Model refresh" option', 'Model refresh'],
+  ])('EXPLICITLY NAMED survives even when the name mentions the container: %j', (message, expected) => {
+    // Drop `explicitlyNamed` and these three RED. Without a container noun
+    // inside an explicitly-named label, widening the screen to every trigger
+    // passes every other test in this file.
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" is the user's own name and must survive`).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it.each([
+    ['Add franchise the model as an option', 'Franchise the model'],
+    ['Add rebuild the pricing model as an option', 'Rebuild the pricing model'],
+  ])('a VERB PHRASE mentioning the container is still an ordinary add: %j', (message, expected) => {
+    // Drop `isTargetReference` from the `as an option` branch and these RED.
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must survive`).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it('⭐ CONTAINER_NOUNS is pinned BY HAND — a generated control cannot see it SHRINK', () => {
+    // The hand-written half. The generated contrast control above cannot fail
+    // when the alphabet loses a member, because it iterates that same alphabet.
+    expect([...CONTAINER_NOUNS].sort()).toEqual(
+      [
+        'analysis', 'board', 'canvas', 'decision', 'diagram', 'graph', 'list',
+        'map', 'mix', 'model', 'page', 'plan', 'project', 'scenario', 'set',
+      ].sort(),
+    );
+  });
+});
