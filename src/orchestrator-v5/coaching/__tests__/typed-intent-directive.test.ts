@@ -293,13 +293,13 @@ describe('resolveApplicableProtocol — cites science ONLY where the bundle says
     ['elicit_risks', 'no published protocol names a gap-elicitation exercise'],
   ] as const)(
     'does NOT yet cite a protocol for %s — a held scope boundary, not an absence of science',
-    intent => {
+    (intent, why) => {
       for (const stage of ['frame', 'analyse', 'decide', 'review']) {
         expect(
           resolveApplicableProtocol(intent as 'outside_view', stage),
-          `${intent} acquired a DSK citation at stage ${stage}. That is a claim of ` +
-            'scientific grounding on a user-visible surface: adjudicate the ' +
-            "protocol's required_inputs and contraindications, not just its " +
+          `${intent} acquired a DSK citation at stage ${stage} (${why}). That is a ` +
+            'claim of scientific grounding on a user-visible surface: adjudicate ' +
+            "the protocol's required_inputs and contraindications, not just its " +
             'stage_applicability, and update this pin with the argument.',
         ).toBeNull();
       }
