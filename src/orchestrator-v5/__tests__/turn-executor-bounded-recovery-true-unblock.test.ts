@@ -36,8 +36,16 @@
  *
  * Harness mirrors `turn-executor-bounded-recovery-unknown-freshness.test.ts`
  * (same session-store mock and graph fixtures) but drives the ROUTING-FAILURE
- * entry point rather than the STEP 7 backstop, because that is the path the
- * live witness actually took. The message `'help me think this through'`
+ * entry point rather than the STEP 7 backstop. That is a deliberate HARNESS
+ * CHOICE — this entry point is the one whose failure cause the suite pins —
+ * and deliberately NOT an attribution of the witness's turn:
+ * `buildBoundedFallbackCopyAndChips` takes NO ARGUMENTS at all four call
+ * sites and reads only the analysis projection and the freshness verdict, so
+ * the copy is byte-identical whichever site fired and the text the witness
+ * saw cannot identify the entry point. The witness above is real; what it
+ * establishes is the INSTRUCTION the copy gave and what the user did next,
+ * never which of the four paths produced it.
+ * The message `'help me think this through'`
  * carries no analytical signal, so `tryStaleRerunGuard` declines with
  * `no_analytical_signal` and the turn genuinely reaches routing — asserted
  * per-test, not assumed.
@@ -203,7 +211,17 @@ function mkPayload(message: string): MessageTurnPayload {
 
 /** Both routing calls end `stop_reason: 'max_tokens'` → `tryInterpret`
  *  returns non_repairable `unexpected_stop_reason` → the bounded routing
- *  fallback. This is the live-witnessed failure cause.
+ *  fallback.
+ *
+ *  This is a DETERMINISTIC EXACT-ROUTE SIMULATION of that cause, NOT current
+ *  live evidence. A DOUBLE exhaustion under the present 3072 → 8192 regime is
+ *  UNVERIFIED: no witness of one exists. The live max_tokens evidence is
+ *  HISTORICAL and SINGLE-exhaustion — ~4-5% of routing calls ended
+ *  `max_tokens` at the old 2048 cap, a regime in which no retry existed at all
+ *  (`routing/route-with-tool-use.ts:63-73`). Both the cap and the retry
+ *  changed after that measurement, so it establishes neither the current
+ *  terminal-failure rate nor that the two-call path has ever fired in
+ *  production. What the mock guarantees is the ROUTE, not its incidence.
  *
  *  `output_tokens` is the IMPORTED first-call cap, not a typed-in number: a
  *  truncated first attempt burns exactly its budget, and a hardcoded literal
