@@ -22,6 +22,11 @@ import { describe, it, expect } from 'vitest';
 import {
   detectAddOptionIntent,
   buildAddOptionClarifyChipMessage,
+  isTargetReference,
+  OPTION_NOUN_DETERMINERS,
+  TARGET_DEFINITE_DETERMINERS,
+  TARGET_QUANTIFIER_DETERMINERS,
+  CONTAINER_NOUNS,
 } from '../add-option-intent.js';
 
 /** The exact `action_prompt` CEE's widening card sends as free text. */
@@ -239,5 +244,189 @@ describe('detectAddOptionIntent — totality', () => {
   it('an over-long label is declined rather than truncated into a different name', () => {
     const d = detectAddOptionIntent('Add "' + 'y'.repeat(200) + '" as an option');
     expect(d.matched).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ THE CLOSED CLASS — the corpus that closes against an ENUMERATION.
+//
+// WHY THIS EXISTS AND THE TEN PAIRS ABOVE DO NOT REPLACE IT. The first version
+// of the target/label screen hand-listed the twelve determiners reproduction
+// had turned up, and the pairs above pinned exactly those. English determiners
+// are a CLOSED CLASS of ~45, so the class survived one word shorter: measured
+// over the corpus below at that commit, 117 of 196 probes still minted the
+// user's own container as an option name, and 10 of 10 legitimate verb
+// phrasings were dropped in the other direction.
+//
+// So this corpus is generated from the alphabets rather than typed out, and it
+// is written in MATCHED DIRECTIONS throughout: a widening REDs the LIE column,
+// an over-correction REDs the GAP column. Neither column alone is evidence.
+// ---------------------------------------------------------------------------
+
+describe('detectAddOptionIntent — the determiner CLOSED CLASS, both directions', () => {
+  const ALL_TARGET_DETERMINERS = [...TARGET_DEFINITE_DETERMINERS, ...TARGET_QUANTIFIER_DETERMINERS];
+
+  // --- LIE column: every determiner in the class, against a container -------
+  const LIE_CASES: string[] = [];
+  for (const det of ALL_TARGET_DETERMINERS) {
+    LIE_CASES.push(`Add an option to ${det} decision`);
+    LIE_CASES.push(`Add an option for ${det} model`);
+  }
+  for (const det of ['all', 'both', 'these', 'those', 'several', 'some', 'many', 'two']) {
+    LIE_CASES.push(`Add an option to ${det} decisions`);
+  }
+  for (const n of CONTAINER_NOUNS) LIE_CASES.push(`Add an option to ${n}`);
+  for (const g of ["Paul's", "Acme's", "everyone's", "the team's", "my colleague's"]) {
+    LIE_CASES.push(`Add an option to ${g} model`);
+    LIE_CASES.push(`Add an option for ${g} decision`);
+  }
+  for (const phrase of [
+    'a new decision', 'another new decision', 'any other decision', 'the same decision',
+    'some existing scenario', 'each strategic decision', 'every remaining decision',
+    'the overall analysis', 'this whole model', 'a new distribution model',
+  ]) {
+    LIE_CASES.push(`Add an option to ${phrase}`);
+  }
+
+  it.each(LIE_CASES)('LIE: %j names the container and must NOT be minted as a label', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must not mint the user's own container as an option`).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('target_not_a_label');
+  });
+
+  // --- GAP column: the opposite direction, twinned case by case -------------
+  //
+  // ⭐ EVERY CONTAINER NOUN THAT IS ALSO A VERB GETS A TWIN. The ten pairs
+  // above contain no verb colliding with the noun alphabet, so that corpus
+  // shared the code's blind spot — the exact trap matched pairs exist to
+  // prevent, reappearing inside them. These are the missing right-hand column.
+  const VERB_TWINS: ReadonlyArray<readonly [string, string]> = [
+    ['plan', 'Add an option to plan a phased rollout'],
+    ['map', 'Add an option to map the supply chain'],
+    ['list', 'Add an option to list on the LSE'],
+    ['set', 'Add an option to set up a joint venture'],
+    ['mix', 'Add an option to mix in-house and outsourced delivery'],
+    ['project', 'Add an option to project demand three years out'],
+    ['model', 'Add an option to model a two-year ramp'],
+    ['graph', 'Add an option to graph the cost curve'],
+    ['board', 'Add an option to board the remaining vessels'],
+    ['page', 'Add an option to page the on-call team'],
+  ];
+
+  it.each(VERB_TWINS)(
+    'GAP: %j is a VERB here, so %j is a legitimate option and must be claimed',
+    (noun, message) => {
+      const d = detectAddOptionIntent(message);
+      expect(d.matched, `"${message}" is a legitimate add and must survive the target screen`).toBe(true);
+      if (!d.matched) return;
+      // ...and the label is the whole verb phrase, not the bare container word.
+      expect(d.label.toLowerCase()).not.toBe(noun);
+      expect(d.label.toLowerCase().startsWith(noun)).toBe(true);
+    },
+  );
+
+  it.each([
+    // An INDEFINITE determiner with no container is an ordinary option NAME.
+    // Widening the target screen to "any determiner" would take all of these.
+    ['Add an option to a joint venture with Siemens', 'Joint venture with Siemens'],
+    ['Add an option to a wholly-owned subsidiary', 'Wholly-owned subsidiary'],
+    ['Add an option to another supplier in Poland', 'Another supplier in Poland'],
+    ['Add an option to defer the decision until next year', 'Defer the decision until next year'],
+  ])('GAP: %j is an option name, not a container reference', (message, expected) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must survive`).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it('a BARE container noun is the container; the same word leading a phrase is a verb', () => {
+    // The discriminating pair for the anchor. Loosening `BARE_CONTAINER` back
+    // to a word boundary REDs the second line; dropping it REDs the first.
+    expect(isTargetReference('model')).toBe(true);
+    expect(isTargetReference('model a two-year ramp')).toBe(false);
+    expect(isTargetReference('plan')).toBe(true);
+    expect(isTargetReference('plan a phased rollout')).toBe(false);
+  });
+
+  it('a QUANTIFIER is a target only WITH a container — the two conjuncts both bite', () => {
+    // Drop the determiner conjunct and line 2 flips; drop the container
+    // conjunct and line 3 flips. Neither assertion alone proves the pair.
+    expect(isTargetReference('each decision')).toBe(true);
+    expect(isTargetReference('franchise the model')).toBe(false); // container, no determiner lead
+    expect(isTargetReference('a joint venture with Siemens')).toBe(false); // determiner, no container
+  });
+
+  it('a DEFINITE determiner is a target whatever its head noun — quantifiers are not', () => {
+    expect(isTargetReference('the big bet')).toBe(true);
+    expect(isTargetReference('a big bet')).toBe(false);
+  });
+
+  it("⭐ the productive genitive is a possessive determiner and cannot be listed", () => {
+    expect(isTargetReference("Paul's model")).toBe(true);
+    expect(isTargetReference("the team's decision")).toBe(true);
+    // ...and it is scoped to the genitive form, not to any capitalised word.
+    expect(isTargetReference('Siemens partnership')).toBe(false);
+  });
+});
+
+describe('the target alphabet AGREES with the option-noun alphabet it sits beside', () => {
+  // ⭐⭐ THE UNION ASSERTION — the guard that would have caught `another`.
+  //
+  // `another` was already in `OPTION_NOUN_DETERMINERS` while the target screen
+  // that needed it hand-listed twelve words of its own. A derived guard proves
+  // AGREEMENT and can never prove COMPLETENESS, so this test is deliberately
+  // paired with the hand-written closed-class corpus above: drop either and a
+  // whole defect class goes unobserved.
+  it('every lead word of an option-noun determiner is known to the target screen', () => {
+    const known = new Set(
+      [...TARGET_DEFINITE_DETERMINERS, ...TARGET_QUANTIFIER_DETERMINERS].map((w) => w.toLowerCase()),
+    );
+    const missing = OPTION_NOUN_DETERMINERS.map((phrase) => phrase.split(' ')[0]!.toLowerCase()).filter(
+      (lead) => !known.has(lead),
+    );
+    expect(missing, 'a determiner added for the OPTION noun must also be known to the TARGET screen').toEqual([]);
+  });
+
+  it('the alphabets are non-empty and disjoint — a word may not carry two rules', () => {
+    // A positive control on the assertion above: an empty alphabet would make
+    // it vacuously pass.
+    expect(TARGET_DEFINITE_DETERMINERS.length).toBeGreaterThan(10);
+    expect(TARGET_QUANTIFIER_DETERMINERS.length).toBeGreaterThan(30);
+    expect(OPTION_NOUN_DETERMINERS.length).toBeGreaterThan(5);
+    expect(CONTAINER_NOUNS.length).toBeGreaterThan(10);
+    const overlap = TARGET_DEFINITE_DETERMINERS.filter((w) => TARGET_QUANTIFIER_DETERMINERS.includes(w));
+    expect(overlap).toEqual([]);
+  });
+});
+
+describe('tidyLabel — BOTH directions of the article rule are pinned', () => {
+  // ⚠ The strip direction had no red anywhere: deleting the strip line left
+  // all 70 tests green, because every positive whose label could lose an
+  // article was quoted or explicitly named. These are the missing half.
+  it('STRIP: a grammatical article on an UNQUOTED label is scaffolding, not a name', () => {
+    for (const [message, expected] of [
+      ['Add the Berlin office as an option', 'Berlin office'],
+      ['Add a Poland joint venture as an option', 'Poland joint venture'],
+      ['Add an Ireland subsidiary as an option', 'Ireland subsidiary'],
+    ] as const) {
+      const d = detectAddOptionIntent(message);
+      expect(d.matched, message).toBe(true);
+      if (!d.matched) continue;
+      expect(d.label, `"${message}" must not keep its grammatical article`).toBe(expected);
+    }
+  });
+
+  it('KEEP: an article the USER put inside a name survives verbatim', () => {
+    for (const [message, expected] of [
+      ['Add an option called The Big Bet', 'The Big Bet'],
+      ['Add "The Berlin office" as an option', 'The Berlin office'],
+      ['Add an option named "A Clean Break"', 'A Clean Break'],
+    ] as const) {
+      const d = detectAddOptionIntent(message);
+      expect(d.matched, message).toBe(true);
+      if (!d.matched) continue;
+      expect(d.label, `"${message}" must keep the name the user wrote`).toBe(expected);
+    }
   });
 });

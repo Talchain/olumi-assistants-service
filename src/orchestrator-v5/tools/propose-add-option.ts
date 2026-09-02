@@ -373,6 +373,7 @@ export const ADD_OPTION_REJECTION_CODES = [
   'TOO_MANY_LINKS',
   'DUPLICATE_OPTION_LABEL',
   'LABEL_COLLIDES_WITH_EXISTING_NODE',
+  'LABEL_IS_THE_PARENT_DECISION',
   'LABEL_UNUSABLE',
 ] as const;
 export type AddOptionRejectionCode = (typeof ADD_OPTION_REJECTION_CODES)[number];
@@ -405,6 +406,47 @@ export type AddOptionValidation =
 
 function normaliseLabel(label: string): string {
   return label.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The nouns a decision's label ends in when it is named after its subject —
+ * "Pricing decision", "Expansion strategy", "The build-or-buy question".
+ */
+const DECISION_HEAD_NOUN = /\s+(?:decision|decisions|strategy|choice|question|problem|call)$/;
+const LEADING_ARTICLE_IN_LABEL = /^(?:the|a|an)\s+/;
+
+/** A decision label reduced to its SUBJECT: "Pricing decision" -> "pricing". */
+function decisionSubject(label: string): string {
+  return normaliseLabel(label).replace(LEADING_ARTICLE_IN_LABEL, '').replace(DECISION_HEAD_NOUN, '').trim();
+}
+
+/**
+ * ⭐ IS THIS PROPOSED NAME JUST THE DECISION ITSELF, MINUS ITS HEAD NOUN?
+ *
+ * The second layer under the recogniser's target/label screen, and it exists
+ * because the recogniser CANNOT reach this class. "Add an option for pricing"
+ * and "add an option for licensing" are the same shape — a bare gerund after a
+ * preposition — so a graph-blind rule can only tell them apart by guessing.
+ * This one is GRAPH-AWARE: `pricing` is the parent decision "Pricing decision"
+ * with its head noun removed, and offering the user "Pricing" as an option
+ * under "Pricing decision" is the lie the whole screen exists to stop.
+ * `licensing` matches no decision and passes.
+ *
+ * ⚠ DELIBERATELY NOT the broader "label is a whole-word substring of a
+ * decision label" form. Measured against that form, a decision phrased as a
+ * question — "Should we expand into Germany?" — refuses its own best option,
+ * "Expand into Germany", which is a legitimate answer and the single most
+ * useful thing this path can produce. Equality-after-stripping catches every
+ * case the corpus found without that cost. A false refusal here is only a GAP
+ * (the generic edit lane serves the turn); a false accept is a LIE. That
+ * asymmetry justifies a rule this tight, not a rule this loose.
+ */
+function labelIsTheDecisionItself(label: string, decisionLabel: string): boolean {
+  const l = normaliseLabel(label).replace(LEADING_ARTICLE_IN_LABEL, '').trim();
+  const d = normaliseLabel(decisionLabel).replace(LEADING_ARTICLE_IN_LABEL, '').trim();
+  if (l.length === 0 || d.length === 0) return false;
+  // Either side may be the one carrying the head noun.
+  return l === decisionSubject(d) || decisionSubject(l) === d || decisionSubject(l) === decisionSubject(d);
 }
 
 /**
@@ -513,6 +555,18 @@ export function validateProposedAddOption(
       kind: 'rejected',
       code: 'LABEL_COLLIDES_WITH_EXISTING_NODE',
       reason: 'the proposed name is already the name of something else on the model',
+    };
+  }
+
+  // ...and an option may not be named after the DECISION IT HANGS OFF, even
+  // when the two strings differ. See `labelIsTheDecisionItself`.
+  for (const d of grounding.decisions) {
+    if (!labelIsTheDecisionItself(label, d.label)) continue;
+    return {
+      ok: false,
+      kind: 'rejected',
+      code: 'LABEL_IS_THE_PARENT_DECISION',
+      reason: 'the proposed name is the decision itself, not an option for it',
     };
   }
 

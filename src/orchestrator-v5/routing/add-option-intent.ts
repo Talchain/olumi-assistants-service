@@ -88,8 +88,33 @@ const QUESTION_LEAD =
   /^(?:what|how|why|when|where|who|which|should|does|do|is|are|will|would|could|can|might|shall|may)\b/;
 
 const ADD_VERB = '(?:add|create|include|introduce|insert)';
-const DETERMINER =
-  "(?:(?:a|an|another|one\\s+more|the|a\\s+new|a\\s+further|a\\s+possible|a\\s+second|a\\s+third|a\\s+fourth|a\\s+fifth)\\s+)?";
+/**
+ * The determiners that may introduce the OPTION NOUN ("add A new option").
+ *
+ * ⭐ A LIST, NOT A REGEX LITERAL, because this is the enumeration the target
+ * screen must agree with — `another` sat here for a whole review cycle while
+ * the target screen, which needed it, hand-listed twelve words of its own. The
+ * test file asserts every lead word here is known to the target alphabets, so
+ * the next addition cannot go missing the same way. Order is load-bearing
+ * (regex alternation is first-match-wins) and is asserted against the exact
+ * source string the hand-written literal produced.
+ */
+export const OPTION_NOUN_DETERMINERS: readonly string[] = [
+  'a',
+  'an',
+  'another',
+  'one more',
+  'the',
+  'a new',
+  'a further',
+  'a possible',
+  'a second',
+  'a third',
+  'a fourth',
+  'a fifth',
+];
+
+const DETERMINER = `(?:(?:${OPTION_NOUN_DETERMINERS.map((d) => d.replace(/ /g, '\\s+')).join('|')})\\s+)?`;
 const ADJ = '(?:(?:new|strategic|further|possible|additional|extra|alternative)\\s+)?';
 const OPTION_NOUN = '(?:option|alternative|choice)\\b(?!s)';
 const QUOTE = `["'‘’“”]`;
@@ -133,21 +158,206 @@ const P_QUOTED_OPTION_NOUN = new RegExp(
  * decision. That is worse than the generic lane, which handles those turns
  * correctly — a regression dressed as a capability.
  *
- * The discriminator is that a legitimate option name after this preposition is
- * a VERB ("partner", "expand"), never a determiner. So a remainder that opens
- * with a determiner, demonstrative or possessive is a TARGET, and the option
- * label is ABSENT — decline, and let the generic lane ask. Never mint X.
+ * ⭐⭐ WHY THIS IS BUILT FROM AN ENUMERATION AND NOT A LIST OF EXAMPLES.
+ * The first version of this screen hand-listed TWELVE determiners — the ones
+ * reproduction had found. English determiners are a CLOSED CLASS of ~45, so
+ * THE CLASS SURVIVED ONE WORD SHORTER: `to each decision`, `to every
+ * decision`, `to another decision`, `to a new decision`, `to both decisions`
+ * and `to Paul's model` all still minted the user's own container as an
+ * option name. Measured over an adversarial corpus at that commit: 117 of 196
+ * probes minted a target as a label. And `another` was ALREADY in this file's
+ * own `DETERMINER` alphabet, fifty lines up — the list to close against was
+ * already in the file, unused by the screen that needed it.
+ *
+ * So the alphabet is ENUMERATED ONCE, exported, and every rule below is
+ * derived from it. `add-option-intent.test.ts` asserts the UNION with
+ * `DETERMINER`: a determiner added for the OPTION noun phrase can no longer go
+ * silently missing from the TARGET screen. (A derived guard proves agreement
+ * and never completeness, so the same test also carries a hand-written corpus
+ * of the closed class — the two guards are not redundant.)
+ *
+ * ⭐ TWO SUB-CLASSES, BECAUSE THEY CARRY DIFFERENT EVIDENCE — not one list
+ * split for tidiness. They answer different questions and must not share a
+ * threshold:
+ *
+ *   · DEFINITE / DEMONSTRATIVE / POSSESSIVE — `the`, `this`, `my`, `Paul's`.
+ *     These PRESUPPOSE AN EXISTING REFERENT: the phrase points at something
+ *     the model already has. Whatever its head noun, it is a target.
+ *     ("add an option to the big bet" declines — pinned.)
+ *
+ *   · INDEFINITE / QUANTIFIER / WH / NUMERAL — `a`, `each`, `every`,
+ *     `another`, `both`. These presuppose NOTHING, so "a joint venture with
+ *     Siemens" is a perfectly good option NAME. They are a target only when
+ *     the phrase ALSO names the container ("a new decision", "each decision",
+ *     "both decisions"). Widening this half to "any determiner" would close
+ *     the lie at the cost of every indefinite option name — a gap the PR's own
+ *     asymmetry says is cheap, but a needless one, and this half is where the
+ *     legitimate names live.
  *
  * ⚠ NOT SHARED WITH THE OTHER TRIGGERS, deliberately. `option_called`
  * ("an option called The Big Bet") has an explicit naming word in front of the
  * label, so a determiner there is part of a name the user actually wrote.
  * Two harms, two thresholds: dropping a real add is a gap, minting a name the
  * user never said is a lie, and they must not share one rule.
+ *
+ * ⚠ AND THIS SCREEN IS THE SOLE DEFENCE FOR THIS CLASS. The validator's
+ * `LABEL_COLLIDES_WITH_EXISTING_NODE` fires only on an EXACT match with a node
+ * label that happens to exist, so "Each decision" and "Paul's model" are
+ * accepted by it on any graph without those names. Do not weaken this rule on
+ * the belief that a second layer will catch it.
  */
-const TARGET_LEAD = /^(?:the|this|that|these|those|my|our|your|its|their|his|her)\s+/i;
-/** A bare frame noun is the container, never the option ("add an option to model"). */
-const FRAME_NOUN_LEAD =
-  /^(?:model|decision|canvas|graph|scenario|analysis|board|map|diagram|list|set|page|project|plan|mix)\b/i;
+
+/**
+ * Determiners that PRESUPPOSE an existing referent. A phrase they lead points
+ * at something already on the model, whatever its head noun.
+ */
+export const TARGET_DEFINITE_DETERMINERS: readonly string[] = [
+  // articles (definite) + demonstratives
+  'the',
+  'this',
+  'that',
+  'these',
+  'those',
+  // possessive determiners
+  'my',
+  'our',
+  'your',
+  'its',
+  'their',
+  'his',
+  'her',
+  'whose',
+];
+
+/**
+ * The rest of the closed class: indefinite articles, quantifiers, distributives,
+ * wh-determiners and numerals/ordinals. These presuppose nothing, so they mark
+ * a target only in company with a container noun (see `CONTAINER_NOUNS`).
+ */
+export const TARGET_QUANTIFIER_DETERMINERS: readonly string[] = [
+  // indefinite articles
+  'a',
+  'an',
+  // additive / identity
+  'another',
+  'other',
+  'such',
+  'same',
+  // existential, negative, distributive, universal
+  'some',
+  'any',
+  'no',
+  'none',
+  'each',
+  'every',
+  'either',
+  'neither',
+  'all',
+  'both',
+  'half',
+  // degree
+  'much',
+  'many',
+  'more',
+  'most',
+  'less',
+  'least',
+  'few',
+  'fewer',
+  'little',
+  'several',
+  'enough',
+  'plenty',
+  // wh-determiners
+  'which',
+  'what',
+  'whichever',
+  'whatever',
+  // numerals and ordinals
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'first',
+  'second',
+  'third',
+  'fourth',
+  'fifth',
+  'next',
+  'last',
+  'final',
+];
+
+/**
+ * The CONTAINER the option would be added TO — never the option itself.
+ *
+ * ⚠ EIGHT OF THESE ARE ALSO COMMON ENGLISH VERBS (`plan`, `map`, `list`,
+ * `set`, `mix`, `project`, `model`, `graph`, `board`, `page`), so this
+ * alphabet may only ever be matched where a NOUN is grammatically required:
+ * as the WHOLE remainder (`BARE_CONTAINER`), or inside a determiner-led noun
+ * phrase (`quantifier + container`). The version of this rule that matched on
+ * a bare word boundary declined all ten of "add an option to plan a phased
+ * rollout", "to set up a joint venture", "to map the supply chain" and their
+ * kin — 10 of 10 verb-collision probes lost, in the direction this module
+ * claims to have parameterised separately.
+ */
+export const CONTAINER_NOUNS: readonly string[] = [
+  'model',
+  'decision',
+  'canvas',
+  'graph',
+  'scenario',
+  'analysis',
+  'board',
+  'map',
+  'diagram',
+  'list',
+  'set',
+  'page',
+  'project',
+  'plan',
+  'mix',
+];
+
+const alt = (words: readonly string[]): string =>
+  words
+    .slice()
+    .sort((a, b) => b.length - a.length)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+
+/** `the model`, `this scenario`, `my big bet` — definite, so a target outright. */
+const TARGET_DEFINITE_LEAD = new RegExp(`^(?:${alt(TARGET_DEFINITE_DETERMINERS)})\\s+`, 'i');
+/**
+ * The productive possessive: `Paul's model`, `the team's decision`, `Acme's
+ * plan`. A genitive IS a possessive determiner — it simply cannot be listed,
+ * so it is matched by its form.
+ */
+const TARGET_GENITIVE_LEAD = /^[A-Za-z][A-Za-z0-9-]*['’]s\s+/;
+/** `each …`, `every …`, `a new …`, `both …` — a target only WITH a container. */
+const TARGET_QUANTIFIER_LEAD = new RegExp(`^(?:${alt(TARGET_QUANTIFIER_DETERMINERS)})\\s+`, 'i');
+/** The container named anywhere inside that determiner-led phrase. */
+const CONTAINER_MENTION = new RegExp(`\\b(?:${alt(CONTAINER_NOUNS)})s?\\b`, 'i');
+/**
+ * A bare container noun IS the container ("add an option to model"), and the
+ * comment above has always said so — this is anchored to the END of the
+ * remainder, which is what "bare" means, so the verb readings survive.
+ */
+const BARE_CONTAINER = new RegExp(`^(?:${alt(CONTAINER_NOUNS)})s?[\\s.,;:!?-]*$`, 'i');
+
+/**
+ * Is this remainder a reference to the CONTAINER rather than an option name?
+ * Exported so the corpus can bind to the rule itself, not only to its effect.
+ */
+export function isTargetReference(rawRemainder: string): boolean {
+  const raw = rawRemainder.trim();
+  if (raw.length === 0) return false;
+  if (TARGET_DEFINITE_LEAD.test(raw) || TARGET_GENITIVE_LEAD.test(raw)) return true;
+  if (BARE_CONTAINER.test(raw)) return true;
+  if (TARGET_QUANTIFIER_LEAD.test(raw) && CONTAINER_MENTION.test(raw)) return true;
+  return false;
+}
 
 const PLURAL_OPTION_WORD = /\b(?:options|alternatives|choices)\b/;
 const OPTION_WORD_IN_LABEL = /\b(?:options?|alternatives?|choices?)\b/i;
@@ -288,8 +498,7 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
   // article — "the model" must still look like "the model" here, or the very
   // determiner that identifies it as a target has already been removed.
   if (candidate.trigger === 'option_to') {
-    const raw = candidate.label.trim();
-    if (TARGET_LEAD.test(raw) || FRAME_NOUN_LEAD.test(raw)) {
+    if (isTargetReference(candidate.label)) {
       return NO_MATCH('target_not_a_label');
     }
   }

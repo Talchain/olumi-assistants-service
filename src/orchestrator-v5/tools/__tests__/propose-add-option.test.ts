@@ -397,6 +397,56 @@ describe('validateProposedAddOption — the remaining refusals', () => {
     expect(v.code).toBe('LABEL_COLLIDES_WITH_EXISTING_NODE');
   });
 
+  it('⭐ named after the decision MINUS ITS HEAD NOUN → LABEL_IS_THE_PARENT_DECISION', () => {
+    // The class the recogniser CANNOT reach. "Add an option for pricing" and
+    // "add an option for licensing" are the same shape — a bare gerund after a
+    // preposition — so a graph-blind rule can only guess. This one is
+    // graph-aware: the parent decision is "Geographic Expansion Strategy", so
+    // "Geographic Expansion" is the decision itself, not an option for it.
+    const decision = GROWTH_G.labelById.get('dec_expansion')!;
+    const subject = decision.replace(/\s+Strategy$/i, '');
+    expect(subject, 'the fixture must actually carry a head noun to strip').not.toBe(decision);
+    const v = validateProposedAddOption({ ...base, label: subject }, GROWTH_G);
+    expect(v.ok, `"${subject}" is the decision itself`).toBe(false);
+    if (v.ok || v.kind !== 'rejected') throw new Error('expected rejection');
+    expect(v.code).toBe('LABEL_IS_THE_PARENT_DECISION');
+  });
+
+  it('...and in the other direction — the label carrying a head noun the decision lacks', () => {
+    const decision = GROWTH_G.labelById.get('dec_expansion')!;
+    const subject = decision.replace(/\s+Strategy$/i, '');
+    for (const head of ['decision', 'choice', 'question']) {
+      const v = validateProposedAddOption({ ...base, label: `${subject} ${head}` }, GROWTH_G);
+      expect(v.ok, `"${subject} ${head}"`).toBe(false);
+      if (v.ok || v.kind !== 'rejected') continue;
+      expect(v.code).toBe('LABEL_IS_THE_PARENT_DECISION');
+    }
+  });
+
+  it('OPPOSITE DIRECTION: a legitimate option that MENTIONS the subject still passes', () => {
+    // ⚠ The discriminating twin, and the reason this rule is EQUALITY-after-
+    // stripping rather than the broader "whole-word substring of a decision
+    // label". Under the substring form every one of these is refused —
+    // including the single most useful thing this path produces, an option
+    // that answers the decision in its own words. A false refusal here is only
+    // a gap, but it is a needless one and it takes the good cases first.
+    const decision = GROWTH_G.labelById.get('dec_expansion')!;
+    const subject = decision.replace(/\s+Strategy$/i, '');
+    for (const label of [
+      `${subject} via a joint venture`,
+      `Pause ${subject.toLowerCase()} for a year`,
+      'Partner with a local distributor',
+    ]) {
+      const v = validateProposedAddOption({ ...base, label }, GROWTH_G);
+      expect(v.ok, `"${label}" is a legitimate option and must survive`).toBe(true);
+      // ...and it IS a whole-word substring relationship, so the looser form
+      // this rule declines really would have taken it.
+      if (label !== 'Partner with a local distributor') {
+        expect(label.toLowerCase()).toContain(subject.toLowerCase());
+      }
+    }
+  });
+
   it('...and after a GOAL or a FACTOR too — same confusion, different kind', () => {
     for (const id of ['goal_arr', F_NRR]) {
       const existing = GROWTH_G.labelById.get(id);
