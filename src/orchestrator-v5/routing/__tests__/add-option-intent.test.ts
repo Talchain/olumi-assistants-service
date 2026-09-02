@@ -84,6 +84,19 @@ describe('detectAddOptionIntent — OPPOSITE DIRECTION: every neighbour keeps it
     ['Would it be worth adding an option here', 'deliberation'],
     ['Add more options', 'plural widening, not one named option'],
     ['Suggest additional options for this decision', "the UI's own explore-more chip"],
+    // ⭐ THESE FIVE WERE ADDED BECAUSE A MUTANT SURVIVED. Removing the
+    // singular-noun guard left the corpus above fully GREEN — every phrase in
+    // it was being declined by the LABEL patterns, not by the guard, so the
+    // guard was untested and a tidy-up could have deleted it silently. Each of
+    // these is declined now and CLAIMED by the guard-less mutant (measured
+    // both ways), which is what makes them evidence. They are also the real
+    // harm: "Add options: Berlin office, Munich office" would otherwise create
+    // ONE option literally named "Berlin office, Munich office".
+    ['Add options: Berlin office, Munich office', 'plural list — would mint one option named after all of them'],
+    ['Add options called Berlin and Munich', 'plural list with a separator'],
+    ['Add alternatives: partner, acquire, build', 'plural alternatives'],
+    ['Create options to expand into Germany and France', 'plural with an infinitive'],
+    ['Add choices called A and B', 'plural choices'],
     ['Add a factor called Shipping costs', 'a factor, not an option'],
     ['Add a risk called Regulatory delay', 'a risk, not an option'],
     ['Add an assumption that demand keeps growing', 'an assumption, not an option'],
