@@ -821,9 +821,27 @@ export const KNOWN_OPEN_COORDINATED_NAME: readonly string[] = [
  * close; open classes do not. Determiners closed because English has ~45 of
  * them and no more. Pointers, like container nouns, compose freely ("that last
  * one", "the two we discussed", "whichever you prefer") and no list reaches
- * them. Adding five strings would close these five rows and nothing else,
- * while reading as though the class were handled — which is how four rounds
- * happened.
+ * them. Adding strings would close those rows and nothing else, while reading
+ * as though the class were handled — which is how four rounds happened.
+ *
+ * ⭐⭐ THIS SET IS A SAMPLED FLOOR, NOT AN INVENTORY — and the sentence that
+ * used to sit here said the opposite.
+ *
+ * It briefly claimed the set "tracks measured scope", i.e. that growing it to
+ * match what reviewers found was the discipline. That is a TRACKING MIRROR,
+ * and it contradicted the paragraph directly above it: the header says
+ * enumerating an open class is futile, and the replacement sentence adopted a
+ * policy that mandates exactly that enumeration. An independent 43-item sweep
+ * of pointer expressions then measured **41 minting outside this set** (123 of
+ * 129 across three frames, contrast controls firing both ways in the same
+ * run) — so the tracking framing understated the class by roughly 4.5x, on a
+ * number the decision to ship it open was justified against.
+ *
+ * What is true: the members below are a SAMPLE of a class that cannot be
+ * enumerated. The set exists to keep the class VISIBLE and NON-SHRINKING —
+ * `toBe(9)` stops it being quietly emptied — never to say how large the class
+ * is. Do not read its length as a cost estimate, and do not grow it toward the
+ * 41: that is the fifth round this module has already ruled out.
  *
  * The exit is the same `clarify` arm named above, and the discriminating
  * control is that `Add the Berlin office as an option` must keep yielding
@@ -835,11 +853,9 @@ export const KNOWN_OPEN_ANAPHORA: readonly string[] = [
   'Add either of them as an option',
   'Add both of those as an option',
   'Add the first one as an option',
-  // ⚠ GROWN 3 Sep 2026 from five to nine. The reviewer measured four further
-  // phrasings minting at 17196fdb, outside the declared set. A known-open set
-  // that UNDERSTATES what mints is a mirror going stale in the direction that
-  // flatters us — and honest cost accounting is this module's whole argument
-  // for shipping these open at all. Declared scope tracks measured scope.
+  // Sampled 3 Sep 2026 from a reviewer's rows at 17196fdb. These are examples,
+  // not an inventory — a later sweep found ~41 more. See the SAMPLED FLOOR note
+  // above before adding to this list.
   'Add the same thing as an option',
   'Add the one we discussed as an option',
   'Add whatever the consultants recommended as an option',

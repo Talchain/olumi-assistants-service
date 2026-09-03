@@ -937,8 +937,14 @@ describe('the courtesy-prefix header now matches the code', () => {
 // stays green — the test COUNT dropping by one was the only tell.
 //
 // The determiner alphabets had exactly the same hole and were left open, which
-// is the instance-vs-class error this PR has now demonstrated three times. Four
-// alphabets exist; four are pinned.
+// is the instance-vs-class error this PR has now demonstrated three times.
+//
+// ⚠ AND THE COUNT WAS WRONG TOO: there are FIVE alphabets, not four. The fifth
+// is `OPTION_NOUN_DETERMINERS`, which BUILDS the recogniser regex, and it was
+// already hand-pinned — `DETERMINER_FRAGMENT` is asserted byte-for-byte against
+// the historical literal, with a positive control proving a reorder breaks it.
+// A sentence counting the alphabets got it wrong while the pins themselves were
+// right. Five alphabets exist; five are pinned.
 // ---------------------------------------------------------------------------
 describe('every alphabet in this module is pinned BY HAND', () => {
   it('TARGET_DEFINITE_DETERMINERS — the presupposing determiners, exactly', () => {
@@ -963,19 +969,32 @@ describe('every alphabet in this module is pinned BY HAND', () => {
     // The definite half presupposes a referent and is a target whatever the head
     // noun; the quantifier half needs a container noun. A word in both would
     // silently take whichever rule is tested first.
+    //
+    // Proven by COPYING `same` into the definite alphabet — an insert, leaving
+    // the quantifier entry in place, so both lists still contain it. (An
+    // earlier note called this mutation a "move"; it was never a move, and the
+    // distinction matters: a move would relocate the word and this assertion
+    // would stay green, whereas a copy is what actually creates the ambiguity.)
     const overlap = TARGET_DEFINITE_DETERMINERS.filter((w) =>
       (TARGET_QUANTIFIER_DETERMINERS as readonly string[]).includes(w),
     );
     expect(overlap).toEqual([]);
   });
 
-  it('all four alphabets are hand-pinned — the completeness check on this suite', () => {
+  it('all FIVE alphabets are hand-pinned — the completeness check on this suite', () => {
     // A derived guard proves the copies agree and can never prove a list is
-    // right. These four assertions are the only ones in this file that can see
-    // an alphabet SHRINK.
+    // right. These are the only assertions in this file that can see an
+    // alphabet SHRINK.
+    //
+    // ⚠ The fifth entry is not decoration: `OPTION_NOUN_DETERMINERS` builds the
+    // recogniser regex, and a comment claiming "four alphabets" left it
+    // uncounted here while it was in fact pinned elsewhere (see the
+    // DETERMINER_FRAGMENT block). Counted explicitly so the sentence and the
+    // assertions cannot drift apart again.
     expect(TARGET_DEFINITE_DETERMINERS.length).toBe(13);
     expect(TARGET_QUANTIFIER_DETERMINERS.length).toBe(46);
     expect(CONTAINER_NOUNS.length).toBe(15);
     expect(NAMING_WORDS.length).toBe(5);
+    expect(OPTION_NOUN_DETERMINERS.length).toBe(12);
   });
 });
