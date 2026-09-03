@@ -48,6 +48,10 @@ import {
   type LeaderIdentityBasis,
   type ContentSafeRunDelta,
 } from '../coaching/compare-runs.js';
+import {
+  licenceToReportMovementDirection,
+  type MovementDirectionLicence,
+} from '../coaching/movement-direction-licence.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 // T1 claim safety (ROADMAP 1.233) — the ALARM's reader, for the module-load
 // probe on this file's withheld copy. Imported rather than re-implemented so the
@@ -469,6 +473,7 @@ function bandPhrase(level: string): string | null {
 function composeComparison(
   delta: ContentSafeRunDelta,
   authority: RunComparisonLeaderAuthority,
+  movementLicence: MovementDirectionLicence,
 ): string {
   const parts: string[] = [];
   const mayNamePrior = authority.prior;
@@ -535,16 +540,41 @@ function composeComparison(
   // cannot show that, "its lead has widened by about 20 percentage points"
   // silently attributes one option's lead to another — and the pronoun makes
   // it a continuity claim in the very branch that just declined to make one.
+  //
+  // ⭐⭐ AND A THIRD PRECONDITION, ADDED AFTER THE 2026-09-03 CAPTURE: THE
+  // MOVEMENT MUST BE DISTINGUISHABLE FROM SAMPLING NOISE.
+  //
+  // `margin_direction` is a ROUNDING verdict on the displayed integer
+  // (`MARGIN_EPSILON_PP` = 0.5) and knows nothing about how many samples
+  // produced it. On the live capture that threshold turned a 62% -> 62.6%
+  // movement at n = 10,000 into *"its lead has widened by about 1 percentage
+  // point"*, against a 2-SE band of 1.37pp. The sibling surface
+  // (`signals/coaching-signals.ts`) shipped the same sentence from the same
+  // field, so the gate is applied at BOTH — a fix on one surface only is how
+  // this file's own register-parity note says the two drift.
   if (!mayCompareLeaderIdentity) {
     // no margin sentence
-  } else if (delta.margin_direction === 'widened') {
-    parts.push(
-      `Its lead has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`,
-    );
-  } else if (delta.margin_direction === 'narrowed') {
-    parts.push(
-      `Its lead has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`,
-    );
+  } else if (
+    delta.margin_direction === 'widened'
+    || delta.margin_direction === 'narrowed'
+  ) {
+    if (movementLicence.kind === 'licensed') {
+      parts.push(
+        delta.margin_direction === 'widened'
+          ? `Its lead has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
+          : `Its lead has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`,
+      );
+    } else if (movementLicence.kind === 'within_noise') {
+      parts.push(
+        'The size of its lead moved by less than this model varies between '
+        + 'runs, so I would not read a direction into that movement.',
+      );
+    } else {
+      parts.push(
+        'I cannot tell whether the movement in the size of its lead is real '
+        + 'or just sampling variation, so treat it as unchanged.',
+      );
+    }
   } else if (delta.margin_direction === 'unchanged') {
     parts.push('The size of its lead is essentially unchanged.');
   }
@@ -729,7 +759,15 @@ export function tryRunComparisonGate(
   return {
     matched: true,
     mode: 'compared',
-    assistant_text: composeComparison(delta, authority),
+    assistant_text: composeComparison(
+      delta,
+      authority,
+      // ⭐ THE SAME TWO FACTS THE DELTA WAS PROJECTED FROM. `pair` is this
+      // gate's own selection, so the band is computed over the pair the
+      // sentence quantifies — not over a second selection that could name a
+      // different "previous run".
+      licenceForPair(pair.prior, pair.current),
+    ),
     suggested_actions: [],
     // Deliberately NOT gated on `authority`. This field has exactly one
     // consumer — the `v5.run_comparison_gate` telemetry event in
@@ -741,4 +779,32 @@ export function tryRunComparisonGate(
     leading_option_changed: delta.leading_option_changed,
     leader_identity_basis: delta.leader_identity_basis,
   };
+}
+
+/**
+ * The movement-direction licence for a compared pair of run facts.
+ *
+ * FAILS CLOSED to `unbounded`: a fact with no readable PLoT envelope yields no
+ * band, and an absent band must never read as a granted direction (the same
+ * construction as the REQUIRED `mayNameLeadingOption` above).
+ */
+function licenceForPair(
+  prior: HandlerFact,
+  current: HandlerFact,
+): MovementDirectionLicence {
+  const priorEnrichment = runAnalysisEnrichmentOf(prior);
+  const currentEnrichment = runAnalysisEnrichmentOf(current);
+  if (priorEnrichment === null || currentEnrichment === null) {
+    return { kind: 'unbounded', reason: 'no_identity_bound_pair' };
+  }
+  return licenceToReportMovementDirection({ priorEnrichment, currentEnrichment });
+}
+
+/** The PLoT envelope persisted on a `run_analysis` fact, or null. */
+function runAnalysisEnrichmentOf(fact: HandlerFact): Record<string, unknown> | null {
+  if (fact.fact_type !== 'run_analysis') return null;
+  const enrichment = fact.result.enrichment;
+  return enrichment !== null && typeof enrichment === 'object' && !Array.isArray(enrichment)
+    ? (enrichment as Record<string, unknown>)
+    : null;
 }
