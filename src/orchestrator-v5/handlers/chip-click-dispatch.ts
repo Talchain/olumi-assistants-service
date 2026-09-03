@@ -55,6 +55,7 @@ import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
 import { config } from '../../config/index.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { applyEgressForbiddenPhraseGuard } from '../compose/forbidden-user-facing-phrases.js';
+import { applyProcessNarrationGuard } from '../compose/process-narration.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -1700,6 +1701,45 @@ export async function dispatchChipClickRunAnalysis(
           ? `${AUTO_RUN_PROVISIONAL_DISCLOSURE} ${receipt}`
           : AUTO_RUN_PROVISIONAL_DISCLOSURE,
       };
+    }
+
+    // ⭐⭐ PROCESS NARRATION — the third of the three finaliser sites, and it
+    // runs BEFORE the forbidden-phrase guard for the same ordering reason as
+    // in turn-executor: it is the guard that can substitute the whole reply,
+    // so its replacement copy must then be judged by the guard below rather
+    // than bypassing it. See `compose/process-narration.ts` for the two
+    // witnessed leaks (3 Sep 2026) and for why the branch-level
+    // `stripPlanningPreamble` could not cover them.
+    //
+    // ⚠ WHY HERE AT ALL, when neither witnessed leak came down this path.
+    // `DETERMINISTIC_CHIP_ACTION_TYPES` routes chip clicks around the turn
+    // executor entirely (see the F6 note below, which exists for exactly this
+    // reason), so a guard installed only in `finalizeRun` would be blind to
+    // every chip-initiated turn. Enumerating the paths that HAVE leaked is how
+    // the next emit path ships uncovered; this covers the chip-click DISPATCH
+    // FAMILY by construction — both of route-v2's `chip_click` exits
+    // (`:2855`, `:2937`) reach here.
+    //
+    // ⚠ IT IS NOT ROUTE-LEVEL COVERAGE, and an earlier draft of this comment
+    // implied it was. `route-v2.ts` has 24 `sendFinalised200` exits and this
+    // guard is reachable on four. The measured enumeration, and the exits
+    // that carry model-authored prose WITHOUT it, are in
+    // `enforceProcessNarrationGuard`'s docblock in `turn-executor.ts`.
+    {
+      const guarded = applyProcessNarrationGuard(response.assistant_text ?? '');
+      if (guarded.rewritten) {
+        emit(TelemetryEvents.V5EgressProcessNarrationDetected, {
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          marker: guarded.hit,
+          remedy: guarded.remedy,
+          dispatch_path: 'chip_click_finalise',
+          sentences_total: guarded.sentencesTotal,
+          sentences_removed: guarded.sentencesRemoved,
+          narration_length: guarded.narration.length,
+        });
+        response = { ...response, assistant_text: guarded.text };
+      }
     }
 
     // V5 stale-aware explain recovery — finaliser-level egress guard.
