@@ -34,6 +34,10 @@ import {
   checkDecisionReviewContract,
   summariseContractViolations,
 } from '../../cee/decision-review/contract-gate.js';
+import {
+  checkProseFactAgreement,
+  summariseProseFactViolations,
+} from '../../cee/decision-review/prose-fact-agreement.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
 import { emit, log, TelemetryEvents } from '../../utils/telemetry.js';
 import { collectFactorFlipEntries } from '../../orchestrator/context/analysis-compact.js';
@@ -571,7 +575,48 @@ export async function enrichRunAnalysisWithDecisionReview(
       { request_id: input.requestId, scenario_id: input.scenarioId },
       gapRedaction,
     );
-    const reviewOutput = gapRedaction.value as DecisionReviewOutput;
+    const gapRedacted = gapRedaction.value as Record<string, unknown>;
+
+    // PROSE / FACT AGREEMENT — the THIRD consumer of this single egress seam,
+    // and a DIFFERENT question from both of its neighbours. The contract gate
+    // above asks "does this output obey the prompt contract?"; the gap
+    // redaction beside it asks "does this sentence state a retired statistic?";
+    // this asks **"does this prose agree with the signed analytical fact the
+    // producer shipped in the same payload?"** A review can pass both of the
+    // others and still tell the user that a link getting STRONGER flips the
+    // result when the producer's own `edge_e_values` row says it must get
+    // WEAKER — measured on the 2026-09-03 capture, on both narrated edges.
+    //
+    // Two inputs, read separately on purpose:
+    //   `enrichment`  — the signed edge facts (`edge_e_values`), which are NOT
+    //                   forwarded to the prompt and so are the independent
+    //                   check rather than a second reading of the model's own
+    //                   input;
+    //   `invokeInput` — what the model was actually shown, which is the only
+    //                   thing that can license a value-of-information claim.
+    //                   Licensing from the enrichment would cite evidence the
+    //                   model never saw.
+    //
+    // Neither remedy drops the review — see the module header and the
+    // per-field ruling cited on the redaction above.
+    const proseFact = checkProseFactAgreement(gapRedacted, enrichment, invokeInput);
+    if (proseFact.violations.length > 0) {
+      emit(TelemetryEvents.V5DecisionReviewProseFactViolation, {
+        request_id: input.requestId,
+        scenario_id: input.scenarioId,
+        duration_ms: Date.now() - startedAt,
+        redacted_contradicted: proseFact.redactedContradicted,
+        redacted_ungrounded: proseFact.redactedUngrounded,
+        voi_fields_redacted: proseFact.voiFieldsRedacted,
+        // The honest residue: directional claims KEPT because this seam
+        // declined to classify their prose. Counted so the gap is observable
+        // rather than inferred — it is the number that says how much of the
+        // surface the deterministic check is not reaching.
+        unclassified_kept: proseFact.unclassifiedKept,
+        ...summariseProseFactViolations(proseFact.violations),
+      });
+    }
+    const reviewOutput = proseFact.output as DecisionReviewOutput;
 
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:
     // Run the parent-level enrichment through the sanitiser BEFORE

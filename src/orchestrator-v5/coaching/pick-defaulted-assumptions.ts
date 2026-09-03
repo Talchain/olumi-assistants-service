@@ -91,6 +91,7 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+import { readDefaultedRootEvidence } from '../context/inference-warning-evidence.js';
 
 /**
  * Maximum factor labels named in the disclosure sentence. Beyond this the
@@ -173,6 +174,32 @@ export function readDefaultedAssumptions(
  *
  * Exported so the producer-path suite can bind to THIS function by identity
  * rather than re-implementing the traversal (CLAUDE.md trap 19).
+ *
+ * ⭐⭐ THE COUNT IS FLOORED AGAINST A SECOND, INDEPENDENT PRODUCER CHANNEL, and
+ * that is a correctness fix, not a nicety. On the live capture of 2026-09-03
+ * (scenario 7826c742) the engine's `defaulted_assumptions` list held ONE entry
+ * while its own `inference_warnings` held THREE `ROOT_NODE_DEFAULT_VALUE`
+ * warnings — nodes 16ec3d64, 422ceee7 and 7dc44ba7 — plus a
+ * `GOAL_ANCESTOR_DATA_GAP` saying the goal's probabilities partially rest on
+ * placeholder zeros. The product therefore told a founder *"The analysis used
+ * a default value for ONE of the factors"* about a model running on three
+ * placeholders under the headline number. Understating how provisional a
+ * number is, is how a provisional number becomes a recommendation.
+ *
+ * ⚠ THE FLOOR IS A UNION ASSERTION, NOT A SECOND MIRROR (CLAUDE.md trap 12d).
+ * Deriving the disclosure from `defaulted_assumptions` alone can only ever
+ * prove that list is self-consistent; it can never notice the list is SHORT.
+ * The completeness check has to come from outside the list, and the warning
+ * channel is the outside source the producer already ships. Neither channel
+ * supersedes the other — they answer different questions ("what did the
+ * producer put on its disclosure list?" vs "which roots did the engine
+ * actually compute on a placeholder?"; see `inference-warning-evidence.ts`) —
+ * so the honest composite is the MAXIMUM, never one replacing the other.
+ *
+ * The floor moves the count only UPWARD, and only on evidence the engine
+ * itself emitted. `named` is untouched: the warning channel carries node IDs,
+ * not labels, and naming a raw id at a user-facing surface would trade an
+ * under-disclosure for a leak.
  */
 export function readDefaultedAssumptionsFromEnrichment(
   enrichment: unknown,
@@ -182,12 +209,20 @@ export function readDefaultedAssumptionsFromEnrichment(
 
   // The producer's real path.
   const brief = asObject(envelope['decision_brief']);
-  const nested =
-    brief === null ? null : readDefaultedAssumptions(brief['defaulted_assumptions']);
-  if (nested !== null) return nested;
+  const disclosed =
+    (brief === null ? null : readDefaultedAssumptions(brief['defaulted_assumptions'])) ??
+    // Tolerated alternative — see the note above.
+    readDefaultedAssumptions(envelope['defaulted_assumptions']);
 
-  // Tolerated alternative — see the note above.
-  return readDefaultedAssumptions(envelope['defaulted_assumptions']);
+  const floor = readDefaultedRootEvidence(envelope).defaultedRootFloor;
+
+  if (disclosed === null) {
+    // The disclosure list is absent or empty but the engine warned about
+    // defaulted roots anyway — today that combination discloses NOTHING.
+    return floor > 0 ? { count: floor, named: Object.freeze([]) } : null;
+  }
+  if (floor <= disclosed.count) return disclosed;
+  return { count: floor, named: disclosed.named };
 }
 
 export function pickLatestDefaultedAssumptions(
