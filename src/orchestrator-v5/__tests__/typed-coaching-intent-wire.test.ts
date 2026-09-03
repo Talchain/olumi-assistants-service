@@ -28,6 +28,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { Intent } from '@talchain/schemas/boundary';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { TelemetryEvents, setTestSink } from '../../utils/telemetry.js';
@@ -395,17 +396,48 @@ describe('a typed coaching intent routes end-to-end and reaches the coach', () =
     ).toBe(false);
   });
 
-  it('an UNROUTED published intent is not steered (the gate is the four, not the enum)', async () => {
-    // `pre_mortem` is a published `Intent` member with a mounted spark and NO
-    // arm. Routing the whole enum because the enum lists it would re-create the
-    // silent-drop defect in the opposite direction.
+  it('an UNROUTED published intent is not steered (the gate is the SEVEN, not the enum)', async () => {
+    // ⚠ THIS CONTROL WAS `pre_mortem` UNTIL pre_mortem WAS ROUTED. That is the
+    // hazard worth naming: a negative case whose subject later acquires the
+    // behaviour keeps passing only if someone notices. It is now
+    // `mitigation_help` — published in the `Intent` enum, mounted by NO
+    // affordance in DGAI, and routed by nobody — and the precondition is
+    // asserted rather than assumed, so this cannot decay into a tautology.
+    expect(
+      Intent.options as readonly string[],
+      'mitigation_help is no longer published — this control proves nothing',
+    ).toContain('mitigation_help');
+    expect(
+      ROUTED_COACHING_INTENTS as readonly string[],
+      'mitigation_help is now ROUTED — this negative case is vacuous; pick another control',
+    ).not.toContain('mitigation_help');
+
     const { adapter, seen } = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('pre_mortem', 'frame'), 'req-wire-unrouted', {
+    await runTurnExecutor(chipPayload('mitigation_help', 'frame'), 'req-wire-unrouted', {
       routingAdapter: adapter as never,
       graphState: READY_GRAPH as never,
     });
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.some(m => m.includes('## Requested coaching method (explicit)'))).toBe(false);
+  });
+
+  it('DISCRIMINATING PAIR — the SAME turn shape WITH a routed intent IS steered', async () => {
+    // ⭐ The absence above proves the arm can decline; on its own it does not
+    // prove the arm can ACT on this exact turn shape, so a resolver that
+    // declined everything would pass it. This is the other half of the pair:
+    // same payload builder, same stage, same adapter — only the intent token
+    // differs, and now the directive MUST be present.
+    const { adapter, seen } = makeCapturingAdapter();
+    await runTurnExecutor(chipPayload('pre_mortem', 'frame'), 'req-wire-routed-pair', {
+      routingAdapter: adapter as never,
+      graphState: READY_GRAPH as never,
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(
+      seen.some(m => m.includes('## Requested coaching method (explicit)')),
+      'a routed intent on the same turn shape was NOT steered — the absence test ' +
+        'above is therefore not evidence about routing, only about a dead arm',
+    ).toBe(true);
   });
 });
 
@@ -493,8 +525,10 @@ describe('F2 — an unrouted typed intent is OBSERVABLE, not silently dropped', 
   });
 
   it('a PUBLISHED-but-unrouted intent emits the drop, naming the exact token', async () => {
+    // Control subject moved `pre_mortem` → `mitigation_help` when pre_mortem
+    // gained an arm; the precondition is pinned in the sibling suite.
     const { adapter, seen } = makeCapturingAdapter();
-    await runTurnExecutor(chipPayload('pre_mortem', 'frame'), 'req-f2-unrouted', {
+    await runTurnExecutor(chipPayload('mitigation_help', 'frame'), 'req-f2-unrouted', {
       routingAdapter: adapter as never,
       graphState: READY_GRAPH as never,
     });
@@ -509,7 +543,7 @@ describe('F2 — an unrouted typed intent is OBSERVABLE, not silently dropped', 
       'a typed `chip.intent` CEE does not route left no trace at all — the silent ' +
         'drop is the mechanism that made this whole defect class invisible',
     ).toHaveLength(1);
-    expect(dropped[0]!.data.intent).toBe('pre_mortem');
+    expect(dropped[0]!.data.intent).toBe('mitigation_help');
     expect(dropped[0]!.data.stage).toBe('frame');
     // Content-free: the user's message must never ride this event.
     expect(JSON.stringify(dropped[0]!.data)).not.toContain(SPARK_MESSAGE);
