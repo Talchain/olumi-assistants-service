@@ -79,15 +79,54 @@ import {
 } from "./magnitude-alphabet.js";
 
 /**
- * The separators that join the two bounds of a written range.
+ * The separators that join the two bounds of a written range, for patterns
+ * whose surrounding grammar does NOT commit to a coordinate reading.
  *
- * Hyphen, en dash, em dash, "to" and "and" — the last two only in their word
- * forms, so "2to5" does not read as a range. Spelled ONCE here because the
- * factor extractor previously carried three private spellings of it and one of
- * them (`[-–—to]+`, a CHARACTER CLASS) matched a bare "o" or "t" as a
- * separator.
+ * Hyphen, en dash, em dash, and "to" in its word form only, so "2to5" does not
+ * read as a range. Spelled ONCE here because the factor extractor previously
+ * carried three private spellings of it and one of them (`[-–—to]+`, a
+ * CHARACTER CLASS) matched a bare "o" or "t" as a separator.
+ *
+ * ⛔⛔ "and" IS NOT HERE, AND ITS ABSENCE IS THE POINT. An earlier cut of this
+ * constant admitted it, unanchored — and `percentRange` / `currencyRange` make
+ * their `between` prefix OPTIONAL, so two independently stated amounts joined
+ * by an ordinary "and" became one range with a MIDPOINT NOBODY WROTE. Measured
+ * through `extractFactors` at `d2847f2c`:
+ *
+ *     "We pay £500 and £700 per month."       → + {v: 600,     500..700}
+ *     "Costs are £30k and £45k respectively." → + {v: 37,500,  30k..45k}
+ *     "We saw 5% and 10% in the two cohorts." → + {v: 7.5%,      5..10}
+ *     "we raised £2.5m and £500k in grants"   → + {v: 1,500,000, min > max}
+ *
+ * That is the OVER-READ direction — a fabricated magnitude, the worse of the
+ * two.
+ *
+ * ⭐ BUT DELETING "and" OUTRIGHT WAS ALSO WRONG, AND A TEST CAUGHT IT. The
+ * first cut of this fix dropped the word entirely, and
+ * `parseNumericValue("between £20,000 and £30,000")` — a legitimate,
+ * already-pinned, `between`-anchored range — stopped parsing. The harm is not
+ * the word "and"; it is "and" WITHOUT the anchor that commits the sentence to a
+ * coordinate reading.
+ *
+ * ⭐⭐ SO THE "and" BRANCH IS BOUND BY POSITION, NOT BY OCCURRENCE. Its
+ * lookbehind requires the text immediately before this separator to be
+ * `between <optional currency><the digits just matched>` — i.e. THE LOWER
+ * BOUND ITSELF IS THE OBJECT OF "between". That is a fixed grammar, not a
+ * proximity heuristic and not an open-ended string rule (this estate has burned
+ * four consecutive rounds on one of those, trap 22f), and it binds the
+ * suppression to its object by identity, where identity is position (trap 19):
+ *
+ *     "between £20,000 and £30,000"     → range      (anchor adjacent)
+ *     "We pay £500 and £700 per month."  → two points (no anchor)
+ *     "between two options, we pay £500 and £700"
+ *                                         → two points (anchor not adjacent)
+ *
+ * `genericRange` and `numeric-parser`'s bare range do not need it — they
+ * consume `between` as a literal prefix and use `RANGE_SEPARATOR_WORDS_ONLY`.
  */
-export const RANGE_SEPARATOR = "(?:\\s*[-–—]\\s*|\\s+(?:to|and)\\s+)";
+export const RANGE_SEPARATOR =
+  "(?:\\s*[-–—]\\s*|\\s+to\\s+" +
+  `|(?<=\\bbetween\\s{1,3}(?:[£$€¥₹]\\s*)?${AMOUNT_DIGITS})\\s+and\\s+)`;
 
 /**
  * The WORD-ONLY separator, for callers whose surrounding grammar already
@@ -252,8 +291,25 @@ export function resolveAmountRange(input: {
  * new rule invented for this case: a pair whose digits DESCEND is not a range.
  * `resolveAmountRange` uses it to decide whether a trailing magnitude can be
  * distributed; here there is no magnitude to distribute, and the same fact
- * decides whether there is a range at all. One rule, two uses — stated once so
- * the two cannot drift into disagreeing about what a range is.
+ * decides whether there is a range at all.
+ *
+ * ⚠⚠ BUT "ONE RULE, TWO USES" IS NOT WHAT THIS FILE IMPLEMENTS, and the
+ * sentence that used to stand here said it was. There are THREE answers to
+ * "is a descending pair a range?", and they are deliberately different:
+ *
+ *   percent (here)                        → NO. Refuse.
+ *   amount, magnitude on ONE side only    → NO. Refuse (ellipsis needs the
+ *                                           ordering precondition to be safe).
+ *   amount, magnitude on BOTH sides       → YES, and it publishes `min > max`
+ *                                           — pinned at `amount-range.test.ts`
+ *                                           on the stated grounds that the
+ *                                           extractors already tolerated it.
+ *
+ * The third is a tolerance carried forward, not a rule this file endorses. It
+ * is recorded here rather than smoothed over, because a comment asserting an
+ * invariant the file does not hold is the most convincing wrong sentence in a
+ * module — a successor would reconcile the code to the comment and change
+ * behaviour nobody asked to change.
  *
  * ⚠ THE COST, AND WHY IT IS THE SAFE DIRECTION: "churn between 10-5%" is now
  * refused. Refusing it loses an extraction and asks the user; admitting it kept

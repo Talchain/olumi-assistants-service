@@ -25,9 +25,12 @@
  * and it can NEVER prove the patterns read their captures correctly, nor that
  * the alphabet is long enough (trap 12d). A pattern could name the alternation
  * in a group its consumer ignores and this guard would applaud. That is why the
- * hand-written corpus in `amount-range.test.ts` and
- * `factor-extraction/__tests__/range-magnitude-cross-extractor.test.ts` ships
- * beside it and neither supersedes the other: derivation stops the copies
+ * hand-written corpus in `amount-range.test.ts` — including its
+ * cross-extractor agreement case, "the option path and the factor path agree
+ * about the same sentence" — ships beside it and neither supersedes the other
+ * (⚠ this sentence previously named a
+ * `factor-extraction/__tests__/range-magnitude-cross-extractor.test.ts` that
+ * does not exist; the corpus is real, the address was not): derivation stops the copies
  * drifting, a corpus is what notices the list is short OR the wiring wrong.
  *
  * ── THE EXCLUSION IS DERIVED, NOT DECLARED ─────────────────────────────────

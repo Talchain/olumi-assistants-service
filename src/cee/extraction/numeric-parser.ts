@@ -50,6 +50,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import {
   amountRangePattern,
+  RANGE_SEPARATOR,
   rangePointEstimate,
   resolveAmountRange,
   resolvePercentRange,
@@ -253,7 +254,15 @@ export function parseNumericValue(text: string): ParsedValue | null {
  * module `cee/factor-extraction` reads — so the two extractors resolve
  * "£80-120k" to the same two bounds and the same point. That agreement is
  * asserted directly, on one shared corpus, in
- * `factor-extraction/__tests__/range-magnitude-cross-extractor.test.ts`.
+ * `utils/__tests__/amount-range.test.ts` — see "the option path and the factor
+ * path agree about the same sentence".
+ *
+ * ⚠ THIS POINTER WAS WRONG AND IS CORRECTED. It named
+ * `factor-extraction/__tests__/range-magnitude-cross-extractor.test.ts`, a file
+ * that does not exist in this repo; a successor grepping for it would have
+ * concluded the agreement was unasserted. The guard is real, only the address
+ * was fictional — which is exactly the class of sentence this estate treats as
+ * a defect in its own right.
  */
 /**
  * The third answer `parseRangeValue` can give: "this text states a range, and
@@ -264,6 +273,48 @@ export function parseNumericValue(text: string): ParsedValue | null {
 const RANGE_REFUSED = Symbol("range_refused");
 type RangeParse = ParsedValue | typeof RANGE_REFUSED | null;
 
+/**
+ * ⭐⭐⭐ "from X to Y" IS A CHANGE, NOT A RANGE — and reading it as one turned a
+ * confident figure into `null` on exactly the construction "reduce", "cut" and
+ * "lower" mean.
+ *
+ * `RANGE_SEPARATOR` admits `\s+to\s+`, and every range pattern below makes its
+ * `between` prefix optional, so a from-to frame matched as a range. When the
+ * pair DESCENDS — which is what a reduction is — `resolvePercentRange` refuses,
+ * `RANGE_REFUSED` stops the chain, and the caller gets nothing. Measured
+ * through `parseNumericValue` at `d2847f2c`, against the base at `f4c8f501`:
+ *
+ *     "reduce churn from 10% to 5%"    10 (high) →  NULL
+ *     "cut CAC from £600 to £400"     600 (high) →  500 (medium), rangeMin > rangeMax
+ *     "cut spend from £2m to £500k"     2m (high) →  1.25m (medium), inverted
+ *     "raise price from £49 to £59"    49 (high) →  54 (medium)
+ *
+ * Both consumers are the option-intervention path — `intervention-extractor.ts`
+ * `continue`s on a falsy value at `:407` and pushes `value: null` at `:329` —
+ * so the intervention is dropped or nulled outright.
+ *
+ * ⚠ THIS PR ALREADY CONTAINED THE RIGHT ANALYSIS, one module over.
+ * `resolveAmountPairBothOrNeither`'s docstring: *"a DECREASE descends by
+ * definition, so the ordering precondition that makes shared-suffix ellipsis
+ * safe for a range says nothing here."* It was implemented for `changePattern`
+ * in `factor-extraction` and not carried here, where the same precondition
+ * meets the same construction. This is that rule, applied consistently.
+ *
+ * ⭐ BOUND BY POSITION, NOT BY OCCURRENCE. The predicate asks whether THIS
+ * match's own lower bound is the object of a `from`, never whether the word
+ * appears somewhere in the text — an assertion (or a suppression) must bind to
+ * its object by identity, and here identity is position (trap 19). So
+ * "we cut costs, and the range is £5k-£9k" is untouched.
+ *
+ * The remedy is to return `null`, not `RANGE_REFUSED`: this text states a
+ * figure, it simply is not a range, so the point parsers below should read it —
+ * which restores the confident `from`-side value the base returned.
+ */
+function isFromToChangeFrame(text: string, matchIndex: number | undefined): boolean {
+  if (matchIndex === undefined) return false;
+  return /\bfrom\s+$/i.test(text.slice(0, matchIndex));
+}
+
 function parseRangeValue(text: string): RangeParse {
   const currencyRange = new RegExp(
     `(?<currency>[£$€¥₹])\\s*` +
@@ -273,7 +324,7 @@ function parseRangeValue(text: string): RangeParse {
     "i",
   );
   const currencyMatch = text.match(currencyRange);
-  if (currencyMatch) {
+  if (currencyMatch && !isFromToChangeFrame(text, currencyMatch.index)) {
     const g = currencyMatch.groups ?? {};
     const resolved = resolveAmountRange({
       minDigits: g.min,
@@ -297,14 +348,20 @@ function parseRangeValue(text: string): RangeParse {
 
   // Percentage range: "5-10%", "between 5 and 10%". No magnitude — a
   // percentage does not take one, and the bounds are read as written.
+  // ⚠ THE SEPARATOR IS `RANGE_SEPARATOR`, NOT A PRIVATE COPY. This pattern
+  // spelled its own `(?:\\s*[-–—]\\s*|\\s+(?:to|and)\\s+)`, which carried the
+  // same unanchored `and` the shared constant has now dropped — so
+  // "We saw 5% and 10% in the two cohorts" read as one range with a midpoint
+  // nobody wrote. A second spelling of a separator is the mirror this module
+  // moved to `amount-range.ts` to abolish (trap 12); it is consumed here.
   const percentRange = new RegExp(
     `(?:between\\s+)?(?<min>${AMOUNT_DIGITS})\\s*%?` +
-      `(?:\\s*[-–—]\\s*|\\s+(?:to|and)\\s+)` +
+      RANGE_SEPARATOR +
       `(?<max>${AMOUNT_DIGITS})\\s*%`,
     "i",
   );
   const percentMatch = text.match(percentRange);
-  if (percentMatch) {
+  if (percentMatch && !isFromToChangeFrame(text, percentMatch.index)) {
     const g = percentMatch.groups ?? {};
     const resolvedPercent = resolvePercentRange({ minDigits: g.min, maxDigits: g.max });
     // A DESCENDING pair is not a range — "revenue 2024-10%" is a year and a

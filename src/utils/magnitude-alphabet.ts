@@ -218,11 +218,34 @@ export const AMOUNT_DIGITS = "\\d+(?:,\\d{3})*(?:\\.\\d+)?";
  * this anchor, and each one written by hand is a chance to forget it. A guard
  * that composes it cannot backtrack; a guard that spells its own can.
  *
- * `(?![\\d,])` forbids stopping mid-run. `(?!\\.\\d)` forbids stopping before a
- * decimal fraction — spelled that way, not `(?!\\.)`, so an amount at the end
- * of a sentence ("It cost £59.") still matches.
+ * ⚠⚠ AND THE COMMA HALF WAS TOO WIDE, WHICH SILENTLY DROPPED STATED FIGURES.
+ * The first spelling was `(?![\\d,])`, meaning "do not stop before a digit OR A
+ * COMMA". A thousands separator is a comma — but so is an ORDINARY SENTENCE
+ * COMMA, and this anchor sits inside BOTH `MAGNITUDE_SUFFIX_ABSENT_GUARD` and
+ * `RANGE_LOWER_BOUND_ABSENT_GUARD`, so no sibling pattern caught what it
+ * refused. Measured through `extractFactors` at `d2847f2c`:
+ *
+ *     "The budget is £50,000, but that is not fixed."   →  NOTHING
+ *     "budget of £180,000, plus contingency"            →  NOTHING
+ *     "We spent £50, and the rest went on tooling."     →  NOTHING
+ *     "Vendor A at £180,000, Vendor B at £240,000, and
+ *      an in-house build at £200,000."                  →  £200,000 ONLY
+ *
+ * A number the user typed, gone — the class `contextualNumber`'s own comment
+ * calls "the assistant asked the user for a number they had already typed".
+ * Five of those strings were ALREADY in this repo as fixtures for the
+ * compound-goal path, so the corpus and the code shared one blind spot.
+ *
+ * The job has a precise spelling and it is not "no comma": it is "not another
+ * THOUSANDS GROUP". `(?!,\\d{3})` forbids stopping before `,123` — the actual
+ * failure — while leaving a sentence comma alone.
+ *
+ * `(?!\\d)` forbids stopping mid-run. `(?!,\\d{3})` forbids stopping between
+ * thousands groups. `(?!\\.\\d)` forbids stopping before a decimal fraction —
+ * spelled that way, not `(?!\\.)`, so an amount at the end of a sentence
+ * ("It cost £59.") still matches.
  */
-export const AMOUNT_RUN_END = "(?![\\d,])(?!\\.\\d)";
+export const AMOUNT_RUN_END = "(?!\\d)(?!,\\d{3})(?!\\.\\d)";
 
 /**
  * The alphabet itself, under a caller-chosen group name, with the load-bearing
@@ -330,9 +353,10 @@ export const MAGNITUDE_AMBIGUOUS_TRAILER_GUARD = `(?!(?:${MAGNITUDE_ALTERNATION}
  * refusal had been intended (CLAUDE.md trap 22b: one predicate, two opposite
  * harms).
  *
- * `(?![\\d,])` forbids stopping mid-run, and `(?!\\.\\d)` forbids stopping
- * before a decimal fraction — spelled that way, not `(?!\\.)`, so an amount at
- * the end of a sentence ("It cost £59.") still matches. With both in place the
+ * The anchor is `AMOUNT_RUN_END`, and its three limbs are described at that
+ * constant rather than restated here — a duplicated description is how the
+ * comma limb came to be documented as narrower than it was, in three files at
+ * once. With the anchor in place the
  * match FAILS ENTIRELY on a magnitude-bearing amount, which is the only correct
  * outcome: the sibling that CAN read it has already done so.
  */

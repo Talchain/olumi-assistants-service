@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AMOUNT_DIGITS } from "../magnitude-alphabet.js";
+import { AMOUNT_DIGITS, AMOUNT_RUN_END } from "../magnitude-alphabet.js";
 import {
   RANGE_LOWER_BOUND_ABSENT_GUARD,
   rangePointEstimate,
@@ -283,6 +283,192 @@ describe("a from-to change is not a range", () => {
         maxMagnitude: undefined,
       }),
     ).toEqual({ min: 10, max: 20, magnitudeDistributed: false });
+  });
+});
+
+describe("AMOUNT_RUN_END distinguishes a THOUSANDS group from a sentence comma", () => {
+  /**
+   * ⚠⚠ THE FIRST SPELLING WAS `(?![\\d,])` — "do not stop before a digit OR A
+   * COMMA" — and it therefore refused every amount followed by an ordinary
+   * sentence comma. The anchor sits inside BOTH decline guards, so no sibling
+   * pattern caught what it refused, and the number the user typed simply
+   * vanished. Five of the strings below were ALREADY in this repo as fixtures
+   * for the compound-goal path: the code's blind spot and the corpus's blind
+   * spot were the same one.
+   *
+   * ⭐ ASSERTED ON THE REGEX DIRECTLY as well as through the extractor. That is
+   * how this estate caught the backtracking defect in the first place: a guard
+   * proven only through a caller that supplies its missing precondition has not
+   * been proven.
+   */
+  const runEnd = new RegExp(`(?<amount>${AMOUNT_DIGITS})${AMOUNT_RUN_END}`);
+
+  it.each([
+    ["£800,000, which is a lot", "800,000"],
+    ["£800,000 last year", "800,000"],
+    ["£50, and the rest", "50"],
+    ["£1,200-2,400", "1,200"],
+    ["£49.", "49"],
+    ["£1,234,567, roughly", "1,234,567"],
+  ])("%s reads the WHOLE run, stopping only where the run ends", (text, expected) => {
+    expect(runEnd.exec(text)?.groups?.amount).toBe(expected);
+  });
+
+  it("⭐ THE TWIN: it still refuses to stop BETWEEN thousands groups", () => {
+    // The job the comma limb actually has, and the reason it cannot simply be
+    // deleted. Anchored at the start so the engine cannot slide the match to a
+    // later, legal position — this asserts the ANCHOR, not the scan.
+    const anchored = new RegExp(`^(?<amount>${AMOUNT_DIGITS})${AMOUNT_RUN_END}`);
+    // "800" is followed by ",000" — a thousands group — so stopping there is
+    // forbidden and the whole run is taken instead.
+    expect(anchored.exec("800,000 spent")?.groups?.amount).toBe("800,000");
+    // …and the other two limbs still bite.
+    expect(anchored.exec("1.5 million")?.groups?.amount).toBe("1.5");
+    expect(new RegExp(`^(?<amount>\\d)${AMOUNT_RUN_END}`).exec("80")).toBeNull();
+  });
+
+  /**
+   * One case per pattern that carries a decline guard, bound to the pattern by
+   * its `matchedText` span rather than by the value alone — a different pattern
+   * matching the same number would otherwise satisfy the assertion (trap 19).
+   */
+  it.each([
+    ["PATTERNS.currency", "The budget for this is £50,000, hard.", 50_000, "£50,000"],
+    ["PATTERNS.contextualNumber", "budget of £180,000, plus contingency", 180_000, "budget of £180,000"],
+    ["PATTERNS.approximateValue", "roughly £250,000, plus VAT", 250_000, "roughly £250,000"],
+  ])("%s survives an amount followed by a sentence comma", (_pattern, text, value, span) => {
+    const factors = extractFactors(text);
+    const hit = factors.find((f) => f.matchedText === span);
+    expect(hit, `nothing matched the span ${span} — the figure was dropped`).toBeDefined();
+    expect(hit!.value).toBe(value);
+  });
+
+  it("the three-vendor brief keeps ALL THREE figures, not just the last", () => {
+    // Already a fixture in this repo (`noun-form-real-briefs.json`), and the
+    // shape that makes the drop visible: the first two amounts are each
+    // followed by a comma, so both vanished and only the third survived.
+    const values = extractFactors(
+      "Vendor A at £180,000, Vendor B at £240,000, and an in-house build at £200,000.",
+    ).map((f) => f.value);
+    expect(values.sort((a, b) => a - b)).toEqual([180_000, 200_000, 240_000]);
+  });
+
+  it("⭐ and the amounts the guards are FOR are still declined", () => {
+    // The opposite-direction twin for the whole change: widening the anchor
+    // must not reopen either defect it was written to close.
+    const bareTwin = extractFactors("The cost is £80k.").filter((f) => f.value === 80);
+    expect(bareTwin, "the 1,000x-short bare twin came back").toEqual([]);
+    const rangeHalf = extractFactors("We're budgeting £80-120k for the first hire.");
+    expect(rangeHalf.some((f) => f.value === 80), "half a range published as a point").toBe(false);
+    expect(rangeHalf.some((f) => f.rangeMin === 80_000 && f.rangeMax === 120_000)).toBe(true);
+  });
+});
+
+describe("the same rule reaches numeric-parser: a from-to frame is not a range", () => {
+  /**
+   * ⚠ THIS CLASS SHIPPED, AND THE CORPUS COULD NOT SEE IT. `RANGE_SEPARATOR`
+   * admits `\s+to\s+`, and every range pattern in `numeric-parser` makes its
+   * `between` prefix optional, so `from X to Y` matched as a range. When the
+   * pair DESCENDS — which is what "reduce", "cut" and "lower" mean — the
+   * percent resolver refused, `RANGE_REFUSED` stopped the chain, and the
+   * caller got NULL. Every from-to fixture in the repo ascended, so the corpus
+   * excluded the class outright and certified nothing over it.
+   *
+   * Both consumers are the option-intervention path
+   * (`intervention-extractor.ts` `continue`s on falsy at `:407`, pushes
+   * `value: null` at `:329`), so the intervention was dropped or nulled.
+   */
+  const DESCENDING_CHANGES: ReadonlyArray<readonly [string, number, string]> = [
+    ["reduce churn from 10% to 5%", 10, "percent"],
+    ["bring churn from 12% to 8%", 12, "percent"],
+    ["from 10% to 5%", 10, "percent"],
+    ["cut CAC from £600 to £400", 600, "GBP"],
+    ["lower CAC from £600k to £400k", 600_000, "GBP"],
+    ["cut spend from £2m to £500k", 2_000_000, "GBP"],
+  ];
+
+  it.each(DESCENDING_CHANGES)(
+    "%s reads the stated FROM figure, not null and not an inverted range",
+    (text, expected, unit) => {
+      const parsed = parseNumericValue(text);
+      expect(parsed, `${text} parsed to nothing`).not.toBeNull();
+      expect(parsed!.value).toBe(expected);
+      expect(parsed!.unit).toBe(unit);
+      // The two shapes this class used to produce, both forbidden.
+      expect(parsed!.isRange ?? false, "a change is not a range").toBe(false);
+      expect(parsed!.rangeMin).toBeUndefined();
+      expect(parsed!.rangeMax).toBeUndefined();
+    },
+  );
+
+  it("an ASCENDING from-to is treated the same way — the frame decides, not the ordering", () => {
+    // ⚠ THE OPPOSITE-DIRECTION TWIN (trap 22b). If the fix had keyed on
+    // "descending" rather than on the FRAME, this case would still read as a
+    // range and the predicate would carry the same asymmetry as the defect.
+    for (const [text, expected] of [
+      ["raise price from £49 to £59", 49],
+      ["increase revenue from 10% to 12%", 10],
+      ["from £80,000 to £100,000", 80_000],
+    ] as const) {
+      const parsed = parseNumericValue(text);
+      expect(parsed!.value, text).toBe(expected);
+      expect(parsed!.isRange ?? false, text).toBe(false);
+    }
+  });
+
+  it("⭐ the refusal binds by POSITION, so a `from` elsewhere in the sentence is not a frame", () => {
+    // The discriminating twin for the binding itself. `isFromToChangeFrame`
+    // asks whether THIS match's own lower bound is the object of a `from`,
+    // never whether the word occurs in the text (trap 19). Without that, a
+    // stray "from" would suppress a genuine range.
+    const stillARange = parseNumericValue("we moved away from that, and the budget is £5,000-£9,000");
+    expect(stillARange!.isRange).toBe(true);
+    expect(stillARange!.rangeMin).toBe(5_000);
+    expect(stillARange!.rangeMax).toBe(9_000);
+  });
+});
+
+describe("`and` joins a range ONLY where `between` anchors its lower bound", () => {
+  /**
+   * ⚠ AN UNANCHORED `and` MANUFACTURED A MIDPOINT NOBODY WROTE. The separator
+   * admitted the bare word while `currencyRange`/`percentRange` make their
+   * `between` prefix optional, so two independently stated amounts became one
+   * range. That is the OVER-READ direction — a fabricated magnitude.
+   */
+  it.each([
+    ["We pay £500 and £700 per month.", [500, 700]],
+    ["Costs are £30k and £45k respectively.", [30_000, 45_000]],
+    ["we raised £2.5m and £500k in grants", [2_500_000, 500_000]],
+  ] as ReadonlyArray<readonly [string, readonly number[]]>)(
+    "%s stays TWO points, with no invented midpoint",
+    (text, expected) => {
+      const values = extractFactors(text).map((f) => f.value);
+      expect(values.sort((a, b) => a - b)).toEqual([...expected].sort((a, b) => a - b));
+      expect(
+        extractFactors(text).some((f) => f.rangeMin !== undefined),
+        "a range was manufactured from an ordinary `and`",
+      ).toBe(false);
+    },
+  );
+
+  it("⭐ THE TWIN: with `between` on the lower bound it IS a range — deleting `and` outright was also wrong", () => {
+    // The first cut of this fix dropped the word entirely and broke this
+    // already-pinned case. One control cannot cover two opposite defects, so
+    // both directions are asserted here.
+    const parsed = parseNumericValue("between £20,000 and £30,000");
+    expect(parsed!.isRange).toBe(true);
+    expect(parsed!.rangeMin).toBe(20_000);
+    expect(parsed!.rangeMax).toBe(30_000);
+    expect(parsed!.value).toBe(25_000);
+    expect(parsed!.confidence).toBe("medium");
+  });
+
+  it("the anchor must govern THIS lower bound, not merely appear in the sentence", () => {
+    // Positional binding again: "between" is present, but it governs a phrase,
+    // not the amount. A proximity heuristic would read this as a range.
+    const parsed = parseNumericValue("between two options, we pay £500 and £700");
+    expect(parsed!.value).toBe(500);
+    expect(parsed!.isRange ?? false).toBe(false);
   });
 });
 
