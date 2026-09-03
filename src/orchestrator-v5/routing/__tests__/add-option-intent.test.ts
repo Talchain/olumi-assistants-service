@@ -31,6 +31,8 @@ import {
   CLOSED_COORDINATED_INSTRUCTION,
   KNOWN_OPEN_COORDINATED_NAME,
   KNOWN_OPEN_ANAPHORA,
+  KNOWN_OPEN_HEDGE_LABEL,
+  KNOWN_OPEN_NAMING_WORD_TARGET_PRICE,
   KNOWN_OPEN_SEPARATOR_NAMING,
   KNOWN_OPEN_DEFERRAL_LABEL,
   NAMING_WORDS,
@@ -230,10 +232,20 @@ describe('detectAddOptionIntent — TARGET vs LABEL, in matched pairs', () => {
     expect(d.label.length).toBeGreaterThan(3);
   });
 
-  it('the screen is bound to the prepositional trigger ONLY — an explicit name keeps its determiner', () => {
-    // A determiner after `called` is part of a name the user actually wrote, so
-    // the two triggers must NOT share the rule. This is the discriminating pair
-    // that proves the screen is scoped rather than global.
+  it('the two triggers take DIFFERENT ARMS of the screen — not different scopes', () => {
+    // ⚠ THIS TEST'S NAME AND REASONING WERE BOTH FALSE UNTIL 3 Sep 2026, and the
+    // reasoning was the one defending a live defect. It said the screen is
+    // "bound to the prepositional trigger ONLY" because "a determiner after
+    // `called` is part of a name the user actually wrote". Measured: that
+    // exemption let 8 of 8 determiner-led TARGETS through — `Add an option
+    // called the model` -> "The model".
+    //
+    // The assertions below were always right; only the explanation was wrong.
+    // `The Big Bet` survives not because `called` is exempt, but because a
+    // naming word takes the INTERSECTION arm (`isTargetReference &&
+    // mentionsContainer`) and "The Big Bet" names no container. The
+    // prepositional form takes the FULL arm, where a determiner alone is
+    // enough. Give `called` the full arm and this row REDs — mutation-checked.
     const named = detectAddOptionIntent('Add an option called The Big Bet');
     expect(named.matched).toBe(true);
     if (!named.matched) return;
@@ -700,16 +712,27 @@ describe('⭐⭐ THE GAPS THIS MODULE SHIPS OPEN, ASSERTED AS AN EXACT SET', () 
 // ---------------------------------------------------------------------------
 
 describe('the screen’s two conjunctions each bite, on their own case', () => {
+  // ⚠⚠ A PINNED ROW WAS MOVED OUT OF THIS CORPUS ON 3 Sep 2026, DELIBERATELY
+  // AND WITH ITS REASON, RATHER THAN QUIETLY DROPPED.
+  //
+  // `Add an option called The Model Overhaul` used to sit here as a positive.
+  // It no longer survives: the target screen is now keyed on QUOTING rather
+  // than on `explicitlyNamed`, and that label is determiner-led AND names a
+  // container, so it takes the same intersection arm as `as an option` and
+  // declines. It is one of exactly three legitimate names out of twenty-two
+  // that the fix costs, and it is pinned as a gap in
+  // `KNOWN_OPEN_NAMING_WORD_TARGET_PRICE` below.
+  //
+  // The remaining two rows are QUOTED, which is the whole point: a quoted
+  // string is the user's words verbatim and stays exempt.
   it.each([
-    ['Add an option called The Model Overhaul', 'The Model Overhaul'],
     ['Add "The pricing decision review" as an option', 'The pricing decision review'],
     ['Add a "Model refresh" option', 'Model refresh'],
   ])('EXPLICITLY NAMED survives even when the name mentions the container: %j', (message, expected) => {
     // ⚠ THE MUTANT EVIDENCE HERE IS THE FIRST TWO ROWS ONLY — measured
     // 3 Sep 2026, and this comment previously overstated it.
     //
-    // Dropping `explicitlyNamed` REDs `The Model Overhaul` and
-    // `The pricing decision review`, because each is a determiner-led phrase
+    // Dropping the guard REDs `The pricing decision review`, a determiner-led phrase
     // that also names a container, so the screen's conjunction goes true once
     // the guard is gone. The third row, `Add a "Model refresh" option`, CANNOT
     // RED under that mutation: `isTargetReference('Model refresh')` is false on
@@ -1120,5 +1143,96 @@ describe('every alphabet in this module is pinned BY HAND', () => {
     expect(CONTAINER_NOUNS.length).toBe(15);
     expect(NAMING_WORDS.length).toBe(5);
     expect(OPTION_NOUN_DETERMINERS.length).toBe(12);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ A NAMING WORD DOES NOT MAKE A TARGET REFERENCE A NAME.
+//
+// `explicitlyNamed` switched the target screen OFF for unquoted `called`
+// labels, and that exemption was defended by a comment which measurement
+// refuted. `Add an option called the model` is a user POINTING AT the model,
+// not christening an option — the flagship defect of this PR, one trigger over.
+// ---------------------------------------------------------------------------
+describe('an unquoted naming word does not exempt a TARGET reference', () => {
+  it.each([
+    'Add an option called the model',
+    'Add an option called each decision',
+    'Add an option called this scenario',
+    'Add an option called my model',
+    'Add an option called the pricing decision',
+    'Add an option called our analysis',
+    'Add an option named the canvas',
+    'Add an option called every decision',
+  ])('LIE: %j points at the model and must not be minted', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must not mint the container as an option`).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('target_not_a_label');
+  });
+
+  it.each([
+    // A QUOTED label is the user's words verbatim and stays exempt — this is
+    // the discriminating half, and it is why the fix is keyed on quoting.
+    ['Add "The model" as an option', 'The model'],
+    ['Add an option named "The pricing decision"', 'The pricing decision'],
+    ['Add a "The Big Bet" option', 'The Big Bet'],
+  ])('GAP: %j is QUOTED — verbatim, determiner and all', (message, expected) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must survive`).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it.each([
+    // ...and the unquoted naming word still works for ordinary names. The
+    // screen takes the INTERSECTION arm, so a determiner alone is not enough —
+    // which is what lets this row through and is exactly what the refuted
+    // comment claimed would fail.
+    ['Add an option called The Big Bet', 'The Big Bet'],
+    ['Add an option called Stay UK-only', 'Stay UK-only'],
+    ['Add an option called The Berlin office', 'The Berlin office'],
+    ['Add an option called Franchise model', 'Franchise model'],
+    ['Add an option titled Stay UK-only', 'Stay UK-only'],
+  ])('GAP: %j is an ordinary name and must survive', (message, expected) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" must survive`).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it('⚠ THE PRICE, pinned: 3 of 22 legitimate names lost, all the same shape', () => {
+    // Determiner-led AND naming a container. Measured, not estimated. One was a
+    // pinned positive above, moved here with its reason rather than dropped.
+    for (const message of KNOWN_OPEN_NAMING_WORD_TARGET_PRICE) {
+      expect(
+        detectAddOptionIntent(message).matched,
+        `"${message}" now CLAIMS — the gap closed; move it out and say so`,
+      ).toBe(false);
+    }
+    expect(KNOWN_OPEN_NAMING_WORD_TARGET_PRICE.length).toBe(3);
+  });
+});
+
+describe('⚠ a HEDGE is not an option, and no screen here can reach one', () => {
+  it.each(KNOWN_OPEN_HEDGE_LABEL)('KNOWN-OPEN, still open: %j', (message) => {
+    expect(
+      detectAddOptionIntent(message).matched,
+      `"${message}" now DECLINES — move it out of KNOWN_OPEN_HEDGE_LABEL and say so`,
+    ).toBe(true);
+  });
+
+  it('the set is exact-length — it REDs if it grows or shrinks', () => {
+    expect(KNOWN_OPEN_HEDGE_LABEL.length).toBe(8);
+  });
+
+  it('⭐ the obvious screen is a NO-OP — demonstrated, not asserted', () => {
+    // Every screen in this module asks "does this refer to something the model
+    // already has?" A hedge refers to nothing, so no target rule reaches it.
+    // Only "your call" is caught, and only because it opens with a possessive.
+    const hedges = ['tbd', 'not sure yet', 'we will see', 'to be decided', 'no idea', 'now'];
+    const caught = hedges.filter((h) => isTargetReference(h) || mentionsContainer(h));
+    expect(caught).toEqual([]);
+    expect(isTargetReference('your call')).toBe(true); // the lone incidental hit
   });
 });

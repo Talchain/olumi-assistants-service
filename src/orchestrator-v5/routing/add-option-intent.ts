@@ -674,13 +674,31 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
   // `Add the model as an option` went straight through `unquoted_as_option`
   // and minted "Model". The flagship defect, alive through a sibling door.
   //
-  // ⚠ AND IT IS NOT "SCREEN ALL FIVE TRIGGERS". Measured: that declines
-  // `Add an option called The Big Bet`, `Add "The Berlin office" as an option`
-  // and `Add a "The Big Bet" option` — explicitly-named labels, one of them
-  // this module's own pinned discriminator. A quoted or `called` label is
-  // a name the user actually wrote, determiner and all. Deriving the scope
-  // from THIS predicate screens exactly the triggers that infer a label and
-  // exactly none of the triggers that are handed one.
+  // ⚠⚠ THE SENTENCE THAT USED TO SIT HERE WAS FALSE, AND IT PROTECTED A LIVE
+  // DEFECT FOR THREE ROUNDS. It said screening `option_called` would decline
+  // `Add an option called The Big Bet`, and that was quoted as settled.
+  // Measured: `isTargetReference("The Big Bet")` is TRUE but
+  // `mentionsContainer("The Big Bet")` is FALSE, and a naming word takes the
+  // INTERSECTION arm — so The Big Bet SURVIVES the screen. The sentence had
+  // conflated the full prepositional arm with the intersection arm: one name,
+  // two questions, inside the justification for an exemption.
+  //
+  // What is actually true. A QUOTED label is the user's words verbatim, so it
+  // stays exempt. An UNQUOTED naming word is a weaker claim:
+  // `Add an option called the model` is a user POINTING AT the model, not
+  // christening an option — 8 of 8 determiner-led targets through that trigger
+  // minted the container as the option name, which is
+  // `Add the model as an option -> "Model"` reborn one trigger over. So the
+  // SCREEN is keyed on QUOTING, and `option_called` takes the same intersection
+  // arm as `as an option`. Measured price: 8/8 lies closed, 3 of 22 legitimate
+  // names lost (all three determiner-led AND naming a container, e.g.
+  // "The Model Overhaul"), and one of those three was a pinned spec row that
+  // has been moved rather than quietly dropped.
+  //
+  // ⚠ `explicitlyNamed` still exists and still governs `tidyLabel` — whether an
+  // article is scaffolding or part of a name is a DIFFERENT question from
+  // whether the phrase is a target, and collapsing them is what produced this
+  // defect. Two questions, named apart, deliberately.
   const explicitlyNamed = candidate.labelWasQuoted || candidate.trigger === 'option_called';
 
   // ⚠ AND THE TWO INFERRING TRIGGERS STILL ASK DIFFERENT QUESTIONS — measured,
@@ -705,7 +723,7 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
   // Applied to the RAW capture, before `tidyLabel` strips the leading article —
   // "the model" must still look like "the model" here, or the very determiner
   // that identifies it as a target has already been removed.
-  if (!explicitlyNamed) {
+  if (!candidate.labelWasQuoted) {
     const raw = candidate.label;
     const isTarget =
       candidate.trigger === 'option_to'
@@ -932,12 +950,73 @@ export const KNOWN_OPEN_SEPARATOR_NAMING: readonly string[] = [
  * read as though the class were handled — the pattern this PR has now measured
  * to fail four times. Pinned, with the `clarify` arm as the exit.
  *
- * ⭐ NOTE THE OVERLAP THAT IS ALREADY CLOSED: the colon/dash forms of the same
- * hedges (`Add an option: TBD`, `Add an option - not sure which yet`) DO now
- * decline, because punctuation no longer confers `explicitlyNamed`. What
- * remains open is the hedge arriving through a real preposition.
+ * ⚠ AND THE SENTENCE THAT USED TO END THIS PARAGRAPH WAS FALSE. It said "what
+ * remains open is the hedge arriving through a real preposition", pointing the
+ * successor at the NARROWER arm. Measured at this head, the NAMING-WORD arm is
+ * the wider one: 9 of 9 hedges mint through `called`/`named`
+ * (`Add an option called TBD` -> "TBD") against 8 of 9 through a preposition.
+ * The colon/dash forms do decline — that half was true; the completeness claim
+ * beside it was not. See `KNOWN_OPEN_HEDGE_LABEL`.
  */
 export const KNOWN_OPEN_DEFERRAL_LABEL: readonly string[] = [
   'We should add an option to think about this later',
   'We need to add an option to decide later',
+];
+
+/**
+ * ⚠ A HEDGE IS NOT AN OPTION — and NO SCREEN IN THIS MODULE CAN REACH ONE.
+ *
+ * `Add an option called TBD` mints an option named "TBD"; so do "not sure yet",
+ * "your call", "we will see", "no idea". Measured at this head: 9 of 9 through
+ * the NAMING-WORD arm, 8 of 9 through a preposition. The naming-word arm is the
+ * wider of the two, which is the opposite of what this file used to claim.
+ *
+ * ⭐ AND THE OBVIOUS FIX IS A NO-OP, DEMONSTRATED RATHER THAN ASSERTED. Running
+ * the target screen over these labels catches 1 of 10 — and that one only
+ * because "your call" happens to open with a possessive determiner. THE REASON
+ * IS STRUCTURAL: every screen here asks "is this a reference to something the
+ * model already has?", and a hedge refers to NOTHING. It is not a target, so no
+ * target rule reaches it. A hedge-word list would be a seventh hand-maintained
+ * list over an OPEN class — the shape this module has measured to fail four
+ * times.
+ *
+ * THE REMEDY IS THE `clarify` ARM, and that is reasoned from the measurement
+ * rather than hoped for: the label is exactly what the user typed, the user has
+ * told us they do not know, and asking is the only answer that is neither a
+ * refusal nor a lie. `AddOptionValidation` carries `kind: 'clarify'`; ⚠ the
+ * route does NOT render it (`route-v2.ts` branches only on
+ * `composed.status === 'composed'`), so the successor must WIRE it as well as
+ * call it. NOT BUILT HERE — a scope expansion, deliberately not taken.
+ *
+ * ⚠ SEVERITY, AND THE RUNG IS CODE-READ, NOT WIRE-WITNESSED. Sharper than "a
+ * hint reaching the composer": the system prompt instructs the model to name
+ * the option the way the user named it, the turn asserts the label back to it,
+ * temperature is 0 and `tool_choice` is forced, and both downstream guards are
+ * GRAPH-RELATIVE — they compare against nodes that exist — so a hedge is
+ * invisible to them. Every one of those is a CODE READ. No wire capture exists
+ * in either direction; do not upgrade this to witnessed on the strength of the
+ * reasoning above, and do not soften it back to "one step removed".
+ */
+export const KNOWN_OPEN_HEDGE_LABEL: readonly string[] = [
+  'Add an option called TBD',
+  'Add an option called not sure yet',
+  'Add an option called your call',
+  'Add an option called we will see',
+  'Add an option called to be decided',
+  'Add an option called no idea',
+  'Add an option for now',
+  'Add an option to TBD',
+];
+
+/**
+ * ⚠ THE PRICE OF KEYING THE SCREEN ON QUOTING, PINNED BY NAME. Three legitimate
+ * names out of twenty-two, all the same shape: determiner-led AND naming a
+ * container. One was a pinned positive in the spec corpus and was MOVED here
+ * with its reason rather than quietly dropped. Gaps, served by the generic edit
+ * lane, bought for 8 of 8 lies.
+ */
+export const KNOWN_OPEN_NAMING_WORD_TARGET_PRICE: readonly string[] = [
+  'Add an option called The Model Overhaul',
+  'Add an option called The new plan',
+  'Add an option called The pricing model refresh',
 ];
