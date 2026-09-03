@@ -959,7 +959,11 @@ const STRUCTURAL_EDGE_TYPES = new Set(["decision-option", "option-factor"]);
 /**
  * Detect uniform edge strengths indicating LLM did not output varied coefficients.
  *
- * When >80% of CAUSAL edges have strength_mean === 0.5 (the default), this indicates
+ * ANSWERS: "did the model default every causal edge to the midpoint?" — a
+ * question about MAGNITUDE, so a defaulted edge counts whether it is +0.5 or
+ * -0.5. Polarity is not an input.
+ *
+ * When >80% of CAUSAL edges have |strength_mean| === 0.5 (the default), this indicates
  * the LLM failed to output the V4 `strength: {mean, std}` nested object and
  * the pipeline fell back to defaults. This defeats sensitivity analysis.
  *
@@ -1031,7 +1035,17 @@ export function detectUniformStrengths(
     // Check V4 field (strength_mean) first, fallback to legacy (weight)
     const strength = edge?.strength_mean ?? edge?.weight ?? DEFAULT_STRENGTH;
 
-    if (typeof strength === "number" && Math.abs(strength - DEFAULT_STRENGTH) < EPSILON) {
+    // ⭐ COMPARE THE MAGNITUDE, NOT THE SIGNED VALUE.
+    // "Did the model default this edge to the midpoint?" is a question about
+    // magnitude: a defaulted edge is ±0.5 depending on its polarity, because
+    // reconciliation moves the stated `effect_direction`'s sign onto the
+    // magnitude. Measuring distance from +0.5 makes a defaulted NEGATIVE edge
+    // read as 1.0 away from the default, so it is not counted — and this
+    // function's own warning string ("N% of causal edges have default strength
+    // (0.5)") then reports a percentage that is not the true one.
+    // `validation/integrity-sentinel.ts:516-517` already takes the magnitude for
+    // this same question, for this same stated reason.
+    if (typeof strength === "number" && Math.abs(Math.abs(strength) - DEFAULT_STRENGTH) < EPSILON) {
       defaultStrengthCount++;
       const edgeId = edge?.id;
       if (typeof edgeId === "string" && affectedEdgeIds.length < 10) {
@@ -1308,7 +1322,13 @@ export interface StrengthClusteringResult {
 
 /**
  * Detect strength clustering: low coefficient of variation (CV < 0.3) in edge strengths.
- * CV = std(strengths) / mean(abs(strengths))
+ *
+ * ANSWERS: "did the model hedge — are all the causal strengths bunched together?"
+ * It does NOT answer "which way do the edges point": polarity is not an input.
+ * Both moments are therefore taken over MAGNITUDES:
+ *
+ *   CV = std(abs(strengths)) / mean(abs(strengths))
+ *
  * If mean(abs(strengths)) === 0, treat as clustered.
  * Excludes structural edges (decision→option, option→factor).
  */
@@ -1382,8 +1402,14 @@ export function detectStrengthClustering(
     };
   }
 
-  // Calculate standard deviation
-  const variance = strengths.reduce((sum, s) => sum + Math.pow(s - meanAbs, 2), 0) / strengths.length;
+  // ⭐ THE DEVIATION IS TAKEN IN MAGNITUDE SPACE.
+  // This took the variance of the SIGNED values about the mean of the ABSOLUTE
+  // values — two different spaces, so it stopped being a coefficient of
+  // variation the moment signs were mixed. A stated-negative edge at -0.6
+  // against `meanAbs` 0.6 read a deviation of -1.2 where its true deviation from
+  // the magnitude mean is 0. "Did the model hedge?" is a question about how far
+  // apart the strengths are, never about which way they point.
+  const variance = absStrengths.reduce((sum, s) => sum + Math.pow(s - meanAbs, 2), 0) / absStrengths.length;
   const std = Math.sqrt(variance);
   const cv = std / meanAbs;
 
@@ -2052,17 +2078,42 @@ export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQua
   // ⚠ THIS BECAME REACHABLE WITH THE POLARITY FIX IN THIS PR, WHICH IS WHY IT
   // IS FIXED HERE. Before it, a stated-negative relationship carried a POSITIVE
   // mean, so the signed and unsigned readings agreed and the defect was latent.
+  //
   // Measured on this PR's own governed baseline
   // (`tools/graph-evaluator/governed/draft-graph-v5/baseline/
   // run-b9389df-claude-sonnet-4-6.json`), replicating this function exactly —
   // same reader, same population variance, same `?? 0.5` fallback — before and
-  // after the flip: 324 edges, 70 sign flips (22%), and **14 of 14 cases cross
-  // the 0.3 threshold below**, each taking `estimate_confidence` up by +0.10.
-  // e.g. case 4: CV 0.121 → 3.481; case 0: 0.000 → 1.960.
+  // after the flip. STATE THE POPULATION, because it is not the edge count:
+  // the artefact holds 324 edges, but only 72 carry a `strength_mean` at all
+  // (0 nested, 252 with none), and STRP Rule 4 fires ONLY where a mean is
+  // present and disagrees with the stated direction. The `?? 0.5` fallback lives
+  // in each READER; the default is not materialised onto the edge until the
+  // Stage 6 boundary (`transforms/schema-v3.ts`), after this stage. So:
   //
-  // The direction of that error is the one that matters: it RAISES a confidence
+  //     19 sign flips (17 of them on causal edges), and
+  //     **7 of the 14 cases cross the 0.3 threshold below**,
+  //
+  // each taking `estimate_confidence` up by +0.10 — cases 1, 2, 3, 4, 6, 7, 12.
+  // e.g. case 1: CV 0.221 → 1.317; case 4: 0.121 → 0.892; case 12: 0.100 → 0.531.
+  // The seven unaffected cases carry no `strength_mean` on any edge, so Rule 4
+  // cannot reach them.
+  //
+  // ⚠ AN EARLIER REVISION OF THIS COMMENT CLAIMED "70 sign flips (22%), 14 of 14
+  // cases". That figure is WITHDRAWN: it applied the sign to all 70 edges whose
+  // stated direction is negative, including the 252 that carry no mean, which is
+  // a population Rule 4 never touches. Anyone sizing follow-on work off it —
+  // #1330's fixture re-derivation, for one — would size it several times too
+  // large. Re-derive against the reader Rule 4 actually uses before quoting.
+  //
+  // The direction of the error is the one that matters: it RAISES a confidence
   // figure on exactly the drafts the polarity fix touches. Control on the same
   // corpus: with `Math.abs` applied, 0 of 14 cases move at all.
+  //
+  // ⚠ AND IT HAS TWO SIBLINGS ASKING THE SAME QUESTION on the same graph in the
+  // same stage — `detectUniformStrengths` (`package.ts:594`) and
+  // `detectStrengthClustering` (`package.ts:601`), both repaired alongside this
+  // one. Enumerating the PRODUCERS of a disagreement is not the same as
+  // enumerating the CONSUMERS of the sign this change newly populates.
   //
   // ⚠ It also corrects the metric for any graph that already carried a negative
   // mean by another route. That is not a side effect to apologise for — it is
