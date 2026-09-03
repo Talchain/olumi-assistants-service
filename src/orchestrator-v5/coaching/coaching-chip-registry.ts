@@ -54,17 +54,43 @@
  * frame. Nothing here can return less than the LLM would have returned,
  * because nothing here returns an answer.
  *
- * ── ⭐⭐ WHY THIS LIST IS NOT A HAND-MAINTAINED MIRROR ──────────────────────
- * It IS a hand-written list, and pretending otherwise would be the estate's
- * signature defect (trap 12). A guard DERIVED from this map could only ever
- * prove that its consumers agree with it — never that it is SHORT (trap 12d).
- * The completeness check therefore comes from OUTSIDE the list:
- * `__tests__/coaching-chip-registry.test.ts` scans the whole `src/` tree for
- * chip-id literals whose slug contains a routed intent token (the tokens
- * themselves derived from `ROUTED_COACHING_INTENTS`, not restated) and REDs
- * on any id this map does not resolve. A new coaching chip hand-rolled in a
- * composer goes red the day it lands, and the scan carries its own contrast
- * control so it cannot pass by being blind.
+ * ── ⭐⭐ THIS LIST IS HAND-WRITTEN, AND SO IS HALF OF ITS CHECK ─────────────
+ * Pretending otherwise would be the estate's signature defect (trap 12). A
+ * guard DERIVED from this map could only ever prove that its consumers agree
+ * with it — never that it is SHORT (trap 12d). The completeness check
+ * therefore comes from OUTSIDE the list, and it lives in exactly one file:
+ * `tests/contract/coaching-chip-intent-completeness.guard.test.ts`. It walks
+ * `src/` comment-stripped, collects chip ids that are written out or minted
+ * through `promptChip`/`chipId` from a quoted lowercase literal, and REDs on
+ * any id it classifies as naming a routed coaching method that this map does
+ * not resolve. **Read that file's header before adding a chip here.** This
+ * note is deliberately its POINTER, not its summary — a summary is one more
+ * mirror to drift.
+ *
+ * ⚠ WHAT THE CLASSIFIER RESTS ON, SAID PLAINLY: TWO VOCABULARIES, ONE OF THEM
+ * MIRRORED. The CEE intent tokens are derived from `ROUTED_COACHING_INTENTS`
+ * and never restated. The DGAI affordance spellings are not derivable — they
+ * live in another repo with nothing importable — so the guard carries
+ * `AFFORDANCE_ALIASES`, a HAND-WRITTEN mirror. It fails loud on the dimension
+ * that grows (its keys are asserted equal to the derived arm, so an eighth
+ * routed method REDs until someone states its spelling) and it is pinned as a
+ * frozen record, so it can neither grow nor shrink in silence. It exists
+ * because the two vocabularies differ for four of the seven methods
+ * (`challenge_frame`/`pressure_test_frame` and three more).
+ *
+ * ⚠⚠ A SAMPLED FLOOR, NEVER AN EXACT SET. This paragraph used to claim that a
+ * coaching chip hand-rolled in a composer "goes red the day it lands". That
+ * sentence is WITHDRAWN. It was false for four of seven methods under the
+ * token-only classifier that preceded `AFFORDANCE_ALIASES`, and it is still
+ * not a claim the scan can support. A green run means only this: **no chip id
+ * in `src/` THAT THE SCAN CAN SEE spells a routed intent token or a recorded
+ * affordance name and goes unresolved.** Measured blind spots, recorded so
+ * nobody has to rediscover them — an id minted from a discriminator that is
+ * not a quoted lowercase literal (a template literal, a variable, or a literal
+ * carrying a hyphen, which `chipId()` normalises to an underscore) is
+ * invisible to the scan; and a RENAME of a DGAI spark leaves it green while
+ * re-opening the blind spot for that one method. Treat a clean sheet as a
+ * floor, and add the chip here rather than relying on the guard to notice.
  */
 
 import type { RoutedCoachingIntent } from './typed-intent-directive.js';

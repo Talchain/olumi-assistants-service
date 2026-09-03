@@ -9,10 +9,14 @@
  * magnitude alphabet). The thing that catches a short list is a check whose
  * evidence comes from somewhere else.
  *
- * So this guard scans the SOURCE TREE. For every chip-id literal whose slug
- * names a routed coaching method, the registry must resolve it. A composer
- * that hand-rolls a new coaching chip — the exact way the pre-mortem chip came
- * to exist at four sites under two id spellings — goes RED the day it lands.
+ * So this guard scans the SOURCE TREE. For every chip id THE SCAN CAN SEE
+ * whose slug names a routed coaching method, the registry must resolve it. A
+ * composer that hand-rolls a new coaching chip — the exact way the pre-mortem
+ * chip came to exist at four sites under two id spellings — REDs it, PROVIDED
+ * that chip's id reaches the wire by one of the two routes this scan can read.
+ * That proviso is the whole scope of a green run: it is enumerated at the
+ * patterns below and restated at SCOPE OF THE GREEN, and what this guard
+ * reports is a SAMPLED FLOOR, never an exact set.
  *
  * ── ⚠⚠ "NAMES A ROUTED METHOD" IS TWO VOCABULARIES, NOT ONE ────────────────
  * An earlier version of this guard classified on the CEE INTENT TOKEN alone
@@ -49,14 +53,17 @@
  * It is a FAIL-LOUD mirror on the dimension that actually grows. Its keys are
  * asserted EQUAL to `ROUTED_COACHING_INTENTS`, derived — so an eighth routed
  * method REDs this file until someone states its affordance spelling (or
- * states that it has none, with an empty array). What it cannot catch is a
- * RENAME of an existing spark in DGAI, which would silently re-open the blind
- * spot for that one method. That residual is stated, not closed.
+ * states that it has none, with an empty array). What THE MIRROR cannot catch
+ * is a RENAME of an existing spark in DGAI, which would silently re-open the
+ * blind spot for that one method. That residual is stated, not closed — and it
+ * is not the only one; the SCAN has its own, enumerated at route 3 below.
  *
  * ⚠ SCOPE OF THE GREEN, stated so it cannot be generalised again: a clean
- * sheet here means **no chip id in `src/` spells a routed intent token or one
- * of the four recorded affordance names and goes unresolved**. It is not a
- * proof that no unroutable coaching affordance exists.
+ * sheet here means **no chip id in `src/` THAT THIS SCAN CAN SEE spells a
+ * routed intent token or one of the four recorded affordance names and goes
+ * unresolved**. Both qualifiers are load-bearing. It is not a proof that no
+ * unroutable coaching affordance exists, and it is not a proof about ids
+ * minted by route 3 below, which the scan cannot read at all.
  *
  * ── WHY THE TOKENS ARE DERIVED AND THE PATTERN IS NOT ──────────────────────
  * The intent vocabulary comes from `ROUTED_COACHING_INTENTS`, never restated
@@ -107,17 +114,47 @@ const SRC_ROOT = fileURLToPath(new URL('../../src', import.meta.url));
 const REGISTRY_FILE = 'orchestrator-v5/coaching/coaching-chip-registry.ts';
 
 /**
- * Chip ids reach the wire two ways, and a scan that sees only the first is
- * blind to the majority of them. This guard's own NON-VACUITY control caught
- * exactly that on its first run: the literal-only pattern found 40 ids and
- * MISSED `chip_prompt_run_pre_mortem`, the very chip the lane was built for,
- * because `compose/chip-generator.ts` never spells it — `promptChip()` mints
- * it from a discriminator through `chipId()`'s template.
+ * Chip ids in the `chip_action_*` / `chip_prompt_*` family — the only family
+ * that can spell a coaching method — reach the wire THREE ways. This scan
+ * reads two of them, and the third is live today, so the enumeration is stated
+ * with its gap rather than as a closed set. The NON-VACUITY control caught
+ * exactly this shape on its first run: the literal-only pattern found 40 ids
+ * and MISSED `chip_prompt_run_pre_mortem`, the very chip the lane was built
+ * for, because `compose/chip-generator.ts` never spells it — `promptChip()`
+ * mints it from a discriminator through `chipId()`'s template.
  *
- *   1. WRITTEN OUT   `id: 'chip_action_run_pre_mortem'` — a literal.
- *   2. MINTED        `promptChip('run_pre_mortem', …)` /
- *                    `chipId('prompt', 'run_pre_mortem')` — reconstructed here
- *                    with the same expression `chipId()` uses.
+ *   1. WRITTEN OUT — SEEN.
+ *      `id: 'chip_action_run_pre_mortem'`, a literal.
+ *   2. MINTED FROM A QUOTED LOWERCASE LITERAL — SEEN.
+ *      `promptChip('run_pre_mortem', …)` / `chipId('prompt', 'run_pre_mortem')`,
+ *      reconstructed below with the same expression the minters use.
+ *   3. MINTED FROM ANYTHING ELSE — INVISIBLE, and in production now:
+ *      a template literal — `chipId('prompt', …)` with a backtick-quoted
+ *      "unsupported_" + category discriminator, at
+ *      `compose/unsupported-action-response.ts:308,315,321`; a variable —
+ *      `chipId('action', h.handler_id)` at `:376` and
+ *      `compose/validation-failure-responses.ts:219`, and
+ *      `chipId('prompt', label)` at `:1546`; and a literal carrying a HYPHEN,
+ *      which the `[a-z0-9_]+` capture cannot match even though `chipId()`
+ *      normalises the hyphen to an underscore (12 such lines in
+ *      `validation-failure-responses.ts`). A coaching chip minted any of these
+ *      ways passes GREEN. Measured, with a contrast control: the same three
+ *      patterns see the literal forms in 1 and 2 in the same probe.
+ *
+ * One further minter sits OUTSIDE that family and is harmless BY CONSTRUCTION
+ * rather than by luck: `chipIdForText()`
+ * (`coaching/post-analysis-wrapper.ts:622`) mints `chip_text_<sha256 prefix>`,
+ * which cannot spell a method token. Named here so the "three ways" above is
+ * read as scoped, not as a whole-repo census of chip minting.
+ *
+ * ⚠ `chipId` is FOUR independent module-private helpers, not one shared
+ * import — `chip-generator.ts:1230`, `unsupported-action-response.ts:384`,
+ * `validation-failure-responses.ts:1540`, `recovery-chips.ts:229`. They do not
+ * even share a signature: the middle two also admit an `'entity'` scope, whose
+ * `chip_entity_*` ids this scan ignores; the other two do not. The patterns
+ * below match the CALL syntax, so they do cover all four today — but "the same
+ * expression `chipId()` uses" is a statement about a shape shared by four
+ * functions that can drift apart, not about one definition.
  *
  * The minting helper NAMES are restated, which is a residual mirror. It is a
  * fail-loud one: rename `promptChip` and the non-vacuity control immediately
