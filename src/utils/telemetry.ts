@@ -1608,6 +1608,28 @@ export const TelemetryEvents = {
   // this event.
   V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
 
+  // PROSE / FACT AGREEMENT — a DIFFERENT question from the contract gate above,
+  // and deliberately a second event rather than a new reason code on that one.
+  // The contract gate asks "does this output obey the prompt contract?"; this
+  // asks "does this prose agree with the signed analytical fact the producer
+  // shipped in the same payload?" A well-formed, contract-clean review can be
+  // directionally inverted, and folding the two vocabularies together would
+  // make the dashboards unable to tell a shape regression from a truthfulness
+  // one. See `cee/decision-review/prose-fact-agreement.ts`.
+  //
+  // Fires whenever anything was redacted. NEITHER remedy drops the review (the
+  // per-field ruling in `compose/leading-option-egress-guard.ts`), so there is
+  // no `dropped` field here — its presence would imply a drop path that does
+  // not exist.
+  //
+  // Privacy contract (R-004): `request_id` / `scenario_id` are routing-key
+  // strings; `reason` / `reasons` are drawn from the bounded
+  // `ProseFactRule` vocabulary; every remaining field is a finite integer. NO
+  // prose, graph label, raw id, brief text, or review content appears — and
+  // that matters more here than elsewhere, because the thing being counted IS
+  // a sentence about the user's own decision.
+  V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
+
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,
   // so the routing-contract invariant (edit intent → mutation OR clarification
@@ -3970,6 +3992,16 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("v5.decision_review.contract_violation", 1, {
             reason: String((eventData.reason as string) || "unknown"),
             dropped: String(eventData.dropped === true),
+          });
+          break;
+        }
+
+        case TelemetryEvents.V5DecisionReviewProseFactViolation: {
+          // Reason tag is the PRIMARY violated rule code (bounded by
+          // ProseFactRule); the full set and the per-rule counts travel on the
+          // log payload. No `dropped` tag — neither remedy drops the review.
+          datadogClient.increment("v5.decision_review.prose_fact_violation", 1, {
+            reason: String((eventData.reason as string) || "unknown"),
           });
           break;
         }
