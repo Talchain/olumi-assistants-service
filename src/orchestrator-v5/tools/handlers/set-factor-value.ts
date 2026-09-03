@@ -54,7 +54,8 @@ import {
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
 import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
-import { isSuccessfulRunAnalysisFact } from '../../context/freshness.js';
+import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
+import { deriveEditComparisonReach } from '../../coaching/edit-comparison-reach.js';
 import { log } from '../../../utils/telemetry.js';
 
 /**
@@ -93,6 +94,41 @@ import { log } from '../../../utils/telemetry.js';
 // in scope by the same rule).
 export const STALENESS_NARRATIVE =
   ' This makes the last analysis stale. Re-run analysis to see how this affects the results.';
+
+/**
+ * ⭐⭐ THE STALENESS NARRATIVE IS FALSE FOR A FACTOR EVERY OPTION OVERRIDES,
+ * AND THIS CONSTANT IS WHAT IT IS REPLACED BY.
+ *
+ * MEASURED, 2026-09-03 (`olumi-programme-docs`
+ * `artefacts/manual-test-2026-09-03/`). A user corrected Sales Headcount
+ * Investment from £80 to £100,000. All three options in that decision set
+ * their own value for it (0.9 / 0.4 / 0), so the factor is a BASELINE THEY ALL
+ * REPLACE and its own value is never read. The analysis said so in the same
+ * payload: `sensitivity_score: 0`, `elasticity: 0`,
+ * `zero_reason: "intervention_override"`, `influence_rank: 6 of 6`.
+ *
+ * The product nevertheless replied *"This makes the last analysis stale.
+ * Re-run analysis to see how this affects the results."* — a promise the
+ * re-run structurally could not keep, since the edited number cannot enter the
+ * computation. The user duly re-ran, the win figures moved by sampling noise,
+ * and the next turn narrated a causal story for the movement. **The false
+ * staleness promise is the first link in that chain**, which is why this is a
+ * REPLACEMENT and not a suppression: saying nothing would leave the user with
+ * an accepted edit and no way to learn why it did nothing.
+ *
+ * ⚠ IT IS NOT AN ERROR MESSAGE AND MUST NOT READ AS ONE. The edit is applied,
+ * the value is now correct, and the user has done nothing wrong. The sentence
+ * states what the value IS in this model and names the thing that WOULD move
+ * the comparison — the per-option values.
+ *
+ * Copy contract (this file's, unchanged): British English, sentence case, no
+ * em-dashes, no internal terms, no raw decimals. Asserted clean against
+ * `findForbiddenPhraseHit` by test rather than by review.
+ */
+export const BASELINE_REPLACED_BY_OPTIONS_NARRATIVE =
+  ' Every option here sets its own value for this factor, so this figure is the'
+  + ' baseline they all replace, and changing it will not move the comparison.'
+  + ' To change the comparison, set the value each option uses.';
 
 /**
  * Parameter Zod schema registered with the validator. Exported so the
@@ -696,8 +732,37 @@ export function createSetFactorValueHandler(): HandlerFn {
     const hasPriorSuccessfulAnalysis = invocation.context.prior_facts.some(
       isSuccessfulRunAnalysisFact,
     );
-    const assistantText =
-      !noop && hasPriorSuccessfulAnalysis ? `${baseText}${STALENESS_NARRATIVE}` : baseText;
+
+    // ⭐ CAN THIS EDIT MOVE THE COMPARISON AT ALL? Derived ONCE, here, from the
+    // POST-mutation graph plus the newest analysis the user has been shown.
+    //
+    // The post-mutation graph is the right authority because it is the state
+    // the next analysis would run on. A value edit does not add or remove an
+    // option intervention, and a consented cap change RENORMALISES the
+    // interventions without changing which factors they key — so pre and post
+    // agree here today. Reading the post state anyway means the answer stays
+    // true of the graph the sentence is about if that ever stops holding.
+    //
+    // ⚠ `hasPriorSuccessfulAnalysis` DELIBERATELY DOES NOT GATE THIS. "Every
+    // option replaces this value" is a fact about the MODEL, true before any
+    // analysis has ever run, and it is exactly the moment a user building the
+    // model needs to hear it. Gating it on a prior analysis would withhold the
+    // coaching from the user who has the most to gain from it.
+    const editComparisonReach = deriveEditComparisonReach({
+      graph: result.mutatedGraph,
+      priorAnalysisEnrichment: newestSuccessfulAnalysisEnrichment(
+        invocation.context.prior_facts,
+      ),
+      factorId: targetId,
+    });
+
+    const assistantText = noop
+      ? baseText
+      : editComparisonReach.kind === 'inert'
+        ? `${baseText}${BASELINE_REPLACED_BY_OPTIONS_NARRATIVE}`
+        : hasPriorSuccessfulAnalysis
+          ? `${baseText}${STALENESS_NARRATIVE}`
+          : baseText;
 
     return {
       assistant_text: assistantText,
@@ -707,4 +772,35 @@ export function createSetFactorValueHandler(): HandlerFn {
     };
     });
   };
+}
+
+/**
+ * The PLoT envelope of the newest SUCCESSFUL analysis in the window, or null.
+ *
+ * ⚠ "SUCCESSFUL", NOT "SHOWN TO THE USER" — and the two are different
+ * questions with different answers since the server acquired a way to run an
+ * analysis nobody asked for (`scheduleAutoRunAfterFreshDraft`). The "shown"
+ * predicate is `hasUserSeenRunAnalysisResult`, and it is NOT what this call
+ * wants: the question here is *"what did the last computation measure about
+ * this factor?"*, which an auto-run answers perfectly well. Naming it "shown"
+ * would be this estate's signature defect committed inside a docstring
+ * (CLAUDE.md trap #21).
+ *
+ * ⭐ `selectRunAnalysisFact` — the CANONICAL newest-first selector the turn's
+ * own freshness verdict is derived from — rather than a local
+ * `find(isSuccessfulRunAnalysisFact)`. The predicate would be right and the
+ * ORDERING private: facts arrive in the loader's delivery order while the
+ * selector sorts by `computed_at`, so a local find can read a DIFFERENT run
+ * than the rest of the turn is reasoning about (the drift #738 fixed in
+ * `selectTwoNewestRunAnalysisFacts`, and the same reason
+ * `buildRerunAcknowledgement` calls the selector).
+ */
+function newestSuccessfulAnalysisEnrichment(
+  priorFacts: HandlerInvocation['context']['prior_facts'],
+): unknown {
+  const selected = selectRunAnalysisFact(priorFacts);
+  if (selected === null) return null;
+  const fact = selected.fact;
+  if (fact.fact_type !== 'run_analysis') return null;
+  return fact.result.enrichment ?? null;
 }

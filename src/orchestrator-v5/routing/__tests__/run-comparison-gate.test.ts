@@ -11,13 +11,33 @@ import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 
 // Self-contained fixtures (no shared integration mocks).
-function envelope(options: Array<{ id: string; label: string; win: number }>, band?: string): V2RunResponseEnvelope {
+/**
+ * ⚠ `nSamples` IS REQUIRED, NOT DEFAULTED. Since the movement-direction gate
+ * landed, "Its lead has widened by about N percentage points" needs EVIDENCE
+ * that the quantity moved, and the evidence is the per-option Monte-Carlo
+ * sample size. Defaulting it would hand every future fixture the licence
+ * silently — the hand-maintained-mirror shape (CLAUDE.md trap #12) — so each
+ * fixture states its own budget, and `null` states the envelope has none.
+ */
+function envelope(
+  options: Array<{ id: string; label: string; win: number }>,
+  nSamples: number | null,
+  band?: string,
+): V2RunResponseEnvelope {
   return {
     analysis_status: 'completed',
-    results: options.map((o) => ({ option_id: o.id, option_label: o.label, win_probability: o.win })),
+    results: options.map((o) => ({
+      option_id: o.id,
+      option_label: o.label,
+      win_probability: o.win,
+      ...(nSamples === null ? {} : { outcome: { n_samples: nSamples } }),
+    })),
     ...(band ? { robustness_synthesis: { overall_assessment: band } } : {}),
   } as unknown as V2RunResponseEnvelope;
 }
+
+/** The capture's real Monte-Carlo budget (2026-09-03, all three options). */
+const N = 10_000;
 
 /**
  * ⚠ THE `constraint_verdict` STAMP IS REQUIRED ON ANY FIXTURE THAT EXPECTS
@@ -60,8 +80,8 @@ function runFact(env: V2RunResponseEnvelope): HandlerFact {
   } as unknown as HandlerFact;
 }
 
-const PRIOR = runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], 'low'));
-const CURRENT = runFact(envelope([{ id: 'b', label: 'Onshore', win: 0.55 }, { id: 'a', label: 'Offshore', win: 0.45 }], 'high'));
+const PRIOR = runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], N, 'low'));
+const CURRENT = runFact(envelope([{ id: 'b', label: 'Onshore', win: 0.55 }, { id: 'a', label: 'Offshore', win: 0.45 }], N, 'high'));
 const TWO_RUNS = [CURRENT, PRIOR];
 
 // Forbidden in user-facing copy (internal vocab / IDs / raw decimals).
@@ -461,11 +481,11 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     const before = runFact(envelope([
       { id: 'a', label: 'Offshore', win: 0.62 },
       { id: 'b', label: 'Onshore', win: 0.38 },
-    ]));
+    ], N));
     const after = runFact(envelope([
       { id: 'a', label: 'Offshore (EU)', win: 0.62 },
       { id: 'b', label: 'Onshore', win: 0.38 },
-    ]));
+    ], N));
     const out = ask([after, before]);
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -525,7 +545,7 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     const after = runFact(envelope([
       { id: 'b', label: 'Onshore', win: 0.70 },
       { id: 'a', label: 'Offshore', win: 0.30 },
-    ]));
+    ], N));
     const out = ask([after, before]);
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -551,7 +571,7 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     const after = runFact(envelope([
       { id: 'b', label: 'Onshore', win: 0.90 },
       { id: 'a', label: 'Offshore', win: 0.10 },
-    ]));
+    ], N));
     const out = ask([after, before]);
     expect(out.matched).toBe(true);
     if (!out.matched) return;

@@ -50,9 +50,15 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 // Fixtures. Self-contained; no shared integration mocks.
 // ---------------------------------------------------------------------------
 
+/**
+ * ⚠ `nSamples` IS REQUIRED, NOT DEFAULTED — see the sibling note in
+ * `run-comparison-gate.test.ts`. The margin sentence this suite's
+ * PERMITTED/PERMITTED control asserts needs evidence the quantity moved.
+ */
 function envelope(
   options: Array<{ id: string; label: string; win: number }>,
   band: string,
+  nSamples: number | null,
 ): V2RunResponseEnvelope {
   return {
     analysis_status: 'completed',
@@ -60,10 +66,14 @@ function envelope(
       option_id: o.id,
       option_label: o.label,
       win_probability: o.win,
+      ...(nSamples === null ? {} : { outcome: { n_samples: nSamples } }),
     })),
     robustness_synthesis: { overall_assessment: band },
   } as unknown as V2RunResponseEnvelope;
 }
+
+/** The capture's real Monte-Carlo budget (2026-09-03, all three options). */
+const N = 10_000;
 
 /**
  * How a run's claim-safety verdict is recorded on the persisted fact.
@@ -106,6 +116,7 @@ const PRIOR_ENV = envelope(
     { id: 'b', label: 'Onshore', win: 0.38 },
   ],
   'low',
+  N,
 );
 const CURRENT_ENV = envelope(
   [
@@ -113,6 +124,7 @@ const CURRENT_ENV = envelope(
     { id: 'a', label: 'Offshore', win: 0.45 },
   ],
   'high',
+  N,
 );
 
 const PRIOR_LEADER = 'Offshore';

@@ -48,8 +48,21 @@ import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 // coaching-signals spec, so the projection under test is the real one.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ⚠ `nSamples` IS REQUIRED, NOT DEFAULTED — and that is the point of the
+ * parameter. Since the movement-direction gate landed, a quantified "its lead
+ * has widened by about N percentage points" needs EVIDENCE that the quantity
+ * moved, and the evidence is the Monte-Carlo sample size the producer echoes
+ * per option. A default would silently hand every future fixture the licence,
+ * which is precisely the hand-maintained-mirror shape this estate keeps paying
+ * for (CLAUDE.md trap #12). `null` is a REAL shape and not a test convenience:
+ * measured on the 2026-09-03 capture, the persisted envelope carried
+ * `meta === null` while `option_comparison[].outcome.n_samples` was present, so
+ * both readings occur on the live path.
+ */
 function runEnvelope(
   options: Array<{ id: string; label: string; win: number }>,
+  nSamples: number | null,
 ): Record<string, unknown> {
   return {
     analysis_status: 'completed',
@@ -58,9 +71,13 @@ function runEnvelope(
       option_label: o.label,
       win_probability: o.win,
       factor_sensitivity: [],
+      ...(nSamples === null ? {} : { outcome: { n_samples: nSamples } }),
     })),
   };
 }
+
+/** The capture's real Monte-Carlo budget (2026-09-03, all three options). */
+const N = 10_000;
 
 /** Same options, but with NO `option_id` — forces `leader_identity_basis` off
  *  `option_id`, i.e. the honest-abstention arm. */
@@ -161,7 +178,7 @@ function editGraphFact(label: string): HandlerFact {
 const OFFSHORE_LEADS = runEnvelope([
   { id: 'a', label: 'Offshore', win: 0.62 },
   { id: 'b', label: 'Onshore', win: 0.38 },
-]);
+], N);
 /**
  * ONE recommendable option ⇒ `margin` is null (`analysis-compact.ts:836` needs
  * >= 2) ⇒ `deriveMargin` returns `'unavailable'` (`compare-runs.ts:272`). The
@@ -169,19 +186,19 @@ const OFFSHORE_LEADS = runEnvelope([
  * and this reaches the `unavailable` arm rather than the abstention arm.
  * Module-level because three suites need it, including the egress pin.
  */
-const MARGIN_UNAVAILABLE = runEnvelope([{ id: 'a', label: 'Offshore', win: 0.62 }]);
+const MARGIN_UNAVAILABLE = runEnvelope([{ id: 'a', label: 'Offshore', win: 0.62 }], N);
 const OFFSHORE_LEADS_WIDER = runEnvelope([
   { id: 'a', label: 'Offshore', win: 0.72 },
   { id: 'b', label: 'Onshore', win: 0.28 },
-]);
+], N);
 const OFFSHORE_LEADS_NARROWER = runEnvelope([
   { id: 'a', label: 'Offshore', win: 0.53 },
   { id: 'b', label: 'Onshore', win: 0.47 },
-]);
+], N);
 const ONSHORE_LEADS = runEnvelope([
   { id: 'b', label: 'Onshore', win: 0.55 },
   { id: 'a', label: 'Offshore', win: 0.45 },
-]);
+], N);
 
 
 /** Drive the real detector on a re-run turn. */
