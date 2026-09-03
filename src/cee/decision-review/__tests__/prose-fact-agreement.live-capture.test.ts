@@ -264,6 +264,40 @@ describe('live capture — the seam', () => {
   });
 });
 
+describe('live capture — no quantity escapes the seam', () => {
+  it('surfaces no number from edge_e_values, a ratified tier-3 deny field', () => {
+    // The cage's only possible answer about edge_e_values is `tier3_denied`,
+    // so this module must be a structured GATE and nothing else — the same
+    // posture compose/lens-selector.ts records for its own join. Asserted
+    // against the real magnitudes rather than by inspecting the code.
+    const { enrichment, review } = capture();
+    const magnitudes = (
+      enrichment.edge_e_values as ReadonlyArray<Record<string, unknown>>
+    ).flatMap((r) => [r.e_value, r.current_mean, r.flip_mean])
+      .filter((v): v is number => typeof v === 'number' && v !== 0)
+      .map((v) => String(v));
+    expect(magnitudes.length).toBeGreaterThan(20); // positive control
+
+    const result = checkProseFactAgreement(review, enrichment, invokeInputAsBuilt());
+    const serialisedOutput = JSON.stringify(result.output);
+    const serialisedVerdict = JSON.stringify({
+      violations: result.violations,
+      redactedContradicted: result.redactedContradicted,
+      redactedUngrounded: result.redactedUngrounded,
+      unclassifiedKept: result.unclassifiedKept,
+      voiFieldsRedacted: result.voiFieldsRedacted,
+    });
+    for (const magnitude of magnitudes) {
+      expect(serialisedVerdict).not.toContain(magnitude);
+      // The output is the model's own prose minus redactions — this seam adds
+      // nothing to it, so no magnitude may APPEAR that was not already there.
+      if (!JSON.stringify(review).includes(magnitude)) {
+        expect(serialisedOutput).not.toContain(magnitude);
+      }
+    }
+  });
+});
+
 describe('live capture — the value-of-information licence', () => {
   /**
    * The invoke input for this run is reconstructed the way the enricher builds

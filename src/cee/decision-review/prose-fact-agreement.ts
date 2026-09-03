@@ -135,6 +135,23 @@
 
 import { replaceAssertingUnits } from '../../orchestrator-v5/compose/redactable-units.js';
 
+/**
+ * ⚠ CLAIM-SAFETY POSTURE, because a reviewer will and should ask.
+ *
+ * `edge_e_values` is a RATIFIED TIER-3 DENY field — the cage's only possible
+ * answer about it is `tier3_denied`, and `compose/lens-selector.ts` records
+ * the rule: the selector "reads it as a structured gate only and no quantity
+ * from it may ever be surfaced."
+ *
+ * This module has the SAME posture, deliberately. It reads the field to decide
+ * one three-valued thing — must the link get stronger, weaker, or reverse? —
+ * and every number it touches dies inside this file. Nothing it returns can
+ * carry one: the remedy is a DELETION or a fixed replacement string, the
+ * telemetry payload is bounded rule codes and integers, and no exported type
+ * has a field a magnitude could ride on. A fixture-bound test asserts that no
+ * value from `edge_e_values` reaches the output or the telemetry summary.
+ */
+
 // ============================================================================
 // Producer fact 1 — the signed flip requirement per edge
 // ============================================================================
@@ -198,6 +215,10 @@ function edgeKey(fromId: string, toId: string): string {
  * degrades to "no fact available". The join is therefore on `from_id`/`to_id`
  * — the structured fields — and a fixture-bound test asserts the literal-key
  * join finds NOTHING, so the hazard cannot quietly return.
+ *
+ * This is the estate's established idiom rather than a new one:
+ * `coaching/select-fragile-edge.ts` and `compose/lens-selector.ts` already
+ * join `edge_e_values` on `(from_id, to_id)` for the same reason.
  */
 function splitScenarioKey(key: string): { fromId: string; toId: string } | null {
   for (const sep of ['->', '::']) {
