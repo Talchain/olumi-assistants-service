@@ -1,0 +1,215 @@
+{
+  "_provenance": "Derived from artefacts/manual-test-2026-09-03/olumi-debug-f2e2df1b-20260903.json (scenario 7826c742-2939-4584-917c-f1286a663ae4). The bundle is the UI post-split view; strength_mean here is re-signed from effect_direction to reconstruct the pre-split form the detector reads at package time.",
+  "nodes": [
+    {
+      "id": "05f973ef",
+      "kind": "option"
+    },
+    {
+      "id": "15f7737d",
+      "kind": "option"
+    },
+    {
+      "id": "16ec3d64",
+      "kind": "factor"
+    },
+    {
+      "id": "26fbdff5",
+      "kind": "factor"
+    },
+    {
+      "id": "27c23ebb",
+      "kind": "factor"
+    },
+    {
+      "id": "3d37f4b2",
+      "kind": "risk"
+    },
+    {
+      "id": "422ceee7",
+      "kind": "factor"
+    },
+    {
+      "id": "428612e0",
+      "kind": "risk"
+    },
+    {
+      "id": "552bd1c0",
+      "kind": "goal"
+    },
+    {
+      "id": "7dc44ba7",
+      "kind": "factor"
+    },
+    {
+      "id": "919d7f50",
+      "kind": "factor"
+    },
+    {
+      "id": "94b13741",
+      "kind": "option"
+    },
+    {
+      "id": "b42f8b15",
+      "kind": "outcome"
+    },
+    {
+      "id": "b6941ac0",
+      "kind": "outcome"
+    },
+    {
+      "id": "bbbbd8f2",
+      "kind": "risk"
+    },
+    {
+      "id": "faa7499e",
+      "kind": "decision"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-0",
+      "from": "05f973ef",
+      "to": "27c23ebb",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-1",
+      "from": "05f973ef",
+      "to": "919d7f50",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-2",
+      "from": "15f7737d",
+      "to": "27c23ebb",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-3",
+      "from": "15f7737d",
+      "to": "919d7f50",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-4",
+      "from": "16ec3d64",
+      "to": "3d37f4b2",
+      "strength_mean": 0.35
+    },
+    {
+      "id": "e-5",
+      "from": "16ec3d64",
+      "to": "bbbbd8f2",
+      "strength_mean": 0.4
+    },
+    {
+      "id": "e-6",
+      "from": "26fbdff5",
+      "to": "3d37f4b2",
+      "strength_mean": 0.55
+    },
+    {
+      "id": "e-7",
+      "from": "27c23ebb",
+      "to": "26fbdff5",
+      "strength_mean": 0.45
+    },
+    {
+      "id": "e-8",
+      "from": "3d37f4b2",
+      "to": "552bd1c0",
+      "strength_mean": -0.5
+    },
+    {
+      "id": "e-9",
+      "from": "422ceee7",
+      "to": "b6941ac0",
+      "strength_mean": 0.351852
+    },
+    {
+      "id": "e-10",
+      "from": "428612e0",
+      "to": "552bd1c0",
+      "strength_mean": -0.5
+    },
+    {
+      "id": "e-11",
+      "from": "7dc44ba7",
+      "to": "b6941ac0",
+      "strength_mean": 0.211111
+    },
+    {
+      "id": "e-12",
+      "from": "919d7f50",
+      "to": "428612e0",
+      "strength_mean": 0.65
+    },
+    {
+      "id": "e-13",
+      "from": "919d7f50",
+      "to": "b42f8b15",
+      "strength_mean": 0.45
+    },
+    {
+      "id": "e-14",
+      "from": "919d7f50",
+      "to": "b6941ac0",
+      "strength_mean": 0.387037
+    },
+    {
+      "id": "e-15",
+      "from": "919d7f50",
+      "to": "bbbbd8f2",
+      "strength_mean": 0.35
+    },
+    {
+      "id": "e-16",
+      "from": "94b13741",
+      "to": "27c23ebb",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-17",
+      "from": "94b13741",
+      "to": "919d7f50",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-18",
+      "from": "b42f8b15",
+      "to": "552bd1c0",
+      "strength_mean": 0.5
+    },
+    {
+      "id": "e-19",
+      "from": "b6941ac0",
+      "to": "552bd1c0",
+      "strength_mean": 0.5
+    },
+    {
+      "id": "e-20",
+      "from": "bbbbd8f2",
+      "to": "552bd1c0",
+      "strength_mean": -0.5
+    },
+    {
+      "id": "e-21",
+      "from": "faa7499e",
+      "to": "05f973ef",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-22",
+      "from": "faa7499e",
+      "to": "15f7737d",
+      "strength_mean": 1
+    },
+    {
+      "id": "e-23",
+      "from": "faa7499e",
+      "to": "94b13741",
+      "strength_mean": 1
+    }
+  ]
+}
