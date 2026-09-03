@@ -24,6 +24,7 @@ import {
   buildAddOptionClarifyChipMessage,
   isTargetReference,
   OPTION_NOUN_DETERMINERS,
+  ALL_ADD_OPTION_TRIGGERS,
   GENERIC_LABELS,
   DETERMINER_FRAGMENT,
   KNOWN_OPEN_CONTAINER_GAP,
@@ -465,8 +466,16 @@ describe('the target screen is on EVERY trigger that INFERS a label', () => {
     expect(d.reason).toBe('target_not_a_label');
   });
 
-  // ⚠ ...and NOT on the triggers that are HANDED a label. Screening every
-  // declines these three; one of them is this module's own discriminator.
+  // ⚠ ...and NOT on the triggers that are HANDED a label. Screening all five
+  // declines every row below, one of which is this module's own discriminator.
+  //
+  // `all five` is KEPT on purpose: it counts a CLOSED UNION DECLARED ELSEWHERE
+  // (`AddOptionIntentTrigger`), which the reader cannot recount from this line,
+  // so it carries information rather than mirroring a visible list — and the
+  // deliberately-quoted "SCREEN ALL FIVE TRIGGERS" below depends on it for
+  // sense. It is pinned by `ALL_ADD_OPTION_TRIGGERS`, whose exhaustiveness the
+  // COMPILER enforces. A previous sweep deleted it as if it were a mirror and
+  // severed this sentence doing so; both are repaired here.
   const EXPLICITLY_NAMED: ReadonlyArray<readonly [string, string]> = [
     ['Add an option called The Big Bet', 'The Big Bet'],
     ['Add "The Berlin office" as an option', 'The Berlin office'],
@@ -602,7 +611,7 @@ describe('the target screen is wired to EVERY inferring trigger, not one', () =>
     // ⚠ AND THE TWIN THAT MAKES THE TWO TRIGGERS DIFFERENT QUESTIONS. The
     // `as an option` frame ALREADY says X is the option, so a determiner there
     // proves nothing — only a CONTAINER reference is a target. Screening this
-    // trigger with the prepositional rule declines all three of these.
+    // trigger with the prepositional rule declines the rows beneath this note.
     ['Add the Berlin office as an option', 'Berlin office'],
     ['Add the Poland joint venture as an option', 'Poland joint venture'],
     // NB the possessive is NOT stripped — tidyLabel strips the|a|an only, so
@@ -696,7 +705,7 @@ describe('the screen’s two conjunctions each bite, on their own case', () => {
     ['Add "The pricing decision review" as an option', 'The pricing decision review'],
     ['Add a "Model refresh" option', 'Model refresh'],
   ])('EXPLICITLY NAMED survives even when the name mentions the container: %j', (message, expected) => {
-    // Drop `explicitlyNamed` and these three RED. Without a container noun
+    // Drop `explicitlyNamed` and every row above REDs. Without a container noun
     // inside an explicitly-named label, widening the screen to every trigger
     // passes every other test in this file.
     const d = detectAddOptionIntent(message);
@@ -947,18 +956,69 @@ describe('the courtesy-prefix header now matches the code', () => {
 // against the historical literal, with a positive control proving a reorder
 // breaks it.
 //
-// ⭐⭐ SO THE COUNT IS GONE FROM THE PROSE, HERE AND EVERYWHERE ELSE IN THESE
-// TWO FILES. A number in a comment restating a list that sits beside it is a
-// hand-maintained mirror with a sample size of one: no test can see it, no
-// reader recounts it, and it went stale three times in this PR alone — twice by
-// drift and once BORN WRONG at authoring ("EIGHT of these are also verbs",
-// beside a parenthetical listing ten, never true at any commit).
+// ⭐⭐ THE RULE THAT CAME OUT OF IT, stated exactly, because it has two halves
+// and getting either wrong costs a round:
+//
+//   · DELETE a number that RESTATES A LIST THE READER CAN SEE. It is a
+//     hand-maintained mirror with a sample size of one — no test sees it, no
+//     reader recounts it. It went wrong four times in this PR: twice by drift,
+//     and twice BORN WRONG at authoring ("EIGHT of these are also verbs" beside
+//     a parenthetical listing ten; "these three" above a four-entry array —
+//     neither ever true at any commit).
+//
+//   · KEEP a number that COUNTS A CLOSED SET DECLARED ELSEWHERE. The reader
+//     cannot recover it from the line, so it carries information. "all five
+//     triggers" is this, and a sweep deleted it as though it were a mirror —
+//     severing a sentence in the process. THEN PIN IT: see
+//     `ALL_ADD_OPTION_TRIGGERS`, whose exhaustiveness the compiler enforces.
+//
+//   · KEEP dated measurements ("10 of 10 probes lost", "left all 353 green")
+//     and quotations. They record what happened and cannot drift; rewriting
+//     them would falsify the record.
+//
+// ⚠ AND THE HONEST SCOPE OF THIS SWEEP, because a claim to have closed a class
+// is exactly the kind of sentence that tells the next reader to stop looking.
+// It was applied ONCE, to these two files, over the QUANTIFIER forms ("the ten
+// pairs", "EIGHT of these", "four punctuation marks") and the DEMONSTRATIVE
+// forms ("these three", "all three of these"), each swept with a contrast
+// control so an empty result meant something. PROSE IS WRITTEN CONTINUOUSLY, so
+// this is a rule applied at a point in time, NOT a permanently closed class —
+// the same standing the sampled floor has. The next comment written can
+// reintroduce it, and nothing here will notice.
 //
 // THE LIST IS THE RECORD. The assertions below name every alphabet
-// individually, so they cannot disagree with a sentence that no longer states a
-// total. Where a count genuinely carries meaning it belongs in an assertion the
-// suite can see — which is what each `toEqual`/`toBe` below is.
+// individually, so they cannot disagree with a sentence that states no total.
 // ---------------------------------------------------------------------------
+describe('the trigger set is closed, and "all five" is a checked claim', () => {
+  it('ALL_ADD_OPTION_TRIGGERS has exactly five members', () => {
+    // The prose says "all five triggers" in two places and quotes it in a
+    // third. This is what makes that a claim rather than a sentence. The
+    // COMPILER catches an omission from the union (`_TriggersExhaustive`); this
+    // catches the count drifting away from the prose.
+    expect(ALL_ADD_OPTION_TRIGGERS.length).toBe(5);
+    expect([...ALL_ADD_OPTION_TRIGGERS].sort()).toEqual([
+      'option_called', 'option_to', 'quoted_as_option', 'quoted_option_noun',
+      'unquoted_as_option',
+    ]);
+  });
+
+  it('every trigger is reachable — the set is not aspirational', () => {
+    // A pinned list nothing can produce would be a guard agreeing with itself.
+    const seen = new Set<string>();
+    for (const m of [
+      'Add "Partner with a distributor" as an option',
+      'Add Partner with a distributor as an option',
+      'Add an option called Stay UK-only',
+      'Add an option to expand into Germany',
+      'Add a "Do nothing" option',
+    ]) {
+      const d = detectAddOptionIntent(m);
+      if (d.matched) seen.add(d.trigger);
+    }
+    expect([...seen].sort()).toEqual([...ALL_ADD_OPTION_TRIGGERS].sort());
+  });
+});
+
 describe('every alphabet in this module is pinned BY HAND', () => {
   it('TARGET_DEFINITE_DETERMINERS — the presupposing determiners, exactly', () => {
     expect([...TARGET_DEFINITE_DETERMINERS].sort()).toEqual([

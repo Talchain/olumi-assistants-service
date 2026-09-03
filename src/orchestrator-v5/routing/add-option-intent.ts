@@ -68,6 +68,35 @@ export type AddOptionIntentTrigger =
   | 'option_to'
   | 'quoted_option_noun';
 
+/**
+ * Every trigger, exhaustively — so "all five triggers" is a claim the toolchain
+ * checks rather than a number in a sentence.
+ *
+ * ⚠ THIS IS THE OTHER HALF OF THE PROSE-COUNT RULE. A count that RESTATES A
+ * LIST THE READER CAN SEE is a mirror and gets deleted; a count of a CLOSED SET
+ * DECLARED ELSEWHERE carries information the reader cannot recover from the
+ * line, so it stays — and then it has to be pinned. `all five triggers` is the
+ * second kind, and deleting it was a mistake corrected here.
+ *
+ * `satisfies` catches a typo; the `_Exhaustive` alias catches an OMISSION —
+ * add a sixth member to the union without adding it here and the BUILD fails,
+ * which no test could do.
+ */
+export const ALL_ADD_OPTION_TRIGGERS = [
+  'quoted_as_option',
+  'unquoted_as_option',
+  'option_called',
+  'option_to',
+  'quoted_option_noun',
+] as const satisfies readonly AddOptionIntentTrigger[];
+
+type _TriggersExhaustive =
+  Exclude<AddOptionIntentTrigger, (typeof ALL_ADD_OPTION_TRIGGERS)[number]> extends never
+    ? true
+    : ['MISSING TRIGGER in ALL_ADD_OPTION_TRIGGERS'];
+const _triggersExhaustive: _TriggersExhaustive = true;
+void _triggersExhaustive;
+
 export type AddOptionIntentNoMatchReason =
   | 'empty'
   | 'question'
@@ -647,8 +676,8 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
   //
   // ⚠ AND IT IS NOT "SCREEN ALL FIVE TRIGGERS". Measured: that declines
   // `Add an option called The Big Bet`, `Add "The Berlin office" as an option`
-  // and `Add a "The Big Bet" option` — three explicitly-named labels, one of
-  // them this module's own pinned discriminator. A quoted or `called` label is
+  // and `Add a "The Big Bet" option` — explicitly-named labels, one of them
+  // this module's own pinned discriminator. A quoted or `called` label is
   // a name the user actually wrote, determiner and all. Deriving the scope
   // from THIS predicate screens exactly the triggers that infer a label and
   // exactly none of the triggers that are handed one.
