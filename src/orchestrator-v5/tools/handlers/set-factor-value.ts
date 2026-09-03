@@ -750,7 +750,7 @@ export function createSetFactorValueHandler(): HandlerFn {
     // coaching from the user who has the most to gain from it.
     const editComparisonReach = deriveEditComparisonReach({
       graph: result.mutatedGraph,
-      priorAnalysisEnrichment: newestShownAnalysisEnrichment(
+      priorAnalysisEnrichment: newestSuccessfulAnalysisEnrichment(
         invocation.context.prior_facts,
       ),
       factorId: targetId,
@@ -775,7 +775,16 @@ export function createSetFactorValueHandler(): HandlerFn {
 }
 
 /**
- * The PLoT envelope of the newest analysis the user has been shown, or null.
+ * The PLoT envelope of the newest SUCCESSFUL analysis in the window, or null.
+ *
+ * ⚠ "SUCCESSFUL", NOT "SHOWN TO THE USER" — and the two are different
+ * questions with different answers since the server acquired a way to run an
+ * analysis nobody asked for (`scheduleAutoRunAfterFreshDraft`). The "shown"
+ * predicate is `hasUserSeenRunAnalysisResult`, and it is NOT what this call
+ * wants: the question here is *"what did the last computation measure about
+ * this factor?"*, which an auto-run answers perfectly well. Naming it "shown"
+ * would be this estate's signature defect committed inside a docstring
+ * (CLAUDE.md trap #21).
  *
  * ⭐ `selectRunAnalysisFact` — the CANONICAL newest-first selector the turn's
  * own freshness verdict is derived from — rather than a local
@@ -786,7 +795,7 @@ export function createSetFactorValueHandler(): HandlerFn {
  * `selectTwoNewestRunAnalysisFacts`, and the same reason
  * `buildRerunAcknowledgement` calls the selector).
  */
-function newestShownAnalysisEnrichment(
+function newestSuccessfulAnalysisEnrichment(
   priorFacts: HandlerInvocation['context']['prior_facts'],
 ): unknown {
   const selected = selectRunAnalysisFact(priorFacts);
