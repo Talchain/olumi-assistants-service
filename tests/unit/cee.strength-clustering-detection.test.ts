@@ -23,7 +23,21 @@ import {
   detectStrengthClustering,
   detectGoalLayerStrengthClustering,
 } from "../../src/cee/structure/index.js";
-import founderGraph from "../fixtures/founder-session-7826c742.graph.json" with { type: "json" };
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+/**
+ * The founder's own model, scenario 7826c742-2939-4584-917c-f1286a663ae4.
+ * Read rather than imported: an import attribute needs a module setting the
+ * repo-wide tsc pass does not use, and the typecheck ratchet catches that even
+ * though the build gate excludes tests.
+ */
+const founderGraph = JSON.parse(
+  readFileSync(
+    fileURLToPath(new URL("../fixtures/founder-session-7826c742.graph.json", import.meta.url)),
+    "utf-8",
+  ),
+) as { nodes: Array<{ id: string; kind: string }>; edges: Array<Record<string, unknown>> };
 
 /** A graph whose goal layer is flat while its interior varies — the founder shape. */
 function flatGoalLayerGraph() {
