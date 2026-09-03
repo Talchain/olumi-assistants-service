@@ -616,11 +616,34 @@ function tidyLabel(raw: string, explicitlyNamed: boolean, wasQuoted = false): st
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
-function labelIsSafe(label: string): boolean {
+/**
+ * ⚠ SCREENED PRE- AND POST-STRIP, AND THAT IS THE WHOLE POINT.
+ *
+ * `tidyLabel` removes a leading article BEFORE this runs, so a member of
+ * `GENERIC_LABELS` that CONTAINS one could never match: "the new one" arrived
+ * here already reduced to "New one", and the set holds neither. Two of the ten
+ * members of what this module calls "the only defence" were DEAD — measured,
+ * with "another one" (no article to strip) refusing correctly in the same run
+ * as the contrast control.
+ *
+ * ⭐ AND THE EXACT-SIZE PIN COULD NOT SEE IT, because it checks MEMBERSHIP and
+ * not REACHABILITY. A list can be complete and still be inert. The spec now
+ * asserts every member actually REFUSES on an arm it can arrive through, which
+ * is the assertion that would have caught this.
+ *
+ * So the raw capture is passed in and both forms are tested. Widening the SET
+ * was the alternative and is deliberately not taken — pointers are the open
+ * class this module does not chase.
+ */
+function labelIsSafe(label: string, rawBeforeStrip?: string): boolean {
   if (label.length < 2 || label.length > 120) return false;
   if (!/[a-z]/i.test(label)) return false;
   if (OPTION_WORD_IN_LABEL.test(label)) return false;
   if (GENERIC_LABELS.has(label.toLowerCase())) return false;
+  if (rawBeforeStrip !== undefined) {
+    const raw = rawBeforeStrip.replace(/\s+/g, ' ').trim().replace(TRAILING_PUNCT, '');
+    if (GENERIC_LABELS.has(raw.toLowerCase())) return false;
+  }
   return true;
 }
 
@@ -776,7 +799,7 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
   }
 
   const label = tidyLabel(candidate.label, explicitlyNamed, candidate.labelWasQuoted);
-  if (!labelIsSafe(label)) return NO_MATCH('label_unsafe');
+  if (!labelIsSafe(label, candidate.label)) return NO_MATCH('label_unsafe');
   // An UNQUOTED label that carries a number is a value statement swallowed
   // into a name ("… called Outsource that cuts support cost to 30") — the
   // edit lane owns that write. A QUOTED label with a digit is a deliberate

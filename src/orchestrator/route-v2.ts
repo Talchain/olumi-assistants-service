@@ -6495,6 +6495,21 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           } else {
             // ⭐ EVERY NON-COMPOSED OUTCOME FALLS THROUGH, INCLUDING `clarify`.
             //
+            // ⚠ ROWED, NOT FIXED (3 Sep 2026): the parenthetical below is
+            // FALSE as a reachability claim — a `clarify` is not restricted to
+            // multi-decision models, and the validator's single-decision
+            // auto-resolve is not the only path here. The BEHAVIOUR is correct
+            // either way (every non-`composed` status falls through to the edit
+            // lane), so this is a comment defect, not a routing defect.
+            // Backlog; deliberately not fixed inside this round.
+            //
+            // ⚠ ALSO ROWED: the three chip-arm telemetry emits above
+            // (`fell_through:gm_off`, `fell_through:commit_failed`,
+            // `fell_through:${addOptionOutcome.reason}`) omit the
+            // `origin: 'chip'` field that every text-arm emit carries, so
+            // chip-originated fall-throughs are indistinguishable from
+            // unattributed ones in telemetry. Real, minor, backlog.
+            //
             // `clarify` means the proposer could not tell WHICH decision owns
             // the option (only reachable when the model holds more than one —
             // with a single decision the validator resolves it). The edit lane

@@ -1127,6 +1127,37 @@ describe('every alphabet in this module is pinned BY HAND', () => {
     expect(overlap).toEqual([]);
   });
 
+  it('⭐⭐ REACHABILITY, not membership — every member must actually REFUSE', () => {
+    // THE ASSERTION THAT WOULD HAVE CAUGHT IT. The exact-size pin below checks
+    // MEMBERSHIP; it cannot see a member that is present and INERT. Two of the
+    // ten were: `tidyLabel` strips the leading article BEFORE `labelIsSafe`
+    // runs, so "the new one" arrived as "New one" and the set holds neither.
+    // A list can be complete and still not guard.
+    for (const member of GENERIC_LABELS) {
+      const d = detectAddOptionIntent(`Add ${member} as an option`);
+      expect(
+        d.matched,
+        `GENERIC_LABELS member "${member}" is PRESENT but INERT — it does not refuse on an arm it can arrive through`,
+      ).toBe(false);
+      if (d.matched) continue;
+      expect(d.reason).toBe('label_unsafe');
+    }
+  });
+
+  it('...and the article-stripping arm is the one that was blind', () => {
+    // The discriminating pair, in the direction that failed: a member WITH an
+    // article was claimed, one WITHOUT was refused. Both refuse now.
+    expect(detectAddOptionIntent('Add the new one as an option').matched).toBe(false);
+    expect(detectAddOptionIntent('Add a new one as an option').matched).toBe(false);
+    expect(detectAddOptionIntent('Add another one as an option').matched).toBe(false);
+    // ...and an ordinary name beginning with an article still survives, so the
+    // fix screens the generic set and not the article.
+    const ok = detectAddOptionIntent('Add the Berlin office as an option');
+    expect(ok.matched).toBe(true);
+    if (!ok.matched) return;
+    expect(ok.label).toBe('Berlin office');
+  });
+
   it('⭐ GENERIC_LABELS is pinned BY HAND — the sixth list, and the only defence', () => {
     // The module's header calls this "the only defence" against the anaphora
     // class, which this module deliberately ships OPEN. It had NO shrink pin:
