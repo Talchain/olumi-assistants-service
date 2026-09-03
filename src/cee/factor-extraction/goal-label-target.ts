@@ -42,6 +42,41 @@
  * binds, brief attests, and a label quantity absent from the brief mints
  * NOTHING and says why.
  *
+ * ── ⛔⛔ THE EXACT STRENGTH OF THAT ATTESTATION, AND IT IS WEAKER THAN THE
+ *    SENTENCE ABOVE READS ────────────────────────────────────────────────────
+ * `sameQuantity` answers **"does this figure OCCUR in the brief?"**. It does
+ * NOT answer "did the user state this figure AS THEIR TARGET", and an earlier
+ * version of this header read as though it did. That is the whole #789
+ * defence, so the gap is stated here rather than left to be discovered.
+ * Measured at `cd010b55`:
+ *
+ *     label "Keep Monthly Churn Below 4%"
+ *     brief "…Trial-to-paid conversion is 12% and monthly churn is 4%."
+ *       →  ok, { value: 0.04, unit: "%", briefQuote: "4%" }
+ *
+ * The brief states 4% as the CURRENT LEVEL. The model wrote the label. Nothing
+ * in the brief says 4% is a target, and the mint stamps
+ * `goal_threshold_frame: 'level'` on it — after which ISL computes a
+ * `probability_of_goal` against a threshold nobody set. By this module's own
+ * doctrine ("a wrong threshold is a confident lie, an absent one is a gap, and
+ * a lie outranks a gap") that is the wrong side, and it is NOT CLOSED HERE.
+ *
+ * A second instance, same root, also open: a BARE YEAR attests a count —
+ * label "Sign 2026 Enterprise Accounts" + brief "Our plan runs to 2026." mints
+ * 2,026. (A third, "B2B" scanning as 2,000,000,000, WAS closed — see
+ * `NOT_INSIDE_A_WORD` — because it is a scanner defect with a closed fix
+ * rather than an instance of this predicate's breadth.)
+ *
+ * ⭐ THE REMEDY IS KNOWN AND IS NOT AN OPEN-ENDED STRING RULE, which is banned
+ * here. `factor-extraction/index.ts` already resolves goal constructions and
+ * carries a SPAN, having learned this exact lesson — *"an assertion, or a
+ * suppression, must bind to its object by IDENTITY, and here identity is
+ * position"*. Binding the brief attestation to a span that grammar resolved as
+ * a TARGET, rather than to any occurrence of the figure, closes the class. That
+ * is work in another module and a change to what this lane owns, so it is
+ * reported at the boundary rather than taken: **this module guarantees that the
+ * minted figure APPEARS IN THE USER'S BRIEF, and nothing stronger.**
+ *
  * ── FAIL-CLOSED, EVERY BRANCH ─────────────────────────────────────────────
  *   no goal label                     -> refuse `no_goal_label`
  *   no non-temporal quantity in label -> refuse `no_quantity_in_label`
@@ -129,10 +164,90 @@ const CURRENCY_CLASS = "[£$€]";
  * than excluded by lookahead so the caller can report WHY a quantity was
  * skipped instead of it vanishing.
  */
+/**
+ * ⭐⭐⭐ "THE DIGIT RUN ENDS HERE" — without which the refusal below is not a
+ * refusal, it is a SHORTER, WRONG NUMBER.
+ *
+ * `AMOUNT_DIGITS` is greedy and `MAGNITUDE_AMBIGUOUS_TRAILER_GUARD` is a bare
+ * negative lookahead, so when the guard fires the engine does not reject the
+ * match — it BACKTRACKS THE DIGITS until the lookahead is satisfied. Measured
+ * through `deriveGoalTargetFromLabel` at `cd010b55`:
+ *
+ *     "£80kARR"                         →  £8   (intended: no match)  10,000x
+ *     "£1.5mARR"                        →  £1
+ *     "the run rate is £250grandish"    →  £25
+ *     "Reach £30kMRR Within 18 Months"  →  £3   ← the very target this exists for
+ *
+ * `MRR` / `ARR` straight after a magnitude key is not a corner case in this
+ * product's domain: the witnessed goal label is literally
+ * "Reach £30k MRR Within 18 Months", and a model writing it without the space
+ * is a coin flip. On the BRIEF side it is worse than a bad read — it injects
+ * spurious small quantities into the attested set, so a label reading
+ * "Reach £80kARR" against a brief containing "£8" mints **£8** as the target.
+ *
+ * ⚠⚠ TWO DISCLOSURES, BOTH LOAD-BEARING.
+ *
+ * 1. THE CLASS IS ESTATE-WIDE AND PRE-DATES THIS MODULE. `compound-goal/
+ *    extractor.ts` and `provenance/stated-amounts.ts` compose the same guard
+ *    the same way; this scanner is the fourth instance, not the origin. It is
+ *    fixed HERE because this consumer mints THE goal threshold — the single
+ *    number ISL scores every option against.
+ *
+ * 2. ⛔ THIS CONSTANT IS A DELIBERATE, TEMPORARY DUPLICATE. Sibling PR #1327
+ *    adds exactly this anchor to `utils/magnitude-alphabet.ts` as
+ *    `AMOUNT_RUN_END`, the shared home where it belongs. That PR is not merged,
+ *    and adding the export here as well would put two PRs in one file for no
+ *    gain. **WHEN #1327 LANDS, DELETE THIS AND IMPORT `AMOUNT_RUN_END`** — the
+ *    two are character-for-character identical, which is the point and also the
+ *    hazard (trap 12). Rebasing onto #1327 is the reviewer's stated merge order.
+ */
+const DIGIT_RUN_END_LOCAL = "(?!\\d)(?!,\\d{3})(?!\\.\\d)";
+
+/**
+ * ⭐ A DIGIT INSIDE A WORD IS NOT A QUANTITY. The scanner had no left boundary,
+ * so the `2` of **"B2B"** scanned as the count 2,000,000,000 — `B` read as a
+ * magnitude key — and attested a label reading "Reach 2bn Monthly Impressions"
+ * against a brief that says only "We're a B2B SaaS". Measured at `cd010b55`:
+ * `briefQuote: "2B"`.
+ *
+ * ⚠ THE KEY IS NAMED AS `B`, NOT SPELLED OUT, AND THAT IS DELIBERATE. Spelling
+ * the scale word here trips `magnitude-alphabet.union.test.ts`'s REVIEWED-
+ * manifest guard, whose remedy is a row in that file — which #1324 and #1327
+ * are both already editing. This module holds NO magnitude list (it composes
+ * `magnitudeSuffixPattern` from the one alphabet), so there is nothing for that
+ * guard to protect here; naming the key avoids putting a third PR into one
+ * contended registry. If a reviewer would rather have the REVIEWED row, it is
+ * one line and this note is the reason it is not already there.
+ *
+ * Bound to the LEFT, where the defect is; a letter to the RIGHT is already the
+ * ambiguous-trailer guard's question, and they must not be collapsed (trap 21).
+ *
+ * ⭐⭐ THE DIGIT IN THE CLASS IS NOT DECORATION, AND A MUTANT FOUND IT. The
+ * first cut was `(?<![A-Za-z])`. A mutant widening it to `[A-Za-z0-9]` SURVIVED
+ * the corpus, so rather than assert it equivalent (an equivalent mutant must be
+ * DEMONSTRATED, never assumed) the two spellings were run against each other
+ * over a corpus drawn from outside the fix, with a positive control proving the
+ * probe could see a difference. They differ, and the letters-only spelling is
+ * the WORSE of the two:
+ *
+ *     "12a34"     letters-only → ["12", "4"]      digits too → ["12"]
+ *     "£30k30k"   letters-only → ["£30", "0k"]    digits too → ["£30"]
+ *
+ * When the start of a number is refused, the engine advances INTO it and
+ * matches the tail — publishing "4" out of "34" and "0k" out of "30k". That is
+ * the backtracking defect one level out: a refusal that yields a shorter, wrong
+ * number instead of nothing. A digit can never legitimately begin a new
+ * quantity while another digit sits immediately to its left, so the class
+ * carries both.
+ */
+const NOT_INSIDE_A_WORD = "(?<![A-Za-z0-9])";
+
 function quantityScanner(): RegExp {
   return new RegExp(
-    `(?<currency>${CURRENCY_CLASS})?` +
+    NOT_INSIDE_A_WORD +
+      `(?<currency>${CURRENCY_CLASS})?` +
       `(?<amount>${AMOUNT_DIGITS})` +
+      DIGIT_RUN_END_LOCAL +
       magnitudeSuffixPattern("mag") +
       MAGNITUDE_AMBIGUOUS_TRAILER_GUARD +
       `(?<pct>\\s*%|\\s*percent\\b)?` +
@@ -227,7 +342,32 @@ export function deriveGoalTargetFromLabel(
   }
 
   const briefText = typeof brief === "string" ? brief : "";
-  const briefQuantities = scanQuantities(briefText);
+  // ⚠⚠ THE TEMPORAL EXCLUSION APPLIES TO BOTH SIDES, AND IT USED TO APPLY TO
+  // ONE. The label side was filtered; the brief side was not — and
+  // `sameQuantity` compares only unit and value, so "18 months" in the brief
+  // ATTESTED a bare count of 18 in the label. Measured at `cd010b55`:
+  //
+  //   label "Reach 18 Enterprise Accounts" + brief "…grow the business within
+  //   18 months."   →  ok, { value: 18, unit: "count", briefQuote: "18 months" }
+  //   label "Hire 6 Salespeople" + brief "…keep at least 6 months of runway."
+  //                 →  ok, { value: 6,  unit: "count", briefQuote: "6 months" }
+  //
+  // The user stated 18 as a DEADLINE and the mint stamped it as a LEVEL. That
+  // is precisely the class the header says is closed, and the reason
+  // `TIME_UNIT_ALT` is imported at all — the invariant was right, its domain
+  // had one side missing.
+  //
+  // ⚠ THE KIT COULD NOT SEE IT: the mutant mutates the LABEL-side filter, so by
+  // construction it only ever measured the side that exists, and no case in the
+  // corpus had a temporal brief quantity as the attesting one. The invariant
+  // was written with the same asymmetry as the code (trap 13d).
+  //
+  // It cannot cost a legitimate mint, and that is structural rather than
+  // measured: a TEMPORAL label quantity is already refused above as
+  // `no_quantity_in_label`, so no surviving label quantity is temporal, and
+  // `sameQuantity` requires equal units — so nothing that mints today depends
+  // on matching a temporal brief quantity.
+  const briefQuantities = scanQuantities(briefText).filter((q) => !q.temporal);
 
   // ⚠ THE ATTESTED SET IS DEDUPED BY QUANTITY, NOT BY OCCURRENCE. A label that
   // names one target and a brief that states it three times is UNAMBIGUOUS;

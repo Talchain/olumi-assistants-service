@@ -94,11 +94,35 @@ describe("deriveGoalTargetFromLabel", () => {
     // "18 Months" is the only other quantity in the label. If the temporal
     // classification were dropped this would refuse as ambiguous, so this case
     // is load-bearing in both directions.
+    //
+    // ⚠ ONE ASSERTION HERE COULD NOT FAIL AND HAS BEEN REPLACED.
+    // `expect(r.target.unit).not.toBe("months")` is true of every possible
+    // outcome: `scanQuantities` only ever emits a currency symbol, "%" or
+    // "count", so NO code change could turn it red. It read as a guard and was
+    // a tautology. The `value !== 18` half was and remains real.
     const r = deriveGoalTargetFromLabel(GOAL_LABEL, FOUNDER_BRIEF);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.target.unit).not.toBe("months");
     expect(r.target.value).not.toBe(18);
+    // Bound by IDENTITY, not by a predicate another quantity could satisfy:
+    // the selected span must be the CURRENCY one, and the deadline's span must
+    // not be what was chosen (trap 19).
+    expect(r.target.unit).toBe("£");
+    expect(r.target.matchedText).toBe("£30k");
+    expect(r.target.matchedText.toLowerCase()).not.toContain("month");
+  });
+
+  it("⭐ PRECONDITION: the label really does carry the deadline this test claims to reject", () => {
+    // Without this the test above passes just as well on a fixture that has
+    // quietly lost its temporal quantity — the discrimination would be gone and
+    // nothing would say so (trap 13b).
+    expect(GOAL_LABEL).toMatch(/18\s+months/i);
+    // …and a label carrying ONLY the deadline refuses, which is the same
+    // classification observed from the other side.
+    expect(deriveGoalTargetFromLabel("Ship Within 18 Months", FOUNDER_BRIEF)).toEqual({
+      ok: false,
+      refusal: "no_quantity_in_label",
+    });
   });
 
   it("refuses a label figure the brief does not state (#789: no model authors a threshold)", () => {
@@ -317,5 +341,163 @@ describe("the minted target SURVIVES Stage 4b (threshold sweep)", () => {
     expect(goal.goal_threshold_unit).toBe("£");
     expect(goal.goal_threshold_frame).toBeDefined();
     expect(ctx.thresholdSweepTrace.strips_applied).toBe(0);
+  });
+});
+
+describe("the review's three findings — measured, then pinned", () => {
+  /* ─────────────────────────────────────────────────────────────────────────
+   * BLOCKING 1 — the temporal exclusion was applied on ONE side.
+   * ────────────────────────────────────────────────────────────────────── */
+  it("a DURATION in the brief does not attest a bare COUNT in the label", () => {
+    // Measured at `cd010b55`: this returned
+    // `ok { value: 18, unit: "count", briefQuote: "18 months" }`. The user
+    // stated 18 as a DEADLINE; the mint stamped it as a LEVEL.
+    expect(
+      deriveGoalTargetFromLabel(
+        "Reach 18 Enterprise Accounts",
+        "I want to grow the business within 18 months.",
+      ),
+    ).toEqual({ ok: false, refusal: "quantity_not_attested" });
+
+    expect(
+      deriveGoalTargetFromLabel(
+        "Hire 6 Salespeople",
+        "We must keep at least 6 months of runway.",
+      ),
+    ).toEqual({ ok: false, refusal: "quantity_not_attested" });
+  });
+
+  it("⭐ THE TWIN: the same COUNT stated non-temporally in the brief still attests", () => {
+    // Without this, "filter the brief side" could be satisfied by a change that
+    // simply stopped attesting counts at all — the label-side asymmetry
+    // repeated on the brief side, which is the shape of the original defect
+    // (trap 13d: an invariant written with the code's own asymmetry).
+    const r = deriveGoalTargetFromLabel(
+      "Reach 18 Enterprise Accounts",
+      "We want 18 enterprise accounts signed.",
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.target.value).toBe(18);
+    expect(r.target.unit).toBe("count");
+  });
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * BLOCKING 2 — the greedy digit run backtracked behind the trailer guard.
+   * ────────────────────────────────────────────────────────────────────── */
+  it.each([
+    ["£80kARR", "no_quantity_in_label"],
+    ["£1.5mARR", "no_quantity_in_label"],
+    ["the run rate is £250grandish", "no_quantity_in_label"],
+    ["Reach £30kMRR Within 18 Months", "no_quantity_in_label"],
+  ])("%s refuses outright instead of backtracking to a shorter number", (label, refusal) => {
+    // Measured at `cd010b55`, in order: £8, £1, £25, £3 — under-reads of up to
+    // 10,000x, and the last is the very target this module exists to capture.
+    // A brief carrying all four short readings makes the old behaviour MINT
+    // them, so this is an attestation test, not only a scanner test.
+    const brief = "we have £8 and £1 and £25 and £3 in the bank";
+    expect(deriveGoalTargetFromLabel(label, brief)).toEqual({ ok: false, refusal });
+  });
+
+  it("⭐ THE TWIN: a magnitude followed by a SPACE or nothing still reads in full", () => {
+    // The anchor must refuse a truncated read, not every read. Without this the
+    // fix could be "match nothing ever" and the cases above would still pass.
+    for (const [label, value] of [
+      ["£30k", 30_000],
+      ["Reach £30k MRR Within 18 Months", 30_000],
+    ] as const) {
+      const r = deriveGoalTargetFromLabel(label, "we want £30k MRR");
+      expect(r.ok, label).toBe(true);
+      if (!r.ok) return;
+      expect(r.target.value, label).toBe(value);
+    }
+    // And #799's narrowing is untouched: a trailer that is NOT a magnitude key
+    // must keep extracting.
+    const pcm = deriveGoalTargetFromLabel("Hold Price At £49pcm", "we charge £49pcm");
+    expect(pcm.ok).toBe(true);
+    if (!pcm.ok) return;
+    expect(pcm.target.value).toBe(49);
+  });
+
+  it("a digit INSIDE a word is not a quantity — `B2B` is not two billion", () => {
+    // Measured at `cd010b55`: `briefQuote: "2B"`. The scanner had no left
+    // boundary, so the `2` of "B2B" scanned as a count with `B` read as the
+    // billion key, and attested a label the brief never supported.
+    expect(
+      deriveGoalTargetFromLabel(
+        "Reach 2bn Monthly Impressions",
+        "We're a B2B SaaS wanting more reach.",
+      ),
+    ).toEqual({ ok: false, refusal: "quantity_not_attested" });
+
+    // THE TWIN: a genuine `2bn` in the brief still attests, so the left
+    // boundary refuses word-internal digits and nothing else.
+    const real = deriveGoalTargetFromLabel(
+      "Reach 2bn Monthly Impressions",
+      "We want 2bn monthly impressions.",
+    );
+    expect(real.ok).toBe(true);
+    if (!real.ok) return;
+    expect(real.target.value).toBe(2_000_000_000);
+  });
+
+  it("⭐ a refused word-internal number does not leak its TAIL either", () => {
+    // Found by a mutant that SURVIVED: widening the left boundary to include
+    // digits was not equivalent, it was strictly better. With a letters-only
+    // boundary the engine advances INTO a number whose start it refused and
+    // matches the tail — "12a34" published "4", "£30k30k" published "0k". The
+    // backtracking defect one level out.
+    //
+    // Asserted through the attestation, where the harm lands: a brief whose
+    // only "4" is the tail of a refused "34" must not attest a label reading 4.
+    expect(deriveGoalTargetFromLabel("Reach 4 Accounts", "we run 12a34 experiments")).toEqual({
+      ok: false,
+      refusal: "quantity_not_attested",
+    });
+    // THE TWIN: a genuine, separately written 4 still attests.
+    const real = deriveGoalTargetFromLabel("Reach 4 Accounts", "we want 4 accounts");
+    expect(real.ok).toBe(true);
+  });
+
+  it("the left boundary sits BEFORE the currency symbol, not after it", () => {
+    // Placement, not just membership. A mutant that added `£` to the boundary
+    // class SURVIVED the corpus; measured against it, the two spellings differ
+    // only on a doubled symbol — so this is the case that discriminates where
+    // the lookbehind is anchored, and without it the placement is unpinned.
+    const r = deriveGoalTargetFromLabel("Reach ££30k MRR", "we want ££30k MRR");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.target.value).toBe(30_000);
+    expect(r.target.unit).toBe("£");
+  });
+
+  /* ─────────────────────────────────────────────────────────────────────────
+   * BLOCKING 3 — NOT CLOSED. Pinned as a KNOWN GAP so it stays visible.
+   * ────────────────────────────────────────────────────────────────────── */
+  it("⛔ KNOWN GAP: a figure stated as a LEVEL still attests a target", () => {
+    // ⚠ THIS TEST ASSERTS THE DEFECT, DELIBERATELY, AND MUST BE INVERTED —
+    // NOT DELETED — WHEN THE SPAN BINDING LANDS. `sameQuantity` answers "does
+    // this figure occur in the brief?", never "did the user state it as their
+    // target". The brief below states 4% as the CURRENT churn level; the model
+    // wrote the label; the mint stamps `goal_threshold_frame: 'level'`.
+    //
+    // A gap recorded in the suite is honest; a gap invisible to it is how this
+    // one reached a review. Pinned as an EXACT set so it REDs if the class
+    // grows OR shrinks (trap 22f).
+    const level = deriveGoalTargetFromLabel(
+      "Keep Monthly Churn Below 4%",
+      "Trial-to-paid conversion is 12% and monthly churn is 4%.",
+    );
+    expect(level.ok, "if this is now false, INVERT this test — the gap closed").toBe(true);
+    if (!level.ok) return;
+    expect(level.target.value).toBe(0.04);
+
+    const year = deriveGoalTargetFromLabel(
+      "Sign 2026 Enterprise Accounts",
+      "Our plan runs to 2026.",
+    );
+    expect(year.ok, "if this is now false, INVERT this test — the gap closed").toBe(true);
+    if (!year.ok) return;
+    expect(year.target.value).toBe(2026);
   });
 });

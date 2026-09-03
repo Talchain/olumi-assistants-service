@@ -837,7 +837,28 @@ function mintGoalTargetFromGoalLabel(
     collector,
   );
 
-  if (!minted) return undefined;
+  if (!minted) {
+    // ⚠ THE ONE SILENT NON-MINT PATH, NOW LOUD. `derive` succeeded and
+    // `applyGoalTargetRedirect` still declined — first-writer-wins, a threshold
+    // is already on the node. This branch logged NOTHING, which made both
+    // "logs the REFUSAL REASON either way" above and "Fail loud on every
+    // non-mint, with the reason, never a silence" below false as written. It is
+    // a DIFFERENT reason from the derive-side refusals — the figure was read and
+    // attested, and the mint was refused downstream — so it carries its own
+    // name rather than being folded into `GoalLabelTargetRefusal`, which is the
+    // deriver's vocabulary and answers a different question (trap 21).
+    log.info(
+      {
+        event: "cee.factor_enrichment.goal_threshold_label_not_minted",
+        goalNodeId: goalNode.id,
+        reason: "redirect_declined_threshold_already_set",
+        label_span: derived.target.matchedText,
+        brief_span: derived.target.briefQuote,
+      },
+      "Goal target derived from the label but not minted: a threshold was already set",
+    );
+    return undefined;
+  }
 
   log.info(
     {
