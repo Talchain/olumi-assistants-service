@@ -15,6 +15,10 @@
  * A control set written here would only prove the guard agrees with its
  * author.
  */
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -24,6 +28,7 @@ import {
   PROCESS_NARRATION_FALLBACK_TEXT,
   PROCESS_NARRATION_PATTERNS,
   ROUTE_TAXONOMY_PATTERNS,
+  ROUTING_SELF_TALK_PATTERNS,
   RULE_CITATION_PATTERNS,
   SELF_HONESTY_POLICY_PATTERNS,
   SENTENCE_SPLIT,
@@ -104,6 +109,93 @@ const GOOD_ANSWERS: ReadonlyArray<readonly [string, string]> = [
       `percentages on your factors and risks.`,
   ],
 ];
+
+// ── THE MARKER CORPUS — ONE STRING PER PATTERN, PROVEN COMPLETE ───────────
+/**
+ * ⭐ WHY THIS EXISTS AND WHY IT IS NOT A HAND-MAINTAINED MIRROR.
+ *
+ * Two properties below need a string that MATCHES a given pattern, and a
+ * regex cannot be run backwards to produce one. So the strings are written
+ * here — and the `marker corpus` block asserts, DERIVED FROM
+ * `PROCESS_NARRATION_PATTERNS` ITSELF, that every pattern in the exported set
+ * is matched by at least one member. A pattern added without a corpus string
+ * REDs that assertion; it cannot land silently. That is the completeness check
+ * a derived guard can never perform on itself (CLAUDE.md trap 12d: derivation
+ * proves agreement, a corpus is what notices the list is short).
+ *
+ * ⚠ These are hand-written, unlike every other fixture in this file, and that
+ * is a deliberate and disclosed exception: they exist to reach each pattern,
+ * not to prove the predicate's breadth is right. The evidence about breadth is
+ * the capture above and the false-positive sweep in the PR — never this list.
+ */
+const MARKER_CORPUS: ReadonlyArray<readonly [string, string]> = [
+  // RULE_CITATION_PATTERNS
+  ['rule citation · per rule N', 'Per rule 9, I will handle the value change first.'],
+  ['rule citation · rule N says', 'Rule 9 says one action per turn, so I will pick one.'],
+  ['rule citation · rule N (gloss)', 'I am following rule 9 (the one about turns) here.'],
+  // THIRD_PERSON_READER_PATTERNS
+  ['third-person reader · verb', 'The user wants two things from this turn.'],
+  ['third-person reader · contraction', "The user's asking about strengths."],
+  // ROUTING_SELF_TALK_PATTERNS
+  ['routing self-talk · one action per turn', 'I am limited to one action per turn.'],
+  ['routing self-talk · can only route one', 'I can only route one request at a time.'],
+  // SELF_HONESTY_POLICY_PATTERNS
+  ['self-honesty policy', "I shouldn't invent an explanation for that."],
+  // INTERNAL_IDENTIFIER_PATTERNS
+  ['internal identifier · CamelCase type', "Nothing in the ContextPack's labels carries that."],
+  ['internal identifier · dotted path', 'Nothing in graph.edges carries that.'],
+  // ROUTE_TAXONOMY_PATTERNS
+  ['route taxonomy · not an edit request', 'This is a question, not a model edit request.'],
+  ['route taxonomy · no model changes needed', 'No model changes are needed to answer this.'],
+];
+
+/**
+ * The stripper's SOURCE. Read rather than imported because the property being
+ * pinned is that this module's binding is IMPORTED there — a structural fact a
+ * behavioural test cannot distinguish from a verbatim local copy.
+ */
+const STRIPPER_SOURCE = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../routing/strip-planning-preamble.ts'),
+  'utf8',
+);
+
+describe('the marker corpus — complete over the exported set, by derivation', () => {
+  it('every pattern in PROCESS_NARRATION_PATTERNS is matched by at least one member', () => {
+    // ⭐ THE ANTI-MIRROR ASSERTION THAT ACTUALLY BITES. Iterates the SET, not
+    // the corpus, so adding a thirteenth pattern with no exemplar REDs here
+    // and every property below stays honest about its own coverage.
+    const uncovered = PROCESS_NARRATION_PATTERNS.filter(
+      (pattern) => !MARKER_CORPUS.some(([, text]) => pattern.test(text)),
+    ).map((pattern) => pattern.source);
+    expect(uncovered).toEqual([]);
+  });
+
+  it('all SIX classes are represented — none silently absent', () => {
+    // The previous spec's table covered five of six: ROUTING_SELF_TALK_PATTERNS
+    // had no exemplar in either new file, while a comment claimed "every class
+    // is reachable … one exemplar per class". Derived from the groups now, so
+    // a seventh class cannot be omitted the same way.
+    const CLASSES: ReadonlyArray<readonly [string, readonly RegExp[]]> = [
+      ['RULE_CITATION_PATTERNS', RULE_CITATION_PATTERNS],
+      ['THIRD_PERSON_READER_PATTERNS', THIRD_PERSON_READER_PATTERNS],
+      ['ROUTING_SELF_TALK_PATTERNS', ROUTING_SELF_TALK_PATTERNS],
+      ['SELF_HONESTY_POLICY_PATTERNS', SELF_HONESTY_POLICY_PATTERNS],
+      ['INTERNAL_IDENTIFIER_PATTERNS', INTERNAL_IDENTIFIER_PATTERNS],
+      ['ROUTE_TAXONOMY_PATTERNS', ROUTE_TAXONOMY_PATTERNS],
+    ];
+    // The union of the six named groups IS the exported set — so the six
+    // above are all of them, not five of six plus an unnamed remainder.
+    expect(CLASSES.flatMap(([, group]) => [...group])).toEqual([
+      ...PROCESS_NARRATION_PATTERNS,
+    ]);
+    for (const [name, group] of CLASSES) {
+      expect(
+        MARKER_CORPUS.some(([, text]) => group.some((p) => p.test(text))),
+        `${name} has no corpus exemplar`,
+      ).toBe(true);
+    }
+  });
+});
 
 describe('process-narration — the two witnessed leaks', () => {
   it('the deliberation monologue is condemned WHOLE and replaced with an answer', () => {
@@ -204,10 +296,16 @@ describe('process-narration — the answers that must survive', () => {
     expect(r.text).toBe('Founder-led sales leads in 62% of runs.\n\nThe margin is not settled.');
   });
 
-  it('never returns empty for non-empty input, on any marker', () => {
-    for (const pattern of PROCESS_NARRATION_PATTERNS) {
-      const r = applyProcessNarrationGuard(`Per rule 9 (x). ${pattern.source.slice(0, 0)}stub.`);
-      expect(r.text.trim().length).toBeGreaterThan(0);
+  it('never returns empty for non-empty input, on EVERY marker in the set', () => {
+    // ⚠ THIS TEST REPLACED A VACUOUS ONE, AND THE VACUITY IS WORTH RECORDING.
+    // The previous version interpolated `pattern.source.slice(0, 0)` — which
+    // is ALWAYS the empty string — so its loop fed one constant twelve times
+    // and it was a single case wearing a per-marker sweep's name. The sweep is
+    // now over MARKER_CORPUS, which `the marker corpus` block below proves
+    // reaches every pattern in the exported set.
+    for (const [name, exemplar] of MARKER_CORPUS) {
+      const r = applyProcessNarrationGuard(exemplar);
+      expect(r.text.trim().length, `${name} produced empty output`).toBeGreaterThan(0);
     }
     expect(applyProcessNarrationGuard(LEAK_DELIBERATION).text.trim().length).toBeGreaterThan(0);
   });
@@ -246,26 +344,35 @@ describe('the replacement answer', () => {
 });
 
 describe('ONE marker set, TWO remedies — the anti-mirror assertion', () => {
-  it('the planning stripper uses THIS module\'s patterns, by identity', () => {
-    // Derived, not mirrored: the assertion iterates the exported set rather
-    // than hand-listing exemplar strings, so a seventh pattern added here
-    // cannot cover the egress path and silently miss the orientation path.
-    for (const pattern of PROCESS_NARRATION_PATTERNS) {
-      expect(PROCESS_NARRATION_PATTERNS).toContain(pattern);
-    }
-    // Every class is reachable through isPlanningText — one exemplar per
-    // class, each a string the class was written for.
-    const perClass: ReadonlyArray<readonly [readonly RegExp[], string]> = [
-      [RULE_CITATION_PATTERNS, 'Per rule 9 (one action per turn), I will do this first.'],
-      [THIRD_PERSON_READER_PATTERNS, "The user's asking about strengths."],
-      [SELF_HONESTY_POLICY_PATTERNS, "I shouldn't invent an explanation for that."],
-      [INTERNAL_IDENTIFIER_PATTERNS, 'Nothing in graph.edges carries that.'],
-      [ROUTE_TAXONOMY_PATTERNS, 'No model changes are needed to answer this.'],
-    ];
-    for (const [group, exemplar] of perClass) {
-      expect(group.some((p) => p.test(exemplar))).toBe(true);
-      expect(isPlanningText(exemplar)).toBe(true);
-      expect(findProcessNarrationHit(exemplar)).not.toBeNull();
+  it('the planning stripper IMPORTS this module\'s set — asserted at its source', () => {
+    // ⚠ THIS REPLACED AN ASSERTION THAT COULD NOT FAIL. The previous version
+    // was `for (const p of PROCESS_NARRATION_PATTERNS) expect(
+    // PROCESS_NARRATION_PATTERNS).toContain(p)`, which is true of any array
+    // unconditionally and never referenced the stripper at all. It carried
+    // this test's name while pinning nothing.
+    //
+    // The property is STRUCTURAL — one module importing another's binding —
+    // and a behavioural test cannot see it: a verbatim local copy of the array
+    // behaves identically and is exactly the mirror this is meant to forbid.
+    // So it is pinned the way the estate pins wiring: at the source, the same
+    // mechanism as `blocked-slot-claim-guard-callsite-pin.test.ts`.
+    expect(STRIPPER_SOURCE).toContain(
+      "from '../compose/process-narration.js'",
+    );
+    expect(STRIPPER_SOURCE).toContain('PROCESS_NARRATION_PATTERNS');
+    expect(STRIPPER_SOURCE).toContain('return PROCESS_NARRATION_PATTERNS.some((p) => p.test(text));');
+    // And it declares no second set of its own — the drift this forbids.
+    expect(STRIPPER_SOURCE).not.toMatch(/^(?:export )?const \w*PATTERNS\w*(?::[^=]*)?\s*=\s*\[/m);
+  });
+
+  it('EVERY pattern in the exported set is reachable through isPlanningText', () => {
+    // The behavioural half, and it is derived: the corpus below is proven
+    // complete over `PROCESS_NARRATION_PATTERNS` by the `marker corpus` block,
+    // so a thirteenth pattern cannot land covering the egress path while
+    // silently missing the orientation path — the corpus check REDs first.
+    for (const [name, exemplar] of MARKER_CORPUS) {
+      expect(isPlanningText(exemplar), `${name} is invisible to isPlanningText`).toBe(true);
+      expect(findProcessNarrationHit(exemplar), `${name} is invisible to the guard`).not.toBeNull();
     }
   });
 

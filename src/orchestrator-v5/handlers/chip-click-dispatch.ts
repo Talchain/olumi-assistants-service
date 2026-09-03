@@ -1716,8 +1716,15 @@ export async function dispatchChipClickRunAnalysis(
     // executor entirely (see the F6 note below, which exists for exactly this
     // reason), so a guard installed only in `finalizeRun` would be blind to
     // every chip-initiated turn. Enumerating the paths that HAVE leaked is how
-    // the next emit path ships uncovered; this is the enumeration of paths
-    // that CAN emit.
+    // the next emit path ships uncovered; this covers the chip-click DISPATCH
+    // FAMILY by construction — both of route-v2's `chip_click` exits
+    // (`:2855`, `:2937`) reach here.
+    //
+    // ⚠ IT IS NOT ROUTE-LEVEL COVERAGE, and an earlier draft of this comment
+    // implied it was. `route-v2.ts` has 24 `sendFinalised200` exits and this
+    // guard is reachable on four. The measured enumeration, and the exits
+    // that carry model-authored prose WITHOUT it, are in
+    // `enforceProcessNarrationGuard`'s docblock in `turn-executor.ts`.
     {
       const guarded = applyProcessNarrationGuard(response.assistant_text ?? '');
       if (guarded.rewritten) {

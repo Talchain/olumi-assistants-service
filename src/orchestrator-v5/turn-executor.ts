@@ -13062,10 +13062,52 @@ export async function runTurnExecutor(
    * header records: on coach / converse / text_only "the orientation IS the
    * whole answer and emptying it would ship a blank reply". Both witnessed
    * leaks are on exactly those branches. Fixing this by adding a third and
-   * fourth call site would leave the FIFTH emit path — and this executor has
-   * dozens — uncovered the day it is added. The same argument the
-   * forbidden-phrase guard below already makes: an upstream hook misses new
-   * emit paths, a finaliser hook cannot.
+   * fourth call site inside the compose branches would leave the FIFTH branch
+   * — and this executor has dozens of exits — uncovered the day it is added.
+   * A hook in `finalizeRun` covers every exit of THIS executor by
+   * construction, which an in-branch fix cannot.
+   *
+   * ⚠⚠ COVERAGE, MEASURED — AND NARROWER THAN "BY CONSTRUCTION" SUGGESTS.
+   * An earlier draft of this note claimed the three call sites made coverage
+   * structural across the route. That claim was FALSE and is withdrawn.
+   * Derived at `src/orchestrator/route-v2.ts` (3 Sep 2026): that file has
+   * **24 `sendFinalised200` exits**, the sole sanctioned 200-OK send site, and
+   * this guard is reachable on **four** of them —
+   *   · `:6860` `turn_executor`  (→ `runTurnExecutor` → `finalizeRun`, here)
+   *   · `:6387` `edit_graph`     (`eg.response` ← `dispatchEditGraph` `:6284`)
+   *   · `:2855`, `:2937` `chip_click` (← `dispatchDeterministicChipClick`
+   *     `:2830`, which delegates to `dispatchChipClickRunAnalysis`
+   *     `chip-click-dispatch.ts:1167`)
+   * The property that IS structural is per-dispatch-family: every exit of
+   * those three families is covered. The route as a whole is NOT.
+   *
+   * ⛔ THE TWENTY UNCOVERED EXITS, named rather than left implicit. The one
+   * that matters is `:4519 draft_graph`, which ships prose assembled from
+   * LLM-authored coaching fields (`coaching/post-draft-narrative.ts:6`
+   * — `coachingSummary` is used VERBATIM when it passes the copy-quality
+   * gate). The other nineteen are route-level intercepts that compose their
+   * own responses without entering a guarded dispatcher: ten further
+   * `edit_graph` exits (`:2195`, `:5117`, `:5239`, `:5293`, `:5325`, `:5559`,
+   * `:5782`, `:5880`, `:6154`, `:6251`), plus `system_event`,
+   * `readiness_intake`, `add_option_transaction`, the two
+   * `explicit_generate_*`, `clarify_v2`, `process_meta_intake` and the two
+   * `frame_no_brief_guard` exits.
+   *
+   * ⚠ NO NARRATION HAS BEEN WITNESSED ON ANY OF THOSE TWENTY. This is an
+   * enumeration of exits that CAN carry model-authored prose without this
+   * guard, not a measured leak — the distinction matters, because a row
+   * minted from it must restate that scope and not generalise it
+   * (CLAUDE.md trap 20).
+   *
+   * ⭐ THE ALTERNATIVE, DELIBERATELY NOT TAKEN HERE. The sibling leader-claim
+   * guard solved exactly this by installing at `sendFinalised200` itself and
+   * wrote down why (`route-v2.ts:1594-1601`: *"a per-exit edit is one place
+   * per exit for the next exit to be forgotten"*). That is the right shape and
+   * it is a larger change than this one: this guard can SUBSTITUTE A WHOLE
+   * REPLY, and the false-positive sweep behind its marker set was run over
+   * production string literals, not over `draft_graph`'s composed narrative.
+   * Moving it to the route chokepoint needs its own sweep of that copy and is
+   * a scope expansion, not a line move. Stopped at the boundary and reported.
    *
    * The guard is safe HERE precisely because it can never return nothing: on a
    * block that was narration end to end it substitutes an honest sentence plus
@@ -13093,6 +13135,30 @@ export async function runTurnExecutor(
    * the user stops reading the monologue now, and it appears in the right
    * place the moment the disclosure flags are opened. Flipping either flag is
    * a product decision and is not taken here.
+   *
+   * ⛔ WHAT THIS DOES NOT REACH — THE DURABLE COPY, AND IT IS FED BACK TO THE
+   * MODEL. Every `commitTurn` site in this executor runs BEFORE `finalizeRun`,
+   * and `commit.ts:332 durablePublicAssistantText` re-applies only the
+   * forbidden-phrase guard and the entity scrub. So `assistant_message`
+   * persists the UNGUARDED text for these turns, and that value is read back
+   * as prior-turn context by `context/context-pack-assembler.ts`,
+   * `rolling-summary/build-input.ts` and `handlers/edit-graph-dispatch.ts`
+   * (as `{ role: 'assistant', content: turn.assistant_message }`).
+   * `session/store.ts:189-193` describes that field as *"the egress-validated,
+   * user-visible prose … `assistant_text` is what the user saw"*, which stops
+   * being true on a turn this guard rewrites.
+   *
+   * ⚠ SCOPE, STATED PRECISELY. This guard WIDENS a gap the leader-claim and
+   * structural-success guards already have; it does not create one. It matters
+   * more here only because the retained content is the exact monologue this
+   * guard exists to suppress, and the model is then re-shown it as its own
+   * prior answer. NO REINFORCEMENT EFFECT HAS BEEN MEASURED — in the single
+   * available capture the model recovered on the following turn, and one data
+   * point is not a finding. The repo names the remedy in two places
+   * (`turn-executor.ts:12384`, `edit-graph-dispatch.ts:4583`: *"runs BEFORE
+   * commitTurn so the stored assistant_message equals the honest wire copy"*),
+   * and applying it belongs with the sibling guards that share the gap rather
+   * than in this change.
    *
    * Idempotent: neither the surviving answer sentences nor the fallback copy
    * carries a narration marker.
