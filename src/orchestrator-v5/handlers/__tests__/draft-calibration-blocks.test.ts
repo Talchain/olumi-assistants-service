@@ -31,6 +31,7 @@ import { deriveMissingRootAssumptions } from '../../../cee/graph-readiness/missi
 import { shouldSuppressEditDispatchForValueUpdate } from '../../../orchestrator/routing/value-update-gate.js';
 import { gateCoachingCardBody } from '../../coaching/copy-quality-gate.js';
 import {
+  buildCalibrationBody,
   buildDraftCalibrationBlocks,
   calibrationAnswerExemplar,
   DRAFT_CALIBRATION_SIGNAL_PREFIX,
@@ -190,6 +191,30 @@ describe('fail-closed', () => {
     expect(buildDraftCalibrationBlocks({ graph: quantified, createdAt: CREATED_AT })).toEqual([]);
   });
 
+  it('⛔ THE BODY GATE EARNS ITS PLACE — an offence the TITLE truncation hides', () => {
+    // ⭐ THIS IS THE DIVERGENCE THAT MAKES TWO GATES TWO GATES. The title is
+    // truncated to 80 before it is gated, so a banned word at the end of a long
+    // label is cut out of the title and survives in the body, which is never
+    // truncated. Without this case the body gate is indistinguishable from its
+    // neighbour and could be deleted with a green suite — a mutant proved
+    // exactly that before this test existed.
+    const label = 'How much confidence the leadership team places in our quarterly sales graphs';
+    const g = graph(
+      [{ id: 'f', kind: 'factor', label }],
+      [{ from: 'f', to: 'g', strength_mean: 0.5 }],
+    );
+
+    // PRECONDITIONS, all three, or the assertion below proves nothing.
+    expect(deriveMissingRootAssumptions(g).ranked.map((r) => r.factor_id)).toEqual(['f']);
+    const title = `Give ${label} a level`.slice(0, 80).replace(/\s+\S*$/, '');
+    expect(gateCoachingCardBody(title).accept, 'the title must PASS, or the body gate is not isolated').toBe(true);
+    const body = buildCalibrationBody({ factor_id: 'f', factor_label: label, materiality: 1 }, 1);
+    expect(body.length, 'the body must be UNDER the cap, or length is doing the work').toBeLessThanOrEqual(300);
+    expect(gateCoachingCardBody(body).accept).toBe(false);
+
+    expect(buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })).toEqual([]);
+  });
+
   it('⛔ a label too long to quote whole yields SILENCE, not a truncated ask', () => {
     const longLabel =
       'which we believe is partly driven by product quality and partly by how much '
@@ -198,9 +223,13 @@ describe('fail-closed', () => {
       [{ id: 'f', kind: 'factor', label: longLabel }],
       [{ from: 'f', to: 'g', strength_mean: 0.5 }],
     );
-    // PRECONDITION — the ranking DOES return it, so the empty result below is
-    // the budget gate's doing and not the derivation seeing nothing.
+    // PRECONDITIONS — the ranking DOES return it, and the body genuinely
+    // overshoots, so the empty result below is the length refusal and not the
+    // derivation seeing nothing. The refusing authority is the copy gate's
+    // `too_long`; this module keeps no length constant of its own.
     expect(deriveMissingRootAssumptions(g).ranked.map((r) => r.factor_id)).toEqual(['f']);
+    const body = buildCalibrationBody({ factor_id: 'f', factor_label: longLabel, materiality: 1 }, 1);
+    expect(body.length).toBeGreaterThan(300);
     expect(buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })).toEqual([]);
   });
 

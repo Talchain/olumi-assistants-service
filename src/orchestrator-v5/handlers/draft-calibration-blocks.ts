@@ -100,14 +100,23 @@
  * ── FAIL-CLOSED GATES, in order ────────────────────────────────────────────
  *   1. no ranked unquantified root                  → []
  *   2. the top-ranked factor has no usable label    → []
- *   3. the assembled body exceeds the card budget   → []  (see below)
- *   4. `gateCoachingCardBody` rejects title or body → []
- *   5. the block fails `CoachingBlockSchema`        → []
+ *   3. `gateCoachingCardBody` rejects title or body → []  (see below)
+ *   4. the block fails `CoachingBlockSchema`        → []
+ *
+ * ⚠ THERE IS NO LENGTH CHECK OF THIS MODULE'S OWN, AND THERE WAS ONE UNTIL A
+ * MUTANT PROVED IT INERT. It read `if (body.length > 300) return []` — a
+ * hand-copied restatement of a cap that `gateCoachingCardBody` and
+ * `CoachingBlockSchema` BOTH already enforce (measured: the schema rejects a
+ * 301-character body). Deleting it changed no behaviour on any test, which is
+ * the definition of a mirror rather than a guard, and this module's own header
+ * lectures about exactly that. The length authority is the contract's.
  *
  * ── GATE 3 IS THE INTERESTING ONE, AND IT IS NOT A LENGTH CHECK ────────────
  * The exemplar must carry the factor's label EXACTLY, or `set <label> to 40%`
- * resolves nothing and the card breaks P8. So the body is never truncated: if
- * it does not fit whole, the card is not emitted. On the founder's capture that
+ * resolves nothing and the card breaks P8. So the body is NEVER TRUNCATED —
+ * the title is, because it carries no command, and the body is not. A body
+ * that does not fit whole is rejected by `gateCoachingCardBody`'s `too_long`
+ * and the card is not emitted. On the founder's capture that
  * rule has a real consequence worth stating rather than discovering later — the
  * second-ranked factor is labelled with a 117-character sentence fragment
  * ("which we believe is partly driven by product quality and…"), whose body
@@ -154,13 +163,16 @@ import { guidanceSignalsForCoachingKind } from '../compose/guidance-signals.js';
 export const DRAFT_CALIBRATION_SIGNAL_PREFIX = 'draft_calibration:root_level:';
 
 /**
- * `CoachingBlockSchema`'s own title/body caps, mirrored here because they are
- * module-private in `@talchain/schemas`. The mirror is CONTAINED: gate 5
- * re-parses the whole block, so a drift in either number drops the card rather
- * than shipping an over-long one.
+ * The title cap. It is a mirror of `CoachingBlockSchema`'s (module-private)
+ * bound, and it is here ONLY because truncation needs a number to truncate to —
+ * a length no downstream authority can supply. The mirror is CONTAINED: the
+ * final schema parse re-checks the whole block, so a drift drops the card
+ * rather than shipping an over-long title.
+ *
+ * There is deliberately no BODY twin. The body is never truncated, so nothing
+ * here needs its cap, and restating it bought nothing — see the header.
  */
 const TITLE_BUDGET = 80;
-const BODY_BUDGET = 300;
 
 /**
  * The illustrative figure in the command exemplar.
@@ -256,14 +268,21 @@ export function buildDraftCalibrationBlocks(
   if (top.factor_label.length === 0) return [];
 
   const title = truncateAtWordBoundary(`Give ${top.factor_label} a level`, TITLE_BUDGET);
+  // ⚠ NOT TRUNCATED. See the header: a shortened exemplar is an ask this
+  // product cannot accept, so an over-long body must be refused, never trimmed.
   const body = buildCalibrationBody(top, ranked.length);
 
-  // Gate 3 — whole or nothing. See the header: a truncated exemplar is an ask
-  // this product cannot accept.
-  if (body.length > BODY_BUDGET) return [];
-
-  // Gate 4 — on the EXACT bytes that ship. A label that leaks a slug-shaped id
-  // or graph-shape wording drops the card rather than being rewritten.
+  // Gate 3 — on the EXACT bytes that ship, and the ONLY length authority this
+  // module invokes. A label that leaks a slug-shaped id, uses graph-shape
+  // wording, or pushes the body past the card cap drops the card rather than
+  // being rewritten: rewriting the product's own account of a user's model
+  // would be its own dishonesty.
+  //
+  // ⭐ TITLE AND BODY ARE GATED SEPARATELY AND THAT IS NOT REDUNDANT. The title
+  // is truncated first, so an offending token near the end of a long label is
+  // cut out of the title and survives in the body. The suite drives exactly
+  // that divergence, with the body-under-cap precondition asserted, so this
+  // line REDs on its own rather than leaning on its neighbour.
   if (!gateCoachingCardBody(title).accept) return [];
   if (!gateCoachingCardBody(body).accept) return [];
 
@@ -297,7 +316,8 @@ export function buildDraftCalibrationBlocks(
     // available, and a label without a prompt renders inert.
   } as CoachingBlock;
 
-  // Gate 5 — fail closed rather than hand egress a block it drops whole.
+  // Gate 4 — fail closed rather than hand egress a block it drops whole. Also
+  // the contract's own length authority; see the header.
   if (!CoachingBlockSchema.safeParse(candidate).success) return [];
 
   return [candidate];
