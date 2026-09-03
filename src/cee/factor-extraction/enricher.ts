@@ -30,6 +30,10 @@ import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCap,
 } from "../../utils/goal-threshold-cap.js";
+import {
+  deriveGoalTargetFromLabel,
+  type GoalLabelTargetRefusal,
+} from "./goal-label-target.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -777,6 +781,90 @@ function applyGoalTargetRedirect(
 }
 
 /**
+ * THE FALLBACK ROUTE INTO THE SAME MINT — the goal node's own label.
+ *
+ * ⭐ WHY A SECOND ROUTE EXISTS AT ALL. `isTargetGoalLabel` decides whether the
+ * user's stated target becomes typed data, and it decides it by asking whether
+ * a REGEX-INFERRED FACTOR LABEL contains one of four substrings. MEASURED at
+ * `f4c8f501` against the 3 Sep founder brief: 21 extracted factors, ZERO
+ * carrying any of the four words, and the £30,000 target extracted under the
+ * label `"Customer Count"`. The mint was not narrow for that brief — it was
+ * UNREACHABLE, and the target shipped as label prose with all four typed fields
+ * null. See `goal-label-target.ts` for the bundle reference and the argument.
+ *
+ * ⚠ IT IS A FALLBACK, NOT A SECOND AUTHOR. It runs only where the factor route
+ * minted nothing, and `applyGoalTargetRedirect` still returns false on a node
+ * that already carries a threshold, so FIRST WRITER WINS is untouched.
+ *
+ * ⚠ AND IT DOES NOT REOPEN #789. The number must be attested in the user's own
+ * brief before it is minted; the label only says WHICH quantity is the target.
+ *
+ * Returns the goal node id when it minted, otherwise `undefined`, and logs the
+ * REFUSAL REASON either way — a threshold that is absent because the figure was
+ * a model invention must be distinguishable in the logs from a scanner that
+ * stopped matching (CLAUDE.md trap 12).
+ */
+function mintGoalTargetFromGoalLabel(
+  enrichedGraph: GraphT,
+  goalNodeIndex: number,
+  brief: string,
+  collector?: CorrectionCollector,
+): string | undefined {
+  const goalNode = enrichedGraph.nodes[goalNodeIndex];
+  if (!goalNode) return undefined;
+
+  const derived = deriveGoalTargetFromLabel(goalNode.label, brief);
+  if (!derived.ok) {
+    logGoalLabelRefusal(goalNode.id, derived.refusal);
+    return undefined;
+  }
+
+  // A SYNTHESISED `ExtractedFactor`, so the label route and the factor route
+  // share one piece of arithmetic and one cap doctrine. Confidence is 1 because
+  // nothing here is inferred: the quantity was read deterministically from the
+  // label and matched deterministically in the brief.
+  const minted = applyGoalTargetRedirect(
+    enrichedGraph,
+    goalNodeIndex,
+    {
+      label: goalNode.label ?? "",
+      value: derived.target.value,
+      unit: derived.target.unit,
+      confidence: 1,
+      matchedText: derived.target.matchedText,
+      extractionType: "explicit",
+    },
+    collector,
+  );
+
+  if (!minted) return undefined;
+
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_threshold_from_label",
+      goalNodeId: goalNode.id,
+      label_span: derived.target.matchedText,
+      brief_span: derived.target.briefQuote,
+      unit: derived.target.unit,
+    },
+    "Goal target minted from the goal label, attested in the brief",
+  );
+  return enrichedGraph.nodes[goalNodeIndex].id;
+}
+
+/** Fail loud on every non-mint, with the reason, never a silence. */
+function logGoalLabelRefusal(goalNodeId: string, refusal: GoalLabelTargetRefusal): void {
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_threshold_label_refused",
+      goalNodeId,
+      refusal,
+    },
+    `Goal target not minted from the goal label: ${refusal}`,
+  );
+}
+
+/**
  * The goal-target redirect, run WITHOUT the factor side.
  *
  * ROADMAP 2.281 — the repair. `allOptionsHaveInterventions` is a sound reason
@@ -807,7 +895,6 @@ function mintGoalTargetOnly(
   const target = qualifyExtractedFactors(extractFactors(brief), minConfidence).find((f) =>
     isTargetGoalLabel(f.label),
   );
-  if (!target) return { graph, mintedGoalId: undefined };
 
   // Clone before writing — the skip path returns the caller's own graph object
   // when nothing is minted, and must not mutate it when something is.
@@ -817,9 +904,20 @@ function mintGoalTargetOnly(
     edges: [...graph.edges],
   };
 
-  const minted = applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector);
-  return minted
-    ? { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id }
+  // ⚠ NO EARLY RETURN ON `!target` ANY MORE. That return is what made the mint
+  // unreachable for the 3 Sep founder brief: `isTargetGoalLabel` matched none
+  // of its 21 extracted factor labels, so the skip path gave up before ever
+  // looking at the goal node — whose label carried the target in plain sight.
+  const minted = target
+    ? applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector)
+    : false;
+  if (minted) {
+    return { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id };
+  }
+
+  const fromLabel = mintGoalTargetFromGoalLabel(enrichedGraph, goalNodeIndex, brief, collector);
+  return fromLabel !== undefined
+    ? { graph: enrichedGraph, mintedGoalId: fromLabel }
     : { graph, mintedGoalId: undefined };
 }
 
@@ -1193,6 +1291,19 @@ export async function enrichGraphWithFactorsAsync(
     }
 
     factorsAdded++;
+  }
+
+  // ── THE FALLBACK: the goal node's own label ──────────────────────────────
+  // Runs only when the loop above minted nothing, so the factor route keeps
+  // precedence and FIRST WRITER WINS is unchanged. See
+  // `mintGoalTargetFromGoalLabel` for why the loop can miss an ordinary
+  // quantified target entirely.
+  if (goalThresholdsSet === 0 && goalNode && goalNodeIndex >= 0) {
+    const fromLabel = mintGoalTargetFromGoalLabel(enrichedGraph, goalNodeIndex, brief, collector);
+    if (fromLabel !== undefined) {
+      goalThresholdsSet++;
+      goalThresholdsMinted.push(fromLabel);
+    }
   }
 
   // Emit telemetry
