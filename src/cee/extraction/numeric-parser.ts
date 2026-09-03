@@ -289,9 +289,41 @@ type RangeParse = ParsedValue | typeof RANGE_REFUSED | null;
  *     "cut spend from £2m to £500k"     2m (high) →  1.25m (medium), inverted
  *     "raise price from £49 to £59"    49 (high) →  54 (medium)
  *
- * Both consumers are the option-intervention path — `intervention-extractor.ts`
- * `continue`s on a falsy value at `:407` and pushes `value: null` at `:329` —
- * so the intervention is dropped or nulled outright.
+ * ⚠⚠ AND WHAT THAT COSTS A USER TODAY IS NOT WHAT THIS COMMENT USED TO SAY.
+ * It read: *"Both consumers are the option-intervention path —
+ * `intervention-extractor.ts` `continue`s on a falsy value at `:407` and
+ * pushes `value: null` at `:329` — so the intervention is dropped or nulled
+ * outright."* The two call sites are named correctly and what they PASS was
+ * never checked. Measured by driving the five real `INTERVENTION_PATTERNS`
+ * and the `:407` fallback scan over these sentences, rather than by reading
+ * their regexes:
+ *
+ *   - `:329` takes `valueGroup` from `INTERVENTION_PATTERNS`. Four of the five
+ *     capture the single token `([£$€¥₹]?\d+(?:,\d{3})*(?:\.\d+)?[kKmMbB]?%?)`;
+ *     the one `valueGroup: 0` pattern's full match terminates at its first
+ *     percent, so "reduce churn from 10% to 5%" arrives as "reduce churn from
+ *     10%" — one bound, never a span.
+ *   - `:407` scans that same single-token pattern with `/g`, so it hands over
+ *     "£600" and "£400" separately, never "£600 to £400".
+ *   - `numeric-parser.ts:841/861` sit inside `extractAllNumericValues`, which
+ *     has ZERO consumers in `src/` — held there by a live tripwire with its own
+ *     positive control at
+ *     `__tests__/numeric-parser-magnitude-authority.test.ts`.
+ *
+ * Across every sentence above, no from-to SPAN reaches `parseNumericValue` at
+ * all (the span detector was itself positive-controlled before the absence was
+ * believed). So this class is NOT user-reachable through THIS function, and the
+ * range grammar here is currently exercised only by single-token inputs.
+ *
+ * ⚠⚠⚠ DO NOT READ THAT AS "THE FROM-TO CLASS IS NOT USER-REACHABLE". It is
+ * reachable, through the OTHER extractor. `factor-extraction`'s `extractFactors`
+ * is called from `enricher.ts` at `:393`, `:858` and `:982`, it has NO from-to
+ * frame guard of any kind, and its range patterns claim a from-to span exactly
+ * as this one did. A manifest for one function is evidence about that function
+ * and nothing else (trap 20); the generalisation is where the error enters, and
+ * it entered twice here before this sentence was written. What that path does
+ * with a descending from-to is decided in `utils/amount-range.ts`, and the
+ * measured base/head pair is recorded there.
  *
  * ⚠ THIS PR ALREADY CONTAINED THE RIGHT ANALYSIS, one module over.
  * `resolveAmountPairBothOrNeither`'s docstring: *"a DECREASE descends by

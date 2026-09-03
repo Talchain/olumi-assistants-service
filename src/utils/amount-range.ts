@@ -264,10 +264,44 @@ export function resolveAmountRange(input: {
 
   const min = minDigits * resolveMagnitude(input.minMagnitude);
   const max = maxDigits * resolveMagnitude(input.maxMagnitude);
-  // Both bounds stated independently. A descending pair here is the writer's,
-  // not an ellipsis artefact, and the extractors already tolerated it — so it
-  // is left alone rather than newly refused. Narrowing the accepted set is a
-  // separate decision from reading magnitudes correctly.
+
+  // ⚠⚠ THE SENTENCE THAT USED TO STAND HERE WAS FALSE FOR HALF ITS OWN BRANCH,
+  // and the half it was false about is the half this change created.
+  //
+  // It read: *"a descending pair here is the writer's, not an ellipsis
+  // artefact, and the extractors already tolerated it — so it is left alone
+  // rather than newly refused."* One sentence covering two situations that
+  // differ in exactly the way that matters — the estate's signature defect
+  // (trap 21). Measured through `enrichGraphWithFactors`, the user-reachable
+  // entry, at the base `f4c8f501` and at `479c7c97`:
+  //
+  //   NEITHER bound carries a magnitude — "cut CAC from £600 to £400"
+  //     base  {value 500, rangeMin 600, rangeMax 400}
+  //     head  {value 500, rangeMin 600, rangeMax 400}      IDENTICAL.
+  //   The tolerance is genuinely INHERITED. Not this change's to narrow, and
+  //   it is pinned as a recorded floor rather than silently altered.
+  //
+  //   BOTH bounds carry one — "We will cut spend from £2m to £500k this year."
+  //     base  {value 2_000_000, extractionType "explicit", confidence 0.85}
+  //     head  {value 1_250_000, extractionType "range",
+  //            rangeMin 2_000_000, rangeMax 500_000}
+  //   NOT inherited. Base emitted no range at all here, because base could not
+  //   read a magnitude on either bound of a `to`-joined pair. Reading the
+  //   magnitudes correctly is what put this shape INSIDE the branch, and the
+  //   branch then published a midpoint of £1,250,000 — a number the writer
+  //   never typed — IN PLACE OF their own stated £2m, with min > max.
+  //
+  // That is the OVER-READ direction this module's header calls the worse of
+  // the two, arriving on the path that reaches a user. So the ordering
+  // precondition already applied by the other two answers in this file
+  // (`resolvePercentRange` refuses a descending pair; the elliptical branch
+  // above refuses one) is applied to the members this change added, and to
+  // those only. Refusing restores the base output on that set EXACTLY.
+  if (hasMinMag && hasMaxMag && min > max) return null;
+
+  // Neither bound carries a magnitude: the inherited tolerance, left alone.
+  // Narrowing THAT set is a separate decision from reading magnitudes
+  // correctly, and it is not this change's to take.
   return { min, max, magnitudeDistributed: false };
 }
 
@@ -293,23 +327,33 @@ export function resolveAmountRange(input: {
  * distributed; here there is no magnitude to distribute, and the same fact
  * decides whether there is a range at all.
  *
- * ⚠⚠ BUT "ONE RULE, TWO USES" IS NOT WHAT THIS FILE IMPLEMENTS, and the
- * sentence that used to stand here said it was. There are THREE answers to
- * "is a descending pair a range?", and they are deliberately different:
+ * ⚠⚠ "ONE RULE, TWO USES" IS STILL NOT WHAT THIS FILE IMPLEMENTS, and the two
+ * sentences that have stood here before both described it wrongly. There are
+ * FOUR answers to "is a descending pair a range?", and the split is by whether
+ * this change put the shape inside the branch, not by tidiness:
  *
  *   percent (here)                        → NO. Refuse.
  *   amount, magnitude on ONE side only    → NO. Refuse (ellipsis needs the
  *                                           ordering precondition to be safe).
- *   amount, magnitude on BOTH sides       → YES, and it publishes `min > max`
- *                                           — pinned at `amount-range.test.ts`
- *                                           on the stated grounds that the
- *                                           extractors already tolerated it.
+ *   amount, magnitude on BOTH sides       → NO. Refuse. This shape could not
+ *                                           reach the branch before magnitudes
+ *                                           were read on both bounds, so the
+ *                                           tolerance was NOT inherited — it
+ *                                           was created here, and it published
+ *                                           a midpoint over a stated figure on
+ *                                           the user-reachable enricher path.
+ *                                           Refusing restores the base output
+ *                                           on that set exactly.
+ *   amount, NEITHER bound carries one     → YES, and it publishes `min > max`.
+ *                                           Genuinely inherited: base and head
+ *                                           are identical on it. Pinned as a
+ *                                           recorded floor, not endorsed.
  *
- * The third is a tolerance carried forward, not a rule this file endorses. It
- * is recorded here rather than smoothed over, because a comment asserting an
- * invariant the file does not hold is the most convincing wrong sentence in a
- * module — a successor would reconcile the code to the comment and change
- * behaviour nobody asked to change.
+ * The fourth is a tolerance carried forward. It is recorded here rather than
+ * smoothed over, because a comment asserting an invariant the file does not
+ * hold is the most convincing wrong sentence in a module — a successor would
+ * reconcile the code to the comment and change behaviour nobody asked to
+ * change. The third was described that way too, and it was not true of it.
  *
  * ⚠ THE COST, AND WHY IT IS THE SAFE DIRECTION: "churn between 10-5%" is now
  * refused. Refusing it loses an extraction and asks the user; admitting it kept

@@ -221,10 +221,22 @@ describe("shapes with no single reading are refused, and the refused set is exac
         maxMagnitude: "m",
       }),
     ).toBeNull();
-    // …and a DESCENDING pair where both bounds state their own magnitude is
-    // the writer's, not an ellipsis artefact, so it is NOT newly refused.
-    // Narrowing the accepted set is a separate decision from reading
-    // magnitudes correctly.
+    // ⚠⚠ THIS PIN MOVED, AND THE REASON IS A MEASUREMENT, NOT A PREFERENCE.
+    // It asserted `{min: 5_000_000, max: 2_000_000}` on the stated grounds
+    // that "the extractors already tolerated it". Driven through
+    // `enrichGraphWithFactors`, the entry a user actually reaches, that ground
+    // is false for a magnitude-bearing pair:
+    //
+    //   "We will cut spend from £2m to £500k this year."
+    //     f4c8f501  {value 2_000_000, extractionType "explicit", conf 0.85}
+    //     479c7c97  {value 1_250_000, extractionType "range",
+    //                rangeMin 2_000_000, rangeMax 500_000}
+    //
+    // Base emitted no range there at all — it could not read a magnitude on
+    // either bound of a `to`-joined pair — so the tolerance was CREATED by
+    // reading them, not inherited. What it created was a midpoint of
+    // £1,250,000 standing in for the writer's own stated £2m. Refusing
+    // restores the base output on that set exactly.
     expect(
       resolveAmountRange({
         minDigits: "5",
@@ -232,7 +244,60 @@ describe("shapes with no single reading are refused, and the refused set is exac
         maxDigits: "2",
         maxMagnitude: "m",
       }),
-    ).toEqual({ min: 5_000_000, max: 2_000_000, magnitudeDistributed: false });
+    ).toBeNull();
+    // …and the ASCENDING twin, so the refusal keys on the ORDERING and not on
+    // the presence of two magnitudes. Without this, refusing every
+    // both-magnitude pair would pass the case above and destroy the feature.
+    expect(
+      resolveAmountRange({
+        minDigits: "2",
+        minMagnitude: "m",
+        maxDigits: "5",
+        maxMagnitude: "m",
+      }),
+    ).toEqual({ min: 2_000_000, max: 5_000_000, magnitudeDistributed: false });
+    // …and the INHERITED tolerance is untouched: neither bound carries a
+    // magnitude, base and head are identical on it, and narrowing it is not
+    // this change's to take. The opposite-direction twin for the refusal.
+    expect(
+      resolveAmountRange({
+        minDigits: "600",
+        minMagnitude: undefined,
+        maxDigits: "400",
+        maxMagnitude: undefined,
+      }),
+    ).toEqual({ min: 600, max: 400, magnitudeDistributed: false });
+  });
+
+  it("⭐ the refusal reaches the USER-REACHABLE path: a stated figure is no longer replaced by a midpoint", () => {
+    // The whole point of the pin above, asserted where it is felt rather than
+    // only at the resolver. At `479c7c97` this brief yielded a single factor
+    // whose value was 1_250_000 with rangeMin 2_000_000 > rangeMax 500_000.
+    const factors = extractFactors("We will cut spend from £2m to £500k this year.");
+    expect(
+      factors.some((f) => f.value === 1_250_000),
+      "a midpoint the writer never wrote came back",
+    ).toBe(false);
+    expect(
+      factors.some(
+        (f) => f.rangeMin !== undefined && f.rangeMax !== undefined && f.rangeMin > f.rangeMax,
+      ),
+      "an inverted range came back",
+    ).toBe(false);
+    // Both stated figures survive, which is what the base did.
+    const values = factors.map((f) => f.value).sort((a, b) => a - b);
+    expect(values).toEqual([500_000, 2_000_000]);
+  });
+
+  it("⭐ TWIN: the headline range fix is untouched by the refusal", () => {
+    // A refusal that swallowed ascending ranges would pass every assertion
+    // above while deleting the reason this PR exists.
+    const range = extractFactors("We're budgeting £80-120k for the first hire.").find(
+      (f) => f.extractionType === "range",
+    );
+    expect(range!.value).toBe(100_000);
+    expect(range!.rangeMin).toBe(80_000);
+    expect(range!.rangeMax).toBe(120_000);
   });
 });
 
@@ -374,9 +439,21 @@ describe("the same rule reaches numeric-parser: a from-to frame is not a range",
    * caller got NULL. Every from-to fixture in the repo ascended, so the corpus
    * excluded the class outright and certified nothing over it.
    *
-   * Both consumers are the option-intervention path
+   * ⚠⚠ THE REACHABILITY SENTENCE THAT USED TO STAND HERE WAS UNSUPPORTED, and
+   * the corrected version is at `numeric-parser.ts`'s `isFromToChangeFrame`.
+   * It read: *"Both consumers are the option-intervention path
    * (`intervention-extractor.ts` `continue`s on falsy at `:407`, pushes
-   * `value: null` at `:329`), so the intervention was dropped or nulled.
+   * `value: null` at `:329`), so the intervention was dropped or nulled."*
+   * The call sites are named right; what they PASS was never measured. Driving
+   * the five real `INTERVENTION_PATTERNS` and the `:407` fallback scan shows
+   * only ever SINGLE TOKENS — "£600", "£400", "reduce churn from 10%" — so no
+   * from-to span reaches `parseNumericValue` from a user at all, and the
+   * assertions in this block are DURABLE CORRECTNESS, not a live defect.
+   *
+   * ⚠⚠⚠ THAT IS A FACT ABOUT ONE FUNCTION AND NOT ABOUT THE CLASS. The other
+   * extractor, `extractFactors`, IS reached from `enricher.ts:393/858/982`, has
+   * no from-to frame guard of any kind, and claims a from-to span as a range
+   * exactly as this one did. `KNOWN_ADJACENCY_GAP` below pins what it does.
    */
   const DESCENDING_CHANGES: ReadonlyArray<readonly [string, number, string]> = [
     ["reduce churn from 10% to 5%", 10, "percent"],
@@ -578,5 +655,159 @@ describe("the percent range no longer reads its hyphen as a minus sign", () => {
     );
     expect(range!.rangeMin).toBeCloseTo(0.05);
     expect(range!.rangeMax).toBeCloseTo(0.1);
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE RECORDED GAP — an adjacency-bound frame, disclosed rather than
+ * re-litigated (ROADMAP 2.1131, CLAUDE.md traps 22f and 12d).
+ *
+ * `isFromToChangeFrame` asks `/\bfrom\s+$/i` of the text before the match, so
+ * `from` must sit IMMEDIATELY before the figure. One ordinary adverb defeats
+ * it. The reviewer who found this RAN THE NEXT ROUND BEFORE ASKING FOR ONE:
+ * admitting a single intervening word fixes three spellings, still misses
+ * "from an estimated £600 to £400", and newly SUPPRESSES a genuine range
+ * ("the deal moved away from budget £5,000-£9,000" → the lower bound alone).
+ * One probe, two fixes bought with one lie. Four consecutive rounds on this
+ * predicate have each closed one direction and opened the other, and that is
+ * the signal to stop writing rules and start recording behaviour.
+ *
+ * ── WHAT THIS SET IS, AND WHAT IT IS NOT ───────────────────────────────────
+ * It is a **SAMPLED FLOOR**, never the class. The class is open — adverbs,
+ * hedges and appositives compose without limit — and an exact-set claim over
+ * an open class reads green precisely as the class grows (this wave's dominant
+ * defect). These are spellings that were MEASURED, one per behaviour, so that
+ * the behaviour is visible in the suite rather than discovered by a user.
+ *
+ * ── BOTH DIRECTIONS, BECAUSE THEY CANNOT SHARE A THRESHOLD ─────────────────
+ * A GAP (a stated figure vanishes) and a LIE (a figure appears that nobody
+ * wrote) are opposite harms, and a single window traded one for the other four
+ * times. They are pinned separately, each with its opposite-direction twin:
+ *   · the ADJACENT spellings must keep working  (a widening that suppresses
+ *     them REDs — the set "grew")
+ *   · the listed gap members must keep failing EXACTLY as recorded  (a fix
+ *     REDs them — the set "shrank", which is the good direction and should
+ *     still be a deliberate, reviewed edit rather than a silent one)
+ *   · the positional case must never be suppressed  (trap 19: the frame binds
+ *     by POSITION, not by the occurrence of the word)
+ *
+ * ── SEVERITY, MEASURED, NOT ASSUMED ────────────────────────────────────────
+ * On `parseNumericValue` this class is NOT user-reachable: both call sites in
+ * `intervention-extractor.ts` hand over single tokens only (manifest and drive
+ * recorded at `numeric-parser.ts`). On `extractFactors` — which `enricher.ts`
+ * DOES call — there is no frame guard at all, so the factor path behaves the
+ * same for the adjacent and the adverbial spelling alike. Each assertion below
+ * says which path it is about.
+ */
+describe("KNOWN_ADJACENCY_GAP — a sampled floor, pinned in both directions", () => {
+  /**
+   * Direction 1 — THE GAP. A stated figure vanishes: `parseNumericValue`
+   * returns `null` where the base at `f4c8f501` returned the from-side figure
+   * at `high`. Percent pairs and magnitude-bearing money pairs land here,
+   * because their resolvers refuse a descending pair and the refusal stops the
+   * chain. Not user-reachable through this function; recorded as durable
+   * correctness.
+   */
+  const GAP_YIELDS_NOTHING: readonly string[] = [
+    "reduce churn from about 10% to 5%",
+    "reduce churn from around 10% to 5%",
+    "reduce churn from roughly 10% to 5%",
+    "reduce churn from an estimated 10% to 5%",
+    "cut spend from nearly £2m to £500k",
+  ];
+
+  it.each(GAP_YIELDS_NOTHING)(
+    "GAP (sampled): %s yields nothing from parseNumericValue",
+    (text) => {
+      expect(
+        parseNumericValue(text),
+        "this member left the recorded gap set. That is the GOOD direction — " +
+          "but it must be a reviewed edit to this floor, not a silent drift.",
+      ).toBeNull();
+    },
+  );
+
+  /**
+   * Direction 2 — THE LIE, and it is the worse one. A midpoint nobody wrote,
+   * on a pair whose bounds are recorded in the order the writer stated them,
+   * so `rangeMin > rangeMax` where the change descends. Money pairs with NO
+   * magnitude on either bound land here: the ordering refusal above does not
+   * govern them, because that tolerance is INHERITED from the base rather than
+   * created by this change (base and head are identical on it — see
+   * `resolveAmountRange`).
+   */
+  const LIE_FABRICATES_A_MIDPOINT: ReadonlyArray<
+    readonly [string, number, number, number]
+  > = [
+    // text, midpoint, rangeMin, rangeMax
+    ["cut CAC from about £600 to £400", 500, 600, 400],
+    ["cut CAC from around £600 to £400", 500, 600, 400],
+    ["lower price from just £49 to £39", 44, 49, 39],
+    // Ascending twins: still a midpoint nobody wrote, merely well-ordered —
+    // the third behaviour in this class, and the one a two-way split misses.
+    ["raise price from about £49 to £59", 54, 49, 59],
+  ];
+
+  it.each(LIE_FABRICATES_A_MIDPOINT)(
+    "LIE (sampled): %s publishes %d, a midpoint nobody wrote",
+    (text, midpoint, min, max) => {
+      const parsed = parseNumericValue(text);
+      expect(parsed, `${text} left the recorded gap set`).not.toBeNull();
+      expect(parsed!.value).toBe(midpoint);
+      expect(parsed!.isRange).toBe(true);
+      expect(parsed!.rangeMin).toBe(min);
+      expect(parsed!.rangeMax).toBe(max);
+      // Recorded at "medium", never "high": the point is the service's choice.
+      expect(parsed!.confidence).toBe("medium");
+    },
+  );
+
+  it("⭐ TWIN: the ADJACENT spellings still work — a widening that suppressed them would RED here", () => {
+    // The set must not GROW. Every one of these is the round-2 fix, and the
+    // obvious next string rule (admit one intervening word) leaves them alone
+    // while breaking the positional case below — which is why it was declined.
+    for (const [text, expected] of [
+      ["reduce churn from 10% to 5%", 10],
+      ["cut CAC from £600 to £400", 600],
+      ["cut spend from £2m to £500k", 2_000_000],
+      ["raise price from £49 to £59", 49],
+    ] as const) {
+      const parsed = parseNumericValue(text);
+      expect(parsed, text).not.toBeNull();
+      expect(parsed!.value, text).toBe(expected);
+      expect(parsed!.confidence, text).toBe("high");
+      expect(parsed!.isRange ?? false, text).toBe(false);
+    }
+  });
+
+  it("⭐ TWIN: a genuine range near a stray `from` is NOT suppressed", () => {
+    // The precise case the declined widening would have broken: the frame must
+    // bind by POSITION. Without this, "one intervening word" turns a stated
+    // £5,000–£9,000 range into a bare £5,000.
+    const parsed = parseNumericValue(
+      "we moved away from that, and the budget is £5,000-£9,000",
+    );
+    expect(parsed!.isRange).toBe(true);
+    expect(parsed!.rangeMin).toBe(5_000);
+    expect(parsed!.rangeMax).toBe(9_000);
+  });
+
+  it("the FACTOR path has no frame guard at all, and the adverb makes no difference to it", () => {
+    // The reachable path, recorded so nobody infers from `parseNumericValue`'s
+    // manifest that the class is closed. `extractFactors` treats the adjacent
+    // and the adverbial spelling identically, because `isFromToChangeFrame`
+    // lives in `numeric-parser` and governs nothing here.
+    const adjacent = extractFactors("cut CAC from £600 to £400").find(
+      (f) => f.extractionType === "range",
+    );
+    const adverbial = extractFactors("cut CAC from about £600 to £400").find(
+      (f) => f.extractionType === "range",
+    );
+    for (const [name, f] of [["adjacent", adjacent], ["adverbial", adverbial]] as const) {
+      expect(f, `${name}: no range factor at all`).toBeDefined();
+      expect(f!.value, name).toBe(500);
+      expect(f!.rangeMin, name).toBe(600);
+      expect(f!.rangeMax, name).toBe(400);
+    }
   });
 });
