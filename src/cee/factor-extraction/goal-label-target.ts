@@ -77,6 +77,18 @@
  * reported at the boundary rather than taken: **this module guarantees that the
  * minted figure APPEARS IN THE USER'S BRIEF, and nothing stronger.**
  *
+ * ⏰ RE-SURFACE TRIGGER — written here because a parked remedy with no trigger
+ * is how this estate loses work: the register almost always has the row, and
+ * what dies is anything that would surface it again (CLAUDE.md, chronic failure
+ * 2). The span remedy is rowed in the PR thread for the register; it must be
+ * picked up at WHICHEVER COMES FIRST of
+ *   (a) the goal-chip surface that renders this field reaching staging — UI
+ *       #1172 at time of writing — because that is the moment an unstated
+ *       figure becomes something the product tells the user they said; or
+ *   (b) 2026-10-01.
+ * Until then the gap is asserted, not described: see the KNOWN GAP floor in
+ * `__tests__/goal-label-target.test.ts`, which REDs when an instance closes.
+ *
  * ── FAIL-CLOSED, EVERY BRANCH ─────────────────────────────────────────────
  *   no goal label                     -> refuse `no_goal_label`
  *   no non-temporal quantity in label -> refuse `no_quantity_in_label`
@@ -97,6 +109,13 @@
  * onto a node measured in £. The temporal vocabulary is IMPORTED from
  * `compound-goal/extractor.ts`'s `TIME_UNIT_ALT`, which is itself derived from
  * `WORD_UNITS`' `temporal` flag — not restated here (trap 12).
+ *
+ * ⚠ THE EXCLUSION IS ABOUT THE QUANTITY'S OWN UNIT, NOT ABOUT A NEARBY WORD.
+ * "4% year on year" and "£200k year on year" are a percentage and a sum of
+ * money that happen to be measured annually; only a BARE COUNT followed by a
+ * time word is a duration. Classifying by the trailing word alone deleted
+ * attested targets and, on a two-target brief, converted an honest refusal into
+ * a silent pick — measured, and written up at `scanQuantities`.
  *
  * Every other grammar below is likewise composed from `utils/magnitude-alphabet`
  * (`AMOUNT_DIGITS`, the ONE magnitude alternation, the ambiguous-trailer guard),
@@ -154,6 +173,14 @@ export type GoalLabelTargetResult =
 
 /** Currency symbols this service reads, in the spelling every sibling pattern uses. */
 const CURRENCY_CLASS = "[£$€]";
+
+/**
+ * The unit a quantity carries when it is neither money nor a percentage — a
+ * bare number of things. Named because it is the ONE unit that a trailing time
+ * word can legitimately turn into a duration, and the temporal test below reads
+ * it rather than restating the currency/percent precedence a second time.
+ */
+const UNIT_COUNT = "count";
 
 /**
  * ONE quantity grammar, used for the label scan AND the brief scan, so a number
@@ -281,7 +308,6 @@ function scanQuantities(text: string): ScannedQuantity[] {
     const magnitude = resolveMagnitude(m.groups?.mag);
     const currency = m.groups?.currency;
     const isPercent = m.groups?.pct !== undefined;
-    const isTemporal = m.groups?.time !== undefined;
 
     // `%` and a currency symbol are mutually exclusive readings; a currency
     // symbol wins because it is written on the left and cannot be incidental.
@@ -295,9 +321,55 @@ function scanQuantities(text: string): ScannedQuantity[] {
       // THE FRACTION CONVENTION — see `GoalLabelTarget.value`.
       value = (digits * magnitude) / 100;
     } else {
-      unit = "count";
+      unit = UNIT_COUNT;
       value = digits * magnitude;
     }
+
+    // ⭐⭐ THE QUESTION THIS ANSWERS IS "IS THIS QUANTITY DENOMINATED IN TIME?"
+    // — NOT "IS A TIME WORD NEARBY?", WHICH IS WHAT IT USED TO ANSWER.
+    //
+    // The trailing `time` group is captured, not excluded by lookahead, so
+    // "18 months" and "4% year on year" both carry it. Reading the group ALONE
+    // classified the second as a duration, which is false by construction: a
+    // percentage cannot be a duration, and neither can a sum of money. The
+    // scanner has already decided which of the three the quantity is, two lines
+    // above, so the test is bound to THAT decision — one place to change if the
+    // unit set ever grows, and no second copy of the currency/percent
+    // precedence to drift out of step with the first (trap 12).
+    //
+    // MEASURED at `d167f80a`, on the brief side, where the previous round had
+    // just added the filter:
+    //
+    //   label "Reach £30k MRR And 4% Churn"
+    //   brief "£30k MRR and churn under 4% year on year"
+    //     →  ok, £30,000            ← ONE of the user's TWO stated targets
+    //
+    // The user stated two targets; "4% year on year" was dropped from the
+    // attested set as temporal, `attested.length` fell to 1, and the module
+    // SILENTLY PICKED ONE. Its own header commits to the opposite — where the
+    // target could not be determined, ASK rather than guess (ROADMAP 2.1051,
+    // trap 22f) — and at `cd010b55`, measured, this same input refused
+    // `ambiguous_multiple_attested`.
+    //
+    // The same misclassification cost two SINGLE-target mints beside it, both
+    // measured at both heads, so their direction is not inferred either:
+    //
+    //                                    cd010b55        d167f80a
+    //   "4% year on year"     (brief)    mints %0.04     quantity_not_attested
+    //   "£200k year on year"  (brief)    mints £200k     quantity_not_attested
+    //
+    // Those two are gaps, not lies, and the previous round introduced them; the
+    // two-target case above is the lie, and it is why this is fixed rather than
+    // rowed. The LABEL side carried the same misclassification BEFORE either
+    // head — "Keep Churn Under 4% Year On Year" refused `no_quantity_in_label`
+    // at `cd010b55` too — and one predicate serves both sides, so this closes
+    // that as well.
+    //
+    // ⚠ THE COMPLEMENT IS PINNED SEPARATELY, because a fix spelled "stop
+    // filtering when a time word follows" would reopen the defect the previous
+    // round closed: a BARE COUNT with a time word is still a duration, and the
+    // suite asserts that in both directions on inputs of its own.
+    const isTemporal = m.groups?.time !== undefined && unit === UNIT_COUNT;
 
     out.push({ value, unit, matchedText: m[0], temporal: isTemporal });
   }
@@ -362,11 +434,18 @@ export function deriveGoalTargetFromLabel(
   // corpus had a temporal brief quantity as the attesting one. The invariant
   // was written with the same asymmetry as the code (trap 13d).
   //
-  // It cannot cost a legitimate mint, and that is structural rather than
-  // measured: a TEMPORAL label quantity is already refused above as
-  // `no_quantity_in_label`, so no surviving label quantity is temporal, and
-  // `sameQuantity` requires equal units — so nothing that mints today depends
-  // on matching a temporal brief quantity.
+  // ⚠⚠ AND THE SENTENCE THAT USED TO SIT HERE WAS FALSE. It read: "It cannot
+  // cost a legitimate mint, and that is structural rather than measured." The
+  // structural argument was sound about the shape it examined — a temporal
+  // LABEL quantity is refused above as `no_quantity_in_label`, and
+  // `sameQuantity` requires equal units — and it was still wrong, because it
+  // assumed `temporal` meant "denominated in time" when the classifier read
+  // only whether a time word followed. It DID cost a legitimate mint: a
+  // two-target brief refused correctly at `cd010b55` and minted one of the two
+  // at `d167f80a`. See `scanQuantities` for the measurement and the fix. The
+  // claim is not restated in a corrected form here — the predicate now says it
+  // itself, and a safety argument written a second time in a second place is
+  // the mirror this estate keeps paying for (trap 12).
   const briefQuantities = scanQuantities(briefText).filter((q) => !q.temporal);
 
   // ⚠ THE ATTESTED SET IS DEDUPED BY QUANTITY, NOT BY OCCURRENCE. A label that

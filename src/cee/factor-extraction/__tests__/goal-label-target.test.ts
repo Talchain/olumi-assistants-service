@@ -474,16 +474,44 @@ describe("the review's three findings — measured, then pinned", () => {
   /* ─────────────────────────────────────────────────────────────────────────
    * BLOCKING 3 — NOT CLOSED. Pinned as a KNOWN GAP so it stays visible.
    * ────────────────────────────────────────────────────────────────────── */
-  it("⛔ KNOWN GAP: a figure stated as a LEVEL still attests a target", () => {
+  it("⛔ KNOWN GAP — A SAMPLED FLOOR, NOT AN EXACT SET: a figure stated as a LEVEL still attests a target", () => {
     // ⚠ THIS TEST ASSERTS THE DEFECT, DELIBERATELY, AND MUST BE INVERTED —
     // NOT DELETED — WHEN THE SPAN BINDING LANDS. `sameQuantity` answers "does
     // this figure occur in the brief?", never "did the user state it as their
     // target". The brief below states 4% as the CURRENT churn level; the model
     // wrote the label; the mint stamps `goal_threshold_frame: 'level'`.
     //
+    // ⚠⚠ WHAT THIS TEST GUARANTEES, AND THE PREVIOUS SENTENCE HERE CLAIMED MORE.
+    // It read: "Pinned as an EXACT set so it REDs if the class grows OR
+    // shrinks". FALSE, and falsifiable by reading the code beneath it: two
+    // independent `toBe(true)` assertions on two hand-written inputs, with no
+    // computed set and no `toEqual` over an enumeration. It REDs on SHRINK ONLY
+    // — when one of these two instances starts refusing — and is structurally
+    // blind to the class growing.
+    //
+    // THE CLASS IS WIDER THAN THESE TWO. Five more instances, measured through
+    // this module at this head, every one of them minting and none of them
+    // visible to the assertions below:
+    //
+    //   "Reach 12% Conversion"  + "our conversion is 12% today"          → %0.12
+    //   "Reach £500 CAC"        + "we currently pay £500 per acquisition" → £500
+    //   "Grow To 12 Engineers"  + "we are a team of 12 engineers"        → count 12
+    //   "Ship 4 Releases"       + "we are migrating to GPT-4"            → count 4
+    //   "Reach 27001 Users"     + "we need ISO 27001 certification"      → count 27001
+    //
+    // ⛔ DO NOT GROW THE SET TO MATCH. "A figure the brief states for some
+    // reason other than as a target" is an OPEN CLASS over natural language;
+    // enumerating it is the error, not the fix, and an exact-set claim over an
+    // open class reads green as the class grows — a tracking mirror wearing a
+    // guard's clothes (trap 12). These two are a SAMPLED FLOOR: a floor under
+    // the gap's visibility, chosen because they are the two the review
+    // measured, and they say nothing about the size of the class.
+    //
     // A gap recorded in the suite is honest; a gap invisible to it is how this
-    // one reached a review. Pinned as an EXACT set so it REDs if the class
-    // grows OR shrinks (trap 22f).
+    // one reached a review. What this floor is FOR is the shrink direction:
+    // when the span binding lands (see the module header), these REDden and the
+    // successor is told to invert them rather than discovering the gap closed
+    // by accident.
     const level = deriveGoalTargetFromLabel(
       "Keep Monthly Churn Below 4%",
       "Trial-to-paid conversion is 12% and monthly churn is 4%.",
@@ -499,5 +527,95 @@ describe("the review's three findings — measured, then pinned", () => {
     expect(year.ok, "if this is now false, INVERT this test — the gap closed").toBe(true);
     if (!year.ok) return;
     expect(year.target.value).toBe(2026);
+  });
+});
+
+describe("round 3 — a % or a currency amount is not a duration", () => {
+  /* ───────────────────────────────────────────────────────────────────────────
+   * THE PREVIOUS ROUND'S OWN FIX INTRODUCED THIS. The brief side gained the
+   * temporal filter the label side already had — correctly — but `isTemporal`
+   * was read from the trailing time GROUP alone, regardless of the unit the
+   * scanner had just assigned. So a quantity carrying `%` or a currency symbol
+   * was classified as a duration whenever a time word followed it.
+   *
+   * Two of the three consequences are gaps. The third is a LIE, and it is the
+   * one this block exists for.
+   * ──────────────────────────────────────────────────────────────────────── */
+
+  it("⛔ THE HARM: a time word after a % must not delete the second target and turn a refusal into a GUESS", () => {
+    // Measured at `d167f80a`: `ok { value: 30000, unit: "£" }`.
+    //
+    // The user stated TWO targets. "4% year on year" classified as temporal,
+    // the new brief-side filter dropped it, `attested.length` fell from 2 to 1,
+    // and the module silently picked one — the guess its own header promises
+    // never to make ("a wrong threshold is a confident lie, an absent one is a
+    // gap, and a lie outranks a gap"). At `cd010b55`, before the brief-side
+    // filter existed, this same input refused correctly.
+    expect(
+      deriveGoalTargetFromLabel(
+        "Reach £30k MRR And 4% Churn",
+        "£30k MRR and churn under 4% year on year",
+      ),
+    ).toEqual({ ok: false, refusal: "ambiguous_multiple_attested" });
+  });
+
+  it("⭐ THE CONTROL that makes the case above discriminating: the same two targets, time word removed", () => {
+    // The two inputs differ by exactly the trailing "year on year". Without
+    // this control the assertion above would pass just as well on a module that
+    // refuses everything, and the refusal would be no evidence at all about the
+    // temporal predicate (trap 13b: a guard agreeing with itself).
+    expect(
+      deriveGoalTargetFromLabel("Reach £30k MRR And 4% Churn", "£30k MRR and churn under 4%"),
+    ).toEqual({ ok: false, refusal: "ambiguous_multiple_attested" });
+  });
+
+  it("⭐ THE TWIN, positive direction: a % or a currency amount with a trailing time word still ATTESTS", () => {
+    // "4% year on year" is a percentage measured annually, not a duration. A
+    // fix that merely widened the brief-side filter would satisfy the harm case
+    // above by refusing more, so the mint has to be asserted in this direction
+    // too — and on BOTH sides, because the predicate is shared.
+    const pct = deriveGoalTargetFromLabel("Keep Churn Under 4%", "we need it under 4% year on year");
+    expect(pct.ok).toBe(true);
+    if (!pct.ok) return;
+    expect(pct.target.unit).toBe("%");
+    expect(pct.target.value).toBeCloseTo(0.04, 12);
+
+    const money = deriveGoalTargetFromLabel("Hold Spend At £200k", "we spend £200k year on year");
+    expect(money.ok).toBe(true);
+    if (!money.ok) return;
+    expect(money.target.unit).toBe("£");
+    expect(money.target.value).toBe(200_000);
+
+    // The LABEL side carried the same misclassification before this round — it
+    // refused `no_quantity_in_label` on a perfectly ordinary percentage target.
+    // One predicate, so one fix closes both; asserted here so that stays true.
+    const labelSide = deriveGoalTargetFromLabel(
+      "Keep Churn Under 4% Year On Year",
+      "monthly churn is 4%",
+    );
+    expect(labelSide.ok).toBe(true);
+    if (!labelSide.ok) return;
+    expect(labelSide.target.value).toBeCloseTo(0.04, 12);
+  });
+
+  it("⭐ THE TWIN, negative direction: a BARE COUNT with a time word is still a duration, on both sides", () => {
+    // The complement. If the fix were spelled as "stop filtering when a time
+    // word follows", BLOCKING 1 would reopen silently — so the count branch is
+    // pinned on fresh inputs rather than left to the cases that motivated it.
+    expect(
+      deriveGoalTargetFromLabel("Reach 24 Design Partners", "we will do this in 24 hours"),
+    ).toEqual({ ok: false, refusal: "quantity_not_attested" });
+
+    expect(deriveGoalTargetFromLabel("Ship In 24 Hours", "we have 24 design partners")).toEqual({
+      ok: false,
+      refusal: "no_quantity_in_label",
+    });
+
+    // …and its own positive twin, so the pair cannot pass by refusing counts.
+    const real = deriveGoalTargetFromLabel("Reach 24 Design Partners", "we want 24 design partners");
+    expect(real.ok).toBe(true);
+    if (!real.ok) return;
+    expect(real.target.unit).toBe("count");
+    expect(real.target.value).toBe(24);
   });
 });
