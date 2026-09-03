@@ -13093,6 +13093,28 @@ export async function runTurnExecutor(
    * withdrawn route-level claim reproduced one level down, and the reason this
    * note now names exits rather than families.
    *
+   * ⭐ THE COUNT IS CLOSED AGAINST THE FULL ENUMERATION, not against the one
+   * bypass the review happened to find. "A guard placed after an early return"
+   * is a CLASS, and `:2855` was one instance, so every `return` statement of
+   * both guarded dispatchers was resolved on the AST and mapped to the outcome
+   * it carries (4 Sep 2026):
+   *   · `dispatchChipClickRunAnalysis` — six returns. `outcome: 'ok'` occurs
+   *     exactly ONCE and it is AFTER the guard, so `:2937` is covered. Four
+   *     returns precede the guard: `handler_recovered` (`:1406`) is the only
+   *     one that reaches a 200; `commit_failed`, `handler_failure` and
+   *     `handler_result_invalid` are sent by route-v2 as 500s and never enter
+   *     `sendFinalised200` at all.
+   *   · `dispatchEditGraph` — three returns, one before the guard: the
+   *     claim-then-starve exit at `edit-graph-dispatch.ts:2665`
+   *     (`unresolvedClarificationFellThrough`). Route-v2 answers that flag by
+   *     DELIBERATELY NOT RETURNING (`:6336`) and falling through to
+   *     `runTurnExecutor`, where `finalizeRun` applies this guard — so it
+   *     never reaches `:6387`, whose `else` branch is the only sender of
+   *     `eg.response`. `:6387` is covered.
+   * ⚠ The negative result was not believed until the instrument was shown
+   * able to produce a positive one: pointed at the chip-click dispatcher it
+   * reports the known `:1406` bypass, and three more.
+   *
    * ⛔ THE TWENTY-ONE UNCOVERED EXITS, named rather than left implicit.
    *
    * · `:2855` `chip_click` — the `handler_recovered` outcome, and the one
