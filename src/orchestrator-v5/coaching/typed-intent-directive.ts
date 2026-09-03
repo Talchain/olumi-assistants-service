@@ -1,6 +1,10 @@
 /**
- * ⭐ THE TYPED COACHING-INTENT ARM — what makes four MOUNTED, user-visible
- * affordances stop degrading to generic free prose.
+ * ⭐ THE TYPED COACHING-INTENT ARM — what makes the MOUNTED, user-visible
+ * coaching affordances stop degrading to generic free prose.
+ *
+ * (This line said "four" until the arm grew its last three members. The set is
+ * `ROUTED_COACHING_INTENTS` below, with per-member DGAI provenance; a count
+ * restated in prose is the mirror this estate keeps paying for — trap 12.)
  *
  * ── THE DEFECT THIS CLOSES ──────────────────────────────────────────────────
  * SEVEN strategic-reasoning sparks are on screen today. The first four
@@ -179,11 +183,31 @@ import type { DSKProtocol } from '../../dsk/types.js';
  * not claim the turn. Routing it would put two authorities on one affordance
  * and the directive would die on the primary path, unobserved: the readiness
  * pre-route returns before this code is reached, so the arm would look wired
- * and never fire. The invariant that makes the ordering safe today is stated at
- * `turn-executor.ts:8277-8284` — "no affordance carries both" — and
- * `estimate_help` is the affordance that would falsify it. Routing it is
- * separate work that must first decide WHICH authority owns the turn; it is not
- * a registry edit.
+ * and never fire.
+ *
+ * ⚠⚠ THE MECHANISM, DERIVED AT THE BYTES — AND AN EARLIER VERSION OF THIS
+ * PARAGRAPH CITED THE WRONG SEAM, WHICH WOULD HAVE SENT THE NEXT LANE TO THE
+ * OPPOSITE CONCLUSION. It named `turn-executor.ts:8277-8284` ("no affordance
+ * carries both") as the invariant `estimate_help` would falsify. That
+ * invariant is about a routed coaching intent coinciding with a
+ * `chipClickForcedIntent` PILL, and `detectChipClickForcedIntent`
+ * (`src/orchestrator/route-v2.ts:358-370`) answers a value for
+ * `explain_results` / `explain_result` / `what_would_flip` / `what_changed`
+ * ONLY — it returns `undefined` for `analysis_readiness`. So routing
+ * `estimate_help` leaves `chipClickForcedIntent === undefined` and that
+ * ordering invariant is UNTOUCHED. A lane told "route it and 8277-8284
+ * breaks" would check 8277-8284, correctly find it unbroken, and route the
+ * intent into a dead arm.
+ *
+ * What actually makes it dead is ONE LEVEL UP AND IN A DIFFERENT FILE:
+ * `isReadinessChipClick` (`src/orchestrator/route-v2.ts:3031-3032`) is true
+ * for a typed `chip_click` carrying `action_type === 'analysis_readiness'`;
+ * its branch (`:3076`) composes the readiness answer
+ * (`composeReadinessIntakeResponse`, `:3113`) and RETURNS the turn at the
+ * route (`sendFinalised200(..., 'readiness_intake', ...)`, `:3191`).
+ * TurnExecutor — and therefore this arm — is never reached. Routing
+ * `estimate_help` is separate work that must first decide WHICH authority
+ * owns the turn; it is not a registry edit.
  */
 export const ROUTED_COACHING_INTENTS = [
   'challenge_frame',

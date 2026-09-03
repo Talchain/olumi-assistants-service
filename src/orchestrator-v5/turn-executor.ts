@@ -8245,11 +8245,21 @@ export async function runTurnExecutor(
         });
         // ⭐ TYPED COACHING-INTENT ARM (coaching/typed-intent-directive.ts).
         //
-        // Four MOUNTED sparks (`pressure_test_frame`, `define_success`,
-        // `widen_options`, `reflect_bias`) declare a typed `chip.intent` and,
-        // until this arm existed, silently degraded to generic free prose
-        // because CEE routed none of them and the UI's two-signal send gate
-        // (KNOWN_INTENTS ∧ CEE_ACCEPTED_INTENTS) correctly failed closed.
+        // MOUNTED sparks declare a typed `chip.intent`. UNROUTED, such a chip
+        // silently degrades to generic free prose: the UI's two-signal send
+        // gate (KNOWN_INTENTS ∧ CEE_ACCEPTED_INTENTS) correctly fails closed
+        // when CEE has no arm for the intent, so the click arrives as
+        // anonymous text. This arm is what routes them.
+        //
+        // ⚠ WHICH sparks, and how many, is DELIBERATELY NOT RESTATED HERE.
+        // This comment said "Four MOUNTED sparks (`pressure_test_frame`,
+        // `define_success`, `widen_options`, `reflect_bias`)" and went stale
+        // the moment the arm grew its last three members — a hand-maintained
+        // count in the first thing anyone reads at the call site (CLAUDE.md
+        // trap 12). The single authority is the members of
+        // `ROUTED_COACHING_INTENTS` and the per-member DGAI provenance block
+        // above it (`coaching/typed-intent-directive.ts`). Read that; do not
+        // re-mint a count here.
         //
         // ⚠ THE POSITION IS DELIBERATE, and it is the OPPOSITE of every
         // deterministic pre-route above. Those claim the turn and skip the LLM.
@@ -8304,7 +8314,7 @@ export async function runTurnExecutor(
         // ⭐ F2 — THE DROP IS OBSERVABLE. `resolveCoachingIntent` answers
         // `undefined` for an intent CEE does not route, and the arm above then
         // simply skipped: no telemetry, no log, nothing. THAT SILENCE IS THE
-        // MECHANISM that let four mounted sparks degrade to anonymous prose for
+        // MECHANISM that let the mounted sparks degrade to anonymous prose for
         // as long as they did — nothing anywhere could distinguish an intent
         // nobody clicked from one the product threw away.
         //

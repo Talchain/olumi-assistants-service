@@ -383,15 +383,84 @@ describe('buildCoachingMethodDirective', () => {
     ['outside_view', ['REFERENCE CLASS', 'never invent a percentage'],
      'the reference class AND the fabrication guard — a base rate is the most ' +
      'inventable number in this arm'],
-    ['elicit_risks', ['UPSIDE'],
-     'the spark is "Find risks and upside"; a risk-only answer silently ' +
-     'delivers half the affordance'],
+    ['elicit_risks', ['MISSING, not what is present', 'UPSIDE'],
+     'the gap framing AND the upside half — the spark is "Find risks and ' +
+     'upside", so a risk-only answer, or one that restates what the model ' +
+     'already covers, silently delivers half the affordance'],
   ] as const)('%s keeps the move that makes it that method', (intent, needles, why) => {
     const { directive } = buildCoachingMethodDirective(intent as 'pre_mortem', 'frame');
     for (const needle of needles) {
       expect(directive, `${intent} lost: ${why}`).toContain(needle);
     }
   });
+
+  /**
+   * ⭐⭐⭐ AND THE `clicked` PHRASE IS PINNED BY IDENTITY TOO — THE OTHER FIELD
+   * OF `INTENT_METHOD`, AND THE ONE THAT TELLS THE COACH *WHICH REQUEST* IT IS
+   * ANSWERING.
+   *
+   * The pin above closed the INSTANCE an earlier mutant exposed (`method`
+   * hollowed out) and left the CLASS open: `INTENT_METHOD` records carry TWO
+   * fields, and only one of them was bound. Measured by an independent
+   * reviewer at `266b1d4f`, not supposed: SWAPPING the `clicked` phrases
+   * between `outside_view` and `pre_mortem` left the whole suite GREEN
+   * (67/67), shipping a self-contradictory directive — "The user clicked a
+   * button to take the outside view on this decision" followed by the
+   * prospective-hindsight method. A click on **Run a pre-mortem** would be
+   * steered to name the wrong exercise: the precise harm this arm exists to
+   * remove, one field to the left of where the guard was placed.
+   *
+   * ⚠ WHY THE WIRE SUITE CANNOT SEE IT. Its strongest-looking evidence — the
+   * directive reaching the router compared against the production builder's
+   * own output — is DERIVED FROM `buildCoachingMethodDirective`, so it agrees
+   * with any value that function produces (CLAUDE.md trap 12d: derivation
+   * proves the consumers agree with the list, never that the list is right).
+   * The only instrument that can catch a wrong phrase is a HAND-WRITTEN one,
+   * so this table is spelled out by hand and its coverage is asserted, making
+   * it a mirror that FAILS LOUD rather than one that drifts green.
+   *
+   * Closed against the ENUMERATION (all seven routed intents), not against the
+   * two the reviewer's mutant happened to swap: the same swap between any
+   * other pair would otherwise still survive.
+   */
+  const CLICKED_PHRASE: Readonly<Record<string, string>> = {
+    challenge_frame: 'pressure-test the framing of this decision',
+    define_success: 'define a measurable success target for this decision',
+    elicit_options: 'widen the set of options under consideration',
+    challenge_assumption: 'think through a possible blind spot in how their model leans',
+    outside_view: 'take the outside view on this decision',
+    pre_mortem: 'run a pre-mortem on this decision',
+    elicit_risks: 'find the risks and upside missing from their model',
+  };
+
+  it('PRECONDITION — the hand-written clicked table covers EXACTLY the routed set', () => {
+    // Without this the per-intent pin below would silently stop covering an
+    // intent added to the registry, and the `clicked` field would be unbound
+    // again for exactly the newest, least-reviewed member (CLAUDE.md trap 12 —
+    // a hand-maintained mirror must fail loud on drift, never assume good).
+    expect(
+      Object.keys(CLICKED_PHRASE).sort(),
+      'the clicked-phrase table and ROUTED_COACHING_INTENTS have diverged; a ' +
+        'routed intent with no entry here has an UNPINNED clicked phrase',
+    ).toEqual([...ROUTED_COACHING_INTENTS].sort());
+  });
+
+  it.each(ROUTED_COACHING_INTENTS)(
+    '%s names the request the user actually clicked — bound by identity, not by shape',
+    intent => {
+      const { directive } = buildCoachingMethodDirective(intent, 'frame');
+      // The WHOLE sentence, not a substring of the phrase: this binds the
+      // directive to THIS intent's request (CLAUDE.md trap 19 — an assertion
+      // must name its object, never a predicate another object could satisfy).
+      expect(
+        directive,
+        `${intent}'s directive does not ask the coach to ` +
+          `"${CLICKED_PHRASE[intent]}". A routed chip whose directive names a ` +
+          'DIFFERENT exercise steers the coach to answer a question the user ' +
+          'did not ask — the exact degradation this arm exists to remove.',
+      ).toContain(`The user clicked a button to ${CLICKED_PHRASE[intent]}.`);
+    },
+  );
 
   it('always demands grounding and forbids inventing the user\'s numbers', () => {
     for (const intent of ROUTED_COACHING_INTENTS) {
