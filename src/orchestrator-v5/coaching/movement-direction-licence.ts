@@ -51,6 +51,8 @@
  * envelopes and returns a discriminated verdict.
  */
 
+import type { HandlerFact } from '@talchain/schemas/orchestrator';
+
 import {
   isUsableWinProbability,
   winnerOptionResultSource,
@@ -268,4 +270,24 @@ export function licenceToReportMovementDirection(input: {
   if (verdicts.every((v) => v === 'signal')) return { kind: 'licensed' };
   if (verdicts.every((v) => v === 'within_noise')) return { kind: 'within_noise' };
   return { kind: 'indeterminate', reason: 'mixed_verdicts' };
+}
+
+/**
+ * The PLoT envelope persisted on a `run_analysis` fact, or null.
+ *
+ * ⭐ ONE READER, EXPORTED. Both consumers of this module need to get from a
+ * `HandlerFact` to the envelope, and two private copies of a shape-narrowing
+ * read is a hand-maintained mirror waiting to drift (CLAUDE.md trap #12) —
+ * one that would drift SILENTLY, because a copy that stopped recognising an
+ * envelope would simply hand back `null` and the licence would fail closed
+ * without anything going red.
+ */
+export function readRunAnalysisEnrichment(
+  fact: HandlerFact,
+): Record<string, unknown> | null {
+  if (fact.fact_type !== 'run_analysis') return null;
+  const enrichment = fact.result.enrichment;
+  return enrichment !== null && typeof enrichment === 'object' && !Array.isArray(enrichment)
+    ? (enrichment as Record<string, unknown>)
+    : null;
 }

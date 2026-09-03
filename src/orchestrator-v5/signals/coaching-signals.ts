@@ -50,6 +50,7 @@ import { hasUserSeenRunAnalysisResult } from '../context/run-initiator.js';
 import { deriveEditComparisonReach } from '../coaching/edit-comparison-reach.js';
 import {
   licenceToReportMovementDirection,
+  readRunAnalysisEnrichment,
   type MovementDirectionLicence,
 } from '../coaching/movement-direction-licence.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
@@ -685,7 +686,7 @@ function editTargetsInertFactor(
 ): boolean {
   const selected = selectRunAnalysisFact(priorFacts);
   if (selected === null) return false;
-  const enrichment = runAnalysisEnrichment(selected.fact);
+  const enrichment = readRunAnalysisEnrichment(selected.fact);
   if (enrichment === null) return false;
 
   const edits = outcome.handler_facts.filter(
@@ -776,8 +777,8 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
   // `selectRunAnalysisFact` result, so "the run we compared against" is one
   // fact by construction. A second selection here would let the sentence bound
   // its noise against a different pair than the one it quantifies.
-  const priorEnrichment = runAnalysisEnrichment(selected.fact);
-  const currentEnrichment = runAnalysisEnrichment(currentFact);
+  const priorEnrichment = readRunAnalysisEnrichment(selected.fact);
+  const currentEnrichment = readRunAnalysisEnrichment(currentFact);
 
   return {
     delta: compareRuns(prior, current, input.interventionControlledFactorIds),
@@ -796,15 +797,6 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
       currentEnrichment,
     ),
   };
-}
-
-/** The PLoT envelope persisted on a `run_analysis` fact, or null. */
-function runAnalysisEnrichment(fact: HandlerFact): Record<string, unknown> | null {
-  if (fact.fact_type !== 'run_analysis') return null;
-  const enrichment = fact.result.enrichment;
-  return enrichment !== null && typeof enrichment === 'object' && !Array.isArray(enrichment)
-    ? (enrichment as Record<string, unknown>)
-    : null;
 }
 
 /**

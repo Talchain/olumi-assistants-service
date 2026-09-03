@@ -50,6 +50,7 @@ import {
 } from '../coaching/compare-runs.js';
 import {
   licenceToReportMovementDirection,
+  readRunAnalysisEnrichment,
   type MovementDirectionLicence,
 } from '../coaching/movement-direction-licence.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
@@ -784,27 +785,18 @@ export function tryRunComparisonGate(
 /**
  * The movement-direction licence for a compared pair of run facts.
  *
- * FAILS CLOSED to `unbounded`: a fact with no readable PLoT envelope yields no
- * band, and an absent band must never read as a granted direction (the same
- * construction as the REQUIRED `mayNameLeadingOption` above).
+ * FAILS CLOSED to `indeterminate`: a fact with no readable PLoT envelope
+ * yields no band, and an absent band must never read as a granted direction
+ * (the same construction as the REQUIRED `mayNameLeadingOption` above).
  */
 function licenceForPair(
   prior: HandlerFact,
   current: HandlerFact,
 ): MovementDirectionLicence {
-  const priorEnrichment = runAnalysisEnrichmentOf(prior);
-  const currentEnrichment = runAnalysisEnrichmentOf(current);
+  const priorEnrichment = readRunAnalysisEnrichment(prior);
+  const currentEnrichment = readRunAnalysisEnrichment(current);
   if (priorEnrichment === null || currentEnrichment === null) {
     return { kind: 'indeterminate', reason: 'no_identity_bound_pair' };
   }
   return licenceToReportMovementDirection({ priorEnrichment, currentEnrichment });
-}
-
-/** The PLoT envelope persisted on a `run_analysis` fact, or null. */
-function runAnalysisEnrichmentOf(fact: HandlerFact): Record<string, unknown> | null {
-  if (fact.fact_type !== 'run_analysis') return null;
-  const enrichment = fact.result.enrichment;
-  return enrichment !== null && typeof enrichment === 'object' && !Array.isArray(enrichment)
-    ? (enrichment as Record<string, unknown>)
-    : null;
 }
