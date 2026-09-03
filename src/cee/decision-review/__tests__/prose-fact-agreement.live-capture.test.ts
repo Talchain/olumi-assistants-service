@@ -134,6 +134,57 @@ describe('live capture — the producer fact', () => {
   });
 });
 
+describe('live capture — the ungrounded blast radius, measured', () => {
+  /**
+   * The fail-closed drop is the largest behaviour change in this seam: a
+   * scenario with no `edge_e_values` row is removed even though nothing has
+   * been proven wrong about it. So the exposure is MEASURED here rather than
+   * asserted to be small, and pinned so a producer whose coverage drops shows
+   * up as a RED instead of as a quiet loss of coaching.
+   */
+  it('records how many fragile edges carry no signed fact on this run', () => {
+    const { enrichment } = capture();
+    const fragile = (enrichment.robustness as Record<string, unknown>)
+      .fragile_edges as ReadonlyArray<Record<string, unknown>>;
+    const facts = deriveEdgeFlipFacts(enrichment);
+    const ungrounded = fragile.filter(
+      (f) => !facts.has(`${f.from_id as string}|${f.to_id as string}`),
+    );
+    expect(fragile).toHaveLength(12);
+    expect(ungrounded.map((f) => f.edge_id)).toEqual([
+      '422ceee7->b6941ac0',
+      '16ec3d64->bbbbd8f2',
+    ]);
+  });
+
+  it('grounded both edges the model ACTUALLY narrated, so the drop rule cost nothing here', () => {
+    // ⚠ THE FIRST VERSION OF THIS TEST ASSERTED WHAT THE PROMPT'S DOCUMENTED
+    // SELECTION ALGORITHM "WOULD HAVE PICKED" (top 3 fragile edges by
+    // marginal_switch_probability, fallback switch_probability). That is not
+    // derivable and it was wrong twice over: two implementations of the same
+    // ranking disagreed with each other because of how they treat a null
+    // marginal, AND the edges the model actually emitted match NEITHER
+    // ranking. A test that predicts a model's selection is a claim about the
+    // model, not about the payload.
+    //
+    // What IS derivable is what the model did emit, and whether this seam had
+    // a fact for it. That is the number that bounds the drop rule.
+    const { enrichment, review } = capture();
+    const facts = deriveEdgeFlipFacts(enrichment);
+    const narrated = Object.keys(review.scenario_contexts as Record<string, unknown>);
+    expect(narrated).toEqual([SALES_TO_RUNWAY, CAC_TO_GOAL]);
+    for (const key of narrated) {
+      const [fromId, toId] = key.split('->');
+      expect(facts.get(`${fromId}|${toId}`)?.requirement).not.toBeNull();
+    }
+    // …so every redaction on this run was a proven contradiction, never a
+    // fail-closed drop. Asserted directly rather than inferred.
+    const result = checkProseFactAgreement(review, enrichment);
+    expect(result.redactedUngrounded).toBe(0);
+    expect(result.redactedContradicted).toBe(2);
+  });
+});
+
 describe('live capture — the prose', () => {
   it('asserts a STRONGER link in both narrated triggers', () => {
     const { review } = capture();
