@@ -49,6 +49,7 @@ vi.mock('../../../structure/index.js', () => ({
   detectStructuralWarnings: vi.fn(),
   detectUniformStrengths: vi.fn(),
   detectStrengthClustering: vi.fn(),
+  detectGoalLayerStrengthClustering: vi.fn(),
   detectSameLeverOptions: vi.fn(),
   detectOptionSimilarity: vi.fn().mockReturnValue({ detected: false, critiques: [], warnings: [], validationIssues: [] }),
   detectMissingBaseline: vi.fn(),
@@ -81,6 +82,7 @@ import {
   detectStructuralWarnings,
   detectUniformStrengths,
   detectStrengthClustering,
+  detectGoalLayerStrengthClustering,
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
@@ -162,6 +164,7 @@ function setupMocks(): void {
   (detectStructuralWarnings as any).mockReturnValue({ warnings: [], uncertainNodeIds: [] });
   (detectUniformStrengths as any).mockReturnValue({ detected: false });
   (detectStrengthClustering as any).mockReturnValue({ detected: false });
+  (detectGoalLayerStrengthClustering as any).mockReturnValue({ detected: false });
   (detectSameLeverOptions as any).mockReturnValue({ detected: false });
   (detectMissingBaseline as any).mockReturnValue({ detected: false });
   (detectGoalNoBaselineValue as any).mockReturnValue({ detected: false });

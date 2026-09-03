@@ -21,6 +21,7 @@ import {
   detectStructuralWarnings,
   detectUniformStrengths,
   detectStrengthClustering,
+  detectGoalLayerStrengthClustering,
   detectSameLeverOptions,
   detectOptionSimilarity,
   detectMissingBaseline,
@@ -598,10 +599,26 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   }
 
   // Pre-analysis quality detectors
+  //
+  // Two dispersion questions, deliberately separate (see structure/index.ts):
+  //   detectStrengthClustering          — did the model differentiate its causal
+  //                                       weights ANYWHERE in the graph?
+  //   detectGoalLayerStrengthClustering — does it hold a differentiated belief
+  //                                       about what matters TO THE GOAL?
+  // Both aggregate over different populations and can disagree on the same
+  // graph, which is the point: a flat goal layer inside an otherwise varied
+  // graph is invisible to every graph-wide aggregate, and it is the layer the
+  // option comparison is weighted by.
   const strengthClust = detectStrengthClustering(ctx.graph as any);
   if (strengthClust.detected && (strengthClust as any).warning) {
     if (!draftWarnings) draftWarnings = [];
     draftWarnings.push((strengthClust as any).warning);
+  }
+
+  const goalLayerClust = detectGoalLayerStrengthClustering(ctx.graph as any);
+  if (goalLayerClust.detected && (goalLayerClust as any).warning) {
+    if (!draftWarnings) draftWarnings = [];
+    draftWarnings.push((goalLayerClust as any).warning);
   }
 
   const sameLever = detectSameLeverOptions(ctx.graph as any);

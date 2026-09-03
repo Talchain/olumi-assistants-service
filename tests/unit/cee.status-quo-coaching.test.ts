@@ -55,6 +55,7 @@ vi.mock("../../src/cee/structure/index.js", () => ({
   detectStructuralWarnings: vi.fn().mockReturnValue({ warnings: [], uncertainNodeIds: [] }),
   detectUniformStrengths: vi.fn(),
   detectStrengthClustering: vi.fn(),
+  detectGoalLayerStrengthClustering: vi.fn(),
   detectSameLeverOptions: vi.fn(),
   detectOptionSimilarity: vi.fn().mockReturnValue({ detected: false, critiques: [], warnings: [], validationIssues: [] }),
   detectMissingBaseline: vi.fn(),
@@ -110,6 +111,7 @@ import { ceeAnyTruncated, buildCeeGuidance } from "../../src/cee/guidance/index.
 import {
   detectUniformStrengths,
   detectStrengthClustering,
+  detectGoalLayerStrengthClustering,
   detectSameLeverOptions,
   detectMissingBaseline,
   detectGoalNoBaselineValue,
@@ -203,6 +205,7 @@ function setupMocks() {
   (buildCeeGuidance as any).mockReturnValue({ recommendations: [] });
   (detectUniformStrengths as any).mockReturnValue({ detected: false });
   (detectStrengthClustering as any).mockReturnValue({ detected: false });
+  (detectGoalLayerStrengthClustering as any).mockReturnValue({ detected: false });
   (detectSameLeverOptions as any).mockReturnValue({ detected: false });
   (detectMissingBaseline as any).mockReturnValue({ detected: false });
   (detectGoalNoBaselineValue as any).mockReturnValue({ detected: false });

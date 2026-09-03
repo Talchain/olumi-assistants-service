@@ -1297,7 +1297,13 @@ export function fixNonCanonicalStructuralEdges(
 // =============================================================================
 
 /**
- * Result of strength clustering detection.
+ * Result of a strength-dispersion detector.
+ *
+ * `coefficientOfVariation` is the dispersion of edge MAGNITUDES:
+ *   CV = std(|strength|) / mean(|strength|)
+ * Sign is deliberately not measured here — direction is a separate semantic,
+ * carried by `effect_direction` and checked by the polarity guards. See
+ * `magnitudeCoefficientOfVariation` for why mixing the two was a defect.
  */
 export interface StrengthClusteringResult {
   detected: boolean;
@@ -1306,24 +1312,64 @@ export interface StrengthClusteringResult {
   warning?: CEEStructuralWarningV1;
 }
 
+/** A causal edge admitted to a dispersion population. */
+interface CausalEdgeSample {
+  id?: string;
+  /** strength_mean as it stands at Stage 5 (package): SIGNED. */
+  signed: number;
+  /** true when this edge's target is a goal node. */
+  intoGoal: boolean;
+}
+
 /**
- * Detect strength clustering: low coefficient of variation (CV < 0.3) in edge strengths.
- * CV = std(strengths) / mean(abs(strengths))
- * If mean(abs(strengths)) === 0, treat as clustered.
- * Excludes structural edges (decision→option, option→factor).
+ * Coefficient of variation of edge MAGNITUDES.
+ *
+ * THE QUESTION THIS ANSWERS: "do these edges differ in HOW MUCH they matter?"
+ * — not "do they differ in sign".
+ *
+ * ⚠ WHY THIS IS A NAMED FUNCTION RATHER THAN THREE INLINE LINES.
+ * The shipped implementation computed the variance over the SIGNED strengths
+ * around the mean of the ABSOLUTE strengths — two different scales in one
+ * quotient, which is a coefficient of variation of nothing. Stage 2
+ * (`normaliseRiskCoefficients`, transforms/risk-normalisation.ts) forces every
+ * risk→goal and risk→outcome edge negative, and Stage 5 (`package`) is where
+ * the spread is measured — so on any graph carrying a risk edge each negative
+ * contributed a squared deviation of about (2 × mean)² instead of ~0, and the
+ * quotient was inflated far past any plausible threshold. Measured over a
+ * 21-artefact corpus spanning ~9 scenarios, the shipped arithmetic returned
+ * 0.954–1.669 and never once fell below its 0.3 threshold: a guard that ran on
+ * every draft and could not fire.
+ *
+ * The sign-free form below is the only coherent CV available here. A signed CV
+ * (`std(s) / mean(s)`) is undefined in practice for sign-mixed data, because the
+ * denominator passes through zero.
+ *
+ * @returns CV over magnitudes; 0 when every magnitude is 0 (treated as clustered
+ *          by callers, since a layer of zeroes carries no belief either).
  */
-export function detectStrengthClustering(
-  graph: GraphV1 | undefined,
-  threshold: number = 0.3
-): StrengthClusteringResult {
+function magnitudeCoefficientOfVariation(signed: readonly number[]): number {
+  const magnitudes = signed.map(Math.abs);
+  const meanAbs = magnitudes.reduce((a, b) => a + b, 0) / magnitudes.length;
+  if (meanAbs === 0) return 0;
+  const variance =
+    magnitudes.reduce((sum, m) => sum + Math.pow(m - meanAbs, 2), 0) / magnitudes.length;
+  return Math.sqrt(variance) / meanAbs;
+}
+
+/**
+ * Collect the causal edges of a graph, tagged with whether each one points at
+ * the goal. Structural edges (decision→option, option→factor) are excluded:
+ * they are canonical wiring at 1.0/std 0.01 (`normaliseStructuralEdges`), not
+ * beliefs, and including them would swamp the causal signal.
+ */
+function collectCausalEdgeSamples(graph: GraphV1 | undefined): CausalEdgeSample[] {
   if (!graph || !Array.isArray((graph as any).edges) || !Array.isArray((graph as any).nodes)) {
-    return { detected: false, coefficientOfVariation: 0, edgeCount: 0 };
+    return [];
   }
 
   const nodes = (graph as any).nodes as any[];
   const edges = (graph as any).edges as any[];
 
-  // Build node kind map
   const nodeKindMap = new Map<string, string>();
   for (const node of nodes) {
     const id = typeof node?.id === "string" ? node.id : undefined;
@@ -1331,82 +1377,181 @@ export function detectStrengthClustering(
     if (id && kind) nodeKindMap.set(id, kind);
   }
 
-  // Collect causal edge strengths
-  const strengths: number[] = [];
-  const affectedEdgeIds: string[] = [];
-
+  const samples: CausalEdgeSample[] = [];
   for (const edge of edges) {
     const from = edge?.from;
     const to = edge?.to;
     const fromKind = typeof from === "string" ? nodeKindMap.get(from) : undefined;
     const toKind = typeof to === "string" ? nodeKindMap.get(to) : undefined;
 
-    // Skip structural edges
-    if (fromKind && toKind) {
-      const edgeType = `${fromKind}-${toKind}`;
-      if (STRUCTURAL_EDGE_TYPES.has(edgeType)) continue;
-    }
+    if (fromKind && toKind && STRUCTURAL_EDGE_TYPES.has(`${fromKind}-${toKind}`)) continue;
 
     const strength = edge?.strength_mean ?? edge?.weight ?? 0.5;
-    if (typeof strength === "number" && Number.isFinite(strength)) {
-      strengths.push(strength);
-      const edgeId = edge?.id;
-      if (typeof edgeId === "string") affectedEdgeIds.push(edgeId);
-    }
+    if (typeof strength !== "number" || !Number.isFinite(strength)) continue;
+
+    samples.push({
+      id: typeof edge?.id === "string" ? edge.id : undefined,
+      signed: strength,
+      intoGoal: toKind === "goal",
+    });
+  }
+  return samples;
+}
+
+/** Build the shared warning body for a dispersion detector. */
+function buildClusteringWarning(
+  id: "strength_clustering" | "goal_layer_strength_clustering",
+  edgeIds: string[],
+  explanation: string,
+  fixHint: string,
+): CEEStructuralWarningV1 {
+  const capped = edgeIds.slice(0, 10);
+  return {
+    id,
+    severity: "medium",
+    node_ids: [],
+    edge_ids: capped,
+    affected_node_ids: [],
+    affected_edge_ids: capped,
+    explanation,
+    fix_hint: fixHint,
+  };
+}
+
+const CLUSTERING_FIX_HINT =
+  "Review edge strengths — low variance suggests estimates may be rough approximations";
+
+/**
+ * THE QUESTION: "Across this whole causal graph, did the model differentiate how
+ * strongly things influence each other at all?"
+ *
+ * Fires when the coefficient of variation of causal edge MAGNITUDES falls below
+ * `threshold`. A graph whose every edge carries about the same weight cannot
+ * support a sensitivity analysis: nothing in it says what matters more than what.
+ *
+ * SCOPE, and why it is not sufficient on its own: this population is the whole
+ * graph, so a single flat LAYER inside an otherwise varied graph is invisible to
+ * it by construction. That is the founder-session pathology, and it is the
+ * question `detectGoalLayerStrengthClustering` answers instead. Both run.
+ *
+ * THRESHOLD, 0.3 — carried forward from the original implementation and now
+ * CALIBRATED rather than inherited. Over a 21-artefact corpus spanning ~9
+ * scenarios (12 B2 draws, one B2 raw draft, the founder session, four cold-read
+ * fixtures, three live draft captures) the magnitude CV of the whole causal
+ * population is 0.217–0.725, with an empirical gap between 0.229 and 0.345.
+ * 0.3 sits inside that gap and fires on 2 of 21 artefacts. n=21 over ~9
+ * scenarios is a small sample; treat the figure as provisional.
+ *
+ * Excludes structural edges (decision→option, option→factor).
+ */
+export function detectStrengthClustering(
+  graph: GraphV1 | undefined,
+  threshold: number = 0.3
+): StrengthClusteringResult {
+  const samples = collectCausalEdgeSamples(graph);
+  return evaluateDispersion(samples, threshold, "strength_clustering");
+}
+
+/**
+ * Threshold for the goal layer, calibrated separately — see the note on
+ * `detectGoalLayerStrengthClustering`. It is NOT 0.3: the goal layer is a
+ * small, high-stakes population whose healthy dispersion runs lower than the
+ * graph's, and reusing 0.3 would fire on 11 of 21 corpus artefacts.
+ */
+export const GOAL_LAYER_CLUSTERING_THRESHOLD = 0.15;
+
+/**
+ * THE QUESTION: "Does the model hold a differentiated belief about how much each
+ * outcome and risk matters to the goal the user actually asked about?"
+ *
+ * The population is exactly the causal edges whose target is a goal node. Those
+ * edges are what the option comparison is weighted by, so a flat goal layer
+ * means the model holds no belief about the one thing the user asked — while the
+ * product still computes a precise comparison over it.
+ *
+ * WHY A SECOND DETECTOR RATHER THAN A WIDER FIRST ONE. `detectStrengthClustering`
+ * and `detectUniformStrengths` both aggregate across the whole graph. A goal
+ * layer is structurally a minority of edges (5 of 15 in the founder session), so
+ * a flat goal layer inside a varied graph cannot move either aggregate past its
+ * threshold. Measured: on the founder session the whole-graph magnitude CV is
+ * 0.229 while the goal layer's is 0.000; across the four B2 draws that flatten
+ * the goal layer entirely, the whole-graph CV is 0.367–0.592 — comfortably
+ * "healthy" — while the goal layer is exactly 0.000. The two questions have
+ * different answers on the same graph, so they need different names.
+ *
+ * THRESHOLD, 0.15 — derived, not chosen. Over the same 21-artefact corpus the
+ * goal-layer magnitude CV is either 0.000 (five artefacts whose goal edges are
+ * all one magnitude, the founder session among them) or 0.091 (one near-flat
+ * band of 0.40–0.50), and then jumps to 0.221 and above for the fifteen
+ * artefacts whose goal layers are genuinely differentiated. 0.091 → 0.221 is the
+ * widest gap in the data; 0.15 is its midpoint, so it is the maximum-margin
+ * split. Any value in that interval classifies the corpus identically — the
+ * corpus cannot distinguish them, and this constant should be re-derived when a
+ * larger corpus exists. PROVISIONAL.
+ *
+ * Returns `detected: false` with `edgeCount: 0` when the graph has no goal node,
+ * and stays silent on a single goal edge: the dispersion of one number is not a
+ * fact about the model.
+ */
+export function detectGoalLayerStrengthClustering(
+  graph: GraphV1 | undefined,
+  threshold: number = GOAL_LAYER_CLUSTERING_THRESHOLD
+): StrengthClusteringResult {
+  const samples = collectCausalEdgeSamples(graph).filter(s => s.intoGoal);
+  return evaluateDispersion(samples, threshold, "goal_layer_strength_clustering");
+}
+
+/**
+ * Shared verdict for both dispersion detectors: measure, compare, and — only if
+ * the population is under-dispersed — build the warning that says so.
+ */
+function evaluateDispersion(
+  samples: CausalEdgeSample[],
+  threshold: number,
+  id: "strength_clustering" | "goal_layer_strength_clustering",
+): StrengthClusteringResult {
+  if (samples.length < 2) {
+    return { detected: false, coefficientOfVariation: 0, edgeCount: samples.length };
   }
 
-  if (strengths.length < 2) {
-    return { detected: false, coefficientOfVariation: 0, edgeCount: strengths.length };
-  }
+  const edgeIds = samples.map(s => s.id).filter((x): x is string => typeof x === "string");
+  const signed = samples.map(s => s.signed);
+  const allZero = signed.every(s => s === 0);
+  const cv = magnitudeCoefficientOfVariation(signed);
 
-  // Calculate mean of absolute values
-  const absStrengths = strengths.map(Math.abs);
-  const meanAbs = absStrengths.reduce((a, b) => a + b, 0) / absStrengths.length;
+  const population = id === "goal_layer_strength_clustering" ? "goal-linkage" : "causal";
 
-  // If mean is zero, treat as clustered
-  if (meanAbs === 0) {
+  if (allZero) {
     return {
       detected: true,
       coefficientOfVariation: 0,
-      edgeCount: strengths.length,
-      warning: {
-        id: "strength_clustering" as any,
-        severity: "medium",
-        node_ids: [],
-        edge_ids: affectedEdgeIds.slice(0, 10),
-        affected_node_ids: [],
-        affected_edge_ids: affectedEdgeIds.slice(0, 10),
-        explanation: "All edge strengths are zero — estimates may need review.",
-        fix_hint: "Review edge strengths — low variance suggests estimates may be rough approximations",
-      } as CEEStructuralWarningV1,
+      edgeCount: samples.length,
+      warning: buildClusteringWarning(
+        id,
+        edgeIds,
+        `All ${population} edge strengths are zero — estimates may need review.`,
+        CLUSTERING_FIX_HINT,
+      ),
     };
   }
 
-  // Calculate standard deviation
-  const variance = strengths.reduce((sum, s) => sum + Math.pow(s - meanAbs, 2), 0) / strengths.length;
-  const std = Math.sqrt(variance);
-  const cv = std / meanAbs;
-
-  const detected = cv < threshold;
-
-  if (!detected) {
-    return { detected: false, coefficientOfVariation: cv, edgeCount: strengths.length };
+  if (!(cv < threshold)) {
+    return { detected: false, coefficientOfVariation: cv, edgeCount: samples.length };
   }
+
+  const explanation =
+    id === "goal_layer_strength_clustering"
+      ? `The ${samples.length} edges linking outcomes and risks to the goal carry near-identical ` +
+        `strengths (magnitude CV ${cv.toFixed(2)}, threshold ${threshold}). These are the ` +
+        `relationships the option comparison is weighted by, so the model holds no view on what ` +
+        `matters most to the stated goal.`
+      : `Edge strength CV is ${cv.toFixed(2)} (threshold: ${threshold}) — strengths are clustered.`;
 
   return {
     detected: true,
     coefficientOfVariation: cv,
-    edgeCount: strengths.length,
-    warning: {
-      id: "strength_clustering" as any,
-      severity: "medium",
-      node_ids: [],
-      edge_ids: affectedEdgeIds.slice(0, 10),
-      affected_node_ids: [],
-      affected_edge_ids: affectedEdgeIds.slice(0, 10),
-      explanation: `Edge strength CV is ${cv.toFixed(2)} (threshold: ${threshold}) — strengths are clustered.`,
-      fix_hint: "Review edge strengths — low variance suggests estimates may be rough approximations",
-    } as CEEStructuralWarningV1,
+    edgeCount: samples.length,
+    warning: buildClusteringWarning(id, edgeIds, explanation, CLUSTERING_FIX_HINT),
   };
 }
 
