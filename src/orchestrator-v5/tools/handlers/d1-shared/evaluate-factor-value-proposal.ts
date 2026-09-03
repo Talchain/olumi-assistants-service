@@ -163,12 +163,21 @@ export type ProposalRejectionReason =
  * (`transforms/provenance-display.ts` owns it and names the question in those
  * words). The two facts move independently and the divergence is REACHABLE on
  * exactly the path this module exists for: a user edit within the stored cap
- * is stamped `user_override` by `canonicalise-value-ops.ts`
- * `stampUserEditProvenance` while the cap beside it is untouched — so reading
+ * is stamped with `canonicalise-value-ops.ts`'s exported `USER_EDIT_SOURCE` by
+ * `stampUserEditProvenance`, while the cap beside it is untouched — so reading
  * value-authorship here would declare the drafting model's own ceiling
  * "confirmed" because the user once corrected the number underneath it, and
  * would then refuse their NEXT correction. That is the founder's defect,
  * rebuilt out of the field that looked like the fix.
+ *
+ * ⚠ THE STAMP IS NAMED BY ITS EXPORTED CONSTANT ABOVE, NOT SPELLED OUT, AND
+ * THAT IS DELIBERATE. `cee/transforms/__tests__/no-brief-derived-user-override
+ * .writers.test.ts` sweeps every non-test file under `src/` for the literal and
+ * requires each carrier to sit in a REVIEWED manifest whose one question is
+ * *"by what path does the value reach the stamp?"*. This module has no such
+ * path — it never touches `observed_state.source` — so an entry claiming one
+ * would be a false statement in the register that exists to keep those
+ * statements true. Spell the constant, not the string.
  *
  * So the honest reading of a stored cap is the contract's own instruction for
  * an absent provenance stamp, quoted verbatim from `ObservedStateSchema`:
