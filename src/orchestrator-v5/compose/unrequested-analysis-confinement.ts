@@ -242,9 +242,19 @@ export const UNREQUESTED_ROBUSTNESS_KEPT_MEMBERS: readonly string[] = Object.fre
  * absent). Dropping only the first would have left the figure on the wire and
  * the acceptance test passing against the array the author happened to look at.
  *
+ * ⚠ MEASURED, AND IT IS NOT WHAT BITES. Mutation M3a — deleting the member
+ * below — leaves the acceptance suite 15/15 GREEN, because
+ * {@link keyStatesComparativeStanding} already matches `win_probability`. So
+ * do NOT describe this list as the guard: it is the readable statement of
+ * intent, and the thing a reader greps for when asking "what does an
+ * unrequested run stop saying?". The derived predicate is the enforcement.
+ * Both ship because they answer different questions — a list is what notices a
+ * member is WRONG, a derived family is what notices a member is MISSING
+ * (parent CLAUDE.md trap 12d) — and the pair is kept honest by M3b, which
+ * neuters the predicate and hard-fails the module at load.
+ *
  * Exported so the acceptance test asserts against the REAL constant rather
- * than a copy of it, and so the drift test can prove the projection honours
- * every member it declares.
+ * than a copy of it.
  */
 export const UNREQUESTED_OPTION_ROW_DROPPED_MEMBERS: readonly string[] = Object.freeze([
   'win_probability',
