@@ -145,6 +145,51 @@ describe('readDefaultedRootEvidence — shape tolerance', () => {
   });
 });
 
+describe('the floor over every OTHER real capture in this repo', () => {
+  /**
+   * "Does this change other payloads?" answered by measurement rather than by
+   * reasoning. These are the repo's own committed captures — not fixtures
+   * written here — and on all three the floor is ZERO, so the disclosure is
+   * byte-identical to today. Only a run where the engine actually warned about
+   * defaulted roots moves.
+   *
+   * Pinned so that a producer which starts emitting ROOT_NODE_DEFAULT_VALUE on
+   * these shapes shows up as a RED to look at, rather than as a silent change
+   * in what users are told.
+   */
+  const OTHER_CAPTURES = [
+    ['dsk-walk/session-a', join(__dirname, '..', '..', 'compose', '__tests__', 'fixtures', 'dsk-walk', 'session-a.enrichment.json')],
+    ['dsk-walk/session-b2', join(__dirname, '..', '..', 'compose', '__tests__', 'fixtures', 'dsk-walk', 'session-b2.enrichment.json')],
+    ['tied-options/20260828', join(__dirname, '..', '..', 'compose', '__tests__', 'fixtures', 'tied-options', '20260828T141150Z-analyse.enrichment.json')],
+  ] as const;
+
+  it.each(OTHER_CAPTURES)('%s: the floor is zero, so the disclosure is unchanged', (_name, path) => {
+    const enrichment = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    const evidence = readDefaultedRootEvidence(enrichment);
+    expect(evidence.defaultedRootFloor).toBe(0);
+
+    // …and the signal is exactly what the pre-floor reader would have produced.
+    const brief = enrichment.decision_brief as Record<string, unknown> | undefined;
+    const rawList = brief?.defaulted_assumptions ?? enrichment.defaulted_assumptions;
+    const expectedCount = Array.isArray(rawList) && rawList.length > 0 ? rawList.length : null;
+    expect(readDefaultedAssumptionsFromEnrichment(enrichment)?.count ?? null).toBe(expectedCount);
+  });
+
+  it('a goal-ancestor gap ALONE still discloses nothing, and that is deliberate', () => {
+    // The tied-options capture carries GOAL_ANCESTOR_DATA_GAP with no
+    // ROOT_NODE_DEFAULT_VALUE and no defaulted_assumptions. There is no count
+    // to state, and inventing one would be the mirror of the defect this floor
+    // fixes. Naming the boundary rather than leaving it to be discovered:
+    // gating a precise leader claim on the gap needs copy that does not exist
+    // and a surface this lane does not own.
+    const enrichment = JSON.parse(
+      readFileSync(OTHER_CAPTURES[2][1], 'utf8'),
+    ) as Record<string, unknown>;
+    expect(readDefaultedRootEvidence(enrichment).goalAncestorDataGap).toBe(true);
+    expect(readDefaultedAssumptionsFromEnrichment(enrichment)).toBeNull();
+  });
+});
+
 describe('the disclosure count floor', () => {
   it('raises the live capture from "one of the factors" to three', () => {
     const signal = readDefaultedAssumptionsFromEnrichment(capture());
