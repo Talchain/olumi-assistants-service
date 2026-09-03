@@ -21,8 +21,6 @@ import type { FastifyRequest } from 'fastify';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import type { DraftGraphResult } from '../../../orchestrator/tools/draft-graph.js';
-
 vi.mock('../../../orchestrator/tools/draft-graph.js', () => ({
   handleDraftGraph: vi.fn(),
 }));

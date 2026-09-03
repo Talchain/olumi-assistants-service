@@ -307,20 +307,25 @@ export function buildDraftCalibrationBlocks(
   // THAN QUIETLY KEPT. `truncateAtWordBoundary` always cuts at a space (the
   // one after "Give" is inside every budget), so the title's tokens are always
   // a SUBSET of `{Give} ∪ tokens(label)` and the body always contains all of
-  // `tokens(label)`. Any CONTENT offence therefore trips both. Each line still
-  // has exactly one live case of its own, and the suite drives both:
+  // `tokens(label)`. Any CONTENT offence therefore trips BOTH, and the title is
+  // the one that fires first.
   //
-  //   title-only : a single-token label longer than the budget leaves the
-  //                title as the bare word "Give" → `too_short`. The body is
-  //                fine, so only this line refuses it.
-  //   body-only  : a label whose body overshoots 300 while the truncated title
-  //                does not → `too_long`.
+  // Measured, at the mutants, and stated at its true strength rather than
+  // softened:
   //
-  // Both are kept because the bytes are different bytes and both are shown to
-  // a user — the sibling emitters gate title and body separately for the same
-  // reason. Mutation testing marks the CONTENT halves as surviving mutants;
-  // that is the correct reading of an equivalence, and it is stated here so a
-  // later reader does not rediscover it as a defect.
+  //   THE TITLE LINE HAS A LIVE CASE OF ITS OWN. A single-token label longer
+  //   than the budget leaves the title as the bare word "Give" → `too_short`,
+  //   while the body is perfectly fine. Deleting the line REDs the suite.
+  //
+  //   THE BODY LINE HAS NONE. Deleting it leaves the suite GREEN: content is
+  //   caught by the title line, and length by `CoachingBlockSchema` at gate 5
+  //   (measured: the schema rejects a 301-character body). It is a SURVIVING
+  //   MUTANT and it is kept deliberately — not because it fires today, but
+  //   because the subset argument above holds only while the body's sole
+  //   variable is the label. The first copy change that puts anything else in
+  //   the body (a brief quotation, an engine phrase) breaks that silently, and
+  //   the sibling emitters gate both halves for the same reason. Recorded here
+  //   so a later reader finds a decision rather than rediscovering a defect.
   if (!gateCoachingCardBody(title).accept) return [];
   if (!gateCoachingCardBody(body).accept) return [];
 
