@@ -177,7 +177,7 @@ const P_UNQUOTED_AS_OPTION = new RegExp(
  *
  * A naming word is what makes a label EXPLICITLY NAMED, and `explicitlyNamed`
  * switches the whole target screen off. So this alternation is a permission
- * list, and four punctuation marks were sitting in it: `:` `-` `–` `—`.
+ * list, and punctuation marks were sitting in it: `:` `-` `–` `—`.
  *
  * Anything after a colon or a dash was therefore treated as a name the user
  * had chosen, and walked past every screen in this module:
@@ -194,7 +194,7 @@ const P_UNQUOTED_AS_OPTION = new RegExp(
  * and the hyphen matched INSIDE a word:
  *   `Add an option-level breakdown of the risks` -> "Level breakdown of the risks"
  *
- * REMOVING FOUR ENTRIES FROM AN ENUMERATION, not a new predicate — the same
+ * REMOVING ENTRIES FROM AN ENUMERATION, not a new predicate — the same
  * safe class as the `plan` head noun. Punctuation is a SEPARATOR; only a word
  * is evidence that the user is naming something. `called`/`named`/`titled`/
  * `labelled` keep working unchanged.
@@ -367,23 +367,23 @@ export const TARGET_QUANTIFIER_DETERMINERS: readonly string[] = [
 /**
  * The CONTAINER the option would be added TO — never the option itself.
  *
- * ⚠ EIGHT OF THESE ARE ALSO COMMON ENGLISH VERBS (`plan`, `map`, `list`,
- * `set`, `mix`, `project`, `model`, `graph`, `board`, `page`), so this
- * ⭐⭐ THIS LIST IS AN OPEN CLASS AND CANNOT BE CLOSED — see
- * `KNOWN_OPEN_CONTAINER_GAP` at the bottom of this file. Determiners are a
+ * ⚠ MANY OF THESE ARE ALSO COMMON ENGLISH VERBS (`plan`, `map`, `list`, `set`,
+ * `mix`, `project`, `model`, `graph`, `board`, `page`), so this alphabet may
+ * only ever be matched where a NOUN is grammatically required: as the WHOLE
+ * remainder (`BARE_CONTAINER`), or inside a determiner-led noun phrase
+ * (`quantifier + container`). The version of this rule that matched on a bare
+ * word boundary declined "add an option to plan a phased rollout", "to set up
+ * a joint venture", "to map the supply chain" and their kin — 10 of 10
+ * verb-collision probes lost, in the direction this module claims to have
+ * parameterised separately.
+ *
+ * ⭐⭐ AND THIS LIST IS AN OPEN CLASS THAT CANNOT BE CLOSED — see
+ * `KNOWN_OPEN_CONTAINER_GAP` at the foot of this file. Determiners are a
  * CLOSED class and are now genuinely closed against it. English common nouns
  * are not. `node`, `key question`, `element`, `driver`, `lever` and `outcome`
  * all name the container in this product's own vocabulary and none of them can
  * be enumerated in advance. Do not start a fifth round of adding words: the
  * exit is the `clarify` arm, rowed as successor work.
- *
- * alphabet may only ever be matched where a NOUN is grammatically required:
- * as the WHOLE remainder (`BARE_CONTAINER`), or inside a determiner-led noun
- * phrase (`quantifier + container`). The version of this rule that matched on
- * a bare word boundary declined all ten of "add an option to plan a phased
- * rollout", "to set up a joint venture", "to map the supply chain" and their
- * kin — 10 of 10 verb-collision probes lost, in the direction this module
- * claims to have parameterised separately.
  */
 export const CONTAINER_NOUNS: readonly string[] = [
   'model',
@@ -498,7 +498,7 @@ const OPTION_WORD_IN_LABEL = /\b(?:options?|alternatives?|choices?)\b/i;
  * comment, against twelve real hits for `CONTAINER_NOUNS`.
  *
  * Exported solely so the spec can pin it. ⚠ THE PIN GUARDS MEMBERSHIP DRIFT,
- * NOT MEMBERSHIP: whether these are the RIGHT ten is a separate question that
+ * NOT MEMBERSHIP: whether these are the RIGHT members is a separate question that
  * this PR does not answer and did not ask. Do not widen it here — the anaphora
  * class is open and no list closes it (see `KNOWN_OPEN_ANAPHORA`).
  */
@@ -834,7 +834,7 @@ export const KNOWN_OPEN_COORDINATED_NAME: readonly string[] = [
  * The `as an option` frame screens on `isTargetReference(raw) &&
  * mentionsContainer(raw)`, so a determiner-led POINTER carrying no container
  * noun is minted as the option's name: "All of the above", "Last one",
- * "Either of them". `GENERIC_LABELS` — ten strings — is the only defence, and
+ * "Either of them". `GENERIC_LABELS` is the only defence, and
  * it is a hand-maintained list of an OPEN class.
  *
  * ⭐ BY THE RULING THIS PR ESTABLISHED, THIS IS NOT CHASED. Closed classes
@@ -898,7 +898,7 @@ export const KNOWN_OPEN_SEPARATOR_NAMING: readonly string[] = [
 /**
  * ⚠ A DEFERRAL IS NOT AN OPTION, and deferral phrases are an OPEN class.
  *
- * `GENERIC_LABELS` already refuses ten pointer-ish strings; these are the same
+ * `GENERIC_LABELS` already refuses a handful of pointer-ish strings; these are the same
  * shape one step out. Extending that list would close exactly these rows and
  * read as though the class were handled — the pattern this PR has now measured
  * to fail four times. Pinned, with the `clarify` arm as the exit.

@@ -103,7 +103,7 @@ describe('detectAddOptionIntent — OPPOSITE DIRECTION: every neighbour keeps it
     ['Would it be worth adding an option here', 'deliberation'],
     ['Add more options', 'plural widening, not one named option'],
     ['Suggest additional options for this decision', "the UI's own explore-more chip"],
-    // ⭐ THESE FIVE WERE ADDED BECAUSE A MUTANT SURVIVED. Removing the
+    // ⭐ THESE WERE ADDED BECAUSE A MUTANT SURVIVED. Removing the
     // singular-noun guard left the corpus above fully GREEN — every phrase in
     // it was being declined by the LABEL patterns, not by the guard, so the
     // guard was untested and a tidy-up could have deleted it silently. Each of
@@ -264,7 +264,7 @@ describe('detectAddOptionIntent — totality', () => {
 // ---------------------------------------------------------------------------
 // ⭐⭐ THE CLOSED CLASS — the corpus that closes against an ENUMERATION.
 //
-// WHY THIS EXISTS AND THE TEN PAIRS ABOVE DO NOT REPLACE IT. The first version
+// WHY THIS EXISTS AND THE PAIRS ABOVE DO NOT REPLACE IT. The first version
 // of the target/label screen hand-listed the twelve determiners reproduction
 // had turned up, and the pairs above pinned exactly those. English determiners
 // are a CLOSED CLASS of ~45, so the class survived one word shorter: measured
@@ -311,7 +311,7 @@ describe('detectAddOptionIntent — the determiner CLOSED CLASS, both directions
 
   // --- GAP column: the opposite direction, twinned case by case -------------
   //
-  // ⭐ EVERY CONTAINER NOUN THAT IS ALSO A VERB GETS A TWIN. The ten pairs
+  // ⭐ EVERY CONTAINER NOUN THAT IS ALSO A VERB GETS A TWIN. The pairs
   // above contain no verb colliding with the noun alphabet, so that corpus
   // shared the code's blind spot — the exact trap matched pairs exist to
   // prevent, reappearing inside them. These are the missing right-hand column.
@@ -465,7 +465,7 @@ describe('the target screen is on EVERY trigger that INFERS a label', () => {
     expect(d.reason).toBe('target_not_a_label');
   });
 
-  // ⚠ ...and NOT on the triggers that are HANDED a label. Screening all five
+  // ⚠ ...and NOT on the triggers that are HANDED a label. Screening every
   // declines these three; one of them is this module's own discriminator.
   const EXPLICITLY_NAMED: ReadonlyArray<readonly [string, string]> = [
     ['Add an option called The Big Bet', 'The Big Bet'],
@@ -672,7 +672,7 @@ describe('⭐⭐ THE GAPS THIS MODULE SHIPS OPEN, ASSERTED AS AN EXACT SET', () 
 });
 
 // ---------------------------------------------------------------------------
-// ⭐⭐ THE THREE DISCRIMINATORS A MUTANT KIT FORCED, AND WHY THEY ARE NOT
+// ⭐⭐ THE DISCRIMINATORS A MUTANT KIT FORCED, AND WHY THEY ARE NOT
 // REDUNDANT WITH THE CASES ABOVE.
 //
 // Three mutations SURVIVED the first kit against this file: dropping
@@ -929,7 +929,7 @@ describe('the courtesy-prefix header now matches the code', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ⭐⭐ ALL FIVE ALPHABETS CARRY A HAND-WRITTEN PIN — closing the CLASS, not the
+// ⭐⭐ EVERY ALPHABET CARRIES A HAND-WRITTEN PIN — closing the CLASS, not the
 // two instances that were found.
 //
 // `CONTAINER_NOUNS` and `NAMING_WORDS` were pinned by hand after a mutant proved
@@ -938,14 +938,26 @@ describe('the courtesy-prefix header now matches the code', () => {
 // stays green — the test COUNT dropping by one was the only tell.
 //
 // The determiner alphabets had exactly the same hole and were left open, which
-// is the instance-vs-class error this PR has now demonstrated three times.
+// is the instance-vs-class error this PR kept demonstrating.
 //
-// ⚠ AND THE COUNT WAS WRONG TOO: there are FIVE alphabets, not four. The fifth
-// is `OPTION_NOUN_DETERMINERS`, which BUILDS the recogniser regex, and it was
-// already hand-pinned — `DETERMINER_FRAGMENT` is asserted byte-for-byte against
-// the historical literal, with a positive control proving a reorder breaks it.
-// A sentence counting the alphabets got it wrong while the pins themselves were
-// right. Five alphabets exist; five are pinned.
+// ⚠ AND A SENTENCE COUNTING THE ALPHABETS WAS WRONG WHILE THE PINS BESIDE IT
+// WERE RIGHT — twice, in two files, both times understating them. The one it
+// missed is `OPTION_NOUN_DETERMINERS`, which BUILDS the recogniser regex and
+// was already hand-pinned: `DETERMINER_FRAGMENT` is asserted byte-for-byte
+// against the historical literal, with a positive control proving a reorder
+// breaks it.
+//
+// ⭐⭐ SO THE COUNT IS GONE FROM THE PROSE, HERE AND EVERYWHERE ELSE IN THESE
+// TWO FILES. A number in a comment restating a list that sits beside it is a
+// hand-maintained mirror with a sample size of one: no test can see it, no
+// reader recounts it, and it went stale three times in this PR alone — twice by
+// drift and once BORN WRONG at authoring ("EIGHT of these are also verbs",
+// beside a parenthetical listing ten, never true at any commit).
+//
+// THE LIST IS THE RECORD. The assertions below name every alphabet
+// individually, so they cannot disagree with a sentence that no longer states a
+// total. Where a count genuinely carries meaning it belongs in an assertion the
+// suite can see — which is what each `toEqual`/`toBe` below is.
 // ---------------------------------------------------------------------------
 describe('every alphabet in this module is pinned BY HAND', () => {
   it('TARGET_DEFINITE_DETERMINERS — the presupposing determiners, exactly', () => {
@@ -989,7 +1001,7 @@ describe('every alphabet in this module is pinned BY HAND', () => {
     // CONTAINER_NOUNS entry REDs two named tests — so the suite could see
     // shrinkage in general and simply could not see it here.
     //
-    // ⚠ THIS GUARDS DRIFT, NOT MEMBERSHIP. Whether these are the right ten is a
+    // ⚠ THIS GUARDS DRIFT, NOT MEMBERSHIP. Whether these are the right members is a
     // separate question this PR does not answer. Do not widen it here.
     expect([...GENERIC_LABELS].sort()).toEqual([
       'a new one', 'another one', 'here', 'it', 'one', 'something', 'that',
@@ -998,7 +1010,7 @@ describe('every alphabet in this module is pinned BY HAND', () => {
     expect(GENERIC_LABELS.size).toBe(10);
   });
 
-  it('all FIVE alphabets are hand-pinned — the completeness check on this suite', () => {
+  it('every alphabet is hand-pinned — the completeness check on this suite', () => {
     // A derived guard proves the copies agree and can never prove a list is
     // right. These are the only assertions in this file that can see an
     // alphabet SHRINK.
