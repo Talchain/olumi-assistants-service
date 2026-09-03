@@ -663,6 +663,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
         V5DecisionReviewCompleted: "v5.decision_review.completed",
         V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+        V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
         V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
@@ -1059,6 +1060,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.decision_review.shape_check_warnings": [TelemetryEvents.CeeDecisionReviewShapeCheckWarnings],
         // POST-parse contract gate — reason-tagged counter (primary rule code).
         "v5.decision_review.contract_violation": [TelemetryEvents.V5DecisionReviewContractViolation],
+        // Prose/fact agreement — a DIFFERENT question from the contract gate
+        // above (does the prose agree with the producer's signed fact?), so it
+        // carries its own metric rather than another reason code on that one.
+        "v5.decision_review.prose_fact_violation": [
+          TelemetryEvents.V5DecisionReviewProseFactViolation,
+        ],
         "v5.egress.leading_option_claim_withheld_violated": [TelemetryEvents.V5LeadingOptionClaimAtEgress],
         "v5.claim_safety.fail_closed_unavailable_total": [
           TelemetryEvents.V5ClaimSafetyFailClosedUnavailable,
@@ -2185,6 +2192,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
         "v5.decision_review.contract_violation",
+        "v5.decision_review.prose_fact_violation",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",
