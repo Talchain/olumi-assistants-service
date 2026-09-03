@@ -32,6 +32,9 @@ import {
   KNOWN_OPEN_COORDINATED_NAME,
   KNOWN_OPEN_ANAPHORA,
   KNOWN_OPEN_HEDGE_LABEL,
+  KNOWN_OPEN_SWALLOWED_TAIL,
+  KNOWN_OPEN_RETRACTION,
+  KNOWN_OPEN_TWO_QUOTED,
   KNOWN_OPEN_NAMING_WORD_TARGET_PRICE,
   KNOWN_OPEN_SEPARATOR_NAMING,
   KNOWN_OPEN_DEFERRAL_LABEL,
@@ -551,7 +554,11 @@ describe('⚠ the gaps this module ships OPEN, pinned exactly', () => {
     // matches what is actually measured rather than what was first imagined.
     expect(KNOWN_OPEN_CONTAINER_GAP.length).toBe(10);
     expect(CLOSED_COORDINATED_INSTRUCTION.length).toBe(4);
-    expect(KNOWN_OPEN_COORDINATED_NAME.length).toBe(11);
+    // 11 when the screen keyed only on `and`; 15 after it was widened to
+    // `but`/`while` and adverbs on 3 Sep 2026, which extended this same price
+    // class by four. The pin caught the growth on the first run, which is what
+    // it is for.
+    expect(KNOWN_OPEN_COORDINATED_NAME.length).toBe(15);
     // Positive control: the set is not vacuous and these really are container
     // references a human would call targets.
     expect(KNOWN_OPEN_CONTAINER_GAP).toContain('Add an option to each node');
@@ -846,12 +853,20 @@ describe('a coordinated second instruction is a DROPPED INSTRUCTION, not a name'
     // Same lesson as CONTAINER_NOUNS: every other assertion here is generated
     // from the screen itself, so only a hand-written list observes a deletion.
     const src = COORDINATED_EDIT_INSTRUCTION_SOURCE;
+    // ⚠ STEMS, not whole words, since 3 Sep 2026: the screen matches `remov\w*`
+    // so that "removing" is caught as well as "remove" — one participle was
+    // enough to defeat the whole screen.
     for (const v of [
-      'remove', 'delete', 'drop', 'rename', 'replace', 'update', 'change',
-      'increase', 'decrease', 'raise', 'lower', 'configure', 'split', 'merge',
+      'remov', 'delet', 'drop', 'renam', 'replac', 'updat', 'chang',
+      'increas', 'decreas', 'rais', 'lower', 'configur', 'split', 'merg',
       'reset', 'edit', 'adjust',
     ]) {
       expect(src, `"${v}" must remain in the coordinated-edit verb list`).toContain(v);
+    }
+    // The conjunctions the screen requires BEFORE a verb — one adverb had been
+    // defeating it, so `also`/`then also` and `but`/`while` are load-bearing.
+    for (const c of ['and', 'but', 'while', 'whilst', 'also']) {
+      expect(src, `"${c}" must remain a recognised coordinator`).toContain(c);
     }
     // ...and the two deliberate EXCLUSIONS, which are what let the screen
     // coexist with the verb-collision class.
@@ -1234,5 +1249,118 @@ describe('⚠ a HEDGE is not an option, and no screen here can reach one', () =>
     const caught = hedges.filter((h) => isTargetReference(h) || mentionsContainer(h));
     expect(caught).toEqual([]);
     expect(isTargetReference('your call')).toBe(true); // the lone incidental hit
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ THE REMAINDER SCREENS ARE INERT ON BOTH INFERRING ARMS.
+// An inferred label runs to the first `.!;`, so a trailing tail lands INSIDE
+// the label and `screenRemainder` receives "". Every compound/value test in
+// this file was written against the QUOTED arm — the one place the remainder is
+// real. A guard tested only where it works is not tested.
+// ---------------------------------------------------------------------------
+describe('the quoted arm and the inferring arms are not the same guard', () => {
+  it('⭐ ONE PAIR OF QUOTES decides whether the remainder screen runs at all', () => {
+    const quoted = detectAddOptionIntent('Add an option called "Premium" on the model');
+    const inferred = detectAddOptionIntent('Add an option called Premium on the model');
+    expect(quoted.matched && inferred.matched).toBe(true);
+    if (!quoted.matched || !inferred.matched) return;
+    expect(quoted.label).toBe('Premium');
+    expect(quoted.remainder).toBe('on the model');
+    // ...and the identical sentence without quotes swallows the tail whole.
+    expect(inferred.label).toBe('Premium on the model');
+    expect(inferred.remainder).toBe('');
+  });
+
+  it.each(KNOWN_OPEN_SWALLOWED_TAIL)('KNOWN-OPEN, still open: %j', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" now DECLINES — move it out and say so`).toBe(true);
+    if (!d.matched) return;
+    expect(d.remainder).toBe('');
+  });
+
+  it('the sets are exact-length — they RED if they grow or shrink', () => {
+    expect(KNOWN_OPEN_SWALLOWED_TAIL.length).toBe(4);
+    expect(KNOWN_OPEN_RETRACTION.length).toBe(3);
+    expect(KNOWN_OPEN_TWO_QUOTED.length).toBe(1);
+  });
+});
+
+describe('⚠ RETRACTION is a different axis from label quality', () => {
+  it.each(KNOWN_OPEN_RETRACTION)('KNOWN-OPEN: the label is right, the decision to act is wrong: %j', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" now DECLINES — move it out and say so`).toBe(true);
+    if (!d.matched) return;
+    // The label is PERFECT — that is what makes this a different axis.
+    expect(d.label).toBe('Premium');
+  });
+});
+
+describe('⚠ two quoted options in one turn — the second is dropped', () => {
+  it.each(KNOWN_OPEN_TWO_QUOTED)('KNOWN-OPEN: %j', (message) => {
+    expect(detectAddOptionIntent(message).matched).toBe(true);
+  });
+});
+
+describe('an adverb no longer defeats the coordinated-instruction screen', () => {
+  it.each([
+    'Add an option to partner with Siemens and remove the old one',
+    'Add an option to partner with Siemens and also remove the old one',
+    'Add an option to partner with Siemens and then also remove the old one',
+    'Add an option to partner with Siemens but remove the old one',
+    'Add an option to partner with Siemens while removing the old one',
+    'Add an option to go direct whilst removing the distributor',
+    'Add an option to run a trial but reset the baseline',
+    'Add an option to licence the tech and also lower the price',
+  ])('LIE: %j drops an instruction and must decline', (message) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, `"${message}" silently drops half the request`).toBe(false);
+    if (d.matched) return;
+    expect(d.reason).toBe('compound_edit');
+  });
+
+  it.each([
+    'Add an option to grow while staying lean',
+    'Add an option to expand but stay profitable',
+    'Add an option to scale while keeping quality',
+    'Add an option to build in-house but partner on sales',
+    'Add an option to grow but reduce risk',
+    'Add an option to set up a joint venture',
+    'Add an option to remove the middleman',
+    'Add an option to buy and build',
+    'Add an option to partner with Siemens and Bosch',
+  ])('GAP: %j is one option name and must stay claimed', (message) => {
+    expect(detectAddOptionIntent(message).matched, `"${message}" must survive`).toBe(true);
+  });
+
+  it('⭐ still INERT on the historical ", and" class this estate ruled unwinnable', () => {
+    for (const s of [
+      'Do not, and this is firm, let gross margin drop below 78%',
+      'Keep churn under 5%, and margin above 40%',
+      'Hold price, and do not discount',
+      'We must not, and I mean this, drop below 78% margin',
+    ]) {
+      expect(new RegExp(COORDINATED_EDIT_INSTRUCTION_SOURCE, 'i').test(s), s).toBe(false);
+    }
+  });
+});
+
+describe('a QUOTED label keeps its casing — the header always promised it', () => {
+  it.each([
+    ['Add "iPhone launch" as an option', 'iPhone launch'],
+    ['Add an option called "iOS-first rollout"', 'iOS-first rollout'],
+    ['Add an option named "eBay partnership"', 'eBay partnership'],
+  ])('%j keeps character 0 exactly as typed', (message, expected) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched, message).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(expected);
+  });
+
+  it('an UNQUOTED label is still capitalised — the two are different questions', () => {
+    const d = detectAddOptionIntent('Add an option to expand into Germany');
+    expect(d.matched).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe('Expand into Germany');
   });
 });

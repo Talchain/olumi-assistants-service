@@ -23,6 +23,33 @@
  * options"), other nouns ("add a factor"), removals and value edits never
  * match.
  *
+ * ⚠⚠ READ THIS BEFORE THE TWO SCOPE BOUNDARIES BELOW: ON THE TWO INFERRING
+ * ARMS THE REMAINDER IS ALWAYS EMPTY, SO EVERY REMAINDER SCREEN IS INERT
+ * THERE. Measured 3 Sep 2026, 88 of 88 non-name tails swallowed; the quoted
+ * contrast control is 44/44 clean. An inferred label runs to the first
+ * `.!;`, so a trailing tail lands INSIDE THE LABEL and `screenRemainder`
+ * receives "". One pair of quotes decides it:
+ *
+ *     Add an option called "Premium" on the model
+ *         -> label "Premium",              remainder "on the model"   screen RUNS
+ *     Add an option called  Premium  on the model
+ *         -> label "Premium on the model", remainder ""               screen INERT
+ *
+ * ⭐ AND THE REASON NOTHING CAUGHT IT FOR TEN ROUNDS: every compound- and
+ * value-screen test in this module is written against the QUOTED arm — the one
+ * place the remainder is real. A guard tested only where it works is not
+ * tested. That is the same corpus defect this PR has now hit four times.
+ *
+ * ⚠ THE OBVIOUS FIX OSCILLATES and is NOT taken. Stripping a trailing frame
+ * phrase off an inferred label closes the frame sub-class but TRUNCATES
+ * legitimate names — measured here, 6 of 14: "Switch to the model" ->
+ * "Switch", "Escalate to the board" -> "Escalate", "Commit to the plan" ->
+ * "Commit". Pinned instead in `KNOWN_OPEN_SWALLOWED_TAIL`.
+ *
+ * The two boundaries below therefore hold FOR THE QUOTED ARM. They are written
+ * as unconditional and they are not; that overstatement is withdrawn here
+ * rather than left standing.
+ *
  * TWO DELIBERATE SCOPE BOUNDARIES (ruling 8, 1 Sep 2026 — narrow the
  * richness, never the end-to-end path):
  *   1. A message whose REMAINDER (the text outside the label) carries a
@@ -31,6 +58,9 @@
  *      unit resolution. The focused path never writes a number, so it must
  *      not claim a message that states one — that would be the
  *      "typed value silently discarded" class.
+ *      ⚠ Holds on the QUOTED arm. On an inferred label a value in the tail is
+ *      caught only because `VALUE_TOKEN` is also run over the LABEL; a
+ *      non-numeric tail is not caught at all.
  *   2. A REMAINDER carrying a further edit verb ("… and set price to 40") is a
  *      multi-part edit; the edit lane's part accounting owns those. Not
  *      claimed.
@@ -505,9 +535,9 @@ export function isTargetReference(rawRemainder: string): boolean {
  * recorded rather than discovered later.
  */
 export const COORDINATED_EDIT_INSTRUCTION_SOURCE =
-  '(?:,\\s*)?(?:and|then|and then)\\s+(?:remove|delete|drop|rename|replace|update|change|increase|decrease|raise|lower|configure|split|merge|reset|edit|adjust)';
+  '(?:,\\s*)?(?:and|then|and then|but|while|whilst)\\s+(?:also\\s+|then\\s+also\\s+|then\\s+)?(?:remov|delet|drop|renam|replac|updat|chang|increas|decreas|rais|lower|configur|split|merg|reset|edit|adjust)';
 const COORDINATED_EDIT_INSTRUCTION =
-  /\b(?:,\s*)?(?:and|then|and then)\s+(?:remove|delete|drop|rename|replace|update|change|increase|decrease|raise|lower|configure|split|merge|reset|edit|adjust)\b/i;
+  /\b(?:,\s*)?(?:and|then|and then|but|while|whilst)\s+(?:also\s+|then\s+also\s+|then\s+)?(?:remov\w*|delet\w*|drop\w*|renam\w*|replac\w*|updat\w*|chang\w*|increas\w*|decreas\w*|rais\w*|lower\w*|configur\w*|split\w*|merg\w*|reset\w*|edit\w*|adjust\w*)\b/i;
 
 const PLURAL_OPTION_WORD = /\b(?:options|alternatives|choices)\b/;
 const OPTION_WORD_IN_LABEL = /\b(?:options?|alternatives?|choices?)\b/i;
@@ -573,10 +603,16 @@ function stripQuotedSpans(text: string): string {
  * renames what someone just told it is the small version of the defect this
  * module exists to prevent.
  */
-function tidyLabel(raw: string, explicitlyNamed: boolean): string {
+function tidyLabel(raw: string, explicitlyNamed: boolean, wasQuoted = false): string {
   let trimmed = raw.replace(/\s+/g, ' ').trim().replace(TRAILING_PUNCT, '');
   if (!explicitlyNamed) trimmed = trimmed.replace(LEADING_ARTICLE, '');
   if (trimmed.length === 0) return '';
+  // ⚠ A QUOTED LABEL KEEPS ITS CASING. The header has always promised "casing
+  // preserved"; this function was uppercasing character 0 regardless, so
+  // `Add "iPhone launch" as an option` shipped an option called "IPhone
+  // launch". Inside quotes the user has typed the name exactly, capitalisation
+  // included — another guarantee the comment made and the code did not keep.
+  if (wasQuoted) return trimmed;
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
@@ -739,7 +775,7 @@ export function detectAddOptionIntent(message: unknown): AddOptionIntentDetectio
     return NO_MATCH('compound_edit');
   }
 
-  const label = tidyLabel(candidate.label, explicitlyNamed);
+  const label = tidyLabel(candidate.label, explicitlyNamed, candidate.labelWasQuoted);
   if (!labelIsSafe(label)) return NO_MATCH('label_unsafe');
   // An UNQUOTED label that carries a number is a value statement swallowed
   // into a name ("… called Outsource that cuts support cost to 30") — the
@@ -861,7 +897,19 @@ export const CLOSED_COORDINATED_INSTRUCTION: readonly string[] = [
  * all coordinate a noun or a verb OUTSIDE the list. A corpus assembled to
  * defend a predicate tends to share its blind spot.
  */
+/**
+ * ⚠ WIDENED 3 Sep 2026 with the screen. Allowing an adverb (`also`,
+ * `then also`) and the adversative/temporal conjunctions (`but`, `while`,
+ * `whilst`) closed 7 more dropped instructions — one adverb had been defeating
+ * the whole screen — and it extends this same price class from `and` to those
+ * conjunctions: 8 further coordinated NAMES now decline. Same shape, same
+ * trade, already accepted; recorded so the extension is not discovered later.
+ */
 export const KNOWN_OPEN_COORDINATED_NAME: readonly string[] = [
+  'Add an option to expand but lower prices',
+  'Add an option to scale while lowering cost',
+  'Add an option to rebrand while updating the website',
+  'Add an option to hold share but drop the low-margin SKU',
   'Add an option to rebrand and update the website',
   'Add an option to automate and replace manual QA',
   'Add an option to restructure and merge the two teams',
@@ -1019,4 +1067,59 @@ export const KNOWN_OPEN_NAMING_WORD_TARGET_PRICE: readonly string[] = [
   'Add an option called The Model Overhaul',
   'Add an option called The new plan',
   'Add an option called The pricing model refresh',
+];
+
+/**
+ * ⚠ THE TAIL SWALLOWED INTO AN INFERRED LABEL. See the header for why every
+ * remainder screen is inert on the two inferring arms, and why the obvious fix
+ * (stripping a trailing frame phrase) is not taken: it truncates 6 of 14
+ * legitimate names, "Switch to the model" -> "Switch" among them.
+ *
+ * These are LIES in the label-quality sense — the option is created with a name
+ * that contains words the user did not intend as its name — but they are NOT
+ * dropped instructions: nothing the user asked for goes unperformed. Pinned
+ * exact-length so the class is visible and non-shrinking.
+ */
+export const KNOWN_OPEN_SWALLOWED_TAIL: readonly string[] = [
+  'Add an option called Premium on the model',
+  'Add an option called Premium for the pricing decision',
+  'Add an option to expand into Germany on the canvas',
+  'Add an option to licence the tech in the scenario',
+];
+
+/**
+ * ⚠⚠ A NEW AXIS, AND IT IS NOT LABEL QUALITY: RETRACTION AND CONDITIONALITY.
+ *
+ * `Add an option called "Premium", actually never mind` is ACCEPTED with the
+ * label "Premium" — on the QUOTED arm, where the remainder screen genuinely
+ * runs, with a perfect label. THE LABEL IS RIGHT AND THE DECISION TO ACT IS
+ * WRONG. Same for "— on second thoughts no" and "if we get board approval",
+ * which is a CONDITION the recogniser has no way to represent.
+ *
+ * ⭐ THIS REFUTES THIS MODULE'S OWN SUMMARY. After nine rounds it recorded that
+ * every defect here is label quality. That was an honest generalisation from
+ * nine rounds of evidence and it is FALSE: retraction is a different axis, and
+ * so is a guard that is inert on the arm most users hit. A narrowing that reads
+ * as reassurance is the same defect class as a false comment — it tells the
+ * next reader where they need not look.
+ *
+ * NOT CHASED. Detecting a retraction is not a recogniser rule; it belongs with
+ * the `clarify` work, where "you said add it and then said never mind — which?"
+ * is the honest answer. Reported, pinned, not built.
+ */
+export const KNOWN_OPEN_RETRACTION: readonly string[] = [
+  'Add an option called "Premium", actually never mind',
+  'Add an option called "Premium" — on second thoughts no',
+  'Add an option called "Premium" if we get board approval',
+];
+
+/**
+ * ⚠ TWO QUOTED OPTIONS IN ONE TURN: the second is silently dropped, and
+ * `stripQuotedSpans` deletes its name before any screen looks at it, so the
+ * plural-widening guard cannot see it either. Not fixed — the extractor returns
+ * one candidate by construction, and making it return two is a shape change,
+ * not a screen change. Pinned so the next reader inherits it.
+ */
+export const KNOWN_OPEN_TWO_QUOTED: readonly string[] = [
+  'Add "Premium" and "Freemium" as an option',
 ];

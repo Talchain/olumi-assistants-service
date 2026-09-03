@@ -58,6 +58,27 @@
  * an explicit unknown the readiness intake asks the user to fill, never a
  * number anyone invented. `configured` stays "at least one VALUED link".
  */
+
+/**
+ * ⚠ CARRY-FORWARD, SCOPED HONESTLY AND NOT CHASED: A MIXED INTERVENTION SPEC.
+ *
+ * The `value: null` widening this path relies on also serves the DEPLOYED CHIP
+ * leg, and a MIXED spec there — some interventions valued, some null — would
+ * emit two contradictory sentences, with the false one ("the analysis can run")
+ * honoured, because `option-status.ts` guards its connected-but-numberless limb
+ * on `interventionCount === 0` rather than on "every value is null".
+ *
+ * WHAT I MEASURED, AND WHAT I DID NOT:
+ *   · The FOCUSED path cannot produce it. `propose-add-option.ts` types its
+ *     interventions as `{ factor_id, value: null }` and pushes `value: null`
+ *     unconditionally — a mixed spec is unreachable from this PR's path by
+ *     construction, not by convention.
+ *   · A sweep of `src/` found NO CEE producer emitting a mixed spec, with a
+ *     contrast control confirming the sweep sees valued interventions where
+ *     they exist.
+ *   · ⚠ THE UI SIBLING IS UNSWEPT. I did not look, and this claim says nothing
+ *     about it. Reported rather than chased, per scope.
+ */
 import { z } from 'zod';
 
 import { STRUCTURAL_EDGE_DEFAULTS } from '../../orchestrator/context/constants.js';

@@ -111,14 +111,20 @@ function buildConfiguredNotice(label: string): string {
  * in its place, so the user is asked one question rather than two overlapping
  * ones.
  */
-function buildLinkedUnvaluedNotice(label: string, factorLabels: readonly string[]): string {
+export function buildLinkedUnvaluedNotice(label: string, factorLabels: readonly string[]): string {
   const named =
     factorLabels.length === 1
       ? `'${factorLabels[0]}'`
       : `${factorLabels.slice(0, -1).map((l) => `'${l}'`).join(', ')} and '${factorLabels[factorLabels.length - 1]}'`;
+  // ⚠ "either" MEANS ONE OF TWO. This read `length === 1 ? 'it' : 'either'`,
+  // so three and four factors — the ordinary text-leg case — were told
+  // "without a size of effect on EITHER". Flagged twice, pinned by no test,
+  // carried past twelve heads. Three arms, not two.
+  const them =
+    factorLabels.length === 1 ? 'it' : factorLabels.length === 2 ? 'either' : 'any of them';
   return (
     `I've linked '${label}' to ${named}, without a size of effect on ` +
-    `${factorLabels.length === 1 ? 'it' : 'either'} — I don't have those numbers. ` +
+    `${them} — I don't have those numbers. ` +
     `Tell me what ${factorLabels.length === 1 ? 'it' : 'each'} changes by and I'll write them in.`
   );
 }

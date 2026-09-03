@@ -366,6 +366,7 @@ export const ADD_OPTION_REJECTION_CODES = [
   'UNKNOWN_DECISION_ID',
   'NOT_A_DECISION',
   'DECISION_LABEL_MISMATCH',
+  'DECISION_LABEL_MISSING',
   'UNKNOWN_FACTOR_ID',
   'NOT_A_FACTOR',
   'FACTOR_LABEL_MISMATCH',
@@ -565,6 +566,33 @@ export function validateProposedAddOption(
   }
   // The LABEL ECHO — the anti-substitution guard.
   const parentLabel = grounding.labelById.get(parentId);
+  // ⭐⭐ THE ECHO MUST BE PRESENT, NOT MERELY CORRECT WHEN OFFERED.
+  //
+  // This header promises that for each id the model must ALSO echo the entity's
+  // exact label, and that failing the echo rejects the whole proposal. That was
+  // true of the LINK arm and NOT of this one: `links[].required` forces
+  // `factor_label`, so omitting it is `SCHEMA_INVALID`; `parent_decision_label`
+  // was `.optional()` and its check sat behind `!== undefined`, so OMITTING the
+  // echo skipped it entirely.
+  //
+  // A GUARD BEHIND AN OPTIONAL FIELD IS ADVISORY. Measured on a two-decision
+  // graph: a WRONG-BUT-VALID parent id with the label omitted was ACCEPTED —
+  // the option filed under "Hiring approach" when it belonged under "Pricing
+  // strategy" — while the same wrong id WITH an echo was correctly rejected.
+  // The echo would have caught it; omission bypassed the echo.
+  //
+  // ⚠ AND IT REFUTES A MEASUREMENT THIS PR CARRIED FROM cf723416 — "id echo
+  // holds both directions" — which exercised only the FACTOR arm. The factor
+  // arm is the in-run contrast control here, and it rejects all three ways.
+  if (p.parent_decision_id !== undefined && p.parent_decision_label === undefined) {
+    return {
+      ok: false,
+      kind: 'rejected',
+      code: 'DECISION_LABEL_MISSING',
+      reason: 'a parent decision id was given without echoing that decision’s label',
+    };
+  }
+
   if (
     p.parent_decision_label !== undefined &&
     parentLabel !== undefined &&

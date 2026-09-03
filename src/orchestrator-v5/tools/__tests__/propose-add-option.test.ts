@@ -397,6 +397,68 @@ describe('validateProposedAddOption — the remaining refusals', () => {
     expect(v.code).toBe('LABEL_COLLIDES_WITH_EXISTING_NODE');
   });
 
+  it('⭐⭐ the parent echo must be PRESENT, not merely correct when offered', () => {
+    // The header promises that for each id the model must ALSO echo the exact
+    // label, and that failing the echo rejects the whole proposal. Measured
+    // before the fix: a WRONG label rejected, an OMITTED one was ACCEPTED —
+    // a guard behind an optional field is advisory.
+    const v = validateProposedAddOption(
+      { label: 'A brand-new option', parent_decision_id: 'dec_expansion', links: [], unknowns: [] },
+      GROWTH_G,
+    );
+    expect(v.ok).toBe(false);
+    if (v.ok || v.kind !== 'rejected') throw new Error('expected rejection');
+    expect(v.code).toBe('DECISION_LABEL_MISSING');
+  });
+
+  it('⭐ the discriminating case: an option filed under the WRONG decision', () => {
+    // With two decisions, a WRONG-BUT-VALID id and the label omitted used to be
+    // ACCEPTED — filed under "Hiring approach" when it belonged under "Pricing
+    // strategy". The echo would have caught it; omission bypassed the echo.
+    const g = grounded({
+      nodes: [
+        { id: 'dec_pricing', kind: 'decision', label: 'Pricing strategy' },
+        { id: 'dec_hiring', kind: 'decision', label: 'Hiring approach' },
+        { id: 'fac_cost', kind: 'factor', label: 'Payroll cost' },
+        { id: 'goal_g', kind: 'goal', label: 'Grow' },
+      ],
+    });
+    const wrong = validateProposedAddOption(
+      { label: 'Freemium tier', parent_decision_id: 'dec_hiring', links: [], unknowns: [] },
+      g,
+    );
+    expect(wrong.ok, 'a wrong-but-valid parent with no echo must not be accepted').toBe(false);
+    // ...and the intended one, echoed, still works.
+    const right = validateProposedAddOption(
+      {
+        label: 'Freemium tier',
+        parent_decision_id: 'dec_pricing',
+        parent_decision_label: 'Pricing strategy',
+        links: [],
+        unknowns: [],
+      },
+      g,
+    );
+    expect(right.ok).toBe(true);
+  });
+
+  it('⭐ IN-RUN CONTRAST CONTROL: the FACTOR arm rejects all three ways', () => {
+    // The factor arm was already symmetric — `links[].required` forces
+    // `factor_label` — and that is exactly why the earlier "id echo holds both
+    // directions" measurement passed: it exercised only this arm.
+    const base = {
+      label: 'New option',
+      parent_decision_id: 'dec_expansion',
+      parent_decision_label: GROWTH_G.labelById.get('dec_expansion')!,
+      unknowns: [],
+    };
+    const fid = GROWTH_G.factors[0]!.id;
+    const flabel = GROWTH_G.factors[0]!.label;
+    expect(validateProposedAddOption({ ...base, links: [{ factor_id: fid, factor_label: flabel, rationale: 'r' }] }, GROWTH_G).ok).toBe(true);
+    expect(validateProposedAddOption({ ...base, links: [{ factor_id: fid, factor_label: 'Wrong', rationale: 'r' }] }, GROWTH_G).ok).toBe(false);
+    expect(validateProposedAddOption({ ...base, links: [{ factor_id: fid, rationale: 'r' }] }, GROWTH_G).ok).toBe(false);
+  });
+
   it('⭐ named after the decision MINUS ITS HEAD NOUN → LABEL_IS_THE_PARENT_DECISION', () => {
     // The class the recogniser CANNOT reach. "Add an option for pricing" and
     // "add an option for licensing" are the same shape — a bare gerund after a
@@ -768,6 +830,50 @@ describe.skipIf(!LIVE_KEY)('proposer quality against the REAL model (key-gated)'
     for (const i of out.proposal.interventions) {
       expect(GROWTH_G.kindById.get(i.factor_id)).toBe('factor');
     }
+  }, 45_000);
+
+  it('⭐⭐ LABEL FIDELITY — the question this PR has priced on an assumption for ten rounds', async () => {
+    // WHY THIS EXISTS. Every declared-open class in this module ships on the
+    // basis that a bad label reaches the user as a HELD PROPOSAL they can
+    // reject — never as a canonical write. That rests on what the composer does
+    // with a detected label, and until now the only key-gated arm fed it a
+    // LEGITIMATE name ("Partner with a local distributor") and asserted
+    // interventions and factor kinds — nothing about the label at all. The one
+    // instrument that could settle the question was pointed away from it.
+    //
+    // Two changes: feed a DECLARED-OPEN fragment, and assert the LABEL.
+    //
+    // ⚠ THIS CANNOT RUN WITHOUT A KEY AND IT SETTLES NOTHING UNTIL IT DOES.
+    // Local execution against a stub that obeys the system prompt literally
+    // turns 10 of 10 declared-open fragments into the canonical label, and a
+    // substituted or inverted label passes untouched in both directions —
+    // there is no label-fidelity guard, the advertised echo is id-scoped only.
+    // That is LOCAL EXECUTION, not a wire witness. This arm is what makes the
+    // next run with a key answer it.
+    const { getAdapter } = await import('../../../adapters/llm/router.js');
+    const out = await composeAddOption({
+      adapter: getAdapter('edit_graph'),
+      grounding: GROWTH_G,
+      message: 'Add an option called TBD',
+      detectedLabel: 'TBD',
+      requestId: 'live-req-label',
+      scenarioId: 'live-scn-label',
+      timeoutMs: 30_000,
+    });
+    // Record the answer whichever way it falls — this arm exists to MEASURE,
+    // not to be green.
+    console.log(
+      `[propose-add-option] LABEL FIDELITY: status=${out.status} label=${
+        out.status === 'composed' ? JSON.stringify(out.proposal.label) : 'n/a'
+      }`,
+    );
+    expect(['composed', 'clarify', 'rejected', 'unavailable']).toContain(out.status);
+    if (out.status !== 'composed') return;
+    // If the model echoes the hedge, the label IS "TBD" and the declared-open
+    // hedge class reaches the user as a held proposal named "TBD" — which is
+    // exactly what the pins say and what no wire capture has yet confirmed.
+    expect(typeof out.proposal.label).toBe('string');
+    expect(out.proposal.label.length).toBeGreaterThan(0);
   }, 45_000);
 });
 
