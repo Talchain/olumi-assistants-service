@@ -1716,15 +1716,24 @@ export async function dispatchChipClickRunAnalysis(
     // executor entirely (see the F6 note below, which exists for exactly this
     // reason), so a guard installed only in `finalizeRun` would be blind to
     // every chip-initiated turn. Enumerating the paths that HAVE leaked is how
-    // the next emit path ships uncovered; this covers the chip-click DISPATCH
-    // FAMILY by construction — both of route-v2's `chip_click` exits
-    // (`:2855`, `:2937`) reach here.
+    // the next emit path ships uncovered.
     //
-    // ⚠ IT IS NOT ROUTE-LEVEL COVERAGE, and an earlier draft of this comment
-    // implied it was. `route-v2.ts` has 24 `sendFinalised200` exits and this
-    // guard is reachable on four. The measured enumeration, and the exits
-    // that carry model-authored prose WITHOUT it, are in
-    // `enforceProcessNarrationGuard`'s docblock in `turn-executor.ts`.
+    // ⚠⚠ IT DOES NOT COVER THE CHIP-CLICK DISPATCH FAMILY, AND THIS COMMENT
+    // SAID IT DID. The withdrawn sentence read: "this covers the chip-click
+    // DISPATCH FAMILY by construction — both of route-v2's `chip_click` exits
+    // (`:2855`, `:2937`) reach here." Resolved on the AST by an independent
+    // review: `:2855` is the `handler_recovered` exit, composed in
+    // `tryComposeRecoverableChipOutcome` [688-1130] and returned by
+    // `if (recovered) return recovered;` at `:1406` — out of a CATCH clause
+    // nested in the outer try, i.e. BEFORE this guard, which sits in that
+    // outer try's own body. Only `:2937`, the `ok` outcome, reaches here.
+    //
+    // So the guard is reachable on THREE of route-v2's 24 `sendFinalised200`
+    // exits, not four, and the structural property is per-EXIT rather than
+    // per-family. The measured enumeration of all twenty-one uncovered exits,
+    // with `:2855`'s reason and the note that it carries only static literals
+    // (uncovered, not leaking), is in `enforceProcessNarrationGuard`'s
+    // docblock in `turn-executor.ts`.
     {
       const guarded = applyProcessNarrationGuard(response.assistant_text ?? '');
       if (guarded.rewritten) {

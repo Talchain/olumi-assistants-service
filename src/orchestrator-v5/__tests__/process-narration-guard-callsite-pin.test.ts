@@ -24,20 +24,33 @@
  * ⚠ SCOPE — WHAT THIS FILE DOES **NOT** CLAIM. It pins the three call sites
  * that exist. It is NOT evidence that those three cover every 200-OK exit:
  * `route-v2.ts` has 24 `sendFinalised200` exits and this guard is reachable on
- * four of them (`turn_executor`, the `eg.response` edit exit, and the two
- * `chip_click` exits). See the guard's docblock in `turn-executor.ts` for the
- * enumeration and for the exits that carry model-authored prose without it.
+ * **three** of them — `:6860 turn_executor`, `:6387 edit_graph` (the
+ * `eg.response` exit), and `:2937 chip_click` (the `ok` outcome ONLY).
+ *
+ * ⚠ THIS HEADER SAID **FOUR** AND NAMED "the two `chip_click` exits", AND
+ * THAT WAS WRONG. A second independent review resolved the delegation on the
+ * AST: `:2855` is the `handler_recovered` exit, returned out of
+ * `dispatchChipClickRunAnalysis` from a catch clause at
+ * `chip-click-dispatch.ts:1406`, before the guard at `:1729`. The count is
+ * 3 of 24 and the uncovered set is 21. See the guard's docblock in
+ * `turn-executor.ts` for the full enumeration, for `:2855`'s reason, and for
+ * the exits that carry model-authored prose without it.
  *
  * ⚠ MUTANT OBLIGATION (what must RED): delete any one of the three calls →
  * that site's property fails; move the executor call below the
- * forbidden-phrase guard → the ordering property fails; drop the telemetry
- * emit at any site → that site's observability property fails.
+ * forbidden-phrase guard → the ordering property fails; **relocate the
+ * executor call outside `finalizeRun`'s body, preserving guard order** → the
+ * containment property fails (property 5 — it did NOT, before this round);
+ * drop the telemetry emit at any site → that site's observability property
+ * fails.
  */
 
-import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+
+import ts from 'typescript';
+import { describe, expect, it } from 'vitest';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const read = (rel: string): string => readFileSync(resolve(HERE, rel), 'utf8');
@@ -125,15 +138,90 @@ describe('process-narration guard — wired at all three dispatch finalisers', (
     }
   });
 
-  it('5 · in the executor the guard is INSIDE finalizeRun, not on one exit path', () => {
+  it('5 · in the executor the guard is INSIDE finalizeRun — AST containment, not an index comparison', () => {
     // The property that makes "every executor exit" true: the call sits in the
-    // finaliser body, so it cannot be one exit's local decision.
-    const finaliser = EXECUTOR.indexOf('function finalizeRun(');
-    expect(finaliser).toBeGreaterThan(-1);
-    const call = EXECUTOR.indexOf(
-      "enforceProcessNarrationGuard('turn_executor_finalise');",
+    // finaliser BODY, so it cannot be one exit's local decision.
+    //
+    // ⚠⚠ THE FIRST DRAFT OF THIS PROPERTY COULD NOT OBSERVE ITS OWN
+    // VIOLATION, and that was MEASURED rather than argued. It asserted
+    // `indexOf(call) > indexOf('function finalizeRun(')` — a POSITIONAL PROXY
+    // satisfied by every character after the declaration, including every
+    // character after the body ENDS. An independent review relocated the three
+    // `enforce*` calls to just past `finalizeRun`'s closing brace, preserving
+    // their relative order so the ordering property survived, and this spec
+    // stayed 13 passed / 0 failed while the AST confirmed the calls had left
+    // the finaliser. That relocation is this rewrite's discriminating mutant.
+    //
+    // Containment is resolved on the PARSED TREE rather than by counting
+    // braces over text, so a brace inside a comment, a string or a `${}`
+    // interpolation cannot move the boundary. The parse is local to this test.
+    const sf = ts.createSourceFile(
+      'turn-executor.ts',
+      EXECUTOR,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ true,
     );
-    expect(call).toBeGreaterThan(finaliser);
+
+    /** Every `<callee>('turn_executor_finalise')` call node in the file. */
+    const callsTo = (callee: string): ts.CallExpression[] => {
+      const found: ts.CallExpression[] = [];
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isCallExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          node.expression.text === callee
+        ) {
+          found.push(node);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      return found;
+    };
+
+    let finaliser: ts.FunctionDeclaration | undefined;
+    const findFinaliser = (node: ts.Node): void => {
+      if (ts.isFunctionDeclaration(node) && node.name?.text === 'finalizeRun') {
+        finaliser = node;
+      }
+      ts.forEachChild(node, findFinaliser);
+    };
+    findFinaliser(sf);
+    expect(finaliser, 'finalizeRun declaration not found').toBeDefined();
+    expect(finaliser?.body, 'finalizeRun has no body').toBeDefined();
+
+    /** Walk parents — exact containment, not a character-offset comparison. */
+    const insideFinaliser = (node: ts.Node): boolean => {
+      for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
+        if (p === finaliser) return true;
+      }
+      return false;
+    };
+
+    // PRECONDITION 1 — exactly one invocation, so a second copy elsewhere in
+    // the file cannot satisfy this on behalf of the finaliser's own.
+    const guardCalls = callsTo('enforceProcessNarrationGuard');
+    expect(guardCalls).toHaveLength(1);
+
+    // THE PROPERTY.
+    expect(
+      insideFinaliser(guardCalls[0]!),
+      'enforceProcessNarrationGuard is not inside finalizeRun',
+    ).toBe(true);
+
+    // PRECONDITION 2 — THE DISCRIMINATING TWIN. `insideFinaliser` returning
+    // `true` proves nothing on its own: a walk that ran away to the source file
+    // would return `true` for every node. `applyProcessNarrationGuard` is
+    // called from `enforceProcessNarrationGuard`'s OWN body, which is declared
+    // outside `finalizeRun`, so it must read `false`. One assertion proves the
+    // containment holds; only the pair proves the test is still discriminating.
+    const siblingCalls = callsTo('applyProcessNarrationGuard');
+    expect(siblingCalls).toHaveLength(1);
+    expect(
+      insideFinaliser(siblingCalls[0]!),
+      'the containment walk no longer discriminates — it reports a node ' +
+        'declared outside finalizeRun as inside it',
+    ).toBe(false);
   });
 
   it.each([

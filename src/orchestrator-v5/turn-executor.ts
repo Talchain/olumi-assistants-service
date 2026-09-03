@@ -13070,30 +13070,57 @@ export async function runTurnExecutor(
    * ⚠⚠ COVERAGE, MEASURED — AND NARROWER THAN "BY CONSTRUCTION" SUGGESTS.
    * An earlier draft of this note claimed the three call sites made coverage
    * structural across the route. That claim was FALSE and is withdrawn.
-   * Derived at `src/orchestrator/route-v2.ts` (3 Sep 2026): that file has
-   * **24 `sendFinalised200` exits**, the sole sanctioned 200-OK send site, and
-   * this guard is reachable on **four** of them —
+   *
+   * ⚠ ITS REPLACEMENT WAS FALSE TOO, IN THE SAME DIRECTION, AND IS CORRECTED
+   * HERE. It said **four** exits and a covered chip-click "dispatch family".
+   * A second independent review resolved the chip-click delegation on the AST
+   * rather than by reading line numbers, and `:2855` does NOT reach this
+   * guard. Withdrawing a false claim is worth nothing if the replacement
+   * repeats it, so the correction is recorded rather than silently swapped.
+   *
+   * Derived at `src/orchestrator/route-v2.ts` (3 Sep 2026, re-derived at the
+   * AST 4 Sep): that file has **24 `sendFinalised200` exits**, the sole
+   * sanctioned 200-OK send site, and this guard is reachable on **three** —
    *   · `:6860` `turn_executor`  (→ `runTurnExecutor` → `finalizeRun`, here)
    *   · `:6387` `edit_graph`     (`eg.response` ← `dispatchEditGraph` `:6284`)
-   *   · `:2855`, `:2937` `chip_click` (← `dispatchDeterministicChipClick`
-   *     `:2830`, which delegates to `dispatchChipClickRunAnalysis`
-   *     `chip-click-dispatch.ts:1167`)
-   * The property that IS structural is per-dispatch-family: every exit of
-   * those three families is covered. The route as a whole is NOT.
+   *   · `:2937` `chip_click` — the `ok` outcome ONLY (←
+   *     `dispatchDeterministicChipClick` `:2830`, which delegates to
+   *     `dispatchChipClickRunAnalysis` `chip-click-dispatch.ts:1167`; the
+   *     guard sits at `:1729`, in that function's OUTER try block)
    *
-   * ⛔ THE TWENTY UNCOVERED EXITS, named rather than left implicit. The one
-   * that matters is `:4519 draft_graph`, which ships prose assembled from
-   * LLM-authored coaching fields (`coaching/post-draft-narrative.ts:6`
-   * — `coachingSummary` is used VERBATIM when it passes the copy-quality
-   * gate). The other nineteen are route-level intercepts that compose their
-   * own responses without entering a guarded dispatcher: ten further
-   * `edit_graph` exits (`:2195`, `:5117`, `:5239`, `:5293`, `:5325`, `:5559`,
-   * `:5782`, `:5880`, `:6154`, `:6251`), plus `system_event`,
-   * `readiness_intake`, `add_option_transaction`, the two
-   * `explicit_generate_*`, `clarify_v2`, `process_meta_intake` and the two
-   * `frame_no_brief_guard` exits.
+   * The structural property is per-EXIT, not per-dispatch-family. `chip_click`
+   * has two 200-OK exits and only one of them is covered — which is the
+   * withdrawn route-level claim reproduced one level down, and the reason this
+   * note now names exits rather than families.
    *
-   * ⚠ NO NARRATION HAS BEEN WITNESSED ON ANY OF THOSE TWENTY. This is an
+   * ⛔ THE TWENTY-ONE UNCOVERED EXITS, named rather than left implicit.
+   *
+   * · `:2855` `chip_click` — the `handler_recovered` outcome, and the one
+   *   this docblock previously counted as covered. The response is composed
+   *   inside `tryComposeRecoverableChipOutcome`
+   *   (`chip-click-dispatch.ts:688-1130`, which contains no call to this
+   *   guard) and returned straight out of `dispatchChipClickRunAnalysis` by
+   *   `if (recovered) return recovered;` at `:1406` — a return from a CATCH
+   *   clause nested inside the outer try, so it leaves the function before
+   *   the guard at `:1729` in that same outer try's body.
+   *   ⚠ NOT A LIVE LEAK, stated so this line cannot be over-read: that exit
+   *   carries `composeRecoverableHandlerResponse` →
+   *   `composeHandlerFailureBody`, whose `assistant_text` values are static
+   *   string literals with no model or error text interpolated. It is
+   *   uncovered, not leaking.
+   * · `:4519 draft_graph` — the one that matters, because it ships prose
+   *   assembled from LLM-authored coaching fields
+   *   (`coaching/post-draft-narrative.ts:6` — `coachingSummary` is used
+   *   VERBATIM when it passes the copy-quality gate).
+   * · The other nineteen are route-level intercepts that compose their own
+   *   responses without entering a guarded dispatcher: ten further
+   *   `edit_graph` exits (`:2195`, `:5117`, `:5239`, `:5293`, `:5325`,
+   *   `:5559`, `:5782`, `:5880`, `:6154`, `:6251`), plus `system_event`,
+   *   `readiness_intake`, `add_option_transaction`, the two
+   *   `explicit_generate_*`, `clarify_v2`, `process_meta_intake` and the two
+   *   `frame_no_brief_guard` exits.
+   *
+   * ⚠ NO NARRATION HAS BEEN WITNESSED ON ANY OF THOSE TWENTY-ONE. This is an
    * enumeration of exits that CAN carry model-authored prose without this
    * guard, not a measured leak — the distinction matters, because a row
    * minted from it must restate that scope and not generalise it
