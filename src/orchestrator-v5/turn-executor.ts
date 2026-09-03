@@ -89,6 +89,7 @@ import { composeRecoverableValidationResponse } from './compose/recoverable-vali
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
+import { applyProcessNarrationGuard } from './compose/process-narration.js';
 import { buildAppliedGraphWireField } from './compose/applied-graph-emit.js';
 import {
   collectValidEntityLabels,
@@ -13044,6 +13045,102 @@ export async function runTurnExecutor(
   }
 
   /**
+   * ⭐⭐⭐ THE PROCESS-NARRATION GUARD — the chain-of-thought leak, closed at the
+   * chokepoint.
+   *
+   * Witnessed on a real user session (3 Sep 2026, bundle
+   * `olumi-debug-f2e2df1b-20260903.json`): a routing-call deliberation
+   * (*"The user's asking about specific structural values… I shouldn't invent
+   * an explanation for a number I can't ground."*) and a routing verdict
+   * (*"This is a question about existing analysis results, not a model edit
+   * request… No model changes are needed to answer this."*) both shipped
+   * verbatim as `assistant_text`, both `status: 200`, `completed: true`.
+   *
+   * ⚠ WHY A FINALISER HOOK AND NOT A FIX AT THE COMPOSE BRANCH. There already
+   * IS a stripper for this class — `stripPlanningPreamble` — and it is wired to
+   * the execute and clarify branches ONLY, by a deliberate decision its own
+   * header records: on coach / converse / text_only "the orientation IS the
+   * whole answer and emptying it would ship a blank reply". Both witnessed
+   * leaks are on exactly those branches. Fixing this by adding a third and
+   * fourth call site would leave the FIFTH emit path — and this executor has
+   * dozens — uncovered the day it is added. The same argument the
+   * forbidden-phrase guard below already makes: an upstream hook misses new
+   * emit paths, a finaliser hook cannot.
+   *
+   * The guard is safe HERE precisely because it can never return nothing: on a
+   * block that was narration end to end it substitutes an honest sentence plus
+   * the clarifying question (`PROCESS_NARRATION_FALLBACK_TEXT`), which is what
+   * the branch-level stripper could not do.
+   *
+   * ⭐ RUNS FIRST, AHEAD OF `enforceWithheldLeaderClaimGuard`. It performs a
+   * whole-text substitution, so running it first means its replacement copy is
+   * itself subject to the leader-claim, forbidden-phrase and success-claim
+   * guards rather than bypassing them. (The converse is pinned in the spec:
+   * the fallback constant carries no forbidden phrase, no leader claim and no
+   * success claim, so the ordering cannot silently rot.)
+   *
+   * ⭐ THE NARRATION IS ROUTED, NOT DESTROYED. The excised text is appended to
+   * `capturedReasoning` — the ROADMAP 1.42 `_reasoning` disclosure channel,
+   * which exists for exactly this: verbatim deliberation, collapsed by
+   * default, explicitly labelled, never the first thing the user reads. Paul's
+   * standard is that reasoning stays AVAILABLE; it must not be the answer.
+   *
+   * ⚠ SCOPE, MEASURED RATHER THAN ASSUMED: that channel is gated by
+   * `CEE_REASONING_CAPTURE_ENABLED` (default false) at route-v2's re-attach,
+   * and by `VITE_FEATURE_REASONING_DISCLOSURE` (default off) in the UI. So on
+   * today's posture the narration is captured and NOT displayed. That is the
+   * honest outcome of this change and not a claim that the disclosure is live:
+   * the user stops reading the monologue now, and it appears in the right
+   * place the moment the disclosure flags are opened. Flipping either flag is
+   * a product decision and is not taken here.
+   *
+   * Idempotent: neither the surviving answer sentences nor the fallback copy
+   * carries a narration marker.
+   */
+  function enforceProcessNarrationGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    const guarded = applyProcessNarrationGuard(assistantText);
+    if (!guarded.rewritten) return;
+    emit(TelemetryEvents.V5EgressProcessNarrationDetected, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      marker: guarded.hit,
+      remedy: guarded.remedy,
+      dispatch_path: dispatchPath,
+      sentences_total: guarded.sentencesTotal,
+      sentences_removed: guarded.sentencesRemoved,
+      narration_length: guarded.narration.length,
+    });
+    response = {
+      ...response,
+      assistant_text: guarded.text,
+    };
+    // Route the deliberation to its own channel. Appended rather than
+    // overwritten: a turn can carry BOTH captured extended thinking and a text
+    // block that turned out to be narration, and dropping either would make
+    // the disclosure lie by omission. Both are the same fact — what the model
+    // thought on this turn, verbatim, that is not the answer — so they share
+    // the field; the telemetry event above is what records that this half came
+    // from the answer channel.
+    if (guarded.narration.length > 0) {
+      capturedReasoning = capturedReasoning
+        ? `${capturedReasoning}\n\n${guarded.narration}`
+        : guarded.narration;
+    }
+    // ROADMAP 1.132 (F1) — carry the FUNCTIONAL classification through the
+    // rewrite, exactly as the forbidden-phrase guard below does. A functional
+    // receipt that lost a narration sentence is still a functional receipt and
+    // must still ship PLAIN, not behind progressive disclosure.
+    if (functionalAnswerText === assistantText) {
+      functionalAnswerText = guarded.text;
+    }
+  }
+
+  /**
    * V5 stale-aware explain recovery — finaliser-level egress guard.
    *
    * Scans `response.assistant_text` for any forbidden phrase (per
@@ -13788,6 +13885,13 @@ export async function runTurnExecutor(
     // leader-free, so this ordering cannot silently rot.) See
     // `enforceWithheldLeaderClaimGuard` for why a finaliser hook and not
     // another in-flow gate.
+    // ⭐⭐⭐ PROCESS NARRATION — FIRST OF ALL THE PROSE GUARDS. It is the only
+    // one that can substitute the WHOLE reply with new copy of its own, so it
+    // runs ahead of the other three and its replacement is then judged by
+    // them. See `enforceProcessNarrationGuard` for the witnessed leaks, for
+    // why the branch-level `stripPlanningPreamble` could not cover them, and
+    // for where the excised deliberation goes.
+    enforceProcessNarrationGuard('turn_executor_finalise');
     enforceWithheldLeaderClaimGuard('turn_executor_finalise');
     enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
     // AI Harness capability 1 — always-on false-success neutralisation. Runs
