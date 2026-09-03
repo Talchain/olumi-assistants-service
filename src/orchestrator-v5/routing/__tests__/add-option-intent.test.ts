@@ -895,7 +895,7 @@ describe('⚠ ANAPHORA ships OPEN — a pointer is not a name, and pointers are 
   });
 
   it('both new sets are exact-length — they RED if they grow or shrink', () => {
-    expect(KNOWN_OPEN_ANAPHORA.length).toBe(5);
+    expect(KNOWN_OPEN_ANAPHORA.length).toBe(9);
     expect(KNOWN_OPEN_SEPARATOR_NAMING.length).toBe(4);
     expect(KNOWN_OPEN_DEFERRAL_LABEL.length).toBe(2);
   });
@@ -924,5 +924,58 @@ describe('the courtesy-prefix header now matches the code', () => {
       detectAddOptionIntent(message).matched,
       'this now DECLINES — move it out of KNOWN_OPEN_DEFERRAL_LABEL and say so',
     ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ ALL FOUR ALPHABETS CARRY A HAND-WRITTEN PIN — closing the CLASS, not the
+// two instances that were found.
+//
+// `CONTAINER_NOUNS` and `NAMING_WORDS` were pinned by hand after a mutant proved
+// a generated control cannot see its own list shrink: the corpus is built FROM
+// the alphabet, so deleting an entry deletes its own test case and the suite
+// stays green — the test COUNT dropping by one was the only tell.
+//
+// The determiner alphabets had exactly the same hole and were left open, which
+// is the instance-vs-class error this PR has now demonstrated three times. Four
+// alphabets exist; four are pinned.
+// ---------------------------------------------------------------------------
+describe('every alphabet in this module is pinned BY HAND', () => {
+  it('TARGET_DEFINITE_DETERMINERS — the presupposing determiners, exactly', () => {
+    expect([...TARGET_DEFINITE_DETERMINERS].sort()).toEqual([
+      'her', 'his', 'its', 'my', 'our', 'that', 'the', 'their', 'these', 'this',
+      'those', 'whose', 'your',
+    ]);
+  });
+
+  it('TARGET_QUANTIFIER_DETERMINERS — the rest of the closed class, exactly', () => {
+    expect([...TARGET_QUANTIFIER_DETERMINERS].sort()).toEqual([
+      'a', 'all', 'an', 'another', 'any', 'both', 'each', 'either', 'enough',
+      'every', 'few', 'fewer', 'fifth', 'final', 'first', 'five', 'four',
+      'fourth', 'half', 'last', 'least', 'less', 'little', 'many', 'more',
+      'most', 'much', 'neither', 'next', 'no', 'none', 'one', 'other', 'plenty',
+      'same', 'second', 'several', 'some', 'such', 'third', 'three', 'two',
+      'what', 'whatever', 'which', 'whichever',
+    ]);
+  });
+
+  it('the two determiner alphabets stay DISJOINT — a word may not carry two rules', () => {
+    // The definite half presupposes a referent and is a target whatever the head
+    // noun; the quantifier half needs a container noun. A word in both would
+    // silently take whichever rule is tested first.
+    const overlap = TARGET_DEFINITE_DETERMINERS.filter((w) =>
+      (TARGET_QUANTIFIER_DETERMINERS as readonly string[]).includes(w),
+    );
+    expect(overlap).toEqual([]);
+  });
+
+  it('all four alphabets are hand-pinned — the completeness check on this suite', () => {
+    // A derived guard proves the copies agree and can never prove a list is
+    // right. These four assertions are the only ones in this file that can see
+    // an alphabet SHRINK.
+    expect(TARGET_DEFINITE_DETERMINERS.length).toBe(13);
+    expect(TARGET_QUANTIFIER_DETERMINERS.length).toBe(46);
+    expect(CONTAINER_NOUNS.length).toBe(15);
+    expect(NAMING_WORDS.length).toBe(5);
   });
 });

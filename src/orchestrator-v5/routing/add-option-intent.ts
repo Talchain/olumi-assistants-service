@@ -835,6 +835,15 @@ export const KNOWN_OPEN_ANAPHORA: readonly string[] = [
   'Add either of them as an option',
   'Add both of those as an option',
   'Add the first one as an option',
+  // ⚠ GROWN 3 Sep 2026 from five to nine. The reviewer measured four further
+  // phrasings minting at 17196fdb, outside the declared set. A known-open set
+  // that UNDERSTATES what mints is a mirror going stale in the direction that
+  // flatters us — and honest cost accounting is this module's whole argument
+  // for shipping these open at all. Declared scope tracks measured scope.
+  'Add the same thing as an option',
+  'Add the one we discussed as an option',
+  'Add whatever the consultants recommended as an option',
+  'Add the rest of the shortlist as an option',
 ];
 
 /**
