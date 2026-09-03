@@ -1,0 +1,287 @@
+{
+ "_provenance": {
+  "source_artefact": "Talchain/olumi-programme-docs artefacts/manual-test-2026-09-03/olumi-debug-f2e2df1b-20260903.json",
+  "scenario_id": "7826c742-2939-4584-917c-f1286a663ae4",
+  "captured": "2026-09-03",
+  "ui_build": "86786efb",
+  "projection": "MECHANICAL, no authored values. full_graph.factors[] -> nodes[] keeping id/kind/label/observed_state/category verbatim; cee_options[] -> the three option nodes (kind added, id+label verbatim); full_graph.edges[] -> edges[] with source/target renamed from/to and strength_mean/effect_direction/exists_probability verbatim. Nothing was invented, reordered or rounded."
+ },
+ "nodes": [
+  {
+   "id": "16ec3d64",
+   "kind": "factor",
+   "label": "ICP Clarity",
+   "category": "external"
+  },
+  {
+   "id": "26fbdff5",
+   "kind": "factor",
+   "label": "We've heard from three churned customers that they left because of missing integrations, not price \u2014 so we think product gaps mediate the relationship between customer satisfaction and churn",
+   "observed_state": {
+    "value": 0.5,
+    "unit": "\u00a3",
+    "source": "cee_inference",
+    "raw_value": 500,
+    "cap": 1000,
+    "extractionType": "inferred"
+   },
+   "category": "observable"
+  },
+  {
+   "id": "27c23ebb",
+   "kind": "factor",
+   "label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+   "category": "controllable"
+  },
+  {
+   "id": "3d37f4b2",
+   "kind": "risk",
+   "label": "Churn Rate Deterioration"
+  },
+  {
+   "id": "422ceee7",
+   "kind": "factor",
+   "label": "which we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+   "category": "external"
+  },
+  {
+   "id": "428612e0",
+   "kind": "risk",
+   "label": "Runway Depletion Risk"
+  },
+  {
+   "id": "552bd1c0",
+   "kind": "goal",
+   "label": "Reach \u00a330k MRR Within 18 Months"
+  },
+  {
+   "id": "7dc44ba7",
+   "kind": "factor",
+   "label": "Competitive Pressure",
+   "category": "external"
+  },
+  {
+   "id": "919d7f50",
+   "kind": "factor",
+   "label": "Sales Headcount Investment",
+   "observed_state": {
+    "value": 0.7692307692307693,
+    "unit": "\u00a3",
+    "source": "user_override",
+    "raw_value": 100000,
+    "cap": 130000,
+    "extractionType": "explicit",
+    "factor_type": "cost",
+    "uncertainty_drivers": [
+     "Extracted from brief \u2014 confirm value"
+    ]
+   },
+   "category": "controllable"
+  },
+  {
+   "id": "b42f8b15",
+   "kind": "outcome",
+   "label": "Trial-to-Paid Conversion Uplift"
+  },
+  {
+   "id": "b6941ac0",
+   "kind": "outcome",
+   "label": "MRR Growth Rate"
+  },
+  {
+   "id": "bbbbd8f2",
+   "kind": "risk",
+   "label": "Customer Acquisition Cost"
+  },
+  {
+   "id": "faa7499e",
+   "kind": "decision",
+   "label": "Hire a Dedicated Sales Team or Continue With Founder-Led Sales"
+  },
+  {
+   "id": "05f973ef",
+   "kind": "option",
+   "label": "Hire a Dedicated Sales Team"
+  },
+  {
+   "id": "15f7737d",
+   "kind": "option",
+   "label": "hiring a part-time SDR (\u00a340k) to handle top-of-funnel while the founder stays on closing"
+  },
+  {
+   "id": "94b13741",
+   "kind": "option",
+   "label": "Continue With Founder-Led Sales"
+  }
+ ],
+ "edges": [
+  {
+   "from": "05f973ef",
+   "to": "27c23ebb",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "05f973ef",
+   "to": "919d7f50",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "15f7737d",
+   "to": "27c23ebb",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "15f7737d",
+   "to": "919d7f50",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "16ec3d64",
+   "to": "3d37f4b2",
+   "strength_mean": 0.35,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "16ec3d64",
+   "to": "bbbbd8f2",
+   "strength_mean": 0.4,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "26fbdff5",
+   "to": "3d37f4b2",
+   "strength_mean": 0.55,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "27c23ebb",
+   "to": "26fbdff5",
+   "strength_mean": 0.45,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "3d37f4b2",
+   "to": "552bd1c0",
+   "strength_mean": 0.5,
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "422ceee7",
+   "to": "b6941ac0",
+   "strength_mean": 0.3518518518518518,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "428612e0",
+   "to": "552bd1c0",
+   "strength_mean": 0.5,
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "7dc44ba7",
+   "to": "b6941ac0",
+   "strength_mean": 0.21111111111111108,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "919d7f50",
+   "to": "428612e0",
+   "strength_mean": 0.65,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "919d7f50",
+   "to": "b42f8b15",
+   "strength_mean": 0.45,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "919d7f50",
+   "to": "b6941ac0",
+   "strength_mean": 0.387037037037037,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "919d7f50",
+   "to": "bbbbd8f2",
+   "strength_mean": 0.35,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "94b13741",
+   "to": "27c23ebb",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "94b13741",
+   "to": "919d7f50",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "b42f8b15",
+   "to": "552bd1c0",
+   "strength_mean": 0.5,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "b6941ac0",
+   "to": "552bd1c0",
+   "strength_mean": 0.5,
+   "effect_direction": "positive",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "bbbbd8f2",
+   "to": "552bd1c0",
+   "strength_mean": 0.5,
+   "effect_direction": "negative",
+   "exists_probability": 0.8
+  },
+  {
+   "from": "faa7499e",
+   "to": "05f973ef",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "faa7499e",
+   "to": "15f7737d",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  },
+  {
+   "from": "faa7499e",
+   "to": "94b13741",
+   "strength_mean": 1,
+   "effect_direction": "positive",
+   "exists_probability": 1
+  }
+ ]
+}
