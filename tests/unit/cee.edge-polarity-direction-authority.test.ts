@@ -51,6 +51,7 @@ import { resolve } from 'node:path';
 import { reconcileStructuralTruth } from '../../src/validators/structural-reconciliation.js';
 import { transformEdgeToV3 } from '../../src/cee/transforms/schema-v3.js';
 import { normaliseRiskCoefficients } from '../../src/cee/transforms/risk-normalisation.js';
+import { computeModelQualityFactors } from '../../src/cee/structure/index.js';
 import type { GraphT } from '../../src/schemas/graph.js';
 
 /**
@@ -420,6 +421,94 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
 
       expect(flipped, `these stated-negative relationships were silently turned positive: ${flipped.join('; ')}`).toEqual([]);
       expect(survived.length).toBe(corpus.length);
+    });
+
+    it('⭐ and the MAGNITUDE took the sign — the deliverable, not its precondition', () => {
+      // The bucket above tests that `effect_direction` SURVIVES. That is the
+      // precondition; the property this change actually delivers on these edges
+      // is a SIGNED mean. Without this assertion the corpus replay would stay
+      // green on a change that kept the direction and left the magnitude
+      // positive — i.e. on the defect itself, one field over.
+      const corpus = statedNegativesWithPositiveMagnitude();
+      const unsigned: string[] = [];
+      for (const { edge, nodes } of corpus) {
+        const graph = {
+          version: '1',
+          default_seed: 42,
+          nodes,
+          edges: [{ ...edge }],
+          meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
+        } as unknown as GraphT;
+        reconcileStructuralTruth(graph);
+        const after = (graph.edges as any[])[0];
+        if (!(typeof after.strength_mean === 'number' && after.strength_mean < 0)) {
+          unsigned.push(`${edge.from} → ${edge.to} (${String(after.strength_mean)})`);
+        }
+      }
+      expect(unsigned, `stated-negative edges left with a non-negative magnitude: ${unsigned.join('; ')}`).toEqual([]);
+      expect(corpus.length).toBeGreaterThanOrEqual(19);
+    });
+  });
+
+  describe('the consumers of the sign this change newly populates', () => {
+    /**
+     * ⭐⭐⭐ THE ENUMERATION THIS PR OWED AND HAD NOT DONE. It enumerated every
+     * PRODUCER that could create a direction/sign disagreement. It did not
+     * enumerate the CONSUMERS OF THE SIGN that the fix newly populates — and
+     * one of them is a wire-emitted quality metric.
+     *
+     * `computeModelQualityFactors`' `strength_variation` is a coefficient of
+     * variation whose declared purpose is to detect a model that hedged at the
+     * midpoint — a statement about MAGNITUDES. It read the SIGNED mean, so two
+     * edges of equal magnitude and opposite polarity manufactured variation
+     * where there is none, and (worse) a balanced graph drove the CV toward
+     * zero, reporting "hedged" on the most varied models.
+     *
+     * It is live: `stages/package.ts` computes it and emits
+     * `model_quality_factors` on the response, and `strengthVariation > 0.3`
+     * lifts `estimate_confidence` by +0.10.
+     *
+     * Measured on this file's own governed baseline, replicating the function
+     * exactly: 324 edges, 70 sign flips, and 14 of 14 cases crossing the 0.3
+     * threshold — a confidence figure raised on exactly the drafts this PR
+     * touches. Control: with the magnitude read, 0 of 14 move.
+     */
+    it('strength_variation is a statement about MAGNITUDE, so polarity cannot move it', () => {
+      const build = (means: readonly number[], directions: readonly string[]) =>
+        ({
+          version: '1',
+          default_seed: 42,
+          nodes: [
+            { id: 'a', kind: 'factor', label: 'A' },
+            { id: 'b', kind: 'outcome', label: 'B' },
+          ],
+          edges: means.map((m, i) => ({
+            from: 'a',
+            to: 'b',
+            strength_mean: m,
+            effect_direction: directions[i],
+          })),
+          meta: { roots: [], leaves: [], suggested_positions: {}, source: 'assistant' },
+        }) as any;
+
+      // Identical magnitudes, opposite polarity: there is NO variation in
+      // strength here, and the metric must say so.
+      const mixed = computeModelQualityFactors(build([0.6, -0.6, 0.6, -0.6], ['positive', 'negative', 'positive', 'negative']));
+      const allPositive = computeModelQualityFactors(build([0.6, 0.6, 0.6, 0.6], ['positive', 'positive', 'positive', 'positive']));
+      expect(mixed.strength_variation).toBe(0);
+      expect(mixed.strength_variation).toBe(allPositive.strength_variation);
+      expect(mixed.estimate_confidence).toBe(allPositive.estimate_confidence);
+
+      // ⭐ THE OPPOSITE-DIRECTION TWIN: the metric must still SEE genuine
+      // variation in magnitude. Without this, `Math.abs` could have been
+      // "return 0 always" and the assertions above would pass.
+      const varied = computeModelQualityFactors(build([0.1, -0.9, 0.2, -0.8], ['positive', 'negative', 'positive', 'negative']));
+      expect(varied.strength_variation).toBeGreaterThan(0.3);
+      expect(varied.estimate_confidence).toBeGreaterThan(mixed.estimate_confidence);
+
+      // …and the sign is irrelevant to the value, not merely to the threshold.
+      const variedUnsigned = computeModelQualityFactors(build([0.1, 0.9, 0.2, 0.8], ['positive', 'positive', 'positive', 'positive']));
+      expect(varied.strength_variation).toBe(variedUnsigned.strength_variation);
     });
   });
 });

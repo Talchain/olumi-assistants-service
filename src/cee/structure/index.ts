@@ -2033,10 +2033,44 @@ export function computeModelQualityFactors(graph: GraphV1 | undefined): ModelQua
   const nodes = (graph as any).nodes as any[];
   const edges = (graph as any).edges as any[];
 
-  // Compute strength variation (CV)
+  // ⭐⭐⭐ THE CV IS OVER MAGNITUDES, AND IT USED TO BE OVER SIGNED MEANS.
+  //
+  // This metric's declared purpose — stated in the prompt that consumes it —
+  // is to detect a model that HEDGED AT THE MIDPOINT: "Edge strengths show
+  // limited variation — AI may have hedged on midpoint". That is a claim about
+  // how far apart the STRENGTHS are, not about which way they point. Reading
+  // the signed mean answers a different question and answers it wrongly in two
+  // directions at once:
+  //
+  //   · two edges of IDENTICAL magnitude and opposite polarity manufacture
+  //     variation where there is none; and
+  //   · because the divisor is |mean(signed)|, a graph whose positives and
+  //     negatives balance drives the CV toward ZERO — so the metric reports
+  //     "the model hedged" on the MOST varied graphs. It is non-monotonic once
+  //     signs are mixed.
+  //
+  // ⚠ THIS BECAME REACHABLE WITH THE POLARITY FIX IN THIS PR, WHICH IS WHY IT
+  // IS FIXED HERE. Before it, a stated-negative relationship carried a POSITIVE
+  // mean, so the signed and unsigned readings agreed and the defect was latent.
+  // Measured on this PR's own governed baseline
+  // (`tools/graph-evaluator/governed/draft-graph-v5/baseline/
+  // run-b9389df-claude-sonnet-4-6.json`), replicating this function exactly —
+  // same reader, same population variance, same `?? 0.5` fallback — before and
+  // after the flip: 324 edges, 70 sign flips (22%), and **14 of 14 cases cross
+  // the 0.3 threshold below**, each taking `estimate_confidence` up by +0.10.
+  // e.g. case 4: CV 0.121 → 3.481; case 0: 0.000 → 1.960.
+  //
+  // The direction of that error is the one that matters: it RAISES a confidence
+  // figure on exactly the drafts the polarity fix touches. Control on the same
+  // corpus: with `Math.abs` applied, 0 of 14 cases move at all.
+  //
+  // ⚠ It also corrects the metric for any graph that already carried a negative
+  // mean by another route. That is not a side effect to apologise for — it is
+  // the same question being answered consistently.
   const strengths = edges
     .map(e => e?.strength_mean ?? e?.weight ?? 0.5)
-    .filter(s => typeof s === "number" && Number.isFinite(s));
+    .filter(s => typeof s === "number" && Number.isFinite(s))
+    .map(s => Math.abs(s));
 
   let strengthVariation = 0;
   if (strengths.length > 1) {
