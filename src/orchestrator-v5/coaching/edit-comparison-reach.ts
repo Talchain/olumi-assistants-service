@@ -29,11 +29,19 @@
  * NOT, and is deliberately excluded.
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * ⭐ TWO INDEPENDENT WITNESSES, UNIONED — and that is the completeness check
- * each of them needs from outside itself. The graph read fires before any
- * analysis exists and when the last one is stale; the producer read fires when
- * the graph shape is one this repo's enumeration does not reach. A guard
- * derived only from the graph proves the graph agrees with itself.
+ * ⭐ TWO INDEPENDENT WITNESSES — and that is the completeness check each of
+ * them needs from outside itself. The graph read fires before any analysis
+ * exists and when the last one is stale; the producer read fires when the
+ * graph shape is one this repo's enumeration does not reach. A guard derived
+ * only from the graph proves the graph agrees with itself.
+ *
+ * ⚠ UNIONED FOR THE POSITIVE, BUT NOT WHERE THEY DISAGREE. They read the graph
+ * at DIFFERENT TIMES — the structural one NOW, the producer one as of the last
+ * analysis — so a mutation in between can make them contradict each other. In
+ * that one cell this module claims NOTHING rather than picking a winner; the
+ * argument, and the harm each alternative would do, are at the exit itself.
+ * Calling the combination a plain union was the earlier reading and it made
+ * the ordering look deliberate when nothing argued it.
  *
  * PURE AND TOTAL.
  */
@@ -85,15 +93,57 @@ export function deriveEditComparisonReach(input: {
       basis: producerSaysOverridden ? 'both' : 'every_option_overrides',
     };
   }
+  // ⭐⭐⭐ THE DISAGREEMENT CELL — DECIDED DELIBERATELY, AND IT USED TO BE
+  // DECIDED BY ACCIDENT OF ORDERING.
+  //
+  // Six cells; five are obvious. The sixth is
+  //   structural = `reaches_comparison`  ×  producer = `intervention_override`
+  // and it previously resolved to `inert`, because the producer check sat
+  // above the structural positive. That was wrong, and the comment that stood
+  // here ("THE STRUCTURAL VERDICT WINS THE NEGATIVE") described behaviour the
+  // code did not have.
+  //
+  // ⚠ THE TWO WITNESSES ARE FROM DIFFERENT TIMES, BY DESIGN. The caller passes
+  // `result.mutatedGraph` (the post-mutation graph, NOW) and
+  // `newestSuccessfulAnalysisEnrichment(prior_facts)` (whenever the last run
+  // happened) — see `tools/handlers/set-factor-value.ts`. So the producer's
+  // `intervention_override` is a statement about the graph AS IT STOOD AT THE
+  // LAST ANALYSIS, and `reaches_comparison` is a positive enumeration over the
+  // graph as it stands now. Any mutation in between that leaves one option not
+  // overriding the factor reaches this cell — an `edit_graph`, an intervention
+  // removed, or `add_option` adding an option that carries no intervention on
+  // it. It is not a hypothetical.
+  //
+  // ⛔ WHY NOT `reaches`, AND WHY NOT `inert`. Neither witness can be trusted
+  // to win here, and that is the honest reading of the header's own argument
+  // for unioning them:
+  //   · `inert` asserts, through `BASELINE_REPLACED_BY_OPTIONS_NARRATIVE`,
+  //     that "every option here sets its own value for this factor" — a
+  //     sentence the CURRENT graph has just positively refuted — and it also
+  //     suppresses the staleness narrative, so the user is told the edit is
+  //     inert AND not told to re-run. This module's header names that
+  //     direction: "or, far worse, tell a user their edit is inert when it is
+  //     not."
+  //   · `reaches` would rest on the graph enumeration being complete on every
+  //     graph shape, which is the very assumption the producer witness exists
+  //     to cover for. Preferring it here would quietly retire that witness.
+  //
+  // So the cell claims NOTHING. `unknown` costs the coaching sentence on a
+  // genuinely ambiguous turn and lets the caller fall through to the staleness
+  // narrative, which is TRUE on this turn regardless of which witness is
+  // right: an analysis exists (the producer verdict came from it) and the
+  // graph has changed since.
   if (producerSaysOverridden) {
-    return { kind: 'inert', basis: 'producer_intervention_override' };
+    return structural.kind === 'reaches_comparison'
+      ? { kind: 'unknown' }
+      : { kind: 'inert', basis: 'producer_intervention_override' };
   }
-  // ⭐ THE STRUCTURAL VERDICT WINS THE NEGATIVE, AND ONLY THE STRUCTURAL ONE
-  // CAN. `reaches_comparison` means an option was enumerated that does NOT
-  // override this factor — a positive observation. The producer read has no
-  // equivalent: the absence of a `zero_reason` is not a statement that the
-  // factor is live (the entry may be missing, the analysis stale, the envelope
-  // thin), so it can never contribute a `reaches`.
+  // ⭐ ONLY THE STRUCTURAL WITNESS CAN EVER RETURN `reaches`.
+  // `reaches_comparison` means an option was enumerated that does NOT override
+  // this factor — a positive observation. The producer read has no equivalent:
+  // the absence of a `zero_reason` is not a statement that the factor is live
+  // (the entry may be missing, the analysis stale, the envelope thin), so it
+  // can never contribute a `reaches`.
   if (structural.kind === 'reaches_comparison') return { kind: 'reaches' };
   return { kind: 'unknown' };
 }

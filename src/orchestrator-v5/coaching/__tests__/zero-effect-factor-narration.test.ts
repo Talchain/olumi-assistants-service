@@ -473,6 +473,85 @@ describe('deriveEditComparisonReach: the union of two structural witnesses', () 
     ).toEqual({ kind: 'unknown' });
   });
 
+  /**
+   * The graph the `add_option` capability produces: the capture's three
+   * options plus a fourth that carries NO intervention on the edited factor.
+   * So the CURRENT graph positively enumerates an option that consumes the
+   * factor's own value, while the LAST analysis's envelope still says
+   * `intervention_override`.
+   */
+  function graphWithANonOverridingOption(): GraphV3T {
+    const base = captureGraph();
+    return {
+      ...base,
+      nodes: [
+        ...base.nodes,
+        {
+          id: 'o-new',
+          kind: 'option',
+          label: 'Partner-led distribution',
+          interventions: { '27c23ebb': 0.2 },
+        },
+      ],
+    } as GraphV3T;
+  }
+
+  it('⭐⭐ THE TWO WITNESSES DISAGREE: claim NOTHING, never the structural sentence', () => {
+    // ⚠ THIS CELL SHIPPED AS `inert` AND WAS THE REVIEW'S BLOCKING FINDING.
+    //
+    // The producer read is a statement about the graph AS IT STOOD AT THE LAST
+    // ANALYSIS. The structural read is a POSITIVE ENUMERATION over the graph as
+    // it stands NOW — `set-factor-value.ts` deliberately passes
+    // `result.mutatedGraph` (post-mutation) and
+    // `newestSuccessfulAnalysisEnrichment(prior_facts)` (whenever the last run
+    // happened), so the two are from different times BY DESIGN and this
+    // disagreement is structurally guaranteed to be reachable. `add_option`
+    // reaches it in one turn: a new option with no intervention on the factor.
+    //
+    // The old order returned `inert`, and the handler then asserted "Every
+    // option here sets its own value for this factor" — a sentence the current
+    // graph had just refuted — while ALSO suppressing the staleness narrative,
+    // so the user was told their edit was inert and not told to re-run. This
+    // module's own header names that direction: "or, far worse, tell a user
+    // their edit is inert when it is not."
+    const disagreement = {
+      graph: graphWithANonOverridingOption(),
+      priorAnalysisEnrichment: CURRENT_ENVELOPE,
+      factorId: EDITED_FACTOR,
+    };
+
+    // PIN THE PRECONDITION IN-TEST, so this cannot pass by the fixture
+    // silently stopping short of the disagreement it is named for.
+    expect(baselineOverrideReach(disagreement.graph, EDITED_FACTOR).kind).toBe(
+      'reaches_comparison',
+    );
+    expect(
+      zeroEffectReasonFor(collectZeroEffectFactors(CURRENT_ENVELOPE), EDITED_FACTOR),
+    ).toBe('intervention_override');
+
+    expect(deriveEditComparisonReach(disagreement)).toEqual({ kind: 'unknown' });
+  });
+
+  it('DISCRIMINATING TWIN: with the same producer verdict and NO new option, it is still inert', () => {
+    // The pair. Without this, "unknown on disagreement" could be satisfied by a
+    // module that had simply stopped honouring the producer witness at all —
+    // which would silently re-open the P0 this PR exists to close.
+    expect(
+      deriveEditComparisonReach({
+        graph: captureGraph(),
+        priorAnalysisEnrichment: CURRENT_ENVELOPE,
+        factorId: EDITED_FACTOR,
+      }),
+    ).toEqual({ kind: 'inert', basis: 'both' });
+    expect(
+      deriveEditComparisonReach({
+        graph: null,
+        priorAnalysisEnrichment: CURRENT_ENVELOPE,
+        factorId: EDITED_FACTOR,
+      }),
+    ).toEqual({ kind: 'inert', basis: 'producer_intervention_override' });
+  });
+
   it('the graph is the only authority that can return `reaches`', () => {
     // The ABSENCE of a zero_reason is not a statement that a factor is live —
     // the entry may be missing, the analysis stale, the envelope thin.
