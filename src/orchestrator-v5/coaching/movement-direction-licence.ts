@@ -61,10 +61,12 @@ import {
 import { noiseVerdictForProportions } from './win-probability-noise-band.js';
 
 /**
- * Why no direction may be reported. DISCRIMINATED rather than a bare boolean,
- * for the reason `RunDeltaRefusal` gives: *"we had no pair"* and *"we had a
- * pair and it was inside the band"* are different facts about the product, and
- * a caller that wants to explain itself to the user needs to tell them apart.
+ * What the evidence supports. THREE states, DISCRIMINATED rather than a
+ * boolean, for the reason `RunDeltaRefusal` gives: *"we had no pair"*, *"we had
+ * a pair and both movements were inside the band"* and *"we had a pair and the
+ * two disagreed"* are different facts about the product, and each licenses a
+ * DIFFERENT sentence. A consumer that cannot tell them apart will say one
+ * sentence in all three cases, and it will be false in two of them.
  */
 export type MovementDirectionLicence =
   /** BOTH margin-defining options moved by more than the band. Say the direction. */
@@ -123,7 +125,6 @@ export type MovementLicenceIndeterminateReason =
  * construction `RunEchoes` uses in `build-run-delta.ts`.
  */
 interface OptionMovement {
-  readonly optionId: string;
   readonly prior: number;
   readonly current: number;
   readonly priorN: number;
@@ -245,7 +246,6 @@ export function licenceToReportMovementDirection(input: {
       return { kind: 'indeterminate', reason: 'sample_size_unavailable' };
     }
     movements.push({
-      optionId,
       prior: priorReading.winProbability,
       current: currentReading.winProbability,
       priorN: priorReading.nSamples,
