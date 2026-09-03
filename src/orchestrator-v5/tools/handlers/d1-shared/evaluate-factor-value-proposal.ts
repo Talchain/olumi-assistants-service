@@ -137,10 +137,103 @@ export type ProposalRejectionReason =
   | 'cap_redeclares_scale';
 
 /**
+ * WHERE THE CEILING BEING ENFORCED CAME FROM. A separate question from
+ * "is the value in range", and the two must not be answered by one predicate
+ * (CLAUDE.md trap 21 — this estate's signature defect).
+ *
+ *   · `stated_on_this_proposal` — the ceiling arrived WITH the value, on the
+ *     same proposal (`proposalCap`). Judging a proposal against a bound it
+ *     supplies itself is coherent whoever authored it: both halves are part of
+ *     the one change under judgement.
+ *   · `inherited_from_the_factor` — the ceiling is the factor's stored
+ *     `observed_state.cap`, an inherited fact the user is now contradicting.
+ *
+ * ⚠ THE SECOND MEMBER IS DELIBERATELY NOT CALLED "UNATTESTED" OR "AI-DRAFTED",
+ * AND THE RESTRAINT IS THE POINT. This estate holds NO provenance for a cap.
+ * Measured at this tip with a contrast control in the same sweep: `rg -a` over
+ * `src/` for `cap_source|capSource|cap_provenance|capProvenance|cap_confirmed|
+ * capConfirmed|cap_extraction` returns **0**, while the contrast `source:` /
+ * `observed_state.source` returns **1,609**; and `ObservedStateSchema` in the
+ * pinned contract (`@talchain/schemas` 0.50.0, `dist/graph.d.ts`) declares
+ * `value`, `std`, `baseline`, `unit`, `source`, `declared_scale`,
+ * `elicited_from` — and no cap-provenance field of any kind.
+ *
+ * ⚠ AND `observed_state.source` IS NOT A SUBSTITUTE, WHICH IS WHY THIS
+ * FUNCTION DOES NOT READ IT. That field answers *"who authored the VALUE?"*
+ * (`transforms/provenance-display.ts` owns it and names the question in those
+ * words). The two facts move independently and the divergence is REACHABLE on
+ * exactly the path this module exists for: a user edit within the stored cap
+ * is stamped `user_override` by `canonicalise-value-ops.ts`
+ * `stampUserEditProvenance` while the cap beside it is untouched — so reading
+ * value-authorship here would declare the drafting model's own ceiling
+ * "confirmed" because the user once corrected the number underneath it, and
+ * would then refuse their NEXT correction. That is the founder's defect,
+ * rebuilt out of the field that looked like the fix.
+ *
+ * So the honest reading of a stored cap is the contract's own instruction for
+ * an absent provenance stamp, quoted verbatim from `ObservedStateSchema`:
+ *
+ *   > Absence means the producer stamped no provenance — a consumer MUST NOT
+ *   > read absence as any particular class; classify unknown/absent as
+ *   > neutral, never guess.
+ *
+ * Neutral is not "confirmed". A bound may only be enforced against the user on
+ * a positive record that someone set it, and there is no field in which such a
+ * record could be written. Hence: inherited ⇒ unconfirmed, structurally.
+ */
+export type CapBoundOrigin = 'stated_on_this_proposal' | 'inherited_from_the_factor';
+
+/**
+ * Classify the ceiling this evaluation will enforce, or `undefined` when the
+ * factor is uncapped and no ceiling applies.
+ *
+ * Computed over the SAME precedence the predicate applies (`proposalCap ??
+ * factorCap`), deliberately by reading the identical expression, so the origin
+ * cannot come to describe a different number from the one being enforced —
+ * the two-same-named-authorities defect in miniature.
+ */
+export function capBoundOrigin(input: {
+  readonly proposalCap?: number;
+  readonly factorCap?: number;
+}): CapBoundOrigin | undefined {
+  if (input.proposalCap !== undefined) return 'stated_on_this_proposal';
+  if (input.factorCap !== undefined) return 'inherited_from_the_factor';
+  return undefined;
+}
+
+/**
+ * A ceiling that was enforced against the user although nothing on record
+ * confirms it, carried on the rejection so a caller can offer the remedy
+ * rather than re-deriving one (a second bound-widening policy would be the
+ * hand-maintained mirror this estate keeps paying for).
+ *
+ * `rescale_cap_to` comes from {@link suggestExtendedCap}, which is already the
+ * one policy the validator, the composer's rescale chip and the persisted
+ * pending all agree on. It is guaranteed to ADMIT the value it was computed
+ * for — pinned in the spec, because a remedy the next turn refuses again is
+ * the failure mode nothing else in the suite would see.
+ */
+export interface UnconfirmedCapBound {
+  /** The ceiling that was enforced. */
+  readonly cap: number;
+  /** A ceiling that would admit the value the user actually stated. */
+  readonly rescale_cap_to: number;
+}
+
+/**
  * Result of evaluating a proposal. `ok: true` means the handler's
  * `normaliseFactorValue` would not throw for these inputs. `ok: false`
  * carries the granular reason (telemetry) and the canonical user
  * message (`specific_issue`).
+ *
+ * `unconfirmed_bound` is ADDITIVE AND OPTIONAL, and that is a safety property
+ * rather than convenience: every existing consumer branches on `.ok` alone and
+ * therefore still REFUSES, so no caller can be upgraded by accident into
+ * writing a value its own normalisation cannot represent (`normaliseFactorValue`
+ * computes `value = raw / cap` with no clamp — accepting £100,000 against a
+ * stored cap of £100 would persist a normalised level of 1,000). A caller opts
+ * in by reading the field and applying the widened bound; until it does, it
+ * degrades to today's behaviour and never to a corrupt write.
  */
 export type FactorValueProposalEvaluation =
   | { readonly ok: true }
@@ -148,6 +241,14 @@ export type FactorValueProposalEvaluation =
       readonly ok: false;
       readonly reason: ProposalRejectionReason;
       readonly specific_issue: string;
+      /**
+       * Present EXACTLY when the rejection was decided by a ceiling inherited
+       * from the factor, on a proposal that stated its own scale. Absent for a
+       * ceiling stated on the proposal, for a bare number (nothing in the
+       * input asserts a scale, so the ceiling is the only scale evidence there
+       * is), and for every rejection that is not a ceiling breach.
+       */
+      readonly unconfirmed_bound?: UnconfirmedCapBound;
     };
 
 export interface EvaluateFactorValueProposalInput {
@@ -698,30 +799,123 @@ function evaluateFactorValueProposalImpl(
     };
   }
 
-  // 6. Cap-range guards. Identical predicates to
-  //    normalise-factor-value.ts:75 and :117 — applied to
-  //    `effectiveRaw`, so a delta that would overshoot the cap is
-  //    rejected just like an absolute that does.
+  // ── 6. RANGE GUARDS — TWO QUESTIONS, PREVIOUSLY ONE CONJUNCT ──────────────
+  //
+  // This block used to read `effectiveRaw < 0 || effectiveRaw > cap` and give
+  // both arms one reason and one sentence. Those are two different harms and
+  // they cannot share a threshold (CLAUDE.md trap 22b):
+  //
+  //   · A BOUND TOO TIGHT REJECTS TRUTH. Measured, founder session 3 Sep 2026
+  //     (`olumi-programme-docs` `artefacts/manual-test-2026-09-03/`, scenario
+  //     `7826c742`): a brief saying "£80-120k for the first hire" produced
+  //     `raw_value: 80`, which set `cap: 100`, and the user's true £100,000 was
+  //     then REFUSED — "Value £100,000 exceeds the factor's cap of £100." The
+  //     same `observed_state` carried `uncertainty_drivers: ["Extracted from
+  //     brief — confirm value"]`, so the product asked to have the value
+  //     confirmed and enforced a bound derived from it in the same breath.
+  //   · A BOUND ABSENT ADMITS NONSENSE. A bare number carries no scale of its
+  //     own, and a capped factor is stored `value = raw / cap` on a scale that
+  //     starts at zero.
+  //
+  // The floor and the ceiling are therefore separated below, and only the
+  // ceiling consults {@link capBoundOrigin}. The FLOOR does not rest on the
+  // ceiling's number at all — `cap > 0` is already guaranteed by gate 2 — so it
+  // is untouched by where the ceiling came from, in either direction.
   if (cap !== undefined) {
-    const outOfRange = effectiveRaw < 0 || effectiveRaw > cap;
-    if (outOfRange) {
+    // 6a. FLOOR. A capped factor has no representation for a negative: the
+    //     writer stores `raw / cap`, and every consumer of that pair
+    //     (`resolveExistingRawValue`, `buildFactorScaleMap`) reads a
+    //     normalised value as living in [0,1]. Refused whatever the ceiling is
+    //     and whoever set it.
+    if (effectiveRaw < 0) {
       if (!inputHasUnit) {
-        // 6a. bare_number_outside_cap.
+        // Unchanged: this sentence is TRUE for a bare negative (it IS outside
+        // [0, cap]), and its composer branch is owned elsewhere. Only false
+        // copy is rewritten here.
         return {
           ok: false,
           reason: 'bare_number_outside_cap',
           specific_issue: `Value ${effectiveRaw} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
         };
       }
-      // 6b. value_exceeds_cap. Format via the shared helper so
-      //     currency prefixes render correctly (`£500,000`, not
-      //     `500000£`).
-      const formattedInput = formatValueWithUnit(effectiveRaw, effectiveUnit);
-      const formattedCap = formatValueWithUnit(cap, effectiveUnit);
+      // ⚠ THE SENTENCE THIS REPLACES WAS FALSE. A unit-bearing negative took
+      // the `value_exceeds_cap` arm and rendered, measured at staging
+      // `f4c8f501`, "Value £-4,920 exceeds the factor's cap of £100." -4,920
+      // does not exceed 100. One conjunct answered two questions and the copy
+      // inherited the wrong one.
+      //
+      // The reason code is DELIBERATELY unchanged. Minting a new member would
+      // reach `compose/validation-failure-responses.ts` and the precheck
+      // telemetry enum, both owned by other in-flight lanes; an unrecognised
+      // reason falls through to the composer's generic copy, which is worse
+      // than the imperfect branch it has now. What is fixed here is the
+      // falsehood, which needs no new member.
+      //
+      // No computed number is echoed: for a delta the offending figure is
+      // arithmetic the user never typed (an earlier lane in this file shipped
+      // "the value given was 1.2999999999999998" that way).
       return {
         ok: false,
         reason: 'value_exceeds_cap',
-        specific_issue: `Value ${formattedInput} exceeds the factor's cap of ${formattedCap}.`,
+        specific_issue:
+          'That would take this factor below zero, and it is recorded on a ' +
+          'scale that starts at zero.',
+      };
+    }
+
+    // 6b. CEILING.
+    if (effectiveRaw > cap) {
+      if (!inputHasUnit) {
+        // A bare number asserts no scale, so the ceiling is the ONLY scale
+        // evidence in play. Widening on it would let a mistyped digit
+        // redefine what the factor measures — the "a bound absent admits
+        // nonsense" direction. Unchanged, and pinned as the opposite-direction
+        // twin of the founder's case.
+        return {
+          ok: false,
+          reason: 'bare_number_outside_cap',
+          specific_issue: `Value ${effectiveRaw} is outside the factor's expected range [0, ${cap}] and no unit was given.`,
+        };
+      }
+      // Format via the shared helper so currency prefixes render correctly
+      // (`£500,000`, not `500000£`).
+      const formattedInput = formatValueWithUnit(effectiveRaw, effectiveUnit);
+      const formattedCap = formatValueWithUnit(cap, effectiveUnit);
+      const boundOrigin = capBoundOrigin({
+        ...(proposalCap !== undefined ? { proposalCap } : {}),
+        ...(factorCap !== undefined ? { factorCap } : {}),
+      });
+      if (boundOrigin === 'stated_on_this_proposal') {
+        // The bound came with the value. Byte-identical to the historic
+        // sentence, deliberately: this arm is a coherent judgement of a
+        // proposal against its own stated scale, and a live-capture corpus
+        // records this wording.
+        return {
+          ok: false,
+          reason: 'value_exceeds_cap',
+          specific_issue: `Value ${formattedInput} exceeds the factor's cap of ${formattedCap}.`,
+        };
+      }
+      // The bound is inherited and unconfirmed, and the user has stated their
+      // own scale. The sentence stops asserting the bound as a property of the
+      // factor and names it as a reading nothing has confirmed — because on
+      // this evidence the bound is the more likely thing to be wrong.
+      //
+      // ⚠ IT STILL REFUSES, AND THAT IS A BOUNDARY, NOT A JUDGEMENT. Applying
+      // the widened bound means writing `observed_state.cap`, which happens at
+      // `set-factor-value.ts` (`after.cap = parsed.cap ?? before.cap`) — a file
+      // owned by an in-review PR at the time of writing. `unconfirmed_bound`
+      // carries the remedy so that change is a wiring job rather than a
+      // re-derivation. Until then the refusal is at least TRUE about whose
+      // number is in doubt.
+      return {
+        ok: false,
+        reason: 'value_exceeds_cap',
+        specific_issue:
+          `${formattedInput} is above the upper limit of ${formattedCap} recorded for ` +
+          `this factor, and nothing on record confirms that limit. The limit is the ` +
+          `more likely thing to be wrong.`,
+        unconfirmed_bound: { cap, rescale_cap_to: suggestExtendedCap(effectiveRaw) },
       };
     }
   }
