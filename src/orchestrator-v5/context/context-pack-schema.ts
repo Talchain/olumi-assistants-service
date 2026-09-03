@@ -237,6 +237,26 @@ const ContextPackAnalysisSchema = z
     // `false`), matching the pack's key-absence style (cf. conversation
     // `truncated`).
     evidence_gaps_lever_suppressed: z.literal(true).optional(),
+    /**
+     * The EVPPI channel's investigation-priority verdict
+     * (`../coaching/investigation-priority.ts`). A discriminated union so a
+     * malformed or unknown state fails the schema rather than reaching the
+     * display projection as an unrecognised object.
+     *
+     * `'not_assessed'` is a legal member of the TYPE but is never attached by
+     * the producer seam (it is already disclosed by `VOI_NOT_SCORED_NOTE`); it
+     * is admitted here so the schema describes the type rather than the
+     * producer's current habit — a schema narrower than its type is a trap
+     * for the next writer.
+     */
+    investigation_priority: z
+      .discriminatedUnion('kind', [
+        z.object({ kind: z.literal('named'), factorLabel: z.string().min(1) }).strict(),
+        z.object({ kind: z.literal('below_resolution') }).strict(),
+        z.object({ kind: z.literal('incomplete') }).strict(),
+        z.object({ kind: z.literal('not_assessed') }).strict(),
+      ])
+      .optional(),
     goal_fit: ContextPackAnalysisGoalFitSchema.nullable().optional(),
     /**
      * Lane 30 fix 3 — top-level ordinal confidence tier (attested values

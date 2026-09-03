@@ -35,6 +35,7 @@ import {
   MODEL_SCALE_SUSPECT_ABS,
   isAttestedNoFlipReason,
 } from './flip-threshold-rows.js';
+import type { InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 
 /** Cap for evidence-gap signals carried into the projection. */
@@ -186,6 +187,23 @@ export interface AnalysisSummarySignals {
    * prose by the display formatter.
    */
   readonly confidence_tier?: string | null;
+  /**
+   * What ISL's `factor_evppi` estimate said about which factor is worth
+   * resolving first — see `../coaching/investigation-priority.ts`.
+   *
+   * A DIFFERENT SIGNAL FROM `evidence_gaps` ABOVE, and the distinction is the
+   * whole reason this exists: `evidence_gaps` reads
+   * `m1_coaching.evidence_gaps[]` and `investigation_priority` reads
+   * `factor_evppi`. On the 3 Sep 2026 founder capture the first channel was
+   * absent from the enrichment entirely while the second carried an explicit
+   * `below_resolution` verdict, so the pack told the model no
+   * value-of-information scores existed for an analysis that had computed
+   * them and found nothing separable.
+   *
+   * Attached only when the EVPPI channel answered (never `'not_assessed'`),
+   * matching this interface's key-absence idiom.
+   */
+  readonly investigation_priority?: InvestigationPriorityLicence;
 }
 
 /** The summary shape `projectAnalysis` actually consumes. */

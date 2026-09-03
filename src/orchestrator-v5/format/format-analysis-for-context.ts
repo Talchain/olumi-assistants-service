@@ -31,6 +31,10 @@ import type {
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { looksLikeRawDecimal } from './format-graph-for-context.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
+import {
+  analysisAssessedInformationValue,
+  investigationPriorityNote,
+} from '../coaching/investigation-priority.js';
 
 export interface DisplaySafeAnalysisOption {
   readonly label: string;
@@ -331,6 +335,27 @@ export interface DisplaySafeAnalysis {
    * VOI-claim truthfulness outranks breadth.
    */
   readonly value_of_information_note?: string;
+  /**
+   * ⭐ WHAT THE INFORMATION-VALUE SCIENCE SAID ABOUT WHAT TO INVESTIGATE FIRST.
+   *
+   * A DIFFERENT QUESTION FROM `value_of_information` ABOVE, AND THAT IS THE
+   * POINT — they read different producer channels and answered differently on
+   * the capture that produced this field. `value_of_information` bands
+   * `m1_coaching.evidence_gaps[]`; this projects the `factor_evppi` authority
+   * (`coaching/select-factor-evppi.ts` → `coaching/investigation-priority.ts`),
+   * which is the channel PLoT actually populated on 3 Sep 2026.
+   *
+   * Present exactly when the caller supplied a licence AND that licence is not
+   * `not_assessed` (already covered by `value_of_information_note`). Absent
+   * otherwise, so a caller that has not wired the licence gets a
+   * byte-identical projection.
+   *
+   * Like `goal_fit` and `value_of_information_note`, NEVER dropped by the
+   * char-budget guard: without it the pack's only ranking is `top_drivers`,
+   * which ranks INFLUENCE, and narrating that as an investigation priority is
+   * the live defect this field exists to stop.
+   */
+  readonly investigation_priority_note?: string;
   readonly goal_fit?: string;
   /**
    * Lane 30 fix 3 — analysis confidence prose from the producer's ordinal
@@ -1016,8 +1041,51 @@ export function formatAnalysisForContext(
     out.value_of_information_note = VOI_ALL_NEAR_ZERO_NOTE;
   } else if (raw.evidence_gaps_lever_suppressed === true) {
     out.value_of_information_note = VOI_LEVER_SUPPRESSED_NOTE;
-  } else {
+  } else if (!analysisAssessedInformationValue(raw.investigation_priority)) {
+    // ⚠ THE ONE PRE-EXISTING SENTENCE THIS LANE CHANGES, AND WHY.
+    //
+    // `VOI_NOT_SCORED_NOTE` asserts "no value-of-information scores are
+    // available FOR THIS ANALYSIS". That is a claim about the analysis; this
+    // branch only ever knew about ONE channel (`m1_coaching.evidence_gaps`).
+    // When the OTHER channel — ISL's `factor_evppi` — answered, the sentence is
+    // false, and it was false on the 3 Sep founder capture: `m1_coaching` was
+    // absent while `factor_evppi` carried an explicit `below_resolution` row.
+    //
+    // The predicate is READ from `investigation-priority.ts`, never re-derived
+    // here. Two predicates answering "did this analysis assess information
+    // value?" is exactly the shape that produced the false sentence.
+    //
+    // Nothing is lost when it is suppressed: the investigation-priority note
+    // set below carries a STRONGER and truthful version of the same
+    // prohibition. It is never silent.
     out.value_of_information_note = VOI_NOT_SCORED_NOTE;
+  }
+
+  // The investigation-priority licence — the EVPPI channel's own verdict, in
+  // the pack for the first time.
+  //
+  // NEVER DROPPED by the char-budget guard (deliberately absent from
+  // {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER}), on the same doctrine as
+  // `goal_fit` and `value_of_information_note`: a truncated projection that
+  // loses this note leaves the influence ranking as the only ranking in the
+  // pack, which is the exact condition under which the model narrated one as
+  // the other. Set BEFORE the guard so its own length is inside the budget
+  // arithmetic.
+  //
+  // COST, stated rather than hidden, and PINNED rather than restated. The
+  // notes consume part of {@link DISPLAY_ANALYSIS_CHAR_BUDGET} and can
+  // therefore push a large projection into truncation sooner. The ceiling is
+  // asserted by `investigation-priority-note-budget` in
+  // `__tests__/format-analysis-investigation-priority.test.ts`, which REDs if a
+  // note grows past it — a number written here would be a mirror, and mirrors
+  // drift (trap 12). On the branch this lane changes the note also DISPLACES
+  // `VOI_NOT_SCORED_NOTE`, so the net cost is smaller than the note's own
+  // length; that relation is pinned by the same test.
+  if (raw.investigation_priority !== undefined) {
+    const priorityNote = investigationPriorityNote(raw.investigation_priority);
+    if (priorityNote !== null) {
+      out.investigation_priority_note = priorityNote;
+    }
   }
 
   // Lane 30 — goal-fit prose. Three DISCLOSED states (never silent, so the

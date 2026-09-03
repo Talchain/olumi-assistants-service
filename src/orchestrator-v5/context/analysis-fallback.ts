@@ -71,6 +71,7 @@ import {
   deriveTippingPointsFromTopLevel,
   type AnalysisResponseSummaryWithSignals,
 } from './analysis-signals.js';
+import { investigationPriorityFromEnrichment } from '../coaching/investigation-priority.js';
 import { selectRunAnalysisFact } from './freshness.js';
 import { emitUnknownEnrichmentKeyTelemetry } from './enrichment-manifest.js';
 
@@ -468,6 +469,17 @@ export function reconcileAnalysisSummaryWithEnrichment(
   // modelled-outcome means (banded downstream, never surfaced raw).
   const confidenceTier = deriveConfidenceTierFromEnrichment(enrichment);
   const optionOutcomes = deriveOptionOutcomesFromEnrichment(enrichment);
+  // The EVPPI channel's verdict on what is worth investigating first. Attached
+  // HERE, at the single summary/enrichment seam, so it can never describe a
+  // different run from the analysis it rides on — deriving it beside the
+  // projection instead (from `priorFacts`) would let a durable display source
+  // and a hot-window fact disagree, and a licence about the wrong run is worse
+  // than no licence at all.
+  //
+  // `not_assessed` is deliberately NOT attached: that state is already
+  // disclosed by the display projection's `VOI_NOT_SCORED_NOTE`, and omitting
+  // it keeps an enrichment with no `factor_evppi` byte-identical to before.
+  const investigationPriority = investigationPriorityFromEnrichment(enrichment);
 
   const withSignals: AnalysisResponseSummaryWithSignals = {
     ...withFragile,
@@ -477,6 +489,9 @@ export function reconcileAnalysisSummaryWithEnrichment(
     ...(optionGoalFits.length > 0 ? { option_goal_fits: optionGoalFits } : {}),
     ...(confidenceTier !== null ? { confidence_tier: confidenceTier } : {}),
     ...(optionOutcomes.length > 0 ? { option_outcomes: optionOutcomes } : {}),
+    ...(investigationPriority.kind !== 'not_assessed'
+      ? { investigation_priority: investigationPriority }
+      : {}),
   };
 
   return {
