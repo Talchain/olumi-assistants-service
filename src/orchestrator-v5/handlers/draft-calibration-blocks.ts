@@ -74,7 +74,20 @@
  * `shouldSuppressEditDispatchForValueUpdate` over the copy's own exemplar so
  * the pairing REDs in both directions.
  *
- * ⚠ AND THE HONEST LIMIT OF THAT CLAIM: the gate proves the message leaves the
+ * ⭐⭐ AND THE PAIRING IS ENFORCED AT EMIT TIME, NOT ONLY IN A SPEC. The card
+ * asks the router whether its OWN exemplar routes, and stays silent when it
+ * does not. A spec can only ever check the labels its fixtures happen to
+ * carry; the emitter meets every label a real model produces.
+ *
+ * That gate is not theoretical — it FIRES, and finding out why changed this
+ * module. The router's object window is `\S+(?:\s+\S+){0,5}`
+ * (`value-update-gate.ts`), so `set <label> to 40%` resolves for a label of at
+ * most six tokens (seven with a leading article). A seven-word label passes
+ * every copy check, fits the card, reads perfectly — and goes nowhere. The
+ * first version of this module would have shipped that ask; the spec caught it
+ * on a hand-built label, and the fix is this gate rather than a longer spec.
+ *
+ * ⚠ AND THE HONEST LIMIT OF THE CLAIM: the gate proves the message leaves the
  * fragile `edit_graph` JSON route and reaches the tool-use path that owns
  * `set_factor_value`. The final hop is a model call, so this is a claim about
  * ROUTING, not a guarantee of binding. It is the same claim the estate's other
@@ -100,8 +113,9 @@
  * ── FAIL-CLOSED GATES, in order ────────────────────────────────────────────
  *   1. no ranked unquantified root                  → []
  *   2. the top-ranked factor has no usable label    → []
- *   3. `gateCoachingCardBody` rejects title or body → []  (see below)
- *   4. the block fails `CoachingBlockSchema`        → []
+ *   3. the router refuses the card's own exemplar   → []  (P8, above)
+ *   4. `gateCoachingCardBody` rejects title or body → []  (see below)
+ *   5. the block fails `CoachingBlockSchema`        → []
  *
  * ⚠ THERE IS NO LENGTH CHECK OF THIS MODULE'S OWN, AND THERE WAS ONE UNTIL A
  * MUTANT PROVED IT INERT. It read `if (body.length > 300) return []` — a
@@ -111,7 +125,7 @@
  * the definition of a mirror rather than a guard, and this module's own header
  * lectures about exactly that. The length authority is the contract's.
  *
- * ── GATE 3 IS THE INTERESTING ONE, AND IT IS NOT A LENGTH CHECK ────────────
+ * ── GATE 4 IS THE INTERESTING ONE, AND IT IS NOT A LENGTH CHECK ────────────
  * The exemplar must carry the factor's label EXACTLY, or `set <label> to 40%`
  * resolves nothing and the card breaks P8. So the body is NEVER TRUNCATED —
  * the title is, because it carries no command, and the body is not. A body
@@ -155,6 +169,7 @@ import {
   deriveMissingRootAssumptions,
   type MissingRootAssumption,
 } from '../../cee/graph-readiness/missing-root-assumptions.js';
+import { shouldSuppressEditDispatchForValueUpdate } from '../../orchestrator/routing/value-update-gate.js';
 import { gateCoachingCardBody } from '../coaching/copy-quality-gate.js';
 import { deterministicBlockId } from '../compose/block-id.js';
 import { guidanceSignalsForCoachingKind } from '../compose/guidance-signals.js';
@@ -268,21 +283,44 @@ export function buildDraftCalibrationBlocks(
   if (top.factor_label.length === 0) return [];
 
   const title = truncateAtWordBoundary(`Give ${top.factor_label} a level`, TITLE_BUDGET);
+  // Gate 3 — P8, ENFORCED HERE AND NOT ONLY IN A SPEC. `route-v2` uses this
+  // exact predicate to decide whether a message reaches the tool-use path that
+  // owns `set_factor_value`, so asking it about the card's own exemplar is the
+  // product checking that it can hear its own question. A label the router
+  // cannot resolve (its object window is six tokens) yields silence.
+  if (!shouldSuppressEditDispatchForValueUpdate(calibrationAnswerExemplar(top.factor_label))) {
+    return [];
+  }
+
   // ⚠ NOT TRUNCATED. See the header: a shortened exemplar is an ask this
   // product cannot accept, so an over-long body must be refused, never trimmed.
   const body = buildCalibrationBody(top, ranked.length);
 
-  // Gate 3 — on the EXACT bytes that ship, and the ONLY length authority this
+  // Gate 4 — on the EXACT bytes that ship, and the ONLY length authority this
   // module invokes. A label that leaks a slug-shaped id, uses graph-shape
   // wording, or pushes the body past the card cap drops the card rather than
   // being rewritten: rewriting the product's own account of a user's model
   // would be its own dishonesty.
   //
-  // ⭐ TITLE AND BODY ARE GATED SEPARATELY AND THAT IS NOT REDUNDANT. The title
-  // is truncated first, so an offending token near the end of a long label is
-  // cut out of the title and survives in the body. The suite drives exactly
-  // that divergence, with the body-under-cap precondition asserted, so this
-  // line REDs on its own rather than leaning on its neighbour.
+  // ⚠⚠ TITLE AND BODY ARE GATED SEPARATELY, AND FOR THIS MODULE'S CURRENT COPY
+  // THAT IS LARGELY REDUNDANT — MEASURED, NOT ASSUMED, AND RECORDED RATHER
+  // THAN QUIETLY KEPT. `truncateAtWordBoundary` always cuts at a space (the
+  // one after "Give" is inside every budget), so the title's tokens are always
+  // a SUBSET of `{Give} ∪ tokens(label)` and the body always contains all of
+  // `tokens(label)`. Any CONTENT offence therefore trips both. Each line still
+  // has exactly one live case of its own, and the suite drives both:
+  //
+  //   title-only : a single-token label longer than the budget leaves the
+  //                title as the bare word "Give" → `too_short`. The body is
+  //                fine, so only this line refuses it.
+  //   body-only  : a label whose body overshoots 300 while the truncated title
+  //                does not → `too_long`.
+  //
+  // Both are kept because the bytes are different bytes and both are shown to
+  // a user — the sibling emitters gate title and body separately for the same
+  // reason. Mutation testing marks the CONTENT halves as surviving mutants;
+  // that is the correct reading of an equivalence, and it is stated here so a
+  // later reader does not rediscover it as a defect.
   if (!gateCoachingCardBody(title).accept) return [];
   if (!gateCoachingCardBody(body).accept) return [];
 
@@ -316,7 +354,7 @@ export function buildDraftCalibrationBlocks(
     // available, and a label without a prompt renders inert.
   } as CoachingBlock;
 
-  // Gate 4 — fail closed rather than hand egress a block it drops whole. Also
+  // Gate 5 — fail closed rather than hand egress a block it drops whole. Also
   // the contract's own length authority; see the header.
   if (!CoachingBlockSchema.safeParse(candidate).success) return [];
 

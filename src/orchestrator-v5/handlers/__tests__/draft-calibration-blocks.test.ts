@@ -191,26 +191,67 @@ describe('fail-closed', () => {
     expect(buildDraftCalibrationBlocks({ graph: quantified, createdAt: CREATED_AT })).toEqual([]);
   });
 
-  it('⛔ THE BODY GATE EARNS ITS PLACE — an offence the TITLE truncation hides', () => {
-    // ⭐ THIS IS THE DIVERGENCE THAT MAKES TWO GATES TWO GATES. The title is
-    // truncated to 80 before it is gated, so a banned word at the end of a long
-    // label is cut out of the title and survives in the body, which is never
-    // truncated. Without this case the body gate is indistinguishable from its
-    // neighbour and could be deleted with a green suite — a mutant proved
-    // exactly that before this test existed.
-    const label = 'How much confidence the leadership team places in our quarterly sales graphs';
+  it('⭐ THE TITLE TRUNCATES AND THE BODY DOES NOT — the asymmetry P8 requires', () => {
+    // A long label the title cannot hold whole. The card still ships: the
+    // title is trimmed (it carries no command), and the body keeps the label
+    // INTACT inside the exemplar, because a shortened exemplar resolves
+    // nothing. Without the truncation the 90-character title would fail the
+    // contract and the card would vanish, so this pins the truncation too.
+    const label = 'Organisational confidence regarding enterprise procurement predictability';
+    const g = graph(
+      [{ id: 'f', kind: 'factor', label }],
+      [{ from: 'f', to: 'g', strength_mean: 0.5 }],
+    );
+    expect(`Give ${label} a level`.length, 'the raw title must overshoot, or truncation is untested')
+      .toBeGreaterThan(80);
+
+    const blocks = buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT });
+    expect(blocks).toHaveLength(1);
+    const block = blocks[0]!;
+    expect(block.title.length).toBeLessThanOrEqual(80);
+    expect(block.title).not.toContain('a level'); // the tail was trimmed
+    // ...and the body still carries the whole label, exactly.
+    expect(block.body).toContain(calibrationAnswerExemplar(label));
+    expect(shouldSuppressEditDispatchForValueUpdate(exemplarFromBody(block.body))).toBe(true);
+  });
+
+  it('⛔ THE TITLE GATE EARNS ITS PLACE — a single-token label degrades it to "Give"', () => {
+    // `truncateAtWordBoundary` cuts at a space, and the only space before the
+    // budget is the one after "Give". So a label that is one long token leaves
+    // a four-character title: furniture, not a heading. The BODY is fine here,
+    // so only the title gate can refuse this card.
+    const label = 'confidenceoftheleadershipteaminourquarterlyselfservetrialconversionrateoverall';
+    const g = graph(
+      [{ id: 'f', kind: 'factor', label }],
+      [{ from: 'f', to: 'g', strength_mean: 0.5 }],
+    );
+    // PRECONDITIONS — the ranking returns it and the BODY is acceptable, so the
+    // refusal below is the title gate's and nothing else's.
+    expect(deriveMissingRootAssumptions(g).ranked.map((r) => r.factor_id)).toEqual(['f']);
+    const body = buildCalibrationBody({ factor_id: 'f', factor_label: label, materiality: 1 }, 1);
+    expect(gateCoachingCardBody(body).accept, 'the body must PASS, or the title gate is not isolated').toBe(true);
+
+    expect(buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })).toEqual([]);
+  });
+
+  it('⭐⭐ P8 AT EMIT TIME — a label the router cannot resolve yields SILENCE', () => {
+    // The router's object window is six tokens, so a seven-word label makes
+    // `set <label> to 40%` unroutable. Everything else about this card is fine
+    // — which is exactly why the emitter has to ask the router itself rather
+    // than trust a copy review.
+    const label = 'Enterprise procurement cycle predictability across regulated territories';
     const g = graph(
       [{ id: 'f', kind: 'factor', label }],
       [{ from: 'f', to: 'g', strength_mean: 0.5 }],
     );
 
-    // PRECONDITIONS, all three, or the assertion below proves nothing.
+    // PRECONDITIONS — every OTHER gate passes, so the refusal is gate 3's.
     expect(deriveMissingRootAssumptions(g).ranked.map((r) => r.factor_id)).toEqual(['f']);
-    const title = `Give ${label} a level`.slice(0, 80).replace(/\s+\S*$/, '');
-    expect(gateCoachingCardBody(title).accept, 'the title must PASS, or the body gate is not isolated').toBe(true);
     const body = buildCalibrationBody({ factor_id: 'f', factor_label: label, materiality: 1 }, 1);
-    expect(body.length, 'the body must be UNDER the cap, or length is doing the work').toBeLessThanOrEqual(300);
-    expect(gateCoachingCardBody(body).accept).toBe(false);
+    expect(body.length).toBeLessThanOrEqual(300);
+    expect(gateCoachingCardBody(body).accept).toBe(true);
+    // ...and the router genuinely refuses it.
+    expect(shouldSuppressEditDispatchForValueUpdate(calibrationAnswerExemplar(label))).toBe(false);
 
     expect(buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })).toEqual([]);
   });
