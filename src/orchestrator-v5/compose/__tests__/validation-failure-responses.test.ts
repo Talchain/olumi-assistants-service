@@ -195,7 +195,22 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
     }
   });
 
-  it('handles a missing proposed_label via safeLabel fallback', () => {
+  it('a subject it cannot name gets a sentence that claims nothing about the user', () => {
+    // ⚠ THIS TEST PREVIOUSLY PINNED THE DEFECT. It asserted
+    // KIND_MISMATCH_UNRESOLVED here — i.e. that a proposal carrying NO label at
+    // all still produced "I wasn't sure what you meant by that item." It was
+    // written as a `safeLabel` fallback check and, in doing so, froze a
+    // sentence that tells the user two things the payload does not contain:
+    // that they referred to an "item", and that their wording was unclear.
+    //
+    // Live cost, 3 Sep 2026 capture (turn index 2, 14:01:16Z): the user asked
+    // "Why are all of the outcome and risk strengths 50%?" — naming nothing —
+    // and was told the product could not tell what they meant by "that item".
+    // They re-asked twice.
+    //
+    // The assertion now binds to the honest sentence, and keeps the two things
+    // the original was actually protecting: the id must not leak, and the
+    // template id must not move.
     const { response, template_id } = composeFor({
       code: 'ENTITY_KIND_MISMATCH',
       message: 'mismatch',
@@ -205,9 +220,34 @@ describe('composeValidationFailure — ENTITY_KIND_MISMATCH', () => {
       },
     });
     expect(template_id).toBe('kind_mismatch');
-    expect(response.assistant_text).toMatch(KIND_MISMATCH_UNRESOLVED);
+    expect(response.assistant_text).toBe(
+      "I couldn't match that to anything in your model. Tell me what you'd like to change.",
+    );
+    // The claims that must NOT survive an unnamed subject.
+    expect(response.assistant_text).not.toMatch(/wasn't sure what you meant/i);
+    expect(response.assistant_text).not.toMatch(/that item/i);
     expect(response.suggested_actions.length).toBe(1);
     assertStyle(response.assistant_text);
+  });
+
+  it('a NAMED subject keeps the existing copy byte-for-byte', () => {
+    // The discriminating twin. Without it the change above could have replaced
+    // the sentence for EVERY kind mismatch, which would lose real information
+    // on the path that works — a fix that closes one direction by opening the
+    // other (CLAUDE.md trap 22b).
+    const { response, template_id } = composeFor({
+      code: 'ENTITY_KIND_MISMATCH',
+      message: 'mismatch',
+      details: {
+        proposed_kind: 'node',
+        proposed_label: 'Sales Headcount Investment',
+        accepted_kinds: ['option'],
+      },
+    });
+    expect(template_id).toBe('kind_mismatch');
+    expect(response.assistant_text).toBe(
+      "I wasn't sure what you meant by Sales Headcount Investment. Tell me what you'd like to change.",
+    );
   });
 
   it('offers real entity chips from the accepted kinds when a graph is available', () => {

@@ -157,6 +157,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 
 import { loadVerifiedDskBundle } from '../compose/dsk-bundle-record.js';
 import type { DSKProtocol } from '../../dsk/types.js';
+import { coachingIntentForChipId } from './coaching-chip-registry.js';
 
 /**
  * The coaching intents this arm ROUTES. Deliberately NOT the whole `Intent`
@@ -365,8 +366,31 @@ export function resolveCoachingIntent(
 ): RoutedCoachingIntent | undefined {
   if (payload.source !== 'chip' && payload.source !== 'chip_click') return undefined;
   const intent = payload.chip?.intent;
-  if (typeof intent !== 'string') return undefined;
-  return ROUTED_SET.has(intent) ? (intent as RoutedCoachingIntent) : undefined;
+  if (typeof intent === 'string') {
+    return ROUTED_SET.has(intent) ? (intent as RoutedCoachingIntent) : undefined;
+  }
+
+  // ⭐ THE CEE-AUTHORED FALLBACK. A DECLARED intent always wins above — a
+  // producer that says what it means is never second-guessed, and an intent
+  // CEE does not route is still DECLINED rather than quietly re-derived from
+  // an id (the `estimate_help` refusal must stay a refusal).
+  //
+  // This arm exists because the outbound chip contract has no `intent` key at
+  // all, so every affordance CEE composes reaches this function with
+  // `chip.intent === undefined` and could never route. See
+  // `coaching-chip-registry.ts` for the wire derivation and the live capture.
+  //
+  // ⚠ REFUSED WHEN THE CHIP CARRIES AN `action_type`, and that guard is load-
+  // bearing rather than defensive. The turn-executor call site pins an
+  // ordering invariant on the two directives never co-occurring, whose stated
+  // proof is "`chipClickForcedIntent` requires a typed `action_type` pill, and
+  // no affordance carries both" (`turn-executor.ts:8289-8295`). Resolving an
+  // intent from an id without this guard would make that proof false the first
+  // time anyone registered a typed chip. The coaching chips are prompt chips
+  // with no `action_type`, so the guard costs nothing today and keeps the
+  // invariant TRUE BY CONSTRUCTION rather than by coincidence.
+  if (payload.chip?.action_type !== undefined) return undefined;
+  return coachingIntentForChipId(payload.chip?.id);
 }
 
 /**
