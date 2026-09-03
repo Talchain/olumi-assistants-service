@@ -482,7 +482,27 @@ const COORDINATED_EDIT_INSTRUCTION =
 
 const PLURAL_OPTION_WORD = /\b(?:options|alternatives|choices)\b/;
 const OPTION_WORD_IN_LABEL = /\b(?:options?|alternatives?|choices?)\b/i;
-const GENERIC_LABELS = new Set([
+/**
+ * ⚠ THE ONLY DEFENCE FOR THE ANAPHORA CLASS — and it had no shrink pin until
+ * 3 Sep 2026, in the PR that exists to say hand-maintained lists shrink
+ * silently.
+ *
+ * This module's own header calls it "the only defence" against a pointer being
+ * minted as an option name, and the anaphora class is one this module
+ * DELIBERATELY SHIPS OPEN. Leaving the single guard on a deliberately-open
+ * class unpinned is closing instances rather than the class — for the sixth
+ * time in one PR. Measured before pinning: deleting an entry left all 353
+ * tests GREEN, while the contrast (deleting a `CONTAINER_NOUNS` entry) REDs two
+ * named tests, so the suite could see shrinkage in general and simply could not
+ * see it here. Repo-wide, it had ONE spec occurrence and that was inside a
+ * comment, against twelve real hits for `CONTAINER_NOUNS`.
+ *
+ * Exported solely so the spec can pin it. ⚠ THE PIN GUARDS MEMBERSHIP DRIFT,
+ * NOT MEMBERSHIP: whether these are the RIGHT ten is a separate question that
+ * this PR does not answer and did not ask. Do not widen it here — the anaphora
+ * class is open and no list closes it (see `KNOWN_OPEN_ANAPHORA`).
+ */
+export const GENERIC_LABELS = new Set([
   'it',
   'this',
   'that',

@@ -24,6 +24,7 @@ import {
   buildAddOptionClarifyChipMessage,
   isTargetReference,
   OPTION_NOUN_DETERMINERS,
+  GENERIC_LABELS,
   DETERMINER_FRAGMENT,
   KNOWN_OPEN_CONTAINER_GAP,
   CLOSED_COORDINATED_INSTRUCTION,
@@ -928,7 +929,7 @@ describe('the courtesy-prefix header now matches the code', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ⭐⭐ ALL FOUR ALPHABETS CARRY A HAND-WRITTEN PIN — closing the CLASS, not the
+// ⭐⭐ ALL FIVE ALPHABETS CARRY A HAND-WRITTEN PIN — closing the CLASS, not the
 // two instances that were found.
 //
 // `CONTAINER_NOUNS` and `NAMING_WORDS` were pinned by hand after a mutant proved
@@ -979,6 +980,22 @@ describe('every alphabet in this module is pinned BY HAND', () => {
       (TARGET_QUANTIFIER_DETERMINERS as readonly string[]).includes(w),
     );
     expect(overlap).toEqual([]);
+  });
+
+  it('⭐ GENERIC_LABELS is pinned BY HAND — the sixth list, and the only defence', () => {
+    // The module's header calls this "the only defence" against the anaphora
+    // class, which this module deliberately ships OPEN. It had NO shrink pin:
+    // deleting an entry left all 353 tests green, while deleting a
+    // CONTAINER_NOUNS entry REDs two named tests — so the suite could see
+    // shrinkage in general and simply could not see it here.
+    //
+    // ⚠ THIS GUARDS DRIFT, NOT MEMBERSHIP. Whether these are the right ten is a
+    // separate question this PR does not answer. Do not widen it here.
+    expect([...GENERIC_LABELS].sort()).toEqual([
+      'a new one', 'another one', 'here', 'it', 'one', 'something', 'that',
+      'the new one', 'there', 'this',
+    ]);
+    expect(GENERIC_LABELS.size).toBe(10);
   });
 
   it('all FIVE alphabets are hand-pinned — the completeness check on this suite', () => {
