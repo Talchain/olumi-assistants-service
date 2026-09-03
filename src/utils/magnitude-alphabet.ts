@@ -192,6 +192,39 @@ const MAGNITUDE_BY_FOLDED_KEY: ReadonlyMap<string, number> = (() => {
 export const AMOUNT_DIGITS = "\\d+(?:,\\d{3})*(?:\\.\\d+)?";
 
 /**
+ * "THE DIGIT RUN ENDS HERE" — the anchor that makes a DECLINE actually decline
+ * (ROADMAP 2.1131).
+ *
+ * ⭐⭐⭐ A REFUSAL PLACED AFTER A GREEDY GROUP IS NOT A REFUSAL, and this estate
+ * wrote that defect TWICE IN ONE CHANGE before a corpus caught the second one.
+ * `AMOUNT_DIGITS` is greedy, so a bare `(?!…)` after it does not reject the
+ * match — the engine BACKTRACKS the digits until the lookahead is satisfied
+ * and matches a SHORTER NUMBER. Measured, on the first cut of
+ * `MAGNITUDE_SUFFIX_ABSENT_GUARD`:
+ *
+ *     "The cost is £80k."   →  £8      (intended: no match)
+ *     "£250 grand"          →  £25
+ *     "£1.5 million"        →  £1
+ *
+ * A 1,000x under-read closed by opening a 10x one, with nothing in the output
+ * to say a refusal had been intended. The identical mistake then appeared in
+ * `RANGE_LOWER_BOUND_ABSENT_GUARD`, written an hour later by the same hand, and
+ * survived until `amount-range.test.ts` asserted the guard's regex directly
+ * rather than only its effect through a pattern that happened to carry the
+ * anchor already.
+ *
+ * ⚠ THE LESSON, WHICH IS WHY THIS IS A NAMED CONSTANT AND NOT TWO INLINE
+ * LOOKAHEADS: every future "this amount is not the kind I want" guard needs
+ * this anchor, and each one written by hand is a chance to forget it. A guard
+ * that composes it cannot backtrack; a guard that spells its own can.
+ *
+ * `(?![\\d,])` forbids stopping mid-run. `(?!\\.\\d)` forbids stopping before a
+ * decimal fraction — spelled that way, not `(?!\\.)`, so an amount at the end
+ * of a sentence ("It cost £59.") still matches.
+ */
+export const AMOUNT_RUN_END = "(?![\\d,])(?!\\.\\d)";
+
+/**
  * The alphabet itself, under a caller-chosen group name, with the load-bearing
  * `\b` that closes it. Sole source of the alternation for every pattern that
  * reads a magnitude — the optional and required spellings below differ only in
@@ -255,6 +288,56 @@ export const MAGNITUDE_SUFFIX_ANON = `(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)?`;
  * the thing it guards can never disagree about what a magnitude key is.
  */
 export const MAGNITUDE_AMBIGUOUS_TRAILER_GUARD = `(?!(?:${MAGNITUDE_ALTERNATION})[A-Za-z])`;
+
+/**
+ * "THIS AMOUNT CARRIES NO MAGNITUDE" — for the BARE sibling of a
+ * magnitude-bearing pattern (ROADMAP 2.1131).
+ *
+ * ⚠ A DIFFERENT QUESTION FROM `MAGNITUDE_AMBIGUOUS_TRAILER_GUARD`, and the two
+ * are one character apart in spelling and opposite in meaning, so they are
+ * named apart deliberately (trap 21). That one asks *"is the attached run an
+ * unreadable near-magnitude?"* — `$5mARR`. This one asks *"is there a
+ * perfectly readable magnitude here that a SIBLING pattern has already read?"*
+ * — `£80k`.
+ *
+ * ⚠⚠ WHY IT IS NEEDED, MEASURED. `cee/factor-extraction` pairs
+ * `currencyWithMultiplier` (magnitude REQUIRED) with `currency` (bare), and
+ * runs both. On `"The cost is £80k."` at `f4c8f50` that emitted TWO factors —
+ * the correct 80,000 AND a bare **80** — and on
+ * `"We're budgeting £80-120k for the first hire."` the bare twin was again
+ * **80**. A 1,000×-short duplicate of a number the service had already read
+ * correctly is not a harmless extra: `mergeFactors` picks one, and the debug
+ * bundle from 3 Sep records the 80 reaching the graph, setting the scale, and
+ * refusing the user's own correction.
+ *
+ * The bare pattern must therefore decline the amounts its magnitude-bearing
+ * sibling owns. Derived from the same alternation, so "what counts as a
+ * magnitude" is answered once for the reader and the decliner alike.
+ *
+ * ⭐⭐⭐ THE TWO ANCHORS IN FRONT OF THE LOOKAHEAD ARE THE LOAD-BEARING PART,
+ * AND WITHOUT THEM THIS GUARD IS WORSE THAN THE DEFECT IT CLOSES. MEASURED,
+ * on the first cut of this constant, which was the lookahead alone:
+ *
+ *     "The cost is £80k."   bare pattern emitted  £8      (was £80)
+ *     "£250 grand"                                £25     (was £250)
+ *     "£1.5 million"                              £1      (was £1.5)
+ *     "from £49k to £59k"                         £4, £5  (was £49, £59)
+ *
+ * A refusal placed after a greedy digit group is not a refusal: the engine
+ * BACKTRACKS the digits until the lookahead is satisfied, so `£80k` fails on
+ * `80` and then happily matches `£8`. Closing a 1,000x under-read by opening a
+ * 10x one — a different wrong number, with nothing in the output to say a
+ * refusal had been intended (CLAUDE.md trap 22b: one predicate, two opposite
+ * harms).
+ *
+ * `(?![\\d,])` forbids stopping mid-run, and `(?!\\.\\d)` forbids stopping
+ * before a decimal fraction — spelled that way, not `(?!\\.)`, so an amount at
+ * the end of a sentence ("It cost £59.") still matches. With both in place the
+ * match FAILS ENTIRELY on a magnitude-bearing amount, which is the only correct
+ * outcome: the sibling that CAN read it has already done so.
+ */
+export const MAGNITUDE_SUFFIX_ABSENT_GUARD =
+  `${AMOUNT_RUN_END}(?!\\s*(?:${MAGNITUDE_ALTERNATION})\\b)`;
 
 /**
  * The magnitude suffix REQUIRED, not optional (ROADMAP 2.316).

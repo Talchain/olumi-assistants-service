@@ -510,9 +510,15 @@ describe("Factor Extraction with Confidence and Type", () => {
   });
 
   it("extracts range with bounds", () => {
+    // ⚠ THE BARE LOWER BOUND IS NO LONGER EMITTED (ROADMAP 2.1131). The
+    // `currency` pattern used to read "£50" and stop at the hyphen, so a
+    // correctly-read range travelled beside a point taken from its own first
+    // half. That twin is the carrier that reached a user: on "£80-120k" it was
+    // the **80** the 3 Sep session stored as `raw_value`, scaled to `cap: 100`,
+    // and then refused Paul's £100,000 correction against. The range itself is
+    // unchanged; only its short shadow is gone.
     expect(completeShape("The cost is between £50-70")).toEqual([
       ["Cost", 60, "£", "range", 0.8, null], // midpoint
-      ["Cost", 50, "£", "inferred", 0.6, null],
     ]);
     const ranged = extractFactors("The cost is between £50-70").find(
       (f) => f.rangeMin !== undefined,

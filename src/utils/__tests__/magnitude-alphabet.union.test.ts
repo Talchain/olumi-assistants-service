@@ -392,6 +392,22 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // ROADMAP 2.1131 — INCIDENTAL, and deliberately so. `utils/amount-range.ts`
+    // is the RANGE grammar: how a magnitude written once after a coordinate
+    // pair ("£80-120k") scopes both bounds. It declares no alphabet, holds no
+    // magnitude->value map, and spells `thousand`/`million` only in the prose
+    // of its docstring; every key, alternation and multiplier it uses comes
+    // from `magnitude-alphabet.js` via `magnitudeSuffixPattern` and
+    // `resolveMagnitude`.
+    // ⚠ IT ANSWERS A DIFFERENT QUESTION FROM THE ALPHABET, which is why it is a
+    // separate module rather than a section of one (trap 21): the alphabet
+    // answers "how many thousands is this suffix?", this answers "does a
+    // suffix written once apply to both bounds?" Converging them would put a
+    // natural-language scoping rule inside the leaf every consumer imports.
+    // ⚠ If this file ever maps a magnitude word to a NUMBER, that makes it a
+    // genuine sibling lookup and it must move to SIBLING_VALUE_LOOKUPS.
+    'utils/amount-range.ts':
+      'derived — range/scoping grammar only; imports the alternation and resolveMagnitude, declares no alphabet and maps no magnitude word to a number',
     // #1274 — DERIVED, and that is what makes this entry safe rather than an
     // excuse. `missing-value-answer.ts` reads a SPELLED PERCENTAGE LEVEL
     // ("thirty percent" -> 0.3). Its first cut re-typed all 27 cardinal words

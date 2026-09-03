@@ -48,6 +48,12 @@ import {
   parseAmountDigits,
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
+import {
+  amountRangePattern,
+  rangePointEstimate,
+  resolveAmountRange,
+  resolvePercentRange,
+} from "../../utils/amount-range.js";
 
 /**
  * Relative value kind for precise classification.
@@ -76,6 +82,27 @@ export interface ParsedValue {
   confidence: "high" | "medium" | "low";
   /** Original text that was parsed */
   originalText: string;
+  /**
+   * ⭐ A RANGE IS NOT A POINT (ROADMAP 2.1131).
+   *
+   * Set when the text stated a RANGE ("£80-120k", "between 5 and 10 thousand").
+   * `value` then carries the point estimate this service runs on — the
+   * midpoint, chosen once in `rangePointEstimate` so the factor path and this
+   * path cannot disagree about which point — and these two carry what the user
+   * actually wrote.
+   *
+   * ⚠ WHY THE FIELDS EXIST RATHER THAN A BARE MIDPOINT. Until now this parser
+   * had NO range grammar at all, so it read a range's LOWER BOUND and returned
+   * it as `confidence: "high"` — MEASURED at `f4c8f50`,
+   * `parseNumericValue("£80-120k for the first hire")` returned **80**, which
+   * is the exact number the 3 Sep session then enforced a scale from. A caller
+   * that cannot see a range cannot tell the user which point was taken, and a
+   * point silently substituted for a range is the product deciding something
+   * the user did not.
+   */
+  isRange?: boolean;
+  rangeMin?: number;
+  rangeMax?: number;
 }
 
 /**
@@ -174,8 +201,32 @@ export function parseNumericValue(text: string): ParsedValue | null {
 
   const trimmed = text.trim();
 
-  // Try each parser in order of specificity
+  // Try each parser in order of specificity.
+  //
+  // ⚠ `parseRangeValue` RUNS FIRST, AND THE ORDER IS LOAD-BEARING. Every
+  // parser below reads the FIRST amount it finds and stops, so on a range each
+  // of them returns the lower bound as a confident point — and
+  // `parsePercentageValue` does something worse: its sign group reads the
+  // range hyphen of "5-10%" as a MINUS, returning **-10** at
+  // `confidence: "high"` for a stated 5-to-10% churn band. Both were measured
+  // at `f4c8f50`. Recognising the range before any of them is what stops a
+  // written range being silently rewritten into a point.
+  //
+  // ⚠⚠ AND A REFUSED RANGE MUST NOT FALL THROUGH. `parseRangeValue` answers
+  // THREE things, not two — "here is a range", "there is no range here", and
+  // "there is a range and I will not guess its magnitude" — and the first
+  // version of this chain collapsed the last two into `null`, so `£500-2m`
+  // refused in the range parser and then returned **500** from
+  // `parseCurrencyValue` one line later, at `confidence: "high"`. That is the
+  // exact publication the refusal exists to prevent, arriving through the
+  // fall-through, and the comment above the parser already said it must not
+  // happen while the code did it anyway. `RANGE_REFUSED` makes the third
+  // answer a value the chain can see.
+  const range = parseRangeValue(trimmed);
+  if (range === RANGE_REFUSED) return null;
+
   return (
+    range ||
     parseRelativeValue(trimmed) ||
     parseMultiplierValue(trimmed) ||
     parseCurrencyValue(trimmed) ||
@@ -183,6 +234,129 @@ export function parseNumericValue(text: string): ParsedValue | null {
     parseCountValue(trimmed) ||
     parsePlainNumber(trimmed)
   );
+}
+
+/**
+ * Parse a stated RANGE — "£80-120k", "between 5 and 10 thousand", "5-10%".
+ *
+ * Returns the point estimate in `value` (so every existing consumer keeps
+ * working, and now on a correctly-scaled number instead of the lower bound)
+ * WITH the stated bounds beside it, so a consumer that can say "I've taken
+ * £100k from your £80k–£120k" has the material to.
+ *
+ * `confidence` is `"medium"`, not `"high"`: a point taken from a range is an
+ * estimate the SERVICE chose, not a figure the user stated, and reporting it
+ * at the same confidence as a stated point is what let a midpoint be enforced
+ * as if the user had typed it.
+ *
+ * The grammar and the shared-suffix rule are `utils/amount-range.ts`, the same
+ * module `cee/factor-extraction` reads — so the two extractors resolve
+ * "£80-120k" to the same two bounds and the same point. That agreement is
+ * asserted directly, on one shared corpus, in
+ * `factor-extraction/__tests__/range-magnitude-cross-extractor.test.ts`.
+ */
+/**
+ * The third answer `parseRangeValue` can give: "this text states a range, and
+ * its magnitude cannot be scoped without guessing." Distinct from `null`
+ * ("no range here"), because the two demand OPPOSITE things of the caller —
+ * `null` means try the point parsers, this means stop.
+ */
+const RANGE_REFUSED = Symbol("range_refused");
+type RangeParse = ParsedValue | typeof RANGE_REFUSED | null;
+
+function parseRangeValue(text: string): RangeParse {
+  const currencyRange = new RegExp(
+    `(?<currency>[£$€¥₹])\\s*` +
+      amountRangePattern("min", "minMag", "max", "maxMag", {
+        currencyBeforeMax: "(?:[£$€¥₹]\\s*)?",
+      }),
+    "i",
+  );
+  const currencyMatch = text.match(currencyRange);
+  if (currencyMatch) {
+    const g = currencyMatch.groups ?? {};
+    const resolved = resolveAmountRange({
+      minDigits: g.min,
+      minMagnitude: g.minMag,
+      maxDigits: g.max,
+      maxMagnitude: g.maxMag,
+    });
+    // A refusal emits NOTHING and stops the chain — see `RANGE_REFUSED`.
+    if (resolved === null) return RANGE_REFUSED;
+    return {
+      value: rangePointEstimate(resolved),
+      unit: CURRENCY_MAP[g.currency!] || g.currency!,
+      isRelative: false,
+      confidence: "medium",
+      originalText: currencyMatch[0],
+      isRange: true,
+      rangeMin: resolved.min,
+      rangeMax: resolved.max,
+    };
+  }
+
+  // Percentage range: "5-10%", "between 5 and 10%". No magnitude — a
+  // percentage does not take one, and the bounds are read as written.
+  const percentRange = new RegExp(
+    `(?:between\\s+)?(?<min>${AMOUNT_DIGITS})\\s*%?` +
+      `(?:\\s*[-–—]\\s*|\\s+(?:to|and)\\s+)` +
+      `(?<max>${AMOUNT_DIGITS})\\s*%`,
+    "i",
+  );
+  const percentMatch = text.match(percentRange);
+  if (percentMatch) {
+    const g = percentMatch.groups ?? {};
+    const resolvedPercent = resolvePercentRange({ minDigits: g.min, maxDigits: g.max });
+    // A DESCENDING pair is not a range — "revenue 2024-10%" is a year and a
+    // month. Refusing stops the chain: falling through would land on
+    // `parsePercentageValue`, whose sign group reads the hyphen as a MINUS and
+    // published **-10** at confidence "high" for exactly this text.
+    if (resolvedPercent === null) return RANGE_REFUSED;
+    return {
+      value: rangePointEstimate(resolvedPercent),
+      unit: "percent",
+      isRelative: false,
+      confidence: "medium",
+      originalText: percentMatch[0],
+      isRange: true,
+      rangeMin: resolvedPercent.min,
+      rangeMax: resolvedPercent.max,
+    };
+  }
+
+  // Bare range, word separator only: "between 5 and 10 thousand". The dash
+  // form is deliberately not admitted without a currency or a `%` — a bare
+  // "80-120" is as likely a date, a version or an id as a range, and this
+  // parser has no context to tell them apart.
+  const bareRange = new RegExp(
+    `between\\s+` +
+      amountRangePattern("min", "minMag", "max", "maxMag", {
+        separator: "(?:\\s+(?:to|and)\\s+)",
+      }),
+    "i",
+  );
+  const bareMatch = text.match(bareRange);
+  if (bareMatch) {
+    const g = bareMatch.groups ?? {};
+    const resolved = resolveAmountRange({
+      minDigits: g.min,
+      minMagnitude: g.minMag,
+      maxDigits: g.max,
+      maxMagnitude: g.maxMag,
+    });
+    if (resolved === null) return RANGE_REFUSED;
+    return {
+      value: rangePointEstimate(resolved),
+      isRelative: false,
+      confidence: "medium",
+      originalText: bareMatch[0],
+      isRange: true,
+      rangeMin: resolved.min,
+      rangeMax: resolved.max,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -379,6 +553,29 @@ function parseCurrencyValue(text: string): ParsedValue | null {
  */
 function parsePercentageValue(text: string): ParsedValue | null {
   // Pattern: 25%, 3.5%, -10%
+  //
+  // ⚠⚠ THIS PATTERN'S `-?` IS THE SIGN-FLIP CARRIER, AND IT IS DELIBERATELY
+  // LEFT ALONE (ROADMAP 2.1131). At `f4c8f50` it read the HYPHEN OF A RANGE as
+  // a minus — `parseNumericValue("churn between 5-10%")` returned **-10** at
+  // `confidence: "high"` — and the first cut of this change added a lookbehind
+  // here to stop it.
+  //
+  // ⭐ THAT LOOKBEHIND WAS REMOVED, BECAUSE A MUTANT PROVED IT COULD NOT BITE.
+  // Deleting it left all 138 tests GREEN, and an enumeration of every
+  // hyphen-joined percent shape confirmed why: `parseRangeValue` runs FIRST and
+  // claims every one of them ("5-10%", "5 - 10%", "5%-10%", "5–10%",
+  // "between 5 and 10%", "5    -10%"), while the one shape it declines,
+  // "5-10 percent", carries no hyphen-adjacent `%` for this pattern to read.
+  // The guard was unreachable — a control that cannot fail, shipped beside a
+  // fix that does the work.
+  //
+  // ⚠ WHAT PROTECTS THIS INSTEAD IS THE CHAIN ORDER, and the order is pinned:
+  // `parseRangeValue` is consulted before every point parser, and its refusals
+  // STOP the chain rather than falling through (`RANGE_REFUSED`). Mutating
+  // either — demoting the range parser, or letting a refusal fall through —
+  // turns the -10 back on and REDs
+  // `utils/__tests__/amount-range.test.ts`. One guard, demonstrably
+  // load-bearing, beats two where only one can fire.
   const percentPattern = /(-?\d+(?:\.\d+)?)\s*%/;
   const match = text.match(percentPattern);
 

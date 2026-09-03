@@ -27,11 +27,22 @@ import { mergeFactors, type MergeResult } from "./merge.js";
 import {
   AMOUNT_DIGITS,
   isMagnitudeShapedSuffix,
+  MAGNITUDE_SUFFIX_ABSENT_GUARD,
   magnitudeSuffixPattern,
   parseAmountDigits,
   requiredMagnitudeSuffixPattern,
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
+import {
+  amountRangePattern,
+  RANGE_LOWER_BOUND_ABSENT_GUARD,
+  RANGE_SEPARATOR,
+  RANGE_SEPARATOR_WORDS_ONLY,
+  rangePointEstimate,
+  resolveAmountPairBothOrNeither,
+  resolveAmountRange,
+  resolvePercentRange,
+} from "../../utils/amount-range.js";
 import {
   CARDINAL_AMOUNT_SOURCE,
   CARDINAL_FRACTION_CONTINUATION,
@@ -152,14 +163,36 @@ const PATTERNS = {
   ),
 
   // Currency with optional decimals: £49, $100.50, €50, £800,000
-  currency: new RegExp(`(?<currency>[£$€])(?<amount>${AMOUNT_DIGITS})`, "g"),
+  //
+  // ⚠ THE BARE SIBLING OF `currencyWithMultiplier`, AND IT MUST DECLINE THE
+  // AMOUNTS THAT SIBLING OWNS (ROADMAP 2.1131). Without the guard both fire on
+  // "£80k" and the extractor emits TWO factors — the correct 80,000 and a bare
+  // **80**. MEASURED at `f4c8f50`: `extractFactors("The cost is £80k.")`
+  // returned exactly that pair, and on Paul's own brief the bare twin was the
+  // 80 that reached the graph, set the factor's scale, and then refused his
+  // £100,000 correction. A 1,000×-short duplicate of a number the service has
+  // already read correctly is not a harmless extra — `mergeFactors` picks one.
+  //
+  // The guard is a LOOKAHEAD, so `matchedText` for every amount that legitimately
+  // carries no magnitude is byte-identical to what it always was.
+  currency: new RegExp(
+    `(?<currency>[£$€])(?<amount>${AMOUNT_DIGITS})` +
+      MAGNITUDE_SUFFIX_ABSENT_GUARD +
+      RANGE_LOWER_BOUND_ABSENT_GUARD,
+    "g",
+  ),
 
   // Percentage: 5%, 3.5%, 10 percent, 1,200%
   percentage: new RegExp(`(?<amount>${AMOUNT_DIGITS})\\s*(?:%|percent)`, "gi"),
 
   // From-to with currency: "from £49 to £59", "from £49,000 to £59,000"
+  // ⚠ Same bare-sibling rule as `currency` above: an amount carrying a
+  // magnitude belongs to the range/multiplier patterns, and reading it here
+  // without the suffix publishes the digits 1,000x short beside the correct
+  // reading (ROADMAP 2.1131).
   currencyFromTo: new RegExp(
-    `from\\s+(?<currency1>[£$€])(?<from>${AMOUNT_DIGITS})\\s+to\\s+(?:[£$€])?(?<to>${AMOUNT_DIGITS})`,
+    `from\\s+(?<currency1>[£$€])(?<from>${AMOUNT_DIGITS})${MAGNITUDE_SUFFIX_ABSENT_GUARD}` +
+      `\\s+to\\s+(?:[£$€])?(?<to>${AMOUNT_DIGITS})${MAGNITUDE_SUFFIX_ABSENT_GUARD}`,
     "gi",
   ),
 
@@ -172,7 +205,10 @@ const PATTERNS = {
   // Increase/decrease patterns: "increase from 10 to 20", "increasing by 5%"
   changePattern: new RegExp(
     `(?<direction>${GOAL_DIRECTION_VERB_STEMS})(?:e|ing|ed)?\\s+(?:from\\s+)?` +
-      `(?<from>${AMOUNT_DIGITS})\\s*(?:%|[£$€])?\\s+(?:to\\s+)?(?:maybe\\s+)?(?<to>${AMOUNT_DIGITS})`,
+      `(?<from>${AMOUNT_DIGITS})` +
+      magnitudeSuffixPattern("fromMult") +
+      `\\s*(?:%|[£$€])?\\s+(?:to\\s+)?(?:maybe\\s+)?(?<to>${AMOUNT_DIGITS})` +
+      magnitudeSuffixPattern("toMult"),
     "gi",
   ),
 
@@ -205,33 +241,93 @@ const PATTERNS = {
       "\\s+(?:of|is|at|was|be)?\\s*(?:[£$€])?" +
       `(?<amount>${AMOUNT_DIGITS})` +
       magnitudeSuffixPattern("mult") +
+      // ⚠ ROADMAP 2.1131 — an amount that is the FIRST HALF of a written range
+      // belongs to the range patterns, which read the magnitude that scopes
+      // both bounds. Reading it here published "budget of £80" for
+      // "budget of £80-120k". See `RANGE_LOWER_BOUND_ABSENT_GUARD`.
+      RANGE_LOWER_BOUND_ABSENT_GUARD +
       "(?<unknownSuffix>[A-Za-z]+)?\\b\\s*(?:%)?",
     "gi",
   ),
 
   // Approximate values: "around £60", "roughly 50", "approximately $100"
+  //
+  // ROADMAP 2.1131 — the magnitude was absent here, and unlike the currency
+  // forms there was no sibling to catch it: MEASURED at `f4c8f50`,
+  // `"roughly 800k users"` extracted **800**, because `currencyWithMultiplier`
+  // needs a currency symbol and this pattern is the only one that reads a bare
+  // approximated amount. `"Around £250k"` survived only because the currency
+  // sibling ran too.
   approximateValue: new RegExp(
     "(?:around|roughly|approximately|about|circa|~)\\s*(?<currency>[£$€])?" +
-      `(?<amount>${AMOUNT_DIGITS})\\s*(?<unit>%)?`,
+      `(?<amount>${AMOUNT_DIGITS})` +
+      magnitudeSuffixPattern("approxMult") +
+      // ⚠ THE `\\s*` SITS INSIDE THE OPTIONAL GROUP, for the reason
+      // `magnitudeSuffixPattern`'s own docstring gives: spelled `\\s*(%)?` it
+      // consumes the separating space of "roughly 800k users" even when no
+      // `%` follows, and every `matchedText` in the corpus gains a trailing
+      // byte. `matchedText` is quoted verbatim into `provenance.quote`, so
+      // byte-parity here is a user-visible property, not cosmetics.
+      RANGE_LOWER_BOUND_ABSENT_GUARD +
+      "(?:\\s*(?<unit>%))?",
     "gi",
   ),
 
-  // Range with currency: "between £50-70", "£50-£70", "50-70 dollars"
+  /* -----------------------------------------------------------------------
+   * THE THREE RANGE PATTERNS — ROADMAP 2.1131.
+   *
+   * All three read TWO amounts and, until now, consulted the magnitude
+   * alphabet for NEITHER. MEASURED at `f4c8f50` on Paul's own 3 Sep brief:
+   *
+   *   "We're budgeting £80-120k for the first hire."  → range 80 .. 120
+   *   "Budget between £2-5m for the platform."        → range 2 .. 5
+   *   "between 5 and 10 thousand signups"             → range 5 .. 10
+   *   "between 2 and 5 million users"                 → range 2 .. 5
+   *
+   * — five reachable under-reads of 1,000× to 1,000,000×, at confidence 0.80,
+   * none of them masked by a sibling pattern. The first is the one that
+   * reached a user: the £80 that set the factor's scale and then refused the
+   * user's own correction.
+   *
+   * The grammar and the shared-suffix rule now live in
+   * `src/utils/amount-range.ts`, so the two extractors read a range the same
+   * way. The separator moves there too: this file spelled it `[-–—to]+`, a
+   * CHARACTER class, which matches a bare "t" or "o" as a separator.
+   * --------------------------------------------------------------------- */
+
+  // Range with currency: "between £50-70k", "£50k-£70k", "£80-120k"
   currencyRange: new RegExp(
-    `(?:between\\s+)?(?<currency>[£$€])(?<min>${AMOUNT_DIGITS})\\s*[-–—to]+\\s*(?:[£$€])?` +
-      `(?<max>${AMOUNT_DIGITS})`,
+    `(?:between\\s+)?(?<currency>[£$€])` +
+      amountRangePattern("min", "minMult", "max", "maxMult", {
+        currencyBeforeMax: "(?:[£$€])?",
+      }),
     "gi",
   ),
 
   // Range with percentage: "between 5-10%", "5%-10%"
+  //
+  // ⚠ DELIBERATELY MAGNITUDE-FREE, and the exclusion is derived rather than
+  // asserted — see `amount-pattern-magnitude-coverage.test.ts`, which admits
+  // an exclusion ONLY for a pattern whose source requires a literal `%`. A
+  // percentage does not take a magnitude suffix in English ("5k%" is not a
+  // thing), and admitting one here would let the alternation's `m`/`t`
+  // branches bite the first letter of a following word.
   percentRange: new RegExp(
-    `(?:between\\s+)?(?<min>${AMOUNT_DIGITS})\\s*%?\\s*[-–—to]+\\s*(?<max>${AMOUNT_DIGITS})\\s*%`,
+    `(?:between\\s+)?(?<min>${AMOUNT_DIGITS})\\s*%?${RANGE_SEPARATOR}(?<max>${AMOUNT_DIGITS})\\s*%`,
     "gi",
   ),
 
-  // Generic range: "between 50 and 70", "50 to 70"
+  // Generic range: "between 50 and 70", "between 5 and 10 thousand"
+  //
+  // ⚠ WORD-ONLY SEPARATOR, deliberately. This pattern is anchored on "between"
+  // and carries no unit of its own; admitting the dash form would make it also
+  // match "between 5-10%" and emit a UNITLESS 5..10 beside `percentRange`'s
+  // 0.05..0.10 — one written range arriving as two factors on two scales.
   genericRange: new RegExp(
-    `between\\s+(?<min>${AMOUNT_DIGITS})\\s+(?:and|to)\\s+(?<max>${AMOUNT_DIGITS})`,
+    `between\\s+` +
+      amountRangePattern("min", "minMult", "max", "maxMult", {
+        separator: RANGE_SEPARATOR_WORDS_ONLY,
+      }),
     "gi",
   ),
 };
@@ -1755,9 +1851,26 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   const currencyRangeRegex = new RegExp(PATTERNS.currencyRange.source, "gi");
   while ((match = currencyRangeRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency || "";
-    const min = (parseAmountDigits(match.groups?.min) ?? 0);
-    const max = (parseAmountDigits(match.groups?.max) ?? 0);
-    const midpoint = (min + max) / 2;
+    // ROADMAP 2.1131 — the bounds are resolved through the SHARED range
+    // grammar, which applies the trailing magnitude to both. A refusal
+    // (`null`) emits NOTHING: publishing the bare digits for a range whose
+    // magnitude cannot be scoped is the 1,000×-short lie this closes.
+    const resolved = resolveAmountRange({
+      minDigits: match.groups?.min,
+      minMagnitude: match.groups?.minMult,
+      maxDigits: match.groups?.max,
+      maxMagnitude: match.groups?.maxMult,
+    });
+    if (resolved === null) {
+      log.debug(
+        { matched: match[0], event: "cee.factor_extraction.range_magnitude_ambiguous" },
+        "Range refused: trailing magnitude cannot be scoped across both bounds",
+      );
+      continue;
+    }
+    const min = resolved.min;
+    const max = resolved.max;
+    const midpoint = rangePointEstimate(resolved);
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, midpoint, currency);
 
@@ -1781,9 +1894,25 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract percentage ranges: "between 5-10%", "5%-10%"
   const percentRangeRegex = new RegExp(PATTERNS.percentRange.source, "gi");
   while ((match = percentRangeRegex.exec(brief)) !== null) {
-    const min = (parseAmountDigits(match.groups?.min) ?? 0) / 100;
-    const max = (parseAmountDigits(match.groups?.max) ?? 0) / 100;
-    const midpoint = (min + max) / 2;
+    // ROADMAP 2.1131 — a DESCENDING pair is not a range, the same rule the
+    // money ranges apply. MEASURED at `f4c8f50`: "revenue 2024-10%" extracted
+    // a percentage band with a FLOOR OF 2,024% — a year and a month read as a
+    // range. Refusing loses an extraction; admitting kept publishing a number
+    // pointing nowhere the sentence does.
+    const resolvedPercent = resolvePercentRange({
+      minDigits: match.groups?.min,
+      maxDigits: match.groups?.max,
+    });
+    if (resolvedPercent === null) {
+      log.debug(
+        { matched: match[0], event: "cee.factor_extraction.percent_range_not_ascending" },
+        "Percent range refused: the pair descends, so it is not a range",
+      );
+      continue;
+    }
+    const min = resolvedPercent.min / 100;
+    const max = resolvedPercent.max / 100;
+    const midpoint = rangePointEstimate({ min, max });
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, midpoint, "%");
 
@@ -1807,9 +1936,22 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract generic ranges: "between 50 and 70"
   const genericRangeRegex = new RegExp(PATTERNS.genericRange.source, "gi");
   while ((match = genericRangeRegex.exec(brief)) !== null) {
-    const min = (parseAmountDigits(match.groups?.min) ?? 0);
-    const max = (parseAmountDigits(match.groups?.max) ?? 0);
-    const midpoint = (min + max) / 2;
+    const resolved = resolveAmountRange({
+      minDigits: match.groups?.min,
+      minMagnitude: match.groups?.minMult,
+      maxDigits: match.groups?.max,
+      maxMagnitude: match.groups?.maxMult,
+    });
+    if (resolved === null) {
+      log.debug(
+        { matched: match[0], event: "cee.factor_extraction.range_magnitude_ambiguous" },
+        "Range refused: trailing magnitude cannot be scoped across both bounds",
+      );
+      continue;
+    }
+    const min = resolved.min;
+    const max = resolved.max;
+    const midpoint = rangePointEstimate(resolved);
     const label = inferLabel(brief, match.index, match[0]);
     const key = dedupKey(label, midpoint, undefined);
 
@@ -1837,7 +1979,12 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   const approximateRegex = new RegExp(PATTERNS.approximateValue.source, "gi");
   while ((match = approximateRegex.exec(brief)) !== null) {
     const currency = match.groups?.currency;
-    const amount = (parseAmountDigits(match.groups?.amount) ?? 0);
+    // ROADMAP 2.1131 — the magnitude is applied here for the first time.
+    // `"roughly 800k users"` extracted 800 at `f4c8f50`, and no sibling
+    // pattern covered it: `currencyWithMultiplier` requires a symbol.
+    const amount =
+      (parseAmountDigits(match.groups?.amount) ?? 0) *
+      resolveMagnitude(match.groups?.approxMult);
     const unitMatch = match.groups?.unit;
     const unit = unitMatch === "%" ? "%" : currency;
     const normalizedValue = unitMatch === "%" ? amount / 100 : amount;
@@ -1964,8 +2111,26 @@ export function extractFactors(brief: string): ExtractedFactor[] {
   // Extract change patterns (increase/decrease)
   const changeRegex = new RegExp(PATTERNS.changePattern.source, "gi");
   while ((match = changeRegex.exec(brief)) !== null) {
-    const from = (parseAmountDigits(match.groups?.from) ?? 0);
-    const to = (parseAmountDigits(match.groups?.to) ?? 0);
+    // ROADMAP 2.1131 — a from-to CHANGE is not a range (see
+    // `resolveAmountPairBothOrNeither`): a decrease descends by definition, so
+    // the range resolver's ascending precondition does not apply. Both bounds
+    // carry their own magnitude or neither does; the one-sided elliptical form
+    // is REFUSED rather than guessed, and that refusal is pinned by name.
+    const pair = resolveAmountPairBothOrNeither({
+      minDigits: match.groups?.from,
+      minMagnitude: match.groups?.fromMult,
+      maxDigits: match.groups?.to,
+      maxMagnitude: match.groups?.toMult,
+    });
+    if (pair === null) {
+      log.debug(
+        { matched: match[0], event: "cee.factor_extraction.change_magnitude_ambiguous" },
+        "Change refused: a magnitude on one bound only cannot be scoped to the other",
+      );
+      continue;
+    }
+    const from = pair.min;
+    const to = pair.max;
     const isPercent = match[0].includes("%");
     const hasCurrency = /[£$€]/.test(match[0]);
     const unit = isPercent ? "%" : hasCurrency ? match[0].match(/[£$€]/)?.[0] : undefined;
