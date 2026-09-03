@@ -523,19 +523,21 @@ describe('licenceToReportMovementDirection', () => {
     ).toEqual({ kind: 'licensed' });
   });
 
-  it('BOTH margin constituents must move, not either', () => {
-    // The leader moves hugely; the runner-up does not. The margin is their
-    // DIFFERENCE, and one of them moving is not evidence their difference
-    // moved by a bounded amount.
+  it('⭐ MIXED VERDICTS ARE THEIR OWN STATE, NOT "within noise"', () => {
+    // The leader moves hugely; the runner-up does not. Folding this into
+    // `within_noise` would make the consumer say "the figures moved by less
+    // than this model varies between runs" about a figure that plainly moved
+    // by MORE — a false statement out of a guard written to prevent false
+    // statements. One predicate cannot carry two harms (trap 22b).
     expect(
       licenceToReportMovementDirection({
         priorEnrichment: captureEnvelope({ founder: 0.55, hire: 0.3805, sdr: 0.0695 }),
         currentEnrichment: captureEnvelope({ founder: 0.72, hire: 0.3805, sdr: 0.0 }),
-      }).kind,
-    ).toBe('within_noise');
+      }),
+    ).toEqual({ kind: 'indeterminate', reason: 'mixed_verdicts' });
   });
 
-  it('no per-option sample size ⇒ UNBOUNDED, never "within noise"', () => {
+  it('no per-option sample size ⇒ INDETERMINATE, never "within noise"', () => {
     const noSamples = {
       analysis_status: 'completed',
       option_comparison: [
@@ -548,16 +550,16 @@ describe('licenceToReportMovementDirection', () => {
         priorEnrichment: noSamples,
         currentEnrichment: noSamples,
       }),
-    ).toEqual({ kind: 'unbounded', reason: 'sample_size_unavailable' });
+    ).toEqual({ kind: 'indeterminate', reason: 'sample_size_unavailable' });
   });
 
-  it('fewer than two identity-bound options on either side ⇒ UNBOUNDED', () => {
+  it('fewer than two identity-bound options on either side ⇒ INDETERMINATE', () => {
     expect(
       licenceToReportMovementDirection({
         priorEnrichment: PRIOR_ENVELOPE,
         currentEnrichment: { option_comparison: [{ option_id: 'z', win_probability: 1 }] },
       }),
-    ).toEqual({ kind: 'unbounded', reason: 'no_identity_bound_pair' });
+    ).toEqual({ kind: 'indeterminate', reason: 'no_identity_bound_pair' });
     // A margin constituent absent from the EARLIER run has no movement to
     // bound; treating its absence as a movement from zero would fabricate one.
     expect(
@@ -565,10 +567,10 @@ describe('licenceToReportMovementDirection', () => {
         priorEnrichment: { option_comparison: [{ option_id: 'z', win_probability: 1 }] },
         currentEnrichment: CURRENT_ENVELOPE,
       }),
-    ).toEqual({ kind: 'unbounded', reason: 'no_identity_bound_pair' });
+    ).toEqual({ kind: 'indeterminate', reason: 'no_identity_bound_pair' });
   });
 
-  it('a sample too small for the normal approximation ⇒ UNBOUNDED, not a band', () => {
+  it('a sample too small for the normal approximation ⇒ INDETERMINATE, not a band', () => {
     const tiny = (founder: number): Record<string, unknown> => ({
       option_comparison: [
         { option_id: OPT_FOUNDER, win_probability: founder, outcome: { n_samples: 6 } },
@@ -580,7 +582,7 @@ describe('licenceToReportMovementDirection', () => {
         priorEnrichment: tiny(0.5),
         currentEnrichment: tiny(0.95),
       }),
-    ).toEqual({ kind: 'unbounded', reason: 'not_noise_qualified' });
+    ).toEqual({ kind: 'indeterminate', reason: 'not_noise_qualified' });
   });
 
   it('a duplicated option id drops that option rather than guessing', () => {
@@ -596,7 +598,7 @@ describe('licenceToReportMovementDirection', () => {
         priorEnrichment: duped,
         currentEnrichment: duped,
       }),
-    ).toEqual({ kind: 'unbounded', reason: 'no_identity_bound_pair' });
+    ).toEqual({ kind: 'indeterminate', reason: 'no_identity_bound_pair' });
   });
 });
 
@@ -820,7 +822,7 @@ describe('the re-run sentence after an inert edit', () => {
     expect(text).not.toContain('widened');
   });
 
-  it('an UNBOUNDED pair says it cannot tell, and never borrows the noise wording', () => {
+  it('an INDETERMINATE pair says it cannot tell, and never borrows the noise wording', () => {
     // Claiming "less than the model varies" without a band would assert a
     // bound we did not compute.
     const noSamples = (founder: number): Record<string, unknown> => ({
@@ -832,6 +834,19 @@ describe('the re-run sentence after an inert edit', () => {
       ],
     });
     const text = rerunText([runFact(noSamples(0.55))], noSamples(0.62));
+    expect(text).toContain('cannot tell whether the movement');
+    expect(text).not.toContain('less than this model varies');
+    expect(text).not.toContain('widened');
+  });
+
+  it('⭐ A MIXED PAIR NEVER BORROWS THE NOISE WORDING', () => {
+    // One constituent cleared the band, the other did not. Saying "the figures
+    // moved by less than this model varies between runs" here would be false
+    // of the one that moved.
+    const text = rerunText(
+      [runFact(captureEnvelope({ founder: 0.55, hire: 0.3805, sdr: 0.0695 }))],
+      captureEnvelope({ founder: 0.72, hire: 0.3805, sdr: 0.0 }),
+    );
     expect(text).toContain('cannot tell whether the movement');
     expect(text).not.toContain('less than this model varies');
     expect(text).not.toContain('widened');
@@ -927,6 +942,16 @@ describe('run-comparison gate: the same movement gate', () => {
     const text = ask(PRIOR_ENVELOPE, captureEnvelope({ founder: 0.72, hire: 0.2767, sdr: 0.0033 }));
     expect(text).toContain('Its lead has widened by about');
     expect(text).toContain('percentage points');
+  });
+
+  it('⭐ a mixed pair never borrows the noise wording here either', () => {
+    const text = ask(
+      captureEnvelope({ founder: 0.55, hire: 0.3805, sdr: 0.0695 }),
+      captureEnvelope({ founder: 0.72, hire: 0.3805, sdr: 0.0 }),
+    );
+    expect(text).toContain('cannot tell whether the movement in the size of its lead');
+    expect(text).not.toContain('less than this model varies');
+    expect(text).not.toContain('widened');
   });
 
   it('no sample size ⇒ says it cannot tell, and never borrows the noise wording', () => {

@@ -37,7 +37,7 @@
  * under a name that would then be read as authoritative, this module applies
  * the SHIPPED per-proportion band
  * ({@link noiseVerdictForProportions}) to BOTH options the margin is composed
- * of and licenses a direction only when BOTH movements are `signal`. That is a
+ * of, and licenses a direction only when BOTH movements are `signal`. That is a
  * NECESSARY condition for the margin claim, deliberately conservative, and it
  * is stated as such rather than dressed up as a margin band.
  *
@@ -65,14 +65,31 @@ import { noiseVerdictForProportions } from './win-probability-noise-band.js';
  * a caller that wants to explain itself to the user needs to tell them apart.
  */
 export type MovementDirectionLicence =
-  /** Both margin-defining options moved by more than the band. Say the direction. */
+  /** BOTH margin-defining options moved by more than the band. Say the direction. */
   | { readonly kind: 'licensed' }
-  /** A pair existed and at least one movement sat inside the band. */
+  /**
+   * BOTH moved by LESS than the band. The only state in which prose may say
+   * "the figures moved by less than this model varies between runs" — that
+   * sentence is a claim about both quantities, and it is false the moment one
+   * of them cleared the band.
+   */
   | { readonly kind: 'within_noise' }
-  /** No honest band could be computed for this pair. */
-  | { readonly kind: 'unbounded'; readonly reason: MovementLicenceUnboundedReason };
+  /**
+   * Neither claim is supported. Either no band could be computed, or the two
+   * constituents DISAGREED — one cleared the band and the other did not.
+   *
+   * ⚠ THE MIXED CASE LIVES HERE, NOT UNDER `within_noise`, AND THAT IS A
+   * CORRECTION TO THIS MODULE'S FIRST CUT. It originally folded "not both
+   * signal" into `within_noise`, which made the consumer emit "the figures
+   * moved by less than this model varies between runs" on a pair where one
+   * figure had moved by MORE — a false statement produced by a guard written
+   * to prevent false statements. One predicate cannot carry two harms
+   * (CLAUDE.md trap 22b); the third state is what keeps each sentence true of
+   * exactly its own case.
+   */
+  | { readonly kind: 'indeterminate'; readonly reason: MovementLicenceIndeterminateReason };
 
-export type MovementLicenceUnboundedReason =
+export type MovementLicenceIndeterminateReason =
   /**
    * Fewer than two options carry an identity-bound win probability in BOTH
    * runs, so the margin's two constituents cannot both be tracked across the
@@ -89,7 +106,13 @@ export type MovementLicenceUnboundedReason =
    * The normal approximation does not hold for at least one of the four
    * proportion/`n` combinations, so the band itself is not defensible.
    */
-  | 'not_noise_qualified';
+  | 'not_noise_qualified'
+  /**
+   * A band existed for both, and they disagreed: one movement cleared it and
+   * the other did not. The margin is their DIFFERENCE, so neither "it moved"
+   * nor "it did not" is established.
+   */
+  | 'mixed_verdicts';
 
 /**
  * One option's cross-run pair: its win probability and sample size on each
@@ -204,7 +227,7 @@ export function licenceToReportMovementDirection(input: {
   const current = readOptionReadings(input.currentEnrichment);
 
   const pair = currentMarginPair(current);
-  if (pair === null) return { kind: 'unbounded', reason: 'no_identity_bound_pair' };
+  if (pair === null) return { kind: 'indeterminate', reason: 'no_identity_bound_pair' };
 
   const movements: OptionMovement[] = [];
   for (const optionId of pair) {
@@ -214,10 +237,10 @@ export function licenceToReportMovementDirection(input: {
     // in the earlier run has no movement to bound, and treating its absence as
     // a movement from zero would fabricate one.
     if (currentReading === undefined || priorReading === undefined) {
-      return { kind: 'unbounded', reason: 'no_identity_bound_pair' };
+      return { kind: 'indeterminate', reason: 'no_identity_bound_pair' };
     }
     if (currentReading.nSamples === null || priorReading.nSamples === null) {
-      return { kind: 'unbounded', reason: 'sample_size_unavailable' };
+      return { kind: 'indeterminate', reason: 'sample_size_unavailable' };
     }
     movements.push({
       optionId,
@@ -235,10 +258,14 @@ export function licenceToReportMovementDirection(input: {
   // `not_noise_qualified` is NOT "within noise" — it is "no band exists here".
   // Folding it into `within_noise` would report a bound we did not compute.
   if (verdicts.some((v) => v === 'not_noise_qualified')) {
-    return { kind: 'unbounded', reason: 'not_noise_qualified' };
+    return { kind: 'indeterminate', reason: 'not_noise_qualified' };
   }
-  // BOTH, not either. The margin is a difference of these two quantities; one
-  // of them moving is not evidence that their difference moved.
+  // BOTH, not either — three times over. The margin is a DIFFERENCE of these
+  // two quantities, so: both clearing the band licenses a direction; both
+  // sitting inside it licenses the "less than this model varies" sentence; and
+  // one of each licenses NEITHER, because the difference of a moved quantity
+  // and an unmoved one is a movement we have not bounded.
   if (verdicts.every((v) => v === 'signal')) return { kind: 'licensed' };
-  return { kind: 'within_noise' };
+  if (verdicts.every((v) => v === 'within_noise')) return { kind: 'within_noise' };
+  return { kind: 'indeterminate', reason: 'mixed_verdicts' };
 }

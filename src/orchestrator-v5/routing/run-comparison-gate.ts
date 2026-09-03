@@ -795,7 +795,7 @@ function licenceForPair(
   const priorEnrichment = runAnalysisEnrichmentOf(prior);
   const currentEnrichment = runAnalysisEnrichmentOf(current);
   if (priorEnrichment === null || currentEnrichment === null) {
-    return { kind: 'unbounded', reason: 'no_identity_bound_pair' };
+    return { kind: 'indeterminate', reason: 'no_identity_bound_pair' };
   }
   return licenceToReportMovementDirection({ priorEnrichment, currentEnrichment });
 }

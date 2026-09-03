@@ -173,7 +173,7 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
     composeRerunText(
       runDelta ?? null,
       interveningChange ?? null,
-      movementLicence ?? { kind: 'unbounded', reason: 'no_identity_bound_pair' },
+      movementLicence ?? { kind: 'indeterminate', reason: 'no_identity_bound_pair' },
       interveningChangeIsInert === true,
     ),
 };
@@ -265,7 +265,7 @@ function composeRerunText(
   delta: ContentSafeRunDelta | null,
   interveningChange: InterveningChange | null = null,
   movementLicence: MovementDirectionLicence = {
-    kind: 'unbounded',
+    kind: 'indeterminate',
     reason: 'no_identity_bound_pair',
   },
   interveningChangeIsInert = false,
@@ -420,10 +420,12 @@ function composeRerunBody(
           + 'would not read a direction into that movement.',
       };
     }
-    // NO BAND COULD BE COMPUTED. Distinct from the arm above and deliberately
-    // so: claiming "less than the model varies" here would assert a bound we
-    // did not compute (CLAUDE.md trap 13 — an absence claim needs an
-    // instrument that could have seen a presence).
+    // NEITHER CLAIM IS SUPPORTED — no band at all, or a band whose two
+    // constituents disagreed. Distinct from the arm above and deliberately so:
+    // claiming "less than the model varies" here would assert a bound we did
+    // not compute, or assert it of a figure that plainly cleared the band
+    // (CLAUDE.md trap 13 — an absence claim needs an instrument that could
+    // have seen a presence).
     return {
       kind: 'margin_moved',
       text:
