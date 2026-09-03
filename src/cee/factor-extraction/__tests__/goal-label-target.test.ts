@@ -148,6 +148,22 @@ describe("deriveGoalTargetFromLabel", () => {
     expect(r.target.value).toBe(800);
   });
 
+  it("refuses a label figure whose UNIT the brief never states — 500 customers is not £500", () => {
+    // KILLS THE SURVIVOR. Without the unit comparison in `sameQuantity` this
+    // attests a bare count of 500 against the brief's "£500" CAC ceiling and
+    // mints a currency ceiling as a customer target. Same number, different
+    // quantity — the one shape a value-only match cannot tell apart
+    // (CLAUDE.md trap 19: bind by identity, never by a value predicate another
+    // object could satisfy).
+    expect(deriveGoalTargetFromLabel("Reach 500 Customers", FOUNDER_BRIEF)).toEqual({
+      ok: false,
+      refusal: "quantity_not_attested",
+    });
+    // Its positive twin, so the case cannot pass by refusing everything.
+    const ok = deriveGoalTargetFromLabel("Reach 500 Customers", "We want 500 customers.");
+    expect(ok.ok).toBe(true);
+  });
+
   it("refuses an unquantified goal label", () => {
     expect(deriveGoalTargetFromLabel("Grow annual revenue", FOUNDER_BRIEF)).toEqual({
       ok: false,
