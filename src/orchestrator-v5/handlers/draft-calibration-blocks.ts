@@ -53,11 +53,20 @@
  * therefore already made, upstream, by the module that owns it.
  *
  * ⭐ PROVENANCE IS PRESERVED BY THE EXISTING PATH, NOT BY A NEW FIELD. An
- * answer routes to `set_factor_value`, which stamps `observed_state.source:
- * "user_override"` (the stamp visible on the founder's own edited factor in the
- * capture). An unanswered factor keeps its ignorance prior and its
- * `value_tier`. User-stated and Olumi-estimated stay distinguishable
- * downstream because neither carrier is touched here.
+ * answer routes to `set_factor_value`, which writes the user-edit provenance
+ * onto `observed_state.source` — the stamp visible on the founder's own edited
+ * factor in the capture. An unanswered factor keeps its ignorance prior and its
+ * `value_tier`. User-stated and Olumi-estimated stay distinguishable downstream
+ * because neither carrier is touched here.
+ *
+ * ⚠ THIS MODULE IS NOT A WRITER OF THAT STAMP AND MUST NOT BECOME ONE. It never
+ * touches `observed_state`; it only asks. The sentence above deliberately names
+ * the field rather than quoting the literal, because
+ * `cee/transforms/__tests__/no-brief-derived-user-override.writers.test.ts`
+ * scans every non-test `src/` file for that literal and demands a reviewed
+ * entry — and its manifest is a list of WRITERS AND READERS. Adding a module
+ * that merely mentions the stamp in prose would dilute a guard that exists to
+ * stop the product claiming a brief-derived number as the user's own.
  *
  * ── ⭐⭐ P8 — NEVER ASK WHAT YOU CANNOT ACCEPT ──────────────────────────────
  * `routing/__tests__/ask-copy-acceptance-pairing.test.ts` makes this a gate,
