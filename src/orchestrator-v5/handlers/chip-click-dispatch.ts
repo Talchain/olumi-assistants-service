@@ -1730,10 +1730,14 @@ export async function dispatchChipClickRunAnalysis(
     //
     // So the guard is reachable on THREE of route-v2's 24 `sendFinalised200`
     // exits, not four, and the structural property is per-EXIT rather than
-    // per-family. The measured enumeration of all twenty-one uncovered exits,
-    // with `:2855`'s reason and the note that it carries only static literals
-    // (uncovered, not leaking), is in `enforceProcessNarrationGuard`'s
-    // docblock in `turn-executor.ts`.
+    // per-family. The measured enumeration of all twenty-one uncovered exits
+    // and `:2855`'s reason are in `enforceProcessNarrationGuard`'s docblock in
+    // `turn-executor.ts`.
+    //
+    // ⚠ AN EARLIER DRAFT OF THIS COMMENT ADDED "and it carries only static
+    // literals", inherited from the review rather than measured. FALSE: four
+    // of the nine `RECOVERABLE_HANDLER_CAUSES` interpolate. What is true is
+    // narrower and is stated, with its limits, in that docblock.
     {
       const guarded = applyProcessNarrationGuard(response.assistant_text ?? '');
       if (guarded.rewritten) {

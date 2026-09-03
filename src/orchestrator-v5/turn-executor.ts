@@ -13125,11 +13125,28 @@ export async function runTurnExecutor(
    *   `if (recovered) return recovered;` at `:1406` — a return from a CATCH
    *   clause nested inside the outer try, so it leaves the function before
    *   the guard at `:1729` in that same outer try's body.
-   *   ⚠ NOT A LIVE LEAK, stated so this line cannot be over-read: that exit
-   *   carries `composeRecoverableHandlerResponse` →
+   *   ⚠⚠ THE REASSURANCE FIRST WRITTEN HERE WAS FALSE, and it came from
+   *   the review rather than from a measurement — which is this PR's own
+   *   defect class, so it is corrected in place rather than deleted. It read:
+   *   *"that exit carries `composeRecoverableHandlerResponse` →
    *   `composeHandlerFailureBody`, whose `assistant_text` values are static
-   *   string literals with no model or error text interpolated. It is
-   *   uncovered, not leaking.
+   *   string literals with no model or error text interpolated."* Measured
+   *   instead (4 Sep 2026, every case clause mapped against
+   *   `RECOVERABLE_HANDLER_CAUSES`): **four of the nine recoverable causes
+   *   DO interpolate** — `args_validation_failed` and
+   *   `parameter_invalid_at_execute` splice
+   *   `sanitiseForUser(details.specific_issue)`, `analysis_not_ready` splices
+   *   `details.next_step` plus `unresolved_inputs[].prompt`, and
+   *   `options_not_configured` splices a `safeLabel` option label. Five are
+   *   static.
+   *   ⭐ What survives the correction, stated as what it is — a TRACED
+   *   SAMPLE, not an exact-set guarantee over an open class: every writer of
+   *   those interpolated fields that this trace reached is CEE-authored — Zod
+   *   issue messages, `ADJUST_EDGE_STRENGTH_USER_GUIDANCE`, readiness prompts
+   *   from `analysis-ready-core.readinessQuestions`, CEE template strings, and
+   *   a user-authored graph label. **No model-prose channel was found on this
+   *   path, and none was proven absent.** The unchanged, AST-proven claim is
+   *   only the first one: `:2855` does not reach this guard.
    * · `:4519 draft_graph` — the one that matters, because it ships prose
    *   assembled from LLM-authored coaching fields
    *   (`coaching/post-draft-narrative.ts:6` — `coachingSummary` is used
