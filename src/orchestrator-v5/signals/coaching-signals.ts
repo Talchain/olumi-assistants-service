@@ -247,9 +247,12 @@ export const INERT_EDIT_TAIL =
 
 /**
  * ⭐ THE TAIL IS APPLIED HERE, ONCE, RATHER THAN AT EVERY `return` BELOW.
- * `composeRerunBody` has seven exits; appending at each of them is seven
- * places for the next exit to be forgotten (CLAUDE.md trap #12), and it is
- * exactly how the abstention arms below acquired their divergent shapes.
+ * `composeRerunBody` has many exits — deliberately not counted here, because a
+ * hand-typed count is a mirror that drifts the moment an arm is added
+ * (CLAUDE.md trap #12; this file's neighbours have carried a wrong one twice).
+ * Appending at each exit is one place per exit for the next exit to be
+ * forgotten, which is exactly how the abstention arms below acquired their
+ * divergent shapes.
  *
  * The abstention exits ARE deliberately excluded: they are reached before the
  * body has established any comparison, and a tail that says "it could not move
