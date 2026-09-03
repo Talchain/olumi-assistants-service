@@ -530,8 +530,17 @@ describe('reconcileStructuralTruth', () => {
   // Rule 4: Sign Reconciliation
   // =============================================================================
 
+  // ⚠ REVERSED, DELIBERATELY. These two cases previously asserted that Rule 4
+  // overwrites `effect_direction` from `sign(strength_mean)`. That was the
+  // silent polarity inverter: the drafting model's stated NEGATIVE
+  // relationships were being turned positive, measured on 19 edges of a
+  // governed evaluator baseline. `effect_direction` is now the authority and
+  // the SIGN moves onto the magnitude — see the header comment on
+  // `signReconciliationRule` for the derivation, and
+  // `tests/unit/cee.edge-polarity-direction-authority.test.ts` for the full
+  // opposite-direction pairs and the corpus replay.
   describe('Rule 4: Sign Reconciliation', () => {
-    it('flips effect_direction when it contradicts strength_mean sign', () => {
+    it('signs strength_mean from a stated POSITIVE direction, keeping the direction', () => {
       const graph = createValidGraph();
       // Add edge with negative strength but positive direction
       graph.edges.push({
@@ -541,16 +550,18 @@ describe('reconcileStructuralTruth', () => {
 
       const result = reconcileStructuralTruth(graph);
 
-      const fixedEdge = graph.edges.find(e => e.from === 'fac_price' && e.to === 'outcome_1' && e.strength_mean === -0.5);
-      expect(fixedEdge!.effect_direction).toBe('negative');
+      const fixedEdge = graph.edges.find(e => e.from === 'fac_price' && e.to === 'outcome_1' && e.effect_direction === 'positive' && e.strength_mean !== 1);
+      expect(fixedEdge!.effect_direction).toBe('positive');
+      expect(fixedEdge!.strength_mean).toBe(0.5);
       const mutation = result.mutations.find(m => m.code === 'SIGN_CORRECTED');
       expect(mutation).toBeDefined();
-      expect(mutation!.before).toBe('positive');
-      expect(mutation!.after).toBe('negative');
+      expect(mutation!.field).toBe('strength_mean');
+      expect(mutation!.before).toBe(-0.5);
+      expect(mutation!.after).toBe(0.5);
       expect(mutation!.severity).toBe('warn');
     });
 
-    it('flips negative→positive when strength_mean is positive', () => {
+    it('signs strength_mean from a stated NEGATIVE direction, keeping the direction', () => {
       const graph = createValidGraph();
       graph.edges.push({
         from: 'fac_price', to: 'outcome_1',
@@ -559,10 +570,12 @@ describe('reconcileStructuralTruth', () => {
 
       const result = reconcileStructuralTruth(graph);
 
-      const fixedEdge = graph.edges.find(e => e.from === 'fac_price' && e.to === 'outcome_1' && e.strength_mean === 0.7);
-      expect(fixedEdge!.effect_direction).toBe('positive');
+      const fixedEdge = graph.edges.find(e => e.from === 'fac_price' && e.to === 'outcome_1' && e.effect_direction === 'negative');
+      expect(fixedEdge!.effect_direction).toBe('negative');
+      expect(fixedEdge!.strength_mean).toBe(-0.7);
       const mutation = result.mutations.find(m => m.code === 'SIGN_CORRECTED');
       expect(mutation).toBeDefined();
+      expect(mutation!.field).toBe('strength_mean');
     });
 
     it('does not fire when sign and direction agree', () => {
