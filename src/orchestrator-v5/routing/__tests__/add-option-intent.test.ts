@@ -705,9 +705,25 @@ describe('the screen’s two conjunctions each bite, on their own case', () => {
     ['Add "The pricing decision review" as an option', 'The pricing decision review'],
     ['Add a "Model refresh" option', 'Model refresh'],
   ])('EXPLICITLY NAMED survives even when the name mentions the container: %j', (message, expected) => {
-    // Drop `explicitlyNamed` and every row above REDs. Without a container noun
-    // inside an explicitly-named label, widening the screen to every trigger
-    // passes every other test in this file.
+    // ⚠ THE MUTANT EVIDENCE HERE IS THE FIRST TWO ROWS ONLY — measured
+    // 3 Sep 2026, and this comment previously overstated it.
+    //
+    // Dropping `explicitlyNamed` REDs `The Model Overhaul` and
+    // `The pricing decision review`, because each is a determiner-led phrase
+    // that also names a container, so the screen's conjunction goes true once
+    // the guard is gone. The third row, `Add a "Model refresh" option`, CANNOT
+    // RED under that mutation: `isTargetReference('Model refresh')` is false on
+    // every branch, so the conjunction is false whatever `explicitlyNamed`
+    // does. It is a legitimate positive and stays — but it was never evidence
+    // for this mutant, and saying it was asserted a sensitivity the suite does
+    // not have.
+    //
+    // The line below binds that reasoning to an assertion, so if the predicate
+    // ever starts matching this label the explanation fails with it rather than
+    // going quietly stale.
+    expect(isTargetReference('Model refresh')).toBe(false);
+    // Without a container noun inside an explicitly-named label, widening the
+    // screen to every trigger passes every other test in this file.
     const d = detectAddOptionIntent(message);
     expect(d.matched, `"${message}" is the user's own name and must survive`).toBe(true);
     if (!d.matched) return;
@@ -985,6 +1001,25 @@ describe('the courtesy-prefix header now matches the code', () => {
 // this is a rule applied at a point in time, NOT a permanently closed class —
 // the same standing the sampled floor has. The next comment written can
 // reintroduce it, and nothing here will notice.
+//
+// ⭐⭐ AND THE SAME RULE FOR MUTANT CLAIMS, which is the sharper case.
+//
+// A sentence saying "drop X and these N RED" asserts a DISCRIMINATION — its
+// whole job is to state what the suite can detect — so a wrong one claims a
+// sensitivity the tests do not have, and a reader checking whether the kit is
+// honest reads exactly that line and stops. It is the one comment class where
+// being wrong attacks the evidence itself.
+//
+// All four per-case claims in these two files were re-run against their own
+// mutation on 3 Sep 2026 (forms swept: "drop|delete|remove|loosen|unanchor …
+// RED", with a contrast control firing on a planted line). THREE were true;
+// ONE was wrong — "drop `explicitlyNamed` and these three RED" listed a row
+// that cannot RED under that mutation at all. Found by the release-integration
+// seat, not by this suite.
+//
+// Where the claim can be bound to an assertion it now is; where it cannot, it
+// says what was measured and when. Same standing as everything else here: a
+// rule applied once, not a class that stays closed.
 //
 // THE LIST IS THE RECORD. The assertions below name every alphabet
 // individually, so they cannot disagree with a sentence that states no total.
