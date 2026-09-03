@@ -285,6 +285,77 @@ export const AnalysisReadyPayload = z.object({
    */
   may_run: z.boolean().optional(),
   /**
+   * ⭐⭐ THE ONE ANALYSIS-ADMISSION RESULT — see
+   * `orchestrator-v5/admission/analysis-admission.ts` for the full contract and
+   * for the question each existing authority answers.
+   *
+   * ⚠ IT DOES NOT REPLACE `may_run`, AND MERGING THEM WOULD BE THE DEFECT.
+   * `structurally_analysable` IS `may_run` (the same `willProceed`, carried in
+   * the same object so the two cannot drift). What is NEW is
+   * `permitted_analysis_mode`: the UPPER BOUND on what the product may CLAIM,
+   * which no field expressed before. A model can be perfectly executable and
+   * still not license a leader claim.
+   *
+   * Consumers:
+   *   · gate the Run affordance on `structurally_analysable` (or `may_run` —
+   *     same value) and NEVER on `status`;
+   *   · gate any leading-option / "stable" / "robust" wording on
+   *     `permitted_analysis_mode === 'comparative_leader'` CONJOINED with the
+   *     post-run evidence they already read (`leader_claim.permitted`). The two
+   *     answer different questions: this one asks whether the MODEL licenses the
+   *     claim, that one whether THIS RESULT separated the arms;
+   *   · render `reasons` when refusing, so a refusal names which of the four
+   *     fields refused it and what would change it.
+   *
+   * ABSENCE means a pre-`analysis_admission` producer, never "no" — fall back to
+   * existing behaviour, exactly as with `may_run`.
+   *
+   * Additive + passthrough-safe: this object is `.passthrough()` here and the
+   * boundary's `OlumiResponseSchema` accepts additive keys on `analysis_ready`,
+   * the same route `blocked_reason` and `may_run` already took.
+   */
+  analysis_admission: z
+    .object({
+      structurally_analysable: z.boolean(),
+      missing_important_inputs: z.array(z.object({
+        issue_id: z.string(),
+        code: z.string(),
+        option_id: z.string().optional(),
+        option_label: z.string().optional(),
+        factor_id: z.string().optional(),
+        factor_label: z.string().optional(),
+        why_it_matters: z.string(),
+        obligation: z.enum(['required', 'offered']).optional(),
+        waived_by_exclusion: z.boolean(),
+      }).passthrough()).readonly(),
+      semantic_quality_sufficient: z.boolean(),
+      permitted_analysis_mode: z.enum([
+        'none',
+        'exploratory',
+        'quantified_provisional',
+        'comparative_leader',
+      ]),
+      reasons: z.array(z.object({
+        field: z.enum([
+          'structurally_analysable',
+          'missing_important_inputs',
+          'semantic_quality_sufficient',
+          'permitted_analysis_mode',
+        ]),
+        code: z.string(),
+        message: z.string(),
+      }).passthrough()).readonly(),
+      graph_hash: z.string().nullable(),
+      semantic_signals: z.object({
+        confidence_parameters_total: z.number(),
+        confidence_parameters_user_stated: z.number(),
+        confidence_parameters_machine_authored: z.number(),
+        confidence_parameters_unattributed: z.number(),
+      }).passthrough(),
+    })
+    .passthrough()
+    .optional(),
+  /**
    * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — stable machine-readable code for
    * WHY this turn's analysis was refused. Present iff `status === 'blocked'`.
    * See the contract note on `GraphPatchBlockData.analysis_ready` in

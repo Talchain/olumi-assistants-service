@@ -669,6 +669,61 @@ export interface GraphPatchBlockData {
      * against a payload carrying it.
      */
     may_run?: boolean;
+    /**
+     * ⭐⭐ THE ONE ANALYSIS-ADMISSION RESULT — the four verdict fields, their
+     * user-facing reasons, and the subject they are about.
+     *
+     * Contract and derivation: `orchestrator-v5/admission/analysis-admission.ts`.
+     * Stamped in ONE place (`buildCanonicalAnalysisReadyFromGraph`) from the
+     * SAME `RunAdmission` the turn admitted on, and carried onto pipeline-shaped
+     * payloads by `carryCanonicalOnlyFields`.
+     *
+     * ⚠ `structurally_analysable` IS `may_run`. They are carried together so
+     * they cannot drift; the new question is `permitted_analysis_mode` — the
+     * upper bound on what the product may CLAIM, which nothing expressed before.
+     * A model can be perfectly executable and still not license a leader claim,
+     * and shipping "Stable ranking" / "Robust" over a wholly machine-authored
+     * model is the 3 Sep P0 this field exists to make impossible.
+     *
+     * Additive + passthrough-safe, same route as `blocked_reason` and `may_run`.
+     * ABSENCE means an older producer, never "no".
+     */
+    analysis_admission?: {
+      structurally_analysable: boolean;
+      missing_important_inputs: ReadonlyArray<{
+        issue_id: string;
+        code: string;
+        option_id?: string;
+        option_label?: string;
+        factor_id?: string;
+        factor_label?: string;
+        why_it_matters: string;
+        obligation?: 'required' | 'offered';
+        waived_by_exclusion: boolean;
+      }>;
+      semantic_quality_sufficient: boolean;
+      permitted_analysis_mode:
+        | 'none'
+        | 'exploratory'
+        | 'quantified_provisional'
+        | 'comparative_leader';
+      reasons: ReadonlyArray<{
+        field:
+          | 'structurally_analysable'
+          | 'missing_important_inputs'
+          | 'semantic_quality_sufficient'
+          | 'permitted_analysis_mode';
+        code: string;
+        message: string;
+      }>;
+      graph_hash: string | null;
+      semantic_signals: {
+        confidence_parameters_total: number;
+        confidence_parameters_user_stated: number;
+        confidence_parameters_machine_authored: number;
+        confidence_parameters_unattributed: number;
+      };
+    };
     /** Exhaustive structural + semantic issues from the canonical readiness authority. */
     readiness_issues?: Array<{
       issue_id: string;
