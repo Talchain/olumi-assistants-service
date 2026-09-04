@@ -266,12 +266,47 @@ function canonicaliseSpan(text: string): string {
  * **`ExtractedFactor` carries no `match.index`** — `extractFactors` has it at
  * every pattern site and discards it (`index.ts:41-60`). Adding one would mean
  * editing every extractor site, which is exactly the range work open in
- * CEE #1327. So containment is computed on the STRINGS, which is equivalent:
- * where the quote is a literal span of the brief, "some occurrence of the
- * matched text lies inside the quote's span" holds precisely when the quote
- * contains that text as a substring. It is also strictly the more permissive
- * reading — it accepts any occurrence rather than one chosen index — and a
- * more permissive gate refuses less, which is the safe direction here.
+ * CEE #1327. So containment is computed on the STRINGS, which is equivalent
+ * ONLY WHERE `matchedText` IS ITSELF A LITERAL SPAN OF THIS BRIEF: given that,
+ * and given the quote is a literal span too, "some occurrence of the matched
+ * text lies inside the quote's span" holds precisely when the quote contains
+ * that text as a substring, and containment is then the more permissive of the
+ * two — it accepts ANY occurrence rather than one chosen index.
+ *
+ * That premise holds on the REGEX path by construction and nowhere else: every
+ * regex site sets `matchedText` to the match's own `m[0]`/`match[0]` over the
+ * brief (`index.ts` 1678-2195, `stated-level.ts:433`, `stated-amounts.ts:190`),
+ * so an occurrence exists at `m.index` by definition.
+ *
+ * ⚠ NON-COVERAGE — THE LLM-FIRST PATH. `llm-extractor.ts:286` sets
+ * `matchedText` to the MODEL-AUTHORED `source_quote`, and `merge.ts` spreads
+ * `...llmFactor`, so it arrives here verbatim. Nothing constrains it to be a
+ * span of the brief: `LLMFactorSchema` admits `source_quote: z.string().max(200)`
+ * with NO substring refinement (pinned by
+ * `__tests__/llm-source-quote-has-no-span-guarantee.test.ts`), and the only
+ * brief-facing check on this path, `validateAgainstBrief` (`resolver.ts:400`),
+ * compares NUMERIC VALUES and merely WARNS — `llm-extractor.ts:198-213` drops
+ * nothing. The prompt asks for "Exact text from brief" (`llm-extractor.ts:81`),
+ * which is an instruction, not a guarantee.
+ *
+ * So on that path a paraphrased quote has NO occurrence in the brief at all.
+ * The offset comparison has no defined verdict there (there is no `match.index`
+ * to test), while the five lines below still reach `canonicalQuote.includes` and
+ * return FALSE. The two gates therefore do not range over the same domain, and
+ * "strictly more permissive" is NOT a property of this function as written: an
+ * LLM factor whose figure genuinely was written inside the node's own sentence
+ * can be refused because the model rephrased its own quote (`canonicaliseSpan`
+ * collapses whitespace only — it does not fold case). Such a refusal is not a
+ * positional measurement; it is an accident of the model's wording.
+ *
+ * That refusal is left STANDING rather than gated, deliberately, because the two
+ * errors are not symmetric: a false refusal writes nothing and the figure is
+ * still surfaced by `deriveNotModelledManifest` below, whereas a false accept
+ * stamps a number the user never wrote as the user's own words — the measured
+ * harm above. Weakening the gate for unplaceable quotes is a product judgement
+ * with a live cost in the other direction, so it is rowed on the PR, not taken
+ * here. THIS PARAGRAPH IS A RATIONALE, NOT A VERIFIED CLAIM: no test asserts
+ * the LLM-path refusal, because the predicate is not exported.
  *
  * ── WHAT IT DELIBERATELY DOES NOT DO
  * It never rewrites, rescales or re-labels anything, and it does not touch
