@@ -102,6 +102,61 @@ const ENTITY_SIBLING_CAP = 4;
 const AMBIGUOUS_CANDIDATE_CAP = 5;
 
 /**
+ * ⭐ IS THIS SUBJECT ONE WE CAN ACTUALLY NAME BACK TO THE USER?
+ *
+ * `safeLabel` degrades in two steps: a usable label, else `that {kind}`, else
+ * a bare unnamed fallback. Several refusals here interpolate its output into a
+ * sentence ABOUT THE USER'S MESSAGE, and on the bare fallback that sentence
+ * asserts something the payload cannot support.
+ *
+ * ── THE LIVE COST, MEASURED ────────────────────────────────────────────────
+ * 3 Sep 2026 manual capture (`olumi-programme-docs`
+ * `artefacts/manual-test-2026-09-03/olumi-debug-f2e2df1b-20260903.json`), turn
+ * index 2, 14:01:16Z. The user asked, in full: **"Why are all of the outcome
+ * and risk strengths 50%?"** — a whole-model question, 50 characters, naming
+ * no item. The reply, byte-exact:
+ *
+ *     "I wasn't sure what you meant by that item. Did you mean one of these?"
+ *
+ * That is `kind_mismatch_with_siblings` with `entityLabel` on its bare
+ * fallback. Two false claims in one sentence: that the user referred to an
+ * "item", and that their phrasing was unclear. Neither is in the payload. The
+ * user re-asked twice before getting an answer.
+ *
+ * ── WHY A PREDICATE AND NOT A STRING COMPARISON ────────────────────────────
+ * DERIVED from `safeLabel` itself — `safeLabel(null)` IS the bare fallback, so
+ * this cannot drift from the helper it tests (trap 12). Comparing against a
+ * restated `'that item'` literal would go silently wrong the day that copy is
+ * reworded, and the failure would read green.
+ *
+ * The `that {kind}` rung is deliberately NOT unnamed: "I wasn't sure what you
+ * meant by that option" quotes a real category the payload does carry.
+ */
+function isUnnamedSubject(entityLabel: string): boolean {
+  return entityLabel === safeLabel(null);
+}
+
+/**
+ * What a refusal may honestly say when it cannot name its subject.
+ *
+ * The split is the point, and collapsing it would re-open the defect one level
+ * down (CLAUDE.md trap 21 — one name, two questions):
+ *   RESOLVED    the graph DID resolve the target, we simply have no user-safe
+ *               label for it. "I couldn't match that to anything" would be
+ *               false; the true statement is that we cannot make the change.
+ *   UNRESOLVED  nothing was matched at all. That IS the fact, and it is stated
+ *               as OUR failure to match rather than as the user's failure to
+ *               be clear — the distinction #1315 established for the sibling
+ *               instance of this class in the structure-answer composer.
+ *
+ * Neither sentence attributes anything to the user's wording, and neither
+ * invents an "item" the message did not contain.
+ */
+const UNNAMED_SUBJECT_RESOLVED_TEXT =
+  "I found what that change was aimed at, but I can't make that change to it.";
+const UNNAMED_SUBJECT_UNRESOLVED_TEXT = "I couldn't match that to anything in your model.";
+
+/**
  * 1.16 item A2 — stable chip id for the user-consented "extend the scale"
  * chip on `value_exceeds_cap` rejections. Exported so the turn-executor's
  * recoverable-validator commit site can detect the chip on the composed
@@ -265,10 +320,18 @@ function composeEntityKindMismatch(error: ValidationError, ctx: ComposeContext):
   // node / edge / goal / constraint / kind in user text, and rightly so:
   // they are our words, not the user's. Concrete labels are also simply more
   // useful than an abstract category, and they are clickable.
-  if (chips.length > 0) {
-    const found = resolvedKind
+  // ⚠ THE UNNAMED ARM IS NOT A NICER WORDING OF THE NAMED ONE — it answers a
+  // different question. When `entityLabel` is on its bare fallback we know
+  // nothing about what the user referred to, so a sentence that quotes their
+  // supposed reference is a claim the payload cannot carry. See
+  // `isUnnamedSubject`. The NAMED path below is byte-identical to before.
+  const found = isUnnamedSubject(entityLabel)
+    ? (resolvedKind ? UNNAMED_SUBJECT_RESOLVED_TEXT : UNNAMED_SUBJECT_UNRESOLVED_TEXT)
+    : resolvedKind
       ? `I found ${entityLabel}, but I can't make that change to it.`
       : `I wasn't sure what you meant by ${entityLabel}.`;
+
+  if (chips.length > 0) {
     return {
       body: {
         assistant_text: `${found} Did you mean one of these?`,
@@ -283,9 +346,9 @@ function composeEntityKindMismatch(error: ValidationError, ctx: ComposeContext):
   // only kinds this graph has none of). Still drop the old tail — "Try asking
   // about a specific option" was actively misleading when the target was an
   // outcome node, which live evidence shows is the common case.
-  const found = resolvedKind
-    ? `I found ${entityLabel}, but I can't make that change to it.`
-    : `I wasn't sure what you meant by ${entityLabel}.`;
+  //
+  // `found` is composed ONCE above so the two exits cannot drift into two
+  // spellings of one sentence.
   return {
     body: {
       assistant_text: `${found} Tell me what you'd like to change.`,
@@ -314,6 +377,18 @@ function composeEntityNotFound(error: ValidationError, ctx: ComposeContext): Bra
     label: readString(details.entity_label),
     kind: kind ?? undefined,
   });
+  // Same class as the kind-mismatch branch above: "I can't find that item in
+  // your model" tells the user they named an item when they may have named
+  // nothing at all. This branch never resolves a target by construction, so
+  // the unnamed case is always the UNRESOLVED sentence.
+  //
+  // ⭐ Note this arm degrades ONE RUNG LATER than the kind-mismatch one: it
+  // passes `kind` into `safeLabel`, so an entity whose kind is known still
+  // gets "that option" and keeps today's copy. Only a target with neither a
+  // label nor a kind reaches the honest fallback.
+  const notFound = isUnnamedSubject(entityLabel)
+    ? UNNAMED_SUBJECT_UNRESOLVED_TEXT
+    : `I can't find ${entityLabel} in your model.`;
   const graph = ctx.graph;
   if (graph && kind) {
     const siblings = graph.listEntitiesByKind(kind).slice(0, ENTITY_SIBLING_CAP);
@@ -330,8 +405,7 @@ function composeEntityNotFound(error: ValidationError, ctx: ComposeContext): Bra
       );
       return {
         body: {
-          assistant_text:
-            `I can't find ${entityLabel} in your model. Did you mean one of these?`,
+          assistant_text: `${notFound} Did you mean one of these?`,
           suggested_actions: chips,
         },
         template_id: 'entity_not_found_with_siblings',
@@ -341,7 +415,7 @@ function composeEntityNotFound(error: ValidationError, ctx: ComposeContext): Bra
   }
   return {
     body: {
-      assistant_text: `I can't find ${entityLabel} in your model.`,
+      assistant_text: notFound,
       suggested_actions: [fallbackPrompt('Try describing what you want')],
     },
     template_id: 'entity_not_found_no_siblings',
