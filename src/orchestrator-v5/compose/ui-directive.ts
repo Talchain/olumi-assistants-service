@@ -59,7 +59,7 @@ import {
 } from './phase3-blocks.js';
 import { selectLens, type LensId } from './lens-selector.js';
 import type { JudgementSignals } from './judgement-signals.js';
-import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
+import { mayPresentLeaderClaimForFact } from './unrequested-analysis-confinement.js';
 import { emit, TelemetryEvents } from '../../utils/telemetry.js';
 
 /**
@@ -447,10 +447,12 @@ function hasSurvivingLensBlock(freshBlocks: OlumiResponse['blocks']): boolean {
  * unchanged: a lens block that σ dropped is not in `freshBlocks`, and the
  * directive drops with it. Never a "look here" at a card that did not ship.
  *
- * CLAIM SAFETY — deliberately NOT gated on `mayNameLeadingOptionForFact`. An
- * EDGE target names no option and asserts no leader, which is the same scoping
- * row 3's own comment sets out for row 2's factor `focus` and row 7 applies to
- * factor/edge refs. A withheld turn keeps its pointer.
+ * CLAIM SAFETY — deliberately NOT gated on the leader admission at all
+ * (`mayPresentLeaderClaimForFact`, and before it `mayNameLeadingOptionForFact`).
+ * An EDGE target names no option and asserts no leader, which is the same
+ * scoping row 3's own comment sets out for row 2's factor `focus` and row 7
+ * applies to factor/edge refs. A withheld turn keeps its pointer — and so does
+ * an unrequested one, for the same reason.
  *
  * Fail-closed: a lens block whose first ref is missing, malformed or not an edge
  * returns null and the ladder continues to rows 2/3 exactly as before.
@@ -542,7 +544,14 @@ function buildRunAnalysisDirective(
   // that says "point at the leader" must not be emitted by the turn that just
   // declined to name one. The enrichment projection leak
   // (compose/withheld-claim-projection.ts) was the user-visible half.
-  if (!mayNameLeadingOptionForFact(fact)) {
+  // ⭐ THE SHARED ADMISSION, not the constraint-verdict leaf. A directive that
+  // says "point at the leader" must not be emitted by a turn that declined to
+  // name one — and since the post-draft auto-run, "declined" has two
+  // independent causes: the constraint verdict, and nobody having asked for the
+  // analysis at all. `mayPresentLeaderClaimForFact` is the one place those
+  // compose; reading the leaf here would let an unrequested run highlight a
+  // recommended option beside a block that named none.
+  if (!mayPresentLeaderClaimForFact(fact)) {
     return suppressDirective('run_analysis', 'leading_option_claim_withheld');
   }
   const highlight = buildRecommendedOptionUiDirective(fact, lookup);

@@ -40,7 +40,7 @@
  *   the result block    `buildAnalysisResultBlock` — the one builder, which
  *                       applies all three claim-safety layers internally from
  *                       the fact's own persisted verdict
- *                       (`mayNameLeadingOptionForFact`, the transport keep-list,
+ *                       (`mayPresentLeaderClaimForFact`, the transport keep-list,
  *                       and the withheld projections of `summary`,
  *                       `leading_option_id` and the enrichment blobs).
  *
@@ -94,7 +94,7 @@ import {
   composeAnalysisStateV1,
   readRawRobustnessFromResponseBody,
 } from '../orchestrator-v5/compose/analysis-state-v1.js';
-import { mayNameLeadingOptionForFact } from '../orchestrator-v5/compose/withheld-claim-projection.js';
+import { mayPresentLeaderClaimForFact } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
@@ -189,7 +189,19 @@ export async function readScenarioAnalysis(
         // `leader_claim` and the block's projections answer the SAME question
         // about the SAME fact. Two answers here would be trap 21 at a new
         // surface. With no fact, `false` is the fail-closed direction.
-        mayNameLeadingOption: fact !== null ? mayNameLeadingOptionForFact(fact) : false,
+        //
+        // ⭐⭐ AND THAT SENTENCE IS WHY THIS LINE MOVED TO
+        // `mayPresentLeaderClaimForFact`. The block builder stopped answering
+        // the constraint-verdict question alone the day the post-draft auto-run
+        // gained a confinement: it now also asks whether anybody REQUESTED the
+        // analysis. This leg is the auto-run's OWN delivery path, so keeping the
+        // leaf reader here would have made the paragraph above false at exactly
+        // the surface it was written about — an `analysis_result` naming no
+        // leader, beside an `analysis_state.leader_claim.permitted: true` that
+        // grants the UI permission to name one. Same fact, same second, two
+        // answers. The shared admission is the fix; copying the conjunction here
+        // would have been the mirror.
+        mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) : false,
         rawRobustness:
           analysisResult !== null
             ? readRawRobustnessFromResponseBody({ blocks: [analysisResult] })
