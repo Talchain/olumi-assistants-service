@@ -208,6 +208,19 @@ const EDGE_ATTRIBUTION = {
     source: "synthetic",
     quote: "Decision-to-option scaffold minted by the projector",
   },
+  /**
+   * ⭐ THE ONE EDGE THAT KEEPS A COMPARISON DIMENSION ALIVE — see Pass 3b.
+   *
+   * Follows `projector_structural` exactly: `source: "synthetic"` is what
+   * `mapToV3ProvenanceSource` routes to the `ai_inferred` badge, and the quote
+   * describes the MACHINE ACTION rather than quoting anyone. Named apart from
+   * the decision scaffold because the two answer different questions and a
+   * reader is entitled to know which scaffold they are looking at (trap 21).
+   */
+  option_set_factor_bridge: {
+    source: "synthetic",
+    quote: "Option-set factor joined to the goal by the projector",
+  },
 } as const;
 
 export interface RecordProvenance {
@@ -2950,7 +2963,148 @@ function projectOnce(
       return seen;
     };
 
-    const reachesGoal = reachingGoal(edges);
+    const reachesGoalBeforeBridging = reachingGoal(edges);
+
+    // ⭐⭐ PASS 3b(i) — A FACTOR THE OPTIONS SET TO A VALUE IS THE COMPARISON
+    // ITSELF, AND DROPPING IT DELETES THE USER'S OWN QUANTITIES.
+    //
+    // ── THE DEFECT THIS CLOSES, DERIVED BY EXECUTING THIS FUNCTION ───────────
+    // Brief: *"hiring one senior tech lead at £110k, or two mid-level developers
+    // at £70k each"*. Four record sets were run through `projectRecordsToGraph`
+    // at `ae6284b8`:
+    //   · model authors the cost factor AND chains it onward  → WORKS: one
+    //     factor, both options carrying `raw_interventions` 110000 / 140000.
+    //   · model authors it, sets it per option with `sets_to`, and omits ONLY
+    //     the onward link                                     → **the factor and
+    //     BOTH magnitudes were silently deleted right here.**
+    //   · the same set plus a single `factor → goal` link     → WORKS again.
+    // The delta between "the cost is deleted" and "the cost is modelled" was
+    // exactly ONE EDGE. This mints it.
+    //
+    // ── WHY THIS IS NOT A HOLE IN THE RULE BELOW (trap 21) ──────────────────
+    // Pass 3b's derivation is sound for the class it was MEASURED on: 8 of 17
+    // unreachable nodes on a live draft were stated figures — "£3.1m cash",
+    // "NRR is 112%" — that the model CORRECTLY DECLINED to connect. Forcing
+    // those in manufactures a machine-authored causal claim, so they are
+    // disclosed instead, and they still are: this block does not touch them.
+    //
+    // A factor an option SETS TO A VALUE is a different question wearing the
+    // same predicate. The model did not decline to connect it — it connected it
+    // to the options, with magnitudes, and omitted only the onward hop. Pass 3b
+    // itself ranks dropping as *"silently lose something the user said — the
+    // second worst"*, mitigated by disclosure; for this class the mitigation
+    // does not hold, because what is lost is not a stray figure but the only
+    // quantified comparison between the alternatives.
+    //
+    // ── WHAT IS AND IS NOT INVENTED ─────────────────────────────────────────
+    // NO VALUE IS INVENTED. Every magnitude on the rescued factor is the
+    // model's, and Pass 3c still refuses to fill a missing one. What is minted
+    // is ONE EDGE, of a shape the served instruction explicitly sanctions — *"A
+    // factor linked straight to the goal has to be bridged for you, and the
+    // bridge is then the machine's guess at what the result was"* — and which
+    // `fixFactorGoalEdges` already bridges and discloses downstream. It carries
+    // `provenance_source: "structural"` and the scaffold badge, so no surface
+    // can present it as a link the model or the user drew.
+    //
+    // ── THE PREDICATE IS DELIBERATELY NOT "IS THIS MONEY?" ──────────────────
+    // Cost is the instance that was witnessed; the property that matters is
+    // that TWO OR MORE OPTIONS put a NUMBER on the same factor, which is what
+    // makes it a dimension the analysis can compare. Sniffing the unit for a
+    // currency would be a natural-language predicate over an open class (trap
+    // 22) to buy a narrower rule that is no safer.
+    //
+    // Both bounds are load-bearing and both are pinned by discriminating
+    // controls in `__tests__/option-set-factor-is-a-modelled-quantity.test.ts`:
+    //   · NO `sets_to` on the link → still dropped. Nothing quantified is lost,
+    //     and rescuing it would only manufacture `MISSING_OPTION_VALUE` asks.
+    //   · Only ONE option quantifies it → still dropped. See the note on the
+    //     bound below; this is the case the existing orphan test already pins.
+    // A rule that kept either class would reopen what Pass 3b closed.
+    const bridgedToGoal: string[] = [];
+    {
+      const optionIds = new Set(nodes.filter((n) => n.kind === "option").map((n) => n.id));
+      const factorIds = new Set(nodes.filter((n) => n.kind === "factor").map((n) => n.id));
+      // A factor is a COMPARISON DIMENSION iff TWO OR MORE DISTINCT OPTIONS set
+      // it to a finite level. Magnitudes are read from `setsToByEdgeId`, the
+      // same map Pass 3c reads, so the two cannot drift on what counts as a
+      // magnitude (trap 12).
+      //
+      // ⚠ THE "TWO OR MORE" BOUND IS NOT DECORATION, AND THE REPO'S OWN CORPUS
+      // IS WHAT SET IT. This block was first written as "some option sets it",
+      // and `option-budget-and-interventions.test.ts`'s *"never names a factor
+      // the connectivity prune withdrew"* went RED: its fixture has ONE option
+      // setting *"an orphan nobody connected"* to 77, and that test pins the
+      // orphan as something the prune must keep dropping. It is right. A factor
+      // exactly one option quantifies is not a comparison — there is nothing on
+      // the other side of it — and rescuing it would buy one saved magnitude at
+      // the cost of a `MISSING_OPTION_VALUE` ask against every other option,
+      // i.e. the product asking the user to fill in a number the machine
+      // decided to keep. Two options putting numbers on the same factor is the
+      // model asserting the alternatives DIFFER on that dimension, which is the
+      // thing the witnessed defect destroyed.
+      const optionsQuantifyingFactor = new Map<string, Set<string>>();
+      for (const edge of edges) {
+        if (!optionIds.has(edge.from) || !factorIds.has(edge.to)) continue;
+        const setsTo = setsToByEdgeId.get(edge.id);
+        if (typeof setsTo !== "number" || !Number.isFinite(setsTo)) continue;
+        const byOption = optionsQuantifyingFactor.get(edge.to);
+        if (byOption) byOption.add(edge.from);
+        else optionsQuantifyingFactor.set(edge.to, new Set([edge.from]));
+      }
+      const quantifiedByAnOption = new Set(
+        [...optionsQuantifyingFactor].filter(([, options]) => options.size >= 2).map(([factorId]) => factorId),
+      );
+      // One goal, chosen by node order, so the mint is a pure function of the
+      // record set. Iterated over `nodes` rather than the Set for the same
+      // reason: Set iteration order would follow edge order instead.
+      const goalId = goalNodes[0]!.id;
+      const goalIdSet = new Set(goalNodes.map((n) => n.id));
+      // ⭐⭐ THE THIRD BOUND, AND IT IS THE ONE THAT KEEPS THE COMPLETION TURN'S
+      // JOB INTACT: only rescue a dangling dimension when the model's own links
+      // ALREADY reach the goal somewhere.
+      //
+      // When NOTHING terminates at the goal, the model has failed at the whole
+      // causal spine, and the right response is the one that already exists —
+      // `enumerateCompletionAsk` raises `no_chain_reaches_goal`
+      // (`NO_PATH_TO_GOAL`) and `no_outcome_or_risk` (`MISSING_BRIDGE`) and the
+      // second turn is asked to draw the chain itself. Both of those asks are
+      // PREDICTIONS of validator codes, and a bridge minted here would make the
+      // predicted codes genuinely unable to fire, so the asks would fall silent
+      // and the machine's guess at the outcome would stand unchallenged in place
+      // of the model's own. That is trap 23 — satisfying the structural check
+      // while the real gap goes unasked — and this bound is what refuses it.
+      //
+      // Where the spine DOES exist, the model has substantially succeeded and one
+      // quantified dimension is a local omission; deleting the user's own
+      // magnitudes over it is the disproportionate answer. Pinned from the other
+      // side by `completion-gate3-closes.test.ts`, whose fixtures are exactly the
+      // no-spine case and must keep raising both asks.
+      const modelsOwnLinksReachGoal = edges.some(
+        (e) => goalIdSet.has(e.to) && !goalIdSet.has(e.from),
+      );
+      for (const node of modelsOwnLinksReachGoal ? nodes : []) {
+        if (node.kind !== "factor") continue;
+        if (!quantifiedByAnOption.has(node.id)) continue;
+        if (reachesGoalBeforeBridging.has(node.id)) continue;
+        const prov = scaffoldingProvenance(EDGE_ATTRIBUTION.option_set_factor_bridge.quote);
+        const edgeId = mintUnique(sha8("edge", "option-set-factor-bridge", node.id, goalId), usedIds);
+        provenance[edgeId] = prov;
+        edges.push({
+          id: edgeId,
+          from: node.id,
+          to: goalId,
+          origin: "default",
+          provenance_source: "structural",
+          provenance: prov,
+        });
+        bridgedToGoal.push(node.id);
+      }
+    }
+
+    // Recomputed only when a bridge was actually minted, so the untouched path
+    // costs nothing and the two readings cannot silently diverge.
+    const reachesGoal =
+      bridgedToGoal.length === 0 ? reachesGoalBeforeBridging : reachingGoal(edges);
 
     // ⭐⭐ THE COUNTERFACTUAL — the ONE question that separates the model's silence
     // from our own refusal. Same reachability, over the graph the model actually
