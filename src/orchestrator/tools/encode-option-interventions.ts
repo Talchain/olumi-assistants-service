@@ -35,6 +35,32 @@ import { log } from '../../utils/telemetry.js';
 type Dict = Record<string, unknown>;
 const SLASH_KEY_RE = /^data\/interventions\/(.+)$/;
 
+/**
+ * The `InterventionV3.source` members this encoder will PRESERVE from a raw
+ * record instead of defaulting.
+ *
+ * ⭐⭐ WHY THIS EXISTS, AND WHY IT IS SAFE IN ONLY ONE DIRECTION.
+ *
+ * `buildInterventionV3` stamped `source: 'user_specified'` unconditionally, so
+ * a value the PRODUCT chose became permanently indistinguishable from one the
+ * USER stated — measured 2026-09-04 by writing `cee_hypothesis` through the
+ * full apply chain and reading `user_specified` back out. That matters the
+ * moment the product proposes estimates for approval: "whose number is this?"
+ * is the question the whole review rests on, and the graph could not answer it.
+ *
+ * ⚠ THE ALLOWLIST IS NOT `user_specified`, DELIBERATELY. It holds only the two
+ * NON-user provenances, so this carry can never be used to UPGRADE a value's
+ * claim to user-authored — the direction that would matter. Every raw record
+ * that does not name one of these still defaults exactly as before, so no
+ * existing caller's behaviour changes.
+ */
+const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
+  'cee_hypothesis',
+  'brief_extraction',
+]);
+
+const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
+
 /** Raw intervention recovered from any location, pre-encoding. */
 interface RawIntervention {
   /** Model-unit value when already present (0..1). */
@@ -44,6 +70,10 @@ interface RawIntervention {
   readonly unit?: string;
   /** Cap carried on the intervention object itself (proposal cap). */
   readonly cap?: number;
+  /** A NON-user provenance the writer stated explicitly; absent ⇒ default. */
+  readonly source?: string;
+  readonly value_confidence?: string;
+  readonly reasoning?: string;
 }
 
 export interface EncodeOptionInterventionsResult<T> {
@@ -70,7 +100,15 @@ function toRawIntervention(src: unknown): RawIntervention {
   const bare = finiteNum(src);
   if (bare !== undefined) return { value: bare };
   if (!isPlainObject(src)) return {};
-  const out: { value?: number; raw_value?: number; unit?: string; cap?: number } = {};
+  const out: {
+    value?: number;
+    raw_value?: number;
+    unit?: string;
+    cap?: number;
+    source?: string;
+    value_confidence?: string;
+    reasoning?: string;
+  } = {};
   const v = finiteNum(src.value);
   if (v !== undefined) out.value = v;
   const rv = finiteNum(src.raw_value);
@@ -78,6 +116,17 @@ function toRawIntervention(src: unknown): RawIntervention {
   if (typeof src.unit === 'string') out.unit = src.unit;
   const cap = finiteNum(src.cap);
   if (cap !== undefined) out.cap = cap;
+  // Carried ONLY when explicitly stated and recognised; anything else falls
+  // through to the unchanged default in `buildInterventionV3`.
+  if (typeof src.source === 'string' && PRESERVED_INTERVENTION_SOURCES.has(src.source)) {
+    out.source = src.source;
+    if (typeof src.value_confidence === 'string' && INTERVENTION_CONFIDENCES.has(src.value_confidence)) {
+      out.value_confidence = src.value_confidence;
+    }
+    if (typeof src.reasoning === 'string' && src.reasoning.trim().length > 0) {
+      out.reasoning = src.reasoning;
+    }
+  }
   return out;
 }
 
@@ -166,7 +215,10 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
 function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown): Dict {
   const iv: Dict = {
     value,
-    source: 'user_specified',
+    // Default UNCHANGED. `rec.source` is only ever a non-user provenance the
+    // writer stated explicitly (see `PRESERVED_INTERVENTION_SOURCES`), so this
+    // can narrow the claim but never widen it to user-authored.
+    source: rec.source ?? 'user_specified',
     target_match:
       isPlainObject(existing) && isPlainObject(existing.target_match)
         ? existing.target_match
@@ -174,6 +226,11 @@ function buildInterventionV3(fac: string, value: number, rec: RawIntervention, e
   };
   if (rec.unit !== undefined) iv.unit = rec.unit;
   if (rec.raw_value !== undefined) iv.raw_value = rec.raw_value;
+  // Carried only alongside a preserved non-user provenance: an estimate that
+  // cannot say how confident it is, or why, is not reviewable after the turn
+  // that produced it.
+  if (rec.value_confidence !== undefined) iv.value_confidence = rec.value_confidence;
+  if (rec.reasoning !== undefined) iv.reasoning = rec.reasoning;
   return iv;
 }
 
