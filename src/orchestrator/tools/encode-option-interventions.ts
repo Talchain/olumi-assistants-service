@@ -160,6 +160,32 @@ export const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
 
 const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
 
+/**
+ * The `InterventionV3.source` members this encoder will PRESERVE from a raw
+ * record instead of defaulting.
+ *
+ * ⭐⭐ WHY THIS EXISTS, AND WHY IT IS SAFE IN ONLY ONE DIRECTION.
+ *
+ * `buildInterventionV3` stamped `source: 'user_specified'` unconditionally, so
+ * a value the PRODUCT chose became permanently indistinguishable from one the
+ * USER stated — measured 2026-09-04 by writing `cee_hypothesis` through the
+ * full apply chain and reading `user_specified` back out. That matters the
+ * moment the product proposes estimates for approval: "whose number is this?"
+ * is the question the whole review rests on, and the graph could not answer it.
+ *
+ * ⚠ THE ALLOWLIST IS NOT `user_specified`, DELIBERATELY. It holds only the two
+ * NON-user provenances, so this carry can never be used to UPGRADE a value's
+ * claim to user-authored — the direction that would matter. Every raw record
+ * that does not name one of these still defaults exactly as before, so no
+ * existing caller's behaviour changes.
+ */
+const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
+  'cee_hypothesis',
+  'brief_extraction',
+]);
+
+const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
+
 /** Raw intervention recovered from any location, pre-encoding. */
 interface RawIntervention {
   /** Model-unit value when already present (0..1). */
