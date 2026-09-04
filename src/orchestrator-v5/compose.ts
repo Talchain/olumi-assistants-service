@@ -1342,7 +1342,7 @@ function buildAnalysisResultBlockUnconfined(
  */
 export function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
-): OlumiResponse['blocks'][number] {
+): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
   return confineUnrequestedAnalysisBlock(buildAnalysisResultBlockUnconfined(fact), fact);
 }
 

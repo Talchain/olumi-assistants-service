@@ -214,7 +214,7 @@ describe('a run the user asked for is untouched', () => {
     const block = buildAnalysisResultBlock(fact);
     // The confinement is the last step of the builder, so identity here proves
     // it took its early return rather than rebuilding an equal-looking object.
-    expect(confineUnrequestedAnalysisBlock(block as never, fact)).toBe(block);
+    expect(confineUnrequestedAnalysisBlock(block, fact)).toBe(block);
   });
 
   it('keeps the leader, the probabilities, the summary and the robustness verdict', () => {
@@ -299,9 +299,16 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
     // drop alone would pass if it deleted the payload. Both directions:
     expect(after.length).toBeLessThan(before.length);
     for (const dropped of UNREQUESTED_OPTION_ROW_DROPPED_MEMBERS) {
-      expect(after.some((path) => path.endsWith(`.${dropped}`) && !path.startsWith('conditional_winners'))).toBe(
-        false,
-      );
+      // ⚠ THE `conditional_winners` CARVE-OUT IS NOT A FUDGE, AND IT IS SPELT
+      // OUT RATHER THAN LEFT AS A BARE PREDICATE. That blob's buckets carry a
+      // `win_probability` too, and it is a DELIBERATE survivor: the withheld
+      // projection has already removed each bucket's `winner_id` /
+      // `winner_label`, and a probability with no name attached measures a
+      // split rather than ranking anybody (the 2026-07-27 ruling). It appears
+      // by name in the survivor set above, so removing this clause would not
+      // hide it — it would make this loop contradict that set.
+      const optionScoped = after.filter((path) => !path.startsWith('conditional_winners'));
+      expect(optionScoped.some((path) => path.endsWith(`.${dropped}`))).toBe(false);
     }
 
     // And specifically: the two arrays that carried the same figure are both
