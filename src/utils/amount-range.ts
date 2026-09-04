@@ -325,41 +325,71 @@ export function resolveAmountRange(input: {
   // is marked `@deprecated`, it has ZERO src call sites outside its own module,
   // and it mints no factor cap at all. The user-reachable entry is
   // `enrichGraphWithFactorsAsync`, which `cee/unified-pipeline/stages/enrich.ts`
-  // calls and whose own header says "This is the ONLY call site". The numbers
-  // below were re-derived through the ASYNC entry at base `f4c8f501` and at
-  // `6e982fc3`, and they hold — but a verification sentence naming the wrong
-  // function reads as audited and is not, and it sends the next lane to a
-  // function no user reaches, under a green suite.
+  // calls and whose own header says "This is the ONLY call site". A verification
+  // sentence naming the wrong function reads as audited and is not, and it sends
+  // the next lane to a function no user reaches, under a green suite.
   //
-  //   NEITHER bound carries a magnitude — "cut CAC from £600 to £400"
-  //     base  {value 500, rangeMin 600, rangeMax 400}
-  //     head  {value 500, rangeMin 600, rangeMax 400}      IDENTICAL.
-  //   The tolerance is genuinely INHERITED **through the factor path**. Not
-  //   this change's to narrow, and it is pinned as a recorded floor rather than
-  //   silently altered.
+  // ⚠⚠ AND THE CORRECTION FIRST WRITTEN HERE REPEATED THAT DEFECT, which is why
+  // the sets below now cite assertions instead of a measurement. It read: *"The
+  // numbers below were re-derived through the ASYNC entry at base `f4c8f501`
+  // and at `6e982fc3`, and they hold"* — ONE measurement basis claimed over
+  // THREE sets that do not share one, and the wrong basis for every one of
+  // them. `enrichGraphWithFactorsAsync` cannot produce the middle set at all:
+  // `cee/extraction/numeric-parser.ts` is NOT in `enricher.ts`'s transitive
+  // import closure (contrast control in the same walk: `utils/magnitude-
+  // alphabet.ts` IS reached, so the walk sees real edges; and a same-sweep
+  // contrast control finds `parseNumericValue` genuinely imported elsewhere,
+  // e.g. `cee/provenance/stated-amounts.ts` and
+  // `cee/context-integrity/not-modelled-manifest.ts`, so its absence under
+  // `cee/factor-extraction/` is a real absence and not a blind sweep). For the
+  // outer two sets the producer is not recoverable from the figures at all:
+  // `FactorDataT`
+  // and `ExtractedFactor` BOTH carry `extractionType` and `confidence`, so the
+  // shape of the record discriminates nothing, and no assertion anywhere drives
+  // either enricher for these strings.
+  //
+  // A measurement nothing re-runs is a claim with no guard on it. Each set
+  // below therefore names its OWN producer and the assertion that pins it, so
+  // the sentence goes red with the behaviour rather than ageing quietly.
+  //
+  //   NEITHER bound carries a magnitude — "cut CAC from £600 to £400".
+  //   PRODUCER: `extractFactors`. It yields {value 500, rangeMin 600,
+  //   rangeMax 400}, and base `f4c8f501` yielded the same. The tolerance is
+  //   genuinely INHERITED **through the factor path**, so it is not this
+  //   change's to narrow.
+  //     PINNED BY `__tests__/amount-range.test.ts`, "the FACTOR path has no
+  //     frame guard at all, and the adverb makes no difference to it" — which
+  //     asserts those three fields on that exact string.
   //
   //   ⚠ THE SAME CLASS IS **NOT** INHERITED ON THE `parseNumericValue` PATH
   //   WHEN THE PAIR IS DASH-JOINED, and that is a genuine residual this change
-  //   leaves open. Measured on both paths:
+  //   leaves open.
   //     "The budget is £50,000 - 3 months of runway."
-  //       base  parseNumericValue → 50000, confidence "high", no range
-  //       head  parseNumericValue → 25001.5, "medium", rangeMin 50000 > 3
-  //   `parseNumericValue` had no dash range grammar at base, so this shape
-  //   could not reach the branch — the tolerance was CREATED here, exactly as
-  //   it was for the both-magnitude case above. It is NOT closed, because the
-  //   refusal that would close it also deletes the `from X to Y` members of the
-  //   recorded gap set, which ARE inherited. Pinned in both directions in
-  //   `__tests__/amount-range.test.ts` under KNOWN_DASH_JOINED_DESCENDING.
+  //   PRODUCER: `parseNumericValue` — NOT either enricher, and not
+  //   `extractFactors`. It publishes 25001.5 at "medium" over rangeMin 50000 >
+  //   rangeMax 3. At base `f4c8f501` this function had no dash range grammar,
+  //   so the shape could not reach the branch: the tolerance was CREATED here,
+  //   exactly as it was for the both-magnitude case below. It is NOT closed,
+  //   because the refusal that would close it also deletes the `from X to Y`
+  //   members of the recorded gap set, which ARE inherited.
+  //     PINNED BY `__tests__/amount-range.test.ts`, `PARSER_STILL_FABRICATES`
+  //     under `describe("KNOWN_DASH_JOINED_DESCENDING …")` — in both
+  //     directions, so the floor REDs if it grows OR shrinks.
   //
   //   BOTH bounds carry one — "We will cut spend from £2m to £500k this year."
-  //     base  {value 2_000_000, extractionType "explicit", confidence 0.85}
-  //     head  {value 1_250_000, extractionType "range",
-  //            rangeMin 2_000_000, rangeMax 500_000}
-  //   NOT inherited. Base emitted no range at all here, because base could not
-  //   read a magnitude on either bound of a `to`-joined pair. Reading the
-  //   magnitudes correctly is what put this shape INSIDE the branch, and the
-  //   branch then published a midpoint of £1,250,000 — a number the writer
+  //   Base `f4c8f501` emitted no range at all here, because it could not read a
+  //   magnitude on either bound of a `to`-joined pair. Reading the magnitudes
+  //   correctly is what put this shape INSIDE the branch, and at `479c7c97`
+  //   the branch then published a midpoint of £1,250,000 — a number the writer
   //   never typed — IN PLACE OF their own stated £2m, with min > max.
+  //   ⚠ `479c7c97` IS NOT THIS FUNCTION'S ANSWER: the refusal below returns
+  //   `null` for that pair, so do not read those numbers as current behaviour.
+  //     PINNED BY `__tests__/amount-range.test.ts` at both levels — the
+  //     `resolveAmountRange(…) → null` assertion in "refuses a lower-only
+  //     magnitude and a descending elliptical pair, and nothing else", and
+  //     "⭐ the refusal reaches the USER-REACHABLE path: a stated figure is no
+  //     longer replaced by a midpoint", where `extractFactors` yields exactly
+  //     [500_000, 2_000_000].
   //
   // That is the OVER-READ direction this module's header calls the worse of
   // the two, arriving on the path that reaches a user. So the ordering
@@ -415,9 +445,23 @@ export function resolveAmountRange(input: {
  *                                           Refusing restores the base output
  *                                           on that set exactly.
  *   amount, NEITHER bound carries one     → YES, and it publishes `min > max`.
- *                                           Genuinely inherited: base and head
- *                                           are identical on it. Pinned as a
- *                                           recorded floor, not endorsed.
+ *                                           Inherited ONLY IN PART. The
+ *                                           unqualified "base and head are
+ *                                           identical on it" that used to stand
+ *                                           here is false, and it is the same
+ *                                           over-broad sentence corrected twice
+ *                                           above: it holds for the `from X to
+ *                                           Y` members, and NOT for the
+ *                                           dash-joined ones on the
+ *                                           `parseNumericValue` path, which
+ *                                           base `f4c8f501` read as a confident
+ *                                           POINT and which this file's grammar
+ *                                           now turns into an inverted range.
+ *                                           Both halves are pinned as recorded
+ *                                           floors, not endorsed:
+ *                                           `LIE_FABRICATES_A_MIDPOINT` and
+ *                                           `PARSER_STILL_FABRICATES` in
+ *                                           `__tests__/amount-range.test.ts`.
  *
  * The fourth is a tolerance carried forward. It is recorded here rather than
  * smoothed over, because a comment asserting an invariant the file does not

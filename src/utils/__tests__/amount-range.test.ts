@@ -222,17 +222,9 @@ describe("shapes with no single reading are refused, and the refused set is exac
       }),
     ).toBeNull();
     // ⚠⚠ THIS PIN MOVED, AND THE REASON IS A MEASUREMENT, NOT A PREFERENCE.
-    // It asserted `{min: 5_000_000, max: 2_000_000}` on the stated grounds
-    // that "the extractors already tolerated it". Driven through
-    // `enrichGraphWithFactorsAsync` — the entry a user actually reaches, per
-    // `cee/unified-pipeline/stages/enrich.ts` ("the ONLY call site") — that
-    // ground is false for a magnitude-bearing pair:
-    //
-    // ⚠ THE SENTENCE ABOVE NAMED `enrichGraphWithFactors` UNTIL THE REVIEW
-    // META-FINDING. That is the SYNC twin: `@deprecated`, zero src call sites
-    // outside its own module, and it mints no cap. The claim was true of the
-    // function measured and false of the one users reach. Re-derived through
-    // the async entry; the figures below hold.
+    // It asserted `{min: 5_000_000, max: 2_000_000}` on the stated grounds that
+    // "the extractors already tolerated it". That ground is false for a
+    // magnitude-bearing pair:
     //
     //   "We will cut spend from £2m to £500k this year."
     //     f4c8f501  {value 2_000_000, extractionType "explicit", conf 0.85}
@@ -244,6 +236,24 @@ describe("shapes with no single reading are refused, and the refused set is exac
     // reading them, not inherited. What it created was a midpoint of
     // £1,250,000 standing in for the writer's own stated £2m. Refusing
     // restores the base output on that set exactly.
+    //
+    // ⚠ TWO NAMED MEASUREMENT BASES HAVE NOW BEEN WRONG IN THIS COMMENT, so it
+    // no longer names one. It first said the figures were driven through
+    // `enrichGraphWithFactors` — the `@deprecated` SYNC twin, zero src call
+    // sites outside its own module, minting no cap (the review meta-finding).
+    // The correction then said they were "re-derived through the async entry",
+    // which is equally unpinnable: nothing in this repo drives either enricher
+    // on this string, and `FactorDataT` and `ExtractedFactor` BOTH carry
+    // `extractionType` and `confidence`, so the figures cannot say which
+    // function produced them. The historical pair above is kept as a dated
+    // record of two commits and is claimed as nothing more.
+    //
+    // WHAT ACTUALLY PINS THE BEHAVIOUR, at two levels: the
+    // `resolveAmountRange(…) → null` assertion immediately below, and — on the
+    // path a user reaches — "⭐ the refusal reaches the USER-REACHABLE path: a
+    // stated figure is no longer replaced by a midpoint", where `extractFactors`
+    // on this exact sentence must yield exactly [500_000, 2_000_000] and no
+    // 1_250_000. Both go red if the refusal is removed.
     expect(
       resolveAmountRange({
         minDigits: "5",

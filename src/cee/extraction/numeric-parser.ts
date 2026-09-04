@@ -331,11 +331,16 @@ type RangeParse = ParsedValue | typeof RANGE_REFUSED | null;
  * base/head pair is recorded there.
  *
  * ⚠ THE CALL SITES WERE LISTED AS `:393`, `:858` AND `:982` UNTIL THE REVIEW
- * META-FINDING, and one of the three is NOT REACHABLE: `:393` sits inside
- * `enrichGraphWithFactors`, the `@deprecated` SYNC twin with zero src callers.
- * Naming it beside two reachable sites made the reachability claim read as
- * broader than it is, in a paragraph whose entire subject is not over-reading a
- * manifest. Symbols, not line numbers, for the same reason as above.
+ * META-FINDING, and one of the three is NOT REACHABLE. Named by symbol, which
+ * is the entire point of the finding: the unreachable one is the
+ * `extractFactors` call inside `enrichGraphWithFactors` — the `@deprecated`
+ * SYNC twin, zero src callers. The two that ARE reachable are the calls in
+ * `mintGoalTargetOnly` and in `enrichGraphWithFactorsAsync`. Naming the
+ * deprecated one beside them made the reachability claim read as broader than
+ * it is, in a paragraph whose entire subject is not over-reading a manifest.
+ * The three integers survive ONLY as a record of what the old sentence said;
+ * they are not an address, nothing asserts them, and a reader who needs the
+ * sites should grep the two symbols above.
  *
  * ⚠ THIS PR ALREADY CONTAINED THE RIGHT ANALYSIS, one module over.
  * `resolveAmountPairBothOrNeither`'s docstring: *"a DECREASE descends by
