@@ -620,19 +620,28 @@ export class OpenAIAdapter implements LLMAdapter {
           .filter(Boolean)
         : [];
       // ROADMAP 2.281 — the goal-threshold contract is CEE-minted, and on THIS
-      // path the model is its only possible author: `rawJson` here is the
-      // model's own graph, nothing mints above this line, and OpenAI never sends
-      // the Anthropic records grammar. So for this provider the strip is the
-      // ONLY layer, and it is load-bearing — arm (b) of
+      // path the strip is load-bearing: arm (b) of
       // `__tests__/projector-goal-target-survives-draft.test.ts` REDs if it goes.
+      //
+      // ⚠ WHAT IS PINNED HERE IS THE WIRING, AND ONLY THE WIRING.
+      // `tests/unit/cee.goal-threshold-enricher-only-mint.test.ts` §D asserts
+      // that this file holds exactly one `stripModelAuthoredGoalThreshold(` call
+      // site and exactly one `normaliseDraftResponse(` call site, and that the
+      // strip runs before the normalisation.
+      //
+      // ⚠ WHAT IS NOT PINNED: that nothing above this line can mint a goal
+      // field. No assertion covers that. (§D's "the model IS the only possible
+      // author" is a failure-message string, not a check.) It could stop being
+      // true with nothing going red, so this comment does not claim it.
       //
       // ⚠ ADDRESS CORRECTED. This comment used to name "the repair_graph site
       // (:1215)" as the contrasting seam that deliberately does not strip.
-      // ROADMAP 2.763 retired the LLM repair seam: `normaliseDraftResponse` now
-      // occurs exactly once in this file (the draft site below) and :1215 is
-      // unrelated clarify-timeout handling. The live contrast is `anthropic.ts`,
-      // which does NOT strip because `projectDraftRecords` mints the goal quad
-      // above its seam — see the comment at that seam for why.
+      // ROADMAP 2.763 retired the LLM repair seam; the one-call-site assertion
+      // above is the durable form of that count, which is why this comment now
+      // carries no line number of its own. The live contrast is `anthropic.ts`,
+      // which does NOT strip — §D asserts zero call sites there, with the
+      // presence of the `projectDraftRecords(` seam pinned in-test as its
+      // precondition. See the comment at that seam.
       const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
       if (strippedGoal.nodeIds.length > 0) {
         log.info({

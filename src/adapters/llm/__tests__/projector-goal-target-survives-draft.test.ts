@@ -57,11 +57,12 @@ const h = vi.hoisted(() => ({
  * `cee.draft.records_completion_pass … "attempted":true,"error_class":"TypeError"`,
  * followed by `cee.draft.records_projected … "completion_kept":false`.
  *
- * Harmless by design — the pass is best-effort and the arms below assert the
- * pass-1 projection, which is where `applyStatedGoalTarget` mints. But it means
- * the path that REPROJECTS a MERGED record set is not exercised by this file,
- * and a reader must not read arm (a) as covering it. Adding `messages.create`
- * to the mock would be the way to reach it.
+ * The throw is swallowed by the adapter's own `catch` ("Never fatal. Pass 1
+ * stands.", `anthropic.ts`), so the arms below still exercise the pass-1
+ * projection, which is where `applyStatedGoalTarget` mints. Whether the gap is
+ * harmless for the MERGED-records path is NOT established here: that path is
+ * not exercised by this file, and a reader must not read arm (a) as covering
+ * it. Adding `messages.create` to the mock would be the way to reach it.
  */
 vi.mock('@anthropic-ai/sdk', () => {
   class MockAnthropic {
