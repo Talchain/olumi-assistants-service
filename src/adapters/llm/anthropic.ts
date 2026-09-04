@@ -87,6 +87,7 @@ import {
   mergeCompletionClaims,
   RECORDS_COMPLETION_MAX_TOKENS,
   RECORDS_COMPLETION_WALL_MS,
+  censusOptionFactorMagnitudes,
   type DraftInferenceClaim,
 } from '../../cee/draft/records/index.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
@@ -1997,6 +1998,21 @@ export async function draftGraphWithAnthropic(
         },
       );
     }
+    // ⭐ CENSUS POINT 1 of 4 — `before_completion`. MEASUREMENT ONLY: nothing
+    // downstream reads this, and deleting the line changes no persisted byte.
+    //
+    // Deployed drafts persist options with `interventions: {}` (28 of 32 options
+    // empty across 8 drafts), and nobody can say WHERE the magnitude goes
+    // missing, so no fix can be chosen between the three suspected causes. These
+    // four counts are what says where. This one is the earliest graph-shaped
+    // artefact that exists: pass 1, before the completion turn can add anything.
+    emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+      point: "before_completion",
+      idempotency_key: idempotencyKey,
+      model,
+      ...censusOptionFactorMagnitudes(seam.projection.graph),
+    });
+
     // ── ⭐⭐ PASS 2: THE COMPLETION TURN ─────────────────────────────────────
     //
     // Pass 1 produced a complete, well-formed record set. Where it does not join
@@ -2161,6 +2177,27 @@ export async function draftGraphWithAnthropic(
       }, "[Anthropic] records completion pass");
     }
 
+    // ⭐ CENSUS POINT 2 of 4 — `after_completion`. MEASUREMENT ONLY.
+    //
+    // ⚠ OUTSIDE the `answerableAskItems > 0` block, deliberately. Inside it,
+    // this point would go silent on every draft that bought no completion turn
+    // — and those are not a rare tail, they are a large share of drafts. A
+    // census absent from part of its own population reads downstream as "those
+    // drafts did not have the problem", which is the opposite of what a missing
+    // measurement means. So it fires on all four arms: completion merged and
+    // kept, merged and discarded, attempted and failed, never attempted.
+    //
+    // It censuses `activeProjection` — the projection the pipeline CARRIES
+    // FORWARD, which is pass 1's whenever the completion was not kept. That is
+    // the honest reading of "after the completion pass": what the draft is left
+    // holding once the pass has had its chance.
+    emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+      point: "after_completion",
+      idempotency_key: idempotencyKey,
+      model,
+      ...censusOptionFactorMagnitudes(activeProjection.graph),
+    });
+
     // Run after completion selection: completion reprojects records directly,
     // so guarding only the initial seam would let the invalid label return.
     const optionFraming = reconcileDraftOptionFraming(activeRecords, activeProjection);
@@ -2185,6 +2222,24 @@ export async function draftGraphWithAnthropic(
     // record so `rawJson` keeps its declared type, and nothing downstream holds a
     // reference to the projection the sidecar also describes.
     rawJson = { ...activeProjection.graph } as Record<string, unknown>;
+
+    // ⭐ CENSUS POINT 3 of 4 — `after_projection`. MEASUREMENT ONLY.
+    //
+    // Taken on `rawJson`, not on `activeProjection.graph`, even though the line
+    // above makes them the same content: `rawJson` is the object the rest of the
+    // draft path actually reads, and binding the census to the artefact that
+    // TRAVELS is what keeps this point honest if that assignment ever changes.
+    //
+    // ⚠ WHAT THE 2→3 INTERVAL COVERS, precisely, so no delta here is over-read:
+    // `reconcileDraftOptionFraming` and nothing else. It can withdraw an option
+    // (and with it that option's edges), so BOTH numbers can fall between these
+    // two points without a single magnitude having been lost.
+    emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+      point: "after_projection",
+      idempotency_key: idempotencyKey,
+      model,
+      ...censusOptionFactorMagnitudes(rawJson),
+    });
 
     // Diagnostic census of what the projector produced. Computed AFTER the
     // projection deliberately: before it, `rawJson.nodes` is absent on every
