@@ -25,6 +25,8 @@ import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import { maximalOlumiResponse } from '@talchain/schemas/fixtures';
 
 import { attachComputedAt } from '../../../orchestrator-v5/compose/analysis-ready-emit.js';
+import { computeAnalysisAffectingGraphHashSha256 } from '../../../orchestrator-v5/context/graph-hash.js';
+import type { GraphStateIngress } from '../../../orchestrator-v5/boundary/request-extensions.js';
 import { resolveRunAdmission } from '../../../orchestrator-v5/tools/handlers/analysis-ready-core.js';
 import { analysisAdmissionFrom } from '../../../orchestrator-v5/admission/analysis-admission.js';
 import type { AnalysisAdmission } from '../../../orchestrator-v5/admission/analysis-admission.js';
@@ -131,6 +133,27 @@ describe('analysis_admission reaches a consumer', () => {
     // canonical build produced. A structurally-equal copy would mean a second
     // computation of one verdict, which is the hazard this whole module removes.
     expect(admissionOf(carried)).toBe(admissionOf(canonical));
+  });
+
+  it('hop 1b — the ONE production mint path stamps a REAL graph_hash (FINDING 2)', () => {
+    // ⚠ THE FINDING THIS PINS. `canonicalAnalysisReadyFrom` is the only
+    // production mint of `analysis_admission`, and it called
+    // `analysisAdmissionFrom(admission, graph)` with TWO arguments against a
+    // THREE-parameter signature whose third defaulted to `null`. So every wire
+    // payload across all ~30 `buildCanonicalAnalysisReadyFromGraph` call sites
+    // carried `graph_hash: null`, while the field's own contract promised the
+    // subject "so a consumer can tell a stale one". A promise no consumer could
+    // ever redeem is the guarantee-theatre class this estate is named for.
+    const graph = capture();
+    const verdict = admissionOf(buildCanonicalAnalysisReadyFromGraph(graph));
+
+    expect(verdict, 'the capture must produce a verdict at all').toBeDefined();
+    // Bound by IDENTITY to the sanctioned authority — no third hash is minted
+    // here, and a bare shape assertion would not say WHICH hash this is.
+    expect(verdict!.graph_hash).toBe(
+      computeAnalysisAffectingGraphHashSha256(graph as unknown as GraphStateIngress),
+    );
+    expect(verdict!.graph_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('hop 4 identity — a payload that ALREADY carries the verdict is returned unchanged', () => {

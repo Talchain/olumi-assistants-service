@@ -681,9 +681,26 @@ export interface GraphPatchBlockData {
      * ⚠ `structurally_analysable` IS `may_run`. They are carried together so
      * they cannot drift; the new question is `permitted_analysis_mode` — the
      * upper bound on what the product may CLAIM, which nothing expressed before.
-     * A model can be perfectly executable and still not license a leader claim,
-     * and shipping "Stable ranking" / "Robust" over a wholly machine-authored
-     * model is the 3 Sep P0 this field exists to make impossible.
+     * A model can be perfectly executable and still not license a leader claim.
+     *
+     * ⚠⚠ WHAT IT DOES AND DOES NOT MAKE IMPOSSIBLE — CORRECTED, because the
+     * previous sentence read as a general licence. It said shipping "Stable
+     * ranking" / "Robust" over a *wholly* machine-authored model "is the 3 Sep P0
+     * this field exists to make impossible". True of *wholly*, and ONLY of
+     * *wholly* — but the surrounding prose invited the next reader to treat
+     * `comparative_leader` as a general warrant for that wording. It is not.
+     *
+     *   MAKES IMPOSSIBLE: naming a leader, or calling a result stable or robust,
+     *     over a comparison NONE of whose parameters the user has set.
+     *   DOES NOT: certify that the model is well specified, that its numbers are
+     *     right, or that a comparison the user has touched ONCE is sound. The
+     *     floor fires at one user-stated parameter on the comparison's own
+     *     causal substrate. `semantic_signals` publishes the counts so a stricter
+     *     consumer can require more without minting a second opinion.
+     *   DOES NOT: license a claim ON ITS OWN. A surface must conjoin this with
+     *     `leader_claim.permitted` (did THIS RESULT separate the arms?), and —
+     *     for any "proportion of scenarios met the goal" wording — with
+     *     `semantic_signals.goal_target_stated`.
      *
      * Additive + passthrough-safe, same route as `blocked_reason` and `may_run`.
      * ABSENCE means an older producer, never "no".
@@ -716,12 +733,34 @@ export interface GraphPatchBlockData {
         code: string;
         message: string;
       }>;
+      /**
+       * 64-hex analysis-affecting hash of the graph this verdict is about — NOT
+       * the 16-hex `freshness.current_graph_hash` token.
+       */
       graph_hash: string | null;
       semantic_signals: {
+        /** WHOLE-MODEL census — who authored this model's parameters? */
         confidence_parameters_total: number;
         confidence_parameters_user_stated: number;
         confidence_parameters_machine_authored: number;
         confidence_parameters_unattributed: number;
+        /**
+         * THE COMPARISON'S OWN SUBSTRATE — the parameters on a directed path
+         * from an option-intervened factor to the goal. This pair is what
+         * `semantic_quality_sufficient` reads; the whole-model pair above is
+         * NOT. Two questions, named apart.
+         */
+        material_parameters_total: number;
+        material_parameters_user_stated: number;
+        /** The baselines of the factors the options actually differ on. */
+        intervened_factor_baselines_total: number;
+        intervened_factor_baselines_user_stated: number;
+        /**
+         * Has the user said what "good" means? A precondition for a
+         * GOAL-ATTAINMENT claim, deliberately NOT a conjunct of
+         * `permitted_analysis_mode` — see `schemas/analysis-ready.ts`.
+         */
+        goal_target_stated: boolean;
       };
     };
     /** Exhaustive structural + semantic issues from the canonical readiness authority. */

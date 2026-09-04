@@ -304,6 +304,12 @@ export const AnalysisReadyPayload = z.object({
    *     post-run evidence they already read (`leader_claim.permitted`). The two
    *     answer different questions: this one asks whether the MODEL licenses the
    *     claim, that one whether THIS RESULT separated the arms;
+   *   · gate any claim about a PROPORTION OF SCENARIOS MEETING THE GOAL on
+   *     `semantic_signals.goal_target_stated` as a THIRD conjunct — a success
+   *     rate against a bar nobody set is a claim about Olumi's own bar;
+   *   · treat `comparative_leader` as a FLOOR, never a quality certificate. One
+   *     user-stated parameter on the comparison's substrate clears it;
+   *     `semantic_signals` carries the counts for a stricter bar;
    *   · render `reasons` when refusing, so a refusal names which of the four
    *     fields refused it and what would change it.
    *
@@ -345,12 +351,37 @@ export const AnalysisReadyPayload = z.object({
         code: z.string(),
         message: z.string(),
       }).passthrough()).readonly(),
+      /**
+       * The 64-hex analysis-affecting hash of the graph this verdict is about.
+       * NOT the 16-hex `freshness.current_graph_hash` token — same projection,
+       * different truncation, so never string-equal the two.
+       */
       graph_hash: z.string().nullable(),
       semantic_signals: z.object({
+        // The WHOLE-MODEL census: who authored this model's parameters?
         confidence_parameters_total: z.number(),
         confidence_parameters_user_stated: z.number(),
         confidence_parameters_machine_authored: z.number(),
         confidence_parameters_unattributed: z.number(),
+        // The COMPARISON'S OWN SUBSTRATE: and does the comparison rest on any of
+        // the user's? This pair is what `semantic_quality_sufficient` reads.
+        material_parameters_total: z.number(),
+        material_parameters_user_stated: z.number(),
+        // The strictest slice, published so a stricter consumer needs no second
+        // census: the baselines of the factors the options actually differ on.
+        intervened_factor_baselines_total: z.number(),
+        intervened_factor_baselines_user_stated: z.number(),
+        /**
+         * Has the user said what "good" means (a raw goal target)?
+         *
+         * ⚠ DELIBERATELY NOT A CONJUNCT of `permitted_analysis_mode`. It is a
+         * precondition for a GOAL-ATTAINMENT claim ("100% of simulated
+         * scenarios" — without it the bar being cleared is one Olumi chose), and
+         * NOT for a RANKING claim ("Option A leads"). A consumer gating
+         * attainment wording CONJOINS this itself, the same way it conjoins
+         * `leader_claim.permitted` for the post-run question.
+         */
+        goal_target_stated: z.boolean(),
       }).passthrough(),
     })
     .passthrough()
