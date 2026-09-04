@@ -350,6 +350,37 @@ describe('the value predicates are the estate\'s existing ones', () => {
   });
 });
 
+describe('⚠ `unreachable_count` HAS TWO CAUSES, and the field name names only one', () => {
+  it('a root WITH a path but no stated strengths is counted too — on the real capture', () => {
+    // The interface comment used to say "NO directed path to any goal". The
+    // classifier is `materiality > 0`, so it also catches a factor whose path
+    // exists but states no strength. Measured here on the founder capture
+    // rather than asserted, because that comment is what a future consumer
+    // would render as "N assumptions cannot affect the outcome".
+    const stripped = {
+      ...FOUNDER,
+      edges: (FOUNDER.edges as Record<string, unknown>[]).map((e) => {
+        const { strength_mean: _sm, strength: _s, weight: _w, ...rest } = e;
+        return rest;
+      }),
+    };
+    // PRECONDITION — with strengths, all three of these ARE ranked and none is
+    // unreachable, so the flip below is the missing strengths and nothing else.
+    expect(deriveMissingRootAssumptions(FOUNDER).ranked).toHaveLength(3);
+    expect(deriveMissingRootAssumptions(FOUNDER).unreachable_count).toBe(0);
+
+    const result = deriveMissingRootAssumptions(stripped);
+    expect(result.ranked).toEqual([]);
+    expect(result.unreachable_count).toBe(3);
+    // ...and those three demonstrably still HAVE paths to the goal.
+    for (const id of [F.icpClarity, F.productQualityFragment, F.competitivePressure]) {
+      expect(
+        (stripped.edges as Record<string, unknown>[]).some((e) => (e.from ?? e.source) === id),
+      ).toBe(true);
+    }
+  });
+});
+
 describe('a root that cannot reach the goal is COUNTED, never ASKED', () => {
   it('separates the two populations', () => {
     const result = deriveMissingRootAssumptions(
@@ -370,8 +401,22 @@ describe('a root that cannot reach the goal is COUNTED, never ASKED', () => {
   });
 });
 
-describe('ties break by id, never by label', () => {
-  it('two equally material roots come back in id order regardless of label order', () => {
+/**
+ * ⚠⚠ WHAT THIS SUITE PROVES, STATED AT ITS TRUE STRENGTH. It proves the sort
+ * reads the `id` FIELD and never the `label` FIELD. It does NOT prove the
+ * resulting order is uncorrelated with the label, and the interface comment
+ * used to claim it did ("DELIBERATELY not by label") on the strength of the
+ * anti-correlated case below.
+ *
+ * The anti-correlated case is a shape PRODUCTION IDS CANNOT TAKE.
+ * `factor-extraction/index.ts`'s `generateFactorId` builds every enrichment
+ * id as `factor_<label slug>_<index>`, so on the only population that ties by
+ * construction, id order IS label order. Both shapes are driven here — the
+ * hand-built one because it isolates WHICH FIELD is read, the production-
+ * shaped one so no reader inherits the false generalisation from the first.
+ */
+describe('ties break by the id FIELD — which is not the same as being unrelated to the label', () => {
+  it('ANTI-CORRELATED IDS (hand-built, not a production shape) prove the LABEL field is not read', () => {
     const result = deriveMissingRootAssumptions(
       graph(
         [
@@ -385,5 +430,34 @@ describe('ties break by id, never by label', () => {
       ),
     );
     expect(result.ranked.map((r) => r.factor_id)).toEqual(['aaa', 'zzz']);
+    // ...and the label order is the OPPOSITE, which is the whole point of the
+    // fixture and the reason it cannot be a production capture.
+    expect(result.ranked.map((r) => r.factor_label)).toEqual(['Zebra', 'Aardvark']);
+  });
+
+  it('⭐ PRODUCTION-SHAPED IDS ARE LABEL SLUGS, so there the tie order IS label order', () => {
+    // Ids exactly as `generateFactorId(label, index)` mints them. This is the
+    // population that ties by construction (enrichment-added roots, one
+    // defaulted 0.5 edge each), so it is the one a claim about ties is about.
+    const result = deriveMissingRootAssumptions(
+      graph(
+        [
+          { id: 'factor_zebra_0', kind: 'factor', label: 'Zebra' },
+          { id: 'factor_aardvark_1', kind: 'factor', label: 'Aardvark' },
+        ],
+        [
+          { from: 'factor_zebra_0', to: 'g', strength_mean: 0.5, defaulted: true },
+          { from: 'factor_aardvark_1', to: 'g', strength_mean: 0.5, defaulted: true },
+        ],
+      ),
+    );
+    // PRECONDITION — it really is a tie, or this test is about nothing.
+    expect(result.ranked[1]!.materiality).toBe(result.ranked[0]!.materiality);
+    expect(result.ranked.map((r) => r.factor_id)).toEqual([
+      'factor_aardvark_1',
+      'factor_zebra_0',
+    ]);
+    // ⚠ THE MEASURED FACT THE OLD COMMENT DENIED: alphabetical by label.
+    expect(result.ranked.map((r) => r.factor_label)).toEqual(['Aardvark', 'Zebra']);
   });
 });

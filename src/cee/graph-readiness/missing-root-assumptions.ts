@@ -123,17 +123,49 @@ export interface MissingRootAssumption {
 export interface MissingRootAssumptions {
   /**
    * Unquantified root factors that can reach a goal, most material first.
-   * Ties break by `factor_id` ascending — deterministic, and DELIBERATELY not
-   * by label: `DIAGNOSIS-LOCKED` addendum B records a live pair of tests in
-   * this estate that require and forbid alphabetical tie-ranking, so a label
-   * order here would inherit a contradiction rather than settle one.
+   * Ties break by `factor_id` ascending, so the ORDER IS TOTAL AND STABLE.
+   *
+   * ⚠⚠ AND THAT IS THE ONLY THING THE TIE-BREAK GUARANTEES. An earlier version
+   * of this comment said it was "DELIBERATELY not by label", which reads as a
+   * label-independence guarantee and is FALSE on the population that actually
+   * ties. Production factor ids are LABEL SLUGS —
+   * `factor-extraction/index.ts`'s `generateFactorId` builds
+   * `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g,'_').substring(0,20)}_${index}`
+   * — so on enrichment-added factors `factor_id` order IS label order in the
+   * ordinary case. (It diverges only where the slug truncates at 20 characters
+   * or the numeric suffix sorts lexically, e.g. `_10` before `_2`.)
+   *
+   * The true and narrow statement: this module reads the `id` FIELD and never
+   * the `label` FIELD, which is what keeps it out of the contradiction
+   * `DIAGNOSIS-LOCKED` addendum B records — a live pair of tests in this estate
+   * that require and forbid alphabetical tie-ranking. It is NOT a claim that
+   * the resulting order is uncorrelated with the label.
+   *
+   * ⭐ WHY THAT NOW COSTS NOTHING. A tie-break is only dangerous while a
+   * consumer reads it as a materiality VERDICT. It is not one, and since
+   * `orchestrator-v5/handlers/draft-calibration-blocks.ts` stopped asserting
+   * "matters most" on an exact tie, no consumer treats it as one: `ranked[0]`
+   * on a tie means "the one we ask about first", nothing more.
    */
   readonly ranked: readonly MissingRootAssumption[];
   /**
-   * Unquantified root factors with NO directed path to any goal. Carried, never
-   * spoken: a value for one of these cannot change what the model says, so it
-   * is not a gap the user should be asked to close, and counting it in a
-   * user-facing "three assumptions" sentence would overstate the gap.
+   * Unquantified root factors that were NOT ranked because their materiality
+   * came out at zero.
+   *
+   * ⚠ TWO CAUSES, AND THE NAME NAMES ONLY ONE. An earlier version of this
+   * comment said "NO directed path to any goal". The classifier is
+   * `materiality > 0`, which also catches a factor that HAS a path but whose
+   * edges state no strength — an unstated strength contributes nothing, by
+   * `readAbsoluteStrength` above. Measured: delete every `strength_mean` from
+   * `__tests__/fixtures/founder-2026-09-03.graph.json` and this reads 3, for
+   * three roots that all have paths. The suite's `an edge with NO stated
+   * strength contributes nothing rather than a default` pins the same thing.
+   *
+   * Carried, never spoken, and it has NO reader today. A future one must not
+   * render it as "N assumptions cannot affect the outcome" — that sentence is
+   * false for the second cause. If a consumer needs the two apart they are two
+   * questions and must be named apart (CLAUDE.md trap 21), never split out of
+   * this one field.
    */
   readonly unreachable_count: number;
 }

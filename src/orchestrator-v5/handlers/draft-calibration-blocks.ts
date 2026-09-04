@@ -162,6 +162,41 @@
  * false sentence on a card is the exact defect class `DIAGNOSIS-LOCKED`
  * addendum B is about. Silence is the honest failure direction here.
  *
+ * ── ⭐⭐ AND THE SAME STANDARD, APPLIED TO THE CARD'S OWN SUPERLATIVE ────────
+ * The rule above refuses a runner-up because the sentence would be false about
+ * the factor named. A TIE is the same false sentence reached by another route:
+ * on equal materiality `ranked[0]` is whichever `factor_id` sorts first — a
+ * STRING SORT — and "X matters most" reports that coin flip as a fact about
+ * the model. The first version of this module shipped exactly that, and it was
+ * not a corner case: it is the ENRICHER'S DEFAULT OUTPUT SHAPE (see
+ * `buildCalibrationBody`), so the flagship separated model was the exception
+ * and the tie was the rule.
+ *
+ * The resolution is NOT this module's usual silence, and the departure is
+ * deliberate. Silence would have dropped the card on the commonest real model
+ * shape — a dark ship of the whole feature. The defect is the RANKING CLAIM,
+ * not the ask, so the tie body drops the claim and keeps the ask: the count is
+ * still true, the named factor is still one of the gaps, and the command is
+ * still routable. Both directions are pinned in `__tests__` (a tie must drop
+ * it; a genuine separation, including the founder capture, must keep it).
+ *
+ * ── ⚠ A KNOWN, UNCLOSED GAP, RECORDED RATHER THAN QUIETLY FIXED ────────────
+ * A factor LABELLED with " to " in it — "Time to Value", "Lead to Customer
+ * Rate" — produces the exemplar `set Time to Value to 40%`, which the router
+ * accepts (measured: `true`) but whose OBJECT BOUNDARY is ambiguous: the same
+ * separator appears twice.
+ *
+ * It is not closed here, and the reasoning is recorded so the next reader
+ * finds a decision rather than an oversight. This module's claim is ROUTING,
+ * not binding (stated at its true strength above), and the binder is a model
+ * call on the tool-use path that owns `set_factor_value`. The one-line fix —
+ * refuse any label containing the separator — would suppress the card for a
+ * COMMON and legitimate label class in this domain, which is a measured cost,
+ * against a mis-binding nobody has yet measured at the binder. Quoting the
+ * label in the exemplar instead would change the shipped command shape for
+ * EVERY card and must be re-measured against the real router first. Either way
+ * the owner is the binding hop, not this emitter.
+ *
  * ── SCOPE — the draft turn only, and this is a boundary, not an oversight ──
  * The emitter runs where the three sibling draft emitters run. It does not
  * re-ask on later conversational turns, so after the user answers, the NEXT
@@ -230,34 +265,84 @@ function truncateAtWordBoundary(text: string, budget: number): string {
 }
 
 /**
- * The card's body.
+ * The card's body, from the WHOLE ranked list.
  *
  * Four things, in this order, and each is load-bearing:
  *   1. what is missing and that the model is standing in for it;
- *   2. why THIS one (only claimed when there is more than one — with a single
- *      gap "it carries the most weight" is a comparison against nothing);
+ *   2. why THIS one — only when the ranking can actually support it (see the
+ *      tie rule below);
  *   3. the ask, in a shape the router accepts, with the scale named;
  *   4. that analysis is still available — the card is an offer, not a blocker.
+ *
+ * ⭐⭐ IT TAKES THE LIST, NOT `(top, total)`, AND THAT IS THE FIX'S SHAPE.
+ * Whether the superlative may be spoken is a property of `ranked[0]` VERSUS
+ * `ranked[1]`, so it is DERIVED here from the only object that carries both
+ * (CLAUDE.md trap 12). The rejected alternative was a `sharesLead: boolean`
+ * parameter — a mirror of a comparison, which a second caller could compute
+ * differently and which nothing would catch.
  */
-export function buildCalibrationBody(top: MissingRootAssumption, total: number): string {
+export function buildCalibrationBody(ranked: readonly MissingRootAssumption[]): string {
+  const top = ranked[0];
+  // Not reachable through the emitter (gate 1 returns first) — an empty string
+  // is refused by `gateCoachingCardBody`'s `too_short`, so a direct caller
+  // gets silence rather than a half-built sentence.
+  if (top === undefined) return '';
+
   const exemplar = calibrationAnswerExemplar(top.factor_label);
-  const ask =
-    `Give it a level, for example "${exemplar}" on a 0% to 100% scale. `
+  const offer =
+    `for example "${exemplar}" on a 0% to 100% scale. `
     + `I can still compare your options meanwhile.`;
+  const total = ranked.length;
+
   if (total <= 1) {
     return (
       `This model is leaning on one assumption you have not given a level for, `
-      + `so it is working from a placeholder. ${ask}`
+      + `so it is working from a placeholder. Give it a level, ${offer}`
     );
   }
+
+  const gap =
+    `This model is leaning on ${total} assumptions you have not given a level for, `
+    + `so it is working from placeholders. `;
+
+  // ⭐⭐ THE SUPERLATIVE IS EARNED, NEVER ASSUMED — AND ON A TIE IT IS NOT
+  // EARNED. `ranked[0]` on equal materiality is whichever `factor_id` sorts
+  // first, which is a STRING SORT; "matters most" would turn a tie-break into
+  // a statement about the model, false about the factors it silently demotes.
+  //
+  // ⚠ AND THE TIE IS THE ENRICHER'S DEFAULT OUTPUT SHAPE, not a corner.
+  // `factor-extraction/enricher.ts` gives every factor it adds ONE outgoing
+  // edge at `strength_mean: 0.5, defaulted: true` pointed at
+  // `findConnectionTarget`'s `candidates[0].id`, so any two enrichment-added
+  // unquantified factors tie EXACTLY, by construction. (Measured on a live
+  // draft the same day: the deployed product added generic factors labelled
+  // "Spend" and "Value" on precisely that path.)
+  //
+  // ⛔ WHY NOT SILENCE. Silence is this module's answer to five other doubts,
+  // and it is the wrong one here: on the population above it would drop the
+  // card entirely, which is a dark ship of the whole feature rather than a
+  // conservative one. The defect is the RANKING CLAIM, not the ask — so only
+  // the claim goes, and the card still names one gap and offers a routable
+  // command. The body is 17 characters SHORTER this way, so the choice also
+  // costs no budget (pinned in `__tests__`).
+  //
+  // ⚠ THE LIMIT OF `===`, NAMED RATHER THAN PAPERED OVER. It catches the
+  // population that ties by construction — identical defaulted edges produce
+  // bit-identical sums. It does NOT catch a near-tie reached by different
+  // arithmetic (0.5 vs 0.50000000001), where the superlative is still weak.
+  // An epsilon would be an invented tolerance with a cliff either side of it,
+  // so the comparison is exact and the residue is recorded here.
+  const leaderIsShared = ranked[1]!.materiality === top.materiality;
+  if (leaderIsShared) {
+    return `${gap}Give ${top.factor_label} a level, ${offer}`;
+  }
+
   // "matters most" is the RANKING's own claim, and its referent is the set the
   // previous sentence just named — the assumptions with no level. It is the
   // locked diagnosis's own wording ("ICP clarity matters most") and it is
-  // measured, not asserted: the spec pins it against the derived order.
-  return (
-    `This model is leaning on ${total} assumptions you have not given a level for, `
-    + `so it is working from placeholders. ${top.factor_label} matters most. ${ask}`
-  );
+  // measured, not asserted: the spec pins it against the derived order, in
+  // BOTH directions (a tie must drop it; a real separation must keep it).
+  return `${gap}${top.factor_label} matters most. Give it a level, ${offer}`;
 }
 
 export interface BuildDraftCalibrationBlocksParams {
@@ -303,7 +388,9 @@ export function buildDraftCalibrationBlocks(
 
   // ⚠ NOT TRUNCATED. See the header: a shortened exemplar is an ask this
   // product cannot accept, so an over-long body must be refused, never trimmed.
-  const body = buildCalibrationBody(top, ranked.length);
+  // The WHOLE list goes in: whether the card may say "matters most" is a
+  // comparison between the top two, so the body owns it rather than a caller.
+  const body = buildCalibrationBody(ranked);
 
   // Gate 4 — on the EXACT bytes that ship, and the ONLY length authority this
   // module invokes. A label that leaks a slug-shaped id, uses graph-shape

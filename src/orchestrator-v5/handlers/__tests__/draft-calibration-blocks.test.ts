@@ -181,6 +181,135 @@ describe('one at a time, and only the leader', () => {
   });
 });
 
+/**
+ * ⭐⭐ THE SUPERLATIVE IS A CLAIM, AND ON A TIE THE DERIVATION CANNOT MAKE IT.
+ *
+ * `ranked[0]` on an exact materiality tie is whichever `factor_id` sorts first
+ * — a STRING SORT. "X matters most" turns that into a statement about the
+ * model, and it is false about the two factors it silently demotes.
+ *
+ * ⚠ AND THE TIE IS NOT EXOTIC; IT IS THE ENRICHER'S DEFAULT OUTPUT SHAPE, so
+ * these fixtures are built to the enricher's measured shape rather than to a
+ * shape that makes the point conveniently. `factor-extraction/enricher.ts`
+ * gives every factor it adds ONE outgoing edge at `strength_mean: 0.5,
+ * defaulted: true`, pointed at `findConnectionTarget`'s `candidates[0].id` for
+ * the first present kind (decision > option > goal > outcome) — i.e. the SAME
+ * target for essentially every enrichment-added factor. Those nodes are roots
+ * (outgoing edge only) and carry no value when the brief gave no number, so
+ * every pair of them ties EXACTLY, by construction rather than by coincidence.
+ * The ids below are `generateFactorId`'s own `factor_<label slug>_<index>`
+ * output for the labels they carry.
+ *
+ * Every case here pins its own precondition: the materialities are asserted
+ * BYTE-EQUAL first, so a body without the superlative cannot pass because the
+ * derivation saw a separation that was never there (trap 13b, third face).
+ */
+describe('⭐⭐ an exact materiality tie — the card may ask, but may not rank', () => {
+  /** Enrichment-shaped roots: one defaulted 0.5 edge each, same target. */
+  function enrichedTie(labels: readonly string[], strengths?: readonly number[]) {
+    return graph(
+      labels.map((label, i) => ({
+        id: `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 20)}_${i}`,
+        kind: 'factor',
+        label,
+      })),
+      labels.map((label, i) => ({
+        from: `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 20)}_${i}`,
+        to: 'g',
+        strength_mean: strengths?.[i] ?? 0.5,
+        defaulted: true,
+      })),
+    );
+  }
+
+  it('a 3-WAY EXACT TIE does not assert a superlative it cannot support', () => {
+    const g = enrichedTie(['Market Timing', 'Spend', 'Value']);
+
+    // PRECONDITION — all three are ranked and their materialities are BYTE
+    // EQUAL. Without this the assertion below could pass on a derivation that
+    // returned one factor, or none.
+    const { ranked } = deriveMissingRootAssumptions(g);
+    expect(ranked.map((r) => r.factor_id)).toEqual([
+      'factor_market_timing_0',
+      'factor_spend_1',
+      'factor_value_2',
+    ]);
+    expect(ranked[1]!.materiality).toBe(ranked[0]!.materiality);
+    expect(ranked[2]!.materiality).toBe(ranked[0]!.materiality);
+
+    const blocks = buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT });
+    // ⭐ THE CARD STILL SHIPS. Silence here would dark-ship the whole feature
+    // on the enricher's default output; the defect is the RANKING CLAIM, not
+    // the ask, so only the claim is removed.
+    expect(blocks).toHaveLength(1);
+    const body = blocks[0]!.body;
+
+    expect(body).not.toContain('matters most');
+    // ...and it still says the three true things: how many, which one it is
+    // asking about, and that analysis is unaffected.
+    expect(body).toContain('leaning on 3 assumptions');
+    expect(body).toContain('Give Market Timing a level');
+    expect(body).toContain('"set Market Timing to 40%"');
+    expect(body).toContain('I can still compare your options');
+  });
+
+  it('a PARTIAL tie at the TOP is still a shared lead, and is treated as one', () => {
+    // Two leaders and a genuine also-ran. `ranked[0]` is a coin flip between
+    // the first two; the third's presence must not buy back the superlative.
+    const g = enrichedTie(['Market Timing', 'Spend', 'Value'], [0.5, 0.5, 0.1]);
+
+    const { ranked } = deriveMissingRootAssumptions(g);
+    expect(ranked.map((r) => r.factor_id)).toEqual([
+      'factor_market_timing_0',
+      'factor_spend_1',
+      'factor_value_2',
+    ]);
+    expect(ranked[1]!.materiality).toBe(ranked[0]!.materiality);
+    expect(ranked[2]!.materiality).toBeLessThan(ranked[0]!.materiality);
+
+    const body = buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })[0]!.body;
+    expect(body).not.toContain('matters most');
+    expect(body).toContain('leaning on 3 assumptions');
+    expect(body).toContain('Give Market Timing a level');
+  });
+
+  it('⭐ THE OPPOSITE-DIRECTION TWIN — a genuine separation KEEPS the superlative', () => {
+    // Without this, "drop the superlative" could be satisfied by dropping it
+    // always, which would silently delete the card's most useful sentence on
+    // every model that CAN rank — including the founder capture this lane
+    // exists to serve. Both directions, measured (trap 22b).
+    const g = enrichedTie(['Market Timing', 'Spend'], [0.9, 0.1]);
+    const { ranked } = deriveMissingRootAssumptions(g);
+    expect(ranked[1]!.materiality).toBeLessThan(ranked[0]!.materiality);
+
+    const body = buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })[0]!.body;
+    expect(body).toContain('Market Timing matters most');
+  });
+
+  it('⭐ AND ON THE FOUNDER CAPTURE — the real model still ranks, and still says so', () => {
+    const { ranked } = deriveMissingRootAssumptions(FOUNDER);
+    // Precondition: this capture is genuinely separated (~2x), so it is the
+    // right control for "the fix did not silence the flagship case".
+    expect(ranked[0]!.materiality).toBeGreaterThan(ranked[1]!.materiality);
+    const body = buildDraftCalibrationBlocks({ graph: FOUNDER, createdAt: CREATED_AT })[0]!.body;
+    expect(body).toContain('ICP Clarity matters most');
+  });
+
+  it('the tie body stays inside the card budget, so the fix costs no coverage', () => {
+    // The tie body REPLACES "<label> matters most. Give it a level," with
+    // "Give <label> a level," — 17 characters shorter for every label. Pinned
+    // so a later copy change cannot quietly reintroduce a budget cliff that
+    // only fires on ties.
+    const tie = enrichedTie(['Market Timing', 'Spend', 'Value']);
+    const sep = enrichedTie(['Market Timing', 'Spend', 'Value'], [0.9, 0.5, 0.1]);
+    const tieBody = buildDraftCalibrationBlocks({ graph: tie, createdAt: CREATED_AT })[0]!.body;
+    const sepBody = buildDraftCalibrationBlocks({ graph: sep, createdAt: CREATED_AT })[0]!.body;
+    expect(sepBody).toContain('matters most');
+    expect(tieBody.length).toBe(sepBody.length - 17);
+    expect(gateCoachingCardBody(tieBody).accept).toBe(true);
+  });
+});
+
 describe('fail-closed', () => {
   it('no unquantified root that reaches the goal means no card', () => {
     const quantified = graph(
@@ -228,7 +357,7 @@ describe('fail-closed', () => {
     // PRECONDITIONS — the ranking returns it and the BODY is acceptable, so the
     // refusal below is the title gate's and nothing else's.
     expect(deriveMissingRootAssumptions(g).ranked.map((r) => r.factor_id)).toEqual(['f']);
-    const body = buildCalibrationBody({ factor_id: 'f', factor_label: label, materiality: 1 }, 1);
+    const body = buildCalibrationBody([{ factor_id: 'f', factor_label: label, materiality: 1 }]);
     expect(gateCoachingCardBody(body).accept, 'the body must PASS, or the title gate is not isolated').toBe(true);
 
     expect(buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })).toEqual([]);
@@ -247,7 +376,7 @@ describe('fail-closed', () => {
 
     // PRECONDITIONS — every OTHER gate passes, so the refusal is gate 3's.
     expect(deriveMissingRootAssumptions(g).ranked.map((r) => r.factor_id)).toEqual(['f']);
-    const body = buildCalibrationBody({ factor_id: 'f', factor_label: label, materiality: 1 }, 1);
+    const body = buildCalibrationBody([{ factor_id: 'f', factor_label: label, materiality: 1 }]);
     expect(body.length).toBeLessThanOrEqual(300);
     expect(gateCoachingCardBody(body).accept).toBe(true);
     // ...and the router genuinely refuses it.
@@ -269,7 +398,7 @@ describe('fail-closed', () => {
     // derivation seeing nothing. The refusing authority is the copy gate's
     // `too_long`; this module keeps no length constant of its own.
     expect(deriveMissingRootAssumptions(g).ranked.map((r) => r.factor_id)).toEqual(['f']);
-    const body = buildCalibrationBody({ factor_id: 'f', factor_label: longLabel, materiality: 1 }, 1);
+    const body = buildCalibrationBody([{ factor_id: 'f', factor_label: longLabel, materiality: 1 }]);
     expect(body.length).toBeGreaterThan(300);
     expect(buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })).toEqual([]);
   });
