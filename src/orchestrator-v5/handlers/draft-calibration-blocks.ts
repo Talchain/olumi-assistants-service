@@ -167,18 +167,61 @@
  * the factor named. A TIE is the same false sentence reached by another route:
  * on equal materiality `ranked[0]` is whichever `factor_id` sorts first — a
  * STRING SORT — and "X matters most" reports that coin flip as a fact about
- * the model. The first version of this module shipped exactly that, and it was
- * not a corner case: it is the ENRICHER'S DEFAULT OUTPUT SHAPE (see
- * `buildCalibrationBody`), so the flagship separated model was the exception
- * and the tie was the rule.
+ * the model. The first version of this module shipped exactly that.
  *
- * The resolution is NOT this module's usual silence, and the departure is
- * deliberate. Silence would have dropped the card on the commonest real model
- * shape — a dark ship of the whole feature. The defect is the RANKING CLAIM,
- * not the ask, so the tie body drops the claim and keeps the ask: the count is
- * still true, the named factor is still one of the gaps, and the command is
- * still routable. Both directions are pinned in `__tests__` (a tie must drop
- * it; a genuine separation, including the founder capture, must keep it).
+ * ⭐ WHY THE RESOLUTION IS NOT THIS MODULE'S USUAL SILENCE. The reason is
+ * stated first BECAUSE IT DOES NOT DEPEND ON HOW OFTEN TIES OCCUR — the
+ * frequency argument recorded further down cannot carry this decision, and an
+ * earlier version of this header wrongly made it do so:
+ *
+ *   THE CARD CARRIES TWO THINGS, AND ONLY ONE OF THEM IS THE RANKING. It
+ *   DISCLOSES that the model is standing in for assumptions the user never
+ *   gave, and it RANKS them. Silence on a tie would suppress both — and the
+ *   disclosure is the entire point of this lane.
+ *   `DIAGNOSIS-LOCKED-2026-09-03.md` is a record of the product reporting
+ *   62% / 38% over three engine-defaulted root assumptions and never saying
+ *   so. Dropping the card to avoid an unearned superlative would reproduce
+ *   that exact silence, in the name of accuracy. The defect is the RANKING
+ *   CLAIM, not the ask — so only the claim goes.
+ *
+ * The tie body therefore keeps the count (still true), the named factor (still
+ * one of the gaps) and the routable command, and drops only the comparative.
+ * Both directions are pinned in `__tests__` (a tie must drop it; a genuine
+ * separation, including the founder capture, must keep it).
+ *
+ * ⚠ AND THE FREQUENCY CLAIM, CORRECTED TO WHAT WAS ACTUALLY MEASURED. This
+ * header used to assert as fact that the tie "is the ENRICHER'S DEFAULT OUTPUT
+ * SHAPE… so the flagship separated model was the exception and the tie was the
+ * rule". The MECHANISM behind that sentence is verified at the bytes (see
+ * `buildCalibrationBody`); the FREQUENCY never was. The leap from one to the
+ * other is CLAUDE.md trap 20 — an honest mechanism observation generalised
+ * into a population claim at the moment of recording, and then used as the
+ * load-bearing reason to depart from a brief.
+ *
+ *   WHAT IS TRUE: a tie is structurally POSSIBLE and REACHABLE BY
+ *   CONSTRUCTION. That is the whole of the mechanism claim.
+ *
+ *   WHAT IS MEASURED (4 Sep 2026): `deriveMissingRootAssumptions` run over
+ *   every graph-shaped JSON object in this repo — 378 files parsed, 154 graph
+ *   objects — yields 51 models with a non-empty `ranked`: 40 SINGULAR, 11
+ *   SEPARATED, **0 TIED AT THE TOP**.
+ *
+ *   ⚠ THE SCOPE LIMIT OF THAT NUMBER, WHICH IS THE WHOLE OF IT: this corpus
+ *   contains NO enricher-produced edges. `"origin": "enrichment"` and
+ *   `"defaulted": true` each return 0 files repo-wide, while the same sweep's
+ *   contrast controls return 56 (`"strength_mean"`), 45 (`"origin"`, any
+ *   value) and 116 (`"kind": "factor"`) — so the probe is not blind, the
+ *   population is simply absent. It therefore CANNOT certify the
+ *   enricher-added population, and no corpus available here measures it.
+ *   The tie detector is not blind either: a constructed enricher-shaped tie
+ *   classifies TIE_AT_TOP and its separated twin SEPARATED.
+ *
+ * The tie branch is nevertheless marker-independent — two 0.5 edges to one
+ * target tie whether or not `origin`/`defaulted` survive serialisation — so
+ * the narrow measured statement stands: IN EVERY COMMITTED MODEL THAT REACHES
+ * THIS CARD, THE TIE BRANCH NEVER FIRES. It is kept regardless, because the
+ * disclosure argument above does not rest on that rate and so cannot be
+ * falsified by a future measurement of it.
  *
  * ── ⚠ A KNOWN, UNCLOSED GAP, RECORDED RATHER THAN QUIETLY FIXED ────────────
  * A factor LABELLED with " to " in it — "Time to Value", "Lead to Customer
@@ -187,15 +230,35 @@
  * separator appears twice.
  *
  * It is not closed here, and the reasoning is recorded so the next reader
- * finds a decision rather than an oversight. This module's claim is ROUTING,
- * not binding (stated at its true strength above), and the binder is a model
- * call on the tool-use path that owns `set_factor_value`. The one-line fix —
- * refuse any label containing the separator — would suppress the card for a
- * COMMON and legitimate label class in this domain, which is a measured cost,
- * against a mis-binding nobody has yet measured at the binder. Quoting the
- * label in the exemplar instead would change the shipped command shape for
- * EVERY card and must be re-measured against the real router first. Either way
- * the owner is the binding hop, not this emitter.
+ * finds a decision rather than an oversight.
+ *
+ * ⭐ THE REASON IS THE BINDER'S MATCHING STRATEGY, NOT A HOPE ABOUT THE MODEL.
+ * An earlier version of this note rested the case on "the binder is a model
+ * call on the tool-use path", i.e. on the final hop being unmeasurable. That
+ * undersold it. There is a DETERMINISTIC PRE-BINDER ahead of the model call:
+ * `orchestrator-v5/routing/deterministic-value-update.ts`'s
+ * `tryDeterministicValueUpdate`, inserted into the TurnExecutor lifecycle
+ * BEFORE `routeWithToolUse` (its own header says so; the production call site
+ * is `orchestrator-v5/turn-executor.ts`). It does NOT positionally parse
+ * `set X to Y`. It matches candidate labels against the message by
+ * case-insensitive SUBSTRING first, with a bigram-Dice fallback, over the
+ * graph's own node labels. So `set Time to Value to 40%` matches the factor
+ * labelled "Time to Value" ON ITS OWN FULL TEXT, and the realistic failure
+ * mode is an ambiguity CLARIFY — one extra question, with the user picking
+ * from chips — not a silent mis-bind.
+ *
+ * Suppressing a common, legitimate label class to avoid one extra question is
+ * the wrong trade, and that is the whole argument for leaving this open. The
+ * one-line fix (refuse any label containing the separator) buys nothing
+ * against a cost that is now understood. Quoting the label in the exemplar
+ * instead would change the shipped command shape for EVERY card and must be
+ * re-measured against the real router first.
+ *
+ * ⚠ THE RUNG OF THAT PARAGRAPH, STATED SO IT IS NOT SILENTLY UPGRADED: it is
+ * DERIVED BY READING `deterministic-value-update.ts` and its call site — CODE
+ * READ, not executed, and not witnessed on a wire. No probe here has driven
+ * `set Time to Value to 40%` through the pre-binder against a graph carrying
+ * that label. Anyone closing this gap should measure that first.
  *
  * ── SCOPE — the draft turn only, and this is a boundary, not an oversight ──
  * The emitter runs where the three sibling draft emitters run. It does not
@@ -274,6 +337,45 @@ function truncateAtWordBoundary(text: string, budget: number): string {
  *   3. the ask, in a shape the router accepts, with the scale named;
  *   4. that analysis is still available — the card is an offer, not a blocker.
  *
+ * ── ⚠⚠ WHAT THE SPOKEN COUNT COUNTS, PINNED BECAUSE IT IS NOT `ranked.length`
+ * BY ACCIDENT ──────────────────────────────────────────────────────────────
+ * "leaning on N assumptions you have not given a level for" reports
+ * `ranked.length`, which OMITS `unreachable_count`. That omission is a
+ * DECISION, and the decision is forced by the fact that `unreachable_count`
+ * has TWO CAUSES which the sentence cannot both be true of
+ * (`missing-root-assumptions.ts` names them; CLAUDE.md trap 21):
+ *
+ *   CAUSE 1 — no directed path to any goal. The model is NOT leaning on it:
+ *             nothing it could say would move the answer. Counting it makes
+ *             this sentence FALSE.
+ *   CAUSE 2 — a path exists, but some edge on it states no strength. The model
+ *             IS leaning on it. NOT counting it makes this sentence an
+ *             UNDER-CLAIM.
+ *
+ * ⭐ SO THE COUNT IS "GAPS THAT CAN MOVE THE ANSWER", not "gaps". Widening it
+ * to `ranked.length + unreachable_count` would trade the under-claim for a
+ * falsehood, which is strictly worse on a card whose entire purpose is to stop
+ * the product asserting more than it knows — and it would collapse two
+ * questions into one number, which is the defect that field's own doc-comment
+ * exists to forbid.
+ *
+ * ⚠ AND THE RESIDUAL UNDER-CLAIM IS REAL, MEASURED, AND LEFT OPEN ON PURPOSE.
+ * Measured 4 Sep 2026 across the 51 in-repo models with a non-empty `ranked`:
+ * exactly TWO have `ranked = 1, unreachable_count = 1`, and they split ONE
+ * EACH across the two causes —
+ *   · `tools/graph-evaluator/fixtures/repair-graph/10-bidirected-preservation.json`
+ *     — `fac_market_noise` has ZERO out-edges. CAUSE 1, so "leaning on one" is
+ *     CORRECT there and widening would have made it a lie.
+ *   · `tools/graph-evaluator/governed/draft-graph-v5/baseline/run-b9389df-claude-sonnet-4-6.json`
+ *     — `b10644be` "Gross Margin Rate" → "Gross Profit Generation" → goal; its
+ *     OWN edge states 0.7 and the SECOND hop states nothing, so the product is
+ *     zero. CAUSE 2, and a genuine under-claim: the card says "one" where two
+ *     unquantified roots exist.
+ * Direction is under-claim, and "leaning on" carries a materiality sense, so
+ * this ships. Separating the causes is a change to
+ * `missing-root-assumptions.ts`'s contract (two fields, named apart), not a
+ * wider count here. `__tests__` pins BOTH directions so neither can drift.
+ *
  * ⭐⭐ IT TAKES THE LIST, NOT `(top, total)`, AND THAT IS THE FIX'S SHAPE.
  * Whether the superlative may be spoken is a property of `ranked[0]` VERSUS
  * `ranked[1]`, so it is DERIVED here from the only object that carries both
@@ -310,21 +412,32 @@ export function buildCalibrationBody(ranked: readonly MissingRootAssumption[]): 
   // first, which is a STRING SORT; "matters most" would turn a tie-break into
   // a statement about the model, false about the factors it silently demotes.
   //
-  // ⚠ AND THE TIE IS THE ENRICHER'S DEFAULT OUTPUT SHAPE, not a corner.
-  // `factor-extraction/enricher.ts` gives every factor it adds ONE outgoing
-  // edge at `strength_mean: 0.5, defaulted: true` pointed at
-  // `findConnectionTarget`'s `candidates[0].id`, so any two enrichment-added
-  // unquantified factors tie EXACTLY, by construction. (Measured on a live
-  // draft the same day: the deployed product added generic factors labelled
-  // "Spend" and "Value" on precisely that path.)
+  // ⚠ THE TIE IS REACHABLE BY CONSTRUCTION — A MECHANISM CLAIM, AT ITS TRUE
+  // STRENGTH AND NO FURTHER. Verified at the bytes in
+  // `factor-extraction/enricher.ts` (both injection sites): every factor it
+  // adds gets ONE outgoing edge at `strength_mean: 0.5, defaulted: true,
+  // origin: "enrichment"`, pointed at `findConnectionTarget`'s target — the
+  // first node of the first present kind in `decision > option > goal >
+  // outcome`, i.e. `candidates[0].id` unless a candidate LABEL-MATCHES the
+  // factor. So two enrichment-added unquantified factors that land on the same
+  // target tie EXACTLY, by construction.
   //
-  // ⛔ WHY NOT SILENCE. Silence is this module's answer to five other doubts,
-  // and it is the wrong one here: on the population above it would drop the
-  // card entirely, which is a dark ship of the whole feature rather than a
-  // conservative one. The defect is the RANKING CLAIM, not the ask — so only
-  // the claim goes, and the card still names one gap and offers a routable
-  // command. The body is 17 characters SHORTER this way, so the choice also
-  // costs no budget (pinned in `__tests__`).
+  // ⛔ WHAT THAT DOES NOT SAY, because the earlier version of this comment did
+  // say it: it is NOT a claim about how OFTEN ties occur. Measured 4 Sep 2026
+  // over every graph-shaped JSON in this repo — 51 models with a non-empty
+  // `ranked`, 0 tied at the top — with the scope limit that the corpus holds
+  // no enricher-produced edges at all. See the header for the full figures,
+  // the contrast controls and the tie detector's own positive control.
+  //
+  // ⛔ WHY NOT SILENCE — AND THE REASON IS NOT THE RATE. Silence is this
+  // module's answer to five other doubts. It is the wrong one here because the
+  // card DISCLOSES as well as ranks, and dropping it would suppress the
+  // disclosure this lane exists to add (the founder's model reported 62% / 38%
+  // over three engine-defaulted roots and never said so). The defect is the
+  // RANKING CLAIM, not the ask — so only the claim goes, and the card still
+  // names one gap and offers a routable command. That argument holds at any
+  // tie rate, including zero. The body is 17 characters SHORTER this way, so
+  // the choice also costs no budget (pinned in `__tests__`).
   //
   // ⚠ THE LIMIT OF `===`, NAMED RATHER THAN PAPERED OVER. It catches the
   // population that ties by construction — identical defaulted edges produce

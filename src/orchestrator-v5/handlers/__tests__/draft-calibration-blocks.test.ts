@@ -28,6 +28,7 @@ import { CoachingBlockSchema } from '@talchain/schemas/boundary';
 import { describe, expect, it } from 'vitest';
 
 import { deriveMissingRootAssumptions } from '../../../cee/graph-readiness/missing-root-assumptions.js';
+import { generateFactorId } from '../../../cee/factor-extraction/index.js';
 import { shouldSuppressEditDispatchForValueUpdate } from '../../../orchestrator/routing/value-update-gate.js';
 import { gateCoachingCardBody } from '../../coaching/copy-quality-gate.js';
 import {
@@ -188,33 +189,52 @@ describe('one at a time, and only the leader', () => {
  * — a STRING SORT. "X matters most" turns that into a statement about the
  * model, and it is false about the two factors it silently demotes.
  *
- * ⚠ AND THE TIE IS NOT EXOTIC; IT IS THE ENRICHER'S DEFAULT OUTPUT SHAPE, so
- * these fixtures are built to the enricher's measured shape rather than to a
- * shape that makes the point conveniently. `factor-extraction/enricher.ts`
- * gives every factor it adds ONE outgoing edge at `strength_mean: 0.5,
- * defaulted: true`, pointed at `findConnectionTarget`'s `candidates[0].id` for
- * the first present kind (decision > option > goal > outcome) — i.e. the SAME
- * target for essentially every enrichment-added factor. Those nodes are roots
- * (outgoing edge only) and carry no value when the brief gave no number, so
- * every pair of them ties EXACTLY, by construction rather than by coincidence.
- * The ids below are `generateFactorId`'s own `factor_<label slug>_<index>`
- * output for the labels they carry.
+ * ⚠ THE TIE IS REACHABLE BY CONSTRUCTION, WHICH IS WHY THESE FIXTURES ARE
+ * BUILT TO THE ENRICHER'S MEASURED SHAPE rather than to a shape that makes the
+ * point conveniently. `factor-extraction/enricher.ts` gives every factor it
+ * adds ONE outgoing edge at `strength_mean: 0.5, defaulted: true`, pointed at
+ * `findConnectionTarget`'s target — the first node of the first present kind
+ * (decision > option > goal > outcome), i.e. `candidates[0].id` unless a
+ * candidate label-matches the factor. Those nodes are roots (outgoing edge
+ * only) and carry no value when the brief gave no number, so two of them
+ * landing on the same target tie EXACTLY, by construction rather than by
+ * coincidence.
+ *
+ * ⛔ THAT IS A MECHANISM CLAIM AND NOT A FREQUENCY ONE. An earlier version of
+ * this header said the tie "is NOT EXOTIC; IT IS THE ENRICHER'S DEFAULT OUTPUT
+ * SHAPE". Measured 4 Sep 2026 over every graph-shaped JSON object in this repo
+ * (154 graph objects, 51 with a non-empty `ranked`): 40 SINGULAR, 11
+ * SEPARATED, **0 TIED AT THE TOP** — with the scope limit that this corpus
+ * holds no enricher-produced edges at all. These cases therefore pin a branch
+ * no committed model currently reaches, deliberately: the branch exists so the
+ * card's DISCLOSURE survives a tie, and that reason does not depend on the
+ * rate. The emitter's header carries the full figures and controls.
+ *
+ * The ids below are `generateFactorId`'s own output, obtained by CALLING it
+ * rather than by restating its slug formula here.
  *
  * Every case here pins its own precondition: the materialities are asserted
  * BYTE-EQUAL first, so a body without the superlative cannot pass because the
  * derivation saw a separation that was never there (trap 13b, third face).
  */
 describe('⭐⭐ an exact materiality tie — the card may ask, but may not rank', () => {
-  /** Enrichment-shaped roots: one defaulted 0.5 edge each, same target. */
+  /**
+   * Enrichment-shaped roots: one defaulted 0.5 edge each, same target.
+   *
+   * ⚠ THE IDS COME FROM `generateFactorId` ITSELF, NOT FROM A COPY OF ITS SLUG
+   * FORMULA. An earlier version of this helper restated the formula inline —
+   * and restated it WRONGLY, omitting the real function's
+   * `.replace(/^_|_$/g, '')` trim. A spec written to pin the id↔label
+   * relationship is the last place that relationship may be re-implemented
+   * (CLAUDE.md trap 12): a drift in the real function must move these fixtures,
+   * not silently diverge from them.
+   */
   function enrichedTie(labels: readonly string[], strengths?: readonly number[]) {
+    const ids = labels.map((label, i) => generateFactorId(label, i));
     return graph(
-      labels.map((label, i) => ({
-        id: `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 20)}_${i}`,
-        kind: 'factor',
-        label,
-      })),
-      labels.map((label, i) => ({
-        from: `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 20)}_${i}`,
+      labels.map((label, i) => ({ id: ids[i], kind: 'factor', label })),
+      labels.map((_label, i) => ({
+        from: ids[i],
         to: 'g',
         strength_mean: strengths?.[i] ?? 0.5,
         defaulted: true,
@@ -307,6 +327,108 @@ describe('⭐⭐ an exact materiality tie — the card may ask, but may not rank
     expect(sepBody).toContain('matters most');
     expect(tieBody.length).toBe(sepBody.length - 17);
     expect(gateCoachingCardBody(tieBody).accept).toBe(true);
+  });
+});
+
+/**
+ * ⚠⚠ WHAT THE SPOKEN COUNT COUNTS — "gaps that CAN MOVE THE ANSWER", not
+ * "gaps". Pinned in BOTH directions because it is the same defect class the
+ * tie fix just closed: a sentence claiming more precision than the derivation
+ * supports.
+ *
+ * The body reports `ranked.length` and OMITS `unreachable_count`, and that
+ * field has TWO CAUSES the one sentence cannot both be true of:
+ *
+ *   CAUSE 1 — no directed path to a goal. The model is NOT leaning on it, so
+ *             counting it would make the sentence FALSE.
+ *   CAUSE 2 — a path exists but an edge on it states no strength. The model IS
+ *             leaning on it, so omitting it is an UNDER-CLAIM.
+ *
+ * Both are pinned below. Widening the count to `ranked.length +
+ * unreachable_count` REDs BOTH — the first because it would become a lie, the
+ * second because the recorded under-claim would have moved without the
+ * contract change that owning it properly requires. That pair is the point:
+ * either direction of drift is caught, and neither can be "fixed" silently.
+ *
+ * Measured 4 Sep 2026 over the 51 in-repo models with a non-empty `ranked`:
+ * exactly two carry `ranked = 1, unreachable_count = 1`, one per cause. The
+ * fixtures here reproduce those two shapes rather than inventing a third.
+ */
+describe('⚠⚠ the spoken count is "gaps that can move the answer"', () => {
+  it('CAUSE 1 — a root with NO path to the goal is EXCLUDED, and that is correct', () => {
+    // Reproduces `repair-graph/10-bidirected-preservation.json`'s shape:
+    // `fac_market_noise` is an unquantified root with ZERO out-edges.
+    const g = graph(
+      [
+        { id: 'f_reaches', kind: 'factor', label: 'Pricing Power' },
+        { id: 'f_orphan', kind: 'factor', label: 'Market Noise Level' },
+      ],
+      [{ from: 'f_reaches', to: 'g', strength_mean: 0.5 }],
+    );
+
+    // PRECONDITION — the derivation really does see TWO unquantified roots and
+    // bucket them apart. Without this the assertion below could pass because
+    // the orphan was never derived at all (trap 13b).
+    const { ranked, unreachable_count } = deriveMissingRootAssumptions(g);
+    expect(ranked.map((r) => r.factor_id)).toEqual(['f_reaches']);
+    expect(unreachable_count).toBe(1);
+
+    const body = buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })[0]!.body;
+    // "one", not "2": the model cannot be leaning on a factor that reaches
+    // nothing, so the excluded root is excluded TRUTHFULLY.
+    expect(body).toContain('leaning on one assumption');
+    expect(body).not.toContain('leaning on 2 assumptions');
+  });
+
+  it('CAUSE 2 — a root whose PATH states no strength is also excluded: the recorded UNDER-CLAIM', () => {
+    // Reproduces `baseline/run-b9389df-claude-sonnet-4-6.json`'s shape:
+    // "Gross Margin Rate" → "Gross Profit Generation" → goal, where the factor's
+    // OWN edge states a strength and the SECOND hop states none, so the product
+    // is zero and the root lands in `unreachable_count` despite having a path.
+    const g = graph(
+      [
+        { id: 'f_reaches', kind: 'factor', label: 'Pricing Power' },
+        { id: 'f_margin', kind: 'factor', label: 'Gross Margin Rate' },
+        { id: 'o_profit', kind: 'outcome', label: 'Gross Profit Generation' },
+      ],
+      [
+        { from: 'f_reaches', to: 'g', strength_mean: 0.5 },
+        { from: 'f_margin', to: 'o_profit', strength_mean: 0.7 },
+        { from: 'o_profit', to: 'g' }, // ⚠ no strength stated — this is the cause
+      ],
+    );
+
+    // PRECONDITION — and it pins the CAUSE, not merely the bucket: the second
+    // root is unreachable-by-zero WHILE a directed path to the goal exists, so
+    // this case is genuinely cause 2 and not cause 1 wearing its clothes.
+    const { ranked, unreachable_count } = deriveMissingRootAssumptions(g);
+    expect(ranked.map((r) => r.factor_id)).toEqual(['f_reaches']);
+    expect(unreachable_count).toBe(1);
+    // The path is real: state the missing strength and the same root ranks.
+    const withStrength = graph(
+      [
+        { id: 'f_reaches', kind: 'factor', label: 'Pricing Power' },
+        { id: 'f_margin', kind: 'factor', label: 'Gross Margin Rate' },
+        { id: 'o_profit', kind: 'outcome', label: 'Gross Profit Generation' },
+      ],
+      [
+        { from: 'f_reaches', to: 'g', strength_mean: 0.5 },
+        { from: 'f_margin', to: 'o_profit', strength_mean: 0.7 },
+        { from: 'o_profit', to: 'g', strength_mean: 0.9 },
+      ],
+    );
+    expect(deriveMissingRootAssumptions(withStrength).ranked.map((r) => r.factor_id)).toEqual([
+      'f_margin',
+      'f_reaches',
+    ]);
+
+    const body = buildDraftCalibrationBlocks({ graph: g, createdAt: CREATED_AT })[0]!.body;
+    // ⚠ THE UNDER-CLAIM, PINNED AS SUCH. The model IS leaning on "Gross Margin
+    // Rate", and the card says "one". Recorded rather than silently widened:
+    // one number cannot be true of both causes, and separating them is a
+    // change to `missing-root-assumptions.ts`'s contract.
+    expect(body).toContain('leaning on one assumption');
+    expect(body).not.toContain('leaning on 2 assumptions');
   });
 });
 

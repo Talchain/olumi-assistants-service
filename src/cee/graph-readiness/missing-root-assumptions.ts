@@ -128,12 +128,19 @@ export interface MissingRootAssumptions {
    * ⚠⚠ AND THAT IS THE ONLY THING THE TIE-BREAK GUARANTEES. An earlier version
    * of this comment said it was "DELIBERATELY not by label", which reads as a
    * label-independence guarantee and is FALSE on the population that actually
-   * ties. Production factor ids are LABEL SLUGS —
-   * `factor-extraction/index.ts`'s `generateFactorId` builds
-   * `factor_${label.toLowerCase().replace(/[^a-z0-9]+/g,'_').substring(0,20)}_${index}`
-   * — so on enrichment-added factors `factor_id` order IS label order in the
-   * ordinary case. (It diverges only where the slug truncates at 20 characters
-   * or the numeric suffix sorts lexically, e.g. `_10` before `_2`.)
+   * ties. Production factor ids are LABEL SLUGS: `factor-extraction/index.ts`'s
+   * `generateFactorId` lower-cases the label, replaces each run of non-alphanumerics
+   * with `_`, TRIMS a leading and trailing `_`, truncates to 20 characters, and
+   * wraps the result as `factor_<slug>_<index>`. So on enrichment-added factors
+   * `factor_id` order IS label order in the ordinary case. (It diverges only
+   * where the slug truncates at 20 characters or the numeric suffix sorts
+   * lexically, e.g. `_10` before `_2`.)
+   *
+   * ⚠ THAT CHAIN IS DESCRIBED, NOT QUOTED, AND DELIBERATELY SO. An earlier
+   * version of this comment pasted the expression and dropped its
+   * `.replace(/^_|_$/g, "")` step — a hand-maintained mirror that was already
+   * divergent from the function it claimed to quote, inside a comment about
+   * label/id coupling. `generateFactorId` is the authority; read it there.
    *
    * The true and narrow statement: this module reads the `id` FIELD and never
    * the `label` FIELD, which is what keeps it out of the contradiction
