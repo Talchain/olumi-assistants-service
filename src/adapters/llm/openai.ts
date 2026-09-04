@@ -619,12 +619,36 @@ export class OpenAIAdapter implements LLMAdapter {
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
           .filter(Boolean)
         : [];
-      // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. DRAFT ONLY:
-      // the repair_graph site (:1215) deliberately does NOT strip, because it
-      // runs after Stage 3 has enriched and the threshold there IS attested.
-      // OpenAI never sends the Anthropic draft grammar at all, so for this
-      // provider the strip is the ONLY layer — which is precisely why it exists
-      // separately from the grammar cut.
+      // ROADMAP 2.281 — the goal-threshold contract is CEE-minted, and on THIS
+      // path the strip is load-bearing: arm (b) of
+      // `__tests__/projector-goal-target-survives-draft.test.ts` REDs if it goes.
+      //
+      // ⚠ WHAT IS PINNED HERE IS THE WIRING, AND ONLY THE WIRING.
+      // `tests/unit/cee.goal-threshold-enricher-only-mint.test.ts` §D asserts
+      // that this file holds exactly one CALL of
+      // `stripModelAuthoredGoalThreshold` and exactly one CALL of
+      // `normaliseDraftResponse`, and that the strip runs before the
+      // normalisation.
+      //
+      // ⚠ §D COUNTS BY SCANNING THIS FILE'S TEXT — each symbol followed by an
+      // open paren — so COMMENTS IN THIS FILE ARE LOAD-BEARING: naming either
+      // symbol in call form in prose takes its count to 2 and REDs §D. Measured,
+      // not guessed — an earlier draft of this very comment did exactly that and
+      // the required check went red on it. Write them as bare symbols in prose.
+      //
+      // ⚠ WHAT IS NOT PINNED: that nothing above this line can mint a goal
+      // field. No assertion covers that. (§D's "the model IS the only possible
+      // author" is a failure-message string, not a check.) It could stop being
+      // true with nothing going red, so this comment does not claim it.
+      //
+      // ⚠ ADDRESS CORRECTED. This comment used to name "the repair_graph site
+      // (:1215)" as the contrasting seam that deliberately does not strip.
+      // ROADMAP 2.763 retired the LLM repair seam; the one-call assertion above
+      // is the durable form of that count, which is why this comment now carries
+      // no line number of its own. The live contrast is `anthropic.ts`, which
+      // does NOT strip — §D asserts zero calls there, with the presence of the
+      // `projectDraftRecords` seam pinned in-test as its precondition. See the
+      // comment at that seam.
       const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
       if (strippedGoal.nodeIds.length > 0) {
         log.info({

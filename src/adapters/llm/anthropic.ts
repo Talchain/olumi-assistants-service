@@ -23,7 +23,7 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse, ensureControllableFactorBaselines, stripModelAuthoredGoalThreshold } from "./normalisation.js";
+import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
 import { isUsableDraftDocument } from "./draft-document-acceptance.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
@@ -1951,11 +1951,6 @@ export async function draftGraphWithAnthropic(
     }
     // Use full raw text for debug output (preserves preamble/suffix for forensics)
     const jsonText = content.text.trim();
-    // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. Runs BEFORE
-    // normalisation so the degenerate-cap repair below it can never "repair" a
-    // quad that is about to be deleted. DRAFT ONLY: the repair_graph call site
-    // (:2624) deliberately does NOT strip — it runs after Stage 3 has enriched,
-    // where a threshold IS attested and must survive.
     // ── ⭐ THE PROJECTION SEAM ───────────────────────────────────────────────
     //
     // `rawJson` is a RECORD SET, not a graph. The deterministic projector turns
@@ -1965,9 +1960,7 @@ export async function draftGraphWithAnthropic(
     //
     // WHY EXACTLY HERE. Any later and a graph-shaped consumer would already have
     // read a record set; any earlier and it would run before the truncation
-    // salvage that `rawJson` depends on. It sits immediately above
-    // `stripModelAuthoredGoalThreshold` because that strip is the first consumer
-    // that reads graph structure.
+    // salvage that `rawJson` depends on.
     //
     // HONEST FAILURE, NEVER A PHANTOM GRAPH. If the response is not a record set
     // — including the case where the model ignored the instruction and returned a
@@ -2196,15 +2189,37 @@ export async function draftGraphWithAnthropic(
         .filter(Boolean)
       : [];
 
-    const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
-    if (strippedGoal.nodeIds.length > 0) {
-      log.info({
-        event: "cee.draft.model_authored_goal_threshold_stripped",
-        node_ids: strippedGoal.nodeIds,
-        fields: strippedGoal.fields,
-        structured_outputs_enabled: structuredOutputsEnabled,
-      }, "Discarded a model-authored goal-threshold contract from the draft — the enricher is the only mint (2.281)");
-    }
+    // ── ⭐⭐ NO `stripModelAuthoredGoalThreshold` HERE, AND THAT IS THE POINT ──
+    //
+    // ROADMAP 2.281's ingress strip deletes `CEE_MINTED_GOAL_FIELDS` from every
+    // node by KEY PRESENCE ALONE — no provenance, no origin, no node-id set. Its
+    // stated premise is that "at this seam no legitimate, attested threshold can
+    // exist yet: anything present was written by the model".
+    //
+    // THAT PREMISE IS FALSE ON THIS PATH, and has been since the records
+    // cutover put a CEE MINT above it. `rawJson` at this line is not the model's
+    // JSON — it is `activeProjection.graph`, built by `projectDraftRecords`
+    // a few lines up, and `applyStatedGoalTarget` (records/projector.ts) is the
+    // only writer of the goal quad in it. So the strip removed 100 % CEE-minted
+    // values here and 0 % model-authored ones: a founder's stated
+    // "Reach £30k MRR Within 18 Months" was extracted correctly and then
+    // deleted, leaving the canvas reading "No target set".
+    //
+    // A model-authored threshold CANNOT reach this line to be stripped:
+    //   · a GRAPH-shaped response is refused outright by the seam above
+    //     (`seam.ok === false` → typed throw), never normalised into a graph;
+    //   · a RECORD-shaped one is rebuilt field-by-field in `records/seam.ts`
+    //     from a grammar that declares no `goal_*` field at all (swept with a
+    //     contrast control: `goal_threshold|goal_baseline` → 0 in
+    //     `records/grammar.ts` + `instruction.ts`, `unit|value` → 16/10), and the
+    //     projector never spreads record fields onto a node.
+    //
+    // ⚠ THE STRIP IS NOT DEAD AND MUST NOT BE DELETED. `openai.ts:628` keeps it,
+    // and there it is load-bearing: that path sends no records grammar, has no
+    // projection seam, and its `rawJson` IS the model's own graph. The defect was
+    // CALL-SITE-SCOPED, not function-scoped — see the discriminating pair in
+    // `__tests__/projector-goal-target-survives-draft.test.ts`, whose arm (b)
+    // REDs if the OpenAI site is ever removed too.
     const normalised = normaliseDraftResponse(rawJson);
 
     // Pipeline checkpoint: post_adapter_normalisation (after normaliseDraftResponse)
