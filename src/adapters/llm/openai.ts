@@ -625,9 +625,16 @@ export class OpenAIAdapter implements LLMAdapter {
       //
       // ⚠ WHAT IS PINNED HERE IS THE WIRING, AND ONLY THE WIRING.
       // `tests/unit/cee.goal-threshold-enricher-only-mint.test.ts` §D asserts
-      // that this file holds exactly one `stripModelAuthoredGoalThreshold(` call
-      // site and exactly one `normaliseDraftResponse(` call site, and that the
-      // strip runs before the normalisation.
+      // that this file holds exactly one CALL of
+      // `stripModelAuthoredGoalThreshold` and exactly one CALL of
+      // `normaliseDraftResponse`, and that the strip runs before the
+      // normalisation.
+      //
+      // ⚠ §D COUNTS BY SCANNING THIS FILE'S TEXT — each symbol followed by an
+      // open paren — so COMMENTS IN THIS FILE ARE LOAD-BEARING: naming either
+      // symbol in call form in prose takes its count to 2 and REDs §D. Measured,
+      // not guessed — an earlier draft of this very comment did exactly that and
+      // the required check went red on it. Write them as bare symbols in prose.
       //
       // ⚠ WHAT IS NOT PINNED: that nothing above this line can mint a goal
       // field. No assertion covers that. (§D's "the model IS the only possible
@@ -636,12 +643,12 @@ export class OpenAIAdapter implements LLMAdapter {
       //
       // ⚠ ADDRESS CORRECTED. This comment used to name "the repair_graph site
       // (:1215)" as the contrasting seam that deliberately does not strip.
-      // ROADMAP 2.763 retired the LLM repair seam; the one-call-site assertion
-      // above is the durable form of that count, which is why this comment now
-      // carries no line number of its own. The live contrast is `anthropic.ts`,
-      // which does NOT strip — §D asserts zero call sites there, with the
-      // presence of the `projectDraftRecords(` seam pinned in-test as its
-      // precondition. See the comment at that seam.
+      // ROADMAP 2.763 retired the LLM repair seam; the one-call assertion above
+      // is the durable form of that count, which is why this comment now carries
+      // no line number of its own. The live contrast is `anthropic.ts`, which
+      // does NOT strip — §D asserts zero calls there, with the presence of the
+      // `projectDraftRecords` seam pinned in-test as its precondition. See the
+      // comment at that seam.
       const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
       if (strippedGoal.nodeIds.length > 0) {
         log.info({
