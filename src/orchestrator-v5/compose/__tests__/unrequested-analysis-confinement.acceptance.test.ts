@@ -35,6 +35,10 @@
  * over an untyped record — exactly the kind that silently stops matching.
  */
 
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import type { RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
@@ -45,13 +49,31 @@ import {
   UNREQUESTED_OPTION_ROW_DROPPED_MEMBERS,
   UNREQUESTED_ROBUSTNESS_KEPT_MEMBERS,
   confineUnrequestedAnalysisBlock,
+  mayPresentLeaderClaimForFact,
   keyStatesComparativeStanding,
   wasAnalysisRequestedByUser,
 } from '../unrequested-analysis-confinement.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
 import { textNamesLeadingOption } from '../leading-option-egress-guard.js';
 
-import capture from './fixtures/analysis-result-live-2026-09-03.json' with { type: 'json' };
+/**
+ * Read from disk, not via a JSON import attribute: the root tsconfig's `module`
+ * setting rejects `with { type: 'json' }` (TS2823), and `pnpm typecheck` cannot
+ * see it because `tsconfig.build.json` excludes tests. The separate CI check
+ * `Typecheck Drift (ratchet)` is the one that catches it — which is the whole
+ * reason a green local typecheck is necessary and not sufficient here.
+ */
+const capture = JSON.parse(
+  readFileSync(
+    new URL('./fixtures/analysis-result-live-2026-09-03.json', import.meta.url),
+    'utf-8',
+  ),
+) as {
+  readonly summary: string;
+  readonly leading_option_id: string;
+  readonly win_probabilities: Record<string, number>;
+  readonly enrichment: Record<string, unknown>;
+};
 
 const GRAPH_HASH = 'gh_live_20260903_b1run1';
 
@@ -325,6 +347,93 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
     // The inverse guard for the assertion above: if this ever collapses to a
     // handful of numbers, the confinement has become suppression.
     expect(numericPaths(build(true).enrichment).length).toBeGreaterThan(20);
+  });
+});
+
+describe('every surface reads the ONE shared admission (call-site pin)', () => {
+  /**
+   * ⭐ THE GUARD FOR THE DEFECT THIS CHANGE CREATED AND THEN CLOSED.
+   *
+   * The first cut took the conjunction inline in `compose.ts`. That left SIX
+   * other readers of the constraint-verdict leaf — including
+   * `routes/scenario-graph-analysis-read.ts`, the auto-run's OWN delivery path,
+   * whose `analysis_state.leader_claim.permitted` is the UI's entitlement grant.
+   * The block would have said "no leader" while the state beside it granted
+   * permission to name one: same fact, same second, two answers.
+   *
+   * So the invariant is not "the sites agree" — that is a mirror somebody has to
+   * maintain. It is that **the leaf has exactly ONE production call site, inside
+   * the shared admission itself.** A new consumer reaching for the leaf fails
+   * here, by name, with the reason.
+   */
+  const PRODUCTION_CALL_SITE = 'src/orchestrator-v5/compose/unrequested-analysis-confinement.ts';
+
+  function productionCallSitesOf(symbol: string): string[] {
+    // Repo root: this file sits at src/orchestrator-v5/compose/__tests__/.
+    // ⚠ The first version used one `../` too few and scanned `src/src`, which
+    // ENOENTed — caught by the positive control below, which is the only reason
+    // the verdicts underneath it were not trusted. A path-resolution slip in a
+    // scanner is invisible unless something asserts the scanner can SEE.
+    const root = fileURLToPath(new URL('../../../../', import.meta.url));
+    const hits: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === '__tests__' || entry.name === 'node_modules') continue;
+          walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) continue;
+        const source = readFileSync(full, 'utf-8');
+        // Strip line comments so a PROSE mention of the symbol is not counted as
+        // a call — `compose.ts` carries one, and counting it would make this
+        // guard fire on a sentence rather than on a reader.
+        const code = source
+          .split('\n')
+          .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+          .join('\n');
+        if (code.includes(`${symbol}(`)) {
+          hits.push(relative(root, full).replace(/\\/g, '/'));
+        }
+      }
+    };
+    walk(join(root, 'src'));
+    return hits.sort();
+  }
+
+  it('finds the calls it is looking for (positive control)', () => {
+    // A scanner that finds nothing agrees with every other scanner that finds
+    // nothing. Prove it can see a symbol with many production callers before
+    // trusting it about one with few.
+    expect(productionCallSitesOf('projectTransportEnrichmentForWithheldClaim').length).toBeGreaterThan(
+      0,
+    );
+    // Contrast control: a symbol that does not exist must read ZERO, so a
+    // non-empty result is about the code and not about the walker.
+    expect(productionCallSitesOf('thisSymbolDoesNotExistAnywhere')).toEqual([]);
+  });
+
+  it('the constraint-verdict LEAF is called from exactly one production file', () => {
+    expect(productionCallSitesOf('mayNameLeadingOptionForFact')).toEqual([
+      // Its own definition and re-export.
+      'src/orchestrator-v5/compose/withheld-claim-projection.ts',
+      // The shared admission — the ONLY consumer.
+      PRODUCTION_CALL_SITE,
+    ].sort());
+  });
+
+  it('the surfaces that decide what to SHOW about a leader read the admission', () => {
+    expect(productionCallSitesOf('mayPresentLeaderClaimForFact')).toEqual(
+      [
+        PRODUCTION_CALL_SITE,
+        'src/orchestrator-v5/compose.ts',
+        'src/orchestrator-v5/compose/phase3-blocks.ts',
+        'src/orchestrator-v5/compose/ui-directive.ts',
+        // The auto-run's own delivery path — the one that mattered most.
+        'src/routes/scenario-graph-analysis-read.ts',
+      ].sort(),
+    );
   });
 });
 

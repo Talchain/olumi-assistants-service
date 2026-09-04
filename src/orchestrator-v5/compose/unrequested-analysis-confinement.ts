@@ -165,9 +165,11 @@
  * verdict: who wins, by how much, and whether to trust it.
  */
 
+import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { isAutoInitiatedRunAnalysisFact } from '../context/run-initiator.js';
+import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 
 /**
  * Did a user ask for this analysis?
@@ -187,6 +189,64 @@ import { isAutoInitiatedRunAnalysisFact } from '../context/run-initiator.js';
  */
 export function wasAnalysisRequestedByUser(fact: HandlerFact): boolean {
   return !isAutoInitiatedRunAnalysisFact(fact);
+}
+
+/**
+ * The `analysis_result` member of the wire block union — the exact type
+ * `compose.ts`'s builder returns, narrowed from `OlumiResponse['blocks']` by
+ * its `type` discriminant so this projection cannot be handed some other block
+ * and cannot need a cast to give one back.
+ */
+type AnalysisResultBlock = Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }>;
+
+/**
+ * ⭐ THE ONE SHARED ADMISSION — may this fact's result present a leading option
+ * to the USER?
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS, AND IT IS A DEFECT THIS CHANGE CREATED AND THEN CLOSED
+ *
+ * The first cut of this work took the conjunction inline in `compose.ts` and
+ * nowhere else. `mayNameLeadingOptionForFact` has SEVEN readers, and the one
+ * that mattered most is on the auto-run's OWN DELIVERY PATH:
+ * `routes/scenario-graph-analysis-read.ts` re-derives it and feeds
+ * `composeAnalysisStateV1`, whose `leader_claim.permitted` is the UI's
+ * ENTITLEMENT GRANT. That route's own comment says, in terms:
+ *
+ *     "⚠ NOT hardcoded `false`. The entitlement is read from the SELECTED FACT
+ *      by the canonical fail-closed reader — the same one
+ *      `buildAnalysisResultBlock` uses internally — so the verdict's
+ *      `leader_claim` and the block's projections answer the SAME question
+ *      about the SAME fact. Two answers here would be trap 21 at a new surface."
+ *
+ * An inline conjunction would have made that sentence FALSE — the block saying
+ * "no leader" while the state beside it granted the UI permission to name one,
+ * on exactly the turn this change exists to contain. Aligning the two by
+ * copying the conjunction to each site is the mirror this estate keeps paying
+ * for; the remedy is ONE shared admission every consumer reads.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * TWO INPUTS, STILL NAMED APART — that is what makes this a composition
+ *
+ *   `mayNameLeadingOptionForFact` — "does the persisted CONSTRAINT VERDICT
+ *       permit a leader claim?" Unchanged, still the sole reader of
+ *       `result.constraint_verdict`, still exported and still callable on its
+ *       own by anything that genuinely wants only that question answered.
+ *   {@link wasAnalysisRequestedByUser} — "did anybody ASK for this analysis?"
+ *
+ * The two questions keep their own names and their own defaults. What is shared
+ * is the ANSWER to the third question the surfaces actually ask, which is
+ * neither of them: *may the user be shown a leader?*
+ *
+ * ⚠ THE TELEMETRY READERS TAKE THIS TOO, DELIBERATELY. `compose.ts`'s
+ * lens-companion emit and `phase3-blocks.ts`'s fragile-edge-offer emit both
+ * gate on this predicate so their counts match the branch that actually ships
+ * blocks. Leaving them on the narrower reader would over-count offers on
+ * exactly the turns where they are suppressed — which is the defect their own
+ * docstrings say they exist to avoid.
+ */
+export function mayPresentLeaderClaimForFact(fact: RunAnalysisHandlerFact): boolean {
+  return mayNameLeadingOptionForFact(fact) && wasAnalysisRequestedByUser(fact);
 }
 
 /**
@@ -439,14 +499,6 @@ export function projectTransportEnrichmentForUnrequestedRun(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** The shape this projection reads and rewrites — the `analysis_result` block. */
-interface AnalysisResultBlockLike {
-  readonly type: 'analysis_result';
-  readonly summary: string;
-  readonly win_probabilities?: Record<string, number>;
-  readonly enrichment?: unknown;
-  readonly [key: string]: unknown;
-}
 
 /**
  * Confine an `analysis_result` block for a run nobody asked for.
@@ -482,23 +534,22 @@ interface AnalysisResultBlockLike {
  * criterion. The original text is not lost: it stays on the persisted fact,
  * which is what freshness, decision records and the Phase-3 rebuild read.
  */
-export function confineUnrequestedAnalysisBlock<T extends AnalysisResultBlockLike>(
-  block: T,
+export function confineUnrequestedAnalysisBlock(
+  block: AnalysisResultBlock,
   fact: RunAnalysisHandlerFact,
-): T {
+): AnalysisResultBlock {
   if (wasAnalysisRequestedByUser(fact)) return block;
 
   const { win_probabilities: _dropped, ...rest } = block;
-  const enrichment =
-    'enrichment' in block
-      ? projectTransportEnrichmentForUnrequestedRun(
-          block.enrichment as Record<string, unknown> | undefined,
-        )
-      : undefined;
+  const enrichment = projectTransportEnrichmentForUnrequestedRun(
+    block.enrichment as Record<string, unknown> | undefined,
+  );
 
   return {
     ...rest,
     summary: UNREQUESTED_ANALYSIS_SUMMARY,
-    ...(enrichment !== undefined ? { enrichment } : {}),
-  } as unknown as T;
+    ...(enrichment !== undefined
+      ? { enrichment: enrichment as AnalysisResultBlock['enrichment'] }
+      : {}),
+  };
 }
