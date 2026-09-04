@@ -47,6 +47,22 @@ const h = vi.hoisted(() => ({
   openaiPayload: { text: '' },
 }));
 
+/**
+ * ⚠ SCOPE DISCLOSURE — THIS MOCK PROVIDES `messages.stream` ONLY, SO THE PASS-2
+ * COMPLETION IS A NON-EVENT AND THE MERGED-RECORDS REPROJECTION IS UNTESTED HERE.
+ *
+ * `draftGraphWithAnthropic` runs a second, optional completion pass over the
+ * record set via `messages.create`. That method does not exist on this mock, so
+ * the call throws immediately and the adapter's own log says so:
+ * `cee.draft.records_completion_pass … "attempted":true,"error_class":"TypeError"`,
+ * followed by `cee.draft.records_projected … "completion_kept":false`.
+ *
+ * Harmless by design — the pass is best-effort and the arms below assert the
+ * pass-1 projection, which is where `applyStatedGoalTarget` mints. But it means
+ * the path that REPROJECTS a MERGED record set is not exercised by this file,
+ * and a reader must not read arm (a) as covering it. Adding `messages.create`
+ * to the mock would be the way to reach it.
+ */
 vi.mock('@anthropic-ai/sdk', () => {
   class MockAnthropic {
     messages = {

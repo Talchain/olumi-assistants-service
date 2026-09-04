@@ -619,12 +619,20 @@ export class OpenAIAdapter implements LLMAdapter {
           .map((n: any) => n?.kind ?? n?.type ?? 'unknown')
           .filter(Boolean)
         : [];
-      // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. DRAFT ONLY:
-      // the repair_graph site (:1215) deliberately does NOT strip, because it
-      // runs after Stage 3 has enriched and the threshold there IS attested.
-      // OpenAI never sends the Anthropic draft grammar at all, so for this
-      // provider the strip is the ONLY layer — which is precisely why it exists
-      // separately from the grammar cut.
+      // ROADMAP 2.281 — the goal-threshold contract is CEE-minted, and on THIS
+      // path the model is its only possible author: `rawJson` here is the
+      // model's own graph, nothing mints above this line, and OpenAI never sends
+      // the Anthropic records grammar. So for this provider the strip is the
+      // ONLY layer, and it is load-bearing — arm (b) of
+      // `__tests__/projector-goal-target-survives-draft.test.ts` REDs if it goes.
+      //
+      // ⚠ ADDRESS CORRECTED. This comment used to name "the repair_graph site
+      // (:1215)" as the contrasting seam that deliberately does not strip.
+      // ROADMAP 2.763 retired the LLM repair seam: `normaliseDraftResponse` now
+      // occurs exactly once in this file (the draft site below) and :1215 is
+      // unrelated clarify-timeout handling. The live contrast is `anthropic.ts`,
+      // which does NOT strip because `projectDraftRecords` mints the goal quad
+      // above its seam — see the comment at that seam for why.
       const strippedGoal = stripModelAuthoredGoalThreshold(rawJson);
       if (strippedGoal.nodeIds.length > 0) {
         log.info({
