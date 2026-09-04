@@ -201,7 +201,7 @@ async function openaiDraft(responseText: string) {
   h.openaiPayload.text = responseText;
   const result = await new OpenAIAdapter('gpt-4o-mini').draftGraph(
     { brief: BRIEF, docs: [], seed: 1 },
-    { timeoutMs: 120_000, forceDefault: true },
+    { requestId: 'goal-target-openai-arm', timeoutMs: 120_000, forceDefault: true },
   );
   return (result as { graph: { nodes: AnyNode[]; edges: unknown[] } }).graph;
 }
