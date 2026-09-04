@@ -206,6 +206,104 @@ function labelsMatch(label1: string, label2: string): boolean {
 }
 
 /**
+ * ⭐⭐ THE STATED QUOTE ON A PROJECTED NODE, OR `undefined`.
+ *
+ * ⚠ READ FROM AN UNTYPED KEY ON PURPOSE. `Node` (`schemas/graph.ts:306`)
+ * declares no `provenance` field — it is `.passthrough()`, and the record
+ * projector writes provenance through that gap
+ * (`draft/records/projector.ts:2233`). So this cannot be a typed property
+ * access, and the narrowing below is the validation.
+ *
+ * ⚠ THE TWO PROJECTION PATHS DIFFER, AND THAT DIFFERENCE IS THIS GATE'S WHOLE
+ * DOMAIN — derived at the producer, not inferred from a label:
+ *   - a STATED item mints `{ provenance_class: "stated", source_quote, … }`
+ *     (`projector.ts:2233`), so the user's own span is retrievable;
+ *   - a CLAIM mints `{ provenance_class: "ai_inferred", basis, unbased }`
+ *     (`projector.ts:2673`) and carries **no quote at all**.
+ * A claim-derived factor therefore returns `undefined` here and keeps today's
+ * behaviour exactly. Absence means "no span to check", never "empty span".
+ */
+function statedSourceQuote(node: NodeT): string | undefined {
+  const provenance = (node as { provenance?: unknown }).provenance;
+  if (typeof provenance !== "object" || provenance === null) return undefined;
+  const quote = (provenance as { source_quote?: unknown }).source_quote;
+  return typeof quote === "string" && quote.trim().length > 0 ? quote : undefined;
+}
+
+/** Collapse whitespace runs so a quote still matches a brief that wrapped it. */
+function canonicaliseSpan(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * ⭐⭐⭐ POSITIONAL SPAN CONTAINMENT — the ONE rejection test on the enhance
+ * write. TRUE means "this figure was written inside this node's own sentence",
+ * and only a TRUE lets the enhance branch stamp a value as the user's.
+ *
+ * ── THE HARM IT STOPS (measured on deployed staging, 3 Sep 2026)
+ * A founder with £8k MRR was shown **£8.5m** on a factor about his own time.
+ * `labelsMatch` is a bidirectional SUBSTRING test over labels stripped of
+ * non-alphanumerics, and a stated `cause` node's label is a VERBATIM brief
+ * sentence — here 118 characters of it. Any short extracted label occurring
+ * anywhere inside that sentence matches it, so a factor labelled "Retention",
+ * carrying the COMPETITOR's £5m from a different paragraph, selected the
+ * founder-time node and overwrote it in one `data` write: it bound the wrong
+ * magnitude, minted `cap: 1e7` around it, and stamped `extractionType:
+ * "explicit"` — certifying a number the user never wrote as his own words.
+ * Node `27c23ebb`, confirmed a stated `cause` by hash preimage:
+ * `sha8("cause", <that sentence>) === "27c23ebb"` (`projector.ts:2120`).
+ *
+ * ── WHY POSITIONAL, AND NOT A MAGNITUDE CHECK
+ * Offsets are SCALE-BLIND, and that is the point. The magnitude route
+ * (`isAmountStatedInBrief`) declines every percentage, because percents are
+ * stored as fractions and it deliberately refuses percent↔fraction
+ * equivalence — routing the stamp through it would strip a founder's own "4%"
+ * of its user-stated provenance, re-attributing the user's numbers to us. A
+ * span test cannot make that mistake: it never looks at the value.
+ *
+ * ── WHY CONTAINMENT AND NOT AN OFFSET COMPARISON (corrected premise)
+ * The obvious form is `quoteStart <= match.index < quoteStart + len`.
+ * **`ExtractedFactor` carries no `match.index`** — `extractFactors` has it at
+ * every pattern site and discards it (`index.ts:41-60`). Adding one would mean
+ * editing every extractor site, which is exactly the range work open in
+ * CEE #1327. So containment is computed on the STRINGS, which is equivalent:
+ * where the quote is a literal span of the brief, "some occurrence of the
+ * matched text lies inside the quote's span" holds precisely when the quote
+ * contains that text as a substring. It is also strictly the more permissive
+ * reading — it accepts any occurrence rather than one chosen index — and a
+ * more permissive gate refuses less, which is the safe direction here.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT DO
+ * It never rewrites, rescales or re-labels anything, and it does not touch
+ * `labelsMatch`, which stays the candidate GENERATOR and the dedup predicate.
+ * On a refusal the enhance branch writes NOTHING and does not fall through to
+ * node creation, so no duplicate is minted. The figure is not silently
+ * dropped: `deriveNotModelledManifest` already names unmodelled brief
+ * magnitudes to the user, and that is where an unbindable £5m belongs.
+ */
+function enhanceWriteIsSpanContained(
+  node: NodeT,
+  factor: ExtractedFactor,
+  brief: string
+): boolean {
+  const quote = statedSourceQuote(node);
+  // Span-less (claim-derived) node: nothing to contain against. Unchanged.
+  if (quote === undefined) return true;
+
+  const canonicalBrief = canonicaliseSpan(brief);
+  const canonicalQuote = canonicaliseSpan(quote);
+  // The quote is not a literal span of this brief, so no offset window exists
+  // to test against. Refusing here would be a guess, not a measurement.
+  if (!canonicalBrief.includes(canonicalQuote)) return true;
+
+  const matched = canonicaliseSpan(factor.matchedText ?? "");
+  // No matched text means no span to place. Unchanged.
+  if (matched.length === 0) return true;
+
+  return canonicalQuote.includes(matched);
+}
+
+/**
  * Check if units are compatible for duplicate detection.
  * Units match if: both undefined, both equal, or one undefined and semantic label matches.
  */
@@ -987,6 +1085,25 @@ export async function enrichGraphWithFactorsAsync(
         existingNode.data.baseline !== undefined
       );
       if (!hasFactorData) {
+        // ⭐⭐⭐ THE SPAN GATE. `labelsMatch` above GENERATED this candidate; this
+        // is the one test that can REJECT it. A stated node may only be stamped
+        // with a figure written inside its own sentence. See
+        // `enhanceWriteIsSpanContained` for the harm, the derivation and why
+        // this is positional rather than a magnitude comparison.
+        if (!enhanceWriteIsSpanContained(existingNode, factor, brief)) {
+          factorsSkipped++;
+          log.info(
+            {
+              refusedLabel: factor.label,
+              refusedValue: factor.value,
+              refusedMatchedText: factor.matchedText,
+              nodeId: existingNode.id,
+              event: "cee.factor_enrichment.refused_out_of_span",
+            },
+            `Refusing to enhance "${existingNode.id}": "${factor.matchedText}" lies outside the node's own stated span`
+          );
+          continue;
+        }
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
           // Apply normalisation for large non-percentage values
