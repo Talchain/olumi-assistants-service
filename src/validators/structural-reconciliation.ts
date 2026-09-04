@@ -742,6 +742,69 @@ function constraintDirectionHeuristicRule(
 // Rule 4: Sign Reconciliation
 // =============================================================================
 
+/**
+ * ⭐⭐ THE ONE QUESTION THIS RULE ANSWERS: when `strength_mean` and
+ * `effect_direction` disagree, WHICH FIELD IS AUTHORITATIVE?
+ *
+ * The answer is `effect_direction`, and this rule moves the SIGN onto the
+ * MAGNITUDE. It used to do the opposite — overwrite `effect_direction` from
+ * `sign(strength_mean)` — and that was a silent polarity inverter.
+ *
+ * ⚠ THREE PASSES IN CEE ANSWER THIS ONE QUESTION, AND UNTIL THIS CHANGE THEY
+ * GAVE TWO DIFFERENT ANSWERS (the estate's signature defect, CLAUDE.md trap 21):
+ *
+ *   this rule            Stage 2 Normalise        answered "the MAGNITUDE"
+ *   `fixSignMismatch`    Stage 4 Repair substep 1 answers  "the DIRECTION"
+ *                        (`unified-pipeline/stages/repair/deterministic-sweep.ts:147`)
+ *   `transformEdgeToV3`  Stage 6 Boundary         answers  "the DIRECTION"
+ *                        (`cee/transforms/schema-v3.ts:830`)
+ *
+ * Because this rule runs FIRST it ERASED the disagreement, so the other two
+ * never saw one and their (correct) verdict never applied. A drafting model
+ * that emitted an UNSIGNED magnitude plus a direction — the natural shape, and
+ * the one the live draft prompt's own PARAMETER_GUIDANCE grades with
+ * absolute-value bars (`strong |mean|>0.6`) — had every stated NEGATIVE
+ * relationship silently turned POSITIVE.
+ *
+ * MEASURED, not asserted. Across 465 JSON/JSONL files in this repo and
+ * `Talchain/olumi-programme-docs`, 5,092 edge objects carry both a numeric mean
+ * and an `effect_direction`. 25 disagree — ALL 25 of the class
+ * `mean > 0 & direction = "negative"`, ZERO of the reverse. 19 of them sit in
+ * ONE governed evaluator baseline of the real draft-graph task
+ * (`tools/graph-evaluator/governed/draft-graph-v5/baseline/run-b9389df-claude-sonnet-4-6.json`),
+ * and they are semantically correct negatives that this rule was inverting:
+ * "Currency and Macro Risk" → "Revenue Growth Achieved",
+ * "Current Retention Rate" → "Retention Shortfall Risk",
+ * "Commuter Accessibility" → "Commuter Friction and Absenteeism".
+ *
+ * WHY THE DIRECTION IS THE AUTHORITY (derived at the bytes, not chosen):
+ *   (a) the draft grammar makes `effect_direction` REQUIRED with a CLOSED enum
+ *       (`cee/draft/anthropic-graph-schema.ts:395,409`); `strength.mean` is an
+ *       unconstrained `number`. A closed enum the producer must fill is a
+ *       stronger signal than a sign convention stated in one prompt line.
+ *   (b) the live prompt grades strength as a MAGNITUDE (`|mean|`), so the sign
+ *       of `mean` carries no guaranteed meaning at ingress.
+ *   (c) two of the three authorities already honour the direction — this rule
+ *       was the outlier, 1 of 3.
+ *   (d) direction-authoritative is LOSS-FREE: `mean := sign(direction)·|mean|`
+ *       keeps BOTH facts. Sign-authoritative DESTROYS the polarity. Between two
+ *       remedies for one disagreement, the one that discards information is the
+ *       wrong one.
+ *
+ * ⚠ THE OPPOSITE-DIRECTION HARM, and where it is closed. This rule now trusts
+ * the direction, so a genuine positive relationship carrying an accidentally
+ * negated magnitude keeps its POSITIVE direction and loses the stray minus
+ * sign. That class measured ZERO across the corpora above, but zero-observed is
+ * not zero-possible, so both directions are pinned together in
+ * `tests/unit/cee.edge-polarity-direction-authority.test.ts`. The one in-tree
+ * producer that could create a disagreement AFTER this rule —
+ * `normaliseRiskCoefficients` (`cee/transforms/risk-normalisation.ts`), which
+ * runs immediately after in Stage 2 and again reaches Late STRP in Stage 4 —
+ * now stamps `effect_direction: "negative"` alongside the mean it negates, so
+ * Late STRP has nothing to reconcile and cannot undo it.
+ *
+ * A zero magnitude carries no polarity and is left alone, as before.
+ */
 function signReconciliationRule(graph: GraphT): STRPMutation[] {
   const mutations: STRPMutation[] = [];
 
@@ -755,18 +818,20 @@ function signReconciliationRule(graph: GraphT): STRPMutation[] {
       const directionIsPositive = edge.effect_direction === "positive";
 
       if (signIsPositive !== directionIsPositive) {
-        const before = edge.effect_direction;
-        const after = signIsPositive ? "positive" : "negative";
-        edge.effect_direction = after;
+        const before = edge.strength_mean;
+        const after = directionIsPositive
+          ? Math.abs(before)
+          : -Math.abs(before);
+        edge.strength_mean = after;
 
         mutations.push({
           rule: "sign_reconciliation",
           code: "SIGN_CORRECTED",
           edge_id: `${edge.from}::${edge.to}`,
-          field: "effect_direction",
+          field: "strength_mean",
           before,
           after,
-          reason: `effect_direction "${before}" contradicts strength_mean sign (${edge.strength_mean})`,
+          reason: `strength_mean sign (${before}) contradicts the stated effect_direction "${edge.effect_direction}"; the direction is authoritative, so the magnitude takes its sign`,
           severity: "warn",
         });
       }
