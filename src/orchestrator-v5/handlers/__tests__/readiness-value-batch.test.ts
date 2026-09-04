@@ -282,6 +282,45 @@ describe('readiness value batch — atomicity', () => {
     if (outcome.status !== 'invalid') throw new Error('expected invalid');
     expect(outcome.reason).toBe('membership_moved');
   });
+
+  /**
+   * ⭐⭐ THE CASE A SURVIVING MUTANT EXPOSED, and it is the more dangerous half.
+   *
+   * The mutant that disabled the per-key comparison left the suite GREEN,
+   * because the test above changes the NUMBER of cells and the size check
+   * catches that on its own. A count is not an identity: membership can move
+   * while its size is unchanged — one gap closes as another opens — and then
+   * approved estimates would be written against cells the user never reviewed.
+   *
+   * Same cardinality, different cells. Nothing but the per-key comparison can
+   * see this (trap 19 — bind by identity, never by a value another set
+   * satisfies).
+   */
+  it('a proposal whose cells DIFFER at the same cardinality is refused', () => {
+    const graph = zeroConfiguredGraph();
+    const proposal = proposalOrThrow(graph, fullEstimates(graph));
+    // One cell re-pointed at a different factor: the SAME number of cells, a
+    // different set. Only the per-key comparison can see this.
+    const tampered = {
+      ...proposal,
+      cells: proposal.cells.map((cell, index) =>
+        index === 0 ? { ...cell, factor_id: `${cell.factor_id}-elsewhere` } : cell,
+      ),
+    };
+    // Preconditions asserted IN-TEST, so this cannot pass for the wrong
+    // reason: cardinality is genuinely unchanged, and the key set genuinely
+    // differs from what the graph derives.
+    const derived = selectValueBatchMembership(assess(graph));
+    expect(tampered.cells).toHaveLength(derived.cells.length);
+    expect(tampered.cells.map((c) => `${c.option_id}|${c.factor_id}`)).not.toEqual(
+      derived.cells.map((c) => `${c.option_id}|${c.factor_id}`),
+    );
+
+    const outcome = executeValueBatch({ proposal: tampered, currentGraph: graph });
+    expect(outcome.status).toBe('invalid');
+    if (outcome.status !== 'invalid') throw new Error('expected invalid');
+    expect(outcome.reason).toBe('membership_moved');
+  });
 });
 
 describe('readiness value batch — one approval, one apply', () => {
