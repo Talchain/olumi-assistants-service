@@ -230,8 +230,17 @@ type AnalysisResultBlock = Extract<OlumiResponse['blocks'][number], { type: 'ana
  * WHY THIS EXISTS, AND IT IS A DEFECT THIS CHANGE CREATED AND THEN CLOSED
  *
  * The first cut of this work took the conjunction inline in `compose.ts` and
- * nowhere else. `mayNameLeadingOptionForFact` has SEVEN readers, and the one
- * that mattered most is on the auto-run's OWN DELIVERY PATH:
+ * nowhere else. MEASURED at pristine `origin/staging` (a per-file scan with
+ * line comments stripped, so a prose mention is not counted as a call):
+ * `mayNameLeadingOptionForFact` had FIVE production call sites across FOUR
+ * consumer files — `compose.ts` twice, `compose/phase3-blocks.ts`,
+ * `compose/ui-directive.ts` and `routes/scenario-graph-analysis-read.ts` —
+ * plus two prose mentions in `turn-executor.ts` and
+ * `tools/handlers/run-analysis.ts`. The inline conjunction changed ONE of the
+ * five. ⚠ An earlier draft of this paragraph said "seven readers", conflating
+ * call sites with mentions; the figure above is the counted one.
+ *
+ * The site that mattered is on the auto-run's OWN DELIVERY PATH:
  * `routes/scenario-graph-analysis-read.ts` re-derives it and feeds
  * `composeAnalysisStateV1`, whose `leader_claim.permitted` is the UI's
  * ENTITLEMENT GRANT. That route's own comment says, in terms:
