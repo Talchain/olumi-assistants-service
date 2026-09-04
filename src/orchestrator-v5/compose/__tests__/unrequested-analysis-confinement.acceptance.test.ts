@@ -5,11 +5,15 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * THE CORPUS IS A LIVE CAPTURE, NOT A FIXTURE THE AUTHOR WROTE
  *
- * `fixtures/analysis-result-live-2026-09-03.json` is the VERBATIM
- * `analysis_result` block from a real staging run
- * (`Talchain/olumi-programme-docs`,
- * `artefacts/leg5-postrun-2026-09-03/B1-run-1/`). It is a historic record:
- * append-only, never edited (parent CLAUDE.md trap 14b).
+ * `fixtures/analysis-result-live-2026-09-03.json` carries the four
+ * claim-bearing fields of an `analysis_result` block — `summary`,
+ * `leading_option_id`, `win_probabilities`, `enrichment` — copied VERBATIM from
+ * a real staging run (`Talchain/olumi-programme-docs`,
+ * `artefacts/leg5-postrun-2026-09-03/B1-run-1/`). Stated precisely rather than
+ * as "the block": the `type` discriminant is not carried and a `_provenance`
+ * header is added, and a sentence about where evidence came from is the last
+ * one anyone re-checks. The copied VALUES are a historic record: append-only,
+ * never edited (parent CLAUDE.md trap 14b).
  *
  * That matters because a self-authored fixture encodes the author's model of
  * the producer rather than the producer (trap 16-inverse). It is precisely what

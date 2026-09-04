@@ -2,7 +2,7 @@
   "_provenance": {
     "captured": "2026-09-03",
     "source": "Talchain/olumi-programme-docs artefacts/leg5-postrun-2026-09-03/B1-run-1/analysis_result.verbatim.json",
-    "note": "VERBATIM analysis_result block from a live staging run. A historic record: append only, never edit (parent CLAUDE.md trap 14b)."
+    "note": "The four claim-bearing fields of an analysis_result block, copied VERBATIM from a live staging run; the block's `type` discriminant is the only field not carried, and `_provenance` is this header. The copied values are a historic record: append only, never edit (parent CLAUDE.md trap 14b) \u2014 they are what the product actually said on that date."
   },
   "summary": "Germany Pilot via Sponsored Customers came out ahead in 51% of runs of this model, but the analysis treats this as a close call. The result is not yet robust \u2014 small changes could flip it. 'Push Into Germany Next Year' was left out of this comparison because it has no values set. To include it, say 'Help me configure Push Into Germany Next Year.'",
   "leading_option_id": "0dcc2a10",
