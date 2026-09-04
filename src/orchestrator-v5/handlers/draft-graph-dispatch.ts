@@ -93,6 +93,7 @@ import {
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import { buildDraftFramingBlocks } from './draft-framing-blocks.js';
+import { buildDraftCalibrationBlocks } from './draft-calibration-blocks.js';
 import { buildDraftOptionWideningBlocks } from './draft-option-widening-blocks.js';
 import {
   buildV5DiagnosticTrace,
@@ -481,6 +482,27 @@ export function draftResultToOlumiResponse(
           // is. NOT `payload.message` — on the clarify-v2 intake path that is
           // the user's one-line answer (the 2.972 defect, see above).
           briefText: typeof effectiveBrief === 'string' ? effectiveBrief : null,
+          createdAt: blocksCreatedAt,
+        }),
+        // ROOT-ASSUMPTION CALIBRATION (draft-calibration-blocks): at most ONE
+        // card naming the single ROOT factor whose missing level would most
+        // change what this model can say, with the model still runnable.
+        //
+        // ⚠ IT TAKES NO `analysisReady`, AND THAT IS THE POINT rather than an
+        // omission. The three emitters above all gate on readiness — two on
+        // `=== 'ready'`, one on its inverse — and the founder's 3 Sep model was
+        // READY while three of its root assumptions were engine-defaulted to
+        // zero. A readiness gate in either direction is orthogonal to "is this
+        // model standing in for information the user never gave?", so binding
+        // to one would be two questions under one name (CLAUDE.md trap 21).
+        // Its own gates are the ranking's: no unquantified root that can reach
+        // the goal, no card.
+        //
+        // Reads `result.graphOutput` — the SAME drafted graph the widening and
+        // framing emitters are handed, so no two of them can be describing
+        // different models.
+        ...buildDraftCalibrationBlocks({
+          graph: result.graphOutput,
           createdAt: blocksCreatedAt,
         }),
       ]
