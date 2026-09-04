@@ -494,6 +494,26 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // this lane, and "while we're here" work is prohibited.
     'orchestrator-v5/routing/strip-planning-preamble.ts':
       'incidental — comment only; spells no alphabet and parses no numbers',
+    // ⭐ SIXTH — AND THE STANDING RECOMMENDATION DIRECTLY ABOVE IS NOW CLOSED,
+    // as a side effect of a change that was not about magnitudes at all.
+    //
+    // The 3 Sep 2026 chain-of-thought leak needed ONE narration vocabulary
+    // shared by the orientation stripper and a new egress guard, so
+    // `SENTENCE_SPLIT` — and the `£1.5 million` docstring explaining why it
+    // must not cut on a bare `[.!?]` — MOVED here, byte-identical, and
+    // `strip-planning-preamble.ts` now imports it. That is the "state the
+    // decimal-split hazard ONCE in a shared place" the entry above asked for.
+    // Its own entry is kept rather than deleted: the file still exists, the
+    // hazard still applies to it through the import, and a reader arriving at
+    // that entry needs the pointer to where the constant went.
+    //
+    // Classification is the same as its sibling's and for the same reason: this
+    // module holds no magnitude list, parses no number and multiplies nothing.
+    // It matches internal-vocabulary patterns over assistant text, splits on
+    // sentence boundaries and returns substrings. The single magnitude word is
+    // inside the docstring that exists to keep a decimal from being split.
+    'orchestrator-v5/compose/process-narration.ts':
+      'incidental — comment only; spells no alphabet and parses no numbers',
     // ⭐ #928 ROUND 4 — RECOGNITION-ONLY, and the honest classification is NOT
     // "incidental". The clarify-v2 rubric's `quantities` battery DOES spell a
     // magnitude vocabulary (`hundreds?|thousands?|millions?|billions?`). It is

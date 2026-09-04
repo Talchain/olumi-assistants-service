@@ -42,6 +42,7 @@ import {
   EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT,
   findSuccessClaimHit,
 } from '../compose/forbidden-user-facing-phrases.js';
+import { applyProcessNarrationGuard } from '../compose/process-narration.js';
 // ROADMAP 2.427 — configure-option outcome binding (see the guard below the
 // V5 H5 invariant). The composer is the SAME one route-v2's pre-edit-lane
 // intercept uses, so the recovery copy and the intercept copy cannot drift.
@@ -4179,6 +4180,42 @@ export async function dispatchEditGraph(
       substitution_blocked: paSubstitutionBlocked,
       disclosure_appended: paDisclosureAppended,
     });
+  }
+
+  // ⭐⭐⭐ PROCESS NARRATION — AND THIS IS THE PATH THAT ACTUALLY LEAKED.
+  //
+  // Turn 15 of the 3 Sep capture carries `prompt_identity`
+  // `edit_graph_default@v11 (staging)` and shipped:
+  //
+  //   "This is a question about existing analysis results, not a model edit
+  //    request. Per the conversation, updating Sales Headcount Investment …
+  //    No model changes are needed to answer this."
+  //
+  // The routing verdict read out loud, wrapped around a real answer. Which is
+  // why the remedy is per-sentence and not a whole-block drop: sentences 2 and
+  // 3 ARE the answer the user asked for, and this guard keeps them. Only when
+  // the narration sentences are a strict majority is the whole block treated
+  // as the monologue it is. See `compose/process-narration.ts` for the measure
+  // that separates the two, and for the false-positive sweep.
+  //
+  // Runs BEFORE the forbidden-phrase guard below, matching the ordering in
+  // turn-executor: the guard that can substitute the whole reply goes first so
+  // its replacement is judged by the guard that follows.
+  {
+    const guarded = applyProcessNarrationGuard(response.assistant_text ?? '');
+    if (guarded.rewritten) {
+      emit(TelemetryEvents.V5EgressProcessNarrationDetected, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        marker: guarded.hit,
+        remedy: guarded.remedy,
+        dispatch_path: 'edit_graph_finalise',
+        sentences_total: guarded.sentencesTotal,
+        sentences_removed: guarded.sentencesRemoved,
+        narration_length: guarded.narration.length,
+      });
+      response = { ...response, assistant_text: guarded.text };
+    }
   }
 
   // V5 stale-aware explain recovery — finaliser-level egress guard.
