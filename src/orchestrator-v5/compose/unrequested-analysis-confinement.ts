@@ -135,6 +135,21 @@
  * would have passed while the UI's documented fallback source still shipped the
  * number.
  *
+ * ⭐⭐ AND THEN THE ENUMERATION ITSELF WAS SHORT BY A WHOLE CLASS. That first
+ * walk was for COMPARATIVE STANDING only. Walking the EMITTED block again for
+ * ROBUSTNESS VERDICT keys found the verdict living in two more places outside
+ * `enrichment.robustness`: `decision_brief.robustness` (a bare `"fragile"`) and
+ * `decision_brief.analysis_summary.robustness_band`. Neither has a UI reader
+ * today — source-scanned, with a contrast control — so neither was on the
+ * witnessed screen; both are dropped anyway, because a verdict token on the
+ * wire is a claim waiting for a consumer.
+ *
+ * **"Closed against the enumeration" is only as strong as the enumeration's
+ * CLASSES.** One walk per claim class, each with its own reader
+ * ({@link keyStatesComparativeStanding}, {@link keyStatesRobustnessVerdict}),
+ * each asserted in the acceptance suite before AND after. A third class arriving
+ * later needs a third walk; it will not be caught by widening either of these.
+ *
  * ⚠ TWO THINGS THE WALK FOUND AND THIS MODULE DELIBERATELY LEAVES:
  *
  *   `robustness.fragile_edges[].alternative_winner_id` / `_label` — the
@@ -348,6 +363,38 @@ export function keyStatesComparativeStanding(key: string): boolean {
 }
 
 /**
+ * Key names that pass a ROBUSTNESS VERDICT — "should you trust this result?" —
+ * as opposed to measuring the fragility that a verdict would be derived from.
+ *
+ * ⭐ THIS FAMILY EXISTS BECAUSE THE FIRST ENUMERATION MISSED A WHOLE CLASS.
+ * The comparative-standing walk found the win probability in two arrays and I
+ * stopped there. Walking the emitted block again for VERDICT keys found the
+ * robustness verdict living in two more places outside `enrichment.robustness`:
+ * `decision_brief.robustness` (a bare `"fragile"`) and
+ * `decision_brief.analysis_summary.robustness_band`. Neither has a UI reader
+ * today — scanned with a contrast control — so neither was on the witnessed
+ * screen; both are dropped anyway, because a verdict token on the wire is a
+ * claim waiting for a consumer, and the whole point of this module is that an
+ * unrequested run does not pass verdicts.
+ *
+ * ⚠ ANCHORED, and the anchors are load-bearing. `robust_edges` and
+ * `fragile_edges` MEASURE — they are the science that survives — and an
+ * unanchored `/robust/` would delete them. `stability.band_*` on
+ * `edge_e_values` measures too, so `band` only matches as `robustness_band`.
+ */
+const ROBUSTNESS_VERDICT_KEY_PATTERNS: readonly RegExp[] = Object.freeze([
+  /^robustness$/i,
+  /^robustness_(band|verdict|level|tier|rating|score)$/i,
+  /^is_robust$/i,
+  /^display_verdict(_reason)?$/i,
+]);
+
+/** Does this key pass a robustness verdict? See the pattern list above. */
+export function keyStatesRobustnessVerdict(key: string): boolean {
+  return ROBUSTNESS_VERDICT_KEY_PATTERNS.some((pattern) => pattern.test(key));
+}
+
+/**
  * NON-VACUITY, AT MODULE LOAD. A projection that can never fire is the same
  * theatre as an absence assertion that cannot see a presence (parent CLAUDE.md
  * trap 13). This module is imported by the compose seam, so a violation fails
@@ -370,6 +417,37 @@ function assertComparativeStandingReaderDiscriminates(): void {
         `unrequested-analysis-confinement: keyStatesComparativeStanding matches \`${survivor}\`, ` +
           'a measurement member that must survive. The pattern set is over-broad and would ' +
           'delete outcome science from every unrequested run.',
+      );
+    }
+  }
+  // The verdict family, same shape: it must SEE the two live carriers and must
+  // NOT see the fragility science sitting beside them.
+  for (const verdictKey of ['robustness', 'robustness_band', 'is_robust', 'display_verdict']) {
+    if (!keyStatesRobustnessVerdict(verdictKey)) {
+      throw new Error(
+        `unrequested-analysis-confinement: keyStatesRobustnessVerdict does not match ` +
+          `\`${verdictKey}\`, a live verdict carrier. The family is inert.`,
+      );
+    }
+  }
+  for (const survivor of ['robust_edges', 'fragile_edges', 'near_tie', 'stability', 'band_min']) {
+    if (keyStatesRobustnessVerdict(survivor)) {
+      throw new Error(
+        `unrequested-analysis-confinement: keyStatesRobustnessVerdict matches \`${survivor}\`, ` +
+          'which MEASURES fragility rather than judging it. The pattern set is over-broad.',
+      );
+    }
+  }
+  // ⭐ THE TWO GUARDS MUST AGREE ABOUT THE SAME BLOB. Every member the
+  // robustness allow-list keeps must be one the verdict family does NOT match —
+  // otherwise the allow-list is quietly readmitting a verdict the family was
+  // written to stop, and each guard would look correct on its own.
+  for (const kept of UNREQUESTED_ROBUSTNESS_KEPT_MEMBERS) {
+    if (keyStatesRobustnessVerdict(kept)) {
+      throw new Error(
+        `unrequested-analysis-confinement: UNREQUESTED_ROBUSTNESS_KEPT_MEMBERS keeps ` +
+          `\`${kept}\`, which the verdict family classifies as a verdict. The allow-list and ` +
+          'the family disagree about the same blob; one of them is wrong.',
       );
     }
   }
@@ -459,7 +537,35 @@ function projectDecisionBriefForUnrequestedRun(
       out[key] = projectOptionScopedRowsForUnrequestedRun(value);
       continue;
     }
+    // The brief's OWN copy of the verdict — a bare `"fragile"` at
+    // `decision_brief.robustness` on the 2026-09-03 capture.
+    if (keyStatesRobustnessVerdict(key)) continue;
+    if (key === 'analysis_summary') {
+      const summary = projectClaimKeysFromRecord(value);
+      if (summary !== undefined) out[key] = summary;
+      continue;
+    }
     out[key] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Drop every comparative-standing and robustness-verdict member from one flat
+ * record, keeping the rest verbatim.
+ *
+ * Used for `decision_brief.analysis_summary`, which carries
+ * `robustness_band` beside members the withheld projection has already
+ * trimmed. A non-object payload is dropped whole; `undefined` when nothing
+ * survives, so the key is omitted rather than emitted as `{}`.
+ */
+function projectClaimKeysFromRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
+    if (keyStatesComparativeStanding(key)) continue;
+    if (keyStatesRobustnessVerdict(key)) continue;
+    out[key] = member;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

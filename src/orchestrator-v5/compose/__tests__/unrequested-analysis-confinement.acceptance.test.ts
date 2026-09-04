@@ -49,8 +49,9 @@ import {
   UNREQUESTED_OPTION_ROW_DROPPED_MEMBERS,
   UNREQUESTED_ROBUSTNESS_KEPT_MEMBERS,
   confineUnrequestedAnalysisBlock,
-  mayPresentLeaderClaimForFact,
   keyStatesComparativeStanding,
+  keyStatesRobustnessVerdict,
+  mayPresentLeaderClaimForFact,
   wasAnalysisRequestedByUser,
 } from '../unrequested-analysis-confinement.js';
 import { buildAutoRunProvenance } from '../../context/run-initiator.js';
@@ -126,9 +127,21 @@ function numericPaths(value: unknown, path = ''): string[] {
   return [];
 }
 
-/** Every dotted path in `value` whose KEY states a comparative standing. */
-function comparativeStandingPaths(value: unknown, path = ''): string[] {
+/**
+ * Every dotted path in `value` whose KEY satisfies `matches` AND whose value is
+ * a SCALAR.
+ *
+ * ⚠ Scalar-only, and that is not a convenience. A claim is a value —
+ * `"fragile"`, `0.5058` — so a CONTAINER whose name matches (the
+ * `enrichment.robustness` blob itself) is not a claim and must not be counted;
+ * counting it would make the after-assertion unsatisfiable unless the whole
+ * blob were deleted, which is precisely the over-suppression this module
+ * refuses.
+ */
+function pathsWhereKey(value: unknown, matches: (key: string) => boolean, path = ''): string[] {
   const hits: string[] = [];
+  const isScalar = (node: unknown): boolean =>
+    node === null || (typeof node !== 'object' && typeof node !== 'function');
   const walk = (node: unknown, at: string): void => {
     if (Array.isArray(node)) {
       node.forEach((entry, index) => walk(entry, `${at}[${index}]`));
@@ -137,13 +150,18 @@ function comparativeStandingPaths(value: unknown, path = ''): string[] {
     if (node === null || typeof node !== 'object') return;
     for (const [key, member] of Object.entries(node as Record<string, unknown>)) {
       const next = at === '' ? key : `${at}.${key}`;
-      if (keyStatesComparativeStanding(key)) hits.push(next);
+      if (matches(key) && isScalar(member)) hits.push(next);
       walk(member, next);
     }
   };
   walk(value, path);
   return hits;
 }
+
+const comparativeStandingPaths = (value: unknown): string[] =>
+  pathsWhereKey(value, keyStatesComparativeStanding);
+const robustnessVerdictPaths = (value: unknown): string[] =>
+  pathsWhereKey(value, keyStatesRobustnessVerdict);
 
 /** Collapse array indices so a path names a SHAPE, not one row. */
 function shapes(paths: readonly string[]): string[] {
@@ -265,7 +283,6 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
       'flip_thresholds[].alternative_winner_label',
       // FACTOR-scoped again: "moving this factor moves the comparison by this
       // much". It names no option and states no standing.
-      'p_win_sensitivity',
       'p_win_sensitivity[].p_win_delta',
       'p_win_sensitivity[].p_win_delta_percentage_points',
       // The COUNTERFACTUAL winner if this edge flips. `keyDesignatesLeadingOption`
@@ -292,6 +309,34 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
     // claim this test is about.
     expect(after).not.toContain('option_comparison[].win_probability');
     expect(after).not.toContain('decision_brief.options[].win_probability');
+  });
+
+  it('passes no robustness verdict ANYWHERE — the second claim class, and the one I missed', () => {
+    /**
+     * ⭐ THIS TEST EXISTS BECAUSE THE FIRST ENUMERATION WAS OF ONE CLASS ONLY.
+     * The comparative-standing walk found the win probability in two arrays and
+     * I stopped. Walking the EMITTED block again for VERDICT keys found the
+     * robustness verdict in two more places outside `enrichment.robustness`:
+     * `decision_brief.robustness` (a bare "fragile") and
+     * `decision_brief.analysis_summary.robustness_band`.
+     *
+     * "Closed against the enumeration" is only as good as the enumeration's
+     * CLASSES. One walk per claim class, each with its own reader.
+     */
+    const before = robustnessVerdictPaths(capture.enrichment);
+    // Non-vacuity first: the walker must SEE the verdicts before it can report
+    // them gone. Measured on the capture, not listed from memory.
+    expect(shapes(before)).toEqual([
+      // The brief's own bare copy — `"fragile"` — outside `enrichment.robustness`
+      // entirely. This is the pair the first enumeration could not see.
+      'decision_brief.analysis_summary.robustness_band',
+      'decision_brief.robustness',
+      'robustness.display_verdict',
+      'robustness.display_verdict_reason',
+      'robustness.is_robust',
+    ]);
+
+    expect(robustnessVerdictPaths(build(true).enrichment)).toEqual([]);
   });
 
   it('passes no robustness verdict — only the fragility science survives', () => {
@@ -441,6 +486,30 @@ describe('the provenance predicate is the thing being read', () => {
   it('reads unstamped facts as the user’s — the fail-safe direction', () => {
     expect(wasAnalysisRequestedByUser(makeCapturedFact({ autoInitiated: false }))).toBe(true);
     expect(wasAnalysisRequestedByUser(makeCapturedFact({ autoInitiated: true }))).toBe(false);
+  });
+
+  it('the shared admission is a CONJUNCTION — either question closing withholds', () => {
+    // All four cells, so neither term can be dropped without a RED. A test of
+    // only the two diagonal cells would pass on either single term alone.
+    const withdrawVerdict = (fact: RunAnalysisHandlerFact): RunAnalysisHandlerFact =>
+      ({
+        ...fact,
+        result: {
+          ...fact.result,
+          constraint_verdict: {
+            may_name_leading_option: false,
+            constraint_verdict_state: 'evaluated_infeasible',
+          },
+        },
+      }) as unknown as RunAnalysisHandlerFact;
+
+    const requested = makeCapturedFact({ autoInitiated: false });
+    const unrequested = makeCapturedFact({ autoInitiated: true });
+
+    expect(mayPresentLeaderClaimForFact(requested)).toBe(true);
+    expect(mayPresentLeaderClaimForFact(unrequested)).toBe(false);
+    expect(mayPresentLeaderClaimForFact(withdrawVerdict(requested))).toBe(false);
+    expect(mayPresentLeaderClaimForFact(withdrawVerdict(unrequested))).toBe(false);
   });
 
   it('the two arms differ in exactly one enrichment key', () => {
