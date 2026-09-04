@@ -175,9 +175,17 @@
  * risk), `p_win_sensitivity` whole (both are FACTOR-scoped, so their `*_rank`
  * and `p_win_delta` members rank factors and not options),
  * `robustness.fragile_edges` / `robust_edges` / `near_tie` (which relationships
- * are load-bearing), `flip_thresholds`, `critiques`. That is the concrete
- * material the founder's ruling asks this run to produce. What goes is only the
- * verdict: who wins, by how much, and whether to trust it.
+ * are load-bearing), `flip_thresholds`. That is the concrete material the
+ * founder's ruling asks this run to produce. What goes is only the verdict: who
+ * wins, by how much, and whether to trust it.
+ *
+ * `critiques` passes through untouched too — but stated separately and
+ * precisely, because the 2026-09-03 capture this module was derived against
+ * carries NO `critiques` key, so nothing here is EVIDENCE about that blob. It
+ * is named only so a reader knows it was considered and deliberately not
+ * projected: the withheld projection already sanitises it and strips option
+ * identity, and its remaining rows say "this option changes nothing yet",
+ * which states no standing.
  */
 
 import type { OlumiResponse } from '@talchain/schemas/boundary';
