@@ -321,6 +321,40 @@ describe('readiness value batch — atomicity', () => {
     if (outcome.status !== 'invalid') throw new Error('expected invalid');
     expect(outcome.reason).toBe('membership_moved');
   });
+
+  /**
+   * ⭐⭐ THE WITNESSED DEFECT, ARRIVING AT THE EXECUTOR — the second surviving
+   * mutant, and the one that matters most.
+   *
+   * `membership_moved` is a CONJUNCTION: a cardinality check and a per-key
+   * comparison. Disabling the cardinality half left the suite green, because
+   * the per-key half only asks whether every PROPOSAL key is in the
+   * membership. A proposal that is a strict SUBSET satisfies that completely —
+   * which is exactly a nine-of-ten set reaching commit and writing a plan that
+   * cannot unblock the analysis.
+   *
+   * `buildValueBatchProposal` refuses to COMPOSE such a set; this pins that the
+   * executor refuses to APPLY one, so a stale proposal cannot walk in behind
+   * the composer's back.
+   */
+  it('a proposal that covers FEWER cells than the model now has is refused', () => {
+    const graph = zeroConfiguredGraph();
+    const proposal = proposalOrThrow(graph, fullEstimates(graph));
+    const short = { ...proposal, cells: proposal.cells.slice(0, -1) };
+    // Preconditions in-test: genuinely a strict subset, so the per-key
+    // comparison alone cannot reject it and only cardinality can.
+    const derived = selectValueBatchMembership(assess(graph));
+    expect(short.cells.length).toBeLessThan(derived.cells.length);
+    const derivedKeys = new Set(derived.cells.map((c) => `${c.option_id}|${c.factor_id}`));
+    for (const cell of short.cells) {
+      expect(derivedKeys.has(`${cell.option_id}|${cell.factor_id}`)).toBe(true);
+    }
+
+    const outcome = executeValueBatch({ proposal: short, currentGraph: graph });
+    expect(outcome.status).toBe('invalid');
+    if (outcome.status !== 'invalid') throw new Error('expected invalid');
+    expect(outcome.reason).toBe('membership_moved');
+  });
 });
 
 describe('readiness value batch — one approval, one apply', () => {
