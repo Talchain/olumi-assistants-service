@@ -663,7 +663,18 @@ export function confineUnrequestedAnalysisBlock(
 ): AnalysisResultBlock {
   if (wasAnalysisRequestedByUser(fact)) return block;
 
-  const { win_probabilities: _dropped, ...rest } = block;
+  // ⚠⚠ `enrichment` IS DESTRUCTURED OUT OF `rest`, AND THAT LINE IS A LEAK FIX.
+  // The first version spread `rest` (which still held the ORIGINAL enrichment)
+  // and then re-added the projected one only when it was defined — so an
+  // enrichment whose every surviving key projected away, e.g. exactly
+  // `{ robustness: { display_verdict: 'fragile' } }`, fell through the
+  // conditional and shipped the UNPROJECTED original. The live capture could
+  // not see it: it carries thirteen enrichment keys, so the projection never
+  // returned `undefined` on the corpus the tests were written against. A corpus
+  // that omits a shape the contract admits cannot certify the code over that
+  // shape (parent CLAUDE.md trap 13d) — `unrequestedEmptyEnrichment` in the
+  // acceptance suite is the case that now does.
+  const { win_probabilities: _dropped, enrichment: _rawEnrichment, ...rest } = block;
   const enrichment = projectTransportEnrichmentForUnrequestedRun(
     block.enrichment as Record<string, unknown> | undefined,
   );

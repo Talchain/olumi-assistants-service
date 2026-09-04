@@ -372,6 +372,51 @@ describe('a run nobody asked for makes no quantified leader or robustness claim'
     expect(block.summary).not.toMatch(/\d/);
   });
 
+  it('an enrichment whose every key projects away is DROPPED, not passed through', () => {
+    /**
+     * ⭐ THE SHAPE THE LIVE CORPUS CANNOT REACH, AND THE LEAK IT HID.
+     *
+     * The confinement rebuilds the block by spreading the rest of it and
+     * re-adding the projected enrichment only when the projection returned
+     * something. The first version left `enrichment` IN that spread — so an
+     * enrichment where nothing survives falls through the conditional and the
+     * ORIGINAL, unprojected object ships.
+     *
+     * The 2026-09-03 capture carries thirteen enrichment keys, so the
+     * projection never returned `undefined` against it and all twenty other
+     * tests stayed green. A corpus that omits a shape the contract admits
+     * cannot certify the code over that shape (parent CLAUDE.md trap 13d), and
+     * `enrichment` is a `z.record` passthrough that admits exactly this one.
+     */
+    const bare = {
+      ...makeCapturedFact({ autoInitiated: true }),
+      result: {
+        ...makeCapturedFact({ autoInitiated: true }).result,
+        // Only a robustness blob, and only a VERDICT inside it — so the
+        // allow-list empties the blob, and the blob was the only key.
+        enrichment: {
+          robustness: { display_verdict: 'fragile', is_robust: false },
+          run_provenance: buildAutoRunProvenance('22222222-2222-4222-8222-222222222222'),
+        },
+      },
+    } as unknown as RunAnalysisHandlerFact;
+
+    const block = buildAnalysisResultBlock(bare) as unknown as AnalysisResultBlockShape;
+
+    // Positive control: the ORIGINAL enrichment really does carry the verdict,
+    // so an absence assertion here is not vacuous.
+    expect(
+      (bare.result.enrichment as Record<string, Record<string, unknown>>).robustness
+        .display_verdict,
+    ).toBe('fragile');
+
+    // The key is OMITTED entirely rather than emitted as `{}` — the shape a
+    // consumer already tolerates, and never a positive assertion of an empty
+    // analysis.
+    expect(block).not.toHaveProperty('enrichment');
+    expect(robustnessVerdictPaths(block.enrichment)).toEqual([]);
+  });
+
   it('drops decision_review, whose prose is authored on the premise of a leader', () => {
     expect(build(true).enrichment?.decision_review).toBeUndefined();
   });
