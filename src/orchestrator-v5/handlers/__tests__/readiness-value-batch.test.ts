@@ -371,10 +371,16 @@ describe('readiness value batch — one approval, one apply', () => {
       scenarioId: 'scn-value-batch',
     });
     expect(offer).not.toBeNull();
-    expect(offer!.pending.action.kind).toBe('apply_proposed_change');
-    expect(
-      (offer!.pending.action.inline_patch as Record<string, unknown>).handler_id,
-    ).toBe(READINESS_VALUE_BATCH_HANDLER_ID);
+    // Narrowed on the discriminant rather than cast through it: `inline_patch`
+    // exists only on the `apply_proposed_change` member of the union, so this
+    // asserts the offer really is that kind before reading the field.
+    const action = offer!.pending.action;
+    if (action.kind !== 'apply_proposed_change') {
+      throw new Error(`expected apply_proposed_change, got ${action.kind}`);
+    }
+    expect((action.inline_patch as Record<string, unknown>).handler_id).toBe(
+      READINESS_VALUE_BATCH_HANDLER_ID,
+    );
     // ⛔ THE FABRICATION BOUNDARY: the chip carries no product-chosen VALUE.
     //
     // ⚠ THE PREDICATE IS "NO PROPOSED VALUE", NOT "NO DIGIT" — and the
