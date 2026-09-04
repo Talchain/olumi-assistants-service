@@ -1260,7 +1260,36 @@ export function assessCanonicalAnalysisReadiness(
 export function buildCanonicalAnalysisReadyFromGraph(
   graph: unknown,
 ): AnalysisReadyPayload | undefined {
-  const admission = resolveRunAdmission(graph);
+  return canonicalAnalysisReadyFrom(resolveRunAdmission(graph), graph);
+}
+
+/**
+ * ⭐⭐ THE ONE SPELLING OF THE CANONICAL PAYLOAD — for a caller that ALREADY
+ * holds the admission.
+ *
+ * ⚠⚠ THIS EXISTS BECAUSE THE SECOND SPELLING HAD ALREADY DRIFTED, AND A GUARD
+ * CAUGHT IT RATHER THAN A REVIEWER. `build-turn-context.ts` built the refusal's
+ * carrier inline as `{ ...admission.assessment.analysisReady, may_run }`, with a
+ * comment asserting that this *"is literally `buildCanonicalAnalysisReadyFromGraph`'s
+ * body, so the carrier is byte-identical to the canonical projection"*. That was
+ * true when written. The moment the canonical builder gained one field the
+ * sentence became false, and
+ * `handlers/__tests__/analysis-refusal-loader-throw-carries-identity.test.ts`
+ * REDed on the byte-identity it pins.
+ *
+ * Two spellings of one shape is this estate's signature defect (three
+ * `blockedIdentityCarrier` literals, two `generateGraphHash` twins). The fix is
+ * not to add the missing field at the second site — that keeps two sites. It is
+ * for both to call this, so the drift is structurally impossible.
+ *
+ * ⚠ IT TAKES THE ADMISSION, NOT THE GRAPH, so the caller does not re-resolve.
+ * `graph` is used only for the provenance census and MUST be the same graph
+ * `admission` was resolved over, or the two halves describe different models.
+ */
+export function canonicalAnalysisReadyFrom(
+  admission: ReturnType<typeof resolveRunAdmission>,
+  graph: unknown,
+): AnalysisReadyPayload | undefined {
   const payload = admission.assessment.analysisReady;
   if (!payload) return undefined;
   // ⭐ ONE ADMISSION OBJECT, TWO PUBLISHED VIEWS. `may_run` is the run verdict a

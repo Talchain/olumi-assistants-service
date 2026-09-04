@@ -112,8 +112,11 @@
  * blindness. EVIDENCE CLASS: nine STATIC CAPTURES of draft-path graphs in this
  * repo, read at this tip. Not an execution witness, and not a claim about
  * post-edit or mid-session graphs — those are exactly the graphs expected to
- * carry `user_edited` / `user_override` stamps and therefore to flip this field
- * TRUE, which is the behaviour `__tests__` pins in both directions.
+ * carry a user-authored value stamp (the vocabulary is
+ * `obligation-provenance.ts`'s, and is deliberately NOT re-listed here: copying
+ * two of its keys into prose is the hand-maintained mirror this estate pays for)
+ * and therefore to flip this field TRUE, which is the behaviour `__tests__` pins
+ * in both directions.
  *
  * ⚠ THIS IS DELIBERATELY A ONE-BIT FLOOR, NOT A QUALITY SCORE. It says *"no
  * human judgement has entered the parameters this claim rests on"* and nothing

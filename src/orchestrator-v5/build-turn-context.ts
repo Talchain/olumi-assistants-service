@@ -39,6 +39,7 @@ import { GraphV3, NodeV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { config } from '../config/index.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
+  canonicalAnalysisReadyFrom,
   mergeInterventionSourceObjects,
 } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -2828,13 +2829,25 @@ export async function loadScenarioSnapshotForRunAnalysis(
     //
     // NOT a second derivation. `admission` is the assessment made on
     // `sigmaFloor.graph` — GraphV3-valid, parsed above — and `assessment` is
-    // exposed for precisely this reuse. `{ ...analysisReady, may_run }` is
-    // literally `buildCanonicalAnalysisReadyFromGraph`'s body, so the carrier
-    // is byte-identical to the canonical projection of the same graph.
+    // exposed for precisely this reuse.
     //
-    // `may_run` is `willProceed`, which is FALSE on this branch by construction
-    // — carried rather than hardcoded so the field keeps one source and cannot
-    // drift from the boolean that decided the throw.
+    // ⚠⚠ CORRECTED IN PLACE (trap 14 — the old sentence is kept so the reasoning
+    // that failed stays visible). It used to read:
+    //   ~~"`{ ...analysisReady, may_run }` is literally
+    //     `buildCanonicalAnalysisReadyFromGraph`'s body, so the carrier is
+    //     byte-identical to the canonical projection of the same graph."~~
+    // TRUE WHEN WRITTEN, AND FALSE THE MOMENT THE CANONICAL BUILDER GAINED A
+    // FIELD. Re-spelling a shared shape inline is a mirror with no drift alarm
+    // of its own; this one drifted, and only the byte-identity test caught it.
+    //
+    // So the carrier now calls the ONE builder, in its admission-parameterised
+    // form — `canonicalAnalysisReadyFrom` — which takes the admission this
+    // branch already holds and therefore does NOT re-resolve. Byte-identity is
+    // no longer a claim in a comment; it is the same function.
+    //
+    // `may_run` inside it is `willProceed`, FALSE on this branch by
+    // construction — carried rather than hardcoded so the field keeps one
+    // source and cannot drift from the boolean that decided the throw.
     //
     // ⛔ THE OTHER THREE THROWS IN THIS FUNCTION STAY ONE-ARGUMENT, and that is
     // measured, not assumed: `assessCanonicalAnalysisReadiness` returns
@@ -2860,9 +2873,7 @@ export async function loadScenarioSnapshotForRunAnalysis(
     // `tests/unit/analysis-refusal-carries-a-reason.test.ts`.
     throw new AnalysisNotReadyError(
       refusedVerdict(admission),
-      admission.assessment.analysisReady
-        ? { ...admission.assessment.analysisReady, may_run: admission.willProceed }
-        : undefined,
+      canonicalAnalysisReadyFrom(admission, sigmaFloor.graph),
     );
   }
   const verdict = admittedVerdict(admission);
