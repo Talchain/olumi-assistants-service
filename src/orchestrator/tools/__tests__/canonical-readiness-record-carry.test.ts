@@ -425,7 +425,19 @@ const NAMED_BY_REPROJECTION = [
   ...TRIO_KEYS,
 ] as const;
 
-const CARRIED_FROM_CANONICAL = ["may_run", "readiness_issues", "repair_proposal"] as const;
+const CARRIED_FROM_CANONICAL = [
+  "may_run",
+  "readiness_issues",
+  "repair_proposal",
+  // The ONE analysis-admission result. Same bucket and same mechanism as
+  // `may_run`, and for the same reason: the unified pipeline cannot compute it
+  // (it does not hold the admission rule), and `extractAnalysisReady` is a
+  // named-field re-projection, so without the carry the DRAFT turn — the one
+  // turn where a fresh user first meets the Analyse control — would ship no
+  // verdict at all. That is not hypothetical: it is exactly how `may_run` once
+  // shipped absent on 9 of 9 draft turns.
+  "analysis_admission",
+] as const;
 
 const DELIBERATELY_NOT_CARRIED = [
   "blocked_reason",      // minted per-turn by the refusal carrier, never re-projected

@@ -32,6 +32,7 @@ import {
 // alternative was to re-derive `willProceed` here, which would mint the second
 // admission predicate this estate keeps paying for.
 import { resolveRunAdmission } from "../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
+import { analysisAdmissionFrom } from "../../orchestrator-v5/admission/analysis-admission.js";
 import { encodeOptionInterventionsForEdit } from "./encode-option-interventions.js";
 import { stableStringify } from "../context/stable-stringify.js";
 // ⭐ ROADMAP 2.1266 — shared with the draft-path builder in
@@ -1259,19 +1260,57 @@ export function assessCanonicalAnalysisReadiness(
 export function buildCanonicalAnalysisReadyFromGraph(
   graph: unknown,
 ): AnalysisReadyPayload | undefined {
-  const admission = resolveRunAdmission(graph);
+  return canonicalAnalysisReadyFrom(resolveRunAdmission(graph), graph);
+}
+
+/**
+ * ⭐⭐ THE ONE SPELLING OF THE CANONICAL PAYLOAD — for a caller that ALREADY
+ * holds the admission.
+ *
+ * ⚠⚠ THIS EXISTS BECAUSE THE SECOND SPELLING HAD ALREADY DRIFTED, AND A GUARD
+ * CAUGHT IT RATHER THAN A REVIEWER. `build-turn-context.ts` built the refusal's
+ * carrier inline as `{ ...admission.assessment.analysisReady, may_run }`, with a
+ * comment asserting that this *"is literally `buildCanonicalAnalysisReadyFromGraph`'s
+ * body, so the carrier is byte-identical to the canonical projection"*. That was
+ * true when written. The moment the canonical builder gained one field the
+ * sentence became false, and
+ * `handlers/__tests__/analysis-refusal-loader-throw-carries-identity.test.ts`
+ * REDed on the byte-identity it pins.
+ *
+ * Two spellings of one shape is this estate's signature defect (three
+ * `blockedIdentityCarrier` literals, two `generateGraphHash` twins). The fix is
+ * not to add the missing field at the second site — that keeps two sites. It is
+ * for both to call this, so the drift is structurally impossible.
+ *
+ * ⚠ IT TAKES THE ADMISSION, NOT THE GRAPH, so the caller does not re-resolve.
+ * `graph` is used only for the provenance census and MUST be the same graph
+ * `admission` was resolved over, or the two halves describe different models.
+ */
+export function canonicalAnalysisReadyFrom(
+  admission: ReturnType<typeof resolveRunAdmission>,
+  graph: unknown,
+): AnalysisReadyPayload | undefined {
   const payload = admission.assessment.analysisReady;
   if (!payload) return undefined;
-  return { ...payload, may_run: admission.willProceed };
+  // ⭐ ONE ADMISSION OBJECT, TWO PUBLISHED VIEWS. `may_run` is the run verdict a
+  // consumer already gates on; `analysis_admission` is the same verdict plus the
+  // claim-strength bound nothing expressed before. Both are derived from THIS
+  // `admission` — never from a second resolve — so they are structurally
+  // incapable of disagreeing about one graph.
+  return {
+    ...payload,
+    may_run: admission.willProceed,
+    analysis_admission: analysisAdmissionFrom(admission, graph),
+  };
 }
 
 /**
  * CARRY the CANONICAL-ONLY fields onto a payload that was built by some OTHER
  * projection of the same graph. A carry, never a second derivation.
  *
- * The canonical-only set is `may_run`, `readiness_issues` and `repair_proposal`
- * — the three fields the canonical authority computes that no other producer
- * does. It was named `carryCanonicalRunAdmission` when `may_run` was the only
+ * The canonical-only set is `may_run`, `readiness_issues`, `repair_proposal` and
+ * `analysis_admission` — the fields the canonical authority computes that no
+ * other producer does. It was named `carryCanonicalRunAdmission` when `may_run` was the only
  * member; the name is now the general one, because a function that carries an
  * exhaustive issue record while calling itself a run-admission carry is the
  * mis-naming this module keeps paying for.
@@ -1383,6 +1422,19 @@ export function carryCanonicalOnlyFields(
   const proposal = canonical.repair_proposal;
   if (proposal !== undefined && payload.repair_proposal !== proposal) {
     patch.repair_proposal = proposal;
+  }
+
+  // ⚠ `analysis_admission` JOINS THE CANONICAL-ONLY SET FOR THE SAME REASON THE
+  // OTHER THREE DID: the unified pipeline cannot compute it (it does not know
+  // the admission rule, and `extractAnalysisReady` is a NAMED-FIELD
+  // re-projection that drops anything it does not list), so without this carry
+  // the draft turn — the one turn where a fresh user first meets the Analyse
+  // control, and the turn the 3 Sep journey broke on — would ship no verdict at
+  // all. REFERENCE comparison, like its neighbours: when `payload` IS the
+  // canonical build these are the same object and no patch is produced.
+  const admission = canonical.analysis_admission;
+  if (admission !== undefined && payload.analysis_admission !== admission) {
+    patch.analysis_admission = admission;
   }
 
   if (Object.keys(patch).length === 0) return payload;

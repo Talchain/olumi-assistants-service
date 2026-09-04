@@ -285,6 +285,108 @@ export const AnalysisReadyPayload = z.object({
    */
   may_run: z.boolean().optional(),
   /**
+   * ⭐⭐ THE ONE ANALYSIS-ADMISSION RESULT — see
+   * `orchestrator-v5/admission/analysis-admission.ts` for the full contract and
+   * for the question each existing authority answers.
+   *
+   * ⚠ IT DOES NOT REPLACE `may_run`, AND MERGING THEM WOULD BE THE DEFECT.
+   * `structurally_analysable` IS `may_run` (the same `willProceed`, carried in
+   * the same object so the two cannot drift). What is NEW is
+   * `permitted_analysis_mode`: the UPPER BOUND on what the product may CLAIM,
+   * which no field expressed before. A model can be perfectly executable and
+   * still not license a leader claim.
+   *
+   * Consumers:
+   *   · gate the Run affordance on `structurally_analysable` (or `may_run` —
+   *     same value) and NEVER on `status`;
+   *   · gate any leading-option / "stable" / "robust" wording on
+   *     `permitted_analysis_mode === 'comparative_leader'` CONJOINED with the
+   *     post-run evidence they already read (`leader_claim.permitted`). The two
+   *     answer different questions: this one asks whether the MODEL licenses the
+   *     claim, that one whether THIS RESULT separated the arms;
+   *   · gate any claim about a PROPORTION OF SCENARIOS MEETING THE GOAL on
+   *     `semantic_signals.goal_target_stated` as a THIRD conjunct — a success
+   *     rate against a bar nobody set is a claim about Olumi's own bar;
+   *   · treat `comparative_leader` as a FLOOR, never a quality certificate. One
+   *     user-stated parameter on the comparison's substrate clears it;
+   *     `semantic_signals` carries the counts for a stricter bar;
+   *   · render `reasons` when refusing, so a refusal names which of the four
+   *     fields refused it and what would change it.
+   *
+   * ABSENCE means a pre-`analysis_admission` producer, never "no" — fall back to
+   * existing behaviour, exactly as with `may_run`.
+   *
+   * Additive + passthrough-safe: this object is `.passthrough()` here and the
+   * boundary's `OlumiResponseSchema` accepts additive keys on `analysis_ready`,
+   * the same route `blocked_reason` and `may_run` already took.
+   */
+  analysis_admission: z
+    .object({
+      structurally_analysable: z.boolean(),
+      missing_important_inputs: z.array(z.object({
+        issue_id: z.string(),
+        code: z.string(),
+        option_id: z.string().optional(),
+        option_label: z.string().optional(),
+        factor_id: z.string().optional(),
+        factor_label: z.string().optional(),
+        why_it_matters: z.string(),
+        obligation: z.enum(['required', 'offered']).optional(),
+        waived_by_exclusion: z.boolean(),
+      }).passthrough()).readonly(),
+      semantic_quality_sufficient: z.boolean(),
+      permitted_analysis_mode: z.enum([
+        'none',
+        'exploratory',
+        'quantified_provisional',
+        'comparative_leader',
+      ]),
+      reasons: z.array(z.object({
+        field: z.enum([
+          'structurally_analysable',
+          'missing_important_inputs',
+          'semantic_quality_sufficient',
+          'permitted_analysis_mode',
+        ]),
+        code: z.string(),
+        message: z.string(),
+      }).passthrough()).readonly(),
+      /**
+       * The 64-hex analysis-affecting hash of the graph this verdict is about.
+       * NOT the 16-hex `freshness.current_graph_hash` token — same projection,
+       * different truncation, so never string-equal the two.
+       */
+      graph_hash: z.string().nullable(),
+      semantic_signals: z.object({
+        // The WHOLE-MODEL census: who authored this model's parameters?
+        confidence_parameters_total: z.number(),
+        confidence_parameters_user_stated: z.number(),
+        confidence_parameters_machine_authored: z.number(),
+        confidence_parameters_unattributed: z.number(),
+        // The COMPARISON'S OWN SUBSTRATE: and does the comparison rest on any of
+        // the user's? This pair is what `semantic_quality_sufficient` reads.
+        material_parameters_total: z.number(),
+        material_parameters_user_stated: z.number(),
+        // The strictest slice, published so a stricter consumer needs no second
+        // census: the baselines of the factors the options actually differ on.
+        intervened_factor_baselines_total: z.number(),
+        intervened_factor_baselines_user_stated: z.number(),
+        /**
+         * Has the user said what "good" means (a raw goal target)?
+         *
+         * ⚠ DELIBERATELY NOT A CONJUNCT of `permitted_analysis_mode`. It is a
+         * precondition for a GOAL-ATTAINMENT claim ("100% of simulated
+         * scenarios" — without it the bar being cleared is one Olumi chose), and
+         * NOT for a RANKING claim ("Option A leads"). A consumer gating
+         * attainment wording CONJOINS this itself, the same way it conjoins
+         * `leader_claim.permitted` for the post-run question.
+         */
+        goal_target_stated: z.boolean(),
+      }).passthrough(),
+    })
+    .passthrough()
+    .optional(),
+  /**
    * ROADMAP 2.1085 (root 2.1041) / golden-journey EXT-2 — stable machine-readable code for
    * WHY this turn's analysis was refused. Present iff `status === 'blocked'`.
    * See the contract note on `GraphPatchBlockData.analysis_ready` in
