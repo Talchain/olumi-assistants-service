@@ -1211,24 +1211,29 @@ function buildAnalysisResultBlockUnconfined(
   // `decision_review` goes whole while `decision_brief` does not, and why the
   // honest variant is ABSENCE rather than synthesised copy.
   //
-  // ⭐ TWO QUESTIONS, NAMED APART, CONJOINED AT THE POINT OF USE — never one
-  // widened predicate (CLAUDE.md trap 21, this estate's signature defect).
+  // ⭐ TWO QUESTIONS, NAMED APART — never one widened predicate (CLAUDE.md
+  // trap 21, this estate's signature defect). Since R2
+  // (`handlers/auto-run-after-draft.ts`) a `run_analysis` fact can exist with
+  // no user click at all, and on 2026-09-03 a fresh guest was handed "Leading
+  // option · Ahead in 100% of simulated futures · Stable" on the first turn
+  // over a model with no user input. So there are now two independent reasons
+  // a leader must not be shown:
   //
-  //   constraintVerdictPermitsLeader — "does this run's PERSISTED CONSTRAINT
-  //       VERDICT permit a leader claim?" A fact about feasibility against the
-  //       user's stated limits. Unchanged; still the sole reader of
-  //       `result.constraint_verdict`.
-  //   analysisWasRequested — "did anybody ASK for this analysis?" A fact about
-  //       PROVENANCE, read from the one run-initiator authority. Since R2
-  //       (`handlers/auto-run-after-draft.ts`) a `run_analysis` fact can exist
-  //       with no user click at all, and on 2026-09-03 a fresh guest was handed
-  //       "Leading option · Ahead in 100% of simulated futures · Stable" on the
-  //       first turn over a model with no user input.
+  //   "does this run's PERSISTED CONSTRAINT VERDICT permit a leader claim?"
+  //       — `mayNameLeadingOptionForFact`, unchanged, still the sole reader of
+  //         `result.constraint_verdict`.
+  //   "did anybody ASK for this analysis?"
+  //       — `wasAnalysisRequestedByUser`, read from the one run-initiator
+  //         authority.
   //
-  // Either question closing is sufficient reason to withhold the leader claim,
-  // so the withheld projection below serves both. What must NOT happen is the
-  // two collapsing into one name: `mayNameLeadingOptionForFact` keeps answering
-  // exactly what it answered, and the second term is added here.
+  // Either closing is sufficient, so the withheld projection below serves both.
+  // ⚠ THEY ARE COMPOSED IN ONE PLACE, NOT CONJOINED HERE. An inline `&&` at
+  // this line is what the first cut did, and it left the six OTHER readers of
+  // the leaf on the narrower question — including the scenario read leg, whose
+  // `leader_claim.permitted` would then have granted the UI permission to name
+  // a leader this very block had just nulled. `mayPresentLeaderClaimForFact` is
+  // the one shared admission; see
+  // `compose/unrequested-analysis-confinement.ts` for that history.
   const mayNameLeadingOption = mayPresentLeaderClaimForFact(fact);
   // E2 (ROADMAP 1.272) — the permission is read BEFORE the clone and the
   // drop-set is a frozen module constant, so on a withheld turn the blobs that
