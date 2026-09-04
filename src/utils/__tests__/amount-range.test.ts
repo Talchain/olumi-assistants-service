@@ -224,8 +224,15 @@ describe("shapes with no single reading are refused, and the refused set is exac
     // ⚠⚠ THIS PIN MOVED, AND THE REASON IS A MEASUREMENT, NOT A PREFERENCE.
     // It asserted `{min: 5_000_000, max: 2_000_000}` on the stated grounds
     // that "the extractors already tolerated it". Driven through
-    // `enrichGraphWithFactors`, the entry a user actually reaches, that ground
-    // is false for a magnitude-bearing pair:
+    // `enrichGraphWithFactorsAsync` — the entry a user actually reaches, per
+    // `cee/unified-pipeline/stages/enrich.ts` ("the ONLY call site") — that
+    // ground is false for a magnitude-bearing pair:
+    //
+    // ⚠ THE SENTENCE ABOVE NAMED `enrichGraphWithFactors` UNTIL THE REVIEW
+    // META-FINDING. That is the SYNC twin: `@deprecated`, zero src call sites
+    // outside its own module, and it mints no cap. The claim was true of the
+    // function measured and false of the one users reach. Re-derived through
+    // the async entry; the figures below hold.
     //
     //   "We will cut spend from £2m to £500k this year."
     //     f4c8f501  {value 2_000_000, extractionType "explicit", conf 0.85}
@@ -579,32 +586,61 @@ describe("the lower-bound guard declines half a range and nothing else", () => {
 
   it("declines a match that STARTS at the lower bound, and cannot be backtracked past", () => {
     // ⚠ ANCHORED, AND THE ANCHOR IS THE WHOLE ASSERTION. Unanchored, this
-    // regex matches "80-120" — on the **120** — because the engine simply
-    // advances the start position, and 120 is not a lower bound. That is
+    // regex matches "80-120k" — on the **120k** — because the engine simply
+    // advances the start position, and 120k is not a lower bound. That is
     // correct behaviour and my first version of this test read it as a
     // failure; in the real patterns a currency symbol or a context word pins
     // the start, so only the lower bound is ever attempted.
     //
     // What the anchor DOES catch, and what nothing else did: the greedy digit
     // group backtracking past the lookahead. Without `AMOUNT_RUN_END` this
-    // matched "8" of "80-120" and the guard declined nothing at all.
+    // matched "8" of "80-120k" and the guard declined nothing at all.
     const re = new RegExp(`^(?<amount>${AMOUNT_DIGITS})${RANGE_LOWER_BOUND_ABSENT_GUARD}`);
-    expect(re.exec("80-120"), "the lower bound of a written range").toBeNull();
-    expect(re.exec("80–120"), "en dash").toBeNull();
-    expect(re.exec("80 - 120"), "spaced hyphen").toBeNull();
+    expect(re.exec("80-120k"), "the lower bound of a magnitude-scoped range").toBeNull();
+    expect(re.exec("80–120k"), "en dash").toBeNull();
+    expect(re.exec("80 - 120k"), "spaced hyphen").toBeNull();
+    // ⚠⚠ THE THREE CASES ABOVE CARRIED NO `k` UNTIL REVIEW N1, and their
+    // magnitude-free spellings are now ADMITTED. That is the narrowing, pinned
+    // where it is visible: the guard declines an amount only where reading it
+    // as a point would DROP A MAGNITUDE that the range reading carries. The
+    // measurement that forced it — a stated £50,000 replaced by £25k on the
+    // reachable enricher path — and the opposite-direction twins are in the
+    // block headed "the point-suppression declines only where a MAGNITUDE is
+    // at stake".
+    expect(re.exec("80-120")?.[0], "no magnitude is at stake").toBe("80");
     // …and the amounts that are NOT half a range still match, in full.
     expect(re.exec("80 - a note")?.[0]).toBe("80");
     expect(re.exec("80")?.[0]).toBe("80");
     expect(re.exec("80,000")?.[0], "the separator run is not truncated").toBe("80,000");
-    expect(re.exec("80,000-120,000"), "a separated range is still half a range").toBeNull();
+    expect(re.exec("80,000-120,000k"), "a separated range is still half a range").toBeNull();
 
-    // ⚠ AND THE ANCHOR REFUSES RATHER THAN TRUNCATES. With a bare `\\d+` in
-    // place of the shared digit grammar, "80,000" matches only "80" — the
-    // 1,000x comma loss ROADMAP 2.338 closed, arriving through a guard. The
-    // anchor makes that a NO MATCH instead of a short one, which is why it is
-    // spelled `(?![\\d,])` rather than `(?!\\d)`.
+    // ⚠⚠ AND THE ANCHOR REFUSES RATHER THAN TRUNCATES — BUT THE SENTENCE THAT
+    // STOOD HERE NAMED THE **DEFECTIVE** SPELLING AS THE DESIGN REASON (review
+    // N2). It read: *"which is why it is spelled `(?![\\d,])` rather than
+    // `(?!\\d)`."* `(?![\\d,])` was ROUND 1's P1 BLOCKER, not the design: it
+    // forbids stopping before ANY comma, so an ordinary SENTENCE comma refused
+    // the amount outright and "The budget is £50,000, but that is not fixed."
+    // extracted NOTHING. `AMOUNT_RUN_END` is `(?!\\d)(?!,\\d{3})(?!\\.\\d)` —
+    // it forbids stopping before another THOUSANDS GROUP, which is the actual
+    // failure, and leaves a sentence comma alone. Two other copies of this
+    // sentence were corrected to call `(?![\\d,])` "the first spelling"; this
+    // third gave it as current, and the assertion below passes under EITHER
+    // spelling, so nothing REDded.
     const bare = new RegExp(`^(?<amount>\\d+)${RANGE_LOWER_BOUND_ABSENT_GUARD}`);
     expect(bare.exec("80,000"), "refuses rather than publishing a truncated 80").toBeNull();
+
+    // ⭐ THE ASSERTION THAT ACTUALLY DISCRIMINATES, so the defective spelling
+    // cannot be "restored" under a green suite. A sentence comma must NOT
+    // refuse the amount: under `(?![\\d,])` every one of these is `null`;
+    // under `AMOUNT_RUN_END` every one matches in full. Proven by mutant M-N2,
+    // which restores `(?![\\d,])` in `AMOUNT_RUN_END` and REDs exactly here.
+    for (const [text, expected] of [
+      ["50,000, but that is not fixed", "50,000"],
+      ["180,000, plus contingency", "180,000"],
+      ["50, and the rest went on tooling", "50"],
+    ] as const) {
+      expect(re.exec(text)?.[0], `sentence comma: ${text}`).toBe(expected);
+    }
   });
 });
 
@@ -809,5 +845,224 @@ describe("KNOWN_ADJACENCY_GAP — a sampled floor, pinned in both directions", (
       expect(f!.rangeMin, name).toBe(600);
       expect(f!.rangeMax, name).toBe(400);
     }
+  });
+});
+
+/* ===========================================================================
+ * ⭐⭐⭐ THE POINT-SUPPRESSION GUARDS **TWO OPPOSITE HARMS**, AND ITS FIRST
+ * SPELLING WAS TUNED FOR ONE OF THEM (ROADMAP 2.1131, review N1).
+ *
+ * `RANGE_LOWER_BOUND_ABSENT_GUARD` shipped PURELY SYNTACTIC: any amount
+ * followed by dash-then-digit was declined by every point pattern, whatever
+ * the pair turned out to mean. Its own docstring gives the reason it exists,
+ * and the reason is narrower than the rule: *"an amount that is the FIRST HALF
+ * of a written range belongs to the range patterns, WHICH READ THE MAGNITUDE
+ * THAT SCOPES BOTH BOUNDS."* A magnitude is what the point reading loses. Where
+ * the pair carries no magnitude at all, the point reading loses nothing — and
+ * where the pair is not a range, declining destroys the only honest reading in
+ * the sentence.
+ *
+ * MEASURED through `enrichGraphWithFactorsAsync` — the entry the unified
+ * pipeline calls (`cee/unified-pipeline/stages/enrich.ts`, "the ONLY call
+ * site") — at base `f4c8f501` and at `6e982fc3`:
+ *
+ *   "The budget is £50,000 - 3 months of runway."
+ *     f4c8f501  raw_value 50000,    extractionType "explicit", conf 0.90, "£50k"
+ *     6e982fc3  raw_value 25001.5,  extractionType "range",    conf 0.80, "£25k"
+ *               rangeMin 50000 > rangeMax 3
+ *
+ * A stated £50,000 replaced by a midpoint of a "range" between a budget and a
+ * number of months. The descending pair is the INHERITED tolerance this module
+ * deliberately keeps — base emits the same 25001.5 range factor — so what the
+ * guard changed is not the fabrication but the fact that **nothing honest was
+ * left to beat it in `mergeFactors`.**
+ *
+ * ⚠ THE FIX IS THE GUARD'S OWN JUSTIFICATION, NOT A WIDER STRING RULE. The
+ * lookahead now requires a MAGNITUDE on the upper bound — the exact condition
+ * under which reading this amount as a point drops information the range
+ * reading carries. It is derived from the one alphabet
+ * (`MAGNITUDE_SUFFIX_ANON_REQUIRED`), so it cannot drift from what a magnitude
+ * is, and it introduces no length constant, no ordering arithmetic and no
+ * tuned cliff — the four-round oscillation this estate has already paid for
+ * (trap 22f).
+ *
+ * ⚠ WHAT IT DELIBERATELY DOES **NOT** DO, because a guard that answers two
+ * questions is the defect one level up (trap 21): it does not decide whether
+ * the pair is a range. `resolveAmountRange` owns that. This guard answers only
+ * "would reading this amount as a point lose a magnitude?"
+ * ======================================================================== */
+
+describe("the point-suppression declines only where a MAGNITUDE is at stake", () => {
+  it("N1: a stated figure before a dash-and-digit that is NOT a magnitude survives", () => {
+    const factors = extractFactors("The budget is £50,000 - 3 months of runway.");
+    const point = factors.find((f) => f.extractionType === "explicit");
+    expect(point, "the stated £50,000 was suppressed by the range guard").toBeDefined();
+    expect(point!.value).toBe(50_000);
+    expect(point!.unit).toBe("£");
+    expect(point!.confidence).toBe(0.9);
+  });
+
+  it("N1: …and the same shape at two other scales, so the close is not one string", () => {
+    for (const [text, expected] of [
+      ["The cost is £250 - 2 people were needed.", 250],
+      ["Budget of £600 - 2 vendors quoted.", 600],
+    ] as const) {
+      const point = extractFactors(text).find((f) => f.extractionType === "explicit");
+      expect(point, `${text}: the stated figure was suppressed`).toBeDefined();
+      expect(point!.value, text).toBe(expected);
+    }
+  });
+
+  it("⭐ TWIN: the headline £80-120k suppression is UNTOUCHED — no bare £80 comes back", () => {
+    // The opposite-direction twin, and the reason a widening cannot be shipped
+    // without it. A guard relaxed one notch too far republishes the 1,000x-short
+    // 80 that set the 3 Sep factor's scale and refused Paul's £100,000.
+    const factors = extractFactors("We're budgeting £80-120k for the first hire.");
+    expect(
+      factors.some((f) => f.value === 80),
+      "the 1,000x-short bare lower bound came back",
+    ).toBe(false);
+    const range = factors.find((f) => f.extractionType === "range");
+    expect(range!.value).toBe(100_000);
+    expect(range!.rangeMin).toBe(80_000);
+    expect(range!.rangeMax).toBe(120_000);
+  });
+
+  it("⭐ TWIN: an AMBIGUOUS elliptical pair still publishes nothing at all", () => {
+    // "£500-2m" has no single reading and `resolveAmountRange` refuses it. The
+    // guard must keep declining the £500 too, or the refusal is undone from the
+    // other side and a possibly-1,000x-short point ships alone.
+    expect(extractFactors("Budget £500-2m for the platform.")).toEqual([]);
+  });
+
+  it("the guard's REGEX, asserted directly, on both sides of the new condition", () => {
+    // Proven on the constant itself and not only through a pattern that happens
+    // to carry the anchor already — the omission that let this guard ship
+    // unable to decline anything at all (see `AMOUNT_RUN_END`).
+    const re = new RegExp(`^(?<amount>${AMOUNT_DIGITS})${RANGE_LOWER_BOUND_ABSENT_GUARD}`);
+    // DECLINES: a magnitude on the upper bound, in every separator spelling.
+    expect(re.exec("80-120k"), "the lower bound of a magnitude-scoped range").toBeNull();
+    expect(re.exec("80–120k"), "en dash").toBeNull();
+    expect(re.exec("80 — 120k"), "em dash").toBeNull();
+    expect(re.exec("80 - 120 million"), "spaced, spelled-out magnitude").toBeNull();
+    expect(re.exec("500-2m"), "the ambiguous descending elliptical pair").toBeNull();
+    expect(re.exec("80,000-120,000k"), "separators on both bounds").toBeNull();
+    // ADMITS: no magnitude on the upper bound, so nothing is lost by reading
+    // this amount as a point.
+    expect(re.exec("50,000 - 3 months of runway")?.[0], "N1").toBe("50,000");
+    expect(re.exec("250 - 2 people")?.[0]).toBe("250");
+    expect(re.exec("80-120")?.[0], "a bare pair scopes no magnitude").toBe("80");
+    // …and the amounts that are not half of anything are still untouched.
+    expect(re.exec("80 - a note")?.[0]).toBe("80");
+    expect(re.exec("80")?.[0]).toBe("80");
+    expect(re.exec("80,000")?.[0], "the separator run is not truncated").toBe("80,000");
+  });
+});
+
+/* ===========================================================================
+ * ⭐⭐⭐ KNOWN_DASH_JOINED_DESCENDING — WHAT N1's CLOSE DOES **NOT** REACH,
+ * recorded as an exact two-directional floor rather than left invisible
+ * (ROADMAP 2.1131, review N1 + meta-finding; CLAUDE.md traps 22f and 12d).
+ *
+ * The guard change above restores the honest POINT on a dash-joined pair whose
+ * upper bound carries no magnitude. It does not touch the RANGE that pair also
+ * produces, and on `parseNumericValue` there is no point to restore, because
+ * that function's range grammar claims the string before any point pattern is
+ * reached.
+ *
+ * ── WHY IT IS NOT CLOSED HERE, stated so nobody reads this as an oversight ──
+ * Closing it means refusing a DESCENDING pair where NEITHER bound carries a
+ * magnitude. That refusal is not scoped to the dash: it also deletes the
+ * `from X to Y` members recorded in `LIE_FABRICATES_A_MIDPOINT` above, which
+ * base and head agree on and which this PR deliberately declined to narrow.
+ * One refusal, two populations, only one of them this change's — so refusing
+ * would be the "while we're here" widening the scope rule forbids, and the
+ * reviewer's own bounding says the shape occurs ZERO times in 614 real strings
+ * harvested from this repo's fixtures. Recorded, not fixed.
+ *
+ * ── AND ONE HALF OF IT IS **NOT** INHERITED, which the PR's own prose missed ─
+ * `resolveAmountRange`'s comment said the neither-magnitude tolerance is
+ * inherited because "base and head are identical on it". Measured on BOTH
+ * paths rather than on the resolver alone:
+ *
+ *   "The budget is £50,000 - 3 months of runway."
+ *     FACTOR path   base range 25001.5 [50000..3]   head IDENTICAL   inherited
+ *     PARSER path   base 50000, "high", no range
+ *                   head 25001.5, "medium", rangeMin 50000 > rangeMax 3   NEW
+ *
+ * `parseNumericValue` had NO dash range grammar at base, so this shape could
+ * not reach the branch — exactly the argument this PR already accepted for the
+ * both-magnitude case. The claim of inheritance is true of the `from X to Y`
+ * members and FALSE of the dash-joined ones on the parser path.
+ * ======================================================================== */
+
+describe("KNOWN_DASH_JOINED_DESCENDING — a recorded floor, pinned in both directions", () => {
+  /** text, midpoint, rangeMin, rangeMax — as `parseNumericValue` publishes it. */
+  const PARSER_STILL_FABRICATES: ReadonlyArray<readonly [string, number, number, number]> = [
+    ["The budget is £50,000 - 3 months of runway.", 25001.5, 50_000, 3],
+    ["The cost is £250 - 2 people were needed.", 126, 250, 2],
+    ["Budget of £600 - 2 vendors quoted.", 301, 600, 2],
+  ];
+
+  it.each(PARSER_STILL_FABRICATES)(
+    "OPEN (sampled): parseNumericValue(%s) still publishes %d over an inverted range",
+    (text, midpoint, min, max) => {
+      const parsed = parseNumericValue(text);
+      expect(parsed, `${text} left the recorded floor`).not.toBeNull();
+      expect(parsed!.value).toBe(midpoint);
+      expect(parsed!.rangeMin).toBe(min);
+      expect(parsed!.rangeMax).toBe(max);
+      expect(parsed!.rangeMin! > parsed!.rangeMax!, "the inversion itself").toBe(true);
+      // "medium", never "high" — the one honest thing about it.
+      expect(parsed!.confidence).toBe("medium");
+    },
+  );
+
+  it("⭐ the FACTOR path is CLOSED on the same strings — the honest point wins again", () => {
+    // The other direction, and the reason the floor above is a floor rather
+    // than a verdict on the class. On `extractFactors` the fabricated range
+    // still exists (inherited) but no longer runs unopposed, and the enricher
+    // picks the stated figure. Measured through `enrichGraphWithFactorsAsync`:
+    // `raw_value 50000, extractionType "explicit", conf 0.90, display "£50k"`
+    // — byte-for-byte the base `f4c8f501` output.
+    for (const [text, stated] of [
+      ["The budget is £50,000 - 3 months of runway.", 50_000],
+      ["The cost is £250 - 2 people were needed.", 250],
+      ["Budget of £600 - 2 vendors quoted.", 600],
+    ] as const) {
+      const point = extractFactors(text).find((f) => f.extractionType === "explicit");
+      expect(point, `${text}: the stated figure is gone again`).toBeDefined();
+      expect(point!.value, text).toBe(stated);
+      expect(point!.confidence, text).toBe(0.9);
+    }
+  });
+
+  it("⭐ TWIN: an ASCENDING dash-joined pair is untouched on BOTH paths", () => {
+    // A refusal or a widening that swallowed these would pass every assertion
+    // above while deleting the reason this PR exists.
+    const parsed = parseNumericValue("We're budgeting £80-120k for the first hire.");
+    expect(parsed!.value).toBe(100_000);
+    expect(parsed!.rangeMin).toBe(80_000);
+    expect(parsed!.rangeMax).toBe(120_000);
+    const range = extractFactors("We're budgeting £80-120k for the first hire.").find(
+      (f) => f.extractionType === "range",
+    );
+    expect(range!.rangeMin).toBe(80_000);
+    expect(range!.rangeMax).toBe(120_000);
+  });
+
+  it("a YEAR before a percent is read as a figure again, and that is INHERITED", () => {
+    // ⚠ DISCLOSED, NOT INTRODUCED. Relaxing the guard re-admits
+    // `contextualNumber`'s reading of "revenue 2024-10%" as a revenue of
+    // **2024** — which is what base `f4c8f501` did; the first cut of the guard
+    // suppressed it as a side effect of a rule aimed at something else.
+    // Base parity, a different defect class (`contextualNumber` reading a
+    // year), and not this PR's to close. Pinned so it is visible.
+    const factors = extractFactors("revenue 2024-10%");
+    expect(factors.some((f) => f.value === 2024 && f.extractionType === "explicit")).toBe(true);
+    // …and the thing this PR DID close stays closed: no percent band with a
+    // floor of 2,024%, on either path.
+    expect(factors.filter((f) => f.extractionType === "range")).toEqual([]);
+    expect(parseNumericValue("revenue 2024-10%")).toBeNull();
   });
 });

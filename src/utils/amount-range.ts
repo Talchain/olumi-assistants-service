@@ -73,6 +73,7 @@ import {
   AMOUNT_DIGITS,
   AMOUNT_RUN_END,
   MAGNITUDE_SUFFIX_ANON,
+  MAGNITUDE_SUFFIX_ANON_REQUIRED,
   magnitudeSuffixPattern,
   parseAmountDigits,
   resolveMagnitude,
@@ -167,6 +168,49 @@ export const RANGE_SEPARATOR_WORDS_ONLY = "(?:\\s+(?:to|and)\\s+)";
  * Requires a DIGIT after the separator, so ordinary parenthetical dashes
  * ("the £500 — a lot of money — was spent") are untouched.
  *
+ * ⚠⚠⚠ AND IT REQUIRES A **MAGNITUDE** ON THAT UPPER BOUND, WHICH IS THE WHOLE
+ * OF THE QUESTION IT ANSWERS. Its first cut asked only "is this amount
+ * followed by dash-then-digit?" — a purely SYNTACTIC test, with no opinion on
+ * whether the pair is a range or whether reading the amount as a point loses
+ * anything. That is one parameter guarding two opposite harms, tuned for one
+ * of them (trap 22b), and the other harm was measured through
+ * `enrichGraphWithFactorsAsync` — the entry `cee/unified-pipeline/stages/
+ * enrich.ts` calls, and the ONLY src call site — at base `f4c8f501` and at
+ * `6e982fc3`:
+ *
+ *     "The budget is £50,000 - 3 months of runway."
+ *       f4c8f501   raw_value 50000,   "explicit", conf 0.90, display "£50k"
+ *       6e982fc3   raw_value 25001.5, "range",    conf 0.80, display "£25k"
+ *                  rangeMin 50000 > rangeMax 3
+ *
+ * A budget and a number of MONTHS, read as a band, and the writer's own
+ * £50,000 replaced by its midpoint. The descending pair is the tolerance
+ * `resolveAmountRange` inherits and deliberately keeps — base emits the same
+ * 25001.5 factor — so the guard did not create the fabrication. It removed the
+ * honest labelled point that had been BEATING it in `mergeFactors`, which is
+ * how an inherited tolerance became a user-visible lie.
+ *
+ * The condition is taken from this guard's own justification two paragraphs
+ * up: the range patterns are owed the amount because they READ THE MAGNITUDE
+ * THAT SCOPES BOTH BOUNDS. Where there is no magnitude to scope, the point
+ * reading loses nothing and the guard has no business declining it.
+ *
+ *     "£80-120k"      upper carries `k`  →  DECLINE (the 3 Sep defect)
+ *     "£500-2m"       upper carries `m`  →  DECLINE (ambiguous; refused both ways)
+ *     "£50,000 - 3 months"  no magnitude →  ADMIT   (N1)
+ *     "£80-120"             no magnitude →  ADMIT   (the range still wins on value)
+ *
+ * ⚠ DERIVED, NOT SPELLED: the magnitude test is `MAGNITUDE_SUFFIX_ANON_REQUIRED`
+ * from the one alphabet, so it cannot drift from what a magnitude is. There is
+ * no length constant here, no ordering arithmetic and no cliff to tune — the
+ * four-round oscillation over a hand-tuned natural-language predicate is the
+ * bill this estate has already paid (trap 22f).
+ *
+ * ⚠ AND IT STILL DOES NOT DECIDE WHETHER THE PAIR IS A RANGE (trap 21).
+ * `resolveAmountRange` owns that question. This one answers only "would
+ * reading this amount as a point drop a magnitude?" Two questions, named
+ * apart; aligning their answers is what would put them back together.
+ *
  * ⚠⚠ AND IT CARRIES `AMOUNT_RUN_END`, WITHOUT WHICH IT DOES NOT DECLINE AT ALL.
  * Its first cut was the bare lookahead, and the greedy digit group simply
  * backtracked past it: `80-120` failed on `80` and matched `8`. That is the
@@ -179,7 +223,8 @@ export const RANGE_SEPARATOR_WORDS_ONLY = "(?:\\s+(?:to|and)\\s+)";
  * passed. A guard proven only through a caller that supplies its missing
  * precondition has not been proven.
  */
-export const RANGE_LOWER_BOUND_ABSENT_GUARD = `${AMOUNT_RUN_END}(?!\\s*[-–—]\\s*\\d)`;
+export const RANGE_LOWER_BOUND_ABSENT_GUARD =
+  `${AMOUNT_RUN_END}(?!\\s*[-–—]\\s*${AMOUNT_DIGITS}${MAGNITUDE_SUFFIX_ANON_REQUIRED})`;
 
 /**
  * The full range grammar: two amounts, each with an OPTIONAL magnitude, joined
@@ -272,14 +317,39 @@ export function resolveAmountRange(input: {
   // artefact, and the extractors already tolerated it — so it is left alone
   // rather than newly refused."* One sentence covering two situations that
   // differ in exactly the way that matters — the estate's signature defect
-  // (trap 21). Measured through `enrichGraphWithFactors`, the user-reachable
-  // entry, at the base `f4c8f501` and at `479c7c97`:
+  // (trap 21).
+  //
+  // ⚠⚠ AND THE MEASUREMENT BASIS THAT SENTENCE NAMED WAS THE WRONG FUNCTION
+  // (review meta-finding). It said *"measured through `enrichGraphWithFactors`,
+  // the user-reachable entry"*. `enrichGraphWithFactors` is the SYNC twin: it
+  // is marked `@deprecated`, it has ZERO src call sites outside its own module,
+  // and it mints no factor cap at all. The user-reachable entry is
+  // `enrichGraphWithFactorsAsync`, which `cee/unified-pipeline/stages/enrich.ts`
+  // calls and whose own header says "This is the ONLY call site". The numbers
+  // below were re-derived through the ASYNC entry at base `f4c8f501` and at
+  // `6e982fc3`, and they hold — but a verification sentence naming the wrong
+  // function reads as audited and is not, and it sends the next lane to a
+  // function no user reaches, under a green suite.
   //
   //   NEITHER bound carries a magnitude — "cut CAC from £600 to £400"
   //     base  {value 500, rangeMin 600, rangeMax 400}
   //     head  {value 500, rangeMin 600, rangeMax 400}      IDENTICAL.
-  //   The tolerance is genuinely INHERITED. Not this change's to narrow, and
-  //   it is pinned as a recorded floor rather than silently altered.
+  //   The tolerance is genuinely INHERITED **through the factor path**. Not
+  //   this change's to narrow, and it is pinned as a recorded floor rather than
+  //   silently altered.
+  //
+  //   ⚠ THE SAME CLASS IS **NOT** INHERITED ON THE `parseNumericValue` PATH
+  //   WHEN THE PAIR IS DASH-JOINED, and that is a genuine residual this change
+  //   leaves open. Measured on both paths:
+  //     "The budget is £50,000 - 3 months of runway."
+  //       base  parseNumericValue → 50000, confidence "high", no range
+  //       head  parseNumericValue → 25001.5, "medium", rangeMin 50000 > 3
+  //   `parseNumericValue` had no dash range grammar at base, so this shape
+  //   could not reach the branch — the tolerance was CREATED here, exactly as
+  //   it was for the both-magnitude case above. It is NOT closed, because the
+  //   refusal that would close it also deletes the `from X to Y` members of the
+  //   recorded gap set, which ARE inherited. Pinned in both directions in
+  //   `__tests__/amount-range.test.ts` under KNOWN_DASH_JOINED_DESCENDING.
   //
   //   BOTH bounds carry one — "We will cut spend from £2m to £500k this year."
   //     base  {value 2_000_000, extractionType "explicit", confidence 0.85}

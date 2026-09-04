@@ -278,6 +278,24 @@ export function magnitudeSuffixPattern(group: string): string {
 }
 
 /**
+ * The magnitude suffix, REQUIRED, with NO capture group (ROADMAP 2.1131).
+ *
+ * ⚠ IT EXISTS BECAUSE A GUARD NEEDED TO ASK "IS THERE A MAGNITUDE HERE?" AND
+ * THE ONLY ANONYMOUS SPELLING AVAILABLE ANSWERED "…OR NOTHING". A lookahead
+ * built on the OPTIONAL form matches the empty string, so it is satisfied by
+ * every input and the guard it sits in stops discriminating entirely — the
+ * silent, uniform-answer failure of CLAUDE.md trap 20, arriving through a `?`.
+ * `RANGE_LOWER_BOUND_ABSENT_GUARD` asks exactly this question of a range's
+ * UPPER bound.
+ *
+ * The optional spelling below is now DERIVED from this one, so the two cannot
+ * disagree about what a magnitude is, and `MAGNITUDE_SUFFIX_ANON`'s value is
+ * byte-identical to the literal it replaced (pinned in
+ * `__tests__/magnitude-alphabet.union.test.ts`).
+ */
+export const MAGNITUDE_SUFFIX_ANON_REQUIRED = `(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)`;
+
+/**
  * The optional magnitude suffix with NO capture group (ROADMAP 2.322).
  *
  * WHY AN ANONYMOUS SPELLING EXISTS AT ALL. A pattern may need the alphabet
@@ -290,7 +308,7 @@ export function magnitudeSuffixPattern(group: string): string {
  * `t` or a word form no matter what its parser understood. Derived from the
  * same alternation, so it cannot drift from the named spellings.
  */
-export const MAGNITUDE_SUFFIX_ANON = `(?:\\s*(?:${MAGNITUDE_ALTERNATION})\\b)?`;
+export const MAGNITUDE_SUFFIX_ANON = `${MAGNITUDE_SUFFIX_ANON_REQUIRED}?`;
 
 /**
  * The regex form of `isMagnitudeShapedSuffix` (ROADMAP 2.322).

@@ -486,14 +486,35 @@ const CANONICAL_COVERAGE: Readonly<
   // fallback's 0.6 — the collision that let the old coverage pass on the
   // wrong factor.
   approximateValue: [["roughly 50 customers", [["Factor", 50, null, "inferred", 0.7, null]]]],
-  // ⚠ THE BARE LOWER BOUND IS GONE TOO (ROADMAP 2.1131), and this is the
-  // carrier that actually reached the user. `currency` read `£50` and stopped
-  // at the hyphen, so a correctly-read range travelled beside a point taken
-  // from its own first half — and on "£80-120k" that point was the 80 the
-  // 3 Sep session then enforced a scale from. See
-  // `RANGE_LOWER_BOUND_ABSENT_GUARD`.
+  // ⚠ THE BARE LOWER BOUND IS GONE WHERE A **MAGNITUDE** IS AT STAKE
+  // (ROADMAP 2.1131), and that is the carrier that actually reached the user.
+  // `currency` read `£80` of "£80-120k" and stopped at the hyphen, so a
+  // correctly-read range travelled beside a point 1,000x short of it — and
+  // that 80 is what the 3 Sep session enforced a scale from.
+  //
+  // ⚠⚠ IT IS **NOT** GONE HERE, AND THE RESTORATION IS DELIBERATE (review N1).
+  // "£50-70" carries no magnitude on either bound, so the point reading loses
+  // nothing and `RANGE_LOWER_BOUND_ABSENT_GUARD` no longer declines it. The
+  // first cut of that guard was purely syntactic — any amount before
+  // dash-then-digit — and the breadth cost a stated figure on the reachable
+  // path: measured through `enrichGraphWithFactorsAsync`, "The budget is
+  // £50,000 - 3 months of runway." went from `raw_value 50000 / "explicit"`
+  // at base `f4c8f501` to `raw_value 25001.5 / "range"` with
+  // `rangeMin 50000 > rangeMax 3` at `6e982fc3`. See
+  // `utils/__tests__/amount-range.test.ts`, "the point-suppression declines
+  // only where a MAGNITUDE is at stake".
+  //
+  // ⭐ WHAT THE RESTORED COMPANION DOES **NOT** DO, measured rather than
+  // assumed: it does not change what a user sees. Driven through
+  // `enrichGraphWithFactorsAsync`, this brief yields the identical factor
+  // either way — `raw_value 60, extractionType "range", confidence 0.8,
+  // rangeMin 50, rangeMax 70` — because the 0.8 range beats the 0.6 companion
+  // in `mergeFactors`. The array below is the COMPLETE extractor output, which
+  // is a strictly wider claim than the enriched factor, and that is why the
+  // companion has to be pinned here rather than waved through.
   currencyRange: [["Pricing between £50-70.", [
     ["Value", 60, "£", "range", 0.8, null],
+    ["Value", 50, "£", "inferred", 0.6, null],
   ]]],
   percentRange: [["Uplift between 5-10%.", [
     ["Rate", 0.07500000000000001, "%", "range", 0.8, null],

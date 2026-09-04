@@ -305,10 +305,14 @@ type RangeParse = ParsedValue | typeof RANGE_REFUSED | null;
  *     10%" — one bound, never a span.
  *   - `:407` scans that same single-token pattern with `/g`, so it hands over
  *     "£600" and "£400" separately, never "£600 to £400".
- *   - `numeric-parser.ts:841/861` sit inside `extractAllNumericValues`, which
- *     has ZERO consumers in `src/` — held there by a live tripwire with its own
- *     positive control at
- *     `__tests__/numeric-parser-magnitude-authority.test.ts`.
+ *   - the two `parseNumericValue` calls inside `extractAllNumericValues` — the
+ *     segment loop and the pattern-match loop — belong to a function with ZERO
+ *     consumers in `src/`, held there by a live tripwire with its own positive
+ *     control at `__tests__/numeric-parser-magnitude-authority.test.ts`.
+ *     (⚠ NAMED BY SYMBOL, NOT BY LINE, per review N4: this read `:841/861`,
+ *     which had already drifted to `:873/893` by the time it was reviewed. A
+ *     line number in a comment is a hand-maintained mirror with no guard on it,
+ *     and it goes stale inside the same PR that writes it — trap 12.)
  *
  * Across every sentence above, no from-to SPAN reaches `parseNumericValue` at
  * all (the span detector was itself positive-controlled before the absence was
@@ -317,13 +321,21 @@ type RangeParse = ParsedValue | typeof RANGE_REFUSED | null;
  *
  * ⚠⚠⚠ DO NOT READ THAT AS "THE FROM-TO CLASS IS NOT USER-REACHABLE". It is
  * reachable, through the OTHER extractor. `factor-extraction`'s `extractFactors`
- * is called from `enricher.ts` at `:393`, `:858` and `:982`, it has NO from-to
- * frame guard of any kind, and its range patterns claim a from-to span exactly
- * as this one did. A manifest for one function is evidence about that function
- * and nothing else (trap 20); the generalisation is where the error enters, and
- * it entered twice here before this sentence was written. What that path does
- * with a descending from-to is decided in `utils/amount-range.ts`, and the
- * measured base/head pair is recorded there.
+ * is called from `enricher.ts` in `enrichGraphWithFactorsAsync` and in
+ * `mintGoalTargetOnly` (which that async entry calls); it has NO from-to frame
+ * guard of any kind, and its range patterns claim a from-to span exactly as this
+ * one did. A manifest for one function is evidence about that function and
+ * nothing else (trap 20); the generalisation is where the error enters, and it
+ * entered twice here before this sentence was written. What that path does with
+ * a descending from-to is decided in `utils/amount-range.ts`, and the measured
+ * base/head pair is recorded there.
+ *
+ * ⚠ THE CALL SITES WERE LISTED AS `:393`, `:858` AND `:982` UNTIL THE REVIEW
+ * META-FINDING, and one of the three is NOT REACHABLE: `:393` sits inside
+ * `enrichGraphWithFactors`, the `@deprecated` SYNC twin with zero src callers.
+ * Naming it beside two reachable sites made the reachability claim read as
+ * broader than it is, in a paragraph whose entire subject is not over-reading a
+ * manifest. Symbols, not line numbers, for the same reason as above.
  *
  * ⚠ THIS PR ALREADY CONTAINED THE RIGHT ANALYSIS, one module over.
  * `resolveAmountPairBothOrNeither`'s docstring: *"a DECREASE descends by
