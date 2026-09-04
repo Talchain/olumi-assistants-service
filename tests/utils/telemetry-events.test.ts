@@ -620,6 +620,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // fail-open arm; coded reasons, counts and model ids only.
         CeeDraftQuality: "cee.draft_graph.quality",
         CeeDraftQualityRedraw: "cee.draft_graph.quality_redraw",
+        // The four-point option→factor magnitude census — one name, four
+        // `point`s. See the enum's own note for why it is not four names.
+        CeeDraftOptionMagnitudeCensus: "cee.draft_graph.option_magnitude_census",
         V5StructuralEditToolComposed: "v5.structural_edit_tool.composed",
         V5StructuralEditToolEntry: "v5.structural_edit_tool.entry",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites.
@@ -1739,6 +1742,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // counter is worth minting; until then they are structured logs.
         TelemetryEvents.CeeDraftQuality,
         TelemetryEvents.CeeDraftQualityRedraw,
+        // Option→factor magnitude census — deliberately NOT Datadog-mapped.
+        // Its whole value is the SHAPE of four points read together, and a
+        // single scalar counter per point would invite exactly the reading the
+        // instrument exists to prevent (a miss count with no denominator).
+        // Structured logs until a four-point dashboard exists.
+        TelemetryEvents.CeeDraftOptionMagnitudeCensus,
         // CEE_REQUIRE_USER_JWT (flag default OFF, login 3.4 CEE-half, ships
         // dark) — user-JWT identity events are diagnostic-only structured
         // logs until the Paul-gated flip; no Datadog metric mapping yet.
@@ -2481,6 +2490,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // hand-back's observability. Deliberate frozen-registry addition per
         // the registry discipline.
         "v5.edit_graph.unresolved_clarification_fallthrough",
+        // ⭐⭐ The four-point option→factor magnitude census — ONE name, emitted
+        // at four `point`s (before_completion / after_completion /
+        // after_projection / at_commit) so the same measurement of the same
+        // population stays one series. Deliberate frozen-registry addition per
+        // the registry discipline.
+        "cee.draft_graph.option_magnitude_census",
       ];
 
       const actualEvents = Object.values(TelemetryEvents).sort();
