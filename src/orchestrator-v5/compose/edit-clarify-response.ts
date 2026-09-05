@@ -258,7 +258,18 @@ export function selectEditClarifyTargets(
   return [...factors, ...options].slice(0, 3);
 }
 
-function buildLabelChip(nodeId: string, label: string): SuggestedAction {
+/**
+ * ⚠ EXPORTED, not copied. The anaphoric-edit branch in `edit-graph-dispatch.ts`
+ * offers candidate chips for a referent it could not narrow to one, and those
+ * chips must carry EXACTLY this message convention. The convention is
+ * load-bearing, not cosmetic — see the comment inside: a submit message
+ * containing an `EDIT_GRAPH_POSITIVE_REGEX` verb re-triggers the V4 edit
+ * dispatch with a value-less prompt and dead-ends in the same recovery loop the
+ * chip was meant to escape. A second copy of that rule at the call site would
+ * be the hand-maintained mirror this repo keeps paying for (trap 12), and a
+ * drift would read green because nothing compares the two.
+ */
+export function buildLabelChip(nodeId: string, label: string): SuggestedAction {
   // The submit message must NOT contain any verb in route-v2's
   // `EDIT_GRAPH_POSITIVE_REGEX`
   // (change|update|edit|modify|remove|delete|add|adjust|set|reduce|
