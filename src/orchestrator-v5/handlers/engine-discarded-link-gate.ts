@@ -21,6 +21,12 @@
  *     `src/integrations/isl/translator-v3.ts:116`) carried in `body.options`,
  *     **outside** `body.graph`, so the filter never touches it
  *     (`src/routes/v2/run.ts:5503-5504`).
+ *     ⚠ That citation proves the map REACHES the engine. It does **not** prove
+ *     the target must be a FACTOR: the key is a bare string, and PLoT validates
+ *     only that the target exists in the graph, with no kind test
+ *     (`translator-v3.ts:468-475`). The factor constraint is CEE-side —
+ *     `orchestrator/tools/encode-option-interventions.ts:213-225`. Clause 4 of
+ *     the refusal copy asserts both halves, so both are cited there.
  *   · The edit prompt already says this to the model:
  *     *"Do not use add_edge. Structural option-to-factor edges already exist;
  *     interventions set what values flow through them."* (`prompts/edit-graph-v6.ts:95-96`.)
@@ -31,6 +37,14 @@
  * is the intervention VALUE, so the answerable question is about a value, not
  * about a connection — which is why the copy below asks *which factor, and by how
  * much*, and offers no route to build a link of any shape.
+ *
+ * ⚠⚠ **AND A TRUE SENTENCE IS NOT YET A ROUTABLE ONE** — the round-2 rejection.
+ * Being unable to make a false promise is one requirement; the phrasing the copy
+ * hands over must also reach the writer IN THE STATE THIS GATE CREATES, which is
+ * not the state the estate's other option-effect copy was measured in. See
+ * {@link buildEffectExemplar} for the executed matrix and the discriminating
+ * pair. **If a fourth phrasing ever looks necessary, that is the signal to stop
+ * and report rather than to try one** (trap 22f).
  *
  * ## Why the predicate is derived rather than a hand-written `option → risk` test
  *
@@ -119,13 +133,41 @@ export interface EngineDiscardedLink {
   readonly toLabel: string | null;
   /** The endpoint kind whose incidence causes the deletion ('option' | 'decision'). */
   readonly strippedKind: string;
-  /** Label of the option/decision endpoint, when one is safe to render. */
+  /** DISPLAY label of the option/decision endpoint, when one is safe to render. */
   readonly strippedLabel: string | null;
+  /**
+   * ⭐ THE SAME LABEL, UNTRUNCATED — and the two are NOT interchangeable.
+   *
+   * `strippedLabel` is clamped to 60 characters for prose. That clamp is the
+   * reason the previous cut's exemplar could not name the option: a clamped
+   * label matches NOTHING in `resolveOptionEffectWrite`, so a user who copies
+   * the sentence back gets `option_not_named`. Measured (see the exemplar
+   * header below): at an 87-character label the clamped form declines in BOTH
+   * graph states while this form writes in both.
+   *
+   * Whitespace-normalised but never cut. Prose reads the clamped one; the
+   * sentence the user is invited to SEND reads this one. Different jobs,
+   * different strings — the split `validation-failure-responses.ts:1158-1163`
+   * already established for the same seam.
+   */
+  readonly strippedRawLabel: string | null;
 }
 
 interface ResolvedNode {
   readonly label: string | null;
+  readonly rawLabel: string | null;
   readonly kind: string | null;
+}
+
+/**
+ * The label as the ROUTER will see it: whitespace-normalised (because
+ * `resolveOptionEffectWrite` normalises the message the same way before
+ * matching) and NEVER truncated. `clampLabel` does this and then cuts at 60;
+ * this is that function without the cut, which is precisely the difference
+ * between a sentence that binds and one that resolves `option_not_named`.
+ */
+function routableLabel(label: string): string {
+  return label.trim().replace(/\s+/g, ' ');
 }
 
 function asRecord(v: unknown): Record<string, unknown> {
@@ -149,9 +191,10 @@ function collectBatchAdds(
     const v = asRecord(op.value);
     const id = typeof v.id === 'string' ? v.id : typeof op.path === 'string' ? op.path : null;
     if (id === null || id.length === 0) continue;
-    const rawLabel = typeof v.label === 'string' ? v.label.trim() : '';
+    const declared = typeof v.label === 'string' ? v.label.trim() : '';
     adds.set(id, {
-      label: rawLabel.length > 0 ? clampLabel(rawLabel) : null,
+      label: declared.length > 0 ? clampLabel(declared) : null,
+      rawLabel: declared.length > 0 ? routableLabel(declared) : null,
       kind: typeof v.kind === 'string' ? v.kind : null,
     });
   }
@@ -168,14 +211,15 @@ function resolveNode(
     for (const n of nodes) {
       const rec = asRecord(n);
       if (rec.id !== nodeId) continue;
-      const rawLabel = typeof rec.label === 'string' ? rec.label.trim() : '';
+      const declared = typeof rec.label === 'string' ? rec.label.trim() : '';
       return {
-        label: rawLabel.length > 0 ? clampLabel(rawLabel) : null,
+        label: declared.length > 0 ? clampLabel(declared) : null,
+        rawLabel: declared.length > 0 ? routableLabel(declared) : null,
         kind: typeof rec.kind === 'string' ? rec.kind : null,
       };
     }
   }
-  return batchAdds.get(nodeId) ?? { label: null, kind: null };
+  return batchAdds.get(nodeId) ?? { label: null, rawLabel: null, kind: null };
 }
 
 /**
@@ -232,22 +276,88 @@ export function findEngineDiscardedLinks(
       toLabel: to.label,
       strippedKind: fromGated ? from.kind : to.kind,
       strippedLabel: fromGated ? from.label : to.label,
+      strippedRawLabel: fromGated ? from.rawLabel : to.rawLabel,
     });
   }
   return found;
 }
 
 /**
- * ⭐ THE EXEMPLAR NAMES NO OPTION, DELIBERATELY — and that is a measurement, not a
- * style choice. `validation-failure-responses.ts:1191-1196` records it: a real
- * drafted option label runs 84-101 characters, every user-facing rendering
- * truncates it, and the truncated sentence resolves `option_not_named` and does
- * NOT route back to the lane that suggested it. The empty-option form anchors on
- * the literal `option's effect on`, which is what `messageNamesOptionEffectSlot`
- * recognises, so the sentence the product advises and the sentence it can honour
- * cannot drift apart. Built by the shared builder; never retyped here.
+ * ⭐⭐ THE EXEMPLAR NAMES THE OPTION, FROM THE **RAW** LABEL — round three on this
+ * one sentence, and the only round that is a measurement rather than a rephrasing.
+ *
+ * ## What the previous two cuts got wrong
+ *
+ *  · **#1347** advised *"tell me which factor they change and I will connect it
+ *    that way instead"* — it promised a route the same filter deletes. FALSE.
+ *  · **#1348 round 2** advised the OPTION-LESS form
+ *    (`Set the option's effect on that factor to 0.6`). The sentence is TRUE, and
+ *    it still does not reach the writer in the state this gate creates.
+ *
+ * ## Why the option-less form fails HERE, derived at the resolver
+ *
+ * With no option named, `resolveOptionEffectWrite` takes rule 3b
+ * (`routing/option-effect-write.ts:1247`), which resolves the option from the
+ * product's OUTSTANDING ASK — and rule 3b's first act is
+ * `if (pairs.length === 0) return decline('option_not_named')` (`:967`). Those
+ * pairs are live `missing_value` blockers. **This gate fires on a structural
+ * `add_edge`, which says nothing about whether any effect value is outstanding**,
+ * so the blocker set is routinely empty exactly when the gate speaks — it is
+ * empty on this module's own fixture, whose option already carries
+ * `interventions: { 'f-velocity': 0.6 }`.
+ *
+ * ## The measured matrix (executed against this resolver, both graph states)
+ *
+ * ```
+ *                                    effect ALREADY set     effect OUTSTANDING
+ *   option-less                      option_not_named       WRITE
+ *   option named, RAW label          WRITE                  WRITE
+ *   option named, CLAMPED label      option_not_named       option_not_named   (87-char label)
+ * ```
+ *
+ * **The discriminating pair is the last two rows.** Naming the option is not what
+ * broke the earlier attempt; TRUNCATING the name is. At a label short enough to
+ * survive `clampLabel` the middle and bottom rows are the same string, which is
+ * how the clamp hid in the earlier reasoning.
+ *
+ * ## The inherited premise, re-derived rather than trusted
+ *
+ * Round 2 omitted the option citing `validation-failure-responses.ts:1191-1196`.
+ * That note is TRUE and was generalised too far: it says a **`safeLabel`-truncated**
+ * label does not route. The comment block 33 lines ABOVE it
+ * (`:1158-1163`) resolves the tension and was not carried across — *"the message
+ * names the option IN FULL, from the RAW label rather than the displayed one …
+ * The rendered sentence the user READS stays truncated; the replay the chip SENDS
+ * is whole. Different jobs, different strings."* That is exactly the split applied
+ * here.
+ *
+ * ## The two states this exemplar still does NOT write in, pinned not hidden
+ *
+ *  · The option already has this factor at this exact value → `value_already_set`.
+ *    A truthful decline about a request that is already satisfied, not a dead end.
+ *  · The option has NO `option → factor` edge at all → `factor_not_named`, which
+ *    `option-effect-write.ts:1345-1350` makes a DELIBERATE hand-off to the edit
+ *    lane ("the edit LLM can paraphrase-match a factor name this exact reader
+ *    cannot, and can add a missing structural edge").
+ *
+ * Both are asserted as an EXACT set by the suite, so they RED if they grow or
+ * shrink (trap 22f's known-dropped-set rule). Neither is a fourth phrasing
+ * waiting to happen: a fourth phrasing cannot change either, because both are
+ * facts about the GRAPH rather than about the sentence.
+ *
+ * ⚠ The factor slot stays the placeholder `that factor`, which the user
+ * substitutes — the gate must not guess WHICH factor the option changes, and the
+ * question one clause earlier is precisely that question. The routing claim is
+ * therefore about the substituted sentence, and the suite substitutes a real
+ * factor and runs the REAL resolver rather than asserting the string alone.
  */
-const EFFECT_EXEMPLAR = buildConfigureOptionAdvisedFormat('', 'that factor', '0.6');
+function buildEffectExemplar(rawOptionLabel: string | null): string {
+  return buildConfigureOptionAdvisedFormat(
+    rawOptionLabel !== null ? `'${rawOptionLabel}'` : '',
+    'that factor',
+    '0.6',
+  );
+}
 
 /**
  * The refusal copy. EVERY clause is a claim this module can point at:
@@ -260,10 +370,25 @@ const EFFECT_EXEMPLAR = buildConfigureOptionAdvisedFormat('', 'that factor', '0.
  *     exceptions.
  *  3. "so this one would never reach the numbers"  — same bytes; the deleted edge
  *     is not replaced by anything.
- *  4. "What does reach them is an option's effect value on a factor"  — the
- *     `interventions` map travels in `body.options`, outside the filtered graph
- *     (PLoT `run.ts:5503-5504`, `translator-v3.ts:116`).
- *  5. the question, and the exemplar  — probe-P1-verified routable (see above).
+ *  4. "What does reach the numbers is an option's effect value on a factor"  —
+ *     TWO claims with TWO different owners, and conflating them is how the
+ *     earlier citation went wrong:
+ *       · *reaches the numbers* — PLoT. The `interventions` map travels in
+ *         `body.options`, outside the filtered graph, and is typed
+ *         `Record<string, number>` (`run.ts:5503-5504`,
+ *         `translator-v3.ts:116`, both exact at PLoT `d37c8cfd`).
+ *       · *on a FACTOR* — **CEE, not PLoT.** `translator-v3.ts:116` types the
+ *         key as a bare string, and PLoT's own request validation checks only
+ *         that the target EXISTS in the graph, with no kind test
+ *         (`translator-v3.ts:468-475` at PLoT `f19ed87a`). The factor
+ *         constraint is ours: `orchestrator/tools/encode-option-interventions.ts:213-225`
+ *         builds `factorById` from `kind === 'factor'` alone and admits an
+ *         option's target only if it is in that map.
+ *  5. the withheld-change disclosure  — see {@link buildEngineDiscardedLinkRefusal}'s
+ *     `operationCount` parameter; a co-batched LEGAL edit is refused with the rest
+ *     and the user is told so.
+ *  6. the question, and the exemplar  — see {@link buildEffectExemplar} for the
+ *     executed routing matrix.
  *
  * It states NO consequence for the goal, NO claim about what `0.0` means to the
  * solver, and offers NO alternative link shape. Each of those would be a sentence
@@ -273,9 +398,22 @@ const EFFECT_EXEMPLAR = buildConfigureOptionAdvisedFormat('', 'that factor', '0.
  * internal token, clean against `findForbiddenPhraseHit` and `findSuccessClaimHit`
  * (the `Set …` exemplar is mid-sentence, never at a line start, because
  * `SUCCESS_CLAIM_PATTERNS` anchors that verb with the `m` flag).
+ *
+ * @param operationCount how many operations the refused batch carried IN TOTAL.
+ *   ⭐ REQUIRED, NOT OPTIONAL, and that is the fix for the second defect this
+ *   round closed. The disclosure used to be gated on `links.length > 1`, so a
+ *   batch of `[option → risk, factor → risk, add_node]` was refused WHOLE while
+ *   the copy named only the illegal link: two legal edits vanished and the
+ *   *"I have left the whole change out"* sentence never fired (executed: 3
+ *   operations, 1 discarded link, 2 silently withheld). The count the sentence
+ *   turns on is `operationCount - links.length`, which is a different question
+ *   from "how many links did I refuse" — two questions, two parameters
+ *   (trap 21). A DEFAULT would make it a hand-maintained mirror of the caller's
+ *   diligence, which is the shape `buildRepairPairChip`'s header already refuses.
  */
 export function buildEngineDiscardedLinkRefusal(
   links: readonly EngineDiscardedLink[],
+  operationCount: number,
 ): string {
   const first = links[0];
   if (first === undefined) {
@@ -285,9 +423,21 @@ export function buildEngineDiscardedLinkRefusal(
     first.fromLabel !== null && first.toLabel !== null
       ? `the link from '${first.fromLabel}' to '${first.toLabel}'`
       : 'that link';
-  const others =
-    links.length > 1
-      ? ` The same is true of ${links.length - 1} other link${links.length - 1 === 1 ? '' : 's'} in this change, so I have left the whole change out rather than apply part of it.`
+  // Two independent clauses because they answer two independent questions: how
+  // many OTHER links share this fate, and whether anything LEGAL was withheld
+  // with them. One conjunction served both and could only ever tell the truth
+  // about the first.
+  const alsoCount = links.length - 1;
+  const alsoDiscarded =
+    alsoCount > 0
+      ? ` The same is true of ${alsoCount} other link${alsoCount === 1 ? '' : 's'} in this change.`
+      : '';
+  const withheldCount = Math.max(0, operationCount - links.length);
+  const withheld =
+    withheldCount > 0
+      ? ` I have left the whole change out rather than apply part of it, so the ` +
+        `${withheldCount} other change${withheldCount === 1 ? '' : 's'} in the same ` +
+        `instruction ${withheldCount === 1 ? 'is' : 'are'} not in the model either.`
       : '';
   const subject =
     first.strippedLabel !== null ? `'${first.strippedLabel}'` : 'that option';
@@ -295,8 +445,9 @@ export function buildEngineDiscardedLinkRefusal(
     `I have not put ${named} in the model, because it would not survive to the ` +
     `analysis. A link that starts or ends at an option is dropped before the ` +
     `analysis runs, so this one would never reach the numbers, and telling you it ` +
-    `was in the model would be untrue.${others} What does reach the numbers is an ` +
-    `option's effect value on a factor. Tell me which factor ${subject} changes ` +
-    `and by how much, like this: "${EFFECT_EXEMPLAR}" (any number from 0 to 1).`
+    `was in the model would be untrue.${alsoDiscarded}${withheld} What does reach ` +
+    `the numbers is an option's effect value on a factor. Tell me which factor ` +
+    `${subject} changes and by how much, like this: ` +
+    `"${buildEffectExemplar(first.strippedRawLabel)}" (any number from 0 to 1).`
   );
 }

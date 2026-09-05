@@ -1019,7 +1019,16 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       return {
         governing: 'clarify_required',
         blockApply: true,
-        assistantText: buildEngineDiscardedLinkRefusal(discardedLinks),
+        // ⭐ THE TOTAL OPERATION COUNT IS PASSED, NOT THE LINK COUNT. The batch
+        // is refused WHOLE, so every operation beyond the discarded links is a
+        // change the user asked for and does not get — including a perfectly
+        // legal one. The builder turns its withheld-change disclosure on that
+        // difference; passing only the links would make the sentence structurally
+        // unable to fire (which is exactly the defect this round closed).
+        assistantText: buildEngineDiscardedLinkRefusal(
+          discardedLinks,
+          input.operations.length,
+        ),
         suggestedActions: [],
         pendingActions: null,
         publicReason: {
