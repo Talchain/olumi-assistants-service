@@ -52,7 +52,15 @@ import { refereeMutationBatch } from '../graph-management/referee.js';
 import {
   demoteProtectedEntityTargets,
 } from '../graph-management/protection-scope.js';
-import { USER_PROTECTED_ENTITY, TUNABLE_APPLY_HELD } from '../graph-management/reason-codes.js';
+import {
+  USER_PROTECTED_ENTITY,
+  TUNABLE_APPLY_HELD,
+  ENGINE_DISCARDS_OPTION_LINK,
+} from '../graph-management/reason-codes.js';
+import {
+  buildEngineDiscardedLinkRefusal,
+  findEngineDiscardedLinks,
+} from './engine-discarded-link-gate.js';
 import { parseEnvelope } from '../graph-management/parse-envelope.js';
 import { mutationTargetKey } from '../graph-management/pending-projection.js';
 import {
@@ -974,6 +982,56 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
     const gi = firstIndexOf(verdicts, governing);
     const gv = verdicts[gi]!;
     const publicReason = publicReasonOf(gv);
+
+    // ⭐⭐ P0 (witnessed 2026-09-04) — NEVER ASK FOR CONSENT TO A LINK THE ENGINE
+    // THROWS AWAY. PLoT deletes every edge incident to an option or decision node
+    // before the analysis runs (`src/normalisation/option-filter.ts:91-96`), so a
+    // hold ask for such a link asks the user to approve something that cannot
+    // take effect, and the confirmation receipt that follows is untrue. The batch
+    // is refused WHOLE — partial-applying its legal half would be the same lie
+    // one level down, and `stale` already refuses whole for that reason.
+    //
+    // ⚠ WHY THE VERDICT MOVES AND NOT JUST THE COPY. `confirmationSatisfies`
+    // (gm-held-execute.ts:407-423) accepts `held` and `proceed`, so a gate that
+    // only rewrote `assistantText` would still let the confirm-time re-referee
+    // apply the discarded edit — including for a hold minted before this ships.
+    // `clarify_required` is refused there and carries exactly the semantics this
+    // is: well-formed, non-appliable, needs direction. ONE predicate, both paths.
+    //
+    // Placed AFTER the shadow / proceed early return so shadow mode stays
+    // log-only, and after the per-verdict telemetry so the referee's own events
+    // are unchanged; the batch-level outcome is disclosed through publicReason.
+    // `add_edge` is unconditionally `held` at the referee
+    // (graph-management/referee.ts:383-389), so there is no `proceed` path to
+    // guard.
+    //
+    // ⚠ SCOPED TO `held`, DELIBERATELY. `rejected` and `stale` outrank `held`
+    // (`governingOf`) and ALREADY refuse the whole batch without a confirm, so
+    // firing there would only replace a correct refusal with a differently
+    // worded one — and worse, a batch is `rejected` precisely when its entities
+    // could not be resolved, which is the state in which this predicate knows
+    // least. One question, one owner.
+    const discardedLinks =
+      governing === 'held'
+        ? findEngineDiscardedLinks(input.operations, input.currentGraph)
+        : [];
+    if (discardedLinks.length > 0) {
+      return {
+        governing: 'clarify_required',
+        blockApply: true,
+        assistantText: buildEngineDiscardedLinkRefusal(discardedLinks),
+        suggestedActions: [],
+        pendingActions: null,
+        publicReason: {
+          ...publicReason,
+          verdict: 'clarify_required',
+          blocker_code: ENGINE_DISCARDS_OPTION_LINK,
+          blocker_readable:
+            'The proposed link is removed before the analysis runs, so it cannot be applied.',
+        },
+        verdictCounts,
+      };
+    }
 
     if (governing === 'held') {
       const held = buildHeldPending(input, gv, envelopes[gi] ?? null);
