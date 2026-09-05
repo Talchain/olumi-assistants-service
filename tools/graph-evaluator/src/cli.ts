@@ -1782,6 +1782,47 @@ function generateOrchestratorSummary(
     );
   }
 
+  // ── Unattested scale renders (DIAGNOSTIC — not scored, not gated) ──────────
+  // Printed unconditionally, including the zero case, so "measured, found none"
+  // is distinguishable from "not measured". A silent section would let the
+  // class disappear from a promotion report exactly when it was fixed.
+  lines.push("\n## Unattested Scale Renders (diagnostic — not scored)\n");
+  lines.push(
+    "Percentages rendered from model values whose scale nothing attests. " +
+    "A unitless `0.5` shown as `50%` converts an admitted unknown into a " +
+    "confident statistic. These do NOT affect `fabrication_check` or `overall` " +
+    "— the remedy is an open product decision. Tracked here so a promotion run " +
+    "can tell an improvement from a regression on this class.\n"
+  );
+
+  const scaleRows = results.flatMap((r) =>
+    (r.score.scale_conversions ?? []).map((c) => ({ r, c }))
+  );
+
+  if (scaleRows.length === 0) {
+    const anyMeasured = results.some((r) => r.score.scale_conversions !== undefined);
+    lines.push(
+      anyMeasured
+        ? "None detected across this run.\n"
+        : "NOT MEASURED — no result carried the diagnostic.\n"
+    );
+  } else {
+    lines.push(`| Model | Case | Rendered | Source value | Source | Why unattested |`);
+    lines.push(`| --- | --- | --- | --- | --- | --- |`);
+    for (const { r, c } of scaleRows) {
+      lines.push(
+        `| ${r.model.id} | ${r.fixture_id} | \`${c.rendered}\` | \`${c.source_value}\` | \`${c.source_ref}\` | ${c.attestation} |`
+      );
+    }
+    const affected = new Set(
+      results.filter((r) => (r.score.scale_conversions ?? []).length > 0)
+        .map((r) => `${r.model.id}×${r.fixture_id}`)
+    ).size;
+    lines.push(
+      `\n**${scaleRows.length}** unattested render(s) across **${affected}** of **${results.length}** scored response(s).\n`
+    );
+  }
+
   if (judgeActive) {
     const judgeDimKeys = [
       "scientific_polymath", "causal_mechanism", "coaching_over_telling",
