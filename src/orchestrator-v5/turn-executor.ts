@@ -14455,13 +14455,46 @@ export async function runTurnExecutor(
     const analysisStaleButPresent = hasAnalysisProjection && isStale;
     const analysisCurrencyUnconfirmed =
       hasAnalysisProjection && !isFresh && !isStale;
+    // ═════════════════════════════════════════════════════════════════════
+    // EVERY BRANCH MUST NAME THE *TRUE* UNBLOCK, WHICH IS TO ASK AGAIN.
+    //
+    // Read this before rewording any string below. EVERY path into this
+    // helper is a MODEL-OUTPUT failure — `commitBoundedRoutingFallback`
+    // (`schema_repair_failed` / `empty_response` / `unexpected_stop_reason`,
+    // the last being max_tokens on BOTH the initial `V5_ROUTING_MAX_OUTPUT_TOKENS`
+    // call and the escalated `V5_ROUTING_MAX_OUTPUT_TOKENS_RETRY` retry — 3072
+    // and 8192 respectively, read at `routing/route-with-tool-use.ts:61` and
+    // `:75` on 2026-09-02; cite the SYMBOLS, not the digits, because an earlier
+    // draft of this comment carried 2048 from a superseded cap and propagated
+    // it into three other documents. The literals are pinned by
+    // `routing/__tests__/routing-max-tokens-caps.test.ts`)
+    // and the three empty-composed-answer backstops (coach branch,
+    // converse branch, STEP 7). NOT ONE of them is caused, or cured, by the
+    // state of the analysis.
+    //
+    // So the analysis verdict may only ever add a TRUE CAVEAT here. It must
+    // never supply the REMEDY, because re-running the analysis does not fix a
+    // routing failure. Before this was fixed, the stale and
+    // currency-unconfirmed branches named ONLY the re-run, so the copy read
+    // as though the staleness were both the cause and the cure. A live
+    // witness followed exactly that instruction, re-ran, re-asked, succeeded,
+    // and reported the failure as deterministic-on-stale. It is not — the
+    // re-ASK is what unblocked the turn, and the copy had manufactured the
+    // misdiagnosis.
+    //
+    // Ordering is therefore load-bearing, not cosmetic: remedy first, caveat
+    // second. Pinned by
+    // `turn-executor-bounded-recovery-true-unblock.test.ts`, which asserts
+    // the index of the ask-again clause precedes the re-run clause.
+    // ═════════════════════════════════════════════════════════════════════
     // Copy contract (review P1 follow-up; F7 added the unknown row; Codex F5
     // narrows the change-assertion to CONFIRMED stale only):
-    //   - fresh prior analysis        → reassure that it is still usable
-    //   - CONFIRMED stale (hashes differ) → name the change, invite a rerun
+    //   - fresh prior analysis        → ask again; note the analysis survives
+    //   - CONFIRMED stale (hashes differ) → ask again; THEN name the change
+    //     and invite a rerun to refresh the RESULTS (not to fix the turn)
     //   - currency unconfirmed        → projection present but verdict is
-    //     unknown / none / uncomputed: do NOT assert a change, invite a rerun
-    //     to be sure
+    //     unknown / none / uncomputed: ask again; THEN say currency cannot be
+    //     confirmed, without asserting a change
     //   - no prior analysis, no projection → invite a retry without implying state
     // No "recommendation", no raw IDs, no decimals (forbidden-phrase
     // guard still backstops at the finaliser).
@@ -14561,13 +14594,13 @@ export async function runTurnExecutor(
       assistantText = deterministicAnalyticalAnswer;
     } else if (analysisFreshAndAvailable) {
       assistantText =
-        "I couldn't complete that turn cleanly, but your current analysis is still available.";
+        "I couldn't complete that turn cleanly. Ask me again and I'll pick it up. Your current analysis is still available in the meantime.";
     } else if (analysisStaleButPresent) {
       assistantText =
-        "I couldn't complete that turn cleanly. The model has changed since the last analysis, so the cached results may be out of date — re-run analysis to see the current picture.";
+        "I couldn't complete that turn cleanly. Ask me again and I'll pick it up. Separately, the model has changed since the last analysis, so those results may be out of date: re-run analysis to refresh them.";
     } else if (analysisCurrencyUnconfirmed) {
       assistantText =
-        "I couldn't complete that turn cleanly, and I can't confirm whether your current analysis is up to date — re-run analysis to be sure.";
+        "I couldn't complete that turn cleanly. Ask me again and I'll pick it up. Separately, I can't confirm whether your current analysis is up to date: re-run analysis to be sure.";
     } else {
       assistantText =
         "I couldn't complete that turn cleanly. Try again, or rephrase what you'd like to do.";
