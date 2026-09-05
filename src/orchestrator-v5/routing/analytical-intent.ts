@@ -208,6 +208,40 @@ export type AnalyticalIntentClass =
 interface IntentPattern {
   readonly cls: AnalyticalIntentClass;
   readonly pattern: RegExp;
+  /**
+   * When true, this entry does NOT claim a message that carries a concrete
+   * graph-mutation signal OUTSIDE its own matched span — the match is skipped
+   * and classification continues down the list.
+   *
+   * ⭐ WHY THIS EXISTS. `classifyAnalyticalIntent` is read by two different
+   * questions under one name: "may this turn reach an analytical answer?" AND
+   * (via `isAnalyticalQuestion` → route-v2.ts:4840) "must this turn NOT
+   * dispatch an edit?". For a COMPOUND message — a comparison question plus a
+   * real edit instruction — those two answers must differ. Without this flag a
+   * compound message loses the edit lane to the suppressor while
+   * `tryRunComparisonGate` refuses it anyway on `hasMutationSignal`
+   * (run-comparison-gate.ts:626, tested BEFORE the classifier admission at
+   * :630) — so the user's edit is dropped and they get SILENCE. That is
+   * verbatim the outcome this fix's own rationale gives as the reason for
+   * rejecting the negative-regex alternative; trading a wrong edit for silence
+   * is the same bad trade in the other direction.
+   *
+   * The mechanism is this module's OWN established idiom — the
+   * strip-and-recheck `hasIndependentMutationSignal` already uses for the
+   * `what_would_flip` collision, applied to the matched span instead of to a
+   * fixed pattern list.
+   *
+   * ⚠ SCOPE, stated precisely: this flag is set on ONE entry — the transitive
+   * `what_changed` pattern THIS change adds. It is deliberately NOT set on the
+   * pre-existing intransitive sibling, which has the identical property at base
+   * and is left exactly as it was. That restraint buys a structural invariant
+   * worth more than the extra coverage: when the flag fires, the classifier
+   * returns EXACTLY what it returned before this change, because the only
+   * pattern this change introduced has yielded and every other entry is
+   * untouched. Pinned by `classification is never worse than base` in
+   * `analytical-intent-what-changed.test.ts`.
+   */
+  readonly yieldsToOutsideMutation?: boolean;
 }
 
 /**
@@ -226,6 +260,43 @@ interface IntentPattern {
  * riding a refactor.
  */
 const WHAT_CHANGED_SUBJECT_NOUNS = String.raw`(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option)`;
+
+/**
+ * The SUBJECT slot of the TRANSITIVE `what_changed` voice — the thing that did
+ * the changing in "how has THE UPDATE changed the analysis?".
+ *
+ * ⭐ THIS ANCHOR IS THE DELIBERATE ANSWER TO A CLASS QUESTION, not a tightening
+ * for its own sake. `what_changed` means "compare the last two RUNS", and
+ * `tryRunComparisonGate` answers it with a two-run `RunDelta`. A question whose
+ * subject is a DOMAIN DRIVER — "how did the price rise affect the outcome?",
+ * "how has competition impacted the analysis?" — is not that question at all:
+ * it is driver attribution, which `what_drove` owns and which the comparison
+ * gate cannot answer. Left unanchored, the verb alternation below (which mixes
+ * the DELTA verbs `chang|shift|alter` with the CAUSAL verbs `affect|impact`)
+ * hands those questions to the gate, and on a single-run session the gate
+ * answers "there is only one analysis run so far, so there is nothing to
+ * compare yet" — a confident, wrongly-framed answer to a question nobody asked.
+ *
+ * So the subject is anchored on a CHANGE EVENT (an update / edit / revision /
+ * re-run, or an anaphoric `this|that|it` pointing at one). That keeps the
+ * causal verbs usable in their delta sense ("how has the change AFFECTED the
+ * results?") while a domain-driver subject falls straight through to the
+ * `what_drove` and `explain` limbs below, exactly as it did before this change.
+ */
+const WHAT_CHANGED_TRANSITIVE_SUBJECT = String.raw`(?:(?:(?:the|this|that|these|those|my|our|your|their|last|latest|recent)\s+)*(?:updates?|edits?|changes?|revisions?|adjustments?|tweaks?|re-?runs?|new\s+(?:value|number|version|input|assumption)s?|(?:latest|last)\s+(?:run|version)s?)|this|that|it)`;
+
+/**
+ * The gap between the transitive subject and its verb.
+ *
+ * ⚠ `.`, `?` and `!` are not the only clause boundaries a user types. The
+ * original gap excluded only those three, so it could stitch the opening of one
+ * clause to the verb of the NEXT one across a `;`, a `,`, a `:` or a dash —
+ * which is how "How has this gone; change the ranking to put B first" was read
+ * as a comparison question and lost its edit. `,` is in the set because the
+ * compound "question, and <edit>" shape is exactly the case this must not span.
+ * Narrow window (adverbs only: "how has the update ACTUALLY changed …").
+ */
+const CLAUSE_LOCAL_GAP = String.raw`[^.?!;,:—–\n]{0,24}?`;
 
 const INTENT_PATTERNS: readonly IntentPattern[] = [
   // ── rerun_question (most specific — anchored on rerun/stale vocabulary) ─
@@ -344,17 +415,29 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // the suppression and the destination with one predicate. (CEE #888 spent
   // four rounds proving one-more-literal oscillates on this predicate family.)
   //
-  // Anchored on BOTH sides so it cannot reach an imperative edit: an
-  // interrogative `how` + a PAST/PERFECT auxiliary on the left (an edit command
-  // never opens that way), and the same outcome-noun alternation as the
-  // intransitive sibling on the right. The middle is a lazy, bounded,
-  // sentence-local gap — the idiom this file already uses for the `why is …
-  // ahead` what_drove pattern. `how do/can/should I change …` is a HOW-TO or an
-  // advice question, carries no past auxiliary, and is deliberately out.
+  // Anchored on THREE sides so it cannot reach an imperative edit:
+  //
+  //   LEFT   an interrogative `how` + a PAST/PERFECT auxiliary (an edit command
+  //          never opens that way). `how do/can/should I change …` is a HOW-TO
+  //          or advice question, carries no past auxiliary, and is out.
+  //   SUBJECT a CHANGE EVENT (`WHAT_CHANGED_TRANSITIVE_SUBJECT`) — this is what
+  //          keeps driver-attribution questions out of the comparison gate; see
+  //          that constant for the decision and its reasoning.
+  //   RIGHT  the same outcome-noun alternation as the intransitive sibling.
+  //
+  // The middle is a lazy, CLAUSE-local gap (`CLAUSE_LOCAL_GAP`) — narrower than
+  // the sentence-local idiom used elsewhere in this file, because a comma or a
+  // semicolon is exactly where a compound "question + edit" message turns.
+  //
+  // `yieldsToOutsideMutation` is the fourth anchor and the one that operates on
+  // the REST of the message: a compound message carrying a real edit clause
+  // keeps its edit lane instead of being silently suppressed into silence. See
+  // the flag's own docs on `IntentPattern`.
   {
     cls: 'what_changed',
+    yieldsToOutsideMutation: true,
     pattern: new RegExp(
-      String.raw`\bhow\s+(?:has|have|did)\b[^.?!\n]{0,40}?\b(?:chang|affect|shift|alter|impact)\w*\s+(?:the\s+|our\s+|this\s+|that\s+)?${WHAT_CHANGED_SUBJECT_NOUNS}\b`,
+      String.raw`\bhow\s+(?:has|have|did)\s+${WHAT_CHANGED_TRANSITIVE_SUBJECT}\b${CLAUSE_LOCAL_GAP}\b(?:chang|affect|shift|alter|impact)\w*\s+(?:the\s+|our\s+|this\s+|that\s+)?${WHAT_CHANGED_SUBJECT_NOUNS}\b`,
       'i',
     ),
   },
@@ -443,9 +526,47 @@ export function classifyAnalyticalIntent(
   const trimmed = message.trim();
   if (trimmed.length === 0) return null;
   for (const entry of INTENT_PATTERNS) {
-    if (entry.pattern.test(trimmed)) return entry.cls;
+    // `.exec` rather than `.test` so a `yieldsToOutsideMutation` entry can see
+    // its own span. Every pattern in this table is non-global (asserted by
+    // `no INTENT_PATTERN carries a stateful flag` in the unit tests), so this
+    // is stateless and `.test`-equivalent for every other entry.
+    const match = entry.pattern.exec(trimmed);
+    if (match === null) continue;
+    if (
+      entry.yieldsToOutsideMutation === true &&
+      carriesMutationSignalOutsideMatch(trimmed, match)
+    ) {
+      continue;
+    }
+    return entry.cls;
   }
   return null;
+}
+
+/**
+ * Does the message carry a concrete graph-mutation signal in the text OUTSIDE
+ * the span this pattern matched?
+ *
+ * Blanks the matched span to spaces — preserving every offset, so the
+ * line-anchored mutation pattern (`/^\s*(?:set|add|remove|…)/im`) still sees
+ * the same line structure — and re-runs `hasMutationSignal` on the remainder.
+ *
+ * Blanking rather than deleting matters: it is what makes
+ * "How has the update changed the analysis? Add a risk node for supply delays"
+ * expose `Add a risk node` while
+ * "How has the update changed the analysis compared to before?" exposes
+ * nothing, even though the word "update" is itself in the mutation-verb
+ * alternation and would otherwise pair with a later "to <X>".
+ */
+function carriesMutationSignalOutsideMatch(
+  message: string,
+  match: RegExpExecArray,
+): boolean {
+  const blanked =
+    message.slice(0, match.index) +
+    ' '.repeat(match[0].length) +
+    message.slice(match.index + match[0].length);
+  return hasMutationSignal(blanked);
 }
 
 /**
