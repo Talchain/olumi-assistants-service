@@ -47,6 +47,7 @@ import {
   EDIT_GRAPH_NEGATIVE_REGEX,
   EDIT_GRAPH_POSITIVE_REGEX,
 } from '../../../orchestrator/routing/edit-graph-intent-regex.js';
+import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 
 // ── The graph the witnessed session had on screen ──────────────────────────
 //
@@ -129,6 +130,66 @@ const UNKNOWN_SCALE_FACTOR: UnappliedEditNode = {
   kind: 'factor',
   label: 'Team morale',
 };
+/**
+ * ⭐⭐ THE OPEN COUNTEREXAMPLE (independent reviewer, rebound against the merged
+ * #1346 at `e977f6db`): *"option-kind protection is partial — a schema-valid
+ * option with an existing value still gets factor-value chips."*
+ *
+ * There is no option-kind protection in this module to be partial. `kind` is
+ * DECLARED on `UnappliedEditNode` and never READ (measured at `697c409f`:
+ * 0 reads of `node.kind` as a value; contrast controls in the same sweep,
+ * `.label` = 5 reads and `observed_state` = 15, so the probe sees the file).
+ * `findNamedNode` binds by LABEL ALONE.
+ *
+ * What looks like protection is `resolveFactorScale` answering a DIFFERENT
+ * question. `opt_lead` above carries no `observed_state`, so it resolves
+ * `'unknown'` and the unknown branch emits no chips — an option is spared only
+ * for as long as it happens to hold no value. Give it one and the escape opens.
+ *
+ * `NodeV3Schema` puts `observed_state` on the NODE, not on a factor-shaped
+ * subtype, so this fixture is schema-valid. Measured over every `*.json` under
+ * `src/` (44 files, 44 parsed, 0 unparseable, 662 nodes), bucketed BY KIND:
+ *
+ *   kind      total   observed_state   value   value in [0,1]
+ *   factor      228             120      120             120   <- CONTRAST
+ *   option      175               4        4               0
+ *   risk         95               1        1               1   <- REACHABLE TODAY
+ *   outcome      81               3        3               3   <- REACHABLE TODAY
+ *   goal         42               0        0               0
+ *   decision     41               0        0               0
+ *
+ * So the escape is NOT option-shaped. `risk` and `outcome` nodes carrying a
+ * unit-interval value exist in the shipped corpus right now, and a fix written
+ * against `kind === 'option'` would leave both open — closing the instance the
+ * reviewer named while its siblings stay open (CLAUDE.md: close against the
+ * enumeration, not the instances found).
+ */
+const VALUED_OPTION: UnappliedEditNode = {
+  id: 'opt_ai',
+  kind: 'option',
+  // A course of action. There is no quantity here to set.
+  label: 'Deploy the AI chatbot',
+  observed_state: { value: 0.3 },
+};
+const VALUED_RISK: UnappliedEditNode = {
+  id: 'risk_attrition',
+  kind: 'risk',
+  label: 'Key talent attrition',
+  observed_state: { value: 0.3 },
+};
+const VALUED_OUTCOME: UnappliedEditNode = {
+  id: 'out_margin',
+  kind: 'outcome',
+  label: 'Blended gross margin',
+  observed_state: { value: 0.3 },
+};
+/** Kind absent entirely — the shape the fail-safe direction has to rule on. */
+const KINDLESS_NODE = {
+  id: 'unk_1',
+  label: 'Warehouse throughput',
+  observed_state: { value: 0.3 },
+} as unknown as UnappliedEditNode;
+
 const NODES: readonly UnappliedEditNode[] = [
   UNITLESS_FACTOR,
   MEASURED_FACTOR,
@@ -136,6 +197,19 @@ const NODES: readonly UnappliedEditNode[] = [
   CAPPED_FACTOR,
   UNKNOWN_SCALE_FACTOR,
   { id: 'opt_lead', kind: 'option', label: 'Hire a Tech Lead' },
+];
+
+/**
+ * The same graph plus the three non-factor nodes that CARRY a value. Kept as a
+ * separate array so every existing assertion above still measures the graph it
+ * was written against — widening `NODES` in place would silently re-point 67
+ * tests at a different fixture.
+ */
+const NODES_WITH_VALUED_NON_FACTORS: readonly UnappliedEditNode[] = [
+  ...NODES,
+  VALUED_OPTION,
+  VALUED_RISK,
+  VALUED_OUTCOME,
 ];
 
 // ── WITNESSED (real deployed session, 4 Sep 2026) ──────────────────────────
@@ -869,5 +943,288 @@ describe('TWO QUESTIONS, NOT ONE — the property a merged predicate cannot have
     const u1 = resolveUnappliedEditUnderstanding(W1, NODES)!;
     const u2 = resolveUnappliedEditUnderstanding(W2, NODES)!;
     expect(u1.kind).not.toBe(u2.kind);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⭐⭐ NON-FACTOR TARGETS — the chip that routes to a handler which REFUSES it.
+//
+// ── THE TWO QUESTIONS, WRITTEN DOWN BEFORE THE PREDICATE CHANGED ──────────
+// This module already asks ONE question about a named node:
+//
+//   Q-SCALE  `resolveFactorScale` — "what scale is this node's value on?"
+//            A question about `observed_state`. Answers measured /
+//            unit_interval / unknown. It is CORRECT and stays untouched: an
+//            option carrying `observed_state.value = 0.3` genuinely IS on a
+//            0-1 scale, so widening this predicate's window would be aligning
+//            defaults across two questions (CLAUDE.md trap 21) — the fix that
+//            recreates the defect.
+//
+//   Q-KIND   NEW — "will `set_factor_value` write a value to a node of this
+//            kind AT ALL?" A question about `kind`, and nobody was asking it.
+//
+// Two questions, two names, two predicates. The answer to Q-KIND is not minted
+// here: `set_factor_value` publishes it as
+// `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS` (`tools/handlers/set-factor-value.ts`),
+// which its own header calls "the SINGLE source of truth for
+// `set_factor_value`'s target-kind capability" and which its execute-time gate
+// reads. Deriving from it means this module widens automatically if the handler
+// ever accepts another kind, instead of becoming a fourth list to keep in step
+// (CLAUDE.md trap 12).
+//
+// ── WHY THIS IS A LIE AND NOT ONLY A WRONG WORD ───────────────────────────
+// The numeric chip's message shape is deliberately pinned to satisfy
+// `shouldSuppressEditDispatchForValueUpdate`, which suppresses `edit_graph`
+// dispatch and routes the resubmitted turn to the deterministic value lane
+// where `set_factor_value` lives. That handler REFUSES every kind outside its
+// allowed set at `set-factor-value.ts:336-347`, throwing `ENTITY_KIND_MISMATCH`
+// ("Cannot set value on a option — set_factor_value only accepts factors").
+//
+// So this module's own header claim — "this module can never advertise an
+// action that terminates in refusal" — is FALSE for every non-factor node. That
+// is the estate's named advertises-an-action-that-refuses defect, shipped by
+// the module whose comment promises it cannot happen.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('NON-FACTOR TARGETS — a value chip must never name a node the value lane refuses', () => {
+  /**
+   * The invariant, written against the SPEC (what the handler accepts) and not
+   * against the failure mode in hand (`kind === 'option'`). Trap 13d: an
+   * invariant written with the same asymmetry as the defect is a guard
+   * agreeing with itself.
+   *
+   * Binds by IDENTITY: the chip is matched to the node whose exact label it
+   * interpolates, never by a value predicate another node could satisfy.
+   */
+  const chipsThatReachTheValueLane = (
+    message: string,
+    nodes: readonly UnappliedEditNode[],
+  ): ReadonlyArray<{ chipMessage: string; node: UnappliedEditNode | undefined }> => {
+    const reply = composeUnappliedEditReply({ message, nodes });
+    if (reply === null) return [];
+    return reply.chips
+      .filter((c) => shouldSuppressEditDispatchForValueUpdate(c.message))
+      .map((c) => ({
+        chipMessage: c.message,
+        node: nodes.find((n) => c.message.includes(n.label)),
+      }));
+  };
+
+  it('POSITIVE CONTROL — the handler authority genuinely discriminates, so the assertions below are not vacuous', () => {
+    // If this set were empty, or held every kind, every assertion in this
+    // block would pass by testing nothing.
+    expect(SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS).toContain('factor');
+    expect(SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS).not.toContain('option');
+    expect(SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS).not.toContain('risk');
+    expect(SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS).not.toContain('outcome');
+  });
+
+  it('RED-first signature 1: a schema-valid OPTION carrying a value is never offered a factor-value chip', () => {
+    const reached = chipsThatReachTheValueLane(
+      'Change Deploy the AI chatbot to low.',
+      NODES_WITH_VALUED_NON_FACTORS,
+    );
+    for (const r of reached) {
+      expect(
+        r.node === undefined ? 'factor' : r.node.kind,
+        `chip routes to set_factor_value but names a ${r.node?.kind}: ${r.chipMessage}`,
+      ).toBe('factor');
+    }
+  });
+
+  it('RED-first signature 2: and it is not told it is on a 0–1 scale, nor promised a value write', () => {
+    const reply = composeUnappliedEditReply({
+      message: 'Change Deploy the AI chatbot to low.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    expect(reply.text).toContain('Deploy the AI chatbot');
+    expect(reply.text).not.toMatch(/0–1 scale/);
+    expect(reply.text).not.toMatch(/Give me the value and I'll write it/);
+  });
+
+  it('RED-first signature 3: the ENUMERATION, not the instance — risk and outcome carry the same escape', () => {
+    // Both kinds hold a unit-interval value in the shipped `src/**/*.json`
+    // corpus TODAY (risk 1/95, outcome 3/81). A fix written against
+    // `kind === 'option'` leaves both open.
+    for (const [msg, label] of [
+      ['Change Key talent attrition to low.', 'Key talent attrition'],
+      ['Change Blended gross margin to low.', 'Blended gross margin'],
+    ] as const) {
+      const reached = chipsThatReachTheValueLane(msg, NODES_WITH_VALUED_NON_FACTORS);
+      for (const r of reached) {
+        expect(
+          r.node === undefined ? 'factor' : r.node.kind,
+          `chip routes to set_factor_value but names a ${r.node?.kind}: ${r.chipMessage}`,
+        ).toBe('factor');
+      }
+      expect(
+        composeUnappliedEditReply({ message: msg, nodes: NODES_WITH_VALUED_NON_FACTORS })!.text,
+      ).toContain(label);
+    }
+  });
+
+  it('RED-first signature 4: the UNCERTAINTY-ASPECT branch is the second escape and closes with it', () => {
+    // `unsupported_aspect` reaches `buildValueOfferChips` on its own path. A
+    // fix placed inside the level branch alone would close one and leave this
+    // one open — the same one-site fix the enumeration exists to prevent.
+    const reached = chipsThatReachTheValueLane(
+      'Change the uncertainty range for Deploy the AI chatbot to low',
+      NODES_WITH_VALUED_NON_FACTORS,
+    );
+    for (const r of reached) {
+      expect(r.node === undefined ? 'factor' : r.node.kind).toBe('factor');
+    }
+  });
+
+  it('RED-first signature 5: a bare named OPTION is not promised a value write it cannot receive', () => {
+    // `named_target_no_value` mints no chip, so the harm here is the COPY:
+    // "Give me the value and I'll write it" is a promise `set_factor_value`
+    // refuses. A false promise is the defect whether or not a chip carries it.
+    const reply = composeUnappliedEditReply({
+      message: 'Change Deploy the AI chatbot',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    expect(reply.text).toContain('Deploy the AI chatbot');
+    expect(reply.text).not.toMatch(/Give me the value and I'll write it/);
+  });
+
+  it('the reply NAMES the node back — the fix is not a silent drop of the understanding', () => {
+    const u = resolveUnappliedEditUnderstanding(
+      'Change Deploy the AI chatbot to low.',
+      NODES_WITH_VALUED_NON_FACTORS,
+    );
+    expect(u).not.toBeNull();
+    expect(u!.node.id).toBe('opt_ai');
+    expect(u!.kind).toBe('value_edit_unsupported_kind');
+  });
+
+  // ── OPPOSITE-DIRECTION TWINS ────────────────────────────────────────────
+  // A guard that closes this by suppressing chips on real factors is a worse
+  // defect than the one it fixes. Every case above gets its twin.
+
+  it('OPPOSITE DIRECTION — a genuine unit-interval FACTOR still gets its band chips', () => {
+    const reply = composeUnappliedEditReply({
+      message: W2,
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    expect(reply.chips.length).toBeGreaterThan(0);
+    expect(reply.text).toMatch(/0–1 scale/);
+    for (const c of reply.chips) {
+      expect(shouldSuppressEditDispatchForValueUpdate(c.message)).toBe(true);
+      expect(c.message).toContain('Team coordination overhead');
+    }
+  });
+
+  it('OPPOSITE DIRECTION — the uncertainty ask on a real FACTOR still reaches the value lane', () => {
+    const reply = composeUnappliedEditReply({
+      message: W1,
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    expect(reply.chips.length).toBeGreaterThan(0);
+    for (const c of reply.chips) {
+      expect(shouldSuppressEditDispatchForValueUpdate(c.message)).toBe(true);
+    }
+  });
+
+  it('OPPOSITE DIRECTION — a MEASURED factor keeps its own honest branch, not the kind refusal', () => {
+    const u = resolveUnappliedEditUnderstanding(
+      'Change Shipping cost to low',
+      NODES_WITH_VALUED_NON_FACTORS,
+    );
+    expect(u!.kind).toBe('level_on_measured_factor');
+  });
+
+  it('OPPOSITE DIRECTION — an UNKNOWN-scale factor keeps its own branch too', () => {
+    const u = resolveUnappliedEditUnderstanding(
+      'Change Team morale to low',
+      NODES_WITH_VALUED_NON_FACTORS,
+    );
+    expect(u!.kind).toBe('level_on_unknown_scale');
+  });
+
+  it('DISCRIMINATION — the option reply and the factor reply DIFFER, so neither is a blanket answer', () => {
+    // Sameness across inputs that ought to differ is evidence about the
+    // instrument, not about the world (CLAUDE.md trap 20).
+    const option = composeUnappliedEditReply({
+      message: 'Change Deploy the AI chatbot to low.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    const factor = composeUnappliedEditReply({
+      message: W2,
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    expect(option.text).not.toBe(factor.text);
+    expect(option.chips.map((c) => c.message)).not.toEqual(factor.chips.map((c) => c.message));
+  });
+
+  it('the two questions are genuinely TWO — Q-SCALE still answers unit_interval for the option it refuses', () => {
+    // If the fix had been a fourth `FactorScale` state, this would be
+    // impossible to assert: the scale answer for `opt_ai` is CORRECT (its
+    // value is in [0,1] with no unit) and irrelevant. The kind answer is what
+    // decides. Merging them would make one name serve two questions again.
+    const factorLike: UnappliedEditNode = { ...VALUED_OPTION, kind: 'factor' };
+    expect(
+      resolveUnappliedEditUnderstanding('Change Deploy the AI chatbot to low.', [factorLike])!.kind,
+    ).toBe('level_on_unitless_factor');
+    expect(
+      resolveUnappliedEditUnderstanding('Change Deploy the AI chatbot to low.', [VALUED_OPTION])!
+        .kind,
+    ).toBe('value_edit_unsupported_kind');
+  });
+
+  it('FAIL-SAFE — a node with no readable kind is not offered a number either', () => {
+    const reached = chipsThatReachTheValueLane('Change Warehouse throughput to low.', [
+      KINDLESS_NODE,
+    ]);
+    expect(reached).toEqual([]);
+  });
+
+  it('EGRESS — every new branch passes all three guards, checked by execution', () => {
+    for (const m of [
+      'Change Deploy the AI chatbot to low.',
+      'Change Deploy the AI chatbot',
+      'Change the uncertainty range for Deploy the AI chatbot to low',
+      'Change Key talent attrition to low.',
+      'Do you agree? Change Deploy the AI chatbot to low.',
+    ]) {
+      const reply = composeUnappliedEditReply({
+        message: m,
+        nodes: NODES_WITH_VALUED_NON_FACTORS,
+      })!;
+      expect(reply, `null reply for: ${m}`).not.toBeNull();
+      expect(reply.text.startsWith("I haven't changed anything from that.")).toBe(true);
+      for (const s of [reply.text, ...reply.chips.map((c) => `${c.label} ${c.message}`)]) {
+        expect(findForbiddenPhraseHit(s), `forbidden phrase in: ${s}`).toBeNull();
+        expect(findSuccessClaimHit(s), `success claim in: ${s}`).toBeNull();
+        expect(findEditInternalsHit(s), `internals in: ${s}`).toBeNull();
+      }
+    }
+  });
+
+  it('the DELIBERATION branch on an option proceeds into the EDIT lane, never the value lane', () => {
+    const reply = composeUnappliedEditReply({
+      message: 'Do you agree? Change Deploy the AI chatbot to low.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
+    expect(proceed).toBeDefined();
+    // An option change is an edit-lane job; it must not be routed to
+    // `set_factor_value`, which would refuse it.
+    expect(shouldSuppressEditDispatchForValueUpdate(proceed.message)).toBe(false);
+    expect(EDIT_GRAPH_POSITIVE_REGEX.test(proceed.message)).toBe(true);
+  });
+
+  it('KNOWN-DROPPED does not grow — every new case is grounded, not silently dropped', () => {
+    const silentlyDropped = [
+      'Change Deploy the AI chatbot to low.',
+      'Change Deploy the AI chatbot',
+      'Change the uncertainty range for Deploy the AI chatbot to low',
+      'Change Key talent attrition to low.',
+      'Change Blended gross margin to low.',
+    ].filter(
+      (m) =>
+        composeUnappliedEditReply({ message: m, nodes: NODES_WITH_VALUED_NON_FACTORS }) === null,
+    );
+    expect(silentlyDropped).toEqual([]);
   });
 });

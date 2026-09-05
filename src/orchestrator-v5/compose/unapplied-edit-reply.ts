@@ -126,6 +126,7 @@
  */
 
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
+import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../tools/handlers/set-factor-value.js';
 import type { SuggestedAction } from './types.js';
 
 /**
@@ -255,6 +256,79 @@ function resolveUnitLabel(node: UnappliedEditNode): string | undefined {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// A DIFFERENT QUESTION ABOUT THE SAME NODE — "will the value lane WRITE to a
+// node of this kind at all?"  Not a fourth `FactorScale` state.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * ⭐⭐ TWO QUESTIONS, NAMED APART — AND WHY THIS IS NOT A WIDER WINDOW ON
+ * `resolveFactorScale`.
+ *
+ * ── THE OPEN COUNTEREXAMPLE ───────────────────────────────────────────────
+ * An independent reviewer, rebinding against the merged #1346 at `e977f6db`:
+ * "option-kind protection is partial — a schema-valid option with an existing
+ * value still gets factor-value chips."
+ *
+ * There was no option-kind protection here to be partial. `kind` was DECLARED
+ * on `UnappliedEditNode` and never READ, and `findNamedNode` binds by LABEL
+ * ALONE. What looked like protection was `resolveFactorScale` answering an
+ * unrelated question well: an option carrying no `observed_state` resolves
+ * `unknown`, and that branch emits no chips. An option was spared only for as
+ * long as it happened to hold no value.
+ *
+ * ── THE TWO QUESTIONS ─────────────────────────────────────────────────────
+ *   Q-SCALE  `resolveFactorScale` — "what scale is this node's value on?"
+ *            A question about `observed_state`. UNCHANGED, and correct: an
+ *            option carrying `observed_state.value = 0.3` genuinely IS on a
+ *            0-1 scale. That answer is right and IRRELEVANT.
+ *   Q-KIND   this predicate — "will `set_factor_value` write a value to a node
+ *            of this kind at all?" A question about `kind`.
+ *
+ * Widening Q-SCALE to a fourth state would put two questions under one name
+ * and align their defaults — the estate's signature defect (CLAUDE.md trap
+ * 21), and the fix that recreates the harm. They stay two.
+ *
+ * ── WHY THIS IS A LIE, NOT ONLY A WRONG WORD ──────────────────────────────
+ * `buildValueOfferChips`'s message shape is pinned to satisfy
+ * `shouldSuppressEditDispatchForValueUpdate`, which suppresses `edit_graph`
+ * dispatch and routes the resubmitted turn to the deterministic value lane
+ * where `set_factor_value` lives. That handler REFUSES every kind outside its
+ * allowed set at `tools/handlers/set-factor-value.ts:336-347`, throwing
+ * `ENTITY_KIND_MISMATCH` — "Cannot set value on a option — set_factor_value
+ * only accepts factors."
+ *
+ * So this module's own header promise — "this module can never advertise an
+ * action that terminates in refusal" — was FALSE for every non-factor node.
+ *
+ * ── THE ANSWER IS NOT MINTED HERE ─────────────────────────────────────────
+ * `SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS` is the handler's own exported
+ * constant, which its header calls "the SINGLE source of truth for
+ * `set_factor_value`'s target-kind capability" and which its execute-time gate
+ * reads. Importing it means this module widens automatically if the handler
+ * ever accepts another kind, instead of becoming a fourth list to keep in step
+ * (CLAUDE.md trap 12). A hardcoded `kind === 'option'` would ALSO be the wrong
+ * shape: measured over every `*.json` under `src/` (44 files, 44 parsed, 0
+ * unparseable, 662 nodes, bucketed BY KIND) `risk` and `outcome` nodes ALREADY
+ * carry unit-interval values — 1/95 and 3/81, against a `factor` contrast of
+ * 120/228 — so an option-only guard closes the instance the reviewer named and
+ * leaves its siblings open.
+ *
+ * FAIL-SAFE DIRECTION: a node whose `kind` is missing or not a string is
+ * treated as NOT value-editable. Withholding an offer from a node we cannot
+ * classify costs a chip; offering one costs a promise the handler refuses.
+ * Every `NodeV3` carries `kind`, so this is a floor, not a behaviour.
+ */
+const VALUE_EDITABLE_KINDS: ReadonlySet<string> = new Set(
+  SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS,
+);
+
+/** Answers Q-KIND. `true` only when the value lane would accept this node. */
+export function isValueEditableTarget(node: UnappliedEditNode): boolean {
+  return typeof node.kind === 'string' && VALUE_EDITABLE_KINDS.has(node.kind);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // QUESTION 1 — "was this an INSTRUCTION, or a request for my VIEW?"
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -363,6 +437,23 @@ export type UnappliedEditUnderstanding =
       readonly level: string;
     }
   | {
+      /**
+       * ⭐⭐ THE NAMED NODE IS NOT SOMETHING THE VALUE LANE WILL WRITE TO.
+       *
+       * Answers Q-KIND, and it outranks everything the MESSAGE said, because
+       * it is a fact about the node rather than about the words. Placed above
+       * the aspect branch and the level branch in the resolver for exactly
+       * that reason: both of those reach `buildValueOfferChips`, so a guard
+       * inside one of them would close one escape and leave the other open.
+       *
+       * `nodeKind` is `null` when the payload carried no readable kind — the
+       * fail-safe floor, not a class we expect to see.
+       */
+      readonly kind: 'value_edit_unsupported_kind';
+      readonly node: UnappliedEditNode;
+      readonly nodeKind: string | null;
+    }
+  | {
       /** The object was named; no value we could read. */
       readonly kind: 'named_target_no_value';
       readonly node: UnappliedEditNode;
@@ -452,6 +543,33 @@ export function resolveUnappliedEditUnderstanding(
     levelMatch !== null
       ? LEVEL_SYNONYMS.get(levelMatch[1].toLowerCase().replace(/\s+/g, ' ')) ?? null
       : null;
+
+  // ⭐⭐ Q-KIND IS ASKED BEFORE EVERY BRANCH THAT CAN OFFER OR PROMISE A VALUE,
+  // AND THAT PLACEMENT IS THE FIX.
+  //
+  // THREE branches below reach a value offer or a value promise:
+  //   `unsupported_aspect`          -> buildValueOfferChips
+  //   `level_on_unitless_factor`    -> buildValueOfferChips
+  //   `named_target_no_value`       -> "Give me the value and I'll write it"
+  // ...plus `level_on_measured_factor` and `level_on_unknown_scale`, which
+  // both say "Give me the amount/value and I'll write it".
+  //
+  // A guard placed inside any ONE of them closes one escape and leaves the
+  // rest open — the estate's most common repeat. Asked here, once, above all
+  // of them, it closes the class.
+  //
+  // It is asked BEFORE the scale read on purpose: the scale answer for a
+  // valued option is `unit_interval` and it is CORRECT. Q-SCALE is not wrong
+  // about this node; nobody was asking Q-KIND.
+  if (!isValueEditableTarget(node)) {
+    return {
+      kind: 'value_edit_unsupported_kind',
+      node,
+      nodeKind: typeof node.kind === 'string' && node.kind.trim().length > 0
+        ? node.kind.trim()
+        : null,
+    };
+  }
 
   // ⭐ ONE scale read, shared by both branches below. Two branches deciding
   // the same question with their own predicates is how one name comes to
@@ -684,6 +802,36 @@ export function composeUnappliedEditReply(input: {
           `${understanding.level.toLowerCase()}. But "${label}" is measured` +
           `${measuredIn}, so I'd have to invent an amount to act on that word. ` +
           `Give me the amount and I'll write it.`,
+        chips: [],
+      };
+    }
+
+    case 'value_edit_unsupported_kind': {
+      // ⚠ NO NUMERIC CHIP, AND NO "I'll write it" PROMISE. `set_factor_value`
+      // refuses this kind outright, so a value offer here would be an
+      // advertised action that terminates in refusal — and so would the
+      // promise, which is the same lie without the click.
+      //
+      // Chips are deliberately EMPTY rather than absent: the caller
+      // (`edit-graph.ts`) substitutes the generic label chips when this list
+      // is empty, so the user keeps an affordance and none of it carries a
+      // number this module invented.
+      //
+      // The only capability named is the one measured: `set_factor_value`
+      // writes a value on a FACTOR. Nothing else is promised, because
+      // promising an option-effect route we have not routed here by execution
+      // would be this same defect one surface over.
+      const isA =
+        understanding.nodeKind !== null
+          ? `that's ${/^[aeiou]/i.test(understanding.nodeKind) ? 'an' : 'a'} ` +
+            `${understanding.nodeKind}, not a factor`
+          : `I can't tell that it's a factor`;
+      return {
+        text:
+          `${NOTHING_WRITTEN} I understood which one you meant — "${label}" — ` +
+          `but ${isA}, and setting a value is something I can only do on a ` +
+          `factor. If you meant a factor it affects, name that factor and the ` +
+          `value, and I'll write that.`,
         chips: [],
       };
     }
