@@ -13,9 +13,27 @@
  * 5. fabrication_check    (0.15) — no invented numbers/drivers/mechanisms/target_ids
  * 6. banned_terms         (0.10) — no internal terms in user-facing text
  * 7. scenario_specific    (0.10) — per-fixture assertions
+ *
+ * Plus ONE NON-SCORING DIAGNOSTIC: `scale_conversions`.
+ * It records percentages the response rendered from model values whose scale
+ * nothing attests (a bare unitless `0.5` shown as "50%"). It carries NO weight
+ * and gates NOTHING — the remedy for that rendering is an open product
+ * decision, and a gate that failed on the class before the decision was made
+ * would block every promotion. Its only job is to let a promotion run tell an
+ * improvement from a regression on this class, which it previously could not:
+ * the grounding corpus contained both `0.5` and `50`, so `fabrication_check`
+ * certified "50%" as grounded and the gate blessed the transformation it
+ * should have been measuring.
  */
 
-import type { OrchestratorFixture, OrchestratorScore, TurnContext, ScenarioAssertion } from "./types.js";
+import type {
+  OrchestratorFixture,
+  OrchestratorScore,
+  TurnContext,
+  ScenarioAssertion,
+  ScaleAttestation,
+  ScaleConversionRecord,
+} from "./types.js";
 
 // =============================================================================
 // Banned terms (from v30.3 prompt VOICE anti-patterns)
@@ -146,75 +164,233 @@ function getAllEntityIds(ctx: TurnContext): Set<string> {
   return ids;
 }
 
-/** Get all numbers present in the analysis context + entity labels. */
-function getContextNumbers(ctx: TurnContext): Set<number> {
-  const nums = new Set<number>();
+// =============================================================================
+// Grounding corpus with PROVENANCE
+// =============================================================================
+//
+// The corpus used to exist as a bare `Set<number>`. That set is what makes
+// `fabrication_check` pass, and it silently contained BOTH a model value and
+// its x100 form — so a unitless `0.5` rendered as `"50%"` was certified as
+// grounded, and the promotion gate blessed the very transformation it should
+// have been measuring. Keeping only the numbers threw away the one fact needed
+// to tell a legitimate percentage from an invented one: WHERE each number came
+// from, and whether that source attests the 0-1 -> % scale at all.
+//
+// The numeric CONTENT of the corpus is unchanged — `groundedValueSet()` below
+// reproduces the old set exactly, so `fabrication_check` scores identically.
+// The provenance is additive, and is used only for the non-scoring diagnostic.
 
-  // Analysis results
+/** How a grounded number relates to the model value that supplied it. */
+type GroundingRoute =
+  /** The model value itself, as-is. */
+  | "direct"
+  /** The model value multiplied by 100 — a 0-1 -> percentage conversion. */
+  | "scaled_percent"
+  /** The model value divided by 1000 — the "£20k" abbreviation. */
+  | "scaled_thousand";
+
+interface GroundedNumber {
+  /** The number as it enters the grounding corpus. */
+  value: number;
+  /** The model value it derives from. */
+  source_value: number;
+  /** Which context field supplied it, e.g. "factor:fac_retention". */
+  ref: string;
+  route: GroundingRoute;
+  /** Only meaningful for `scaled_percent`. */
+  attestation: ScaleAttestation;
+}
+
+/**
+ * Units that attest a 0-1 -> percentage rendering.
+ *
+ * Deliberately TIGHT. An unrecognised unit falls through to `unit_conflict`,
+ * which is REPORTED — so the failure direction of this list is to over-report,
+ * never to hide. A short list that fails loud beats a long one that goes stale.
+ */
+const PERCENT_UNITS = new Set(["%", "percent", "percentage", "pct"]);
+
+function classifyUnit(unit: string | undefined): ScaleAttestation {
+  if (unit == null || unit.trim().length === 0) return "unattested";
+  return PERCENT_UNITS.has(unit.trim().toLowerCase()) ? "unit_percent" : "unit_conflict";
+}
+
+/** An attested scale conversion is one we do NOT report. */
+function isAttestedPercentScale(a: ScaleAttestation): boolean {
+  return a === "probability" || a === "unit_percent";
+}
+
+/**
+ * Get all numbers present in the analysis context + entity labels, each tagged
+ * with the source that supplied it and how it was derived.
+ */
+function getGroundedNumbers(ctx: TurnContext): GroundedNumber[] {
+  const out: GroundedNumber[] = [];
+  const direct = (value: number, ref: string) =>
+    out.push({ value, source_value: value, ref, route: "direct", attestation: "unattested" });
+  const percent = (source_value: number, ref: string, attestation: ScaleAttestation) =>
+    out.push({
+      value: Math.round(source_value * 100),
+      source_value,
+      ref,
+      route: "scaled_percent",
+      attestation,
+    });
+
+  // Analysis results. `probability` is a declared probability — a percentage
+  // rendering of it is the correct presentation, not an invented scale.
   if (ctx.analysis.winner) {
-    nums.add(ctx.analysis.winner.probability);
-    nums.add(Math.round(ctx.analysis.winner.probability * 100));
+    direct(ctx.analysis.winner.probability, "analysis.winner.probability");
+    percent(ctx.analysis.winner.probability, "analysis.winner.probability", "probability");
   }
   if (ctx.analysis.runner_up) {
-    nums.add(ctx.analysis.runner_up.probability);
-    nums.add(Math.round(ctx.analysis.runner_up.probability * 100));
+    direct(ctx.analysis.runner_up.probability, "analysis.runner_up.probability");
+    percent(ctx.analysis.runner_up.probability, "analysis.runner_up.probability", "probability");
   }
   for (const d of ctx.analysis.top_drivers) {
-    nums.add(d.sensitivity);
-    // Only derive percentage form if sensitivity is a 0-1 decimal
+    direct(d.sensitivity, `top_driver:${d.id}.sensitivity`);
+    // Only derive percentage form if sensitivity is a 0-1 decimal.
+    // A sensitivity is a bare elasticity-like number: it carries no unit and is
+    // not a probability, so its percentage form is UNATTESTED.
     if (d.sensitivity > 0 && d.sensitivity < 1) {
-      nums.add(Math.round(d.sensitivity * 100));
+      percent(d.sensitivity, `top_driver:${d.id}.sensitivity`, "unattested");
     }
   }
 
   // Edge strengths + exists_probability (both raw and percentage forms)
   for (const e of ctx.entities.edges) {
-    nums.add(e.strength_mean);
-    nums.add(Math.abs(e.strength_mean));
-    nums.add(Math.round(Math.abs(e.strength_mean) * 100));
-    nums.add(e.exists_probability);
-    nums.add(Math.round(e.exists_probability * 100));
+    const eref = `edge:${e.from}->${e.to}`;
+    direct(e.strength_mean, `${eref}.strength_mean`);
+    direct(Math.abs(e.strength_mean), `${eref}.strength_mean`);
+    // A causal strength is unitless and is NOT a probability.
+    percent(Math.abs(e.strength_mean), `${eref}.strength_mean`, "unattested");
+    direct(e.exists_probability, `${eref}.exists_probability`);
+    percent(e.exists_probability, `${eref}.exists_probability`, "probability");
   }
 
-  // Factor values (both raw and percentage forms)
+  // Factor values (both raw and percentage forms).
+  // THE DEFECT SITE: `f.value` is a bare number. Unless the factor attests a
+  // unit, its percentage form invents a scale the model never claimed.
   for (const f of ctx.entities.factors) {
     if (f.value != null) {
-      nums.add(f.value);
-      if (f.value > 0 && f.value < 1) nums.add(Math.round(f.value * 100));
+      direct(f.value, `factor:${f.id}`);
+      if (f.value > 0 && f.value < 1) {
+        percent(f.value, `factor:${f.id}`, classifyUnit(f.unit));
+      }
     }
   }
 
   // Goal thresholds (in all common formats: raw, /1000 for "Xk")
   for (const g of ctx.entities.goals) {
     if (g.threshold != null) {
-      nums.add(g.threshold);
-      if (g.threshold >= 1000) nums.add(g.threshold / 1000);
+      direct(g.threshold, `goal:${g.id}.threshold`);
+      if (g.threshold >= 1000) {
+        out.push({
+          value: g.threshold / 1000,
+          source_value: g.threshold,
+          ref: `goal:${g.id}.threshold`,
+          route: "scaled_thousand",
+          attestation: "unattested",
+        });
+      }
     }
   }
 
   // Constraints
   for (const c of ctx.entities.constraints) {
-    nums.add(c.value);
-    if (c.value > 0 && c.value < 1) nums.add(Math.round(c.value * 100));
+    direct(c.value, `constraint:${c.id}`);
+    if (c.value > 0 && c.value < 1) {
+      percent(c.value, `constraint:${c.id}`, classifyUnit(c.unit));
+    }
   }
 
   // Numbers embedded in entity labels (e.g. "£20k MRR", "Raise Prices to £59")
-  const allLabels: string[] = [];
+  const allLabels: Array<{ label: string; ref: string }> = [];
   for (const list of [ctx.entities.decisions, ctx.entities.options, ctx.entities.factors,
                        ctx.entities.outcomes, ctx.entities.risks, ctx.entities.goals]) {
     for (const ent of list) {
-      if ("label" in ent && typeof ent.label === "string") allLabels.push(ent.label);
+      if ("label" in ent && typeof ent.label === "string") {
+        allLabels.push({ label: ent.label, ref: `label:${ent.id}` });
+      }
     }
   }
-  for (const label of allLabels) {
+  for (const { label, ref } of allLabels) {
     const labelNums = label.match(/\d+\.?\d*/g) ?? [];
     for (const ln of labelNums) {
       const v = parseFloat(ln);
-      if (!isNaN(v)) nums.add(v);
+      if (!isNaN(v)) direct(v, ref);
     }
   }
 
-  return nums;
+  return out;
+}
+
+/**
+ * The grounding corpus as the fabrication check consumes it.
+ *
+ * Reproduces the pre-existing `getContextNumbers` set EXACTLY. Deriving it from
+ * the provenance list rather than building it separately means the two can
+ * never drift apart — there is no second hand-maintained copy to go stale.
+ */
+function groundedValueSet(grounded: GroundedNumber[]): Set<number> {
+  return new Set(grounded.map((g) => g.value));
+}
+
+/**
+ * DIAGNOSTIC — find numbers whose ONLY grounding route was an unattested
+ * 0-1 -> percentage conversion.
+ *
+ * This answers a DIFFERENT question from `fabrication_check`. That one asks
+ * "is this number grounded at all?"; this asks "was it grounded only by
+ * inventing a scale?". They are deliberately kept apart: the fabrication
+ * check's small-number allowance (`<= 5`, `10`, `100`) is a property of the
+ * grounding question and has no bearing on whether a scale was invented, so it
+ * is not applied here.
+ *
+ * A number is reported only when EVERY route that grounds it is an unattested
+ * percentage conversion. If it is also grounded directly (a label carries it,
+ * say), no scale was invented and nothing is reported.
+ *
+ * REPORTED, NOT SCORED — the caller must not gate on this.
+ */
+function detectUnattestedScaleRenders(
+  text: string,
+  grounded: GroundedNumber[]
+): ScaleConversionRecord[] {
+  const out: ScaleConversionRecord[] = [];
+  const seen = new Set<string>();
+
+  const tokens = text.match(/\d+\.?\d*%?/g) ?? [];
+  for (const token of tokens) {
+    const value = parseFloat(token.replace("%", ""));
+    if (isNaN(value)) continue;
+
+    // Same tolerance the fabrication check uses, so this reports on exactly the
+    // numbers that check certifies rather than on a differently-drawn set.
+    const matches = grounded.filter((g) => Math.abs(g.value - value) < 0.5);
+
+    // Ungrounded entirely — that is the fabrication check's business, not ours.
+    if (matches.length === 0) continue;
+    // Grounded by some route that invented no scale.
+    if (matches.some((m) => m.route !== "scaled_percent")) continue;
+    // Grounded by a percentage conversion the source actually attests.
+    if (matches.some((m) => isAttestedPercentScale(m.attestation))) continue;
+
+    const m = matches[0];
+    const key = `${token}|${m.ref}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    out.push({
+      rendered: token,
+      rendered_value: value,
+      source_value: m.source_value,
+      source_ref: m.ref,
+      attestation: m.attestation,
+    });
+  }
+
+  return out;
 }
 
 // =============================================================================
@@ -290,6 +466,7 @@ export function scoreOrchestrator(
       banned_terms: false,
       scenario_specific: false,
       overall: 0,
+      scale_conversions: [],
     };
   }
 
@@ -320,6 +497,7 @@ export function scoreOrchestrator(
       banned_terms: false,
       scenario_specific: false,
       overall: 0,
+      scale_conversions: [],
     };
   }
 
@@ -420,7 +598,8 @@ export function scoreOrchestrator(
 
   // Check for fabricated numbers: extract all percentages and decimals from text
   const numberMatches = textStr.match(/\d+\.?\d*%?/g) ?? [];
-  const knownNums = getContextNumbers(ctx);
+  const groundedNumbers = getGroundedNumbers(ctx);
+  const knownNums = groundedValueSet(groundedNumbers);
   // Also include numbers from user messages (single-turn + multi-turn)
   const userMsgs: string[] = [];
   if (fixture.user_message) userMsgs.push(fixture.user_message);
@@ -433,7 +612,21 @@ export function scoreOrchestrator(
     const msgNums = msg.match(/\d+\.?\d*/g) ?? [];
     for (const un of msgNums) {
       const v = parseFloat(un);
-      if (!isNaN(v)) knownNums.add(v);
+      if (!isNaN(v)) {
+        knownNums.add(v);
+        // Also a DIRECT grounding route for the diagnostic below. A number the
+        // user themselves stated is attested by the user, so echoing it back is
+        // not an invented scale even when a unitless model value happens to sit
+        // at v/100. Without this the diagnostic would report the user's own
+        // figure as a fabricated percentage.
+        groundedNumbers.push({
+          value: v,
+          source_value: v,
+          ref: "user_message",
+          route: "direct",
+          attestation: "unattested",
+        });
+      }
     }
   }
   for (const numStr of numberMatches) {
@@ -463,6 +656,11 @@ export function scoreOrchestrator(
       fabrication_check = false;
     }
   }
+
+  // ── DIAGNOSTIC (non-scoring): unattested 0-1 -> percentage renders ─────────
+  // Deliberately computed AFTER the grounding corpus is complete and kept OUT
+  // of every dimension above. It changes no score and gates nothing.
+  const scale_conversions = detectUnattestedScaleRenders(textStr, groundedNumbers);
 
   // Check for invented target_ids in insights and actions
   const allInsights = (parsed.insights as Array<Record<string, unknown>>) ?? [];
@@ -590,5 +788,6 @@ export function scoreOrchestrator(
     banned_terms,
     scenario_specific,
     overall,
+    scale_conversions,
   };
 }
