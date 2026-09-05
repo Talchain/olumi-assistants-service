@@ -775,7 +775,7 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(result.telemetry.llm_calls_used).toBe(0);
     expect(result.analysisReady?.status).toBe('ready');
     expect(result.response.assistant_text).toContain(
-      'The first evidence priority from this analysis is Delivery uncertainty:',
+      "The first evidence priority from this analysis is 'Delivery uncertainty':",
     );
     expect(result.response.assistant_text).toContain(
       'Collect matched cohort evidence for factor B.',
@@ -812,7 +812,7 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
     expect(adapter.chatWithTools).not.toHaveBeenCalled();
     expect(result.telemetry.llm_calls_used).toBe(0);
     expect(result.response.assistant_text).toContain(
-      'The first evidence priority from this analysis is Delivery uncertainty.',
+      "The first evidence priority from this analysis is 'Delivery uncertainty'.",
     );
     expect(result.response.assistant_text).toContain(
       'gather relevant data or expert judgement',

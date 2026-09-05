@@ -65,6 +65,7 @@ import {
   buildDefaultedAssumptionsDisclosure,
   pickLatestDefaultedAssumptions,
   readDefaultedAssumptions,
+  DEFAULTED_DISCLOSURE_TAIL,
   MAX_NAMED_DEFAULTED_FACTORS,
 } from '../../../coaching/pick-defaulted-assumptions.js';
 
@@ -277,7 +278,11 @@ describe('conversational recitation — defaulted values', () => {
       });
       expect(after).not.toContain(DEPLOYED_STABILITY_LINE);
       expect(after).toContain("The analysis used a default value for 'Market Conditions'");
-      expect(after).toContain('the comparison is illustrative until those values are set');
+      // IMPORTED, not hand-copied. This assertion previously spelled the tail
+      // out, which is the mirror `pick-defaulted-assumptions.ts` documents as
+      // the reason `DEFAULTED_DISCLOSURE_TAIL` is exported at all — and it duly
+      // drifted the first time the wording moved.
+      expect(after).toContain(DEFAULTED_DISCLOSURE_TAIL);
       // The recitation itself SURVIVES — qualified, not withheld.
       expect(after).toContain('currently leads, with a probability of');
     });

@@ -517,9 +517,44 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
-      expect(out.assistant_text).toContain('The biggest thing to examine next is Delivery risk');
+      expect(out.assistant_text).toContain("Based on this model, the analysis currently favours 'Hire two senior engineers locally'");
+      expect(out.assistant_text).toContain("The biggest thing to examine next is 'Delivery risk'");
       expect(out.assistant_text).toContain('it could change the result');
+    }
+  });
+
+  /**
+   * THE BRANCH THE FOUNDER ACTUALLY HIT. `composeAdvice`'s attested-no-flip
+   * arm ("carries more of the margin than anything else") had NO test in this
+   * file — `attested_no_flip` appeared nowhere in it — so the label form on the
+   * arm that produced the 2026-09-05 turn-10 sentence was unpinned. Found by a
+   * surviving mutant: leaving `topDriverLabel` bare here kept all 269 tests
+   * green.
+   *
+   * It matters because a factor label can be a raw span of the user's brief, and
+   * unquoted it produces "The biggest thing to examine next is we believe is
+   * partly driven by product quality and…" — not a grammatical sentence.
+   */
+  it('advice composer, attested-no-flip arm: the top driver is QUOTED', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What would you recommend?',
+      analysis: FIXTURE_ANALYSIS,
+      freshness: 'fresh',
+      flipClaimPosture: 'attested_no_flip',
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // PRECONDITION — assert we really are on the no-flip arm, so this cannot
+      // pass by silently exercising the branch above.
+      expect(out.assistant_text).toContain('carries more of the margin than anything else');
+      expect(out.assistant_text).not.toContain('it could change the result');
+
+      expect(out.assistant_text).toContain(
+        "The biggest thing to examine next is 'Delivery risk', because it carries more of the margin",
+      );
+      expect(out.assistant_text).not.toContain(
+        'The biggest thing to examine next is Delivery risk,',
+      );
     }
   });
 
@@ -1009,18 +1044,22 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
+      expect(out.assistant_text).toContain("Based on this model, the analysis currently favours 'Hire two senior engineers locally'");
       expect(out.assistant_text).toContain('with a probability of 62%');
       // ROADMAP 2.1067 — was "It sits ahead of Hire one senior engineer
-      // overseas by 24 percentage points". `advice` quotes no labels, which is
-      // its own voice and is unchanged.
-      expect(out.assistant_text).toContain('Hire one senior engineer overseas sits in second place, with a probability of 38%');
+      // overseas by 24 percentage points".
+      // ⚠ This comment previously read "`advice` quotes no labels, which is its
+      // own voice and is unchanged". That is no longer true and was the defect:
+      // `composeAdvice` was the only composer in the file leaving labels bare,
+      // which produced an ungrammatical sentence whenever a label was a raw
+      // span of the user's brief. It now quotes, like its siblings.
+      expect(out.assistant_text).toContain("'Hire one senior engineer overseas' sits in second place, with a probability of 38%");
       expect(out.assistant_text).not.toMatch(/percentage points?/i);
-      expect(out.assistant_text).toContain('The biggest thing to examine next is Delivery risk');
+      expect(out.assistant_text).toContain("The biggest thing to examine next is 'Delivery risk'");
       // Readability sectioning: the next-step sentence is a bullet
       // under its own labelled block.
       expect(out.assistant_text).toContain('What to check next');
-      expect(out.assistant_text).toMatch(/^• The biggest thing to examine next is Delivery risk/m);
+      expect(out.assistant_text).toMatch(/^• The biggest thing to examine next is 'Delivery risk'/m);
     }
   });
 
@@ -1639,7 +1678,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.copy_source).toBe('factor_evppi');
-      expect(out.assistant_text).toContain('The first evidence priority from this analysis is Cost overrun risk:');
+      expect(out.assistant_text).toContain("The first evidence priority from this analysis is 'Cost overrun risk':");
       expect(out.assistant_text).toContain(
         'Talk to the finance team about historical overruns on similar engagements.',
       );
@@ -1778,7 +1817,7 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     if (out.matched) {
       expect(out.copy_source).toBe('factor_evppi');
       expect(out.assistant_text).toContain(
-        'The first evidence priority from this analysis is Delivery reliability.',
+        "The first evidence priority from this analysis is 'Delivery reliability'.",
       );
       expect(out.assistant_text).toContain('gather relevant data or expert judgement');
       expect(out.assistant_text).not.toMatch(/\b0(?:\.\d+)?\b|evppi/i);
@@ -1980,8 +2019,11 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('"Cost overrun risk" to "Successful launch"');
-      expect(out.assistant_text).not.toMatch(/link from\s*""\s*to/);
+      // Edge endpoints now go through `quoteLabel` like every other label in
+      // this file (and like `describeFragileAssumption` directly above it);
+      // this gap sentence was the only double-quoted site in the module.
+      expect(out.assistant_text).toContain("'Cost overrun risk' to 'Successful launch'");
+      expect(out.assistant_text).not.toMatch(/link from\s*''\s*to/);
     }
   });
 
@@ -2511,15 +2553,15 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
       expect(out.advice_class).toBe('advice');
       const text = out.assistant_text;
       // Existing opener preserved.
-      expect(text).toContain('currently favours Hire One Tech Lead');
+      expect(text).toContain("currently favours 'Hire One Tech Lead'");
       // S4 ROUND 4 — this pin previously required "It sits ahead of Hire Two
       // Developers" on a 0.05pp gap. Literally true, but it frames a dead heat
       // as a standing, and the sibling pin directly below already demanded that
       // composeMeaning REFRAME the very same 0.05pp fixture as a near-tie. Two
       // surfaces, one analysis, opposite framings — the drift this lane closes.
       // composeAdvice now takes its margin verdict from the shared composer too.
-      expect(text).toMatch(/It is effectively tied with Hire Two Developers/);
-      expect(text).not.toMatch(/It sits ahead of Hire Two Developers/);
+      expect(text).toMatch(/It is effectively tied with 'Hire Two Developers'/);
+      expect(text).not.toMatch(/It sits ahead of 'Hire Two Developers'/);
       // No escalation to strong-claim copy.
       assertNoForbidden(text, FORBIDDEN_STRENGTH_PHRASES);
       assertNoForbidden(text, FORBIDDEN_INTERNAL_TERMS);

@@ -234,8 +234,19 @@ export function pickLatestDefaultedAssumptions(
  * `buildDefaultedAssumptionsDisclosure` is required to end with this string —
  * pinned by the builder/tail agreement test, which fails if either side moves.
  */
+/*
+ * ⚠ NUMBER AGREEMENT. This tail must read correctly for EVERY count the
+ * builder can produce, because it is invariant BY DESIGN while the subject and
+ * verb before it are not. It previously ended `until THOSE VALUES are set`,
+ * which is anaphoric and demands a plural antecedent — so the singular
+ * permutation shipped `…a default value for ONE of the factors in your model,
+ * which HAS no value set, so the comparison is illustrative until THOSE VALUES
+ * are set`, observed on the 2026-09-05 founder journey. `real values` is a
+ * GENERIC plural with no antecedent to agree with, so it reads correctly at
+ * count 1 and at count N, and the tail stays a single invariant string.
+ */
 export const DEFAULTED_DISCLOSURE_TAIL =
-  'so the comparison is illustrative until those values are set.';
+  'so the comparison is illustrative until real values are set.';
 
 export function buildDefaultedAssumptionsDisclosure(
   signal: DefaultedAssumptionsSignal,

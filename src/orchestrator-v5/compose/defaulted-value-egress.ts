@@ -367,6 +367,47 @@ export function disclosureJoiner(originalText: string): string {
   return /\n/.test(originalText) ? '\n\n' : ' ';
 }
 
+/**
+ * Place the disclosure BEFORE a trailing closing question.
+ *
+ * The disclosure is correct and stays — this is purely about where the reader's
+ * eye lands. On the 2026-09-05 founder journey it was the FINAL sentence on 6
+ * of 12 turns, so turn 9 asked *"Which of these three failure modes worries you
+ * most…?"* and then buried that question under the caveat. A turn that ends on
+ * boilerplate reads as though the product stopped talking to you.
+ *
+ * DELIBERATELY NARROW. When the reply does not end on a question the output is
+ * byte-identical to the previous append-at-the-end behaviour, so the only
+ * replies that move are the ones that were burying a question. The trailing
+ * segment must also still be findable at the end of `out` — if segmentation and
+ * the joined text disagree for any reason we fall back to appending rather than
+ * risk reordering prose.
+ *
+ * NOT DONE HERE, and deliberately: suppressing a verbatim repeat when nothing
+ * about the defaulted values has changed since the last turn. This seam sees
+ * one turn's text and one turn's signal; it holds no prior-turn state, and
+ * inventing some to track "unchanged" would be new cross-turn state for a
+ * copy problem. Repetition across turns is therefore still open.
+ */
+function placeDisclosure(
+  out: string,
+  segments: ReadonlyArray<{ text: string; sep: string }>,
+  disclosure: string,
+  originalText: string,
+): string {
+  const joiner = disclosureJoiner(originalText);
+  const last = segments[segments.length - 1];
+  const lastText = last === undefined ? '' : last.text.trim();
+  const endsOnQuestion = lastText.length > 0 && /\?["'’”)\]]*$/.test(lastText);
+  if (!endsOnQuestion || !out.endsWith(lastText)) {
+    return `${out}${joiner}${disclosure}`;
+  }
+  const head = out.slice(0, out.length - lastText.length).trimEnd();
+  return head.length > 0
+    ? `${head}${joiner}${disclosure}${joiner}${lastText}`
+    : `${disclosure}${joiner}${lastText}`;
+}
+
 export interface DefaultedValueEgressResult {
   /** The text to ship. Reference-identical to the input when unchanged. */
   readonly text: string;
@@ -490,7 +531,7 @@ export function applyDefaultedValueEgress(
   let disclosureAdded = false;
   if (!seenDisclosure) {
     const disclosure = buildDefaultedAssumptionsDisclosure(signal);
-    out = out.length > 0 ? `${out}${disclosureJoiner(text)}${disclosure}` : disclosure;
+    out = out.length > 0 ? placeDisclosure(out, segments, disclosure, text) : disclosure;
     disclosureAdded = true;
   }
 
