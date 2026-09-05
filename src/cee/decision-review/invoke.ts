@@ -115,26 +115,6 @@ export interface DecisionReviewMeta {
    *  the contract test at decision-review-enricher.contract.test.ts §"_meta
    *  is adapter-only" asserts this key never reaches the user message. */
   readonly evidence_gaps_dropped_count: number;
-  /**
-   * Number of well-formed evidence gaps WITHHELD from the investigation
-   * candidate list because the producer scored them at zero value of
-   * information (`voi <= 0`) — see the gate in
-   * `orchestrator-v5/coaching/decision-review-enricher.ts`.
-   *
-   * ⚠ DISTINCT FROM `evidence_gaps_dropped_count` (trap #21). That one counts
-   * "the producer sent something unusable"; this counts "the producer sent
-   * something usable and said resolving it is worthless". They answer
-   * different questions, so one number could not serve both without hiding
-   * whichever cause was rarer.
-   *
-   * ⭐ A PERSISTENTLY HIGH VALUE IS A PRODUCER SIGNAL, NOT A CEE DEFECT: it
-   * means PLoT is scoring every factor at zero VoI (six of six on the
-   * 2026-09-03 capture), so the user is being offered no investigable route
-   * at all. That is worth knowing and is currently invisible.
-   *
-   * Internal observability only — never reaches the user message.
-   */
-  readonly evidence_gaps_zero_voi_count: number;
   /** Number of upstream m1_coaching.model_critiques entries that were
    *  object-shaped but missing one of the three required fields (type,
    *  severity, message) — see {@link normaliseModelCritique} in

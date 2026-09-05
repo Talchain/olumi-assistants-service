@@ -160,7 +160,31 @@ describe('classifyFactorInvestigation', () => {
     ).toBe('informative');
   });
 
-  it('an absent rank_flip_rate lets the negligible category carry the claim alone', () => {
+  // ═══════════════════════════════════════════════════════════════════════
+  // F3 — ABSENCE IS NOT ZERO, ON THE FLIP FIELD TOO.
+  //
+  // This block replaces a test that asserted the OPPOSITE ("an absent
+  // rank_flip_rate lets the negligible category carry the claim alone"). That
+  // assertion pinned the defect: `foundNoReordering` read
+  // `rankFlipRate === null ? true`, so a factor with NO flip measurement at all
+  // received the STRONGEST verdict available.
+  //
+  // Both conjuncts fail open on absence, which is why one absence was not
+  // enough to catch it:
+  //   - `flip_risk_category` is PLoT's fragile-edge adjacency test and returns
+  //     'negligible' from an EARLY RETURN when there are no fragile edges;
+  //   - an absent `rank_flip_rate` is simply no measurement.
+  // Two absences were being combined into a positive finding.
+  //
+  // MEASURED over the whole repo corpus (35 envelopes / 113 factor_sensitivity
+  // rows, 2026-09-05): rows reaching `no_reordering_found` via an ABSENT rate
+  // = 2 (both in analysis-result-live-2026-09-03.json, NEITHER carrying a
+  // `flip_thresholds` row); rows reaching it on a PRESENT zero = 0. The
+  // strongest claim the product can make was reachable ONLY through missing
+  // evidence.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  it('F3: an ABSENT rank_flip_rate is NOT stability — the negligible category cannot carry the claim alone', () => {
     expect(
       classifyFactorInvestigation({
         factor_id: 'z',
@@ -168,7 +192,43 @@ describe('classifyFactorInvestigation', () => {
         value_of_information: 0,
         flip_risk_category: 'negligible',
       }),
+    ).toBe('no_information_value');
+  });
+
+  it('F3 OPPOSITE-DIRECTION TWIN: a PRESENT zero rank_flip_rate still earns the stronger verdict', () => {
+    // The twin matters as much as the case above. A fix that closed the
+    // absence hole by refusing the strong verdict ALWAYS would silence a
+    // statement the producer genuinely licensed — a gap traded for a lie.
+    // Identical entry, one field added.
+    expect(
+      classifyFactorInvestigation({
+        factor_id: 'z',
+        factor_label: 'z',
+        value_of_information: 0,
+        flip_risk_category: 'negligible',
+        rank_flip_rate: 0,
+      }),
     ).toBe('no_reordering_found');
+  });
+
+  it('F3: the two live 2026-09-03 rows that reached the strong claim on absent evidence now do not', () => {
+    // Byte-for-byte from src/orchestrator-v5/compose/__tests__/fixtures/
+    // analysis-result-live-2026-09-03.json — the rows the cold review named.
+    // Bound by factor_id (trap #19: never by a value another row could match).
+    for (const factorId of ['099f7ecf', '4fcb676f']) {
+      expect(
+        classifyFactorInvestigation({
+          factor_id: factorId,
+          factor_label: `live factor ${factorId}`,
+          value_of_information: 0,
+          evpi_percentage_points: 0,
+          evpi_method: 'heuristic',
+          flip_risk_category: 'negligible',
+          // rank_flip_rate ABSENT, exactly as in the capture; and neither row
+          // has a flip_thresholds entry, so no flip search was ever run.
+        }),
+      ).toBe('no_information_value');
+    }
   });
 
   it('zero VoI with NO flip evidence at all is the weaker verdict, not the stronger one', () => {
@@ -233,5 +293,64 @@ describe('deriveFactorInvestigationFromEnrichment', () => {
       factor_sensitivity: [{ factor_id: 'no-label', value_of_information: 0 }, null, 42],
     });
     expect(signals).toEqual([]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// THE MAGNITUDE — carried so a claim's strength can match its evidence.
+//
+// The exact-zero verdicts leave every positively-scored factor projected
+// EXACTLY as before, which is the shape that produced the witnessed harm. The
+// magnitude is strictly additive: it suppresses nothing and gates nothing.
+// ═════════════════════════════════════════════════════════════════════════
+describe('factor investigation — magnitude passthrough', () => {
+  it('carries evpi_percentage_points and value_of_information on an INFORMATIVE factor', () => {
+    const signals = deriveFactorInvestigationFromEnrichment({
+      factor_sensitivity: [INFORMATIVE_CHURN],
+    });
+    const churn = signalFor(signals, 'churn-response-42');
+    expect(churn.verdict).toBe('informative');
+    expect(churn.evpi_percentage_points).toBe(4.2);
+    expect(churn.value_of_information).toBe(0.18);
+  });
+
+  it('carries the magnitude on the zero-scored factors too, without changing their verdict', () => {
+    const signals = deriveFactorInvestigationFromEnrichment({
+      factor_sensitivity: [WITNESSED_COORDINATION_OVERHEAD],
+    });
+    const witnessed = signalFor(signals, 'coord-overhead-01');
+    expect(witnessed.evpi_percentage_points).toBe(0);
+    expect(witnessed.value_of_information).toBe(0);
+    // OPPOSITE-DIRECTION TWIN of the additive claim: adding a magnitude must
+    // not have moved the verdict this module already got right.
+    expect(witnessed.verdict).toBe('no_reordering_found');
+  });
+
+  it('ABSENCE IS NOT ZERO: a producer that emitted no magnitude yields null, never 0', () => {
+    const signals = deriveFactorInvestigationFromEnrichment({
+      factor_sensitivity: [LEGACY_UNSCORED],
+    });
+    const legacy = signalFor(signals, 'legacy-factor-77');
+    expect(legacy.verdict).toBe('unscored');
+    // `null`, not `0` — the whole defect class this module exists to remove.
+    expect(legacy.evpi_percentage_points).toBeNull();
+    expect(legacy.value_of_information).toBeNull();
+  });
+
+  it('a non-finite magnitude is read as absent, not as a number', () => {
+    const signals = deriveFactorInvestigationFromEnrichment({
+      factor_sensitivity: [
+        {
+          factor_id: 'nan-factor',
+          factor_label: 'NaN factor',
+          value_of_information: 0.5,
+          evpi_percentage_points: Number.NaN,
+        },
+      ],
+    });
+    const row = signalFor(signals, 'nan-factor');
+    expect(row.evpi_percentage_points).toBeNull();
+    // CONTRAST inside the same case: the finite sibling still arrives.
+    expect(row.value_of_information).toBe(0.5);
   });
 });

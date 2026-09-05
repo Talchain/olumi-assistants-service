@@ -81,7 +81,15 @@ describe('display-safe drivers carry the producer investigation verdict', () => 
     const investigation = String(driver.investigation ?? '');
     expect(investigation.length).toBeGreaterThan(0);
     // The true statement is available and must be made.
-    expect(investigation).toContain('nothing we tested would change which option leads');
+    expect(investigation).toContain('resolving this has no measured value');
+    expect(investigation).toContain('resampling did not move its ranking');
+    // ⚠ F3 — AND IT MUST NOT CLAIM WHAT WAS NEVER MEASURED. Neither field this
+    // verdict rests on is about option ordering: `rank_flip_rate` is ISL's
+    // bootstrap stability of the FACTOR'S OWN RANK, and `flip_risk_category`
+    // is PLoT's fragile-edge adjacency test. The old copy said "nothing we
+    // tested would change which option leads" on exactly this evidence.
+    expect(investigation).not.toContain('which option leads');
+    expect(investigation).not.toContain('nothing we tested');
     // The heuristic basis is disclosed rather than asserted as settled fact.
     expect(investigation).toContain('heuristic');
   });
@@ -118,7 +126,7 @@ describe('display-safe drivers carry the producer investigation verdict', () => 
     expect(investigation).toContain('every option sets its own value');
     // It is NOT the uninformative sentence — this factor is not free to vary,
     // which is a different fact with a different remedy.
-    expect(investigation).not.toContain('nothing we tested would change which option leads');
+    expect(investigation).not.toContain('resolving this has no measured value');
   });
 
   it('zero VoI WITHOUT a settled ordering makes the weaker claim only', () => {
@@ -134,9 +142,11 @@ describe('display-safe drivers carry the producer investigation verdict', () => 
     );
     const investigation = String(driverNamed(out, 'UK Market Saturation').investigation ?? '');
     expect(investigation).toContain('no measured value');
-    // Must NOT overclaim that the ordering is settled — the producer's own
-    // rank_flip_rate (0.25 in the live capture) refutes that.
-    expect(investigation).not.toContain('nothing we tested would change which option leads');
+    expect(investigation).toContain('not shown to be stable');
+    // Must NOT overclaim stability — the producer's own rank_flip_rate (0.25
+    // in the live capture) refutes it.
+    expect(investigation).not.toContain('resampling did not move its ranking');
+    expect(investigation).not.toContain('which option leads');
   });
 
   it('an unscored driver (older producer) is byte-identical to the pre-fix projection', () => {
@@ -180,7 +190,7 @@ describe('display-safe drivers carry the producer investigation verdict', () => 
       ]),
     );
     expect(String(driverNamed(out, 'Team coordination overhead').investigation ?? '')).toContain(
-      'nothing we tested would change which option leads',
+      'resampling did not move its ranking',
     );
     expect('investigation' in driverNamed(out, 'Churn response to price')).toBe(false);
   });
@@ -199,5 +209,133 @@ describe('display-safe drivers carry the producer investigation verdict', () => 
     const investigation = driverNamed(out, 'Team coordination overhead').investigation;
     expect(typeof investigation).toBe('string');
     expect(String(investigation)).not.toMatch(/\d/);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════
+// THE MAGNITUDE — the case the exact-zero verdicts CANNOT reach.
+//
+// An `informative` factor keeps its recommendation, and until now was
+// projected as `{label, influence}` — byte-identical to the shape that
+// produced the witnessed lie. At `value_of_information: 0.004` the model had
+// only "moderate negative influence" and supplied "could decisively clarify
+// which option leads" from it.
+//
+// ⚠ EVERY ARM HERE HAS AN OPPOSITE-DIRECTION TWIN. A disclosure that silenced
+// a genuine recommendation would be the worse defect, so each case that ADDS
+// a magnitude is paired with one asserting nothing was removed.
+// ═════════════════════════════════════════════════════════════════════════
+describe('display-safe drivers carry the investigation MAGNITUDE', () => {
+  it('THE CODEX COUNTEREXAMPLE: a positive but near-zero VoI is told not to be called decisive', () => {
+    const out = formatAnalysisForContext(
+      analysisWithDrivers([
+        {
+          factor_label: 'Team coordination overhead',
+          sensitivity_value: -0.35,
+          investigation_verdict: 'informative',
+          investigation_voi: 0.004,
+        },
+      ]),
+    );
+    const driver = driverNamed(out, 'Team coordination overhead');
+    const investigation = String(driver.investigation ?? '');
+    expect(investigation).toContain('near-zero measured value');
+    expect(investigation).toContain('too small to call decisive');
+    // OPPOSITE DIRECTION: the recommendation itself is NOT suppressed. The
+    // influence band is untouched and the driver is still projected.
+    expect(driver.influence).toBe('moderate negative influence');
+    expect(driver.label).toBe('Team coordination overhead');
+  });
+
+  it('a substantial VoI is banded as substantial — the disclosure is not a blanket hedge', () => {
+    const out = formatAnalysisForContext(
+      analysisWithDrivers([
+        {
+          factor_label: 'Churn response to price',
+          sensitivity_value: 0.41,
+          investigation_verdict: 'informative',
+          investigation_voi: 0.75,
+        },
+      ]),
+    );
+    const investigation = String(driverNamed(out, 'Churn response to price').investigation ?? '');
+    // Band DERIVED from the shared influence-bands vocabulary, not from this
+    // test's head (trap 13c): INFLUENCE_BAND_THRESHOLDS.strong === 0.7, so
+    // 0.75 lands in 'strong'. (The first draft of this line asserted 'strong'
+    // at 0.62 — below the 0.7 boundary — and the suite caught it.)
+    expect(investigation).toContain('strong measured value in resolving this');
+    // DISCRIMINATION: it must NOT be given the near-zero hedge.
+    expect(investigation).not.toContain('too small to call decisive');
+  });
+
+  it('an informative driver with NO producer magnitude stays byte-identical to the pre-fix projection', () => {
+    const out = formatAnalysisForContext(
+      analysisWithDrivers([
+        {
+          factor_label: 'Churn response to price',
+          sensitivity_value: 0.41,
+          investigation_verdict: 'informative',
+        },
+      ]),
+    );
+    // ABSENCE IS NOT ZERO — and it is not a hedge either. No key at all.
+    expect(driverNamed(out, 'Churn response to price')).toEqual({
+      label: 'Churn response to price',
+      influence: 'moderate positive influence',
+    });
+  });
+
+  it('a zero-or-negative magnitude on an informative factor publishes nothing rather than "zero"', () => {
+    for (const voi of [0, -0.2]) {
+      const out = formatAnalysisForContext(
+        analysisWithDrivers([
+          {
+            factor_label: 'Odd factor',
+            sensitivity_value: 0.41,
+            investigation_verdict: 'informative',
+            investigation_voi: voi,
+          },
+        ]),
+      );
+      expect('investigation' in driverNamed(out, 'Odd factor')).toBe(false);
+    }
+  });
+
+  it('the magnitude never displaces a zero-verdict sentence', () => {
+    // A verdict sentence and a magnitude must never both be rendered, and the
+    // verdict wins: it is the more decision-relevant fact.
+    const out = formatAnalysisForContext(
+      analysisWithDrivers([
+        {
+          factor_label: 'Team coordination overhead',
+          sensitivity_value: -0.35,
+          investigation_verdict: 'no_reordering_found',
+          investigation_voi: 0.62,
+        },
+      ]),
+    );
+    const investigation = String(driverNamed(out, 'Team coordination overhead').investigation ?? '');
+    expect(investigation).toContain('resolving this has no measured value');
+    expect(investigation).not.toContain('strong measured value in resolving this');
+  });
+
+  it('DOCTRINE A2: the banded magnitude carries no digits, like every other display phrase', () => {
+    for (const voi of [0.004, 0.62]) {
+      const out = formatAnalysisForContext(
+        analysisWithDrivers([
+          {
+            factor_label: 'Any factor',
+            sensitivity_value: 0.41,
+            investigation_verdict: 'informative',
+            investigation_voi: voi,
+          },
+        ]),
+      );
+      const investigation = String(driverNamed(out, 'Any factor').investigation ?? '');
+      // PRECONDITION PINNED IN-TEST: assert the phrase EXISTS before asserting
+      // a property of it, or this passes vacuously on an absent key.
+      expect(investigation.length).toBeGreaterThan(0);
+      expect(investigation).not.toMatch(/\d/);
+    }
   });
 });

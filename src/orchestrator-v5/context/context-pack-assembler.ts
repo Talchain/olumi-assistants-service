@@ -223,6 +223,24 @@ export interface ContextPackAnalysisDriver {
    * asserting a settledness the producer never claimed.
    */
   readonly investigation_basis_heuristic?: boolean;
+  /**
+   * The producer's `value_of_information` for this factor — the dimensionless
+   * [0,1] figure the verdict above is decided on.
+   *
+   * ⭐ Carried so a claim's STRENGTH can match its evidence. The verdicts decide
+   * whether a factor may be recommended at all; this says how MUCH it is worth,
+   * which is a different question and the one the composer was missing for
+   * every `informative` factor. Additive only — the display layer bands it and
+   * never suppresses on it.
+   *
+   * ⚠ This is the PUBLIC-SURFACE figure, never `m1_coaching.evidence_gaps[]
+   * .voi_score`. Derived at PLoT, those are different quantities sharing a
+   * word — see `./factor-investigation-licence.ts` for the two formulas and the
+   * producer's own regression pin against conflating them.
+   *
+   * Key absent when the producer emitted no finite figure.
+   */
+  readonly investigation_voi?: number;
 }
 
 export interface ContextPackAnalysisFragileEdge {
@@ -2393,6 +2411,11 @@ export function projectTopDrivers(
           ? {
               investigation_verdict: signal.verdict,
               ...(signal.heuristic_basis ? { investigation_basis_heuristic: true as const } : {}),
+              // Magnitude rides along whenever the producer supplied one — the
+              // display layer decides where it is worth rendering.
+              ...(signal.value_of_information !== null
+                ? { investigation_voi: signal.value_of_information }
+                : {}),
             }
           : {}),
       };

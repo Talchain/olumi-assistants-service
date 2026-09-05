@@ -173,6 +173,11 @@ const ContextPackAnalysisDriverSchema = z
       ])
       .optional(),
     investigation_basis_heuristic: z.literal(true).optional(),
+    // The producer's public-surface value_of_information for this factor.
+    // Additive disclosure — never a suppression input. Finite by construction
+    // (`readFiniteNumber` at the derivation site); pinned finite here too so a
+    // NaN can never reach the model.
+    investigation_voi: z.number().finite().optional(),
   })
   .strict();
 

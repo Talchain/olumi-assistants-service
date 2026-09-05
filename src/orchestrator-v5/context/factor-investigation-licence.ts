@@ -76,21 +76,49 @@ export type FactorInvestigationVerdict =
    */
   | 'option_controlled'
   /**
-   * Zero measured value of information AND the tested range produced no
-   * reordering (`flip_risk_category: "negligible"` with a zero-or-absent
-   * `rank_flip_rate`). The strongest honest statement: nothing we tested would
-   * change which option leads.
+   * Zero measured value of information AND the producer's bootstrap resampling
+   * left this factor's IMPORTANCE RANK unmoved — `flip_risk_category:
+   * "negligible"` with a **PRESENT** `rank_flip_rate` of zero.
+   *
+   * ⚠⚠ THIS VERDICT DOES **NOT** MEAN "THE WINNING OPTION IS SETTLED", AND THE
+   * COPY MUST NEVER SAY SO. Derived at the producer (2026-09-05):
+   *
+   *   - `rank_flip_rate` is computed by ISL from "per-bootstrap importance
+   *     ranks (by |elasticity|, descending)"
+   *     (`robustness_analyzer_v2.py:5548`), described on the model as
+   *     "Fraction of bootstrap runs where **rank** shifts by >= 2 positions"
+   *     (`response_v2.py:FactorSensitivityV2.rank_flip_rate`). That is THIS
+   *     FACTOR'S POSITION IN THE DRIVER RANKING — not which option wins.
+   *   - `flip_risk_category` is `computeFlipRiskCategory(factorId,
+   *     fragileEdges)` (PLoT `lib/factor-influence.ts:694`) — a pure
+   *     FRAGILE-EDGE ADJACENCY test that returns `'negligible'` from an early
+   *     return when `fragileEdges` is empty, i.e. **when no flip analysis was
+   *     run at all**.
+   *
+   * The producer's actual "which option leads" evidence is
+   * `conditional_winners.winner_flips` / `flip_thresholds`, which this module
+   * does not read. So the two fields here license a claim about THE EVIDENCE
+   * WE MEASURED, and nothing stronger.
    */
   | 'no_reordering_found'
   /**
-   * Zero measured value of information, but reordering was NOT ruled out — the
-   * producer reported a non-zero `rank_flip_rate`, or no flip evidence at all.
+   * Zero measured value of information, and the ranking was NOT shown to be
+   * stable — the producer reported a non-zero `rank_flip_rate`, or supplied no
+   * rank-stability evidence at all.
    *
    * ⚠ THIS MEMBER EXISTS BECAUSE THE TWO FIELDS DISAGREE ON REAL PRODUCER
    * OUTPUT. In the 2026-09-03 live capture, "UK Market Saturation" carries
    * `flip_risk_category: "negligible"` AND `rank_flip_rate: 0.25`. Licensing
-   * "nothing we tested would change which option leads" off the CATEGORY alone
-   * would have shipped a second false claim while fixing the first.
+   * the stronger sentence off the CATEGORY alone would have shipped a second
+   * false claim while fixing the first.
+   *
+   * ⭐ IT IS ALSO WHERE AN **ABSENT** `rank_flip_rate` LANDS. Measured over the
+   * whole repo corpus (35 envelopes / 113 `factor_sensitivity` rows,
+   * 2026-09-05): the ONLY rows that reached `no_reordering_found` did so
+   * through an absent rate — `0` rows reached it on a present zero, and `2`
+   * rows in `analysis-result-live-2026-09-03.json` reached it on absence, with
+   * **no `flip_thresholds` row at all**, i.e. no flip search was ever run on
+   * them. Reading that absence as stability is the harm this member closes.
    */
   | 'no_information_value'
   /**
@@ -124,6 +152,44 @@ export interface FactorInvestigationSignal {
    * an overconfident "this is settled" would trade one lie for another.
    */
   readonly heuristic_basis: boolean;
+  /**
+   * ⭐ THE MAGNITUDE, CARRIED SO A CLAIM'S STRENGTH CAN MATCH ITS EVIDENCE.
+   *
+   * `factor_sensitivity[].evpi_percentage_points` — the producer's estimate of
+   * what resolving this factor is worth, **in percentage points of win
+   * probability**. `null` when the producer emitted no finite figure.
+   *
+   * ⚠ WHY THIS EXISTS, and it is NOT a threshold. The exact-zero verdicts above
+   * close the case where the producer scored a factor at nothing. They do not
+   * touch the adjacent harm: a factor scored at `0.2` percentage points is
+   * `informative`, so the composer is handed an influence band and NOTHING
+   * ELSE — byte-identical to the projection that produced the witnessed lie —
+   * and the model supplies "could decisively clarify which option leads" from
+   * the only evidence it has. **The remedy is to quantify, never to widen the
+   * gate**: two opposite harms cannot share one window, so this field
+   * suppresses nothing and can only ever ADD disclosure.
+   */
+  readonly evpi_percentage_points: number | null;
+  /**
+   * `factor_sensitivity[].value_of_information` — the dimensionless public
+   * -surface figure the verdict above is decided on. Carried alongside the
+   * percentage-point form so a consumer can tell "scored at nearly nothing"
+   * from "not scored at all" without re-reading the envelope.
+   *
+   * ⚠ NOT `m1_coaching.evidence_gaps[].voi_score`. Derived at the producer
+   * (PLoT, 2026-09-05) these are DIFFERENT QUANTITIES SHARING A WORD:
+   *   - this field  = `|sensitivity| × (1 − confidence) × decision_fragility`,
+   *     where `decision_fragility` is the max `marginal_switch_probability`
+   *     over ADJACENT FRAGILE EDGES — so `0` means "off the decision's
+   *     fragility path", not "worthless";
+   *   - `voi_score`  = `normalisedImpact × (1 − confidence)`, which never
+   *     consults fragile edges and is documented as coaching-internal
+   *     PRIORITISATION only, "NOT comparable across surfaces".
+   * PLoT pins the divergence by regression test
+   * (`tests/voi-surface-divergence.test.ts`) and forbids making them
+   * numerically equal without amending both jsdocs. Never join them.
+   */
+  readonly value_of_information: number | null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -170,15 +236,34 @@ function hasNoInformationValue(entry: Record<string, unknown>): boolean {
   return evpi !== null ? evpi <= 0 : false;
 }
 
-/** Did the producer's tested range leave the option ordering untouched? */
+/**
+ * Did the producer POSITIVELY measure this factor's ranking as stable?
+ *
+ * ⚠⚠ ABSENCE IS NOT ZERO — AND THIS FUNCTION READ IT AS ZERO UNTIL 2026-09-05.
+ * It returned `rankFlipRate === null ? true : ...`, so a factor the producer
+ * never ran a flip search on received the STRONGEST claim available. Both
+ * conjuncts fail open on absence unless they are made to demand evidence:
+ *
+ *   - `flip_risk_category` returns `'negligible'` from
+ *     `computeFlipRiskCategory`'s `fragileEdges.length === 0` EARLY RETURN, so
+ *     "negligible" is emitted when nothing was analysed;
+ *   - an absent `rank_flip_rate` is no measurement at all.
+ *
+ * Two absences were being combined into a positive finding. The sibling gate at
+ * {@link classifyFactorInvestigation} already states "absence is NEVER zero"
+ * for value-of-information; this is the same rule, applied to the same file's
+ * other field.
+ *
+ * BOTH pieces of evidence must now be PRESENT and affirmative.
+ */
 function foundNoReordering(entry: Record<string, unknown>): boolean {
   const category = readNonEmptyString(entry.flip_risk_category);
   if (category === null || category.toLowerCase() !== 'negligible') return false;
   const rankFlipRate = readFiniteNumber(entry.rank_flip_rate);
-  // Absent rate ⇒ the category alone carries the claim. A PRESENT non-zero rate
-  // REFUTES it — see {@link FactorInvestigationVerdict.no_information_value};
-  // the live capture carries exactly this disagreement.
-  return rankFlipRate === null ? true : rankFlipRate <= 0;
+  // ABSENT ⇒ NOT ESTABLISHED. A PRESENT non-zero rate also refutes it — see
+  // {@link FactorInvestigationVerdict.no_information_value}; the live capture
+  // carries exactly that disagreement.
+  return rankFlipRate !== null && rankFlipRate <= 0;
 }
 
 function readsAsHeuristic(entry: Record<string, unknown>): boolean {
@@ -248,6 +333,11 @@ export function deriveFactorInvestigationFromEnrichment(
       factor_label: label,
       verdict: classifyFactorInvestigation(entry),
       heuristic_basis: readsAsHeuristic(entry),
+      // Magnitudes ride EVERY entry, including `informative` and `unscored` —
+      // that is the whole point: the quantified-value disclosure is for the
+      // factors the verdicts deliberately leave alone.
+      evpi_percentage_points: readFiniteNumber(entry.evpi_percentage_points),
+      value_of_information: readFiniteNumber(entry.value_of_information),
     });
   }
   return out;

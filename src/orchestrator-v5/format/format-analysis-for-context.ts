@@ -289,9 +289,15 @@ export interface DisplaySafeAnalysisDriver {
    * product spent eight narrations telling a founder to run a pilot that its
    * own engine scored at zero benefit.
    *
-   * Key ABSENT (never empty string) when the factor is genuinely informative
-   * or unscored, so the pre-fix projection is reproduced byte-for-byte for
-   * every case this fix is not about.
+   * Carries ONE of two things, never both: the honest verdict sentence for a
+   * factor the producer scored at zero, or — for an `informative` factor — the
+   * MAGNITUDE of what resolving it is worth. The second exists because a
+   * verdict-only fix leaves every positively-scored factor projected exactly as
+   * it was before, which is the shape that produced the harm.
+   *
+   * Key ABSENT (never empty string) when the factor is unscored, or informative
+   * with no producer magnitude, so the pre-fix projection is reproduced
+   * byte-for-byte for every case this fix is not about.
    *
    * ⚠ Lives on the SAME object as `influence` deliberately: the budget
    * truncator drops `top_drivers` wholesale, so a drop can never strip the
@@ -452,15 +458,28 @@ export function influencePhrase(signedSensitivity: number): string {
  * ⚠ THREE SENTENCES, NOT THREE STRENGTHS OF ONE (trap #21). Each states a
  * different fact with a different remedy, and none may stand in for another:
  *
- *  - `no_reordering_found` — the producer scored zero value of information AND
- *    its tested range produced no reordering. This is the strongest honest
- *    claim, and it is the witnessed case.
- *  - `no_information_value` — zero value of information, but the ordering was
- *    NOT settled (a non-zero `rank_flip_rate`, or no flip evidence at all).
- *    Claiming the ordering is settled here would trade one lie for another.
+ *  - `no_reordering_found` — zero measured value of information AND a PRESENT
+ *    zero `rank_flip_rate`: the producer's bootstrap resampling did not move
+ *    this factor's importance rank.
+ *  - `no_information_value` — zero measured value of information, with the
+ *    ranking either measured as unstable or never measured at all.
  *  - `option_controlled` — the factor is not free to vary; every option sets
  *    its own value. It is a CHOICE, not an uncertainty to investigate, so
  *    "not worth investigating" would be the wrong advice for the right reason.
+ *
+ * ⚠⚠ NONE OF THESE MAY SAY "WHICH OPTION LEADS", AND ONE OF THEM DID UNTIL
+ * 2026-09-05. `no_reordering_found` read *"nothing we tested would change which
+ * option leads"*. Derived at the producer, neither field it rests on is about
+ * option ordering:
+ *   - `rank_flip_rate` is ISL's bootstrap stability of THIS FACTOR'S POSITION
+ *     IN THE DRIVER RANKING ("per-bootstrap importance ranks by |elasticity|",
+ *     `robustness_analyzer_v2.py:5548`);
+ *   - `flip_risk_category` is PLoT's FRAGILE-EDGE ADJACENCY test, which returns
+ *     `'negligible'` when there are no fragile edges to be adjacent to.
+ * The producer's real option-ordering evidence (`conditional_winners`,
+ * `flip_thresholds`) is not read here, so the copy claims only what was
+ * measured. Saying "we tested" of an untested thing is the exact harm class
+ * this module exists to remove.
  *
  * ⭐ NEVER SILENT. Each of these says something TRUE in place of the false
  * recommendation; suppressing the sentence and leaving a blank would hide the
@@ -468,9 +487,9 @@ export function influencePhrase(signedSensitivity: number): string {
  */
 const INVESTIGATION_PHRASES: Readonly<Record<string, string>> = {
   no_reordering_found:
-    'nothing we tested would change which option leads — resolving this has no measured value',
+    'resolving this has no measured value, and resampling did not move its ranking',
   no_information_value:
-    'no measured value in resolving this, though the tested range did not settle the ordering',
+    'resolving this has no measured value, and its ranking was not shown to be stable',
   option_controlled:
     'every option sets its own value for this — a choice, not an uncertainty to investigate',
 };
@@ -483,18 +502,68 @@ const INVESTIGATION_PHRASES: Readonly<Record<string, string>> = {
  */
 const INVESTIGATION_HEURISTIC_TAIL = ' (heuristic estimate, default range)';
 
+/**
+ * ⭐ THE MAGNITUDE HALF — STRICTLY ADDITIVE, SUPPRESSES NOTHING.
+ *
+ * An `informative` factor keeps its recommendation; what it did NOT keep, until
+ * now, was any sense of SCALE. The composer received `{label, influence}` and
+ * nothing else — byte-identical to the projection that produced the witnessed
+ * lie — so at `value_of_information: 0.004` the model still had only "moderate
+ * negative influence" to reason from, and still supplied "could decisively
+ * clarify which option leads". The zero-verdicts above cannot reach that case,
+ * because 0.004 is not zero.
+ *
+ * ⚠ THIS IS DELIBERATELY NOT A WIDER GATE. Whether a factor may be recommended
+ * at all, and how much it is worth, are DIFFERENT QUESTIONS; a band spanning
+ * both would buy coverage of the overclaim by silently eating small-but-real
+ * value (trap 22b — two opposite harms cannot share one window). Nothing here
+ * removes a driver, a recommendation or a phrase.
+ *
+ * ⚠ BANDED, NOT NUMERIC, AND THE BANDS ARE DERIVED NOT INVENTED. Doctrine A2
+ * binds the display projection to carry no raw numbers in its prose (the
+ * digit-bearing fields — `margin`, option percents — are structured, not
+ * prose), and this field is pinned by a no-digits invariant. So the magnitude
+ * is rendered through the SHARED `bandFromMagnitude` /
+ * `NEAR_ZERO_INFLUENCE_THRESHOLD` vocabulary already used by
+ * {@link influencePhrase}, on the same dimensionless [0,1] scale. The 0.05
+ * near-zero cut is the estate's shared constant and independently matches the
+ * cut-point PLoT ratified for this very field (`lib/evpi-emission.ts:151`,
+ * "the UI's `value_of_information > 0.05` cut-point") — so the boundary is
+ * corroborated by the producer rather than chosen here.
+ *
+ * Returns `undefined` — leaving the pre-fix byte-shape untouched — unless the
+ * producer emitted a STRICTLY POSITIVE figure. A zero or negative value on an
+ * `informative` factor is a producer disagreement, not a magnitude to publish.
+ */
+function informativeMagnitudePhrase(
+  driver: ContextPackAnalysisDriver,
+): string | undefined {
+  if (driver.investigation_verdict !== 'informative') return undefined;
+  const voi = driver.investigation_voi;
+  if (typeof voi !== 'number' || !Number.isFinite(voi) || voi <= 0) return undefined;
+  if (voi < NEAR_ZERO_INFLUENCE_THRESHOLD) {
+    // The case the exact-zero verdicts cannot reach, and the one that produced
+    // "could decisively clarify". Positive, so it is NOT suppressed; near zero,
+    // so the composer is told not to call it decisive.
+    return 'a positive but near-zero measured value in resolving this — too small to call decisive';
+  }
+  return `${bandFromMagnitude(voi)} measured value in resolving this`;
+}
+
 function formatDriver(driver: ContextPackAnalysisDriver): DisplaySafeAnalysisDriver {
   const base: DisplaySafeAnalysisDriver = {
     label: driver.factor_label,
     influence: influencePhrase(driver.sensitivity_value),
   };
-  // `informative` and `unscored` deliberately have no phrase: an informative
-  // factor keeps today's behaviour, and an absent producer signal is NEVER
-  // read as zero. Both reproduce the pre-fix projection byte-for-byte.
+  // `unscored` deliberately has no phrase: an absent producer signal is NEVER
+  // read as zero, so it reproduces the pre-fix projection byte-for-byte.
+  // `informative` keeps its recommendation and gains only a MAGNITUDE, and only
+  // when the producer supplied one.
   const phrase =
     driver.investigation_verdict === undefined
       ? undefined
-      : INVESTIGATION_PHRASES[driver.investigation_verdict];
+      : (INVESTIGATION_PHRASES[driver.investigation_verdict] ??
+        informativeMagnitudePhrase(driver));
   if (phrase === undefined) return base;
   return {
     ...base,
