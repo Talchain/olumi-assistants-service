@@ -40,7 +40,10 @@ import {
 } from '../forbidden-user-facing-phrases.js';
 import { qualitativeBand } from '../../../cee/factor-extraction/display-value.js';
 import { isValueUpdatePhrasing } from '../../../orchestrator/routing/value-update-gate.js';
-import { EDIT_GRAPH_POSITIVE_REGEX } from '../../../orchestrator/routing/edit-graph-intent-regex.js';
+import {
+  EDIT_GRAPH_NEGATIVE_REGEX,
+  EDIT_GRAPH_POSITIVE_REGEX,
+} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
 
 // ── The graph the witnessed session had on screen ──────────────────────────
 const UNITLESS_FACTOR: UnappliedEditNode = {
@@ -302,6 +305,30 @@ describe('CHIP ROUTEABILITY — asserted by execution against the shipped gate',
 
   it('POSITIVE CONTROL — the gate can say NO, so the assertion above is not vacuous', () => {
     expect(isValueUpdatePhrasing('Tell me the specific factor to change')).toBe(false);
+  });
+
+  it('the DELIBERATION chips route to the two DIFFERENT lanes they promise — measured, not assumed', () => {
+    // The deliberation branch offers two ways out, and they must land in
+    // different places or one of them is an advertised action that terminates
+    // in refusal. Asserted against the real dispatch predicate, and the two
+    // expectations DIFFER — a blind probe can fake agreement, but it cannot
+    // fake a discrimination it is not making.
+    const reply = composeUnappliedEditReply({ message: W4, nodes: NODES })!;
+    const byId = new Map(reply.chips.map((c) => [c.id, c.message]));
+    const answer = byId.get('unapplied_edit_deliberation_answer')!;
+    const proceed = byId.get('unapplied_edit_deliberation_proceed')!;
+    expect(answer).toBeDefined();
+    expect(proceed).toBeDefined();
+
+    const dispatchesToEditLane = (m: string): boolean =>
+      EDIT_GRAPH_POSITIVE_REGEX.test(m) && !EDIT_GRAPH_NEGATIVE_REGEX.test(m);
+
+    // "give me your view" must NOT be claimed by the edit lane, or the user
+    // asks a question twice and is refused twice.
+    expect(dispatchesToEditLane(answer)).toBe(false);
+    // "put it in the model" MUST be claimed by the edit lane, or the chip
+    // promises a change and delivers a conversation.
+    expect(dispatchesToEditLane(proceed)).toBe(true);
   });
 
   it('W1 also reaches the value lane — the uncertainty ask still ends somewhere real', () => {
