@@ -210,6 +210,23 @@ interface IntentPattern {
   readonly pattern: RegExp;
 }
 
+/**
+ * The outcome nouns the `what_changed` `how …` patterns anchor on.
+ *
+ * Extracted so the INTRANSITIVE ("how has the analysis changed?") and
+ * TRANSITIVE ("how has the update changed the analysis?") voices of the same
+ * question share ONE alternation instead of two hand-maintained copies — the
+ * "shared grammar must be imported, never re-stated" rule this module's
+ * siblings already follow (analytical-question-guard.ts:21-23).
+ *
+ * ⚠ Deliberately NOT reused by the `why (did|has|have) … chang` pattern above,
+ * which carries an extra `numbers?` limb. That is a REAL difference in that
+ * pattern's coverage, not drift, and widening it is a separate change with its
+ * own evidence — folding it in here would be an unmeasured behaviour change
+ * riding a refactor.
+ */
+const WHAT_CHANGED_SUBJECT_NOUNS = String.raw`(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option)`;
+
 const INTENT_PATTERNS: readonly IntentPattern[] = [
   // ── rerun_question (most specific — anchored on rerun/stale vocabulary) ─
   { cls: 'rerun_question', pattern: /\bdo\s+(?:i|we)\s+need\s+to\s+(?:re-?run|rerun|run\s+again)\b/i },
@@ -293,7 +310,54 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // otherwise the state-query guard answers the graph-edit sense.
   { cls: 'what_changed', pattern: /\bwhat(?:'s|\s+(?:has|just))?\s+changed\b/i },
   { cls: 'what_changed', pattern: /\bwhy\s+(?:did|has|have)\s+(?:the\s+)?(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option|numbers?)\s+chang/i },
-  { cls: 'what_changed', pattern: /\bhow\s+(?:did|has|have)\s+(?:the\s+)?(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option)\s+chang/i },
+  // INTRANSITIVE voice — the outcome noun is the SUBJECT of the change verb
+  // ("how has THE ANALYSIS changed?"). Byte-identical to the literal it
+  // replaced; `WHAT_CHANGED_SUBJECT_NOUNS` is the extracted alternation and
+  // `analytical-intent-what-changed.test.ts` pins `.source` against the
+  // original literal so this stays a pure move.
+  {
+    cls: 'what_changed',
+    pattern: new RegExp(
+      String.raw`\bhow\s+(?:did|has|have)\s+(?:the\s+)?${WHAT_CHANGED_SUBJECT_NOUNS}\s+chang`,
+      'i',
+    ),
+  },
+  // ⭐ TRANSITIVE voice of the SAME question — the outcome noun is the OBJECT
+  // ("how has THE UPDATE changed THE ANALYSIS?"). This is the founder's actual
+  // post-rerun EXPLAIN sentence, and until now it classified `null`, which cost
+  // it BOTH halves of the loop's EXPLAIN step at once:
+  //
+  //   1. `isAnalyticalQuestion` (analytical-question-guard.ts, which delegates
+  //      here) returned false, so route-v2's `editVerbCandidate` conjunction
+  //      (route-v2.ts:5018) saw only a positive edit-verb hit — matched on the
+  //      NOUN "update" — and dispatched the EDIT lane. The product answered a
+  //      question as if it were an edit request, then reported no change.
+  //   2. `tryRunComparisonGate` (run-comparison-gate.ts:630) admits only
+  //      `what_changed`, so the one mechanism that can actually answer the
+  //      question — the two-run `RunDelta` comparison — declined it.
+  //
+  // Deliberately NOT fixed by adding "how has" to `EDIT_GRAPH_NEGATIVE_REGEX`:
+  // that list is a flat alternation of meta-question markers with no grammar,
+  // it is consumed by 14 modules, and a literal added there suppresses the
+  // misroute WITHOUT routing the turn anywhere useful — the founder would get
+  // silence instead of a wrong edit. Classifying at the canonical SSOT fixes
+  // the suppression and the destination with one predicate. (CEE #888 spent
+  // four rounds proving one-more-literal oscillates on this predicate family.)
+  //
+  // Anchored on BOTH sides so it cannot reach an imperative edit: an
+  // interrogative `how` + a PAST/PERFECT auxiliary on the left (an edit command
+  // never opens that way), and the same outcome-noun alternation as the
+  // intransitive sibling on the right. The middle is a lazy, bounded,
+  // sentence-local gap — the idiom this file already uses for the `why is …
+  // ahead` what_drove pattern. `how do/can/should I change …` is a HOW-TO or an
+  // advice question, carries no past auxiliary, and is deliberately out.
+  {
+    cls: 'what_changed',
+    pattern: new RegExp(
+      String.raw`\bhow\s+(?:has|have|did)\b[^.?!\n]{0,40}?\b(?:chang|affect|shift|alter|impact)\w*\s+(?:the\s+|our\s+|this\s+|that\s+)?${WHAT_CHANGED_SUBJECT_NOUNS}\b`,
+      'i',
+    ),
+  },
   { cls: 'what_changed', pattern: /\bdid\s+(?:the\s+)?(?:result|outcome|ranking|leading\s+option|winner)\s+chang/i },
   { cls: 'what_changed', pattern: /\bwhat[''']?s\s+different\s+(?:now|in\s+(?:the\s+)?(?:result|results|outcome|analysis|ranking))\b/i },
 
