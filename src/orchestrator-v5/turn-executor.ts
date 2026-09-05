@@ -114,6 +114,7 @@ import {
   tryCompoundValueUpdate,
   buildClarifyAssistantText,
   buildNonFactorKindRefusalText,
+  isConstraintableKind,
   buildClarifyChipMessage,
   buildDeicticClarifyAssistantText,
   mapCqeQuantityToProposalValue,
@@ -278,8 +279,10 @@ import {
 } from './compose/proposed-change.js';
 import {
   buildWarrantDemotion,
+  findUnsupportedOfferTargetKind,
   isProductMintedOfferCopy,
   type PersistedConstraintRow,
+  type TargetKindLookupNode,
 } from './compose/warrant-demotion.js';
 import {
   derivePendingActivity,
@@ -9843,6 +9846,36 @@ export async function runTurnExecutor(
           return Array.isArray(rows) ? (rows as readonly PersistedConstraintRow[]) : [];
         })();
 
+        // ⭐⭐ TARGET-KIND PRECONDITION — the sibling of the registry-executable
+        // check above, and the same rule: do not offer a chip the resumer must
+        // refuse. That check asks whether the HANDLER exists; this one asks
+        // whether the TARGET is one it accepts.
+        //
+        // WITNESSED 1 Sep 2026 on deployed staging. "Engineering Overstretch"
+        // is a `risk`; `set_factor_value` accepts factors only. The product
+        // offered "Set this value", the user confirmed, and got "the target or
+        // value was not valid" — naming neither. The honest reason ("it is a
+        // risk") was in the graph BEFORE the chip was minted. Fixing the
+        // apology would have left the promise in place.
+        //
+        // Node source mirrors `existingConstraints` directly above: the
+        // persisted model is what the resuming handler will load, so it is the
+        // right thing to ask about the target's kind.
+        const offerTargetKindNodes: readonly TargetKindLookupNode[] = (() => {
+          const persistedNodes = (
+            context.persistedGraph as { nodes?: unknown } | null | undefined
+          )?.nodes;
+          if (Array.isArray(persistedNodes) && persistedNodes.length > 0) {
+            return persistedNodes as readonly TargetKindLookupNode[];
+          }
+          const turnNodes = graphStateForTurn?.nodes;
+          return Array.isArray(turnNodes) ? (turnNodes as readonly TargetKindLookupNode[]) : [];
+        })();
+        const unsupportedTargetKind = findUnsupportedOfferTargetKind(
+          action,
+          offerTargetKindNodes,
+        );
+
         const demotion = buildWarrantDemotion(action, existingConstraints);
         const graphHashForProposal =
           currentAnalysisGraphHashForTurn ?? freshness?.current_graph_hash ?? null;
@@ -9852,7 +9885,35 @@ export async function runTurnExecutor(
         let demotionOutcome: string;
         let demotionText: string;
 
-        if (!demotion.ok) {
+        if (unsupportedTargetKind !== null) {
+          // HONEST REFUSAL AT THE OFFER, not an apology after the confirm.
+          // Same copy the deterministic pre-route already uses for this exact
+          // case, so the product says one thing about one fact — and NO
+          // pending is persisted, because there is no resumable action here.
+          // Emitting one would rebuild the dead end by another door.
+          demotionOutcome = `emit_refused:unsupported_target_kind:${unsupportedTargetKind.nodeKind}`;
+          const factorLabelsForRefusal = offerTargetKindNodes
+            .filter((n) => (n as { kind?: unknown }).kind === 'factor')
+            .map((n) => (n as { label?: unknown }).label)
+            .filter((l): l is string => typeof l === 'string' && l.trim().length > 0);
+          demotionText = buildNonFactorKindRefusalText(
+            unsupportedTargetKind.label,
+            unsupportedTargetKind.nodeKind,
+            factorLabelsForRefusal,
+          );
+          // The constraint chip is offered ONLY when `add_constraint` genuinely
+          // accepts this kind — the same gate the refusal copy applies. A chip
+          // for a route that also refuses is the defect one turn along.
+          demotionChips = isConstraintableKind(unsupportedTargetKind.nodeKind)
+            ? [
+                {
+                  id: 'chip_prompt_refuse_constraint',
+                  label: `Add a constraint on ${unsupportedTargetKind.label}`,
+                  message: `Add a constraint on ${unsupportedTargetKind.label}.`,
+                },
+              ]
+            : [];
+        } else if (!demotion.ok) {
           // A mutating handler outside the three proposable intents. There is
           // no chip channel for it, so the honest outcome is a refusal that
           // says nothing was changed — never an execution.

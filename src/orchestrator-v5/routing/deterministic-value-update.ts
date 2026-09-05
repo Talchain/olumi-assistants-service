@@ -63,6 +63,7 @@ import { preNormalise } from '../context/cqe/pre-normalise.js';
 import { applyWordNumberPrePass } from '../context/cqe/word-numbers.js';
 import type { QuantityExtractionResult } from '../context/cqe/schema-types.js';
 import { formatValueWithUnit } from '../tools/handlers/d1-shared/format-confirmation.js';
+import { ALLOWED_TARGET_KINDS as ADD_CONSTRAINT_ALLOWED_TARGET_KINDS } from '../tools/handlers/add-constraint.js';
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
 import {
@@ -1414,6 +1415,21 @@ function articleFor(kind: string): string {
 }
 
 /**
+ * Can `add_constraint` actually accept a target of this kind?
+ *
+ * ONE predicate, exported, so the refusal PROSE and the refusal CHIP cannot
+ * disagree about whether the route they recommend exists. Two independent
+ * lookups of the same constant would agree today and drift the first time one
+ * of them grew a condition — the estate's dominant defect (CLAUDE.md trap 21:
+ * two authorities answering one question under similar names).
+ *
+ * Derived from the handler's own exported authority, never re-spelled here.
+ */
+export function isConstraintableKind(nodeKind: string): boolean {
+  return ADD_CONSTRAINT_ALLOWED_TARGET_KINDS.includes(nodeKind);
+}
+
+/**
  * User-facing copy for the "you named a real node, but it isn't a factor and
  * a value cannot be set on it" case (`dispatch: 'refuse_non_factor_kind'`).
  *
@@ -1465,11 +1481,24 @@ export function buildNonFactorKindRefusalText(
       : examples.length === 1
         ? `You can set a value on a factor instead — ${examples[0]}, for example.`
         : `You can set a value on a factor instead — ${examples[0]} or ${examples[1]}, for example.`;
+  // ⚠ THE CONSTRAINT ROUTE IS NOT UNIVERSAL, AND OFFERING IT BLIND RECREATES
+  // THIS DEFECT ONE TURN ALONG. `add_constraint` accepts factor / outcome /
+  // goal / risk; it REJECTS decision, action and option — and those kinds
+  // reach this copy, because `modelEntityLabels` above buckets decision and
+  // action alongside factors when scanning candidates. Sending a user to an
+  // action that will also refuse them is the same harm as the offer this
+  // refusal replaces, so the sentence is gated on the recommending handler's
+  // OWN exported authority rather than assumed (CLAUDE.md trap 12: derived,
+  // never mirrored). Where the route does not exist the refusal simply stops
+  // after the factor route, which is always real.
+  const constraintClause = isConstraintableKind(nodeKind)
+    ? ` If you want to hold ${label} to a limit, ask me to add a constraint on it.`
+    : '';
   return (
     `${label} is ${articleFor(nodeKind)} ${nodeKind}, not a factor, and I can't ` +
     `set a value on ${articleFor(nodeKind)} ${nodeKind} directly. The model is unchanged so far. ` +
-    `${exampleClause} ` +
-    `If you want to hold ${label} to a limit, ask me to add a constraint on it.`
+    `${exampleClause}` +
+    constraintClause
   );
 }
 
