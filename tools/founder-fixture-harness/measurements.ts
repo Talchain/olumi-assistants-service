@@ -111,13 +111,24 @@ export function collectMeasurements(turns: readonly TurnCapture[]): readonly Mea
     .map((e) => e.strength ?? e.weight ?? e.value)
     .filter((v): v is number => typeof v === 'number');
   const atHalf = strengths.filter((s) => Math.abs(s - 0.5) < 1e-9 || Math.abs(s - 50) < 1e-9).length;
+  // ⚠ WHEN THE READER FINDS NOTHING, PRINT THE KEYS IT DID SEE.
+  // `draft_graph.edges` is `z.unknown()[]` at the boundary pin, so the member
+  // carrying a strength is not derivable from the schema. The first live run
+  // reported "no numeric edge strengths across 27 drafted edges" — true, and
+  // useless: it says nothing about whether the reader is looking in the wrong
+  // place. Printing the observed key set turns a dead end into the one thing a
+  // reader needs to widen it, and keeps this a DERIVED observation rather than
+  // a guess at a field name.
+  const observedEdgeKeys = [...new Set(edges.flatMap((e) => Object.keys(e)))].sort();
   out.push({
     id: 'turn8.edge-strength-distribution',
     what: 'edge strengths in the drafted graph (the "all 50%" question turn 8 asks about)',
     value:
       strengths.length === 0
-        ? `no numeric edge strengths observable across ${edges.length} drafted edges`
-        : `${atHalf}/${strengths.length} edges at 0.5 · distinct values: ${[...new Set(strengths)].sort((a, b) => a - b).join(', ')}`,
+        ? `no numeric strength/weight/value member on any of ${edges.length} drafted edges. ` +
+          `Members actually present: [${observedEdgeKeys.join(', ') || 'none — no drafted edges observed'}]`
+        : `${atHalf}/${strengths.length} edges at 0.5 · distinct values: ${[...new Set(strengths)].sort((a, b) => a - b).join(', ')}` +
+          ` · edge members present: [${observedEdgeKeys.join(', ')}]`,
     why_not_decided: MEASUREMENT_ONLY,
   });
   out.push({
