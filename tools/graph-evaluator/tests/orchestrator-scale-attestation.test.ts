@@ -174,11 +174,17 @@ describe("unattested scale renders — the defect is now visible", () => {
   });
 
   // ── edge.strength_mean — the LARGEST source class in the fixture corpus ────
-  // Measured over all 23 orchestrator fixtures: 45 of the 65 records come from
-  // `edge.*.strength_mean`, and 10 fixtures are exposed by NO other source. It
-  // was also the class the first exposure count omitted. A causal strength is
-  // unitless and is not a probability (`orchestrator-scorer.ts`, the `edges`
-  // loop), so its percentage form is unattested — these two pin that.
+  // A causal strength is unitless and is not a probability (`orchestrator-scorer.ts`,
+  // the `edges` loop), so its percentage form is unattested. These two cases pin that.
+  //
+  // WHY THIS CLASS GETS ITS OWN CASES. It was the class the first exposure
+  // count omitted, and it is the biggest one. As MEASURED ON 2026-09-05 over
+  // the then-23 orchestrator fixtures: 45 of 65 records came from
+  // `edge.*.strength_mean`, and 10 fixtures were exposed by NO other source.
+  // ⚠ Those are dated observations about a corpus that can change, NOT
+  // invariants — nothing derives them and nothing fails if they drift. If you
+  // need the current figures, re-derive them by probing the fixtures; do not
+  // quote this comment.
 
   it("reports an edge strength_mean rendered as a percentage", () => {
     const fixture = makeFixture({
