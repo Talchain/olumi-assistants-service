@@ -115,6 +115,7 @@ import {
 import { enforceRepairVocabularyDenylist } from "../shared/repair-vocabulary-denylist.js";
 import { buildNoOpRecoveryChips } from "./edit-graph-noop-chips.js";
 import { buildEditClarifyFallbackParts } from "../../orchestrator-v5/compose/edit-clarify-response.js";
+import { classifyUnappliedEditFrame, composeUnappliedEditReply } from "../../orchestrator-v5/compose/unapplied-edit-reply.js";
 // ROADMAP 2.427 — the no-op preservation path is the one surface where the edit
 // LLM's own prose reaches the user verbatim, so it is the one surface that can
 // still advise a phrasing the product refuses. See the trip test below.
@@ -2644,9 +2645,45 @@ export async function handleEditGraph(
       // (composeEditClarifyResponse) instead of the chip-less canned
       // NO_OP_FALLBACK_TEXT. The copy passes the egress phrase guards
       // (pinned by the edit-clarify-response tests).
+      //
+      // ⭐⭐ ROADMAP 2.1361 — THE TWO QUESTIONS, NAMED APART.
+      //
+      // `buildEditClarifyFallbackParts` answers ONE question with ONE
+      // sentence, and the witnessed session (4 Sep 2026) proved it is
+      // answering two. Four consecutive messages received it verbatim:
+      // two were edits that NAMED the object and the value ("Change the
+      // team coordination overhead to low") and were told to name the
+      // object and the value; two were questions ("Do you agree that we
+      // should add this as a risk?") that were never change requests and
+      // received an edit-refusal.
+      //
+      // `composeUnappliedEditReply` splits that into
+      // `classifyUnappliedEditFrame` (was this an instruction or a request
+      // for my view?) and `resolveUnappliedEditUnderstanding` (given an
+      // instruction, what did we understand?) — two predicates, two names,
+      // never one window with two defaults. It returns `null` when it can
+      // ground nothing, and the generic fallback below is then unchanged;
+      // that null set is pinned exactly in its spec.
+      //
+      // ⚠ SCOPED TO THE BRANCH THAT SHIPPED THE HARM. It runs only where
+      // the deterministic fallback would have run — a PRESERVED LLM
+      // clarifying question (R10) still wins, untouched. The witnessed
+      // copy was byte-identical to the deterministic fallback, so that is
+      // the branch that carries the defect.
+      const unappliedEditReply = noOpClarificationPreserved
+        ? null
+        : composeUnappliedEditReply({
+            message: editDescription,
+            nodes: context.graph.nodes as ReadonlyArray<{
+              id: string;
+              kind: string;
+              label: string;
+            }>,
+          });
       const clarifyFallback = noOpClarificationPreserved
         ? null
-        : buildEditClarifyFallbackParts(
+        : unappliedEditReply ??
+          buildEditClarifyFallbackParts(
             context.graph.nodes as ReadonlyArray<{ id: string; kind: string; label: string }>,
           );
       const assistantText = noOpClarificationPreserved
@@ -2690,6 +2727,14 @@ export async function handleEditGraph(
           preceded_by_plot_rejection: !!lastPlotErrors,
           preceded_by_validation_failure: !!(lastValidationResult && !lastValidationResult.valid),
           deterministic_chips_emitted: recoveryChips.length,
+          // ROADMAP 2.1361 — which of the TWO questions this no-op answered.
+          // `null` when the LLM's own question was preserved (the composer
+          // never ran) or when it grounded nothing (known-dropped).
+          unapplied_edit_reply: unappliedEditReply !== null,
+          unapplied_edit_frame:
+            unappliedEditReply !== null
+              ? classifyUnappliedEditFrame(editDescription)
+              : null,
         },
         "edit_graph returned empty operations (no-op)",
       );
