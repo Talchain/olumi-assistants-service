@@ -290,6 +290,148 @@ describe('the four discriminating twins (predicate level)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 3b. THE BARE IMPERATIVE — the founder's "Rerun."
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐ PROVENANCE: a REAL user turn, not an invented one. Founder journey on
+ * deployed staging (CEE `1af54f6c`), 2026-09-05T16:53Z, turn 6 of eleven. The
+ * user typed exactly `Rerun.` and was answered with
+ * {@link ANALYSIS_ELECTION_DEMOTION_TEXT} — a sentence that tells them to say
+ * "run the analysis" instead. No analysis ran: `computed_at` was
+ * byte-identical across turns 3 through 11.
+ *
+ * WHY THE PREDICATE MISSED IT. `ANALYSIS_REQUEST_VERB_SOURCE` (`(?:re-?)?run`)
+ * requires an OBJECT, because `run` is an everyday transitive verb and `rerun`
+ * has a nominal homograph. A message that is NOTHING BUT the verb has no
+ * object to give it, so it fell to the bare-noun reading and was demoted.
+ *
+ * ⚠⚠ AND THE OBJECT REQUIREMENT DOES NOT ACTUALLY BUY THE EXCLUSION IT IS
+ * DEFENDED FOR — MEASURED AT THIS TIP, NOT ASSUMED. The homograph sentence the
+ * sibling predicate's ⚠ note names as the reason for the object rule,
+ * "Rerun analysis showed a different leader.", ALREADY reads TRUE here: the
+ * determiner is OPTIONAL in `ANALYSIS_REQUEST_OBJECT_SOURCE`, so `rerun` +
+ * `analysis` matches and the gate ADMITS it today. Pinned below, because it is
+ * the whole argument for why this change is strictly safe: an anchored pattern
+ * that matches ONLY a message consisting of the bare verb cannot admit any
+ * noun phrase, and therefore cannot make an already-admitted homograph worse.
+ *
+ * SCOPE, stated so it is not over-read. This admits an ELECTION the LLM router
+ * already made; it does NOT widen {@link looksLikeImperativeRerun}, the
+ * LLM-free DISPATCH predicate, whose false positive destroys a computed result
+ * and which must stay narrow (trap 21 — two questions under one name). That
+ * separation is asserted, not asserted-about.
+ */
+describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', () => {
+  it('the founder\'s exact turn-6 message is ADMITTED', () => {
+    // Bound by IDENTITY: this exact string, this exact outcome. Not a value
+    // predicate another message could satisfy (CLAUDE.md trap 19).
+    const outcome = evaluateAnalysisElection({
+      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+      message: 'Rerun.',
+    });
+    expect(outcome.kind).toBe('admitted');
+    expect(outcome.kind === 'admitted' && outcome.reason).toBe('explicit_analysis_request');
+  });
+
+  it.each([
+    'Rerun.',
+    'Re-run.',
+    'rerun',
+    'RERUN.',
+    'Rerun!',
+    '  Rerun.  ',
+    're-run.',
+    'Rerun .',
+  ])('MUST-FIRE — a message that is nothing but the verb, %j, is ADMITTED', (message) => {
+    expect(
+      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message }).kind,
+    ).toBe('admitted');
+  });
+
+  it.each([
+    // Every must-fire row above has its OPPOSITE-DIRECTION TWIN here, in the
+    // same order (trap 22b: a corpus that tests one direction is a guard
+    // watching one door).
+    ['Rerun.', 'Rerun?'],            // instruction vs question
+    ['Re-run.', 'Re-runs.'],         // verb vs plural noun
+    ['rerun', 'reruns'],             // verb vs plural noun, no punctuation
+    ['RERUN.', 'RERUN COSTS.'],      // verb vs noun-modifier, case-insensitive
+    ['Rerun!', 'Rerun what?'],       // instruction vs question with an object
+    ['  Rerun.  ', '  The rerun.  '],// verb vs determiner + noun
+    ['re-run.', 're-run cost.'],     // verb vs compound noun
+    ['Rerun .', 'Rerun later.'],     // verb vs verb + adjunct (not bare)
+  ])('TWIN — %j is admitted but its neighbour %j is still DEMOTED', (_fire, decline) => {
+    expect(
+      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message: decline })
+        .kind,
+    ).toBe('demoted');
+  });
+
+  it.each([
+    // The four nominal readings this repo RECORDS as having once wrongly
+    // EXECUTED a re-run (see `IMPERATIVE_RERUN_PATTERNS`' ⚠ note). They are
+    // questions about a PAST run and must never be read as instructions.
+    'What changed in the re-run?',
+    'Show me the re-run results.',
+    'How long did the rerun take?',
+    'Was the rerun better?',
+    // Refusals — the shared negation veto must still outrank the new pattern.
+    "Don't rerun.",
+    'Do not rerun.',
+    'Never rerun.',
+    // Interrogatives — the shared interrogative veto must still fire.
+    'Should I rerun?',
+    'Do we rerun?',
+  ])('UNCHANGED — %j stays DEMOTED (the shared safety envelope still governs)', (message) => {
+    expect(
+      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message }).kind,
+    ).toBe('demoted');
+  });
+
+  it('the homograph the object rule is defended for was ALREADY admitted — this change cannot worsen it', () => {
+    // Pinned so the load-bearing argument for this change cannot silently
+    // become false. If this ever flips to `demoted`, the justification above
+    // is stale and TWIN E must be re-argued, not merely re-run.
+    expect(
+      evaluateAnalysisElection({
+        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+        message: 'Rerun analysis showed a different leader.',
+      }).kind,
+    ).toBe('admitted');
+  });
+
+  it('does NOT widen the LLM-free dispatch predicate (trap 21 — the separation holds)', () => {
+    const bareImperatives = [
+      'Rerun.',
+      'Re-run.',
+      'rerun',
+      'RERUN.',
+      'Rerun!',
+      '  Rerun.  ',
+      're-run.',
+      'Rerun .',
+    ];
+    // Positive control: the corpus is non-empty and the assertion is reachable.
+    expect(bareImperatives.length).toBe(8);
+    for (const message of bareImperatives) {
+      // `looksLikeImperativeRerun` may DISPATCH with no LLM call, and a false
+      // positive there destroys the user's computed result. It must stay
+      // exactly as narrow as it was.
+      expect(
+        looksLikeImperativeRerun(message),
+        `${message} must NOT become an LLM-free dispatch`,
+      ).toBe(false);
+      // …while the admission predicate now admits it.
+      expect(
+        looksLikeExplicitAnalysisRequest(message),
+        `${message} must be admitted by the gate's predicate`,
+      ).toBe(true);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 4. The gate is inert on every other handler, and is MONOTONE
 // ---------------------------------------------------------------------------
 

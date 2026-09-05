@@ -1070,6 +1070,54 @@ const EXPLICIT_ANALYSIS_REQUEST_PATTERNS: readonly RegExp[] = [
   // Object-less form, for the verbs with no nominal homograph:
   // "Analyse.", "Analyse options", "Simulate it", "Re-analyse."
   new RegExp(String.raw`\b${OBJECTLESS_ANALYSIS_VERB_SOURCE}\b`, 'i'),
+  // ⭐ BARE-IMPERATIVE `rerun` — ANCHORED TO THE WHOLE MESSAGE.
+  //
+  // WITNESS, not a hypothetical: founder journey on deployed staging (CEE
+  // `1af54f6c`), 2026-09-05T16:53Z, turn 6 of eleven. The user typed exactly
+  // `Rerun.` and the gate demoted it, so the product answered "I did not read
+  // that as a request to run one… Say \"run the analysis\"" and no analysis
+  // ran (`computed_at` byte-identical across turns 3-11). The single most
+  // natural word for the action, answered by teaching the user our vocabulary.
+  //
+  // WHY IT MISSED. `ANALYSIS_REQUEST_VERB_SOURCE` requires an object, for the
+  // good reason given above it. A message that is NOTHING BUT the verb has no
+  // object to give, so it fell through.
+  //
+  // ⚠ WHY THIS IS NOT A WEAKENING OF THE OBJECT RULE, and the argument is
+  // MEASURED at this tip rather than assumed. The homograph that rule is
+  // defended for — "Rerun analysis showed a different leader." — ALREADY reads
+  // TRUE here, because the determiner is OPTIONAL in
+  // `ANALYSIS_REQUEST_OBJECT_SOURCE`. The exclusion the ⚠ note above claims is
+  // not in force in THIS predicate (it is in force in the sibling
+  // `IMPERATIVE_RERUN_PATTERNS`, which does require the determiner — and which
+  // this entry does not touch). So the object requirement here is not buying
+  // the protection it is credited with, and an anchored alternation that can
+  // match ONLY a message consisting of the bare verb cannot reduce it further:
+  // it admits no noun phrase, because a noun phrase has something either side.
+  // Both facts are pinned in `analysis-election-gate.test.ts` § TWIN E, so
+  // this paragraph REDs if it ever stops being true.
+  //
+  // ⚠ ANCHORED, DELIBERATELY, AND THE ANCHORS ARE THE WHOLE PATTERN. `^` and
+  // `$` (no `m` flag) are what keep this from becoming a bare `/\brerun\b/i`,
+  // which would admit every nominal reading in English — the exact defect the
+  // sibling predicate shipped once and whose ⚠ note says "never restore the
+  // `?`". Trailing `[.!]?` admits a full stop or an exclamation mark and NOT a
+  // question mark: "Rerun?" is a question about whether to, and the shared
+  // interrogative veto is not reached for it because there is no `do/should
+  // I/we`. Removing either anchor is a different predicate; do not.
+  //
+  // ⚠ SCOPE. This widens ADMISSION of an election the LLM router already made.
+  // It does NOT widen `looksLikeImperativeRerun`, the LLM-free DISPATCH
+  // predicate whose false positive destroys a computed result (trap 21 — the
+  // two answer different questions and have opposite safe directions).
+  // Asserted directly in TWIN E, over this exact eight-message set.
+  //
+  // ⚠ KNOWN-DROPPED, pinned rather than papered over (trap 22f). Non-bare
+  // neighbours still decline: "Please rerun.", "Rerun, please.", "Rerun...",
+  // "Rerun and explain." Each costs one click on the offered chip. Adding a
+  // clause for any of them is the second round trap 22f bans — the exit is to
+  // ask the user, not to widen this again.
+  /^\s*re-?run\s*[.!]?\s*$/i,
 ];
 
 /**
