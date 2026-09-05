@@ -905,8 +905,11 @@ export function enumerateCompletionAsk(
   // (`475a18b9:1.0000|dbc7be0a:0.0000`). They are genuinely different
   // alternatives — one sequences the work, one does not — and the model simply
   // never said how they differ. That is a gap the brief can close, so it is
-  // askable; the ask is phrased to permit "it does not", because a difference
-  // invented to satisfy a validator is a number the user will read as their own.
+  // askable; the ask is phrased to permit "it does not" because a difference
+  // manufactured only to clear this check decides the RANKING, which is the
+  // user's call. ⚠ NOT because the number would be read as the user's own —
+  // an uncited magnitude is stamped `cee_hypothesis` by the projector
+  // (`projector.ts:1712-1717`), and that premise is v9's, withdrawn at v10.
   {
     const bySignature = new Map<string, string[]>();
     for (const node of nodes) {
@@ -1161,6 +1164,44 @@ function renderRecordsForAsk(records: DraftRecordSet): string {
  * "do not invent" clause is load-bearing and is phrased as a PERMISSION to
  * return nothing, because a completion turn that feels obliged to produce
  * claims will produce them.
+ *
+ * ⭐⭐ TWO QUESTIONS, NAMED APART (CLAUDE.md trap 21). This prompt answers both
+ * and they have OPPOSITE answers, so collapsing them is how the contradiction
+ * below got written in the first place:
+ *
+ *   "may I add a RECORD the brief does not support?"  — NO. The closing
+ *     paragraph forbids it, and it is the property this whole mechanism exists
+ *     to defend.
+ *   "may I estimate a MAGNITUDE the brief does not state?" — YES, and it must
+ *     agree with `DRAFT_RECORDS_INSTRUCTION`'s
+ *     `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES`, because pass 2's links
+ *     are merged into pass 1's record set and projected as ONE graph.
+ *
+ * ⚠ v9's WITHDRAWN RULE SURVIVED HERE IN TWO PLACES, AND THEY WERE CLOSED
+ * SEPARATELY. The general rule above lost its clause *"— but only where the
+ * brief gives you the basis for it"* on 2026-09-05 (#1349), which carried the
+ * draft's magnitude policy across word for word. Its SIBLING was left standing
+ * seventeen lines below — *"Use only levels the brief gives you the basis for.
+ * Do not invent a number to tell them apart …"* — so the contradiction stopped
+ * being one BETWEEN two prompts and became one INSIDE this prompt: two opposite
+ * answers to the same question, to one model, in one turn. #1349's guard cannot
+ * see it, because its negative is scoped to the exact string *"but only where
+ * the brief gives you the basis for it"* (trailing *"for it"*), which the
+ * sibling does not contain. This change closes the sibling.
+ *
+ * The premise BOTH clauses rested on ("a guessed number is read as the user's
+ * own") is refuted at the projector's bytes: `bindDirectStatedMagnitude`
+ * (`projector.ts:1632`; stamp at `:1712-1717`) marks an UNCITED option→factor
+ * magnitude `cee_hypothesis`, and only a value equal to a stated figure that
+ * VERIFIES against the brief bytes is ever stamped `brief_extraction`
+ * (`:1799`). Agreement is pinned by
+ * `__tests__/sets-to-policy-agreement.test.ts`, which derives BOTH strings from
+ * their modules rather than copying either.
+ *
+ * ⚠ AND IT IS UNMEASURED. A prompt cannot be unit-tested for behaviour; the
+ * spec pins only that the two rules do not contradict. Whether it moves usable
+ * interventions per option is an OUTCOME question, and no instrument in this
+ * repo answers it yet.
  */
 export function buildRecordsCompletionPrompt(args: {
   brief: string;
@@ -1277,9 +1318,11 @@ export function buildRecordsCompletionPrompt(args: {
     "Where two options are listed above as indistinguishable: the analysis cannot compare them, and",
     "a model carrying such a pair is rejected outright — so leaving them as they are is not a safe",
     "answer. Separate them using what the brief SAYS: a factor one of them acts on and the other",
-    "does not, or the same factor at different levels via `sets_to`. Use only levels the brief gives",
-    "you the basis for. Do not invent a number to tell them apart — a difference made up here is a",
-    "number the user will read as their own, and that is a worse failure than the rejection.",
+    "does not, or the same factor at different levels via `sets_to`, estimated the same way as",
+    "above and kept consistent across the options. What you must not do is manufacture a difference",
+    "you cannot defend: an estimated LEVEL leaves the ranking to the analysis, but a GAP invented",
+    "only to clear this check decides that ranking here, and the ranking is the user's to make — a",
+    "worse failure than the rejection.",
     "",
     "Do not restate anything the user said; you cannot, and you do not need to.",
     "Do not add a factor or a link the brief does not support. If a gap above cannot be closed from",
