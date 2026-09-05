@@ -54,6 +54,10 @@ import {
   type ContextPackCeilingCutSection,
 } from './context-policy.js';
 import { partitionInterventionControlledDrivers } from './intervention-controlled-drivers.js';
+import type {
+  FactorInvestigationSignal,
+  FactorInvestigationVerdict,
+} from './factor-investigation-licence.js';
 import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import { EMPTY_COACHING_CACHE, type CoachingCache } from '../coaching/types.js';
 import type { ContextPackConversationSummary } from '../rolling-summary/inject.js';
@@ -196,6 +200,47 @@ export interface ContextPackAnalysisOption {
 export interface ContextPackAnalysisDriver {
   readonly factor_label: string;
   readonly sensitivity_value: number;
+  /**
+   * The producer's own verdict on whether this factor is worth RESOLVING —
+   * see `./factor-investigation-licence.ts`. Joined on the structural
+   * `factor_id` before this projection strips it.
+   *
+   * ⚠ A DIFFERENT QUESTION FROM `sensitivity_value` (trap #21). Sensitivity
+   * says how much this factor moves the outcome; this says whether there is
+   * any measured gain in the user going and pinning it down. The witnessed
+   * live harm was a factor with `sensitivity_score: -0.35` and
+   * `value_of_information: 0` — it mattered a great deal AND was worthless to
+   * investigate, and with only the first field projected the model could not
+   * possibly know the second.
+   *
+   * Key absent when the producer said nothing (older producer) or scored a
+   * real value of information — both keep today's behaviour exactly.
+   */
+  readonly investigation_verdict?: FactorInvestigationVerdict;
+  /**
+   * True when that verdict rests on a heuristic method or a default range, so
+   * the display layer can disclose the strength of its own evidence instead of
+   * asserting a settledness the producer never claimed.
+   */
+  readonly investigation_basis_heuristic?: boolean;
+  /**
+   * The producer's `value_of_information` for this factor — the dimensionless
+   * [0,1] figure the verdict above is decided on.
+   *
+   * ⭐ Carried so a claim's STRENGTH can match its evidence. The verdicts decide
+   * whether a factor may be recommended at all; this says how MUCH it is worth,
+   * which is a different question and the one the composer was missing for
+   * every `informative` factor. Additive only — the display layer bands it and
+   * never suppresses on it.
+   *
+   * ⚠ This is the PUBLIC-SURFACE figure, never `m1_coaching.evidence_gaps[]
+   * .voi_score`. Derived at PLoT, those are different quantities sharing a
+   * word — see `./factor-investigation-licence.ts` for the two formulas and the
+   * producer's own regression pin against conflating them.
+   *
+   * Key absent when the producer emitted no finite figure.
+   */
+  readonly investigation_voi?: number;
 }
 
 export interface ContextPackAnalysisFragileEdge {
@@ -2296,6 +2341,7 @@ export function projectTopDrivers(
   drivers: readonly DriverSummary[],
   controlledFactorIds?: ReadonlySet<string>,
   cap: number = TOP_DRIVER_CAP,
+  investigation?: readonly FactorInvestigationSignal[],
 ): ContextPackAnalysisDriver[] {
   // Spine A backstop: drop any driver whose factor is option-controlled BEFORE
   // the projection strips `factor_id` (the structural match key). Authority is
@@ -2325,12 +2371,55 @@ export function projectTopDrivers(
     }
     source = kept;
   }
+  // Join the producer's investigation verdict BEFORE `factor_id` is stripped.
+  // ⚠ IDENTITY FIRST (trap #19): the id index is authoritative and the label
+  // index is consulted ONLY for a driver that carries no id, because two
+  // factors can share a label and a label-first join would silently stamp one
+  // factor's verdict onto another.
+  const byId = new Map<string, FactorInvestigationSignal>();
+  const byLabel = new Map<string, FactorInvestigationSignal>();
+  for (const signal of investigation ?? []) {
+    if (signal.factor_id !== null && signal.factor_id.length > 0) {
+      byId.set(signal.factor_id, signal);
+    }
+    byLabel.set(signal.factor_label.trim().toLowerCase(), signal);
+  }
+  const verdictFor = (d: DriverSummary): FactorInvestigationSignal | undefined => {
+    const id = typeof d.factor_id === 'string' ? d.factor_id.trim() : '';
+    if (id.length > 0) {
+      const hit = byId.get(id);
+      // A driver that HAS an id but is absent from the id index gets no
+      // verdict — never a label fallback, which is where a wrong-object match
+      // would come from.
+      if (hit !== undefined) return hit;
+      if (byId.size > 0) return undefined;
+    }
+    return byLabel.get(d.factor_label.trim().toLowerCase());
+  };
+
   return source
     .filter((d) => isFiniteSensitivity(d.sensitivity))
-    .map((d) => ({
-      factor_label: d.factor_label,
-      sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
-    }))
+    .map((d) => {
+      const signal = verdictFor(d);
+      return {
+        factor_label: d.factor_label,
+        sensitivity_value: toSignedInfluenceValue(d.direction, d.sensitivity),
+        // Keys ABSENT (never undefined-valued) when the producer said nothing,
+        // so the strict ContextPack schema and the pre-fix byte-shape are both
+        // preserved for every driver this fix is not about.
+        ...(signal !== undefined
+          ? {
+              investigation_verdict: signal.verdict,
+              ...(signal.heuristic_basis ? { investigation_basis_heuristic: true as const } : {}),
+              // Magnitude rides along whenever the producer supplied one — the
+              // display layer decides where it is worth rendering.
+              ...(signal.value_of_information !== null
+                ? { investigation_voi: signal.value_of_information }
+                : {}),
+            }
+          : {}),
+      };
+    })
     .sort((a, b) => Math.abs(b.sensitivity_value) - Math.abs(a.sensitivity_value))
     .slice(0, cap);
 }
@@ -2536,6 +2625,9 @@ export function projectAnalysis(
     analysis.top_drivers,
     controlledFactorIds,
     CONTEXT_PACK_TOP_DRIVER_CAP,
+    // The producer's investigation verdict travels WITH the driver so the
+    // display projection cannot present influence without it.
+    analysis.factor_investigation,
   );
 
   // 3. Robustness band: null when source is unknown / empty; do not fabricate.
