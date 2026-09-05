@@ -243,13 +243,30 @@ describe('classifyUnsupportedOptionLinks', () => {
 // The ask. THIS is the deliverable: the exact words the user now sees.
 // ---------------------------------------------------------------------------
 
+/**
+ * Computed INSIDE each test, never in the describe body: a mutation that
+ * makes the classifier return null must fail an assertion BY NAME, not throw
+ * at collection. A spec that dies at collect reports "no tests" and tells a
+ * mutation run nothing at all.
+ */
+function capturedMatch(): UnsupportedOptionLinkMatch {
+  const m = classifyUnsupportedOptionLinks(CAPTURED_OPS, GRAPH);
+  expect(m).not.toBeNull();
+  return m as UnsupportedOptionLinkMatch;
+}
+
+function capturedAsk(): string {
+  return buildGmUnsupportedLinkHeldAssistantText(
+    capturedMatch(),
+    describeHeldOperationsSubject(CAPTURED_OPS, GRAPH),
+    CAPTURED_OPS.length,
+  );
+}
+
 describe('buildGmUnsupportedLinkHeldAssistantText', () => {
-  const match = classifyUnsupportedOptionLinks(CAPTURED_OPS, GRAPH) as UnsupportedOptionLinkMatch;
-  const subject = describeHeldOperationsSubject(CAPTURED_OPS, GRAPH);
-  const ask = buildGmUnsupportedLinkHeldAssistantText(match, subject, CAPTURED_OPS.length);
 
   it('is the exact sentence the captured user would now see', () => {
-    expect(ask).toBe(
+    expect(capturedAsk()).toBe(
       "I'm holding these changes rather than applying them straight away: " +
         "add risk 'Spend on resources without hitting launch date', " +
         "link 'Hire a Tech Lead' to 'Spend on resources without hitting launch date', " +
@@ -265,25 +282,28 @@ describe('buildGmUnsupportedLinkHeldAssistantText', () => {
   });
 
   it('names the risk the user asked for, and both options, verbatim', () => {
+    const ask = capturedAsk();
     expect(ask).toContain(LABEL_RISK);
     expect(ask).toContain(LABEL_LEAD);
     expect(ask).toContain(LABEL_DEVS);
   });
 
   it('offers the supported shape and does not present the discarded links as effective', () => {
+    const ask = capturedAsk();
     expect(ask).toContain('An option reaches a risk through a factor.');
     expect(ask).toContain('without reaching the result');
   });
 
   it('does not block the user: a yes is still explicitly available', () => {
-    expect(ask).toContain('reply yes to add it exactly as described');
+    expect(capturedAsk()).toContain('reply yes to add it exactly as described');
   });
 
   it('single unsupported link renders singular copy', () => {
     const oneOps = [CAPTURED_OPS[0]!, CAPTURED_OPS[1]!];
-    const oneMatch = classifyUnsupportedOptionLinks(oneOps, GRAPH) as UnsupportedOptionLinkMatch;
+    const oneMatch = classifyUnsupportedOptionLinks(oneOps, GRAPH);
+    expect(oneMatch).not.toBeNull();
     const oneAsk = buildGmUnsupportedLinkHeldAssistantText(
-      oneMatch,
+      oneMatch as UnsupportedOptionLinkMatch,
       describeHeldOperationsSubject(oneOps, GRAPH),
       oneOps.length,
     );
@@ -293,7 +313,7 @@ describe('buildGmUnsupportedLinkHeldAssistantText', () => {
   });
 
   it('falls back to the generic swept ask when no subject is safe', () => {
-    expect(buildGmUnsupportedLinkHeldAssistantText(match, null, 4)).toBe(
+    expect(buildGmUnsupportedLinkHeldAssistantText(capturedMatch(), null, 4)).toBe(
       GM_UNSUPPORTED_LINK_HELD_ASSISTANT_TEXT,
     );
   });
@@ -305,32 +325,27 @@ describe('buildGmUnsupportedLinkHeldAssistantText', () => {
 });
 
 describe('copy sweeps (provisional_doctrine_v0)', () => {
-  const match = classifyUnsupportedOptionLinks(CAPTURED_OPS, GRAPH) as UnsupportedOptionLinkMatch;
-  const texts = [
+  const sweptTexts = (): readonly string[] => [
     GM_UNSUPPORTED_LINK_HELD_ASSISTANT_TEXT,
-    buildGmUnsupportedLinkHeldAssistantText(
-      match,
-      describeHeldOperationsSubject(CAPTURED_OPS, GRAPH),
-      CAPTURED_OPS.length,
-    ),
+    capturedAsk(),
   ];
 
   it('claims no success and trips no forbidden user-facing phrase', () => {
-    for (const t of texts) {
+    for (const t of sweptTexts()) {
       expect(findSuccessClaimHit(t)).toBeNull();
       expect(findForbiddenPhraseHit(t)).toBeNull();
     }
   });
 
   it('uses no held-science vocabulary and no em dash', () => {
-    for (const t of texts) {
+    for (const t of sweptTexts()) {
       expect(HELD_SCIENCE_VOCABULARY_PATTERN.test(t)).toBe(false);
       expect(t).not.toContain('—');
     }
   });
 
   it('leaks no internal vocabulary (node / edge / operation)', () => {
-    for (const t of texts) {
+    for (const t of sweptTexts()) {
       expect(/\bnodes?\b/i.test(t)).toBe(false);
       expect(/\bedges?\b/i.test(t)).toBe(false);
       expect(/\boperations?\b/i.test(t)).toBe(false);
