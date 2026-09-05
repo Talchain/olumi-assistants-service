@@ -422,31 +422,48 @@ const NON_PATTERN_EXTRACTORS = ["goalTargetWithBaseline"] as const;
 const CANONICAL_COVERAGE: Readonly<
   Record<string, ReadonlyArray<readonly [string, readonly FactorShape[]]>>
 > = {
+  /* -------------------------------------------------------------------------
+   * ⭐⭐ THE BARE COMPANION IS GONE, AND THAT IS THE CHANGE (ROADMAP 2.1131).
+   *
+   * Every entry below used to pin TWO factors: the correct magnitude-bearing
+   * reading AND a bare twin from the `currency` fallback — `$2.5m` producing
+   * 2,500,000 **and 2.5**, `£5m` producing 5,000,000 **and 5**. The original
+   * comment called that companion evidence: "pinning it is what makes the
+   * refusal's scope measurable rather than asserted." It was measuring the
+   * scope of a refusal correctly; what nobody asked was whether the companion
+   * should exist at all.
+   *
+   * ⚠ IT SHOULD NOT, AND THE DEBUG BUNDLE FROM 3 SEP 2026 SAYS WHY. A bare
+   * twin is a 1,000x-to-1,000,000,000x-short duplicate of a number this service
+   * has ALREADY read correctly, emitted at confidence 0.6 beside the 0.85 that
+   * is right. `mergeFactors` picks one. On Paul's own brief it picked the short
+   * one: `raw_value: 80` for a stated "£80-120k", which then set the factor's
+   * scale and refused his £100,000 correction against "the factor's cap of
+   * £100" (`olumi-debug-f2e2df1b-20260903.json`).
+   *
+   * `MAGNITUDE_SUFFIX_ABSENT_GUARD` makes the bare pattern decline the amounts
+   * its magnitude-bearing sibling owns. The arrays stay COMPLETE and exact, so
+   * this remains the guard that REDs if an extractor's output changes at all —
+   * only the pinned expectation moves, and it moves by exactly one deletion per
+   * case, deliberately, with the reason recorded here.
+   * ----------------------------------------------------------------------- */
   currencyWithMultiplier: [
-    // Decimal — M9's shape. The companion is the second entry, and pinning it
-    // is what makes the refusal's scope measurable rather than asserted.
+    // Decimal — M9's shape.
     ["We raised $2.5m last year.", [
       ["Value", 2_500_000, "$", "explicit", 0.85, null],
-      ["Value", 2.5, "$", "inferred", 0.6, null],
     ]],
-    // M7's shapes, carried forward. Pristine 7f57602 output verbatim for the
-    // first three; `$5bn` is the targeted change, pinned to prove it lands in
-    // exactly the shape `£5m` already had rather than in some new one.
+    // M7's shapes, carried forward.
     ["We raised £5m last year.", [
       ["Value", 5_000_000, "£", "explicit", 0.85, null],
-      ["Value", 5, "£", "inferred", 0.6, null],
     ]],
     ["We raised $5 million last year.", [
       ["Value", 5_000_000, "$", "explicit", 0.85, null],
-      ["Value", 5, "$", "inferred", 0.6, null],
     ]],
     ["We raised €5K last year.", [
       ["Value", 5_000, "€", "explicit", 0.85, null],
-      ["Value", 5, "€", "inferred", 0.6, null],
     ]],
     ["We raised $5bn last year.", [
       ["Value", 5_000_000_000, "$", "explicit", 0.85, null],
-      ["Value", 5, "$", "inferred", 0.6, null],
     ]],
   ],
   currency: [["We raised $100 last year.", [["Value", 100, "$", "inferred", 0.6, null]]]],
@@ -469,6 +486,32 @@ const CANONICAL_COVERAGE: Readonly<
   // fallback's 0.6 — the collision that let the old coverage pass on the
   // wrong factor.
   approximateValue: [["roughly 50 customers", [["Factor", 50, null, "inferred", 0.7, null]]]],
+  // ⚠ THE BARE LOWER BOUND IS GONE WHERE A **MAGNITUDE** IS AT STAKE
+  // (ROADMAP 2.1131), and that is the carrier that actually reached the user.
+  // `currency` read `£80` of "£80-120k" and stopped at the hyphen, so a
+  // correctly-read range travelled beside a point 1,000x short of it — and
+  // that 80 is what the 3 Sep session enforced a scale from.
+  //
+  // ⚠⚠ IT IS **NOT** GONE HERE, AND THE RESTORATION IS DELIBERATE (review N1).
+  // "£50-70" carries no magnitude on either bound, so the point reading loses
+  // nothing and `RANGE_LOWER_BOUND_ABSENT_GUARD` no longer declines it. The
+  // first cut of that guard was purely syntactic — any amount before
+  // dash-then-digit — and the breadth cost a stated figure on the reachable
+  // path: measured through `enrichGraphWithFactorsAsync`, "The budget is
+  // £50,000 - 3 months of runway." went from `raw_value 50000 / "explicit"`
+  // at base `f4c8f501` to `raw_value 25001.5 / "range"` with
+  // `rangeMin 50000 > rangeMax 3` at `6e982fc3`. See
+  // `utils/__tests__/amount-range.test.ts`, "the point-suppression declines
+  // only where a MAGNITUDE is at stake".
+  //
+  // ⭐ WHAT THE RESTORED COMPANION DOES **NOT** DO, measured rather than
+  // assumed: it does not change what a user sees. Driven through
+  // `enrichGraphWithFactorsAsync`, this brief yields the identical factor
+  // either way — `raw_value 60, extractionType "range", confidence 0.8,
+  // rangeMin 50, rangeMax 70` — because the 0.8 range beats the 0.6 companion
+  // in `mergeFactors`. The array below is the COMPLETE extractor output, which
+  // is a strictly wider claim than the enriched factor, and that is why the
+  // companion has to be pinned here rather than waved through.
   currencyRange: [["Pricing between £50-70.", [
     ["Value", 60, "£", "range", 0.8, null],
     ["Value", 50, "£", "inferred", 0.6, null],

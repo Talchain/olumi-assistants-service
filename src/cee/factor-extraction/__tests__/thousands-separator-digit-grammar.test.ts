@@ -253,7 +253,17 @@ const SEPARATOR_CORPUS: Readonly<Record<string, readonly SeparatorCase[]>> = {
   approximateValue: [
     {
       brief: "roughly 50,000 customers",
-      span: "roughly 50,000 ",
+      // ⚠ THE SPAN LOST ITS TRAILING SPACE (ROADMAP 2.1131), and the byte is
+      // the point rather than an incidental. 2.1131 gave this pattern the
+      // magnitude suffix it never had — `"roughly 800k users"` extracted 800
+      // at `f4c8f50` — and spelled the optional `%` tail as `(?:\s*(%))?`
+      // rather than `\s*(%)?`, which is the spelling `magnitudeSuffixPattern`
+      // itself documents: with the `\s*` OUTSIDE the optional group it is
+      // consumed even when no `%` follows, and every matchedText in the corpus
+      // gains a trailing byte. `matchedText` is quoted verbatim into
+      // `provenance.quote`, so the space was reaching a user. The VALUE is
+      // unchanged; only the quoted span is now exactly what the writer wrote.
+      span: "roughly 50,000",
       value: 50_000,
       pristine: "span `roughly 50 `, value 50",
     },
