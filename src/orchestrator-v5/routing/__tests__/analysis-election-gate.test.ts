@@ -401,6 +401,53 @@ describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', 
     ).toBe('admitted');
   });
 
+  /**
+   * ⭐ THE HONEST GAP, PINNED EXACTLY (trap 22f's rule for shipping a known
+   * one). The shipped pattern is anchored at `^`, so a bare `rerun` that
+   * follows a licensed left context is DROPPED. These are genuine requests and
+   * each costs the user one click on the offered chip.
+   *
+   * ⚠ THIS SET IS ALSO THE ONLY THING THAT MAKES THE `^` ANCHOR OBSERVABLE.
+   * Measured: with the `^` removed, "Fine, rerun." and "OK. Rerun." flip to
+   * admitted and this assertion REDs. Every other message in every corpus in
+   * this file declines by some other route, so without these rows the `^`
+   * could be deleted with the whole suite green — it survived exactly that
+   * mutant before they were added.
+   *
+   * ⚠⚠ AND THE REASON WE ARE NOT SIMPLY DROPPING THE `^`. It was RUN, not
+   * argued about: removing it closes both rows below and REDs nothing in this
+   * file. That makes it a plausible follow-up, NOT a free win — it widens the
+   * predicate from "the message IS the verb" to "the message ENDS in the verb
+   * at a licensed left context", which is a different and much larger input
+   * space that this file's corpora barely sample. A second widening needs its
+   * own corpus from outside the author's head, in BOTH directions (trap 22b).
+   * Adding another clause here instead is the second round trap 22f bans.
+   */
+  const KNOWN_DROPPED_BARE: readonly string[] = [
+    'Fine, rerun.',
+    'OK. Rerun.',
+    'Please rerun.',
+    'Rerun and explain.',
+    'Rerun, please.',
+    'Rerun...',
+  ];
+
+  it('the bare-imperative dropped set is EXACTLY the pinned list', () => {
+    const CANDIDATES = [
+      // Must be admitted — the bare verb itself.
+      'Rerun.',
+      'Re-run.',
+      'rerun',
+      // The honest gap.
+      ...KNOWN_DROPPED_BARE,
+    ];
+    // Positive control (trap 13): the corpus is non-empty and mixed, so this
+    // assertion can fail in both directions.
+    expect(CANDIDATES.length).toBe(9);
+    const dropped = CANDIDATES.filter((m) => !looksLikeExplicitAnalysisRequest(m)).sort();
+    expect(dropped).toEqual([...KNOWN_DROPPED_BARE].sort());
+  });
+
   it('does NOT widen the LLM-free dispatch predicate (trap 21 — the separation holds)', () => {
     const bareImperatives = [
       'Rerun.',
