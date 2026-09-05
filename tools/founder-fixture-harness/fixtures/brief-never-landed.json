@@ -1,0 +1,300 @@
+{
+  "note": "SYNTHETIC, REPRODUCING A REAL STAGING RUN (sanitised; no real scenario data). A network blip dropped the brief and turns 1-5; turns 6-11 landed on a scenario that had never received the founder brief. Turn 6 below carries the SHAPE of the reply staging actually gave: \"Rerun.\" arriving as the FIRST message of an empty conversation is not a request to run anything, so CEE correctly declined \u2014 no analysis result, no refusal. Before the journey-gap rule existed the harness decided that turn and reported C5 FAIL, fabricating a product defect out of a network failure. THIS FIXTURE IS THE MUTANT-BITING CASE: delete the voiding and C5 FAILS here. C3 must also read NOT ASSESSED rather than PASS \u2014 with six of twelve sends scanned, \"no narration found\" is an absence claim over a corpus that was never assembled.",
+  "brief_sha256": "30ff141866aa69f5f763961ede5ae860776f21e427a8178892c040ae724073b6",
+  "expect": {
+    "exit_code": 0,
+    "criteria": {
+      "C1": "NOT_ASSESSED",
+      "C2": "NOT_ASSESSED",
+      "C3": "NOT_ASSESSED",
+      "C4": "NOT_ASSESSED",
+      "C5": "NOT_ASSESSED",
+      "C6": "NOT_ASSESSED"
+    }
+  },
+  "turns": [
+    {
+      "index": 0,
+      "message": "(the verbatim brief \u2014 body only; the harness hashes the real file on a live run)",
+      "http_status": 0,
+      "transport_error": "TypeError: fetch failed"
+    },
+    {
+      "index": 1,
+      "message": "What do you think I'm missing?",
+      "http_status": 0,
+      "transport_error": "TypeError: fetch failed"
+    },
+    {
+      "index": 2,
+      "message": "Run analysis.",
+      "http_status": 0,
+      "transport_error": "TypeError: fetch failed"
+    },
+    {
+      "index": 3,
+      "message": "Explain the result.",
+      "http_status": 0,
+      "transport_error": "TypeError: fetch failed"
+    },
+    {
+      "index": 4,
+      "message": "Why is the sales headcount investment \u00a380? That doesn't seem right.",
+      "http_status": 0,
+      "transport_error": "TypeError: fetch failed"
+    },
+    {
+      "index": 5,
+      "message": "Can you update it with the correct range?",
+      "http_status": 0,
+      "transport_error": "TypeError: fetch failed"
+    },
+    {
+      "index": 6,
+      "message": "Rerun.",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "I have not run the analysis, because I did not read that as a request to run one. Tell me what you would like added, changed or filled in and I will work on the model with you.",
+        "blocks": [],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "needs_user_mapping",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 7,
+      "message": "How has the update changed the analysis?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Before the correction the three routes were indistinguishable. Pricing the hire at \u00a3100,000 instead of \u00a380 moved founder-led selling from 33% to 61% of futures reaching the goal, and hiring from 41% to 18%.",
+        "blocks": [
+          {
+            "type": "explanation",
+            "narrative": "The correction changed one number \u2014 Sales headcount investment \u2014 and it is the only input the three routes differ on, so the whole movement is attributable to it.",
+            "referenced_option_ids": [
+              "opt_founder",
+              "opt_hire"
+            ]
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 8,
+      "message": "Why are all of the outcome and risk strengths 50%?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Because nothing has been said about them yet. Every link into the outcome and the risk carries the same default strength, which means the model is not yet expressing any belief about which of them matters more.",
+        "blocks": [
+          {
+            "type": "text",
+            "content": "Nine links, all at 0.5."
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 9,
+      "message": "Run a pre-mortem.",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Imagine it is eighteen months from now and you did not reach \u00a330k MRR. Here are the three most likely stories.",
+        "blocks": [
+          {
+            "type": "exercise",
+            "title": "Pre-mortem",
+            "body": "Ramp took nine months, not three. Churn rose as the SDR sold to a worse-fit segment. Runway ran out in month seven."
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 10,
+      "message": "What would you do next?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "Price the ramp. Everything above rests on a new hire producing from day one, and that single assumption is doing more work than the cost you just corrected.",
+        "blocks": [
+          {
+            "type": "text",
+            "content": "Next: state how many months ramp takes."
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "index": 11,
+      "message": "Where did we get to?",
+      "http_status": 200,
+      "body": {
+        "response_version": 2,
+        "assistant_text": "You corrected the hire cost from \u00a380 to \u00a3100,000 and reran. Founder-led selling now reaches the goal in most futures. The open question is ramp time.",
+        "blocks": [
+          {
+            "type": "explanation",
+            "narrative": "One correction, one rerun, one open question.",
+            "referenced_option_ids": [
+              "opt_founder"
+            ]
+          }
+        ],
+        "graph_hash": "b1c2d3e4f5a61122",
+        "analysis_ready": {
+          "status": "ready",
+          "current_graph_hash": "b1c2d3e4f5a61122",
+          "graph_hash_at_run": "b1c2d3e4f5a61122",
+          "freshness": "fresh",
+          "analysis_admission": {
+            "structurally_analysable": true,
+            "missing_important_inputs": [],
+            "semantic_quality_sufficient": true,
+            "permitted_analysis_mode": "comparative_leader",
+            "reasons": [],
+            "graph_hash": "11111111bbbb1111111111111111111111111111111111111111111111111111",
+            "semantic_signals": {
+              "confidence_parameters_total": 11,
+              "confidence_parameters_user_stated": 1,
+              "confidence_parameters_machine_authored": 10,
+              "confidence_parameters_unattributed": 0,
+              "material_parameters_total": 6,
+              "material_parameters_user_stated": 1,
+              "intervened_factor_baselines_total": 3,
+              "intervened_factor_baselines_user_stated": 1,
+              "goal_target_stated": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}
