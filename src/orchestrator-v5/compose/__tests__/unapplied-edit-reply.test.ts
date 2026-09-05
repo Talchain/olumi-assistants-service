@@ -39,28 +39,67 @@ import {
   findSuccessClaimHit,
 } from '../forbidden-user-facing-phrases.js';
 import { qualitativeBand } from '../../../cee/factor-extraction/display-value.js';
-import { isValueUpdatePhrasing } from '../../../orchestrator/routing/value-update-gate.js';
+import {
+  isValueUpdatePhrasing,
+  shouldSuppressEditDispatchForValueUpdate,
+} from '../../../orchestrator/routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
   EDIT_GRAPH_POSITIVE_REGEX,
 } from '../../../orchestrator/routing/edit-graph-intent-regex.js';
 
 // ── The graph the witnessed session had on screen ──────────────────────────
+//
+// ⭐⭐ THESE FIXTURES ARE AT THE REAL NODE SHAPE, AND THE FIRST VERSION OF THIS
+// SPEC WAS NOT. It wrote `unit` and `raw_value` at the node's TOP LEVEL, where
+// no graph node has ever carried them, so `isUnitlessFactor` returned true for
+// every real node and the measured branch was unreachable in production while
+// this suite stayed green. A self-authored fixture outside the producer's
+// output domain proves nothing (CLAUDE.md trap 16, inverse form).
+//
+// PROVEN, with a contrast control at the same level, over the 491 graph nodes
+// in every `*.json` under `src/` (44 files, 44 parsed, 32 node-bearing):
+//   node.unit       (top level) ...   0 / 491
+//   node.raw_value  (top level) ...   0 / 491
+//   node.label      (top level) ... 491 / 491   <- CONTRAST: the probe SEES this level
+//   node.observed_state.unit ......  23
+//   node.observed_state.raw_value .  26
+// `NodeV3Schema` (@talchain/schemas 0.50.0, dist/graph.js:256) declares
+// `observed_state` and NOT `unit`; `ObservedStateSchema` (dist/graph.js:139)
+// declares `unit`. `raw_value` is not in the published schema at all and rides
+// `.passthrough()`. The colliding names belong to `DisplayValueInput`
+// (cee/factor-extraction/display-value.ts:30-36) — the same module this
+// composer imports `qualitativeBand` from.
 const UNITLESS_FACTOR: UnappliedEditNode = {
   id: 'fac_tco',
   kind: 'factor',
   label: 'Team coordination overhead',
+  // PROVABLY 0-1: a value inside the unit interval and no unit/raw/cap beside
+  // it. This is the ONLY class entitled to the "0-1 scale" sentence.
+  observed_state: { value: 0.3 },
 };
 const MEASURED_FACTOR: UnappliedEditNode = {
   id: 'fac_spend',
   kind: 'factor',
   label: 'Marketing spend',
-  unit: '£',
-  raw_value: 50000,
+  // £500k, normalised to 0.5 against a 1m cap — the real persisted shape.
+  observed_state: { value: 0.5, raw_value: 500000, unit: '£', cap: 1000000 },
+};
+/**
+ * ⭐ THE DOMINANT REAL CLASS, AND IT HAD NO FIXTURE AT ALL: 403 of those 491
+ * nodes (82%) carry NO `observed_state`, so nothing in the payload says what
+ * scale they are on. Absence is UNDECLARED, never "unitless" — the module must
+ * not claim a 0-1 scale nor offer a number for these.
+ */
+const UNKNOWN_SCALE_FACTOR: UnappliedEditNode = {
+  id: 'fac_morale',
+  kind: 'factor',
+  label: 'Team morale',
 };
 const NODES: readonly UnappliedEditNode[] = [
   UNITLESS_FACTOR,
   MEASURED_FACTOR,
+  UNKNOWN_SCALE_FACTOR,
   { id: 'opt_lead', kind: 'option', label: 'Hire a Tech Lead' },
 ];
 
@@ -240,6 +279,80 @@ describe('QUESTION 2 — the understanding, and the coercion boundary', () => {
     expect(reply.text).not.toMatch(/\d/);
   });
 
+  it('⭐ F1 — a £-denominated factor is never told it is on a 0–1 scale, and is never offered 0.1', () => {
+    // THE WITNESSED CONSEQUENCE OF THE WRONG FIELD PATH. With `unit` read at
+    // the node's top level it is always absent, so a £500k factor was
+    // classified unitless, told "On this factor's 0–1 scale…" — a false claim
+    // about the user's own model — and handed a chip that writes 0.1 into it.
+    // Both halves are asserted here because they are different harms: the
+    // sentence is a lie, the chip is a corruption.
+    const reply = composeUnappliedEditReply({
+      message: 'Change Marketing spend to low',
+      nodes: NODES,
+    })!;
+    expect(reply.text).not.toMatch(/0–1 scale/);
+    expect(reply.text).not.toMatch(/covers a range of values/i);
+    for (const c of reply.chips) {
+      expect(c.message, `offered a bare number on a £ factor: ${c.message}`).not.toMatch(
+        /\bto\s+0?\.\d/,
+      );
+    }
+    expect(reply.chips).toEqual([]);
+  });
+
+  it('⭐ F1 — the measured branch is reachable AT THE REAL SHAPE, not only at a hand-written one', () => {
+    // The bug was not that the branch was wrong; it was that nothing could
+    // reach it. Bind the claim to the path a producer actually writes.
+    const atRealShape: UnappliedEditNode = {
+      id: 'n1',
+      kind: 'factor',
+      label: 'Server cost',
+      observed_state: { value: 0.4, unit: '$', raw_value: 400 },
+    };
+    expect(
+      resolveUnappliedEditUnderstanding('Change Server cost to high', [atRealShape])!.kind,
+    ).toBe('level_on_measured_factor');
+
+    // CONTRAST CONTROL — the very same node with the very same two fields at
+    // the TOP level (the rejected path) carries no scale information at all,
+    // because nothing reads them there. If this ever stops being
+    // 'unknown_scale', the module has grown a second reader on the dead path.
+    const atRejectedPath = {
+      id: 'n1',
+      kind: 'factor',
+      label: 'Server cost',
+      unit: '$',
+      raw_value: 400,
+    } as unknown as UnappliedEditNode;
+    expect(
+      resolveUnappliedEditUnderstanding('Change Server cost to high', [atRejectedPath])!.kind,
+    ).toBe('level_on_unknown_scale');
+  });
+
+  it('⭐ THE DOMINANT CLASS — 82% of real nodes have no observed_state, and absence is not a 0–1 scale', () => {
+    // Measured: 403 of 491 nodes in every graph fixture under src/ carry no
+    // observed_state. Reading that absence as "unitless" is the same false
+    // claim as F1, one class wider. Positive evidence licenses the claim.
+    const m = 'Change Team morale to low';
+    const u = resolveUnappliedEditUnderstanding(m, NODES)!;
+    expect(u.kind).toBe('level_on_unknown_scale');
+    const reply = composeUnappliedEditReply({ message: m, nodes: NODES })!;
+    expect(reply.text).toContain('Team morale');
+    expect(reply.text).not.toMatch(/0–1 scale/);
+    expect(reply.text).not.toMatch(/\d/);
+    expect(reply.chips).toEqual([]);
+  });
+
+  it('⭐ and the PROVABLY 0–1 factor still gets the band offer — the fix is not a blanket refusal', () => {
+    // The opposite-direction twin of the two cases above. Without this, a fix
+    // that refused everything would pass them both.
+    const u = resolveUnappliedEditUnderstanding(W2, NODES)!;
+    expect(u.kind).toBe('level_on_unitless_factor');
+    const reply = composeUnappliedEditReply({ message: W2, nodes: NODES })!;
+    expect(reply.text).toMatch(/0–1 scale/);
+    expect(reply.chips.length).toBeGreaterThan(0);
+  });
+
   it('a named target with NO value bound offers NO number — an unbounded offer is coercion wearing a click', () => {
     const m = 'Change Team coordination overhead';
     const u = resolveUnappliedEditUnderstanding(m, NODES)!;
@@ -376,6 +489,158 @@ describe('EGRESS — no forbidden phrase, no success claim, no internals', () =>
     for (const m of ALL_MESSAGES) {
       const reply = composeUnappliedEditReply({ message: m, nodes: NODES })!;
       expect(reply.text.startsWith("I haven't changed anything from that.")).toBe(true);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⭐ F2 — Q1 MUST NOT SHORT-CIRCUIT Q2. A message can be BOTH: a request for
+// our view that ALSO names the object and the value. Answering only the frame
+// discards a fully-resolved understanding and tells a user who named both that
+// they named neither — the witnessed harm, mirrored inside its own fix.
+//
+// ⚠ Zero of the eight FRAME_TWINS deliberations ground an understanding, so
+// none of them exercises this pairing. These cases exist because the corpus
+// above structurally cannot see the defect (trap 22).
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Deliberative frame AND a grounded instruction in one message. Each is
+ * paired with the bare deliberation carrying the same frame, so the two
+ * branches are asserted to DIFFER — a probe that returned the same answer for
+ * both would prove nothing about the pairing.
+ */
+const PAIRED_CASES: ReadonlyArray<{
+  readonly paired: string;
+  readonly bare: string;
+  readonly node: string;
+}> = [
+  {
+    paired: 'Do you agree? Change the team coordination overhead to low.',
+    bare: W4,
+    node: 'fac_tco',
+  },
+  {
+    paired: 'Do you think we should change Team coordination overhead to low?',
+    bare: 'Do you think we should add a risk?',
+    node: 'fac_tco',
+  },
+  {
+    paired: 'Should we set Team coordination overhead to high?',
+    bare: 'Should we add a mitigation?',
+    node: 'fac_tco',
+  },
+];
+
+describe('F2 — a question that ALSO names the object and the value gets BOTH answers', () => {
+  it.each(PAIRED_CASES)(
+    'PRECONDITION — the pairing is real: $paired grounds an understanding AND reads as a deliberation',
+    ({ paired, node }) => {
+      // Pin the precondition IN-TEST. Without this the assertions below could
+      // pass because the understanding silently stopped resolving.
+      expect(classifyUnappliedEditFrame(paired)).toBe('deliberation');
+      const u = resolveUnappliedEditUnderstanding(paired, NODES);
+      expect(u, `nothing grounded for: ${paired}`).not.toBeNull();
+      expect(u!.node.id).toBe(node);
+    },
+  );
+
+  it.each(PAIRED_CASES)('the reply names back what we understood: $paired', ({ paired }) => {
+    const reply = composeUnappliedEditReply({ message: paired, nodes: NODES })!;
+    // It is still a question, so it must still answer the question…
+    expect(reply.text).toMatch(/question/i);
+    // …but it must NOT discard the object and the value the user gave us.
+    expect(reply.text).toContain('Team coordination overhead');
+  });
+
+  it.each(PAIRED_CASES)(
+    'DISCRIMINATION — the paired reply DIFFERS from the bare one: $paired',
+    ({ paired, bare }) => {
+      // The load-bearing half. If the composer answered the frame and stopped,
+      // these two would be byte-identical — and sameness across inputs that
+      // ought to differ is the tell.
+      const pairedReply = composeUnappliedEditReply({ message: paired, nodes: NODES })!;
+      const bareReply = composeUnappliedEditReply({ message: bare, nodes: NODES })!;
+      expect(classifyUnappliedEditFrame(bare)).toBe('deliberation');
+      expect(resolveUnappliedEditUnderstanding(bare, NODES)).toBeNull();
+      expect(pairedReply.text).not.toBe(bareReply.text);
+    },
+  );
+
+  it('a paired question still offers a way to ANSWER it — the frame is not simply dropped', () => {
+    const reply = composeUnappliedEditReply({
+      message: PAIRED_CASES[0].paired,
+      nodes: NODES,
+    })!;
+    const ids = reply.chips.map((c) => c.id);
+    expect(ids).toContain('unapplied_edit_deliberation_answer');
+  });
+
+  it('OPPOSITE DIRECTION — a paired question never WRITES, and never claims we did', () => {
+    // The frame gate's whole safety argument is that neither branch mutates.
+    // Pairing adds a value-bearing chip to a question, so the twin harm is a
+    // chip that reads as a confirmation. Assert the copy stays a refusal.
+    for (const { paired } of PAIRED_CASES) {
+      const reply = composeUnappliedEditReply({ message: paired, nodes: NODES })!;
+      expect(reply.text.startsWith("I haven't changed anything from that.")).toBe(true);
+      expect(findSuccessClaimHit(reply.text)).toBeNull();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⭐ F3 — assert the REAL suppression predicate, not the weaker conjunct.
+// `value-update-gate.ts:386-388` names `shouldSuppressEditDispatchForValueUpdate`
+// (:411) as "Route-v2's ACTUAL suppression predicate"; `isValueUpdatePhrasing`
+// (:382) is only one of its two conjuncts, and asserting it alone left the
+// mixed value+structural case unmeasured.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('F3 — chip routing asserted against the predicate that actually suppresses', () => {
+  it('every numeric offer chip satisfies the REAL suppression predicate', () => {
+    const reply = composeUnappliedEditReply({ message: W2, nodes: NODES })!;
+    expect(reply.chips.length).toBeGreaterThan(0);
+    for (const c of reply.chips) {
+      expect(
+        shouldSuppressEditDispatchForValueUpdate(c.message),
+        `does not suppress edit dispatch: ${c.message}`,
+      ).toBe(true);
+    }
+  });
+
+  it('POSITIVE CONTROL — the real predicate can say NO, and says no for a DIFFERENT reason than the weak one', () => {
+    // Two controls with DIFFERENT expected answers, so a blind probe cannot
+    // fake agreement: the first fails both conjuncts, the second passes the
+    // weak conjunct and fails only the real one.
+    expect(shouldSuppressEditDispatchForValueUpdate('Tell me the specific factor')).toBe(false);
+    // ⚠ THIS EXAMPLE WAS MEASURED, NOT ASSUMED, AND THE FIRST ONE I WROTE WAS
+    // WRONG. I reached for the mixed message quoted in `value-update-gate.ts`'s
+    // own header ("Set Support cost to 30 and add a new factor called Shipping
+    // costs") — and BOTH predicates return false for it, because the weak
+    // conjunct's regex was tightened after that comment was written. The
+    // comment describes a historical state. Swept eight candidates to find one
+    // that genuinely separates the two.
+    const mixed = 'Update the churn rate to 5% and delete the status quo option';
+    expect(isValueUpdatePhrasing(mixed)).toBe(true);
+    expect(shouldSuppressEditDispatchForValueUpdate(mixed)).toBe(false);
+  });
+
+  it('a label containing a structural word does NOT break the chip — measured, not assumed', () => {
+    // Enumerated as a suspected defect and DISPROVEN; kept as a regression
+    // pin, because a future change to the decomposer could make it real.
+    const andLabel: UnappliedEditNode = {
+      id: 'fac_sm',
+      kind: 'factor',
+      label: 'Sales and marketing spend',
+      observed_state: { value: 0.3 },
+    };
+    const reply = composeUnappliedEditReply({
+      message: 'Change Sales and marketing spend to low',
+      nodes: [andLabel],
+    })!;
+    expect(reply.chips.length).toBeGreaterThan(0);
+    for (const c of reply.chips) {
+      expect(shouldSuppressEditDispatchForValueUpdate(c.message)).toBe(true);
     }
   });
 });
