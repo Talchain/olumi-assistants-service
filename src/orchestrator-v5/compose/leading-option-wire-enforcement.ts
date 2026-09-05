@@ -190,6 +190,7 @@ import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { textAssertsLeadingOption, textNamesLeadingOption } from './leading-option-egress-guard.js';
 import { replaceAssertingUnits } from './redactable-units.js';
+import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
 
 /**
@@ -427,8 +428,25 @@ export interface WireLeaderClaimEnforcementOpts {
   readonly graph: unknown;
   /**
    * The `analysis_ready` payload this exit is shipping (`ctx.analysisReady`),
-   * read ONLY for the option ROSTER when {@link graph} yields none — see
-   * {@link optionRosterFromAnalysisReady}.
+   * read for TWO INDEPENDENT THINGS. They are listed apart because they answer
+   * different questions, and a reader who collapses them will reintroduce the
+   * defect the second one closes:
+   *
+   *   (a) the option ROSTER, when {@link graph} yields none — "which options
+   *       exist", never "which one leads". See
+   *       {@link optionRosterFromAnalysisReady}.
+   *   (b) `analysis_admission.permitted_analysis_mode`, the admission's UPPER
+   *       BOUND on what the product may CLAIM — "does the MODEL license naming a
+   *       leader at all". See {@link analysisReadyPermitsLeaderNaming}, which is
+   *       the single shared reader; this module does not re-derive it.
+   *
+   * ⚠ (b) IS STILL NOT A SECOND VERDICT ABOUT THIS RESULT. It cannot say which
+   * option leads and does not try; it can only say that no option may be named.
+   * `leader_claim.permitted` and `mayNameLeadingOption` are untouched.
+   *
+   * ⚠ (b) IS OPTIONAL AND FAILS OPEN. An absent or unrecognised admission leaves
+   * this gate's behaviour byte-identical, because absence means a producer that
+   * predates the field — never "no" (`schemas/analysis-ready.ts`).
    *
    * ⭐ THIS IS WHAT CLOSES THE HOLE THE `graph` DOCSTRING ABOVE DESCRIBES. That
    * note is retained verbatim because it is still true of the graph reader; it
@@ -555,10 +573,47 @@ export function enforceLeadingOptionClaimsAtWire(
   response: OlumiResponse,
   opts: WireLeaderClaimEnforcementOpts,
 ): WireLeaderClaimEnforcementResult {
-  // PERMIT-WINS. Byte-identical, by reference, first line — same short-circuit
-  // shape as the alarm (`guardLeadingOptionClaimsAtEgress`) and the finalise
-  // chokepoint (`turn-executor.ts:10016`).
-  if (opts.mayNameLeadingOption) return unchanged(response);
+  // PERMIT-WINS, AND PERMITTING NOW TAKES BOTH HALVES. Byte-identical, by
+  // reference, first line — same short-circuit shape as the alarm
+  // (`guardLeadingOptionClaimsAtEgress`) and the finalise chokepoint
+  // (`turn-executor.ts:10016`).
+  //
+  // ⭐ WHY A CONJUNCTION, AND WHY HERE. The two operands answer DIFFERENT
+  // questions and are deliberately NOT reconciled (CLAUDE.md trap 21):
+  //
+  //   `mayNameLeadingOption`              "Is this TURN entitled?" — derived from
+  //                                       the constraint verdict, about whether
+  //                                       the user's ratified hard constraints
+  //                                       were honoured.
+  //   `analysisReadyPermitsLeaderNaming`  "Does the MODEL license the claim at
+  //                                       all?" — the admission's
+  //                                       `permitted_analysis_mode`, an upper
+  //                                       bound on what may be CLAIMED.
+  //
+  // The product already conjoined them on every surface the UI COMPOSES from
+  // structured data, exactly as `schemas/analysis-ready.ts` instructs. It did
+  // not, and could not, conjoin them on the prose CEE AUTHORS: a UI gate cannot
+  // suppress a sentence that arrives inside `assistant_text` already written.
+  // One question, two channels, one gated — which is how the 5 Sep founder
+  // session shipped an admission reading "no option can be called the leader"
+  // above prose reading "Hire a Tech Lead currently performs best, leading in
+  // 46% of simulations." Both sentences were produced by the same turn.
+  //
+  // ⚠ THIS IS NOT `composeLeaderClaim`, AND MUST NOT BECOME IT. That function's
+  // refusal to conjoin the mode is correct and documented
+  // (`compose/analysis-state-v1.ts`): it answers "did THIS RESULT separate the
+  // arms?", and making one authority call another is the #709/#737 defect. The
+  // conjunction belongs at the ENFORCEMENT chokepoint — here — where the
+  // question is the surface-level one the schema names: may this prose name a
+  // leader on screen?
+  //
+  // ⚠ FAIL-OPEN IS LOAD-BEARING, NOT A CONVENIENCE. An absent or unparseable
+  // admission returns `true` from the mode reader, so this line collapses back to
+  // the single operand it was, and every pre-`analysis_admission` producer is
+  // byte-identical. Over-suppression is the WORSE defect (module docstring).
+  if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
+    return unchanged(response);
+  }
 
   try {
     // GRAPH FIRST, READINESS AS THE FALLBACK. The graph is the richer source and

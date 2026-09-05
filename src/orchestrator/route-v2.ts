@@ -1802,6 +1802,12 @@ async function sendFinalised200(
     requestId,
     exitPath,
     mayNameLeadingOption: ctx.mayNameLeadingOption,
+    // Threaded so the ALARM's scope matches the ENFORCER's exactly. The enforcer
+    // above conjoins `analysis_admission.permitted_analysis_mode`; an alarm that
+    // did not would short-circuit on the entitlement alone and report nothing on
+    // the very turns the enforcer just edited — a detector narrower than the
+    // thing it measures. Same object, same field, one shared reader.
+    analysisReady: ctx.analysisReady,
   });
   // Count the client-visible fail-closed outcome at the same exactly-once seam
   // as the response. Derivation-level reads may retry or recover, so emitting
