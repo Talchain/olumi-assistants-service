@@ -220,7 +220,7 @@ interface IntentPattern {
    * real edit instruction — those two answers must differ. Without this flag a
    * compound message loses the edit lane to the suppressor while
    * `tryRunComparisonGate` refuses it anyway on `hasMutationSignal`
-   * (run-comparison-gate.ts:626, tested BEFORE the classifier admission at
+   * (run-comparison-gate.ts:624, tested BEFORE the classifier admission at
    * :630) — so the user's edit is dropped and they get SILENCE. That is
    * verbatim the outcome this fix's own rationale gives as the reason for
    * rejecting the negative-regex alternative; trading a wrong edit for silence

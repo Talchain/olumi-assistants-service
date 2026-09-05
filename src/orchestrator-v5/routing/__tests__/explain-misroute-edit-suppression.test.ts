@@ -142,7 +142,7 @@ const GENUINE_EDITS = [
  * is the direction the first round of this change got wrong: every one of these
  * reached the edit lane at base, and the transitive pattern as first written
  * took the lane away from ALL of them while `tryRunComparisonGate` refused them
- * anyway on `hasMutationSignal` (run-comparison-gate.ts:626, checked BEFORE the
+ * anyway on `hasMutationSignal` (run-comparison-gate.ts:624, checked BEFORE the
  * classifier admission at :630) — so the user's edit was dropped and the answer
  * was silence. Trading a wrong edit for silence is the same bad trade in the
  * other direction, and it is verbatim the outcome this file's header gives as
@@ -313,7 +313,22 @@ describe('post-rerun EXPLAIN question must not reach the edit lane', () => {
  * #888 into four rounds.
  *
  * ⚠⚠ WHAT THIS SET IS, STATED ACCURATELY — the previous description was a false
- * verification claim and an independent review mutation-tested it out.
+ * verification claim, found by an independent review.
+ *
+ * ⚠ THAT FINDING HAS SINCE BEEN ADJUDICATED AND ONLY HALF OF IT SURVIVES, which
+ * is recorded here rather than quietly dropped. The review's CONCLUSION — that
+ * "REDs if it GROWS" was false, because a new unlisted phrasing is structurally
+ * invisible — STANDS, and is acted on below. Its supporting mutant row
+ * (`M2 delete a listed entry → GREEN, no red`) does not. At the head it
+ * reviewed (`d720308`) the collection guard already carried
+ * `expect(KNOWN_DROPPED_STILL_REACHES_EDIT_LANE.length).toBe(10)` at line 255,
+ * inside `describe('this spec collected')` at :243 — the 9th of that file's 9
+ * `it(` blocks, which the same seat's own `M0 pristine → GREEN 9/9` proves was
+ * collected. Deleting a listed entry makes the length 9 and MUST RED. The row
+ * was almost certainly an unapplied mutation read as a survivor; that seat
+ * reported no applied-check. A defective mutant row supporting a true
+ * conclusion is still a false verification claim — the exact class this block
+ * exists to correct, so it does not get an exemption for having been useful.
  *
  * It said the test "REDs if it GROWS (a regression widened the gap)". It does
  * not, and it cannot. What the assertions below actually detect:

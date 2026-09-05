@@ -218,9 +218,7 @@ describe('classifyAnalyticalIntent — what_changed TRANSITIVE voice (EXPLAIN mi
   });
 
   /**
-   * ⭐ THE STRUCTURAL INVARIANT that bounds this change's blast radius across
-   * all 8 `classifyAnalyticalIntent` call sites and all 3 `isAnalyticalQuestion`
-   * ones, without having to measure each consumer's behaviour separately:
+   * ⭐ THE STRUCTURAL INVARIANT:
    *
    *   for every message, the class this module returns is either what it
    *   returned before this change, or `what_changed`.
@@ -231,6 +229,53 @@ describe('classifyAnalyticalIntent — what_changed TRANSITIVE voice (EXPLAIN mi
    * here rather than argued, over the compound shapes where the flag actually
    * fires (`the flag fires here` pins that precondition, so this cannot pass by
    * iterating cases that never reach the guard).
+   *
+   * ⚠⚠ IT BOUNDS THE CLASSIFICATION. IT DOES NOT BY ITSELF BOUND THE HARM.
+   *
+   * An earlier version of this comment said the invariant bounded all 8
+   * `classifyAnalyticalIntent` call sites and all 3 `isAnalyticalQuestion` ones
+   * "without having to measure each consumer's behaviour separately". That
+   * overstated it, and an independent review measured the overstatement out.
+   * The invariant explicitly PERMITS `non-null → what_changed`, and that
+   * transition is reachable in ordinary English — measured at both heads:
+   *
+   *   "How has the update changed the analysis, walk me through it"
+   *       `explain`    at base → `what_changed` here
+   *   "How has the update changed the analysis, what drove that"
+   *       `what_drove` at base → `what_changed` here
+   *
+   * with the controls "walk me through the results" → `explain` and "what drove
+   * this result" → `what_drove` at BOTH heads, so the shift needs this pattern.
+   *
+   * ⚠ AND THIS FILE'S CORPORA CANNOT SEE THAT CLASS. Every compound member
+   * below pairs the question with an EDIT clause; none pairs it with an
+   * `explain` / `what_drove` clause, which is the only way to reach a non-null
+   * base. A corpus that omits a class the invariant admits cannot certify the
+   * code over that class. Recorded as a known blind spot rather than papered
+   * over — the honest statement of a gap is worth more than a guarantee that
+   * quietly assumes it away.
+   *
+   * WHAT ACTUALLY BOUNDS THE HARM is the invariant PLUS a consumer enumeration.
+   * Of the 8 + 3 sites, exactly three discriminate between NON-NULL classes:
+   *
+   *   · `run-comparison-gate.ts:630`  — `!== 'what_changed'`
+   *   · `stale-rerun-guard.ts:144`    — `cls === 'what_would_flip'`
+   *   · `judgement-offer-text.ts:150` — `!== 'what_would_flip'`
+   *
+   * The two `what_would_flip` ones are structurally unreachable from this
+   * change: `what_would_flip` occupies `INTENT_PATTERNS` entries #7-15 and this
+   * pattern is #19, and the classifier returns the FIRST match — so any message
+   * matching both returns `what_would_flip` and never reaches this entry.
+   * Every other site tests `!== null` or carries the class through as
+   * `intent_class` metadata; those see this change only where the pattern newly
+   * fires on a message that classified `null` before, which is the fix itself
+   * and is what the corpora above measure.
+   *
+   * So `run-comparison-gate.ts:630` is the ONLY consumer this change can move
+   * between non-null classes — and admitting these messages is CORRECT rather
+   * than a wrong frame: each one genuinely asks the two-run delta question. That
+   * is materially different from the driver-attribution class above, where the
+   * admitted questions asked about a DOMAIN DRIVER the gate cannot answer.
    */
   const COMPOUND_WHERE_THE_GUARD_FIRES = [
     'How has the update changed the analysis, and add a risk node for supply delays',
