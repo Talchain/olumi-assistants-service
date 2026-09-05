@@ -743,8 +743,33 @@ export function isCompetingRunAnalysisSuggestionChip(chip: SuggestedAction): boo
  *   - `system-events/dispatch.ts:1543` and `:1595`, both inside
  *     `dispatchFactorValueEdit` (a MUTATING path, so it needs
  *     `threadHoldsThroughMutatingCommit`, not a plain thread);
- *   - `handlers/chip-click-dispatch.ts:1679`, in
- *     `dispatchChipClickRunAnalysis` (the run_analysis SUCCESS commit);
+ *   - ~~the run_analysis SUCCESS commit in `dispatchChipClickRunAnalysis`
+ *     (`handlers/chip-click-dispatch.ts`)~~ — ⭐ CLOSED (2.1353 rounds 3-4,
+ *     PR #1286). It reads the prior row with
+ *     `loadMostRecentPendingActionsIntegrityStrict` and threads
+ *     `priorPendingActions`. On a read FAILURE it still commits (the
+ *     `run_analysis` fact must stay durable) and emits
+ *     `v5.pending_wipe_risk_on_success_commit`. On `pending_actions_corrupt`
+ *     it consults the tolerant loader and then SPLITS ON THE RECOVERED COUNT,
+ *     because that code has two producers with opposite recovery behaviour
+ *     (`supabase-store.ts`: a non-array column can only ever yield ZERO, while
+ *     parse failures can yield survivors):
+ *       · ≥1 survivor  -> carries them, emits
+ *         `v5.pending_wipe_partial_recovery_on_success_commit`;
+ *       · 0 survivors  -> threads NOTHING (the key stays omitted rather than
+ *         becoming `[]`, which commit.ts resolves to a total wipe) and emits
+ *         `v5.pending_wipe_unrecoverable_on_success_commit`. Round 3 assigned
+ *         `[]` here and called it a partial recovery — a total loss reported
+ *         as a recovery, found by review at `63880ed1`.
+ *     So a wipe is possible only on a failed read, and never silently, and
+ *     never described as something it was not.
+ *     ⚠ THE LINE NUMBER THAT USED TO BE IN THIS ENTRY IS GONE ON PURPOSE. It
+ *     said `:1679`, moved to `:1847` when round 3 landed, and moved again to
+ *     `:1927` inside round 4 — it was wrong at every reading, including in the
+ *     correction that was supposed to fix it. A line number in a docstring is
+ *     a hand-maintained mirror (trap 12) that this entry has now drifted three
+ *     times; the function name does not drift. Re-derive with
+ *     `rg -a -n 'commitDirectAnswer\(' src/`.
  *   - `routes/assist.v1.scenario-graph-register.ts:435`, which writes a turn
  *     row through `appendCheckedGraphWrite` with no `pending_actions` at all
  *     (`supabase-store.ts:325` resolves that to `[]` — the same silent wipe).
