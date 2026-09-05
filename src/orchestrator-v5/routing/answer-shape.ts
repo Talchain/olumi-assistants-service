@@ -250,6 +250,54 @@ function splitFirstSentence(text: string): { headline: string; remainder: string
 const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
 
 /**
+ * A bullet belongs to the SECTION HEADING immediately above it, and hoisting
+ * it away from that heading strands the heading with nothing under it.
+ *
+ * Measured on the 2026-08-17 live reply corpus + the 2026-09-05 founder
+ * journey (809 replies): **146 of 146** replies carrying an `Options compared`
+ * heading derived to an output where that heading was followed by nothing, and
+ * the deployed founder journey shows the same defect on the advice gate's
+ * `What to check next` (turns 3 and 10, reproduced byte-exact). The heading is
+ * emitted correctly — `post-analysis-advice-gate.ts` puts the bullet directly
+ * beneath it — so the strand is introduced HERE, by lifting the bullet into
+ * `bullets` while the heading stays behind in `detail`, after which
+ * `deriveAnswerTextFromShape` re-renders `[headline, bullets, detail]` and the
+ * bullet lands ABOVE its own heading.
+ *
+ * A line introduces the bullets beneath it when EITHER:
+ *
+ *   - it ends with a colon — it explicitly promises what follows
+ *     (`…three sensible ways to define it against your £150,000 budget:`, and
+ *     `post-analysis-advice-gate.ts`'s evidence-priority line, both of which
+ *     strand their colon today); or
+ *   - it is short and carries NO sentence-terminating punctuation — a label
+ *     rather than a sentence (`What to check next`, `Options compared`).
+ *
+ * A full sentence followed by bullets ("Here is the answer. …" + list) is the
+ * ordinary lead-in-then-list shape and is deliberately NOT matched, so those
+ * bullets keep being hoisted exactly as before. The predicate is deliberately
+ * two narrow limbs rather than a general "is this a heading?" judgement over
+ * natural language — that question does not have a stable answer, and each
+ * extra limb here buys a measured case or it does not ship.
+ *
+ * Scope of the behaviour change, MEASURED rather than asserted: across the
+ * 809-reply corpus exactly 148 replies change, and every one of them is a
+ * reply whose heading or colon is stranded TODAY. No reply outside the
+ * stranded class changes shape, and no reply gains or loses a shape (zero
+ * null-flips). `answer-shape-heading-bullet-adjacency.test.ts` pins both
+ * directions, including the negative case.
+ */
+const SECTION_HEADING_MAX_LENGTH = 60;
+
+function isSectionHeadingLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return false;
+  if (trimmed.endsWith(':')) return true;
+  if (trimmed.length > SECTION_HEADING_MAX_LENGTH) return false;
+  return !/[.!?]$/.test(trimmed);
+}
+
+/**
  * Deterministically SYNTHESISE an answer shape from a plain-prose
  * `assistant_text` that arrived with NO model-authored shape (the intent-null
  * / text_only prose path, and any deterministic-recovery copy). This is the
@@ -305,16 +353,24 @@ export function synthesiseAnswerShapeFromText(text: string): AnswerShape | null 
   const bullets: string[] = [];
   const proseLines: string[] = [];
   const overflowBulletLines: string[] = [];
+  // A bullet that sits under a SECTION HEADING stays with its heading — see
+  // `isSectionHeadingLine`. The flag is updated only by non-blank, non-bullet
+  // lines, so a blank line between the heading and its bullets does not break
+  // the association, and every consecutive bullet in the section is kept.
+  let inHeadingSection = false;
   for (const line of trimmed.split('\n')) {
     const m = SYNTH_BULLET_LINE.exec(line);
-    if (m !== null) {
-      if (bullets.length < ANSWER_SHAPE_MAX_BULLETS) {
-        bullets.push(m[1].trim());
-      } else {
-        overflowBulletLines.push(line);
-      }
-    } else {
+    if (m === null) {
       proseLines.push(line);
+      if (line.trim().length > 0) inHeadingSection = isSectionHeadingLine(line);
+      continue;
+    }
+    if (inHeadingSection) {
+      proseLines.push(line);
+    } else if (bullets.length < ANSWER_SHAPE_MAX_BULLETS) {
+      bullets.push(m[1].trim());
+    } else {
+      overflowBulletLines.push(line);
     }
   }
   const proseText = proseLines.join('\n').trim();
