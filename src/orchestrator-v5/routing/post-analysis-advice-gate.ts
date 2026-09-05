@@ -1897,10 +1897,8 @@ function marginPpString(margin: number | null | undefined): string | null {
  * ROADMAP 2.1067. Before this existed, `composeAdvice` and `composeMeaning`
  * carried the same sentence twice, differing only in whether the label was
  * quoted — so a reword had to be remembered in two places and neither was
- * covered by a guard. The label arrives ALREADY RENDERED because label quoting
- * is each composer's own voice (`advice` quotes nothing, `meaning` quotes
- * everything) and that is the one thing these two surfaces legitimately differ
- * on.
+ * covered by a guard. The label arrives ALREADY RENDERED: both call sites
+ * pass `quoteLabel(runnerLabel)`.
  *
  * It reports the runner-up's OWN win share. The leading option's share is
  * stated by both composers' openers one clause earlier, so the pair gives each

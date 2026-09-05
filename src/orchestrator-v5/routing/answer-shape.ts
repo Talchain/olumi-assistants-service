@@ -254,7 +254,8 @@ const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
  * it away from that heading strands the heading with nothing under it.
  *
  * Measured on the 2026-08-17 live reply corpus + the 2026-09-05 founder
- * journey (809 replies): **146 of 146** replies carrying an `Options compared`
+ * journey (700 replies: 688 in the committed corpus + 12 journey turns):
+ * **146 of 146** replies carrying an `Options compared`
  * heading derived to an output where that heading was followed by nothing, and
  * the deployed founder journey shows the same defect on the advice gate's
  * `What to check next` (turns 3 and 10, reproduced byte-exact). The heading is
@@ -281,7 +282,7 @@ const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
  * extra limb here buys a measured case or it does not ship.
  *
  * Scope of the behaviour change, MEASURED rather than asserted: across the
- * 809-reply corpus exactly 148 replies change, and every one of them is a
+ * 700-reply corpus exactly 148 replies change, and every one of them is a
  * reply whose heading or colon is stranded TODAY. No reply outside the
  * stranded class changes shape, and no reply gains or loses a shape (zero
  * null-flips). `answer-shape-heading-bullet-adjacency.test.ts` pins both

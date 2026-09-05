@@ -23,8 +23,8 @@
  * ⚠ `OBSERVED_DEFECTIVE_TURN_10` is a RECORD OF WHAT THE PRODUCT ONCE SAID.
  * Append to this file; never edit that string to match new behaviour.
  *
- * SCOPE, measured not asserted (809 real replies: the 2026-08-17 live corpus
- * plus this journey): 148 replies change, every one of them stranded today;
+ * SCOPE, measured not asserted (700 real replies: the 688-reply 2026-08-17
+ * live corpus plus this journey's 12 turns): 148 replies change, every one of them stranded today;
  * 290 stranded headings across those replies go to 0; zero replies gain or
  * lose a shape. The negative case below is the guard on the other direction —
  * an ordinary lead-sentence-then-list must STILL hoist its bullets.
@@ -33,21 +33,45 @@ import { describe, expect, it } from 'vitest';
 import {
   synthesiseAnswerShapeFromText,
   deriveAnswerTextFromShape,
-} from '../answer-shape';
+} from '../answer-shape.js';
 
-/** The advice gate's own template — `post-analysis-advice-gate.ts` composeAdvice. */
+/**
+ * `composeAdvice`'s own output for that turn as it stood BEFORE this PR: the
+ * same four segments, with BARE (unquoted) labels. Kept byte-aligned with
+ * `OBSERVED_DEFECTIVE_TURN_10` on purpose — the two carry IDENTICAL content and
+ * differ only in ORDER, so the `not.toBe` pin below discriminates the shaping
+ * defect rather than passing on an incidental wording difference.
+ */
 const ADVICE_GATE_OUTPUT =
   'Based on this model, the analysis currently favours ICP Validation Sprint Before Hiring, with a probability of 82%.'
   + ' Hire a Dedicated Sales Team sits in second place, with a probability of 13%.'
   + '\n\nWhat to check next'
-  + '\n• The biggest thing to examine next is product quality, because it carries more of the margin than anything else.';
+  + '\n• The biggest thing to examine next is we believe is partly driven by product quality and partly by how much attention each trial gets from the founder, because it carries more of the margin than anything else.';
 
-/** Shipped to a real user on 2026-09-05. Historic record — do not edit. */
+/**
+ * Turn 10 of the 2026-09-05 founder journey, VERBATIM: the first 425 characters
+ * of the `assistant_text` a real user was shown on deployed CEE `1af54f6c`
+ * (584 in full; the 159-char defaulted-value disclosure that followed is a
+ * different defect and is not part of this pin).
+ *
+ * ⚠ HISTORIC RECORD — APPEND TO THIS FILE, NEVER EDIT THIS STRING. These are
+ * bytes the product actually emitted. Note in particular that the bullet's
+ * factor label is a RAW SPAN OF THE USER'S BRIEF — that is precisely WHY the
+ * unquoted sentence was ungrammatical, so paraphrasing the label to something
+ * tidier would delete the evidence for the defect this PR fixes.
+ * `SHIPPED_TURN_10_PREFIX_LENGTH` pins the count so it cannot drift again.
+ */
 const OBSERVED_DEFECTIVE_TURN_10 =
   'Based on this model, the analysis currently favours ICP Validation Sprint Before Hiring, with a probability of 82%.'
-  + '\n\n• The biggest thing to examine next is product quality, because it carries more of the margin than anything else.'
+  + '\n\n• The biggest thing to examine next is we believe is partly driven by product quality and partly by how much attention each trial gets from the founder, because it carries more of the margin than anything else.'
   + '\n\nHire a Dedicated Sales Team sits in second place, with a probability of 13%.'
   + '\n\nWhat to check next';
+
+/** Derived from the capture, not asserted: `len(assistant_text[:'What to check next'])`. */
+const SHIPPED_TURN_10_PREFIX_LENGTH = 425;
+
+/** Turn 8's `assistant_text`, in full, from the same capture. */
+const SHIPPED_TURN_8_LENGTH = 673;
 
 /**
  * Turn 8 of the same journey, verbatim. The best passage in that run: it
@@ -90,6 +114,27 @@ function strandedHeadings(text: string): string[] {
 }
 
 describe('answer shape — a heading keeps its bullets', () => {
+  it('the pinned historic strings are the bytes that shipped, at their measured lengths', () => {
+    // These two constants are RECORDS, not fixtures. The lengths come from the
+    // 2026-09-05 capture (`live-20260905T165205Z.captures.json`, turn 10 prefix
+    // and turn 8 in full); pinning them here means a later tidy-up of the
+    // wording fails HERE rather than silently rewriting what the product said.
+    expect(OBSERVED_DEFECTIVE_TURN_10).toHaveLength(SHIPPED_TURN_10_PREFIX_LENGTH);
+    expect(OBSERVED_TURN_8).toHaveLength(SHIPPED_TURN_8_LENGTH);
+    // The defective turn's factor label is a raw span of the user's brief —
+    // the evidence for the label-quoting half of this fix.
+    expect(OBSERVED_DEFECTIVE_TURN_10).toContain(
+      'is we believe is partly driven by product quality and partly by',
+    );
+    // Same content, different order — that is the whole shaping defect. The
+    // two differ in WHITESPACE too (the shaper moves line breaks), so the
+    // multiset is taken over non-whitespace characters.
+    const contentChars = (t: string): string =>
+      [...t.replace(/\s+/g, '')].sort().join('');
+    expect(contentChars(OBSERVED_DEFECTIVE_TURN_10)).toBe(contentChars(ADVICE_GATE_OUTPUT));
+    expect(OBSERVED_DEFECTIVE_TURN_10).not.toBe(ADVICE_GATE_OUTPUT);
+  });
+
   it('the detector itself discriminates (positive and negative control)', () => {
     // Without this pair every assertion below could pass on a blind detector.
     expect(strandedHeadings('Lead.\n\n• b\n\nWhat to check next')).toEqual([
@@ -102,7 +147,7 @@ describe('answer shape — a heading keeps its bullets', () => {
     const out = derive(ADVICE_GATE_OUTPUT);
     expect(strandedHeadings(out)).toEqual([]);
     expect(out).toContain(
-      'What to check next\n• The biggest thing to examine next is product quality,',
+      'What to check next\n• The biggest thing to examine next is we believe is partly driven by product quality and partly by how much attention each trial gets from the founder, because it carries more of the margin than anything else.',
     );
     // The exact bytes a real user was shown must no longer be reachable.
     expect(out).not.toBe(OBSERVED_DEFECTIVE_TURN_10);
@@ -141,6 +186,24 @@ describe('answer shape — a heading keeps its bullets', () => {
     );
     expect(strandedHeadings(out)).toEqual([]);
     expect(out).toContain('define it:\n• A monthly spend.');
+  });
+
+  it('NEGATIVE — the heading cap is pinned from ABOVE: an over-length line still hoists', () => {
+    // `SECTION_HEADING_MAX_LENGTH` is one window policing two opposite harms.
+    // The cases above pin it from BELOW (shrink the cap and real headings
+    // strand). This pins it from ABOVE: widen the cap and an ordinary long
+    // lead-in stops hoisting, which loses progressive disclosure. Raising the
+    // constant 60 -> 600 REDs this case; lowering it does not.
+    const lead = 'A long lead-in line that runs well past the sixty character section heading cap';
+    expect(lead.length).toBeGreaterThan(60); // 79 chars
+    // Two trailing sentences: `synthesiseAnswerShapeFromText` returns null
+    // when there is nothing to put behind the toggle, and a null shape
+    // would make this case prove nothing.
+    const shape = synthesiseAnswerShapeFromText(
+      `${lead}\n• Cost of delay.\n• Team capacity.\n\nEach is worth a look. Then decide.`,
+    );
+    expect(shape).not.toBeNull();
+    expect(shape?.bullets).toEqual(['Cost of delay.', 'Team capacity.']);
   });
 
   it('NEGATIVE — an ordinary sentence followed by a list still hoists the bullets', () => {
