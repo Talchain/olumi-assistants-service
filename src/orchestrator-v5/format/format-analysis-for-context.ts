@@ -279,6 +279,25 @@ export interface DisplaySafeAnalysisDriver {
    *  `"moderate negative influence"`, or `"no material influence"` for
    *  near-zero sensitivities where sign is not meaningful. */
   readonly influence: string;
+  /**
+   * ⭐ THE PRODUCER'S OWN VERDICT ON WHETHER THIS FACTOR IS WORTH RESOLVING.
+   *
+   * Added because its ABSENCE caused a witnessed live harm (2026-09-04): the
+   * model was handed `{label, influence}` and nothing else, so for a factor
+   * with `value_of_information: 0` and `flip_risk_category: "negligible"` the
+   * only inference available was "this matters, so investigate it" — and the
+   * product spent eight narrations telling a founder to run a pilot that its
+   * own engine scored at zero benefit.
+   *
+   * Key ABSENT (never empty string) when the factor is genuinely informative
+   * or unscored, so the pre-fix projection is reproduced byte-for-byte for
+   * every case this fix is not about.
+   *
+   * ⚠ Lives on the SAME object as `influence` deliberately: the budget
+   * truncator drops `top_drivers` wholesale, so a drop can never strip the
+   * counter-evidence while leaving the influence claim standing.
+   */
+  readonly investigation?: string;
 }
 
 export interface DisplaySafeFragileEdge {
@@ -427,10 +446,62 @@ export function influencePhrase(signedSensitivity: number): string {
   return `${band} ${sign} influence`;
 }
 
+/**
+ * The honest sentence for each investigation verdict.
+ *
+ * ⚠ THREE SENTENCES, NOT THREE STRENGTHS OF ONE (trap #21). Each states a
+ * different fact with a different remedy, and none may stand in for another:
+ *
+ *  - `no_reordering_found` — the producer scored zero value of information AND
+ *    its tested range produced no reordering. This is the strongest honest
+ *    claim, and it is the witnessed case.
+ *  - `no_information_value` — zero value of information, but the ordering was
+ *    NOT settled (a non-zero `rank_flip_rate`, or no flip evidence at all).
+ *    Claiming the ordering is settled here would trade one lie for another.
+ *  - `option_controlled` — the factor is not free to vary; every option sets
+ *    its own value. It is a CHOICE, not an uncertainty to investigate, so
+ *    "not worth investigating" would be the wrong advice for the right reason.
+ *
+ * ⭐ NEVER SILENT. Each of these says something TRUE in place of the false
+ * recommendation; suppressing the sentence and leaving a blank would hide the
+ * most decision-relevant fact the analysis produced.
+ */
+const INVESTIGATION_PHRASES: Readonly<Record<string, string>> = {
+  no_reordering_found:
+    'nothing we tested would change which option leads — resolving this has no measured value',
+  no_information_value:
+    'no measured value in resolving this, though the tested range did not settle the ordering',
+  option_controlled:
+    'every option sets its own value for this — a choice, not an uncertainty to investigate',
+};
+
+/**
+ * Disclosed when the value-of-information figure is itself heuristic, or rests
+ * on a default (not user-supplied) range. Without it the replacement sentence
+ * would assert a settledness the producer never claimed — the same overclaim
+ * in the opposite direction.
+ */
+const INVESTIGATION_HEURISTIC_TAIL = ' (heuristic estimate, default range)';
+
 function formatDriver(driver: ContextPackAnalysisDriver): DisplaySafeAnalysisDriver {
-  return {
+  const base: DisplaySafeAnalysisDriver = {
     label: driver.factor_label,
     influence: influencePhrase(driver.sensitivity_value),
+  };
+  // `informative` and `unscored` deliberately have no phrase: an informative
+  // factor keeps today's behaviour, and an absent producer signal is NEVER
+  // read as zero. Both reproduce the pre-fix projection byte-for-byte.
+  const phrase =
+    driver.investigation_verdict === undefined
+      ? undefined
+      : INVESTIGATION_PHRASES[driver.investigation_verdict];
+  if (phrase === undefined) return base;
+  return {
+    ...base,
+    investigation:
+      driver.investigation_basis_heuristic === true
+        ? phrase + INVESTIGATION_HEURISTIC_TAIL
+        : phrase,
   };
 }
 

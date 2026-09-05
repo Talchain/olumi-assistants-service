@@ -38,6 +38,8 @@ import {
 import type { AnalysisResponseSummary } from '../../orchestrator/context/analysis-compact.js';
 
 /** Cap for evidence-gap signals carried into the projection. */
+import type { FactorInvestigationSignal } from './factor-investigation-licence.js';
+
 export const EVIDENCE_GAP_SIGNAL_CAP = 3;
 
 /** Cap for tipping-point signals carried into the projection. */
@@ -172,6 +174,13 @@ export interface OptionOutcomeSignal {
  */
 export interface AnalysisSummarySignals {
   readonly tipping_points?: readonly TippingPointSignal[];
+  /**
+   * Per-factor investigation verdicts derived from `factor_sensitivity[]` —
+   * see `./factor-investigation-licence.ts`. Answers "is there measured value
+   * in the user RESOLVING this factor?", which is a different question from
+   * every other signal here and from the driver's own sensitivity.
+   */
+  readonly factor_investigation?: readonly FactorInvestigationSignal[];
   readonly evidence_gaps?: readonly EvidenceGapSignal[];
   readonly goal_fit?: GoalFitSignal | null;
   /** Lane 30 — per-option goal-fit values (see {@link OptionGoalFitSignal}). */

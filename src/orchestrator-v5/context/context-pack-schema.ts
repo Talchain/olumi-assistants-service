@@ -157,6 +157,22 @@ const ContextPackAnalysisDriverSchema = z
   .object({
     factor_label: z.string(),
     sensitivity_value: z.number().finite(),
+    // The producer's verdict on whether resolving this factor has measured
+    // value (`./factor-investigation-licence.ts`). Optional: absent for an
+    // older producer and for a factor that genuinely IS worth investigating,
+    // both of which keep the pre-fix byte-shape. The enum is closed on purpose
+    // — a verdict this schema does not recognise must fail loudly here rather
+    // than reach the model as an unrendered token.
+    investigation_verdict: z
+      .enum([
+        'option_controlled',
+        'no_reordering_found',
+        'no_information_value',
+        'informative',
+        'unscored',
+      ])
+      .optional(),
+    investigation_basis_heuristic: z.literal(true).optional(),
   })
   .strict();
 

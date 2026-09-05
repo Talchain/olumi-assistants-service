@@ -884,6 +884,7 @@ function buildInvokeInput(
     model_critique_count: dcResult.model_critique_count,
     has_deterministic_coaching: dcResult.has_real_data,
     evidence_gaps_dropped_count: dcResult.evidence_gaps_dropped_count,
+    evidence_gaps_zero_voi_count: dcResult.evidence_gaps_zero_voi_count,
     model_critiques_dropped_count: dcResult.model_critiques_dropped_count,
     model_critiques_capped_count: dcResult.model_critiques_capped_count,
     margin,
@@ -1196,6 +1197,17 @@ interface DeterministicCoachingResult {
   readonly has_real_data: boolean;
   readonly model_critique_count: number;
   readonly evidence_gaps_dropped_count: number;
+  /**
+   * Number of well-formed evidence gaps withheld because the producer scored
+   * them at ZERO value of information.
+   *
+   * ⚠ DELIBERATELY NOT MERGED INTO `evidence_gaps_dropped_count` (trap #21).
+   * That counter means "the producer sent something unusable"; this one means
+   * "the producer sent something usable and said resolving it is worthless".
+   * One number answering both questions would corrupt the malformed-entry
+   * telemetry and hide whichever cause was rarer.
+   */
+  readonly evidence_gaps_zero_voi_count: number;
   /** Number of upstream model_critiques entries dropped for missing one of
    *  the three required fields (type, severity, message) — see
    *  {@link normaliseModelCritique}. Mirrors evidence_gaps_dropped_count. */
@@ -1270,12 +1282,38 @@ function normaliseDeterministicCoachingFromM1(
   const rawGaps = m1 && Array.isArray(m1.evidence_gaps) ? m1.evidence_gaps : [];
   const evidence_gaps: Record<string, unknown>[] = [];
   let dropped = 0;
+  let zeroVoiWithheld = 0;
   for (const g of rawGaps) {
     // Non-object entries aren't "populated but malformed" — skip silently
     // without counting (matches the filter-object-entries convention).
     if (g === null || typeof g !== 'object' || Array.isArray(g)) continue;
     const n = normaliseEvidenceGap(g as Record<string, unknown>);
     if (n) {
+      // ⭐ THE WITNESSED HARM (2026-09-04). This list is what the served
+      // prompt turns into "go and gather data": `decision_review.txt:227`
+      // says "the top 3 non-lever evidence_gaps by voi (ALL IF FEWER), one
+      // concrete action each" — no value-of-information floor anywhere. A
+      // factor the producer scored at zero therefore arrived here (0 is
+      // finite, so it passes `normaliseEvidenceGap`) and the model was
+      // REQUIRED to invent a concrete pilot for it. The product spent eight
+      // narrations sending a founder to spend real time for no modelled
+      // benefit.
+      //
+      // A factor with no measured information value is not an investigation
+      // candidate, so it does not enter the candidate list. The suppression
+      // is deterministic and lives at the composition boundary — NOT a prompt
+      // change, which could not be bounded by tests.
+      //
+      // ⚠ THE TEST IS `<= 0`, AND ITS DIRECTION IS DELIBERATE. Two opposite
+      // harms sit under this predicate and must not share a window (trap
+      // 22b): too WIDE and a genuine recommendation is silently lost (a gap);
+      // too NARROW and the witnessed lie survives. Any POSITIVE score — even
+      // a tiny one — keeps today's behaviour, so this can only ever remove a
+      // recommendation the producer itself valued at nothing.
+      if (typeof n.voi === 'number' && n.voi <= 0) {
+        zeroVoiWithheld++;
+        continue;
+      }
       evidence_gaps.push(n);
     } else {
       dropped++;
@@ -1309,6 +1347,7 @@ function normaliseDeterministicCoachingFromM1(
     has_real_data,
     model_critique_count: model_critiques.length,
     evidence_gaps_dropped_count: dropped,
+    evidence_gaps_zero_voi_count: zeroVoiWithheld,
     model_critiques_dropped_count: critiquesDropped,
     model_critiques_capped_count: critiquesCappedCount,
   };
