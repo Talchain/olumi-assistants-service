@@ -66,6 +66,7 @@ import {
 import type { SuggestedAction } from './compose/types.js';
 import type { CoachingState } from './coaching/coaching-state.js';
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
+import { censusOptionFactorMagnitudes } from '../cee/draft/records/option-magnitude-census.js';
 import { emitContextTruncation } from './context/context-budget-telemetry.js';
 import { config } from '../config/index.js';
 import { floorGraphSigmaForCompute } from '../validators/numeric-bounds.js';
@@ -1565,6 +1566,37 @@ export async function commitDirectAnswer(
         graph_identity_hash_prefix: null,
         error_code: null,
         provenance: 'commit',
+      });
+    }
+
+    // ⭐ CENSUS POINT 4 of 4 — `at_commit`. MEASUREMENT ONLY: nothing reads it,
+    // and it is inside the post-success block, so it can never turn a durable
+    // write into a turn failure.
+    //
+    // ⚠ ON `graphForStore`, NOT `metadata.graph` — the exact object written to
+    // `scenarios.graph`, because `at_commit` is a claim about the PERSISTED
+    // bytes and each point must be about the artefact its name promises.
+    //
+    // ⚠ AND THE HONEST LIMIT OF THAT CHOICE, so nobody reads more into it: on
+    // THIS measure the two currently agree for every input, and the mutant that
+    // swaps them SURVIVES (demonstrated, not asserted — see the PR body). The
+    // persist passes between them move interventions BETWEEN CARRIERS, and the
+    // census is carrier-agnostic by design, so a carrier move is invisible to it
+    // — correctly, since moving a magnitude is not losing one. `graphForStore`
+    // is still the right input: it is the only one that would show it if a
+    // future persist pass changed the option→factor topology itself.
+    //
+    // ⚠ GATED ON `writesGraph`. A commit that writes no graph has no artefact to
+    // census; emitting `{0, 0}` there would put a fabricated zero-denominator
+    // row into the same series as real measurements and drag every aggregate
+    // down. Absent is the truthful report of "nothing to measure".
+    if (writesGraph) {
+      emit(TelemetryEvents.CeeDraftOptionMagnitudeCensus, {
+        point: 'at_commit',
+        scenario_id: metadata.scenario_id,
+        turn_id: metadata.turn_id,
+        turn_class: metadata.turn_class,
+        ...censusOptionFactorMagnitudes(graphForStore),
       });
     }
 

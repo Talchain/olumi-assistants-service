@@ -2704,6 +2704,28 @@ export const TelemetryEvents = {
   // Coded reasons, counts and model ids only — no labels, no brief content.
   CeeDraftQuality: "cee.draft_graph.quality",
   CeeDraftQualityRedraw: "cee.draft_graph.quality_redraw",
+
+  // ⭐ THE OPTION→FACTOR MAGNITUDE CENSUS (src/cee/draft/records/
+  // option-magnitude-census.ts). Emitted FOUR TIMES per drafted graph — once at
+  // each of `before_completion`, `after_completion`, `after_projection` (all
+  // three in the Anthropic draft adapter) and `at_commit` (the V5 commit seam,
+  // on every turn that writes a graph). ONE event name with a `point`
+  // discriminator rather than four names: the four are the same measurement of
+  // the same population at four places, and four names would let one of them be
+  // renamed, dropped or diverge in meaning without the others noticing.
+  //
+  // WHY IT EXISTS. Deployed drafts persist options with `interventions: {}` —
+  // 28 of 32 options empty across 8 drafts, 0 of 8 fully valued. Nothing
+  // currently says WHERE the magnitude goes missing, so no fix can be chosen
+  // over the three suspected causes. This is the instrument that says where.
+  //
+  // ⚠ BOTH NUMBERS OR NEITHER. `missing_magnitude` alone cannot distinguish "no
+  // magnitudes" from "no option→factor claims"; `option_factor_edges` is the
+  // denominator that separates them and is also how the instrument reports its
+  // own blindness (a shape it cannot read counts 0 edges, not 0 misses).
+  // Counts, a closed-enum point and an idempotency key only — no labels, no
+  // brief content, no magnitudes.
+  CeeDraftOptionMagnitudeCensus: "cee.draft_graph.option_magnitude_census",
 } as const;
 
 /**
