@@ -71,7 +71,29 @@ function makeContext(): ConversationContext {
     graph: {
       nodes: [
         { id: 'goal_1', kind: 'goal', label: 'Launch on time' },
-        { id: 'factor_tco', kind: 'factor', label: 'Team coordination overhead' },
+        // ⚠ `observed_state` IS LOAD-BEARING HERE AND WAS MISSING. Without it
+        // nothing in the payload says what scale this factor is on, and the
+        // composer must not claim one — so the band assertions below were
+        // being made against a graph that cannot honestly produce a band. A
+        // factor the user has been shown a LEVEL for has a value; this is that
+        // factor. (The undeclared case is not lost: `factor_morale` below
+        // carries it, and is asserted separately.)
+        {
+          id: 'factor_tco',
+          kind: 'factor',
+          label: 'Team coordination overhead',
+          observed_state: { value: 0.3 },
+        },
+        // The dominant real class — 403 of 491 nodes carry no observed_state.
+        { id: 'factor_morale', kind: 'factor', label: 'Team morale' },
+        // A measured factor, at the real path. The witnessed graph had none,
+        // and its absence is why a £ factor could be told it was 0-1.
+        {
+          id: 'factor_spend',
+          kind: 'factor',
+          label: 'Marketing spend',
+          observed_state: { value: 0.5, raw_value: 500000, unit: '£' },
+        },
         { id: 'opt_lead', kind: 'option', label: 'Hire a Tech Lead' },
       ],
       edges: [
@@ -220,6 +242,45 @@ describe('handleEditGraph no-op — the witnessed collapse, and its repair', () 
       expect(result.suggestedActions, `no affordance for: ${message}`).toBeDefined();
       expect(result.suggestedActions!.length, `no affordance for: ${message}`).toBeGreaterThan(0);
     }
+  });
+
+  it('⭐ WIRING — a £ factor is never told it is on a 0–1 scale, and is offered no bare number', async () => {
+    // The F1 harm, proven through the REAL handler rather than the composer
+    // alone. Before the field-path fix this reply claimed a 0-1 scale on a
+    // £-denominated factor and offered a chip writing 0.1 into it.
+    const result = await handleEditGraph(
+      makeContext(),
+      'Change Marketing spend to low',
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    expect(result.assistantText).toMatch(/measured in £/i);
+    expect(result.assistantText).not.toMatch(/0–1 scale/);
+    for (const c of result.suggestedActions ?? []) {
+      expect(c.prompt, `bare number offered on a £ factor: ${c.prompt}`).not.toMatch(
+        /^Set Marketing spend to \d/,
+      );
+    }
+  });
+
+  it('⭐ WIRING — a factor whose scale nothing declares gets no scale claim and no number', async () => {
+    // 403 of 491 real nodes are this class. Asserted through the handler so a
+    // regression in the call-site projection shows up here too.
+    const result = await handleEditGraph(
+      makeContext(),
+      'Change Team morale to low',
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    expect(result.assistantText).toContain('Team morale');
+    expect(result.assistantText).not.toMatch(/0–1 scale/);
+    for (const c of result.suggestedActions ?? []) {
+      expect(c.prompt).not.toMatch(/^Set Team morale to \d/);
+    }
+    // …and it still keeps an affordance.
+    expect(result.suggestedActions!.length).toBeGreaterThan(0);
   });
 
   it('a number is offered ONLY where the user’s own words bounded one', async () => {
