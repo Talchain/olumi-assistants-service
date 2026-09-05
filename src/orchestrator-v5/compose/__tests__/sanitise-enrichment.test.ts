@@ -184,13 +184,27 @@ describe('S_BUCKET_REPLACEMENTS — pinned approved copy (Paul, 2026-04-30)', ()
     );
   });
 
-  it('falls back to "the relevant option" when no graph context is available', () => {
+  // ⚠ RE-AUTHORED 2026-09-05. This test previously pinned
+  //   "Option 'the relevant option' does not change anything yet."
+  // as the correct fallback. That expectation was the defect: the slot is
+  // wrapped in quotes as a NAME, and `the relevant option` is a DESCRIPTION of
+  // a missing argument, not a label. The same mechanism with an id carrying no
+  // recognisable prefix (the empty string, which the withheld-claim projection
+  // always supplies) produced `Option 'the relevant node' …` on the deployed
+  // build — witnessed by the founder on UI `a9c2e050`.
+  //
+  // The condition under test is unchanged (no graph context, unresolvable id);
+  // only the ruling about what to emit has changed: when the subject cannot be
+  // named, name nobody. Full two-direction coverage lives in
+  // `s-bucket-unnamed-subject.test.ts`.
+  it('names nobody — rather than quoting a description — when no graph context is available', () => {
     const out = S_BUCKET_REPLACEMENTS.EMPTY_INTERVENTIONS!({}, {
       affected_option_ids: ['opt_unknown'],
     });
     expect(out).toBe(
-      "Option 'the relevant option' does not change anything yet. Specify what makes this option different.",
+      'One of your options does not change anything yet. Specify what makes it different.',
     );
+    expect(out).not.toMatch(/'the relevant [a-z]+'/i);
   });
 
   it('all 9 replacements are free of the forbidden vocabulary set', () => {

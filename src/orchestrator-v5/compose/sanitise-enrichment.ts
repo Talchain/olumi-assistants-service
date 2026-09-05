@@ -24,6 +24,7 @@ import {
   WARNING_PATTERNS,
 } from '../../orchestrator/shared/forbidden-tokens.js';
 import {
+  resolveLabel,
   resolveLabelOrFallback,
   type LabelResolverContext,
 } from './resolve-label.js';
@@ -117,9 +118,14 @@ export function bucketFor(code: string | undefined | null): CritiqueBucket {
 //
 // Each entry is a thunk taking the critique's structured fields + the
 // label resolver context. Returns the verbatim replacement message.
-// `<label>` slots are filled via `resolveLabelOrFallback` so the output
-// is always a human label OR `"the relevant option/factor"` — never a
-// raw ID.
+//
+// ⚠ `<label>` slots are filled via `optionLabelOrNull`, NOT
+// `resolveLabelOrFallback`. Every subject-bearing template therefore has TWO
+// forms: one that names the option, and one that names nobody. A slot wrapped
+// in quotes is a NAME slot, and a generic phrase substituted into it reads as
+// a broken interpolation rather than a degraded label — see the rationale on
+// `optionLabelOrNull` and the witnessed defect noted on
+// DEGENERATE_OPTION_ZERO_VARIANCE. Neither form can emit a raw ID.
 
 export interface SCritiqueVars {
   readonly affected_option_ids?: ReadonlyArray<string>;
@@ -130,20 +136,90 @@ function pickOptionId(vars: SCritiqueVars, idx = 0): string {
   return vars.affected_option_ids?.[idx] ?? '';
 }
 
+/**
+ * Resolve an option id to a REAL human label, or `null` when the sentence
+ * cannot name its subject.
+ *
+ * ## Why this is not `resolveLabelOrFallback`
+ *
+ * `resolveLabelOrFallback` never returns null — it substitutes a generic
+ * phrase (`the relevant option`, or `the relevant node` when the id has no
+ * recognisable prefix, which includes the empty string). That is exactly right
+ * for its other caller, `sanitiseEnrichmentText`, which rewrites a leaked id
+ * inside arbitrary producer prose: there the phrase lands in flowing text
+ * ("Compare the relevant option to baseline") and reads as English.
+ *
+ * It is exactly WRONG for this catalogue, whose templates wrap the slot in
+ * single quotes as a NAME. A description quoted as a name is not a degraded
+ * label, it is a broken interpolation — the deployed product rendered
+ * `Option 'the relevant node' produces the same result in every simulation`,
+ * which reads as a bug and discredits every other sentence beside it.
+ *
+ * ## The ruling this encodes
+ *
+ * When the subject cannot be named, NAME NOTHING. Each template below carries
+ * a subject-free variant ("One of your options …") that is fully honest and
+ * carries the same instruction. A sentence with no name is worth more than a
+ * sentence with a fake one.
+ *
+ * ## Leak safety is preserved, and strengthened
+ *
+ * `resolveLabel` returns either a label already cleared by `isUnsafeLabel`
+ * (so never a slug, never the raw id) or null. The unnamed variants contain no
+ * id-derived text at all, so this path cannot leak an entity id — a strictly
+ * stronger guarantee than substituting a generic phrase.
+ */
+function optionLabelOrNull(
+  vars: SCritiqueVars,
+  ctx: LabelResolverContext,
+  idx = 0,
+): string | null {
+  const id = pickOptionId(vars, idx);
+  if (id.length === 0) return null;
+  return resolveLabel(id, ctx);
+}
+
 export const S_BUCKET_REPLACEMENTS: Readonly<
   Record<string, (ctx: LabelResolverContext, vars: SCritiqueVars) => string>
 > = {
-  EMPTY_INTERVENTIONS: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' does not change anything yet. Specify what makes this option different.`,
+  EMPTY_INTERVENTIONS: (ctx, vars) => {
+    const label = optionLabelOrNull(vars, ctx);
+    return label === null
+      ? `One of your options does not change anything yet. Specify what makes it different.`
+      : `Option '${label}' does not change anything yet. Specify what makes this option different.`;
+  },
 
-  INVALID_INTERVENTION_TARGET: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' refers to something that is not currently in the model. Point it at a factor that is in the model, or add that factor first.`,
+  INVALID_INTERVENTION_TARGET: (ctx, vars) => {
+    const label = optionLabelOrNull(vars, ctx);
+    return label === null
+      ? `One of your options refers to something that is not currently in the model. Point it at a factor that is in the model, or add that factor first.`
+      : `Option '${label}' refers to something that is not currently in the model. Point it at a factor that is in the model, or add that factor first.`;
+  },
 
-  NO_EFFECTIVE_PATH_TO_GOAL: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' does not currently connect to your goal. Link what it changes through to your goal, or point it at a factor that already leads there.`,
+  NO_EFFECTIVE_PATH_TO_GOAL: (ctx, vars) => {
+    const label = optionLabelOrNull(vars, ctx);
+    return label === null
+      ? `One of your options does not currently connect to your goal. Link what it changes through to your goal, or point it at a factor that already leads there.`
+      : `Option '${label}' does not currently connect to your goal. Link what it changes through to your goal, or point it at a factor that already leads there.`;
+  },
 
-  IDENTICAL_OPTIONS: (ctx, vars) =>
-    `Options '${resolveLabelOrFallback(pickOptionId(vars, 0), ctx)}' and '${resolveLabelOrFallback(pickOptionId(vars, 1), ctx)}' currently make the same changes, so the analysis treats them as equivalent. Change what one of them does, or drop it.`,
+  // Two slots, so THREE cases — and the partial one is the case a fix written
+  // only for "both present" or "both absent" silently gets wrong. It shipped
+  // exactly that way: `Options 'Hire Two Senior Engineers Locally' and 'the
+  // relevant node'`. Name whatever resolves; never invent the other half.
+  IDENTICAL_OPTIONS: (ctx, vars) => {
+    const tail = `currently make the same changes, so the analysis treats them as equivalent. Change what one of them does, or drop it.`;
+    const first = optionLabelOrNull(vars, ctx, 0);
+    const second = optionLabelOrNull(vars, ctx, 1);
+    if (first !== null && second !== null) {
+      return `Options '${first}' and '${second}' ${tail}`;
+    }
+    const named = first ?? second;
+    if (named !== null) {
+      return `Option '${named}' currently makes the same changes as another option, so the analysis treats them as equivalent. Change what one of them does, or drop it.`;
+    }
+    return `Two of your options ${tail}`;
+  },
 
   GRAPH_DISCONNECTED: (_ctx, _vars) =>
     `Some parts of the model are not connected to your goal. Link them through to your goal, or remove them.`,
@@ -155,8 +231,12 @@ export const S_BUCKET_REPLACEMENTS: Readonly<
   // honest descriptive prose, is NOT in the forbidden list, and
   // avoids the CEE jargon word "interventions" (banned by the
   // sanitise-enrichment plain-language vocabulary guard).
-  OPTION_NO_INTERVENTIONS: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' represents the status quo and makes no adjustments to the model.`,
+  OPTION_NO_INTERVENTIONS: (ctx, vars) => {
+    const label = optionLabelOrNull(vars, ctx);
+    return label === null
+      ? `One of your options represents the status quo and makes no adjustments to the model.`
+      : `Option '${label}' represents the status quo and makes no adjustments to the model.`;
+  },
 
   LOW_EFFECTIVE_SAMPLES: (_ctx, _vars) =>
     `This analysis is less reliable than usual, so treat the result as a signal to check rather than a settled answer.`,
@@ -185,8 +265,22 @@ export const S_BUCKET_REPLACEMENTS: Readonly<
   // a result to be contradicted by. This entry owns the narrower, always-true
   // claim: the outcome does not move. A constant outcome CAN be ahead, so the
   // pair can no longer contradict itself.
-  DEGENERATE_OPTION_ZERO_VARIANCE: (ctx, vars) =>
-    `Option '${resolveLabelOrFallback(pickOptionId(vars), ctx)}' produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them.`,
+  //
+  // ⚠ THE WITNESSED DEFECT (deployed UI `a9c2e050`, founder screenshots, 2026-09-05).
+  // This template rendered `Option 'the relevant node' produces the same result
+  // in every simulation.` — the DESCRIPTION of a missing argument, quoted as if
+  // it were the user's option. Root cause was not this string: it was
+  // `resolveLabelOrFallback('')`, whose prefix-aware fallback has no prefix to
+  // read and returns its defensive `the relevant node`. The guaranteed producer
+  // is `projectCritiquesForWithheldClaim`, which re-renders this catalogue with
+  // `affected_option_ids: undefined` BY DESIGN on every withheld-leader turn.
+  DEGENERATE_OPTION_ZERO_VARIANCE: (ctx, vars) => {
+    const tail = `produces the same result in every simulation, so nothing in your model makes its outcome uncertain. If you expected it to move, review the factors it changes and the ranges set on them.`;
+    const label = optionLabelOrNull(vars, ctx);
+    return label === null
+      ? `One of your options ${tail}`
+      : `Option '${label}' ${tail}`;
+  },
 
   HIGH_TIE_RATE: (_ctx, _vars) =>
     `The options are very close in this analysis. Treat the current lead as finely balanced.`,
