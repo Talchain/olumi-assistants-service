@@ -1,20 +1,25 @@
 {
-  "note": "SYNTHETIC. Turn 6 never returned. Nothing may FAIL on a turn that was never observed — the criteria that read it go NOT ASSESSED and the caveat names the turn. Exit 0, with the loss stated loudly rather than absorbed.",
+  "note": "SYNTHETIC. Turn 6 never returned. The eleven turns are ORDERED AND STATEFUL, so a gap is not a missing data point \u2014 every turn after it is a DIFFERENT CONVERSATION. Turns 6 and after are voided and every criterion goes NOT ASSESSED. Nothing may FAIL on a journey the harness did not actually drive. Exit 0, with the break stated loudly rather than absorbed.",
   "brief_sha256": "30ff141866aa69f5f763961ede5ae860776f21e427a8178892c040ae724073b6",
   "expect": {
     "exit_code": 0,
     "criteria": {
-      "C5": "NOT_ASSESSED"
+      "C1": "NOT_ASSESSED",
+      "C2": "NOT_ASSESSED",
+      "C3": "NOT_ASSESSED",
+      "C4": "NOT_ASSESSED",
+      "C5": "NOT_ASSESSED",
+      "C6": "NOT_ASSESSED"
     }
   },
   "turns": [
     {
       "index": 0,
-      "message": "(the verbatim brief — body only; the harness hashes the real file on a live run)",
+      "message": "(the verbatim brief \u2014 body only; the harness hashes the real file on a live run)",
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "I have drafted your model: three courses of action, eleven factors and one goal. Nothing in it is confirmed yet — tell me what looks wrong.",
+        "assistant_text": "I have drafted your model: three courses of action, eleven factors and one goal. Nothing in it is confirmed yet \u2014 tell me what looks wrong.",
         "blocks": [
           {
             "type": "draft_graph",
@@ -23,7 +28,7 @@
                 {
                   "id": "goal_mrr",
                   "type": "goal",
-                  "label": "Reach £30k MRR within 18 months"
+                  "label": "Reach \u00a330k MRR within 18 months"
                 },
                 {
                   "id": "opt_hire",
@@ -45,21 +50,21 @@
                   "type": "factor",
                   "label": "Sales headcount investment",
                   "value": 80,
-                  "unit": "£"
+                  "unit": "\u00a3"
                 },
                 {
                   "id": "fac_tooling",
                   "type": "factor",
                   "label": "Tooling spend",
                   "value": 20000,
-                  "unit": "£"
+                  "unit": "\u00a3"
                 },
                 {
                   "id": "fac_cac",
                   "type": "factor",
                   "label": "Customer acquisition cost",
                   "value": 500,
-                  "unit": "£"
+                  "unit": "\u00a3"
                 },
                 {
                   "id": "fac_churn",
@@ -78,7 +83,7 @@
                   "type": "factor",
                   "label": "Runway",
                   "value": 200000,
-                  "unit": "£"
+                  "unit": "\u00a3"
                 },
                 {
                   "id": "fac_founder_time",
@@ -97,7 +102,7 @@
                   "type": "factor",
                   "label": "MRR today",
                   "value": 8000,
-                  "unit": "£"
+                  "unit": "\u00a3"
                 },
                 {
                   "id": "risk_runway",
@@ -177,7 +182,7 @@
             {
               "id": "goal_mrr",
               "type": "goal",
-              "label": "Reach £30k MRR within 18 months"
+              "label": "Reach \u00a330k MRR within 18 months"
             },
             {
               "id": "opt_hire",
@@ -199,21 +204,21 @@
               "type": "factor",
               "label": "Sales headcount investment",
               "value": 80,
-              "unit": "£"
+              "unit": "\u00a3"
             },
             {
               "id": "fac_tooling",
               "type": "factor",
               "label": "Tooling spend",
               "value": 20000,
-              "unit": "£"
+              "unit": "\u00a3"
             },
             {
               "id": "fac_cac",
               "type": "factor",
               "label": "Customer acquisition cost",
               "value": 500,
-              "unit": "£"
+              "unit": "\u00a3"
             },
             {
               "id": "fac_churn",
@@ -232,7 +237,7 @@
               "type": "factor",
               "label": "Runway",
               "value": 200000,
-              "unit": "£"
+              "unit": "\u00a3"
             },
             {
               "id": "fac_founder_time",
@@ -251,7 +256,7 @@
               "type": "factor",
               "label": "MRR today",
               "value": 8000,
-              "unit": "£"
+              "unit": "\u00a3"
             },
             {
               "id": "risk_runway",
@@ -421,7 +426,7 @@
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "The run is complete. Both routes reach £30k MRR in some of the simulated futures, and on the numbers as they stand nothing separates them.",
+        "assistant_text": "The run is complete. Both routes reach \u00a330k MRR in some of the simulated futures, and on the numbers as they stand nothing separates them.",
         "blocks": [
           {
             "type": "analysis_result",
@@ -547,15 +552,15 @@
     },
     {
       "index": 4,
-      "message": "Why is the sales headcount investment £80? That doesn't seem right.",
+      "message": "Why is the sales headcount investment \u00a380? That doesn't seem right.",
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "It should not be. I read £80–120k from your brief and recorded 80 without its scale, so the model is treating the hire as costing eighty pounds. Tell me the range and I will correct it.",
+        "assistant_text": "It should not be. I read \u00a380\u2013120k from your brief and recorded 80 without its scale, so the model is treating the hire as costing eighty pounds. Tell me the range and I will correct it.",
         "blocks": [
           {
             "type": "text",
-            "content": "Sales headcount investment currently reads £80."
+            "content": "Sales headcount investment currently reads \u00a380."
           }
         ],
         "graph_hash": "a0b1c2d3e4f50011",
@@ -598,7 +603,7 @@
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "Updated Sales headcount investment from £80 to £100,000.",
+        "assistant_text": "Updated Sales headcount investment from \u00a380 to \u00a3100,000.",
         "blocks": [
           {
             "type": "graph_patch",
@@ -607,11 +612,11 @@
             "target_id": "fac_sales_headcount",
             "before": {
               "value": 80,
-              "unit": "£"
+              "unit": "\u00a3"
             },
             "after": {
               "value": 100000,
-              "unit": "£"
+              "unit": "\u00a3"
             }
           }
         ],
@@ -661,11 +666,11 @@
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "Before the correction the three routes were indistinguishable. Pricing the hire at £100,000 instead of £80 moved founder-led selling from 33% to 61% of futures reaching the goal, and hiring from 41% to 18%.",
+        "assistant_text": "Before the correction the three routes were indistinguishable. Pricing the hire at \u00a3100,000 instead of \u00a380 moved founder-led selling from 33% to 61% of futures reaching the goal, and hiring from 41% to 18%.",
         "blocks": [
           {
             "type": "explanation",
-            "narrative": "The correction changed one number — Sales headcount investment — and it is the only input the three routes differ on, so the whole movement is attributable to it.",
+            "narrative": "The correction changed one number \u2014 Sales headcount investment \u2014 and it is the only input the three routes differ on, so the whole movement is attributable to it.",
             "referenced_option_ids": [
               "opt_founder",
               "opt_hire"
@@ -747,7 +752,7 @@
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "Imagine it is eighteen months from now and you did not reach £30k MRR. Here are the three most likely stories.",
+        "assistant_text": "Imagine it is eighteen months from now and you did not reach \u00a330k MRR. Here are the three most likely stories.",
         "blocks": [
           {
             "type": "exercise",
@@ -830,7 +835,7 @@
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "You corrected the hire cost from £80 to £100,000 and reran. Founder-led selling now reaches the goal in most futures. The open question is ramp time.",
+        "assistant_text": "You corrected the hire cost from \u00a380 to \u00a3100,000 and reran. Founder-led selling now reaches the goal in most futures. The open question is ramp time.",
         "blocks": [
           {
             "type": "explanation",

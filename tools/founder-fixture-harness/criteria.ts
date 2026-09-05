@@ -46,6 +46,7 @@ import {
   C3_SCOPE_NOTE,
   C5_TARGET_LABEL_TOKENS,
   C5_TARGET_MIN_TOKEN_HITS,
+  SCRIPTED_TURNS,
 } from './script.js';
 
 export interface EvaluationInput {
@@ -699,9 +700,11 @@ function evaluateC3(input: EvaluationInput): { criterion: CriterionResult; cavea
     }
   }
 
+  const scannedTurns = turns.filter(reached).length;
+  const expectedTurns = SCRIPTED_TURNS.length + 1; // the eleven plus the brief
   const evidence: string[] = [
     C3_SCOPE_NOTE,
-    `scanned ${scanned} user-visible strings across ${turns.filter(reached).length} returned turns`,
+    `scanned ${scanned} user-visible strings across ${scannedTurns} of ${expectedTurns} sends`,
     `detector: ${detectors.narration.status.source}`,
   ];
   if (userVisibleHits.length > 0) {
@@ -726,17 +729,35 @@ function evaluateC3(input: EvaluationInput): { criterion: CriterionResult; cavea
       'evidence that the guard ran.',
   );
 
+  // ⚠ A CLEAN SCAN OF NOTHING IS NOT A PASS. C3's claim is about ALL the sends.
+  // When the journey broke, the turns after the gap are voided and this scan
+  // sees fewer strings — and if the brief itself never landed it sees NONE,
+  // at which point "no narration found" is an absence assertion that could not
+  // have seen a presence (CLAUDE.md trap 13). A hit is still a genuine finding
+  // on the turns that DID land, so FAIL survives a partial journey; PASS does
+  // not.
+  const complete = scannedTurns === expectedTurns;
+  const verdict: Verdict =
+    userVisibleHits.length > 0 ? 'FAIL' : complete ? 'PASS' : 'NOT_ASSESSED';
+  if (!complete && userVisibleHits.length === 0) {
+    evidence.push(
+      `NOT ASSESSED, not PASS: only ${scannedTurns} of ${expectedTurns} sends were scanned. The ` +
+        'criterion is about all of them, and a clean scan of a partial journey is an absence claim ' +
+        'over a corpus that was never assembled.',
+    );
+  }
+
   return {
     criterion: {
       id: 'C3',
       claim,
-      verdict: userVisibleHits.length === 0 ? 'PASS' : 'FAIL',
+      verdict,
       limbs: [
         limb(
           'C3.wire.no-narration',
           'no string a user sees, on any send, matches the canonical process-narration vocabulary',
           'wire',
-          userVisibleHits.length === 0 ? 'PASS' : 'FAIL',
+          verdict,
           evidence,
         ),
       ],
@@ -1250,12 +1271,94 @@ function evaluateC6(input: EvaluationInput): CriterionResult {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The index of the first turn that did not land, or `undefined` if none did.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ THE ELEVEN TURNS ARE ORDERED AND STATEFUL, SO A GAP IS NOT A MISSING DATA
+ * POINT — IT IS A DIFFERENT CONVERSATION FROM THAT POINT ON.
+ *
+ * FOUND BY RUNNING THIS HARNESS LIVE, AND IT WAS A DEFECT IN THE HARNESS, NOT
+ * IN THE PRODUCT. A network blip dropped turns 0-5 of the second staging run.
+ * Turns 6-11 landed, and the harness cheerfully decided them: it reported C5
+ * FAIL because turn 6 "neither refused nor produced an analysis result", and
+ * C4 FAIL on six turns.
+ *
+ * But the scenario had never received the brief. "Rerun." arrived as the FIRST
+ * message of a conversation with no model in it, and CEE answered — correctly —
+ * *"I have not run the analysis, because I did not read that as a request to
+ * run one."* That is not the fixture's turn 6. It is turn 1 of a different
+ * conversation, and failing the product on it is a fabricated defect.
+ *
+ * So: everything at or after the first gap is UNUSABLE, and every criterion
+ * that reads it goes NOT ASSESSED. A harness that reports a FAIL from a journey
+ * it did not actually drive is worse than one that reports nothing — the whole
+ * point of the fixture is that a failure is "fixed or reverted the same day".
+ *
+ * PROTOCOL.md's own framing: "every rule here exists because a measurement was
+ * once void". This is that rule, learned the same way.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+export function firstJourneyGap(turns: readonly TurnCapture[]): number | undefined {
+  const ordered = [...turns].sort((a, b) => a.index - b.index);
+  for (const t of ordered) {
+    if (!reached(t)) return t.index;
+  }
+  return undefined;
+}
+
+/**
+ * Blank out every turn at or after the gap, so the existing "did not return"
+ * paths cascade a NOT_ASSESSED through every criterion that reads one.
+ * Nothing is deleted from the report — the turn log still shows what landed.
+ */
+function voidDownstreamOfGap(
+  turns: readonly TurnCapture[],
+  gap: number,
+): readonly TurnCapture[] {
+  return turns.map((t) =>
+    t.index < gap
+      ? t
+      : {
+          ...t,
+          body: undefined,
+          transportError:
+            t.transportError ??
+            `voided: the journey broke at turn ${gap}, and every turn after a gap is a different conversation`,
+        },
+  );
+}
+
 export function evaluateCriteria(input: EvaluationInput): Evaluation {
   const caveats: string[] = [];
-  const c3 = evaluateC3(input);
+  const gap = firstJourneyGap(input.turns);
+  const effective: EvaluationInput =
+    gap === undefined ? input : { ...input, turns: voidDownstreamOfGap(input.turns, gap) };
+
+  if (gap !== undefined) {
+    caveats.push(
+      gap === BRIEF_TURN_INDEX
+        ? '⚠⚠ THE BRIEF NEVER LANDED. The scenario this run drove never received the founder brief, so ' +
+          'nothing measured on it is a measurement of this fixture at all. Every criterion is voided. ' +
+          'Re-run; do not report any of these turns as product behaviour.'
+        : `⚠⚠ THE JOURNEY BROKE AT TURN ${gap}. The eleven turns are ORDERED AND STATEFUL: every turn ` +
+          `after a gap is a different conversation, not a later turn of this one. Turns ${gap} and after ` +
+          'are voided and every criterion that reads one is NOT ASSESSED. Deciding them would fabricate ' +
+          'a defect out of a network failure.',
+    );
+  }
+
+  const c3 = evaluateC3(effective);
   caveats.push(...c3.caveats);
 
-  const criteria = [evaluateC1(input), evaluateC2(input), c3.criterion, evaluateC4(input), evaluateC5(input), evaluateC6(input)];
+  const criteria = [
+    evaluateC1(effective),
+    evaluateC2(effective),
+    c3.criterion,
+    evaluateC4(effective),
+    evaluateC5(effective),
+    evaluateC6(effective),
+  ];
 
   for (const c of criteria) {
     for (const l of c.limbs) {
@@ -1265,11 +1368,10 @@ export function evaluateCriteria(input: EvaluationInput): Evaluation {
     }
   }
 
-  const missing = input.turns.filter((t) => !reached(t));
-  for (const t of missing) {
+  for (const t of input.turns) {
+    if (reached(t)) continue;
     caveats.push(
-      `${turnLabel(t)} did not return a body (${t.transportError ?? `HTTP ${t.httpStatus}`}) — every ` +
-        'criterion that reads it is weakened accordingly.',
+      `${turnLabel(t)} did not return a body (${t.transportError ?? `HTTP ${t.httpStatus}`}).`,
     );
   }
 

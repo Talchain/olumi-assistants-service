@@ -210,16 +210,59 @@ describe('founder fixture — every criterion has an exercised FAIL path', () =>
     expect(ev).toContain('no-change denial as the ANSWER');
   });
 
-  it('a turn that never returned makes its criteria NOT ASSESSED — never FAIL', async () => {
+  it('a gap VOIDS everything after it — the turns are ordered and stateful', async () => {
     const detectors = await buildDetectors(undefined);
     const { criteria, caveats } = evaluateCriteria({
       turns: fixtureToCaptures(load('transport-loss')),
       detectors,
     });
-    // Turn 6 never returned. C5's rerun limb reads it, so C5 goes unassessed.
-    expect(verdictOf(criteria, 'C5')).toBe('NOT_ASSESSED');
+    // Turn 6 never returned, so turns 6-11 are a DIFFERENT conversation and
+    // none of them may be decided. Nothing may FAIL on a journey the harness
+    // did not actually drive.
     expect(criteria.filter((c) => c.verdict === 'FAIL')).toEqual([]);
+    expect(criteria.every((c) => c.verdict === 'NOT_ASSESSED')).toBe(true);
+    expect(caveats.join('\n')).toContain('THE JOURNEY BROKE AT TURN 6');
     expect(caveats.join('\n')).toContain('turn 6 did not return a body');
+  });
+
+  it('the brief never landing voids the whole run — the case that fabricated two defects live', async () => {
+    // Reproduces a real staging run: a blip dropped turns 0-5, turns 6-11
+    // landed on a scenario that had never received the brief, and the harness
+    // reported C5 FAIL and C4 FAIL. "Rerun." as the FIRST message of an empty
+    // conversation is not the fixture's turn 6, and CEE's reply to it was
+    // correct behaviour.
+    const detectors = await buildDetectors(undefined);
+    const { criteria, caveats } = evaluateCriteria({
+      turns: fixtureToCaptures(load('brief-never-landed')),
+      detectors,
+    });
+    expect(criteria.filter((c) => c.verdict === 'FAIL')).toEqual([]);
+    expect(criteria.every((c) => c.verdict === 'NOT_ASSESSED')).toBe(true);
+    expect(caveats.join('\n')).toContain('THE BRIEF NEVER LANDED');
+  });
+
+  it('C3 does NOT read PASS on a partial journey — a clean scan of nothing is not an absence', async () => {
+    const detectors = await buildDetectors(undefined);
+    const partial = evaluateCriteria({ turns: fixtureToCaptures(load('brief-never-landed')), detectors });
+    expect(verdictOf(partial.criteria, 'C3')).toBe('NOT_ASSESSED');
+    // The discriminating half: the SAME classifier on a COMPLETE journey does
+    // read PASS, so the NOT_ASSESSED above is the gap and not a broken C3.
+    const complete = evaluateCriteria({ turns: fixtureToCaptures(load('no-failures')), detectors });
+    expect(verdictOf(complete.criteria, 'C3')).toBe('PASS');
+  });
+
+  it('a FAIL that landed BEFORE the gap still stands — voiding is not amnesia', async () => {
+    const detectors = await buildDetectors(undefined);
+    const fixture = load('red-c3-narration');
+    // Break the journey at turn 9, AFTER the narration at turn 7.
+    const broken = {
+      ...fixture,
+      turns: fixture.turns.map((t) =>
+        t.index >= 9 ? { ...t, body: undefined, http_status: 0, transport_error: 'fetch failed' } : t,
+      ),
+    };
+    const { criteria } = evaluateCriteria({ turns: fixtureToCaptures(broken), detectors });
+    expect(verdictOf(criteria, 'C3')).toBe('FAIL');
   });
 
   it('every fixture declares the exit code and criteria it expects, and delivers them', async () => {
@@ -234,6 +277,7 @@ describe('founder fixture — every criterion has an exercised FAIL path', () =>
       'red-c5-off-target',
       'red-c6-misroute',
       'transport-loss',
+      'brief-never-landed',
     ];
     for (const name of cases) {
       const fixture = load(name);
