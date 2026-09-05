@@ -209,6 +209,14 @@ const KNOWN_DROPPED_STILL_REACHES_EDIT_LANE = [
   'Has the update changed the analysis?',
   'In what way has the update changed the analysis?',
   'What effect did the update have on the analysis?',
+  // ⭐ EXTERNALLY SOURCED, not invented here: this sentence is already pinned
+  // as known-dropped by compose/__tests__/unapplied-edit-reply.test.ts, whose
+  // own KNOWN_DROPPED_CORPUS carries it beside the founder's sentence. It is
+  // the `did`-opener twin of the transitive form. Measured at the pristine base
+  // AND after this fix: identical in both trees, so this change neither closes
+  // nor widens it. Recorded here so the two files agree about it rather than
+  // one of them quietly implying it is handled.
+  'Did my edit affect the ranking?',
 ] as const;
 
 describe('KNOWN-DROPPED: post-rerun comparison phrasings this fix does NOT cover', () => {
@@ -244,6 +252,6 @@ describe('this spec collected', () => {
     // real gain, because it is what admits them to the run-comparison gate.
     expect(MISROUTING_QUESTIONS.length).toBe(5);
     expect(GENUINE_EDITS.length).toBe(12);
-    expect(KNOWN_DROPPED_STILL_REACHES_EDIT_LANE.length).toBe(9);
+    expect(KNOWN_DROPPED_STILL_REACHES_EDIT_LANE.length).toBe(10);
   });
 });
