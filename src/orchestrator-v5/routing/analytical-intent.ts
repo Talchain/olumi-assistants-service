@@ -1128,8 +1128,13 @@ export function looksLikeExplicitAnalysisRequest(message: string): boolean {
  */
 const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
   // Imperative edit verb + abstract object: "Change something",
-  // "Update things", "Adjust this", "Modify the model", "Fix the graph".
-  /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|stuff|anything|this|that|it|the\s+(?:model|graph|decision|setup|analysis))\b/i,
+  // "Update things", "Modify the model", "Fix the graph".
+  //
+  // ⚠ `this` / `that` / `it` WERE IN THIS ALTERNATION AND HAVE BEEN MOVED OUT,
+  // to `ANAPHORIC_EDIT_PATTERNS` below. See that constant's header for why —
+  // the short version is that they are a different KIND of object and belong to
+  // a different question.
+  /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|stuff|anything|the\s+(?:model|graph|decision|setup|analysis))\b/i,
   // "Make/do a change/update/adjustment/edit".
   /\b(?:make|do)\s+(?:a|an|some)\s+(?:change|changes|update|updates|adjustment|adjustments|edit|edits|tweak|tweaks)\b/i,
   // Bare imperative edit verb alone, optionally with trailing
@@ -1142,7 +1147,53 @@ const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
   // safe fallback rather than asking for a different factor.
   /^\s*(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s*\.?\s*$/i,
   // "Can you change/update/adjust …" without a concrete factor/value.
-  /\bcan\s+you\s+(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|this|that|it|the\s+(?:model|graph|decision))\b/i,
+  // Same anaphor removal as pattern 0 above.
+  /\bcan\s+you\s+(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|the\s+(?:model|graph|decision))\b/i,
+];
+
+/**
+ * ⭐ ANAPHORIC EDIT — a DIFFERENT QUESTION FROM `VAGUE_EDIT_PATTERNS`, and the
+ * whole point of naming them apart.
+ *
+ * | predicate                 | the question it answers                        |
+ * |---------------------------|------------------------------------------------|
+ * | `looksLikeVagueEdit`      | *Did the user ask for an edit with NO target?* |
+ * | `looksLikeAnaphoricEdit`  | *Did the user ask for an edit whose target is  |
+ * |                           |  a REFERENT to be resolved?*                   |
+ *
+ * `it` / `this` / `that` used to sit in the same alternation as `something` /
+ * `stuff` / `anything`, so a pronoun was classified as **the absence of a
+ * target** rather than as a referent to resolve. Witnessed on deployed staging
+ * (CEE `1af54f6c`, 5 Sep 2026): the product asked *"What would you like the
+ * sales headcount investment set to: the low end of £80k, the high end of
+ * £120k, or a blended figure like £100k?"*, the user replied *"Can you update
+ * it with the correct range?"*, and the next turn answered *"I have not changed
+ * the model yet. Tell me what you want to change, and I will help apply it."*
+ * — a reset that asserts nothing and asks nothing, one turn after the product
+ * itself named the object.
+ *
+ * ⚠ DO NOT ALIGN THESE TWO PREDICATES' POSITIVE PATTERNS. Two questions under
+ * one name is this estate's signature defect; the fix is to name the concepts
+ * apart and let each answer its own question, never to reconcile their objects.
+ *
+ * ⚠ THE NEGATION GATE IS DELIBERATELY SHARED, and that is NOT the same thing.
+ * `NEGATED_EDIT_PATTERNS` answers *"is the user REFUSING an edit?"*, which is
+ * genuinely one question for both predicates — "Don't change it" is a refusal
+ * exactly as "Don't change anything" is. Sharing a genuinely-shared
+ * precondition is correct; sharing the OBJECT CLASS is what would be wrong.
+ *
+ * ⚠ THE VERB LIST HERE IS INTENTIONALLY IDENTICAL to `VAGUE_EDIT_PATTERNS`
+ * pattern 0's, because the split is about the OBJECT, never the verb. It is a
+ * hand-copied list, so it is a mirror — and mirrors in this repo must FAIL LOUD
+ * rather than drift silently. `analytical-intent.test.ts` derives both verb
+ * alternations from the two regexes' own sources and asserts they are equal, so
+ * extending one without the other REDs.
+ *
+ * `\bcan you <verb> it\b` needs no separate pattern: it contains `<verb> it`,
+ * which this pattern already matches.
+ */
+const ANAPHORIC_EDIT_PATTERNS: readonly RegExp[] = [
+  /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:this|that|it)\b/i,
 ];
 
 /**
@@ -1186,3 +1237,38 @@ export function looksLikeVagueEdit(message: string): boolean {
   }
   return false;
 }
+
+/**
+ * Does this message ask for an edit whose target is a REFERENT — `it`, `this`,
+ * `that` — rather than an absent target?
+ *
+ * See `ANAPHORIC_EDIT_PATTERNS` for why this is a separate predicate and why
+ * its negation gate is shared while its positive patterns are not.
+ *
+ * A `true` here is NOT a licence to guess. The caller must resolve the referent
+ * against the register and disclose whatever it binds; where the register
+ * yields nothing, or more than one candidate, the contract is to ASK. The one
+ * banned outcome is the reset this predicate exists to remove.
+ */
+export function looksLikeAnaphoricEdit(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  // Shared precondition, not an aligned default: "Don't change it" is a refusal.
+  for (const re of NEGATED_EDIT_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  for (const re of ANAPHORIC_EDIT_PATTERNS) {
+    if (re.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/**
+ * Test-only accessors for the derived mirror guard described on
+ * `ANAPHORIC_EDIT_PATTERNS`. Exported so the guard reads the REGEXES' OWN
+ * SOURCES rather than a third hand-written copy of the verb list.
+ */
+export const __predicateSourcesForGuard = Object.freeze({
+  vagueEditPattern0: VAGUE_EDIT_PATTERNS[0]!.source,
+  anaphoricEditPattern0: ANAPHORIC_EDIT_PATTERNS[0]!.source,
+});
