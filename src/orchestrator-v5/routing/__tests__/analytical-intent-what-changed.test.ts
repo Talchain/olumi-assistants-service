@@ -186,6 +186,19 @@ describe('classifyAnalyticalIntent — what_changed TRANSITIVE voice (EXPLAIN mi
     }
   });
 
+  it('the anaphoric subjects (this / that / it) are all reachable', () => {
+    // ⚠ ADDED BECAUSE A MUTANT SURVIVED. Deleting `it` from the subject
+    // alternation left all 29 tests GREEN — not because the limb is equivalent
+    // (it is not: without it, "How has it changed the analysis?" classifies
+    // `null`) but because no corpus member exercised it. A survivor is a claim
+    // either way and has to be settled with a discriminating case, not asserted
+    // as equivalent. `this|that|it` are a deliberate design choice — a user
+    // referring to the change they just made — so each limb gets one.
+    expect(classifyAnalyticalIntent('How has it changed the analysis?')).toBe('what_changed');
+    expect(classifyAnalyticalIntent('How has this changed the ranking?')).toBe('what_changed');
+    expect(classifyAnalyticalIntent('How has that changed the results?')).toBe('what_changed');
+  });
+
   it('DISCRIMINATION CONTROL: the exclusion is the SUBJECT, not the causal verb', () => {
     // Without this pair the test above would also pass if `affect|impact` had
     // simply been deleted from the alternation — a different, worse fix that
