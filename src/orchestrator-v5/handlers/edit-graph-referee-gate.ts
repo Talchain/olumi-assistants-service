@@ -65,6 +65,10 @@ import {
   describeHeldOperationsSubject,
   type HeldOpLike,
 } from './describe-changeset.js';
+import {
+  buildGmUnsupportedLinkHeldAssistantText,
+  classifyUnsupportedOptionLinks,
+} from './unsupported-option-link.js';
 import { optionIdsAddedWithInterventionIntent } from '../../orchestrator/tools/encode-option-interventions.js';
 import type { HeldProposalBlock } from '@talchain/schemas/boundary';
 import { mutationTelemetryEvent } from '../graph-management/telemetry.js';
@@ -1046,6 +1050,23 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       const assertableLabels = protectedLabels.filter(
         (l) => !protection.boundedReadingLabels.includes(l),
       );
+      // UNSUPPORTED OPTION LINK — the batch adds a link from an option to a
+      // risk / outcome / goal. `ALLOWED_EDGES` has no such rule, nothing on
+      // the interactive path validates edge shape, and PLoT's
+      // `filterOptionNodes` removes every option-incident edge before the
+      // compute. The generic ask ends "Reply yes to continue", and on this
+      // batch a plain "continue" is exactly the sentence that misled the
+      // captured user, so the ask is REPLACED rather than annotated. Null on
+      // every other batch, so all other hold copy is byte-identical.
+      // Rationale + scope: ./unsupported-option-link.ts.
+      const unsupportedLink = classifyUnsupportedOptionLinks(
+        input.operations as readonly HeldOpLike[],
+        input.currentGraph,
+      );
+      // Precedence: a protection demotion is about CONSENT TO TOUCH an
+      // entity the user asked to be left alone, and outranks a disclosure
+      // about what a yes delivers. Both holds still block; the whole batch
+      // sits behind the one confirm either way.
       const heldAsk =
         gv.blocker?.code === USER_PROTECTED_ENTITY
           ? assertableLabels.length > 0
@@ -1059,7 +1080,13 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
                 heldChangesetSubject,
                 input.operations.length,
               )
-          : buildGmHeldAssistantText(heldChangesetSubject, input.operations.length);
+          : unsupportedLink !== null
+            ? buildGmUnsupportedLinkHeldAssistantText(
+                unsupportedLink,
+                heldChangesetSubject,
+                input.operations.length,
+              )
+            : buildGmHeldAssistantText(heldChangesetSubject, input.operations.length);
       return {
         governing,
         blockApply: true,
