@@ -1624,6 +1624,81 @@ function statedFigureIsClaimedByAnotherOption(args: {
 }
 
 /**
+ * The receipt for a magnitude that cites NOTHING: the three legitimate states
+ * are user fact / OUR estimate with provenance / unknown, and an unstamped
+ * number is the second wearing the first's clothes.
+ *
+ * ⭐ SHARED BY EVERY ORIGIN THAT CAN PRODUCE ONE, which is the whole point.
+ * The sentence lived inline in the stated-option branch while the
+ * model-proposed-option branch had no sentence at all; two branches emitting
+ * one concept is how they drift apart (CLAUDE.md trap 12 — derive, don't
+ * mirror). Callers decide WHETHER a value is uncited; this decides only what
+ * the receipt says once they have.
+ */
+function uncitedOlumiEstimateReceipt(
+  edgeId: string,
+  setsTo: number,
+): ProjectedInterventionBinding {
+  return {
+    raw_value: setsTo,
+    source: "cee_hypothesis",
+    reasoning: `Olumi estimate via edge ${edgeId}; no stated figure is cited for this option→factor effect`,
+  };
+}
+
+/**
+ * ⭐⭐ THE SAME HARM, ON THE ORIGIN THE STATED-OPTION BINDER CANNOT SEE.
+ *
+ * {@link bindDirectStatedMagnitude} asks *"is this magnitude bound to a stated
+ * figure the user owns?"* and can only ask it of a link naming a stated option.
+ * An option the MODEL puts forward is an `option_refinement` claim, so its
+ * magnitude link names `from_claim` and returns at that binder's first guard —
+ * measured at `d818ef5d`, such an option projects `interventions` and
+ * `raw_interventions` with NO `intervention_details` entry at all.
+ *
+ * This asks a DIFFERENT question — *"does this magnitude cite anything?"* —
+ * and is named apart rather than folded in, because collapsing them would put
+ * a model-authored option through the brief-authority machinery (CLAUDE.md
+ * trap 21: two questions under one name).
+ *
+ * ⛔ ONE DIRECTION ONLY, AND THE ASYMMETRY IS THE DESIGN. An unstamped estimate
+ * is a lie; a stamped user figure is merely redundant. So this may return
+ * `cee_hypothesis` and can return nothing else: a refinement that DOES cite the
+ * user's figures is left on its existing route untouched, because granting
+ * `brief_extraction` at the projector for an option the model authored is the
+ * dangerous direction and no evidence here could justify it.
+ *
+ * ⚠ `option` is the ONLY stated kind that mints an option node
+ * (`STATED_KIND_TO_NODE_KIND`), so `from_stated` and `from_claim` exhaust the
+ * origins an option→factor magnitude can have. That enumeration is pinned by a
+ * derived test rather than asserted here.
+ */
+function bindUncitedRefinementMagnitude(args: {
+  readonly claim: DraftInferenceClaim;
+  readonly edgeId: string;
+  readonly statedItems: readonly DraftStatedItem[];
+  readonly claims: readonly DraftInferenceClaim[];
+}): ProjectedInterventionBinding | undefined {
+  const { claim, edgeId, statedItems, claims } = args;
+  if (typeof claim.sets_to !== "number" || !Number.isFinite(claim.sets_to)) return undefined;
+  // Exactly the complement of the stated-option binder's domain: a link whose
+  // source is a CLAIM. For an option node that claim is an `option_refinement`;
+  // requiring it explicitly keeps this branch from widening if another claim
+  // kind ever starts projecting to an option.
+  if (claim.from_stated !== undefined) return undefined;
+  if (claim.from_claim === undefined) return undefined;
+  if (claims[claim.from_claim]?.claim_kind !== "option_refinement") return undefined;
+  // A citation is the other binder's question. Any cited stated FIGURE means
+  // this value has an evidence chain to reason about, so it keeps the route it
+  // has today rather than being claimed for Olumi on the strength of an origin.
+  const citesAFigure = [...new Set(claim.basis ?? [])].some(
+    (index) => Number.isInteger(index) && statedItems[index]?.kind === "figure",
+  );
+  if (citesAFigure) return undefined;
+  return uncitedOlumiEstimateReceipt(edgeId, claim.sets_to);
+}
+
+/**
  * Describe a direct stated-option magnitude only when its basis names numeric
  * stated-item evidence for that exact value, AND that evidence names only this
  * option. Verified, singly-owned evidence earns brief authority; unresolved or
@@ -1709,11 +1784,7 @@ function bindDirectStatedMagnitude(args: {
     // only `authority`, `setsTo` and `edgeId` — never the binding — so stamping
     // cannot change which candidate wins a parallel-link conflict.
     if (citedFigures.length === 0) {
-      return {
-        raw_value: claim.sets_to,
-        source: "cee_hypothesis",
-        reasoning: `Olumi estimate via edge ${edgeId}; no stated figure is cited for this option→factor effect`,
-      };
+      return uncitedOlumiEstimateReceipt(edgeId, claim.sets_to);
     }
     // A value that IS a stated figure somewhere keeps its existing route: the
     // extractor may still earn it brief authority via `classifyAmountAgainstBrief`,
@@ -3118,10 +3189,15 @@ function projectOnce(
         const claim = origin === undefined ? undefined : claims[origin.index];
         const isDirectStatedOption =
           claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
+        // Two questions, asked in order, never collapsed: "is this bound to a
+        // stated figure the user owns?", then — only where the first cannot
+        // reach — "does it cite anything at all?". The second may add OUR name
+        // to an unattributed number and can never add the user's.
         const binding =
           claim === undefined
             ? undefined
-            : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
+            : (bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief }) ??
+              bindUncitedRefinementMagnitude({ claim, edgeId: edge.id, statedItems, claims }));
         candidate = {
           edgeId: edge.id,
           setsTo,
