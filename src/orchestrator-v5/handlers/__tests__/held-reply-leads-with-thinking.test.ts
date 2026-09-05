@@ -72,7 +72,7 @@ import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../compose/forbidden-user-facing-phrases.js';
-import LIVE_REPLIES from '../../compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/digit-bearing-replies.json' with { type: 'json' };
+import LIVE_REPLIES from '../../compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/digit-bearing-replies.json';
 
 // ---------------------------------------------------------------------------
 // Fixtures — the A2 held batch, byte-identical to gm-needs-encoding-receipts
