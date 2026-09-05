@@ -656,6 +656,47 @@ describe('F2 — a question that ALSO names the object and the value gets BOTH a
     expect(ids).toContain('unapplied_edit_deliberation_answer');
   });
 
+  it('⭐ the paired PROCEED chip lands somewhere real — it must not advertise an action that refuses', () => {
+    // Measured, then pinned. The paired branch mints a NEW chip shape
+    // (`Change <label> to <level>.`) that the existing deliberation-chip test
+    // does not cover, and the obvious failure mode is a LOOP: the chip
+    // re-submits the very message that produced this no-op.
+    //
+    // It does not loop, and the two hops are asserted here so a future change
+    // cannot quietly make it one:
+    //   hop 1 — the chip is claimed by the edit lane (else it promises a
+    //           change and delivers a conversation);
+    //   hop 2 — that message resolves to the band branch, whose chips satisfy
+    //           the REAL suppression predicate and therefore reach
+    //           `set_factor_value`.
+    const reply = composeUnappliedEditReply({
+      message: PAIRED_CASES[0].paired,
+      nodes: NODES,
+    })!;
+    const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
+    expect(proceed).toBeDefined();
+
+    const dispatchesToEditLane = (m: string): boolean =>
+      EDIT_GRAPH_POSITIVE_REGEX.test(m) && !EDIT_GRAPH_NEGATIVE_REGEX.test(m);
+    expect(dispatchesToEditLane(proceed.message)).toBe(true);
+
+    // …and the DISCRIMINATION: the other chip must NOT be claimed by the edit
+    // lane, or the user asks a question twice and is refused twice. Two
+    // expectations that DIFFER, so a blind probe cannot fake agreement.
+    const answer = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_answer')!;
+    expect(dispatchesToEditLane(answer.message)).toBe(false);
+
+    // hop 2 — the next turn ends somewhere that can write.
+    const next = composeUnappliedEditReply({ message: proceed.message, nodes: NODES })!;
+    expect(next.chips.length).toBeGreaterThan(0);
+    for (const c of next.chips) {
+      expect(
+        shouldSuppressEditDispatchForValueUpdate(c.message),
+        `paired proceed chip dead-ends: ${c.message}`,
+      ).toBe(true);
+    }
+  });
+
   it('OPPOSITE DIRECTION — a paired question never WRITES, and never claims we did', () => {
     // The frame gate's whole safety argument is that neither branch mutates.
     // Pairing adds a value-bearing chip to a question, so the twin harm is a
