@@ -68,7 +68,13 @@ export function renderReport(outcome: HarnessOutcome): string {
   L.push(`| started | ${context.startedAt} |`);
   L.push(`| mode | ${context.mode} |`);
   L.push(`| state class | **${context.stateClass}** |`);
-  L.push(`| brief | \`${context.briefPath}\` · ${context.briefBytes} bytes · sha256 \`${context.briefSha256}\` |`);
+  L.push(
+    context.mode === 'replay'
+      ? // In replay the brief was never read or sent, so printing a byte count
+        // beside it would suggest an assertion that did not happen.
+        `| brief | \`${context.briefPath}\` · sha256 DECLARED BY THE FIXTURE: \`${context.briefSha256}\` — the brief itself was not read or sent |`
+      : `| brief | \`${context.briefPath}\` · ${context.briefBytes} bytes · sha256 \`${context.briefSha256}\` — asserted against its sidecar AND against the serialised request body |`,
+  );
   L.push(`| CEE base | ${context.ceeBaseUrl} |`);
   L.push(`| Origin sent | ${context.origin} |`);
   L.push(`| scenario id | \`${context.scenarioId}\` |`);
