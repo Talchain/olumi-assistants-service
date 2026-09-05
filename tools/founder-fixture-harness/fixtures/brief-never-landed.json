@@ -1,5 +1,5 @@
 {
-  "note": "SYNTHETIC, REPRODUCING A REAL STAGING RUN. A network blip dropped the brief and turns 1-5; turns 6-11 landed on a scenario that had never received the founder brief. Before the journey-gap rule existed the harness DECIDED those turns and reported C5 FAIL and C4 FAIL \u2014 fabricating two product defects out of a network failure, because \"Rerun.\" arriving as the FIRST message of an empty conversation is not the fixture's turn 6. Every criterion must now be NOT ASSESSED, and C3 in particular must NOT read PASS: with nothing scanned, \"no narration found\" is an absence claim that could not have seen a presence.",
+  "note": "SYNTHETIC, REPRODUCING A REAL STAGING RUN (sanitised; no real scenario data). A network blip dropped the brief and turns 1-5; turns 6-11 landed on a scenario that had never received the founder brief. Turn 6 below carries the SHAPE of the reply staging actually gave: \"Rerun.\" arriving as the FIRST message of an empty conversation is not a request to run anything, so CEE correctly declined \u2014 no analysis result, no refusal. Before the journey-gap rule existed the harness decided that turn and reported C5 FAIL, fabricating a product defect out of a network failure. THIS FIXTURE IS THE MUTANT-BITING CASE: delete the voiding and C5 FAILS here. C3 must also read NOT ASSESSED rather than PASS \u2014 with six of twelve sends scanned, \"no narration found\" is an absence claim over a corpus that was never assembled.",
   "brief_sha256": "30ff141866aa69f5f763961ede5ae860776f21e427a8178892c040ae724073b6",
   "expect": {
     "exit_code": 0,
@@ -55,42 +55,12 @@
       "http_status": 200,
       "body": {
         "response_version": 2,
-        "assistant_text": "Rerun complete. With the hire priced at \u00a3100,000, continuing founder-led selling comes out ahead on the goal in most of the simulated futures.",
-        "blocks": [
-          {
-            "type": "analysis_result",
-            "summary": "Continue founder-led selling leads on reaching \u00a330k MRR within 18 months.",
-            "leading_option_id": "opt_founder",
-            "win_probabilities": {
-              "opt_hire": 0.18,
-              "opt_founder": 0.61,
-              "opt_hybrid": 0.21
-            }
-          }
-        ],
+        "assistant_text": "I have not run the analysis, because I did not read that as a request to run one. Tell me what you would like added, changed or filled in and I will work on the model with you.",
+        "blocks": [],
         "graph_hash": "b1c2d3e4f5a61122",
         "analysis_ready": {
-          "status": "ready",
+          "status": "needs_user_mapping",
           "current_graph_hash": "b1c2d3e4f5a61122",
-          "graph_hash_at_run": "b1c2d3e4f5a61122",
-          "freshness": "fresh",
-          "options": [
-            {
-              "option_id": "opt_founder",
-              "label": "Continue founder-led selling",
-              "win_probability": 0.61
-            },
-            {
-              "option_id": "opt_hybrid",
-              "label": "Add one SDR beside founder-led selling",
-              "win_probability": 0.21
-            },
-            {
-              "option_id": "opt_hire",
-              "label": "Hire a dedicated sales team",
-              "win_probability": 0.18
-            }
-          ],
           "analysis_admission": {
             "structurally_analysable": true,
             "missing_important_inputs": [],
@@ -109,14 +79,6 @@
               "intervened_factor_baselines_user_stated": 1,
               "goal_target_stated": true
             }
-          }
-        },
-        "analysis_state": {
-          "run_state": {
-            "kind": "complete_current"
-          },
-          "leader_claim": {
-            "permitted": true
           }
         }
       }
