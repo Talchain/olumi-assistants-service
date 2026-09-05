@@ -26,10 +26,67 @@ import { getClaimById, getProtocolById } from '../../orchestrator/dsk-loader.js'
 // Types
 // ============================================================================
 
+/**
+ * Whether the number-grounding rule could reach a verdict at all.
+ *
+ * ⚠ THIS ANSWERS ONE QUESTION ONLY: *did the INPUT carry a corpus to ground
+ * AGAINST?* It is NOT the same question as `orchestrator-eval`'s
+ * `not_applicable` status (`tools/orchestrator-eval/src/decision-review/scorer.ts`),
+ * which answers *did the OUTPUT contain numbers to ground?* Both read as
+ * "cannot check" in English and they compose differently — an output with no
+ * numbers is benign, an input with no corpus is not. Keep them named apart; do
+ * not unify them under one flag.
+ *
+ * - `checked`               a non-empty corpus existed and every scanned number
+ *                           was compared against it. Absence of
+ *                           UNGROUNDED_NUMBER warnings is meaningful.
+ * - `corpus_absent`         the input yielded NO groundable numbers, so every
+ *                           number in the prose passed VACUOUSLY. Absence of
+ *                           warnings means "did not look", not "looked and
+ *                           found nothing". `scannedNumbers` says how many were
+ *                           waved through.
+ * - `skipped_shape_invalid` grounding never ran because the shape check had
+ *                           already failed (see `performShapeCheck`).
+ * - `not_requested`         no `reviewInput` was supplied, so the caller never
+ *                           asked for grounding.
+ */
+export type GroundingCoverage =
+  | 'checked'
+  | 'corpus_absent'
+  | 'skipped_shape_invalid'
+  | 'not_requested';
+
+/**
+ * Observational record of what the grounding rule actually did.
+ *
+ * PURELY DIAGNOSTIC. It never affects `valid`, `errors` or `warnings`, and it
+ * carries no `UNGROUNDED_NUMBER` prefix, so the retry filter
+ * (`assist.v1.decision-review.ts`) and the FATAL promotion (`decompose.ts`)
+ * cannot see it. It is deliberately NOT a warning: `warnings.length > 0` is the
+ * route's `logCeeCall` degraded-status predicate, so pushing a diagnostic there
+ * would mark healthy runs degraded.
+ */
+export interface GroundingReport {
+  coverage: GroundingCoverage;
+  /** Size of the corpus derived from the INPUT. 0 ⇔ coverage is `corpus_absent`. */
+  corpusSize: number;
+  /**
+   * How many numeric tokens in the descriptive fields the rule inspected.
+   * 0 with coverage `checked` means the output cited no numbers — measured,
+   * found nothing — which is a different thing from not having measured.
+   */
+  scannedNumbers: number;
+}
+
 export interface ShapeCheckResult {
   valid: boolean;
   errors: string[];
   warnings: string[];
+  /**
+   * Always present, so "measured and clean" stays distinguishable from
+   * "never measured". See `GroundingReport`.
+   */
+  grounding: GroundingReport;
 }
 
 // ============================================================================
@@ -191,7 +248,13 @@ export function extractGroundedNumbers(input: ReviewInputForGrounding): number[]
  * whether n / 100 or n * 100 is within tolerance of a grounded value.
  */
 function isGrounded(n: number, groundedNums: number[]): boolean {
-  if (groundedNums.length === 0) return true; // No corpus → can't check, skip
+  // No corpus → cannot check. This returns TRUE, so every number passes
+  // VACUOUSLY: the verdict is "not checked" wearing the clothes of "grounded".
+  // The verdict is left as-is deliberately (changing it would alter retry and
+  // fallback rates); the vacuity is instead made VISIBLE by the caller, which
+  // reports `coverage: 'corpus_absent'` alongside the count of numbers waved
+  // through. Do not read a clean result without reading that report.
+  if (groundedNums.length === 0) return true;
   // Check the original number, percentage equivalents (n/100, n*100),
   // and common magnitude multipliers (k=1000, m=1000000) so that
   // "200" is grounded when the corpus contains 200000 (from "£200k").
@@ -224,16 +287,25 @@ const PERCENTAGE_PATTERN = /(?<![a-zA-Z_\-\d])(-?\d+(?:\.\d+)?)%/g;
  *    isGrounded() already handles decimal↔percentage equivalence (0.77 ≈ 77%).
  * 2. NUMBER_PATTERN: extract standalone numbers (not followed by %) and check.
  *
- * Returns the fabricated number strings for logging. Deduplication is handled by callers.
+ * Returns the fabricated number strings for logging, plus `scanned` — how many
+ * numeric tokens were inspected. `scanned` is what separates "looked and found
+ * nothing" from "did not look": an empty `fabricated` alone cannot tell them
+ * apart. Deduplication of `fabricated` is handled by callers; `scanned` counts
+ * every token inspected and is deliberately NOT deduplicated.
  */
-function findUngroundedNumbers(text: string, groundedNums: number[]): string[] {
+function findUngroundedNumbers(
+  text: string,
+  groundedNums: number[],
+): { fabricated: string[]; scanned: number } {
   const fabricated: string[] = [];
+  let scanned = 0;
 
   // Pass 1: percentages — extract numeric part of "N%"
   PERCENTAGE_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = PERCENTAGE_PATTERN.exec(text)) !== null) {
     const n = parseFloat(match[1]);
+    scanned++;
     if (!isGrounded(n, groundedNums)) {
       fabricated.push(`${match[1]}%`);
     }
@@ -245,12 +317,13 @@ function findUngroundedNumbers(text: string, groundedNums: number[]): string[] {
     // Skip if immediately followed by % (already handled in pass 1)
     if (text[match.index + match[0].length] === '%') continue;
     const n = parseFloat(match[1]);
+    scanned++;
     if (!isGrounded(n, groundedNums)) {
       fabricated.push(match[1]);
     }
   }
 
-  return fabricated;
+  return { fabricated, scanned };
 }
 
 /**
@@ -282,15 +355,19 @@ export function collectStrings(value: unknown): string[] {
 }
 
 /**
- * Check all descriptive fields in the LLM output for ungrounded numbers.
- * Returns warnings of the form: `UNGROUNDED_NUMBER: "<n>" in <field> is not within ±10% of any input value`.
+ * Run the grounding rule and report BOTH its warnings and what it was able to
+ * check. Single implementation: `checkNumberGrounding` and `performShapeCheck`
+ * are two views onto this one scan, so the warning list and the coverage report
+ * cannot drift apart (derive-don't-mirror — there is no second scanner to keep
+ * in sync).
  */
-export function checkNumberGrounding(
+function groundNumbers(
   data: Record<string, unknown>,
   input: ReviewInputForGrounding,
-): string[] {
+): { warnings: string[]; report: GroundingReport } {
   const groundedNums = extractGroundedNumbers(input);
   const warnings: string[] = [];
+  let scanned = 0;
 
   for (const key of DESCRIPTIVE_FIELD_KEYS) {
     if (!(key in data)) continue;
@@ -298,7 +375,9 @@ export function checkNumberGrounding(
     // Collect all fabricated numbers across all strings, deduplicated per field
     const seen = new Set<string>();
     for (const str of strings) {
-      for (const bad of findUngroundedNumbers(str, groundedNums)) {
+      const scan = findUngroundedNumbers(str, groundedNums);
+      scanned += scan.scanned;
+      for (const bad of scan.fabricated) {
         if (!seen.has(bad)) {
           seen.add(bad);
           warnings.push(`UNGROUNDED_NUMBER: "${bad}" in ${key} is not within ±10% of any input value`);
@@ -312,7 +391,9 @@ export function checkNumberGrounding(
     const seen = new Set<string>();
     for (const bf of data.bias_findings as Record<string, unknown>[]) {
       if (typeof bf.description === 'string') {
-        for (const bad of findUngroundedNumbers(bf.description, groundedNums)) {
+        const scan = findUngroundedNumbers(bf.description, groundedNums);
+        scanned += scan.scanned;
+        for (const bad of scan.fabricated) {
           if (!seen.has(bad)) {
             seen.add(bad);
             warnings.push(`UNGROUNDED_NUMBER: "${bad}" in bias_findings[].description is not within ±10% of any input value`);
@@ -322,7 +403,46 @@ export function checkNumberGrounding(
     }
   }
 
-  return warnings;
+  return {
+    warnings,
+    report: {
+      // The INPUT-side question. An empty corpus means every number above
+      // passed vacuously — `scannedNumbers` is then the count waved through.
+      coverage: groundedNums.length === 0 ? 'corpus_absent' : 'checked',
+      corpusSize: groundedNums.length,
+      scannedNumbers: scanned,
+    },
+  };
+}
+
+/**
+ * The report for a run where the grounding scan never happened. The two
+ * reasons are kept apart on purpose: `not_requested` is the caller's choice,
+ * `skipped_shape_invalid` is a run that asked for grounding and did not get it.
+ * Collapsing them would hide the second behind the first.
+ */
+function unscannedGrounding(reviewInput: ReviewInputForGrounding | undefined): GroundingReport {
+  return {
+    coverage: reviewInput ? 'skipped_shape_invalid' : 'not_requested',
+    corpusSize: 0,
+    scannedNumbers: 0,
+  };
+}
+
+/**
+ * Check all descriptive fields in the LLM output for ungrounded numbers.
+ * Returns warnings of the form: `UNGROUNDED_NUMBER: "<n>" in <field> is not within ±10% of any input value`.
+ *
+ * ⚠ An empty result does NOT mean "checked and clean" — it also occurs when the
+ * input carried no corpus, in which case nothing was checked at all. Callers
+ * that need to tell those apart must read `performShapeCheck(...).grounding`;
+ * this signature is kept string-only for its existing consumers.
+ */
+export function checkNumberGrounding(
+  data: Record<string, unknown>,
+  input: ReviewInputForGrounding,
+): string[] {
+  return groundNumbers(data, input).warnings;
 }
 
 // ============================================================================
@@ -365,7 +485,14 @@ export function performShapeCheck(
   const warnings: string[] = [];
 
   if (typeof data !== "object" || data === null) {
-    return { valid: false, errors: ["Response is not an object"], warnings: [] };
+    return {
+      valid: false,
+      errors: ["Response is not an object"],
+      warnings: [],
+      // Grounding never ran. Which of the two reasons applies depends on
+      // whether the caller asked for it at all.
+      grounding: unscannedGrounding(reviewInput),
+    };
   }
 
   const obj = data as Record<string, unknown>;
@@ -525,10 +652,14 @@ export function performShapeCheck(
   // because grounding checks against descriptive strings require those strings
   // to be present and of the right type.
   // =========================================================================
+  let grounding: GroundingReport;
   if (reviewInput && errors.length === 0) {
-    const groundingWarnings = checkNumberGrounding(obj, reviewInput);
-    warnings.push(...groundingWarnings);
+    const grounded = groundNumbers(obj, reviewInput);
+    warnings.push(...grounded.warnings);
+    grounding = grounded.report;
+  } else {
+    grounding = unscannedGrounding(reviewInput);
   }
 
-  return { valid: errors.length === 0, errors, warnings };
+  return { valid: errors.length === 0, errors, warnings, grounding };
 }
