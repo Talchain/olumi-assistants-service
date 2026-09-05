@@ -86,6 +86,39 @@ const MEASURED_FACTOR: UnappliedEditNode = {
   observed_state: { value: 0.5, raw_value: 500000, unit: '£', cap: 1000000 },
 };
 /**
+ * ⚠ A MEASURED FACTOR WITH NO CAP — AND THE MUTANT THAT FORCED IT INTO
+ * EXISTENCE. `MEASURED_FACTOR` above carries a `cap`, which is realistic, and
+ * `cap` is itself sufficient to classify a factor measured. So the mutant that
+ * reverts the UNIT path to the node's top level left the flagship £ assertion
+ * GREEN — the cap alone still carried it. The headline harm was being asserted
+ * against a fixture that could not see the headline defect.
+ *
+ * This fixture removes the cap, so the £ claim binds to the `observed_state.unit`
+ * path itself and the revert mutant bites the assertion it is named for.
+ */
+const MEASURED_NO_CAP: UnappliedEditNode = {
+  id: 'fac_ship',
+  kind: 'factor',
+  label: 'Shipping cost',
+  observed_state: { value: 0.4, raw_value: 400, unit: '$' },
+};
+
+/**
+ * ⚠ CAP BUT NO UNIT AND NO RAW — 1 of the 491, and it survived the first
+ * mutant kit unasserted. A cap means the 0-1 number is a NORMALISATION of a
+ * user-scale magnitude, so the user's word is about that magnitude and not
+ * about the normalised number. Nothing pinned that until the survivor showed
+ * it: a surviving mutant is a claim either way, and the only settlement is a
+ * discriminating fixture.
+ */
+const CAPPED_FACTOR: UnappliedEditNode = {
+  id: 'fac_headcount',
+  kind: 'factor',
+  label: 'Engineering headcount',
+  observed_state: { value: 0.5, cap: 40 },
+};
+
+/**
  * ⭐ THE DOMINANT REAL CLASS, AND IT HAD NO FIXTURE AT ALL: 403 of those 491
  * nodes (82%) carry NO `observed_state`, so nothing in the payload says what
  * scale they are on. Absence is UNDECLARED, never "unitless" — the module must
@@ -99,6 +132,8 @@ const UNKNOWN_SCALE_FACTOR: UnappliedEditNode = {
 const NODES: readonly UnappliedEditNode[] = [
   UNITLESS_FACTOR,
   MEASURED_FACTOR,
+  MEASURED_NO_CAP,
+  CAPPED_FACTOR,
   UNKNOWN_SCALE_FACTOR,
   { id: 'opt_lead', kind: 'option', label: 'Hire a Tech Lead' },
 ];
@@ -286,18 +321,52 @@ describe('QUESTION 2 — the understanding, and the coercion boundary', () => {
     // about the user's own model — and handed a chip that writes 0.1 into it.
     // Both halves are asserted here because they are different harms: the
     // sentence is a lie, the chip is a corruption.
+    // ⚠ BOTH measured shapes, and the second one is why. `Marketing spend`
+    // carries a cap, and a cap ALONE classifies a factor measured — so this
+    // assertion stayed green under the mutant that reverts the unit path.
+    // `Shipping cost` has a unit and no cap, so the £-harm claim binds to the
+    // `observed_state.unit` read itself.
+    for (const label of ['Marketing spend', 'Shipping cost']) {
+      const reply = composeUnappliedEditReply({
+        message: `Change ${label} to low`,
+        nodes: NODES,
+      })!;
+      expect(reply.text, label).not.toMatch(/0–1 scale/);
+      expect(reply.text, label).not.toMatch(/covers a range of values/i);
+      for (const c of reply.chips) {
+        expect(c.message, `offered a bare number on a measured factor: ${c.message}`).not.toMatch(
+          /\bto\s+0?\.\d/,
+        );
+      }
+      expect(reply.chips, label).toEqual([]);
+    }
+  });
+
+  it('⭐ a CAP alone makes a factor measured — the 0–1 number is a normalisation of a real magnitude', () => {
+    // This case SURVIVED the first mutant kit: dropping `cap` from the
+    // measured test left all 66 green. A surviving mutant is a claim either
+    // way, and the only settlement is a discriminating fixture.
+    const u = resolveUnappliedEditUnderstanding('Change Engineering headcount to low', NODES)!;
+    expect(u.kind).toBe('level_on_measured_factor');
     const reply = composeUnappliedEditReply({
-      message: 'Change Marketing spend to low',
+      message: 'Change Engineering headcount to low',
       nodes: NODES,
     })!;
     expect(reply.text).not.toMatch(/0–1 scale/);
-    expect(reply.text).not.toMatch(/covers a range of values/i);
-    for (const c of reply.chips) {
-      expect(c.message, `offered a bare number on a £ factor: ${c.message}`).not.toMatch(
-        /\bto\s+0?\.\d/,
-      );
-    }
     expect(reply.chips).toEqual([]);
+
+    // CONTRAST — the same value with NO cap beside it IS a 0–1 factor and does
+    // get the band offer. Without this the assertion above could be satisfied
+    // by a module that simply refused everything.
+    const uncapped: UnappliedEditNode = {
+      id: 'fac_x',
+      kind: 'factor',
+      label: 'Engineering headcount',
+      observed_state: { value: 0.5 },
+    };
+    expect(
+      resolveUnappliedEditUnderstanding('Change Engineering headcount to low', [uncapped])!.kind,
+    ).toBe('level_on_unitless_factor');
   });
 
   it('⭐ F1 — the measured branch is reachable AT THE REAL SHAPE, not only at a hand-written one', () => {
