@@ -121,6 +121,236 @@ export type AuthoredLabelRefusal =
   | "asks_a_question";
 
 /**
+ * ⭐⭐⭐ EVERY REFUSAL ANSWERS EXACTLY ONE OF TWO QUESTIONS, AND ONLY ONE OF
+ * THEM IS ABOUT AUTHORSHIP.
+ *
+ *   Q1 · DISPLAY SAFETY — *may I transform this span into a shorter label
+ *        without changing what it means?* Every veto in this module was written
+ *        to answer Q1, and its whole doctrine ("stated over what is THROWN
+ *        AWAY", "refusal falls back to the verbatim") is Q1 doctrine.
+ *
+ *   Q2 · DESIGNATION — *did the USER put this span forward as their objective?*
+ *        An authorship question. The `from_brief` badge at
+ *        `schema-v3.ts:1176` is a Q2 claim, and so is the narrative quoting the
+ *        label back as the user's own goal.
+ *
+ * ⚠⚠ THE MISTAKE THIS TABLE EXISTS TO PREVENT WAS SHIPPED IN THIS FILE'S OWN
+ * PREVIOUS VERSION, AND AN INDEPENDENT REVIEWER MEASURED IT: `head_disclaims`
+ * was admitted as a Q2 answer because it reads like one ("A disclaimer is not a
+ * goal"). It is not. It is a **lexical negation detector** — `HEAD_DISCLAIMS`
+ * is `/(^|\s)(not|never|no|nor)(\s|$)/` — and a negation is how ordinary
+ * business English states an UPPER BOUND. Measured over this module's own
+ * adversarial corpus (`authored-node-labels.test.ts` `MEASURED_HARMS`, written
+ * outside the author's head), **3 of 3 `head_disclaims` goal quotes are genuine
+ * user objectives and 0 of 3 are not**:
+ *
+ *   · "We must never let latency exceed 200ms"        ← a latency target
+ *   · "We must not exceed £250,000"                   ← a budget cap
+ *   · "Grow revenue, but not at the expense of margin" ← a compound objective
+ *
+ * Its precision as a designation signal is therefore ZERO on the only external
+ * evidence available, and admitting it told a user who wrote *"Our objective for
+ * this quarter is: We must never let latency exceed 200ms"* that **"the brief
+ * designates no objective"** — the exact inverse of the harm the consumer was
+ * built to stop. Trap 21: two questions were being answered by one membership
+ * test, and the fail-safe direction of Q1 (refuse ⇒ keep the verbatim, which
+ * cannot regress a label) is the fail-DANGEROUS direction of Q2 (refuse ⇒ strip
+ * a real attribution).
+ *
+ * ⛔⛔ AND THE SAME MISTAKE WAS MADE TWICE, ONE REASON APART. The version that
+ * removed `head_disclaims` kept `states_alternatives` on the strength of a
+ * sentence calling BOTH survivors "closed, explicit construction tests". That
+ * was FALSE AT THE BYTES for one of them: `states_alternatives` is
+ * `NAMES_AN_ALTERNATIVE = /(^|\s)or(\s|$)/i` (`:636`) — a bare word test, the
+ * same KIND of thing as the one just removed. A second independent review drove
+ * three ordinary objectives end to end and every one was told the brief
+ * designates no objective:
+ *
+ *   · "Reach 99.9% uptime or better"                   ← a COMPARATIVE
+ *   · "Increase margin, or failing that, hold it flat"  ← a FALLBACK
+ *   · "grow in Germany or France"                       ← a SCOPE
+ *
+ * ⭐ THE LESSON WORTH MORE THAN THE FIX: the defect was not the word list, it
+ * was that a COMMENT was doing the work of a MEASUREMENT. "Construction test"
+ * described `DELIBERATION_FRAMES` accurately and was extended to its neighbour
+ * by assertion. **Before admitting any reason here, open the predicate and read
+ * it — a claim about the KIND of a test is a claim about bytes.**
+ *
+ * ⚠ AND THE CORPUS COULD NOT HAVE CAUGHT IT: of the acceptance corpus's 8
+ * designating rows, **0** contained a free-standing `or`, while 3 of its 6
+ * non-designating rows did. A corpus that is one-way on the very token a
+ * predicate keys on is structurally incapable of falsifying it (trap 22b). The
+ * spec now carries a DISJUNCTION corpus with a contrast control asserting both
+ * directions on that axis specifically.
+ *
+ * ⭐ SO ONE MEMBER REMAINS, and it survives on a property that was checked
+ * rather than asserted: {@link DELIBERATION_FRAMES} really is a closed list of
+ * 32 explicit deliberation constructions. On the governed baseline it accounts
+ * for **all 4** of the real closures; `states_alternatives` fired on **0 of 13**
+ * and so earned nothing on real data.
+ *
+ * ⭐ DERIVED, NOT MIRRORED (trap 12). `Record<AuthoredLabelRefusal, …>` is
+ * EXHAUSTIVE, so a new refusal reason FAILS `tsc` until someone states which
+ * question it answers. There is no default and no silent bucket.
+ */
+type RefusalAnswers = "designation" | "display_only";
+
+const REFUSAL_ANSWERS: Readonly<Record<AuthoredLabelRefusal, RefusalAnswers>> = {
+  /**
+   * "states a DECISION, not an objective" — Q2, and the ONLY member.
+   *
+   * ⭐ WHY THIS ONE SURVIVES WHERE ITS FORMER TWIN DID NOT: it is a genuinely
+   * CLOSED, EXPLICIT list of 32 deliberation constructions
+   * ({@link DELIBERATION_FRAMES}) — "should we ", "whether to ", "torn between "
+   * — each of which is unambiguous deliberation English, so a match is evidence
+   * rather than a guess. That is a different KIND of test from a single word.
+   */
+  deliberation_frame: "designation",
+
+  // ── Q1 ONLY. Each is a verdict about TRANSFORMING the span, and says
+  //    nothing whatever about who put it forward.
+  /**
+   * ⛔ DEMOTED, AND THE SECOND TIME THIS FILE MADE THE SAME MISTAKE.
+   *
+   * `states_alternatives` is `NAMES_AN_ALTERNATIVE = /(^|\s)or(\s|$)/i` — a
+   * BARE WORD TEST, the same KIND of thing as `head_disclaims`, and it was kept
+   * here on the strength of a comment calling it a "construction test". It is
+   * not one. English uses a free-standing `or` for things that are not choices:
+   *
+   *   · "Reach 99.9% uptime or better"                  ← a COMPARATIVE
+   *   · "Increase margin, or failing that, hold it flat" ← a FALLBACK
+   *   · "grow in Germany or France"                      ← a SCOPE
+   *
+   * All three were driven end to end and every one earned `ai_inferred` and the
+   * disclosure *"the brief designates no objective"* — a false authorship
+   * verdict on a plainly designated objective, which is the exact harm this
+   * consumer exists to prevent. Third appearance of one-predicate-two-questions
+   * in this seam, found by an independent reviewer because THIS LANE'S OWN
+   * CORPUS COULD NOT SEE IT: 0 of its 8 designating rows contained a
+   * free-standing `or`, while 3 of 6 non-designating rows did.
+   *
+   * ⚠ THE PRICE, MEASURED AND ACCEPTED: a genuine unmade choice
+   * ("Build our own last-mile fleet — or partner with a third-party courier")
+   * now KEEPS the user's badge. That is a GAP, and it is today's shipped
+   * staging behaviour — not a new lie. On the governed baseline
+   * `states_alternatives` fires on **0 of 13** goal quotes, so it earned
+   * nothing on real data; all 4 real closures are `deliberation_frame`.
+   * Over-refusal on the DISPLAY side costs nothing; a false verdict on the
+   * DESIGNATION side is the harm. Pinned KNOWN-OPEN in the spec.
+   */
+  states_alternatives: "display_only",
+  /** A degenerate input, not a judgement. Filtered before any surface. */
+  empty: "display_only",
+  would_drop_a_qualification: "display_only",
+  /** A REDUCTION verdict — a clause would have been discarded. */
+  clause_discarded: "display_only",
+  /** ⛔ A LEXICAL NEGATION test. 3/3 genuine objectives — see above. */
+  head_disclaims: "display_only",
+  /** A LENGTH verdict. */
+  no_concise_form: "display_only",
+  /** A TOKEN COUNT. */
+  too_few_tokens: "display_only",
+  names_no_subject: "display_only",
+  /** Fail-closed on an unexpected derivation, never a claim about the user. */
+  not_derivable: "display_only",
+  /** "the quote already IS the objective, verbatim" — the STRONGEST evidence
+   *  the user designated it, so admitting it would invert the badge outright. */
+  identical_to_quote: "display_only",
+  no_derivable_decision_statement: "display_only",
+  /** Option path only. */
+  asks_a_question: "display_only",
+};
+
+/**
+ * The Q2 answers, DERIVED from {@link REFUSAL_ANSWERS} rather than restated.
+ * Exported so guards bind to it by identity; pinned by name in
+ * `goal-designation-provenance.test.ts` so it REDs if it grows OR shrinks.
+ */
+export const REFUSALS_DENYING_OBJECTHOOD: ReadonlySet<AuthoredLabelRefusal> = new Set(
+  (Object.keys(REFUSAL_ANSWERS) as AuthoredLabelRefusal[]).filter(
+    (reason) => REFUSAL_ANSWERS[reason] === "designation",
+  ),
+);
+
+/**
+ * TRUE when a refusal is a positive judgement that the span states a CHOICE and
+ * therefore designates no objective.
+ *
+ * ⚠⚠ SUFFICIENT, NEVER NECESSARY, and the gap is NAMED rather than implied —
+ * this is the honest KNOWN-OPEN set, not a description of completeness:
+ *
+ *   (a) a WELL-FORMED invented goal returns `authored: true` and no reason at
+ *       all, so it is invisible here;
+ *   (b) a span that is not an objective but is refused for a DISPLAY reason
+ *       keeps the badge. The lane's own motivating case — *"Churn has gone up
+ *       over the last two quarters and we're not sure why."* — is in this class.
+ *       It was previously caught by `head_disclaims`, but only BY ACCIDENT: the
+ *       detector fired on the incidental "not" in "we're not sure why", and the
+ *       same accident struck the three genuine objectives above. A coincidence
+ *       is not a signal, and it may not be relied on.
+ *
+ * Both are closed only by asking the PRODUCER — a grammar change in
+ * `DRAFT_RECORDS_INSTRUCTION`, which today offers the model only `stated_items`
+ * ("what the user actually said") and `claims` ("what YOU are adding") and then
+ * forbids the goal from being a claim, i.e. instructs it to infer a goal and
+ * requires it to file the result as something the user said. Deliberately not
+ * this slice, and pinned as KNOWN-OPEN in the spec so the gap is visible in a
+ * suite rather than in a comment nobody runs (trap 22f).
+ */
+export function refusalDeniesObjecthood(reason: AuthoredLabelRefusal | undefined): boolean {
+  return reason !== undefined && REFUSALS_DENYING_OBJECTHOOD.has(reason);
+}
+
+/**
+ * ⭐⭐ CLOSED IS NOT ANCHORED — the fourth and last member of this defect family.
+ *
+ * {@link DELIBERATION_FRAMES} really is a closed list of 32 explicit
+ * constructions; that was checked. But {@link findDeliberationFrame} is
+ * `lower.indexOf(frame)` — **UNANCHORED** — so a frame token appearing ANYWHERE
+ * in a span carried the authorship verdict. Driven end to end, eight plainly
+ * designated objectives were told *"the brief designates no objective"*:
+ *
+ *   · "Considering the runway, reach break-even by Q3"   ← `considering` as a PREPOSITION
+ *   · "Cut churn to 3% so we could reinvest in R&D"      ← `we could` in a PURPOSE CLAUSE
+ *   · "Cut cost per unit, working out at under £4"       ← `working out at` = "amounting to"
+ *   · "Improve onboarding by choosing a simpler default plan", +4 more
+ *
+ * A sentence that OPENS with a deliberation frame is stating the deliberation.
+ * One that merely CONTAINS the token is using ordinary English.
+ *
+ * ⚠⚠ AND WHY THE ANCHOR LIVES HERE AND NOT IN {@link findDeliberationFrame},
+ * WHICH IS THE OBVIOUS FIX AND IS THE WRONG ONE. That function has THREE
+ * callers and they do not want the same thing (trap 21, the very defect this
+ * seam keeps producing):
+ *
+ *   · `deriveGoalObjectiveLabel` / `deriveOptionActionLabel` — a DISPLAY
+ *     refusal, fail-safe: refusing keeps the verbatim and cannot regress a
+ *     label. Anchoring there would turn today's refusals into AUTHORINGS and
+ *     could reintroduce the label harms this module was built to prevent.
+ *   · `decisionLabelFromCandidate` — the EXTRACTION ANCHOR. It slices at
+ *     `frame.index` (`:1170-1173`), so it REQUIRES mid-sentence matching: a
+ *     brief whose decision sentence is not the first thing in the span would
+ *     stop naming a decision at all.
+ *
+ * So the anchor is applied to the AUTHORSHIP question only, leaving all three
+ * existing callers byte-identical — the same move this file already made when
+ * it withdrew the investigative frames from one of the list's two jobs rather
+ * than from the list.
+ *
+ * ⚠ KNOWN-OPEN, pinned by name in the spec rather than chased with a fifth
+ * rule: three sentence-INITIAL uses remain false positives — `considering `,
+ * `work out `, `figure out ` opening a span that then names a real objective.
+ * Anchoring fixes 5 of the 8 at zero cost on real data (all 4 governed
+ * decisions and all 4 corpus rows are sentence-initial and keep their verdict).
+ * **If a fifth instance of this family appears after this, the answer is a
+ * different design, not another patch.**
+ */
+export function deliberationFrameOpensTheSpan(quote: string): boolean {
+  const frame = findDeliberationFrame(canonical(quote));
+  return frame !== undefined && frame.index === 0;
+}
+
+/**
  * ⭐ DELIBERATION FRAMES — the closed list of constructions in which a sentence
  * describes a CHOICE BEING MADE rather than an objective being pursued.
  *
