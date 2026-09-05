@@ -198,6 +198,13 @@ import { deriveAnalysisFreshness } from '../orchestrator-v5/context/freshness.js
 import { deriveAuthoritativeStage } from '../orchestrator-v5/context/derive-stage.js';
 import { extractGraphOptionIds } from '../orchestrator-v5/context/option-identity.js';
 import { dispatchAddOptionTransaction } from '../orchestrator-v5/handlers/add-option-dispatch.js';
+import { detectAddOptionIntent } from '../orchestrator-v5/routing/add-option-intent.js';
+import {
+  buildAddOptionGrounding,
+  composeAddOption,
+} from '../orchestrator-v5/tools/propose-add-option.js';
+import { resolveComposerBudget } from '../orchestrator-v5/tools/compose-structural-edit.js';
+import { getAdapter } from '../adapters/llm/router.js';
 import { buildHeldSupersessionNotice } from '../orchestrator-v5/handlers/edit-graph-referee-gate.js';
 import { appendLapseNotice } from '../orchestrator-v5/handlers/hold-thread-through.js';
 import type { FrameFreshness } from '../orchestrator-v5/graph-management/types.js';
@@ -6263,6 +6270,263 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           turnId: ingress.turn_id,
           userMessage: ingress.message,
         });
+      }
+
+      // ──────────────────────────────────────────────────────────────────
+      // ADD-OPTION, TEXT LEG — the FOCUSED path, ahead of the generic lane
+      // ──────────────────────────────────────────────────────────────────
+      //
+      // "Add 'Partner with a local distributor' as an option" is ONE semantic
+      // operation, and CEE has carried a complete zero-LLM transaction for it
+      // since July — but only a typed CHIP could reach it. In text it hits
+      // `EDIT_GRAPH_POSITIVE_REGEX` (which contains "add") and is authored by
+      // the ~29k-character generic `edit_graph` prompt, landing an option with
+      // `interventions: null` that needs a second configure turn. CEE's own
+      // widening card takes that path too: its `action_prompt` is sent as
+      // ordinary free text (draft-option-widening-blocks.ts:713-720).
+      //
+      // This arm gives that one operation a focused proposer and hands the
+      // result to the SAME transaction the chip uses — so the hold, the
+      // confirm chip, `executeGmHeldResume`, the atomic apply and the canonical
+      // write are all the already-deployed machinery, unchanged.
+      //
+      // ⭐ PLACED HERE, and that is deliberate. Every intercept above (chip
+      // simplify, vague edit, option-effect ask, repair-value ask) has already
+      // had its say, and `editIntentDetected` has already applied the shared
+      // suppressors (proposal confirm, analytical question, state query, typed
+      // chip). This arm therefore adds a claim to NOTHING that was not already
+      // bound for the edit lane — it only re-routes a subset of it, and every
+      // exit that is not a hold falls through to that same lane below.
+      //
+      // ⭐ NO NEW GATE. It rides `CEE_GRAPH_MANAGEMENT_MODE === 'live'`, the
+      // flag that already carries the hold's guarantee: in shadow/off the
+      // referee returns `blockApply: false` by construction, so engaging there
+      // would strip the confirm step rather than disable the capability.
+      const addOptionText = detectAddOptionIntent(ingress.message);
+      const addOptionTextMode = config.features.graphManagementMode;
+      if (addOptionText.matched && addOptionTextMode === 'live') {
+        // Frame authority = the PERSISTED graph, exactly as the chip arm reads
+        // it, so the held pending's `graph_hash` precondition matches the
+        // graph the confirm turn will re-referee against.
+        let textFrameGraph: unknown = null;
+        let textGraphHash: string | null = null;
+        let textFreshness: FrameFreshness = 'unknown';
+        let textPriorPendings: readonly PendingAction[] = [];
+        let textFrameRead = false;
+        try {
+          const turnContext = await buildTurnContext(ingress, requestId);
+          textFrameGraph = turnContext.persistedGraph;
+          textPriorPendings = turnContext.most_recent_pending_actions ?? [];
+          try {
+            textGraphHash = computeAnalysisAffectingGraphHash(
+              textFrameGraph as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            textGraphHash = null;
+          }
+          textFreshness = deriveAnalysisFreshness(
+            turnContext.prior_facts,
+            textGraphHash,
+            undefined,
+            // Same degraded-read threading as the chip arm: an empty fact list
+            // from a THROWN read must not read as "never analysed".
+            turnContext.prior_facts_read_ok === undefined
+              ? undefined
+              : { priorFactsReadOk: turnContext.prior_facts_read_ok },
+          ).freshness;
+          textFrameRead = true;
+        } catch (err) {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err:
+                err instanceof Error
+                  ? { name: err.name, message: err.message }
+                  : { message: String(err) },
+            },
+            'add-option text leg — turn-context read failed; deferring to the edit path',
+          );
+        }
+
+        const addOptionGrounding = textFrameRead
+          ? buildAddOptionGrounding(textFrameGraph)
+          : null;
+        // Derived at the LAST point that knows how much of the turn is gone —
+        // the same helper and the same reason as the structural composer.
+        const addOptionBudget = resolveComposerBudget({ requestStartMs: routeStartedAt });
+
+        if (addOptionGrounding === null || addOptionGrounding.decisions.length === 0) {
+          // No readable frame, or no decision for an option to hang off. The
+          // edit lane owns the turn, exactly as it does today.
+          emit(TelemetryEvents.V5AddOptionTransaction, {
+            request_id: requestId,
+            origin: 'text',
+            outcome: 'fell_through:text_no_grounding',
+          });
+        } else if (addOptionBudget.kind === 'exhausted') {
+          emit(TelemetryEvents.V5AddOptionTransaction, {
+            request_id: requestId,
+            origin: 'text',
+            outcome: 'fell_through:text_no_budget',
+          });
+        } else {
+          const composed = await composeAddOption({
+            // The edit lane's own adapter and model resolution — no new env var.
+            adapter: getAdapter('edit_graph'),
+            grounding: addOptionGrounding,
+            message: ingress.message,
+            detectedLabel: addOptionText.label,
+            requestId,
+            scenarioId: ingress.scenario_id,
+            timeoutMs: addOptionBudget.timeoutMs,
+          });
+
+          if (composed.status === 'composed') {
+            // The proposal is a REQUEST, not an authority: it goes through the
+            // same pure builder and the same referee the chip does, and any
+            // resolution failure falls through rather than being repaired.
+            const textOutcome = dispatchAddOptionTransaction({
+              parameters: {
+                parent_decision_id: composed.proposal.parentDecisionId,
+                label: composed.proposal.label,
+                interventions: composed.proposal.interventions,
+              },
+              currentGraph: textFrameGraph,
+              currentGraphHash: textGraphHash,
+              freshness: textFreshness,
+              mode: addOptionTextMode,
+              scenarioId: ingress.scenario_id,
+              turnId: ingress.turn_id,
+              requestId,
+              stage: ingress.stage,
+            });
+
+            if (textOutcome.kind === 'held') {
+              let textResponse = textOutcome.response;
+              const textSupersession = buildHeldSupersessionNotice(
+                textOutcome.pendingActions[0]!,
+                textPriorPendings,
+                Date.now(),
+              );
+              if (textSupersession !== null) {
+                textResponse = {
+                  ...textResponse,
+                  assistant_text: appendLapseNotice(
+                    textResponse.assistant_text,
+                    textSupersession,
+                  ),
+                };
+              }
+              let textCommitted = false;
+              let textWire = textResponse;
+              try {
+                const commitResult = await commitDirectAnswer(textResponse, {
+                  scenario_id: ingress.scenario_id,
+                  turn_id: ingress.turn_id,
+                  turn_class: 'direct_answer',
+                  handler_id: null,
+                  request_hash: computeRequestHash(ingress),
+                  llm_calls_used: 1,
+                  duration_ms: Date.now() - routeStartedAt,
+                  handler_facts: [],
+                  pending_actions: [...textOutcome.pendingActions],
+                  priorPendingActions: textPriorPendings,
+                  coaching_state: null,
+                  userMessage: ingress.message,
+                });
+                textWire = commitResult.response;
+                textCommitted = true;
+              } catch (err) {
+                // An un-resumable hold is worse than no hold: the confirm turn
+                // would have nothing to resume. Fall through to the edit lane.
+                log.warn(
+                  {
+                    request_id: requestId,
+                    scenario_id: ingress.scenario_id,
+                    err:
+                      err instanceof Error
+                        ? { name: err.name, message: err.message }
+                        : { message: String(err) },
+                  },
+                  'add-option text leg — held-pending commit failed; deferring to the edit path',
+                );
+              }
+              if (textCommitted) {
+                emit(TelemetryEvents.V5AddOptionTransaction, {
+                  request_id: requestId,
+                  origin: 'text',
+                  outcome: 'held',
+                  configured: textOutcome.configured,
+                  link_count: composed.proposal.interventions.length,
+                  linked_unvalued_count: textOutcome.linkedUnvaluedFactorIds.length,
+                  unknown_count: composed.proposal.unknowns.length,
+                });
+                return sendFinalised200(
+                  reply,
+                  requestId,
+                  'add_option_transaction',
+                  textWire,
+                  {
+                    graph: null,
+                    ...(await claimSafety.forExit()),
+                    // A held proposal is a receipt and a question — functional
+                    // copy, shipped plain (ROADMAP 1.132 / F1).
+                    answerKind: 'functional',
+                    requestStartedAt: routeStartedAt,
+                    scenarioId: ingress.scenario_id,
+                    turnId: ingress.turn_id,
+                    userMessage: ingress.message,
+                  },
+                );
+              }
+              emit(TelemetryEvents.V5AddOptionTransaction, {
+                request_id: requestId,
+                origin: 'text',
+                outcome: 'fell_through:commit_failed',
+              });
+            } else {
+              emit(TelemetryEvents.V5AddOptionTransaction, {
+                request_id: requestId,
+                origin: 'text',
+                outcome: `fell_through:${textOutcome.reason}`,
+              });
+            }
+          } else {
+            // ⭐ EVERY NON-COMPOSED OUTCOME FALLS THROUGH, INCLUDING `clarify`.
+            //
+            // ⚠ ROWED, NOT FIXED (3 Sep 2026): the parenthetical below is
+            // FALSE as a reachability claim — a `clarify` is not restricted to
+            // multi-decision models, and the validator's single-decision
+            // auto-resolve is not the only path here. The BEHAVIOUR is correct
+            // either way (every non-`composed` status falls through to the edit
+            // lane), so this is a comment defect, not a routing defect.
+            // Backlog; deliberately not fixed inside this round.
+            //
+            // ⚠ ALSO ROWED: the three chip-arm telemetry emits above
+            // (`fell_through:gm_off`, `fell_through:commit_failed`,
+            // `fell_through:${addOptionOutcome.reason}`) omit the
+            // `origin: 'chip'` field that every text-arm emit carries, so
+            // chip-originated fall-throughs are indistinguishable from
+            // unattributed ones in telemetry. Real, minor, backlog.
+            //
+            // `clarify` means the proposer could not tell WHICH decision owns
+            // the option (only reachable when the model holds more than one —
+            // with a single decision the validator resolves it). The edit lane
+            // below is the existing, working answer for that turn and it holds
+            // its proposal for confirmation too, so the user still sees and
+            // approves the parent before anything moves. Deliberately NOT a new
+            // clarify-and-commit path here: it would be a second consent
+            // producer on a live route for a case this arm can simply decline.
+            emit(TelemetryEvents.V5AddOptionTransaction, {
+              request_id: requestId,
+              origin: 'text',
+              outcome: `fell_through:text_${composed.status}`,
+              ...(composed.status === 'rejected' ? { rejection_code: composed.code } : {}),
+              ...(composed.status === 'unavailable' ? { unavailable_reason: composed.reason } : {}),
+            });
+          }
+        }
       }
 
       // V5 edit lifecycle recovery v1 — chip-simplify and vague-edit

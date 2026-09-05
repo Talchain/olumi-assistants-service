@@ -48,6 +48,36 @@
  * collision on a producer-supplied id) resolves to `{ matched: false, reason }`
  * — the caller then falls through BENIGNLY to the existing free-text/LLM path.
  * Never throws; never mutates its inputs.
+ *
+ * UNVALUED LINKS (add-option text leg, 1 Sep 2026). An intervention spec may
+ * carry `value: null`, meaning "this option changes this factor; the size of
+ * the effect is not stated". The builder then emits the option->factor
+ * structural edge but writes NO entry into the option's `interventions`
+ * bundle — so the option reads back as `needs_encoding` ("Connected to N
+ * factor(s); awaiting effect value(s)", `cee/transforms/option-status.ts`),
+ * an explicit unknown the readiness intake asks the user to fill, never a
+ * number anyone invented. `configured` stays "at least one VALUED link".
+ */
+
+/**
+ * ⚠ CARRY-FORWARD, SCOPED HONESTLY AND NOT CHASED: A MIXED INTERVENTION SPEC.
+ *
+ * The `value: null` widening this path relies on also serves the DEPLOYED CHIP
+ * leg, and a MIXED spec there — some interventions valued, some null — would
+ * emit two contradictory sentences, with the false one ("the analysis can run")
+ * honoured, because `option-status.ts` guards its connected-but-numberless limb
+ * on `interventionCount === 0` rather than on "every value is null".
+ *
+ * WHAT I MEASURED, AND WHAT I DID NOT:
+ *   · The FOCUSED path cannot produce it. `propose-add-option.ts` types its
+ *     interventions as `{ factor_id, value: null }` and pushes `value: null`
+ *     unconditionally — a mixed spec is unreachable from this PR's path by
+ *     construction, not by convention.
+ *   · A sweep of `src/` found NO CEE producer emitting a mixed spec, with a
+ *     contrast control confirming the sweep sees valued interventions where
+ *     they exist.
+ *   · ⚠ THE UI SIBLING IS UNSWEPT. I did not look, and this claim says nothing
+ *     about it. Reported rather than chased, per scope.
  */
 import { z } from 'zod';
 
@@ -77,10 +107,11 @@ export interface AddOptionGraphView {
  * transaction:
  *
  *   { parent_decision_id, label, option_id?,
- *     interventions: [ { factor_id, value, unit?, raw_value? } ] }
+ *     interventions: [ { factor_id, value | null, unit?, raw_value? } ] }
  *
  * `interventions` may be empty — the option is then added UNCONFIGURED and the
  * caller discloses that at proposal time (never a silent analysis-poison land).
+ * A `value: null` entry links the factor WITHOUT a value (see the header).
  * Non-strict: producer-side keys (`chip_id`/`spark_id`) pass through harmlessly.
  */
 /**
@@ -97,7 +128,9 @@ const FiniteNumber = z
 
 const InterventionSpecSchema = z.object({
   factor_id: z.string().min(1),
-  value: FiniteNumber,
+  // `null` = link with UNKNOWN magnitude (edge only, no bundle entry). Any
+  // non-null value must still be a genuinely finite number — no coercion.
+  value: z.union([FiniteNumber, z.null()]),
   unit: z.string().min(1).optional(),
   // raw_value is deliberately polymorphic (categorical/boolean raw values keep
   // their original type); its NUMBER branch must still be finite.
@@ -131,6 +164,8 @@ export interface AddOptionProposal {
   readonly configured: boolean;
   /** Factor ids that received an effect value (for the proposal-time receipt). */
   readonly configuredFactorIds: readonly string[];
+  /** Factor ids linked WITHOUT a value (explicit unknown magnitude). */
+  readonly linkedUnvaluedFactorIds: readonly string[];
 }
 
 export type AddOptionBuildResult =
@@ -240,8 +275,12 @@ export function buildAddOptionTransaction(
   // Canonical top-level InterventionV3 bundle (the spelling GraphV3 preserves
   // and run_analysis reads). `source: 'user_specified'` and an exact-id
   // `target_match` mirror `normalise-option-interventions.freshInterventionV3`.
+  const valued = interventions.filter(
+    (iv): iv is typeof iv & { value: number } => iv.value !== null,
+  );
+  const unvalued = interventions.filter((iv) => iv.value === null);
   const interventionBundle: Record<string, unknown> = {};
-  for (const iv of interventions) {
+  for (const iv of valued) {
     const entry: Record<string, unknown> = {
       value: iv.value,
       source: 'user_specified',
@@ -283,8 +322,9 @@ export function buildAddOptionTransaction(
       operations,
       optionId,
       optionLabel: label,
-      configured: interventions.length > 0,
-      configuredFactorIds: interventions.map((iv) => iv.factor_id),
+      configured: valued.length > 0,
+      configuredFactorIds: valued.map((iv) => iv.factor_id),
+      linkedUnvaluedFactorIds: unvalued.map((iv) => iv.factor_id),
     },
   };
 }
