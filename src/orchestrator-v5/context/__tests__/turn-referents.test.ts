@@ -30,6 +30,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { NodeKindV3 } from '../../../schemas/cee-v3.js';
 import {
   CLAIM_SENTENCE_CAP,
   RANK_ORDER,
@@ -354,5 +355,180 @@ describe('candidatesAtTopPopulatedRank', () => {
 describe('nodeRef', () => {
   it('uses the spec §3.2 address grammar', () => {
     expect(nodeRef('919d7f50')).toBe('node:919d7f50');
+  });
+});
+
+/**
+ * ⭐ THE DERIVED-KIND GUARD.
+ *
+ * `toReferentKind` used to be a hand-written switch over seven members with a
+ * `default: 'factor'`. An EIGHTH `NodeKindV3` member would have become `factor`
+ * silently — a whole node class mis-kinded with nothing red — in the module
+ * whose own header exists because spec §3.3 omitted `action`.
+ *
+ * The mapping is now derived from `NodeKindV3.options`. This suite asserts the
+ * AGREEMENT that derivation buys: every member of the contract's own enum
+ * survives the projection unchanged, so a new member is admitted with no edit
+ * to `turn-referents.ts` and no silent demotion.
+ *
+ * ⚠ It proves agreement, not completeness (CLAUDE.md trap 12d) — it cannot tell
+ * you the ENUM is right. The `ReferentKind` union does that half, at compile
+ * time.
+ */
+describe('projectTurnReferents — the kind mapping is derived from NodeKindV3', () => {
+  const KINDS = NodeKindV3.options;
+
+  it('the enum it derives from is non-empty (the loop below is not vacuous)', () => {
+    // Positive control. Without this, an enum that somehow read empty would make
+    // every assertion in this describe pass by iterating nothing.
+    expect(KINDS.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it.each(KINDS)('a %s node keeps its kind through the register', (kind) => {
+    const label = `Kind Probe ${kind}`;
+    const register = projectTurnReferents({
+      lastAssistantMessage: `We should look at ${label} next.`,
+      lastAssistantTurnIndex: 4,
+      nodes: [{ id: `n_${kind}`, label, kind }],
+    });
+    expect(register.referents).toHaveLength(1);
+    // Bind by identity: the node id, not "the only referent happens to match".
+    expect(register.referents[0]!.ref).toBe(nodeRef(`n_${kind}`));
+    expect(register.referents[0]!.kind).toBe(kind);
+  });
+
+  it('every member of the enum is admitted — none falls through to the default', () => {
+    // The whole-set form of the per-kind case above. If a member ever stopped
+    // being recognised it would arrive as `factor`, which for six of the seven
+    // is observably wrong and for `factor` itself is indistinguishable — so the
+    // assertion is on the SET, derived from the enum, never on a copy of it.
+    const projected = KINDS.map((kind) => {
+      const label = `Kind Probe ${kind}`;
+      const register = projectTurnReferents({
+        lastAssistantMessage: `Consider ${label}.`,
+        lastAssistantTurnIndex: 1,
+        nodes: [{ id: `n_${kind}`, label, kind }],
+      });
+      return register.referents[0]!.kind;
+    });
+    expect(projected).toEqual([...KINDS]);
+  });
+
+  it('CONTRAST: a kind the contract does not carry still degrades to factor', () => {
+    // The opposite-direction twin. The derived set must ADMIT the enum and
+    // still REJECT everything else — a set that admitted anything would pass
+    // every assertion above for the wrong reason.
+    expect(NodeKindV3.options as readonly string[]).not.toContain('constraint');
+    const register = projectTurnReferents({
+      lastAssistantMessage: 'Consider Budget Ceiling.',
+      lastAssistantTurnIndex: 1,
+      nodes: [{ id: 'n_unknown', label: 'Budget Ceiling', kind: 'constraint' }],
+    });
+    expect(register.referents[0]!.kind).toBe('factor');
+  });
+});
+
+/**
+ * ⭐ `claim.about` MUST BE TRUE OF `claim.sentence`.
+ *
+ * `sentence` is the first `CLAIM_SENTENCE_CAP` characters; matching runs over
+ * the WHOLE message. Before this fix `about` was built from whole-message
+ * matches, so it named refs the recorded excerpt does not contain — measured on
+ * 4 of the 9 turns of the 5 Sep founder capture that yield a referent.
+ *
+ * The invariant below is written against the SPEC of the field ("refs named
+ * inside this sentence"), not against the failure mode, and it is checked on a
+ * real captured message rather than one written here.
+ */
+describe('projectTurnReferents — the claim record cannot name what it does not hold', () => {
+  /**
+   * Turn 2 of the 5 Sep founder capture, verbatim (936 characters). Every one
+   * of its three matched labels sits PAST character 400, which is what makes it
+   * the discriminating fixture: an `about` built from the whole message names
+   * three refs the excerpt contains none of.
+   */
+  const TURN_2_ASSISTANT_TEXT =
+    'Analysis will run against your goal of reaching £30k MRR within 18 months, '
+    + 'testing how the four paths (dedicated hire, part-time SDR, ICP validation '
+    + 'first, or staying founder-led) perform given your current model of churn, '
+    + 'conversion, CAC and runway. Since several key factors, like your ICP '
+    + 'understanding and the product-gap-to-churn link, are still unvalidated '
+    + 'assumptions, treat the result as a first read to stress-test rather than a '
+    + 'final answer.\n\nICP Validation Sprint Before Hiring came out ahead in 82% of '
+    + 'runs of this model, but treat this as provisional: the link between Sales '
+    + 'Headcount Investment and Runway Depletion Risk is fragile.\n\nYour first '
+    + 'analysis is ready. Take a moment to explore the leading option and the '
+    + 'factors shaping it before acting on the result.\n\nThe analysis used a '
+    + 'default value for one of the factors in your model, which has no value set, '
+    + 'so the comparison is illustrative until those values are set.';
+
+  function labelOf(ref: string): string {
+    const node = FOUNDER_RUN_NODES.find((n) => nodeRef(n.id) === ref);
+    expect(node).toBeDefined();
+    return node!.label;
+  }
+
+  it('PRECONDITION: this fixture really does name its refs past the cut', () => {
+    // Pins the discriminating power of the fixture itself. If the capture text
+    // were ever shortened, or the cap raised past it, the invariant below would
+    // pass by not being exercised — and this assertion REDs instead.
+    expect(TURN_2_ASSISTANT_TEXT.length).toBeGreaterThan(CLAIM_SENTENCE_CAP);
+    expect(TURN_2_ASSISTANT_TEXT.indexOf('Sales Headcount Investment')).toBeGreaterThan(
+      CLAIM_SENTENCE_CAP,
+    );
+  });
+
+  it('the register still finds the refs — matching is over the whole message', () => {
+    const register = projectTurnReferents({
+      lastAssistantMessage: TURN_2_ASSISTANT_TEXT,
+      lastAssistantTurnIndex: 2,
+      nodes: FOUNDER_RUN_NODES,
+    });
+    expect(register.referents.map((r) => r.ref).sort()).toEqual(
+      ['node:428612e0', 'node:501e2731', 'node:919d7f50'].sort(),
+    );
+  });
+
+  it('but the claim record names only what the excerpt holds, and says it was cut', () => {
+    const register = projectTurnReferents({
+      lastAssistantMessage: TURN_2_ASSISTANT_TEXT,
+      lastAssistantTurnIndex: 2,
+      nodes: FOUNDER_RUN_NODES,
+    });
+    for (const referent of register.referents) {
+      expect(referent.claim!.sentence_truncated).toBe(true);
+      expect(referent.claim!.about).toEqual([]);
+    }
+  });
+
+  it('INVARIANT: every ref in about is present in the sentence beside it', () => {
+    for (const message of [TURN_2_ASSISTANT_TEXT, TURN_4_ASSISTANT_TEXT]) {
+      const register = projectTurnReferents({
+        lastAssistantMessage: message,
+        lastAssistantTurnIndex: 4,
+        nodes: FOUNDER_RUN_NODES,
+      });
+      for (const referent of register.referents) {
+        for (const ref of referent.claim!.about) {
+          expect(referent.claim!.sentence.toLowerCase()).toContain(
+            labelOf(ref).toLowerCase(),
+          );
+        }
+      }
+    }
+  });
+
+  it('CONTRAST: an UNCUT message keeps its refs in about and is not marked truncated', () => {
+    // The opposite-direction twin. Without it, `about: []` for everything would
+    // satisfy the invariant above — a guard agreeing with itself.
+    const register = projectTurnReferents({
+      lastAssistantMessage: TURN_4_ASSISTANT_TEXT,
+      lastAssistantTurnIndex: 4,
+      nodes: FOUNDER_RUN_NODES,
+    });
+    expect(TURN_4_ASSISTANT_TEXT.length).toBeLessThanOrEqual(CLAIM_SENTENCE_CAP);
+    expect(register.referents).toHaveLength(1);
+    expect(register.referents[0]!.claim!.about).toEqual(['node:919d7f50']);
+    expect(register.referents[0]!.claim!.sentence_truncated).toBeUndefined();
   });
 });

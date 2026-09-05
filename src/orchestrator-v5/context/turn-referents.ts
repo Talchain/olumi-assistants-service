@@ -51,7 +51,7 @@
  * @see spec-context-mgmt.md §3 (the component) and §4 (the contract)
  */
 
-import type { NodeKindV3T } from '../../schemas/cee-v3.js';
+import { NodeKindV3, type NodeKindV3T } from '../../schemas/cee-v3.js';
 
 /**
  * Referent kinds.
@@ -94,10 +94,39 @@ export type ReferentIntroducedBy =
 export type ClaimAuthorship = 'deterministic' | 'llm';
 
 export interface ReferentClaim {
-  /** Bounded, verbatim, exactly as the user read it. */
+  /**
+   * A verbatim, bounded EXCERPT of the assistant message the user read — the
+   * first `CLAIM_SENTENCE_CAP` characters, not the whole message.
+   *
+   * ⚠ "EXCERPT", not "the sentence", and the distinction is load-bearing. The
+   * label matching that produces `referents` runs over the WHOLE message,
+   * because the whole message is what the user read. Only this record is cut.
+   * `sentence_truncated` says when the two differ.
+   */
   readonly sentence: string;
-  /** Refs the sentence named. */
+  /**
+   * Refs named INSIDE `sentence` — that is, inside the recorded excerpt, by the
+   * same whole-word match that produced the register.
+   *
+   * ⚠ THIS IS NOT "every ref the message named". Measured on the 5 Sep founder
+   * capture at the register's own producer: on 4 of the 9 turns that yield a
+   * referent, the assistant message is longer than `CLAIM_SENTENCE_CAP` and
+   * names its ref PAST the cut, so an `about` built from whole-message matches
+   * named refs this excerpt does not contain. `about` is now computed from the
+   * excerpt, so the field is true of the string it sits beside.
+   *
+   * ⚠ ABSENCE SEMANTICS, the same discipline this module applies to `source`:
+   * when `sentence_truncated` is true, a ref MISSING from `about` means "not in
+   * the recorded excerpt", never "the message did not name it". The referent
+   * itself is still in the register — the cut changes the record, not the
+   * candidate set.
+   */
   readonly about: readonly string[];
+  /**
+   * `true` when `sentence` is a cut of a longer message. Absent when the
+   * excerpt IS the message.
+   */
+  readonly sentence_truncated?: true;
   /**
    * Values the sentence asserted about those refs.
    *
@@ -166,9 +195,12 @@ export const RANK_ORDER: readonly ReferentIntroducedBy[] = Object.freeze([
 export const TURN_REFERENTS_CAP = 8;
 
 /**
- * Cap on the recorded claim sentence, in characters. The sentence is quoted
- * back to the user by §4.2's disclosure copy, so it is bounded at the source
- * rather than at the surface.
+ * Cap on the recorded claim excerpt, in characters. Bounded at the source
+ * rather than at the surface, like every other pack slice.
+ *
+ * ⚠ NOT A CAP ON WHAT IS MATCHED. Labels are matched against the whole message;
+ * only the recorded excerpt is cut, and `ReferentClaim.about` is derived from
+ * the excerpt so the record cannot claim more than it holds.
  */
 export const CLAIM_SENTENCE_CAP = 400;
 
@@ -220,21 +252,32 @@ export function nodeRef(id: string): string {
   return `node:${id}`;
 }
 
+/**
+ * DERIVED from `NodeKindV3.options`, never restated.
+ *
+ * ⚠ THIS REPLACED A HAND-WRITTEN SWITCH, and the reason is worth keeping. The
+ * switch listed all seven members with a `default: 'factor'`, so an EIGHTH
+ * `NodeKindV3` member would have silently become `factor` — a whole node class
+ * mis-kinded, with nothing red anywhere, in the module whose own header
+ * complains that spec §3.3 omitted `action`. `structural-add.ts` already uses
+ * this derived form for the same enum (`PERSISTABLE_NODE_KINDS`); this is that
+ * pattern, not a new one.
+ *
+ * ⚠ DERIVATION PROVES AGREEMENT, NOT COMPLETENESS (CLAUDE.md trap 12d). What it
+ * removes is the drift between this module and the enum. What it cannot tell
+ * you is whether the ENUM is right — that is `cee-v3.ts`'s problem, and the
+ * `ReferentKind` union type is what keeps the two in step at compile time.
+ */
+const NODE_REFERENT_KINDS: ReadonlySet<string> = new Set<string>(NodeKindV3.options);
+
+function isNodeReferentKind(kind: string): kind is NodeKindV3T {
+  return NODE_REFERENT_KINDS.has(kind);
+}
+
 function toReferentKind(kind: string | undefined): ReferentKind {
   // Closed-set check against the contract's own enum members. An unrecognised
   // kind falls back to 'factor' rather than widening the union at runtime.
-  switch (kind) {
-    case 'goal':
-    case 'factor':
-    case 'outcome':
-    case 'decision':
-    case 'risk':
-    case 'action':
-    case 'option':
-      return kind;
-    default:
-      return 'factor';
-  }
+  return kind !== undefined && isNodeReferentKind(kind) ? kind : 'factor';
 }
 
 /** Escape a label for literal use inside a RegExp. */
@@ -327,9 +370,16 @@ export function projectTurnReferents(input: ProjectTurnReferentsInput): TurnRefe
   const capped = kept.slice(0, TURN_REFERENTS_CAP);
   const omitted = kept.length - capped.length;
 
-  const sentence =
-    message.length > CLAIM_SENTENCE_CAP ? message.slice(0, CLAIM_SENTENCE_CAP) : message;
-  const about = capped.map((hit) => nodeRef(hit.node.id));
+  const truncated = message.length > CLAIM_SENTENCE_CAP;
+  const sentence = truncated ? message.slice(0, CLAIM_SENTENCE_CAP) : message;
+  // ⚠ `about` IS COMPUTED FROM `sentence`, NOT FROM `message`. Candidate
+  // detection above deliberately runs over the whole message — that is what the
+  // user read — but the claim record only holds the excerpt, and a field
+  // documented as "refs named inside this sentence" must be true of THIS
+  // string. See `ReferentClaim.about` for the measurement that forced this.
+  const about = capped
+    .filter((hit) => matchedLength(sentence, hit.node.label) !== null)
+    .map((hit) => nodeRef(hit.node.id));
 
   const referents: TurnReferent[] = capped.map((hit) => ({
     ref: nodeRef(hit.node.id),
@@ -341,6 +391,7 @@ export function projectTurnReferents(input: ProjectTurnReferentsInput): TurnRefe
     claim: {
       sentence,
       about,
+      ...(truncated ? { sentence_truncated: true as const } : {}),
       // ⚠ EMPTY FOR 'llm' BY CONSTRUCTION — see the module header, point 1.
       // A deterministic composer supplies its own values; this producer never
       // infers one from prose.
