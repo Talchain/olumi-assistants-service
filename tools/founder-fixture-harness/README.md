@@ -77,6 +77,29 @@ Reporting "no misroute markers" as "turn 7 answered the question" would swap the
 symptom metric for the outcome metric. The harness states the two apart and
 leaves the second to a human.
 
+## A gap in the journey voids everything after it
+
+**The eleven turns are ordered and stateful, so a turn that did not land is not a
+missing data point — every turn after it is a different conversation.**
+
+This was found by running the harness live. A blip dropped turns 0–5 of a staging run;
+turns 6–11 landed and the harness decided them, reporting **C5 FAIL** and **C4 FAIL**. But
+the scenario had never received the brief: *"Rerun."* arrived as the first message of an
+empty conversation, and CEE's reply — *"I have not run the analysis, because I did not read
+that as a request to run one"* — was correct behaviour. Two product defects fabricated out
+of a network failure, on a fixture whose own rule is that a section-A failure is *"fixed or
+reverted the same day"*.
+
+So everything at or after the first gap is voided and every criterion that reads one goes
+NOT ASSESSED, with a distinct and louder message when the turn that did not land was the
+brief itself. Two consequences, both deliberate:
+
+- **A FAIL that landed BEFORE the gap still stands.** Voiding is not amnesia: narration at
+  turn 7 is a real leak whatever happened at turn 9.
+- **C3 does not read PASS on a partial journey.** Its claim is about all the sends; with
+  the brief dropped it scanned nothing, and "no narration found" over an empty corpus is an
+  absence claim that could not have seen a presence.
+
 ## Six things worth knowing before you trust a result
 
 1. **`NOT ASSESSED` is a first-class outcome.** Exit 0 with four criteria
@@ -205,7 +228,8 @@ others' failures are evidence about the thing they mutate.
 | `red-c5-noop-correction.json` | C5 FAILS when prose says applied and the patch says `noop` |
 | `red-c5-off-target.json` | C5 FAILS when the correction lands on a different object |
 | `red-c6-misroute.json` | C6 FAILS on the noop patch + no-change denial |
-| `transport-loss.json` | a turn that never returned goes NOT ASSESSED, never FAIL |
+| `transport-loss.json` | a gap at turn 6 voids turns 6–11; all six criteria NOT ASSESSED |
+| `brief-never-landed.json` | the real staging run that fabricated two defects — and it BITES: delete the voiding and C5 FAILS here |
 
 They are **synthetic**. Turning a live run into a committed fixture is the
 golden-journey harness's capture flow and needs the same authorisation.
