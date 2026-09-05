@@ -1,0 +1,917 @@
+{
+  "_provenance": {
+    "source": "artefacts/manual-test-2026-09-03/olumi-debug-f2e2df1b-20260903.json (Talchain/olumi-programme-docs)",
+    "captured": "2026-09-03",
+    "scenario_id": "7826c742-2939-4584-917c-f1286a663ae4",
+    "ui_build": "86786efb",
+    "note": "VERBATIM producer subtrees. Append-only historic record - never edit to keep it current (CLAUDE.md trap 14b)."
+  },
+  "enrichment": {
+    "edge_e_values": [
+      {
+        "edge_id": "26fbdff5::3d37f4b2",
+        "from_id": "26fbdff5",
+        "to_id": "3d37f4b2",
+        "from_label": "We've heard from three churned customers that they left because of missing integrations, not price — so we think product gaps mediate the relationship between customer satisfaction and churn",
+        "to_label": "Churn Rate Deterioration",
+        "e_value": 1.0974,
+        "flip_direction": "decrease",
+        "current_mean": 0.55,
+        "flip_mean": -0.603567,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 5,
+          "band_min": -0.89318,
+          "band_median": -1e-06,
+          "band_max": 0.635852,
+          "band_width": 1.529032,
+          "seed_flip_means": [
+            0.550499,
+            -0.89318,
+            null,
+            null,
+            null,
+            -1e-06,
+            null,
+            -0.699963,
+            0.635852,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "27c23ebb::26fbdff5",
+        "from_id": "27c23ebb",
+        "to_id": "26fbdff5",
+        "from_label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+        "to_label": "We've heard from three churned customers that they left because of missing integrations, not price — so we think product gaps mediate the relationship between customer satisfaction and churn",
+        "e_value": 1.0974,
+        "flip_direction": "decrease",
+        "current_mean": 0.45,
+        "flip_mean": -0.493828,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 5,
+          "band_min": -0.668354,
+          "band_median": -1e-06,
+          "band_max": 0.528272,
+          "band_width": 1.196626,
+          "seed_flip_means": [
+            0.441079,
+            -0.668354,
+            null,
+            null,
+            null,
+            -1e-06,
+            null,
+            -0.64868,
+            0.528272,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "3d37f4b2::552bd1c0",
+        "from_id": "3d37f4b2",
+        "to_id": "552bd1c0",
+        "from_label": "Churn Rate Deterioration",
+        "to_label": "Reach £30k MRR Within 18 Months",
+        "e_value": 1.0974,
+        "flip_direction": "increase",
+        "current_mean": -0.5,
+        "flip_mean": 0.548698,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 4,
+          "band_min": -0.773894,
+          "band_median": -0.248991,
+          "band_max": 0.678194,
+          "band_width": 1.452088,
+          "seed_flip_means": [
+            -0.497982,
+            null,
+            null,
+            null,
+            null,
+            1e-06,
+            null,
+            0.678194,
+            -0.773894,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "428612e0::552bd1c0",
+        "from_id": "428612e0",
+        "to_id": "552bd1c0",
+        "from_label": "Runway Depletion Risk",
+        "to_label": "Reach £30k MRR Within 18 Months",
+        "e_value": 1,
+        "flip_direction": "increase",
+        "current_mean": -0.5,
+        "flip_mean": -0.273105,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 8,
+          "band_min": -0.659097,
+          "band_median": 0.144115,
+          "band_max": 0.572589,
+          "band_width": 1.231686,
+          "seed_flip_means": [
+            -0.415485,
+            -0.301698,
+            0.338082,
+            -0.029056,
+            0.317286,
+            null,
+            0.572589,
+            0.408084,
+            -0.659097,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "919d7f50::428612e0",
+        "from_id": "919d7f50",
+        "to_id": "428612e0",
+        "from_label": "Sales Headcount Investment",
+        "to_label": "Runway Depletion Risk",
+        "e_value": 1,
+        "flip_direction": "decrease",
+        "current_mean": 0.65,
+        "flip_mean": 0.355036,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 8,
+          "band_min": -0.876452,
+          "band_median": 0.180315,
+          "band_max": 0.852107,
+          "band_width": 1.728559,
+          "seed_flip_means": [
+            0.416085,
+            0.327664,
+            null,
+            0.032965,
+            -0.415521,
+            -0.124183,
+            -0.876452,
+            null,
+            0.852107,
+            0.784068
+          ]
+        }
+      },
+      {
+        "edge_id": "919d7f50::b42f8b15",
+        "from_id": "919d7f50",
+        "to_id": "b42f8b15",
+        "from_label": "Sales Headcount Investment",
+        "to_label": "Trial-to-Paid Conversion Uplift",
+        "e_value": 1.6555,
+        "flip_direction": "increase",
+        "current_mean": 0.45,
+        "flip_mean": 0.744963,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 4,
+          "band_min": 0.274642,
+          "band_median": 0.503488,
+          "band_max": 0.917834,
+          "band_width": 0.643192,
+          "seed_flip_means": [
+            0.917834,
+            null,
+            null,
+            null,
+            null,
+            0.274642,
+            null,
+            null,
+            0.587272,
+            0.419704
+          ]
+        }
+      },
+      {
+        "edge_id": "919d7f50::b6941ac0",
+        "from_id": "919d7f50",
+        "to_id": "b6941ac0",
+        "from_label": "Sales Headcount Investment",
+        "to_label": "MRR Growth Rate",
+        "e_value": 1.7621,
+        "flip_direction": "increase",
+        "current_mean": 0.387037037037037,
+        "flip_mean": 0.682,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 6,
+          "band_min": 0.235343,
+          "band_median": 0.550542,
+          "band_max": 0.992731,
+          "band_width": 0.757388,
+          "seed_flip_means": [
+            0.525759,
+            0.992731,
+            null,
+            null,
+            null,
+            0.235343,
+            null,
+            0.792865,
+            0.575326,
+            0.289118
+          ]
+        }
+      },
+      {
+        "edge_id": "919d7f50::bbbbd8f2",
+        "from_id": "919d7f50",
+        "to_id": "bbbbd8f2",
+        "from_label": "Sales Headcount Investment",
+        "to_label": "Customer Acquisition Cost",
+        "e_value": 1,
+        "flip_direction": "decrease",
+        "current_mean": 0.35,
+        "flip_mean": 0.055036,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 5,
+          "band_min": -0.01066,
+          "band_median": 0.010085,
+          "band_max": 0.31998,
+          "band_width": 0.33064,
+          "seed_flip_means": [
+            0.31998,
+            0.010085,
+            -1e-06,
+            null,
+            null,
+            null,
+            null,
+            0.094851,
+            -0.01066,
+            null
+          ]
+        }
+      },
+      {
+        "edge_id": "b42f8b15::552bd1c0",
+        "from_id": "b42f8b15",
+        "to_id": "552bd1c0",
+        "from_label": "Trial-to-Paid Conversion Uplift",
+        "to_label": "Reach £30k MRR Within 18 Months",
+        "e_value": 1.6555,
+        "flip_direction": "increase",
+        "current_mean": 0.5,
+        "flip_mean": 0.827737,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 6,
+          "band_min": 0.375933,
+          "band_median": 0.631395,
+          "band_max": 0.745043,
+          "band_width": 0.36911,
+          "seed_flip_means": [
+            0.745043,
+            0.661263,
+            0.615716,
+            null,
+            null,
+            null,
+            null,
+            0.494727,
+            0.647073,
+            0.375933
+          ]
+        }
+      },
+      {
+        "edge_id": "b6941ac0::552bd1c0",
+        "from_id": "b6941ac0",
+        "to_id": "552bd1c0",
+        "from_label": "MRR Growth Rate",
+        "to_label": "Reach £30k MRR Within 18 Months",
+        "e_value": 1.7621,
+        "flip_direction": "increase",
+        "current_mean": 0.5,
+        "flip_mean": 0.881053,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 3,
+          "band_min": 0.156248,
+          "band_median": 0.646941,
+          "band_max": 0.849389,
+          "band_width": 0.693141,
+          "seed_flip_means": [
+            null,
+            0.849389,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0.646941,
+            0.156248
+          ]
+        }
+      },
+      {
+        "edge_id": "bbbbd8f2::552bd1c0",
+        "from_id": "bbbbd8f2",
+        "to_id": "552bd1c0",
+        "from_label": "Customer Acquisition Cost",
+        "to_label": "Reach £30k MRR Within 18 Months",
+        "e_value": 1,
+        "flip_direction": "increase",
+        "current_mean": -0.5,
+        "flip_mean": -0.078624,
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 6,
+          "band_min": -0.507343,
+          "band_median": -0.070817,
+          "band_max": 0.23438,
+          "band_width": 0.741723,
+          "seed_flip_means": [
+            -0.338231,
+            -0.009432,
+            1e-06,
+            null,
+            null,
+            0.23438,
+            null,
+            -0.132203,
+            null,
+            -0.507343
+          ]
+        }
+      }
+    ],
+    "robustness": {
+      "fragile_edges": [
+        {
+          "edge_id": "919d7f50->428612e0",
+          "from_id": "919d7f50",
+          "to_id": "428612e0",
+          "switch_probability": 0.664,
+          "marginal_switch_probability": 0.21,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "Sales Headcount Investment",
+          "to_label": "Runway Depletion Risk",
+          "severity": "error",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "919d7f50->bbbbd8f2",
+          "from_id": "919d7f50",
+          "to_id": "bbbbd8f2",
+          "switch_probability": 0.5,
+          "marginal_switch_probability": 0.18,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "Sales Headcount Investment",
+          "to_label": "Customer Acquisition Cost",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "27c23ebb->26fbdff5",
+          "from_id": "27c23ebb",
+          "to_id": "26fbdff5",
+          "switch_probability": 0.4424,
+          "marginal_switch_probability": 0,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+          "to_label": "We've heard from three churned customers that they left because of missing integrations, not price — so we think product gaps mediate the relationship between customer satisfaction and churn",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "26fbdff5->3d37f4b2",
+          "from_id": "26fbdff5",
+          "to_id": "3d37f4b2",
+          "switch_probability": 0.4204,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "We've heard from three churned customers that they left because of missing integrations, not price — so we think product gaps mediate the relationship between customer satisfaction and churn",
+          "to_label": "Churn Rate Deterioration",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "422ceee7->b6941ac0",
+          "from_id": "422ceee7",
+          "to_id": "b6941ac0",
+          "switch_probability": 0.3732,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "which we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+          "to_label": "MRR Growth Rate",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "16ec3d64->bbbbd8f2",
+          "from_id": "16ec3d64",
+          "to_id": "bbbbd8f2",
+          "switch_probability": 0.3712,
+          "marginal_switch_probability": 0,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "ICP Clarity",
+          "to_label": "Customer Acquisition Cost",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "bbbbd8f2->552bd1c0",
+          "from_id": "bbbbd8f2",
+          "to_id": "552bd1c0",
+          "switch_probability": 0.2952,
+          "marginal_switch_probability": 0.22,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "Customer Acquisition Cost",
+          "to_label": "Reach £30k MRR Within 18 Months",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "428612e0->552bd1c0",
+          "from_id": "428612e0",
+          "to_id": "552bd1c0",
+          "switch_probability": 0.228,
+          "marginal_switch_probability": 0.32,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "Runway Depletion Risk",
+          "to_label": "Reach £30k MRR Within 18 Months",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "b6941ac0->552bd1c0",
+          "from_id": "b6941ac0",
+          "to_id": "552bd1c0",
+          "switch_probability": 0.2236,
+          "marginal_switch_probability": 0.01,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "MRR Growth Rate",
+          "to_label": "Reach £30k MRR Within 18 Months",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "919d7f50->b6941ac0",
+          "from_id": "919d7f50",
+          "to_id": "b6941ac0",
+          "switch_probability": 0.2228,
+          "marginal_switch_probability": 0.02,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "Sales Headcount Investment",
+          "to_label": "MRR Growth Rate",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "919d7f50->b42f8b15",
+          "from_id": "919d7f50",
+          "to_id": "b42f8b15",
+          "switch_probability": 0.1952,
+          "marginal_switch_probability": 0.07,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "Sales Headcount Investment",
+          "to_label": "Trial-to-Paid Conversion Uplift",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        },
+        {
+          "edge_id": "b42f8b15->552bd1c0",
+          "from_id": "b42f8b15",
+          "to_id": "552bd1c0",
+          "switch_probability": 0.1752,
+          "marginal_switch_probability": 0.07,
+          "alternative_winner_id": "05f973ef",
+          "from_label": "Trial-to-Paid Conversion Uplift",
+          "to_label": "Reach £30k MRR Within 18 Months",
+          "severity": "warning",
+          "visible": true,
+          "alternative_winner_label": "Hire a Dedicated Sales Team"
+        }
+      ]
+    },
+    "factor_sensitivity": [
+      {
+        "factor_id": "16ec3d64",
+        "factor_label": "ICP Clarity",
+        "influence_score": 1,
+        "influence_rank": 1,
+        "sensitivity_score": -0.375,
+        "elasticity": 1,
+        "direction": "negative",
+        "importance_rank": 1,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "correlated",
+        "importance_basis": "graph_structural",
+        "driver_label": "biggest",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false
+      },
+      {
+        "factor_id": "26fbdff5",
+        "factor_label": "We've heard from three churned customers that they left because of missing integrations, not price — so we think product gaps mediate the relationship between customer satisfaction and churn",
+        "influence_score": 0.7333333333333334,
+        "influence_rank": 2,
+        "sensitivity_score": -0.275,
+        "elasticity": 0.7333333333333334,
+        "direction": "negative",
+        "importance_rank": 2,
+        "value_of_information": 0,
+        "confidence": 0.5835,
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_isl_bootstrap",
+          "formula_version": "plot_unified_v3",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.8,
+          "sampling_stability": 0.25
+        },
+        "source": "graph",
+        "flip_risk_category": "correlated",
+        "attribution_stability": "low",
+        "rank_flip_rate": 0,
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "importance_basis": "graph_structural",
+        "driver_label": "strong",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false
+      },
+      {
+        "factor_id": "422ceee7",
+        "factor_label": "which we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+        "influence_score": 0.4691358024691357,
+        "influence_rank": 3,
+        "sensitivity_score": 0.1759259259259259,
+        "elasticity": 0.4691358024691357,
+        "direction": "positive",
+        "importance_rank": 3,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "correlated",
+        "importance_basis": "graph_structural",
+        "driver_label": "moderate",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false
+      },
+      {
+        "factor_id": "7dc44ba7",
+        "factor_label": "Competitive Pressure",
+        "influence_score": 0.28148148148148144,
+        "influence_rank": 5,
+        "sensitivity_score": 0.10555555555555554,
+        "elasticity": 0.28148148148148144,
+        "direction": "positive",
+        "importance_rank": 4,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "importance_basis": "graph_structural",
+        "driver_label": "moderate",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false
+      },
+      {
+        "factor_id": "27c23ebb",
+        "factor_label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+        "influence_score": 0.33,
+        "influence_rank": 4,
+        "sensitivity_score": 0,
+        "elasticity": 0,
+        "direction": "negative",
+        "importance_rank": 5,
+        "value_of_information": 0,
+        "confidence": 0.3,
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_isl_bootstrap",
+          "formula_version": "plot_unified_v3",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": 0
+        },
+        "zero_reason": "intervention_override",
+        "source": "graph",
+        "flip_risk_category": "correlated",
+        "attribution_stability": "negligible",
+        "rank_flip_rate": 0,
+        "importance_basis": "graph_structural",
+        "driver_label": "moderate",
+        "range_derivation_source": "default"
+      },
+      {
+        "factor_id": "919d7f50",
+        "factor_label": "Sales Headcount Investment",
+        "influence_score": 0.21728395061728398,
+        "influence_rank": 6,
+        "sensitivity_score": 0,
+        "elasticity": 0,
+        "direction": "negative",
+        "importance_rank": 6,
+        "value_of_information": 0,
+        "confidence": 0.3,
+        "confidence_source": "plot_unified_from_isl_bootstrap",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_isl_bootstrap",
+          "formula_version": "plot_unified_v3",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": 0
+        },
+        "zero_reason": "intervention_override",
+        "source": "graph",
+        "flip_risk_category": "isolated",
+        "attribution_stability": "negligible",
+        "rank_flip_rate": 0,
+        "value_source": "user_override",
+        "value_extraction_type": "explicit",
+        "importance_basis": "graph_structural",
+        "driver_label": "moderate",
+        "range_derivation_source": "default"
+      }
+    ],
+    "factor_evppi": [
+      {
+        "factor_id": "26fbdff5",
+        "evppi": 1e-05,
+        "evppi_raw": 1e-05,
+        "baseline_max_expected_utility": -0.098727,
+        "conditional_max_expected_utility": -0.098717,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": false,
+        "clamped_high": false,
+        "noise_floor": 2.2e-05,
+        "status": "below_resolution",
+        "correlation_active": false
+      }
+    ],
+    "decision_evpi": 0.059971525751371255,
+    "p_win_sensitivity": [
+      {
+        "factor_id": "26fbdff5",
+        "p_win_delta": 0.0195,
+        "p_win_delta_percentage_points": 1.95,
+        "current_metric": 0.620667,
+        "perfect_metric": 0.640167,
+        "metric_type": "p_win_recommended",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "27c23ebb",
+        "p_win_delta": 0.005167,
+        "p_win_delta_percentage_points": 0.52,
+        "current_metric": 0.620667,
+        "perfect_metric": 0.625833,
+        "metric_type": "p_win_recommended",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "919d7f50",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 0.620667,
+        "perfect_metric": 0.617333,
+        "metric_type": "p_win_recommended",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": true,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      }
+    ],
+    "inference_warnings": [
+      {
+        "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+        "message": "4 edge E-value entries were omitted from edge_e_values: 4 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+        "severity": "info"
+      },
+      {
+        "code": "ROOT_NODE_DEFAULT_VALUE",
+        "message": "No observed value provided for root node '16ec3d64'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+        "severity": "info",
+        "field": "nodes[16ec3d64].observed_state.value"
+      },
+      {
+        "code": "ROOT_NODE_DEFAULT_VALUE",
+        "message": "No observed value provided for root node '422ceee7'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+        "severity": "info",
+        "field": "nodes[422ceee7].observed_state.value"
+      },
+      {
+        "code": "ROOT_NODE_DEFAULT_VALUE",
+        "message": "No observed value provided for root node '7dc44ba7'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+        "severity": "info",
+        "field": "nodes[7dc44ba7].observed_state.value"
+      },
+      {
+        "code": "GOAL_ANCESTOR_DATA_GAP",
+        "message": "Goal node '552bd1c0' is scored from its forward-propagated outcome distribution, but root ancestor(s) '16ec3d64', '422ceee7', '7dc44ba7' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data).",
+        "severity": "info",
+        "field": "nodes[552bd1c0]"
+      }
+    ],
+    "decision_brief": {
+      "defaulted_assumptions": [
+        {
+          "factor_label": null,
+          "note": "No observed value provided for root node '16ec3d64'; defaulted to 0.0. Results for downstream nodes may be unreliable.",
+          "source": "default_disclosure",
+          "code": "ROOT_NODE_DEFAULT_VALUE",
+          "doctrine": "provisional_doctrine_v0"
+        }
+      ],
+      "warnings": [
+        {
+          "code": "ANCHORING_RISK",
+          "message": "High-influence factors have 0.5 baseline values — a common 'I don't know' default. Are these estimates or evidence?",
+          "severity": "warning"
+        },
+        {
+          "code": "GOAL_ANCESTOR_DATA_GAP",
+          "message": "Goal node '552bd1c0' is scored from its forward-propagated outcome distribution, but root ancestor(s) '16ec3d64', '422ceee7', '7dc44ba7' carry no observed value or ParameterUncertainty and defaulted to 0.0 — goal-level probabilities partially rest on placeholder zeros (insufficient data)",
+          "severity": "warning"
+        },
+        {
+          "code": "INFLUENTIAL_EXTERNALS",
+          "message": "External factors ICP Clarity significantly affect your outcome but are inherently uncertain. How might you bound these?",
+          "severity": "warning"
+        },
+        {
+          "code": "M2_UNAVAILABLE",
+          "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+          "severity": "warning"
+        },
+        {
+          "code": "MARGINAL_SWITCH_TRUNCATED",
+          "message": "Marginal switch probability was computed for the 10 most elastic fragile edge(s) of 12; the remaining 2 carry marginal_switch_probability=null. Each edge's sweep costs 100 isolated re-evaluations per option, so the set is bounded to keep the analysis inside its compute-admission budget. Retained values are unaffected — each is computed independently of the others",
+          "severity": "warning"
+        }
+      ]
+    }
+  },
+  "decision_review_output": {
+    "narrative_summary": "The size of the lead is not reported as a gap between options — the difference between two win frequencies is not a difference in outcome. ICP Clarity stands out as a key unknown and could change the outcome.",
+    "story_headlines": {
+      "94b13741": "Founder-Led Sales stays ahead when ICP Clarity remains uncertain and current cost controls hold.",
+      "05f973ef": "Hire a Dedicated Sales Team could overtake if sales headcount investment manages runway and customer acquisition cost more effectively."
+    },
+    "robustness_explanation": {
+      "summary": "The ordering holds in about 63% of variations, but the stability is limited due to key uncertainties.",
+      "primary_risk": "The biggest threat is the relationship from Sales Headcount Investment to Runway Depletion Risk.",
+      "stability_factors": [
+        "ICP Clarity underpins conversion and cost assumptions."
+      ],
+      "fragility_factors": [
+        "The link from Sales Headcount Investment to Runway Depletion Risk could flip the result.",
+        "The link from Customer Acquisition Cost to Reach £30k MRR Within 18 Months could change the leader."
+      ]
+    },
+    "readiness_rationale": "Significant information gaps about ICP Clarity and its real impact on cost and retention still hold this back. Only preliminary estimates support the current ordering.",
+    "evidence_enhancements": {
+      "16ec3d64": {
+        "specific_action": "Interview at least 10 current and churned customers to define the ICP and document concrete qualification criteria.",
+        "rationale": "Clarity on ICP would reduce uncertainty driving both churn and acquisition cost, affecting which sales model works best.",
+        "evidence_type": "customer_research",
+        "decision_hygiene": "Estimate likely ICP segments before reviewing new customer insights."
+      },
+      "26fbdff5": {
+        "specific_action": "Map which integrations prospects ask for and tally their influence on closed/lost deals using CRM and qualitative calls.",
+        "rationale": "Customer feedback on integrations mediates satisfaction and churn, so addressing this clarifies the churn dynamic across options.",
+        "evidence_type": "customer_research",
+        "decision_hygiene": "Draft a hypothesis on key integrations before looking at customer data."
+      },
+      "422ceee7": {
+        "specific_action": "Analyse trial-to-paid conversions segmented by trial attention level and product quality indicators over the past 6 months.",
+        "rationale": "Understanding the conversion link to founder attention and product will inform whether scaling sales is viable without harming conversions.",
+        "evidence_type": "internal_data",
+        "decision_hygiene": "Blindly benchmark conversion rates before checking segment-specific trial handling."
+      }
+    },
+    "scenario_contexts": {
+      "919d7f50->428612e0": {
+        "trigger_description": "If Sales Headcount Investment increases runway depletion risk more than forecast,",
+        "consequence": "then Hire a Dedicated Sales Team overtakes Continue With Founder-Led Sales."
+      },
+      "bbbbd8f2->552bd1c0": {
+        "trigger_description": "If Customer Acquisition Cost rises faster than expected,",
+        "consequence": "then Hire a Dedicated Sales Team overtakes Continue With Founder-Led Sales."
+      }
+    },
+    "flip_thresholds": [],
+    "bias_findings": [],
+    "key_assumptions": [
+      "The link from ICP Clarity to Customer Acquisition Cost assumes newly gathered data will not reveal a major mismatch.",
+      "The link from Sales Headcount Investment to Runway Depletion Risk relies on salary and tooling costs staying within the planned range.",
+      "Churn Rate Deterioration is assumed to be primarily affected by missing product integrations, not price sensitivity."
+    ],
+    "decision_quality_prompts": [
+      {
+        "question": "What would prompt you to switch from Continue With Founder-Led Sales to Hire a Dedicated Sales Team if current assumptions about ICP Clarity are revised?",
+        "principle": "Consider-the-opposite",
+        "applies_because": "Continue With Founder-Led Sales is ahead, but the lead depends on uncertainty in ICP Clarity and acquisition cost.",
+        "dsk_grounding": "general"
+      },
+      {
+        "question": "What is the base rate for SaaS companies at this stage hitting £30k MRR within 18 months via founder-led vs. dedicated sales approaches?",
+        "principle": "Outside view and reference class forecasting",
+        "applies_because": "Overall confidence in the result is moderate and would benefit from anchoring on real-world benchmarks.",
+        "dsk_claim_id": "DSK-T-002",
+        "evidence_strength": "strong",
+        "dsk_protocol_id": "DSK-P-002",
+        "dsk_grounding": "resolved"
+      }
+    ],
+    "produced_at": "2026-09-03T13:57:09.190Z"
+  }
+}
