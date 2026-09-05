@@ -71,6 +71,7 @@ import {
   deriveTippingPointsFromTopLevel,
   type AnalysisResponseSummaryWithSignals,
 } from './analysis-signals.js';
+import { investigationPriorityFromEnrichment } from '../coaching/investigation-priority.js';
 import { selectRunAnalysisFact } from './freshness.js';
 import { emitUnknownEnrichmentKeyTelemetry } from './enrichment-manifest.js';
 
@@ -468,6 +469,17 @@ export function reconcileAnalysisSummaryWithEnrichment(
   // modelled-outcome means (banded downstream, never surfaced raw).
   const confidenceTier = deriveConfidenceTierFromEnrichment(enrichment);
   const optionOutcomes = deriveOptionOutcomesFromEnrichment(enrichment);
+  // The EVPPI channel's verdict on what is worth investigating first. Attached
+  // HERE, at the single summary/enrichment seam, so it can never describe a
+  // different run from the analysis it rides on — deriving it beside the
+  // projection instead (from `priorFacts`) would let a durable display source
+  // and a hot-window fact disagree, and a licence about the wrong run is worse
+  // than no licence at all.
+  //
+  // `not_assessed` is deliberately NOT attached: that state is already
+  // disclosed by the display projection's `VOI_NOT_SCORED_NOTE`, and omitting
+  // it keeps an enrichment with no `factor_evppi` byte-identical to before.
+  const investigationPriority = investigationPriorityFromEnrichment(enrichment);
 
   const withSignals: AnalysisResponseSummaryWithSignals = {
     ...withFragile,
@@ -477,6 +489,9 @@ export function reconcileAnalysisSummaryWithEnrichment(
     ...(optionGoalFits.length > 0 ? { option_goal_fits: optionGoalFits } : {}),
     ...(confidenceTier !== null ? { confidence_tier: confidenceTier } : {}),
     ...(optionOutcomes.length > 0 ? { option_outcomes: optionOutcomes } : {}),
+    ...(investigationPriority.kind !== 'not_assessed'
+      ? { investigation_priority: investigationPriority }
+      : {}),
   };
 
   return {
@@ -580,10 +595,26 @@ export function buildAnalysisFromPriorFacts(
       // drivers and fragile edges live at the envelope TOP LEVEL and would
       // otherwise be dropped before the advice-gate projection that
       // composeExplainResults / composeMeaning read. Reconcile through the
-      // SHARED composite seam (drivers + fragile edges + Lane 21 signals) so
-      // this prior-facts fallback and the body `analysis_state` ingress path
-      // (turn-executor) project identically; per-option result wins when
-      // present.
+      // SHARED composite seam (drivers + fragile edges + Lane 21 signals);
+      // per-option result wins when present.
+      //
+      // ⚠ THIS COMMENT USED TO SAY THE SEAM WAS SHARED WITH "the body
+      // `analysis_state` ingress path (turn-executor)". That path no longer
+      // exists and the sentence would be inherited as fact, so it is corrected
+      // rather than left standing. Derived at CEE `f4c8f501`: the only
+      // non-test `src/` readers of `reconcileAnalysisSummaryWithEnrichment` are
+      // this file and a documentation reference in `context-pack-assembler.ts`
+      // (contrast control in the same sweep: `buildAnalysisFromPriorFacts`
+      // reaches 8 non-test files, so the probe was not blind), and
+      // `turn-executor.ts:2520-2530` states that body `analysis_state`
+      // "cannot author either projection, freshness, or prompt bytes".
+      //
+      // WHAT IS STILL TRUE, AND IT MATTERS MORE THAN WHAT WAS WRONG: this seam
+      // is now the ONLY content source for BOTH summaries the turn-executor
+      // compiles — the hot-window `analysisSummary` and the durable
+      // `promptAnalysisSummary` that becomes the model-facing display source.
+      // A signal attached here reaches the coach's pack on every analysis-
+      // bearing turn; one attached elsewhere would not.
       const { summary: reconciled } = reconcileAnalysisSummaryWithEnrichment(
         {
           ...fromEnrichment,

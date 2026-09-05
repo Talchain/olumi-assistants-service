@@ -39,6 +39,7 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
+import type { InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
@@ -298,6 +299,25 @@ export interface ContextPackAnalysis {
    * #308-union structural authority) fires.
    */
   readonly evidence_gaps_lever_suppressed?: true;
+  /**
+   * ⭐ WHAT THE INFORMATION-VALUE SCIENCE SAID ABOUT WHAT TO INVESTIGATE FIRST.
+   *
+   * A DIFFERENT QUESTION FROM `evidence_gaps` ABOVE, from a DIFFERENT PRODUCER
+   * CHANNEL, and the two disagreed on the capture that produced this field.
+   * `evidence_gaps` is `enrichment.m1_coaching.evidence_gaps[]`; this is ISL's
+   * `enrichment.factor_evppi`, read through the existing
+   * `coaching/select-factor-evppi.ts` authority.
+   *
+   * Attached at `reconcileAnalysisSummaryWithEnrichment` — the single seam
+   * between a summary and its own enrichment — so it can never describe a
+   * different run from the analysis it travels with.
+   *
+   * ABSENT (never `'not_assessed'`) when the EVPPI channel said nothing at all:
+   * that state is already disclosed by the display projection's
+   * `VOI_NOT_SCORED_NOTE`, and keeping the key off makes an enrichment without
+   * `factor_evppi` project byte-identically to before this field existed.
+   */
+  readonly investigation_priority?: InvestigationPriorityLicence;
   readonly goal_fit?: ContextPackAnalysisGoalFit | null;
   /**
    * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
@@ -2645,6 +2665,14 @@ export function projectAnalysis(
     // ROADMAP 2.54 (b) — key absent (never `false`) when nothing was
     // suppressed.
     ...(evidenceGapsLeverSuppressed ? { evidence_gaps_lever_suppressed: true as const } : {}),
+    // The EVPPI channel's own verdict, carried through verbatim from the
+    // signal attached at `reconcileAnalysisSummaryWithEnrichment`. NOT
+    // re-derived here: a second derivation would be a second authority on
+    // "what did the information-value estimate say", which is the shape that
+    // put a false sentence in front of a user on 3 Sep 2026.
+    ...(analysis.investigation_priority !== undefined
+      ? { investigation_priority: analysis.investigation_priority }
+      : {}),
     goal_fit: goalFit,
     confidence_tier: confidenceTier,
     // Trust-spine board #1 (CEE half): the honest constraint note, verbatim

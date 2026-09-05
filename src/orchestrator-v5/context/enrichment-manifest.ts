@@ -337,6 +337,52 @@ const R_INTERNAL =
  *
  * So this is a skip with a stated boundary, not a gap: adding a deriver here
  * is a doctrine decision (and a Paul ruling), not a wiring task.
+ *
+ * ⚠⚠ AMENDED — `factor_evppi` MOVED OUT OF THE SKIP SET, AND THE BOUNDARY THAT
+ * MOVED WITH IT IS NARROWER THAN THE ONE ABOVE, NOT ABSENT. STATED IN FULL
+ * BECAUSE THIS IS THE DOCTRINE LINE AND THE NEXT READER INHERITS IT.
+ *
+ * WHAT THE OLD BOUNDARY WAS ACTUALLY PROTECTING, in its own words: the values
+ * are magnitudes, and "narrating them in prose is the 'worth X' / 'by N pp'
+ * claim class the no-EVPI-display doctrine forbids". That is a rule about
+ * MAGNITUDES reaching prose. It still stands, unweakened.
+ *
+ * WHAT THE PROJECTION NOW READS, and it is not a magnitude:
+ * `coaching/investigation-priority.ts` reads `factor_evppi` through the
+ * EXISTING `coaching/select-factor-evppi.ts` authority — whose own contract is
+ * that "the magnitude is never compared, returned, logged, or made available
+ * to prose" — and projects a four-state VERDICT. Two of the four states are
+ * pure refusals. One is a refusal with a reason. The fourth carries ONE FACTOR
+ * LABEL and no number, which is the same thing the deterministic composers
+ * (`phase3-blocks` evidence blocks, `post-analysis-advice-gate`) already put in
+ * front of the user from this same authority. Every emitted note is asserted
+ * digit-free by test.
+ *
+ * WHY IT HAD TO MOVE, measured rather than argued. The 3 Sep 2026 founder
+ * capture (`olumi-programme-docs` `artefacts/manual-test-2026-09-03/`) carried
+ * `factor_evppi` with `status: "below_resolution"` and NO `m1_coaching` at all.
+ * The coach was therefore told "no value-of-information scores are available
+ * for this analysis" — false — and handed exactly one ranking, `top_drivers`,
+ * which ranks INFLUENCE. It duly narrated that ranking as an investigation
+ * priority: "the single highest-value check before acting on this result".
+ * WITHHOLDING THE VERDICT DID NOT PREVENT THE CLAIM; it removed the only fact
+ * that could refuse it. A silence is not a boundary when the model has another
+ * ranking to reach for.
+ *
+ * WHAT REMAINS SKIPPED, deliberately: `decision_evpi`, `p_win_sensitivity` and
+ * `correlation_model` keep {@link R_VOI_NOT_COACH_NARRATED} in full. They are
+ * magnitudes with no number-free verdict reader, and nothing here licenses one.
+ *
+ * ⚠ `inference_warnings` MOVED FOR A DIFFERENT REASON AND MUST NOT BE READ AS
+ * THE SAME DECISION. It was skipped as {@link R_UI_SCIENCE} — "rendered by
+ * DGAI, not narrated by the coach" — and that is still true of its CONTENT:
+ * not one byte of a warning reaches the pack. What reads it is the EVPPI
+ * authority's fail-closed gate, which inspects warning CODES only
+ * (`FACTOR_EVPPI_PARTIAL`, `ENRICHMENT_CONTRACT_MISMATCH`) to decide whether
+ * the ranking may be trusted at all. This manifest classifies by READ, not by
+ * projection, so a code-only gate read lands it in the derived set; the
+ * distinction is recorded here because "derived" would otherwise be inherited
+ * as "the coach sees the warnings", which it does not.
  */
 /**
  * `driver_order` (PLoT #287/#288): the same `R_NO_CONSUMER` shape as
@@ -354,7 +400,7 @@ const R_INTERNAL =
 const R_NO_CONSUMER_YET_S1D =
   'PLoT canonical driver ordering (#287/#288, landed 2026-07-28). Manifested so the runtime tripwire stops false-positiving on essentially every analysis body; NOT projected, and deliberately NOT on the UI transport keep-list — it has no @talchain/schemas contract and no withheld-claim ruling, and CEE currently has ZERO references to it anywhere in src/ or tests/. Its consumption (project, transport, or retire) is S1d\'s decision and needs a schemas train first. Skipped because there is no reader yet, not because it goes somewhere else.';
 const R_VOI_NOT_COACH_NARRATED =
-  'Value-of-information family — transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) for a deterministic ranking surface with NO magnitudes, and deliberately withheld from the analysis→LLM projection: the values are outcome-unit / percentage-point magnitudes, and narrating them in prose is the "worth X" / "by N pp" claim class the no-EVPI-display doctrine forbids. Adding a deriver is a doctrine ruling, not a wiring gap.';
+  'Value-of-information MAGNITUDES — transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) for a deterministic ranking surface with NO magnitudes, and deliberately withheld from the analysis→LLM projection: the values are outcome-unit / percentage-point magnitudes, and narrating them in prose is the "worth X" / "by N pp" claim class the no-EVPI-display doctrine forbids. Adding a MAGNITUDE deriver is a doctrine ruling, not a wiring gap. See the block comment above for what changed for factor_evppi and what did not.';
 const R_COACHING_SIGNAL =
   'CEE-injected coaching-signal marker for the next turn coaching-cache reader (coaching-signal-application.ts) — routing metadata, not analysis content.';
 const R_LEGACY_COMPACT =
@@ -392,7 +438,6 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['path_decomposition', R_UI_SCIENCE],
   ['factor_stability', R_UI_SCIENCE],
   ['stability_thresholds', R_UI_SCIENCE],
-  ['inference_warnings', R_UI_SCIENCE],
   ['sensitivity_reference_option_id', R_UI_SCIENCE],
   ['dominant_factor', R_UI_SCIENCE],
   ['flip_thresholds_status', R_FLIP_SIDECAR],
@@ -437,7 +482,6 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   // V7-C slice 1b — transported to the UI, never narrated by the coach.
   ['correlation_model', R_VOI_NOT_COACH_NARRATED],
   ['decision_evpi', R_VOI_NOT_COACH_NARRATED],
-  ['factor_evppi', R_VOI_NOT_COACH_NARRATED],
   ['p_win_sensitivity', R_VOI_NOT_COACH_NARRATED],
   // The fifth key of the same PLoT window — see its manifest entry.
   ['driver_order', R_NO_CONSUMER_YET_S1D],
