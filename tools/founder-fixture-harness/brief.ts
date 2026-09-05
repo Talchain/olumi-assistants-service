@@ -84,15 +84,34 @@ export function loadBrief(briefPath: string): LoadedBrief {
   const text = raw.toString('utf8');
   const actual = sha256Of(text);
 
-  const sidecarPath = join(dirname(briefPath), `${basename(briefPath)}.sha256`);
-  let sidecar: string;
-  try {
-    sidecar = readFileSync(sidecarPath, 'utf8');
-  } catch {
+  // TWO SPELLINGS ARE IN USE AND ONLY ONE IS OBVIOUS. The banked fixture ships
+  // `BRIEF-FOUNDER-VERBATIM.sha256` — the extension REPLACED, not appended —
+  // while `shasum` and most tooling write `<file>.sha256`. Both are tried, and
+  // the sidecar's own named file is then checked against the brief we loaded,
+  // so accepting the second spelling cannot let a sidecar for a different file
+  // through. (Found by running this harness live: it halted at exit 3 rather
+  // than proceeding on an unasserted brief, which is the behaviour, but the
+  // halt was the harness's spelling, not the fixture's.)
+  const base = basename(briefPath);
+  const dir = dirname(briefPath);
+  const candidates = [join(dir, `${base}.sha256`), join(dir, `${base.replace(/\.[^.]+$/, '')}.sha256`)];
+  let sidecar: string | undefined;
+  let sidecarPath = candidates[0];
+  for (const candidate of candidates) {
+    try {
+      sidecar = readFileSync(candidate, 'utf8');
+      sidecarPath = candidate;
+      break;
+    } catch {
+      // try the next spelling
+    }
+  }
+  if (sidecar === undefined) {
     throw new BriefHashMismatchError(
-      `No sha256 sidecar at ${sidecarPath}. PROTOCOL.md rule 3 requires asserting the brief by ` +
-        'HASH, not by name; without the sidecar there is nothing to assert against. ' +
-        'Point --brief at the fixture checkout, which ships BRIEF-FOUNDER-VERBATIM.txt.sha256.',
+      `No sha256 sidecar beside ${briefPath}. Tried: ${candidates.join(', ')}. ` +
+        'PROTOCOL.md rule 3 requires asserting the brief by HASH, not by name; without the sidecar ' +
+        'there is nothing to assert against. Point --brief at the fixture checkout, which ships ' +
+        'BRIEF-FOUNDER-VERBATIM.sha256.',
     );
   }
 

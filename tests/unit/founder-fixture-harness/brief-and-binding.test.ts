@@ -64,6 +64,24 @@ describe('brief hash assertion', () => {
     expect(() => loadBrief(path)).toThrow(BriefHashMismatchError);
   });
 
+  it("accepts the BANKED fixture's own sidecar spelling — extension REPLACED, not appended", () => {
+    // The fixture ships `BRIEF-FOUNDER-VERBATIM.sha256`, not
+    // `BRIEF-FOUNDER-VERBATIM.txt.sha256`. The first live run of this harness
+    // halted at exit 3 on exactly that — correct behaviour (it refused to
+    // proceed on an unasserted brief) applied to the harness's own spelling
+    // rather than the fixture's. Both are tried now, and the sidecar's named
+    // file is still checked, so the second spelling cannot smuggle a sidecar
+    // for a different file through.
+    const text = 'We are deciding whether to hire.\n';
+    const dir = mkdtempSync(join(tmpdir(), 'founder-brief-'));
+    const path = join(dir, 'BRIEF-FOUNDER-VERBATIM.txt');
+    writeFileSync(path, text, 'utf8');
+    writeFileSync(join(dir, 'BRIEF-FOUNDER-VERBATIM.sha256'), `${sha256Of(text)}  BRIEF-FOUNDER-VERBATIM.txt\n`, 'utf8');
+    const brief = loadBrief(path);
+    expect(brief.sha256).toBe(sha256Of(text));
+    expect(brief.sha256SidecarPath.endsWith('BRIEF-FOUNDER-VERBATIM.sha256')).toBe(true);
+  });
+
   it('REFUSES a sidecar that names a different file rather than assuming they match', () => {
     expect(() => parseSha256Sidecar(`${'a'.repeat(64)}  SOME-OTHER-FILE.txt\n`, 'BRIEF-FOUNDER-VERBATIM.txt')).toThrow(
       BriefHashMismatchError,
