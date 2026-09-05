@@ -37,10 +37,26 @@ import {
   type RunAnalysisScenarioSnapshot,
   type ScenarioReader,
 } from '../run-analysis.js';
-import happyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
+import legacyHappyFixture from '../../../../../tests/fixtures/plot/v2-run-golden-happy.json' with { type: 'json' };
 import minimalFixture from '../../../../../tests/fixtures/plot/v2-run-golden-minimal.json' with { type: 'json' };
 import largerFixture from '../../../../../tests/fixtures/plot/v2-run-golden-larger.json' with { type: 'json' };
+import { attestedConsumerFixture } from '../../../../../tests/fixtures/plot/attested-consumer-fixture.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+
+// Current producer fixture: the positive constraint guards must exercise an
+// attested recommendation, while bespoke legacy fixtures below remain absent.
+const happyFixture = {
+  ...legacyHappyFixture,
+  option_comparison: legacyHappyFixture.results,
+  objective_ranking: {
+    direction: 'maximise', attested: true, status: 'computed',
+    ranked_options: [
+      { option_id: 'opt_a', rank: 1, win_probability: 0.62 },
+      { option_id: 'opt_b', rank: 2, win_probability: 0.38 },
+    ],
+  },
+  robustness: { ...legacyHappyFixture.robustness, recommended_option_id: 'opt_a' },
+};
 
 // ---------------------------------------------------------------------------
 // Test harness
@@ -76,6 +92,14 @@ function makeScenarioReader(snapshot?: RunAnalysisScenarioSnapshot): ScenarioRea
   return vi.fn<[string, AbortSignal | undefined], Promise<RunAnalysisScenarioSnapshot>>(
     () => Promise.resolve(returned),
   );
+}
+
+function scenarioWithOptions(optionIds: string[]): RunAnalysisScenarioSnapshot {
+  return makeScenarioSnapshot({
+    options: optionIds.map((option_id) => ({
+      id: option_id, option_id, label: option_id, interventions: { fac_price: 1 },
+    })),
+  });
 }
 
 function makePlotClient(response: V2RunResponseEnvelope | (() => Promise<V2RunResponseEnvelope>)): PLoTClient {
@@ -131,11 +155,8 @@ describe('run_analysis handler — happy path', () => {
 
     const outcome = await handler(makeInvocation());
 
-    // Headline derived from happy fixture: leader = Option A, margin 24pp to
-    // the runner-up, top driver = Price (highest |elasticity| × confidence).
-    // No fragility resolvable (no from_label/to_label/from_node_id/to_node_id
-    // on the lone fragile edge, no graph nodes to map against), so the
-    // driver-with-margin shape (Case B) fires.
+    // Headline preserves the producer recommendation and its own share.
+    // Price is the strongest driver; no permitted runner-up gap is supplied.
     expect(outcome.assistant_text).toBe(
       'Option A came out ahead in 62% of runs of this model because Price is the strongest driver.',
     );
@@ -158,8 +179,8 @@ describe('run_analysis handler — happy path', () => {
     expect(fact.result.scenario_id).toBe(TEST_SCENARIO_ID);
   });
 
-  it('fact.result.leading_option_id matches the max-probability option from results', async () => {
-    // happy fixture has opt_a@0.62 and opt_b@0.38 → leader is opt_a
+  it('fact.result.leading_option_id preserves the attested producer recommendation', async () => {
+    // The fixture explicitly recommends opt_a; its related share is 0.62.
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(),
@@ -170,7 +191,7 @@ describe('run_analysis handler — happy path', () => {
     expect(fact.result.leading_option_id).toBe('opt_a');
   });
 
-  it('fact.result.win_probabilities maps option_label → win_probability', async () => {
+  it('fact.result.win_probabilities maps admitted option_id → win_probability', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(),
@@ -178,7 +199,7 @@ describe('run_analysis handler — happy path', () => {
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
-    expect(fact.result.win_probabilities).toEqual({ 'Option A': 0.62, 'Option B': 0.38 });
+    expect(fact.result.win_probabilities).toEqual({ opt_a: 0.62, opt_b: 0.38 });
   });
 
   /**
@@ -573,17 +594,20 @@ describe('run_analysis handler — assistant_text ownership contract', () => {
 // R2 edge cases for leading_option_id
 // ---------------------------------------------------------------------------
 
-describe('run_analysis handler — leading_option_id deterministic rules (R2)', () => {
-  async function invokeWithResults(results: unknown[]): Promise<string | null> {
-    const response: V2RunResponseEnvelope = {
+describe('run_analysis handler — producer recommendation and legacy withholding (R2)', () => {
+  async function invokeWithResults(results: Record<string, unknown>[], recommendedOptionId?: string): Promise<string | null> {
+    const legacyResponse = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'r2' },
       results,
       response_hash: 'r2-top',
       analysis_status: 'completed',
-    } as V2RunResponseEnvelope;
+    };
+    const response = (recommendedOptionId === undefined ? legacyResponse :
+      attestedConsumerFixture(legacyResponse, recommendedOptionId, results)) as V2RunResponseEnvelope;
+    const ids = results.flatMap((row) => typeof row.option_id === 'string' ? [row.option_id] : []);
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(response),
-      scenarioReader: makeScenarioReader(),
+      scenarioReader: makeScenarioReader(ids.length ? scenarioWithOptions(ids) : undefined),
     });
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
@@ -595,29 +619,29 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     expect(await invokeWithResults([])).toBeNull();
   });
 
-  it('single result (any probability) → that option', async () => {
+  it('single attested result with an explicit recommendation → that option', async () => {
     expect(
-      await invokeWithResults([{ option_id: 'only', option_label: 'Only', win_probability: 0.5 }]),
+      await invokeWithResults([{ option_id: 'only', option_label: 'Only', win_probability: 1 }], 'only'),
     ).toBe('only');
   });
 
-  it('single result with zero probability → still that option (presence wins over magnitude)', async () => {
+  it('single legacy result with zero probability does not license a recommendation', async () => {
     expect(
       await invokeWithResults([{ option_id: 'only', option_label: 'Only', win_probability: 0 }]),
-    ).toBe('only');
+    ).toBeNull();
   });
 
-  it('single result missing win_probability → still that option (single exempts magnitude check)', async () => {
-    expect(await invokeWithResults([{ option_id: 'only', option_label: 'Only' }])).toBe('only');
+  it('single legacy result missing win_probability does not license a recommendation', async () => {
+    expect(await invokeWithResults([{ option_id: 'only', option_label: 'Only' }])).toBeNull();
   });
 
-  it('multiple results, strictly one max → that option', async () => {
+  it('multiple attested results preserve the explicitly recommended option', async () => {
     expect(
       await invokeWithResults([
-        { option_id: 'a', option_label: 'A', win_probability: 0.5 },
+        { option_id: 'a', option_label: 'A', win_probability: 0.2 },
         { option_id: 'b', option_label: 'B', win_probability: 0.7 },
-        { option_id: 'c', option_label: 'C', win_probability: 0.3 },
-      ]),
+        { option_id: 'c', option_label: 'C', win_probability: 0.1 },
+      ], 'b'),
     ).toBe('b');
   });
 
@@ -648,8 +672,8 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     ).toBeNull();
   });
 
-  it('option_comparison[] fallback when results[] absent', async () => {
-    const response: V2RunResponseEnvelope = {
+  it('attested option_comparison[] works when legacy results[] is empty', async () => {
+    const legacyResponse = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'oc' },
       results: [],
       option_comparison: [
@@ -658,10 +682,11 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
       ],
       response_hash: 'oc-top',
       analysis_status: 'completed',
-    } as unknown as V2RunResponseEnvelope;
+    };
+    const response = attestedConsumerFixture(legacyResponse, 'oc_a', legacyResponse.option_comparison) as unknown as V2RunResponseEnvelope;
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(response),
-      scenarioReader: makeScenarioReader(),
+      scenarioReader: makeScenarioReader(scenarioWithOptions(['oc_a', 'oc_b'])),
     });
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
@@ -672,13 +697,13 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
     expect(outcome.assistant_text).toContain('OC A came out ahead in');
   });
 
-  it('record with only option_label (no option_id) uses the label as id', async () => {
+  it('record with only option_label cannot supply a structural recommendation id', async () => {
     expect(
       await invokeWithResults([
         { option_label: 'Only Label', win_probability: 0.9 },
         { option_label: 'Runner-Up', win_probability: 0.1 },
       ]),
-    ).toBe('Only Label');
+    ).toBeNull();
   });
 });
 
@@ -687,7 +712,7 @@ describe('run_analysis handler — leading_option_id deterministic rules (R2)', 
 // ---------------------------------------------------------------------------
 
 describe('run_analysis handler — win_probabilities extraction', () => {
-  it('keys map by option_label when present', async () => {
+  it('keys use admitted structural ids even when labels are present', async () => {
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(happyFixture as unknown as V2RunResponseEnvelope),
       scenarioReader: makeScenarioReader(),
@@ -695,7 +720,7 @@ describe('run_analysis handler — win_probabilities extraction', () => {
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
-    expect(Object.keys(fact.result.win_probabilities ?? {})).toEqual(['Option A', 'Option B']);
+    expect(Object.keys(fact.result.win_probabilities ?? {})).toEqual(['opt_a', 'opt_b']);
   });
 
   it('omits win_probabilities entirely when no usable entries exist', async () => {
@@ -715,7 +740,7 @@ describe('run_analysis handler — win_probabilities extraction', () => {
     expect(fact.result.win_probabilities).toBeUndefined();
   });
 
-  it('skips records with non-finite probability (NaN, Infinity)', async () => {
+  it('malformed legacy records cannot mint a partial request-binding map', async () => {
     const response: V2RunResponseEnvelope = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'nan' },
       results: [
@@ -732,7 +757,8 @@ describe('run_analysis handler — win_probabilities extraction', () => {
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
-    expect(fact.result.win_probabilities).toEqual({ B: 0.7 });
+    expect(fact.result.win_probabilities).toBeUndefined();
+    expect(fact.result.leading_option_id).toBeNull();
   });
 });
 
@@ -859,15 +885,16 @@ describe('run_analysis handler — PLoT invocation failure paths', () => {
   });
 
   it('PLoT response without analysis_status still treated as happy path (absent ≠ failed)', async () => {
-    const response: V2RunResponseEnvelope = {
+    const legacyResponse = {
       meta: { seed_used: 1, n_samples: 10, response_hash: 'a' },
       results: [{ option_id: 'x', option_label: 'X', win_probability: 1.0 }],
       response_hash: 'a-top',
       // no analysis_status at all
-    } as V2RunResponseEnvelope;
+    };
+    const response = attestedConsumerFixture(legacyResponse, 'x', legacyResponse.results) as unknown as V2RunResponseEnvelope;
     const handler = createRunAnalysisHandler({
       plotClient: makePlotClient(response),
-      scenarioReader: makeScenarioReader(),
+      scenarioReader: makeScenarioReader(scenarioWithOptions(['x'])),
     });
     const outcome = await handler(makeInvocation());
     // Single option at 100% → Case D headline (winner + probability).
@@ -1007,9 +1034,10 @@ describe('run_analysis handler — PLoT payload construction', () => {
 
 describe('run_analysis handler — golden fixture coverage (R5)', () => {
   it('minimal fixture (1 option) produces a valid fact with that option as leader', async () => {
+    const response = attestedConsumerFixture(minimalFixture, 'opt_only', minimalFixture.results);
     const handler = createRunAnalysisHandler({
-      plotClient: makePlotClient(minimalFixture as unknown as V2RunResponseEnvelope),
-      scenarioReader: makeScenarioReader(),
+      plotClient: makePlotClient(response as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(scenarioWithOptions(['opt_only'])),
     });
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
@@ -1019,16 +1047,17 @@ describe('run_analysis handler — golden fixture coverage (R5)', () => {
     expect(outcome.assistant_text).toContain('came out ahead in 100% of runs of this model');
   });
 
-  it('larger fixture (3 options) selects the top-prob option deterministically', async () => {
+  it('larger fixture (3 options) preserves the attested producer recommendation', async () => {
+    const response = attestedConsumerFixture(largerFixture, 'opt_alpha', largerFixture.results);
     const handler = createRunAnalysisHandler({
-      plotClient: makePlotClient(largerFixture as unknown as V2RunResponseEnvelope),
-      scenarioReader: makeScenarioReader(),
+      plotClient: makePlotClient(response as unknown as V2RunResponseEnvelope),
+      scenarioReader: makeScenarioReader(scenarioWithOptions(['opt_alpha', 'opt_beta', 'opt_gamma'])),
     });
     const outcome = await handler(makeInvocation());
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type !== 'run_analysis') throw new Error('wrong fact_type');
     expect(fact.result.leading_option_id).toBe('opt_alpha');
-    expect(Object.keys(fact.result.win_probabilities ?? {})).toEqual(['Alpha', 'Beta', 'Gamma']);
+    expect(Object.keys(fact.result.win_probabilities ?? {})).toEqual(['opt_alpha', 'opt_beta', 'opt_gamma']);
   });
 
   it('larger fixture enrichment preserves decision_brief, fact_objects, and factor_sensitivity', async () => {

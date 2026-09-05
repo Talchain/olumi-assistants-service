@@ -286,6 +286,14 @@
                           "level",
                           "delta"
                         ]
+                      },
+                      "goal_direction": {
+                        "type": "string",
+                        "enum": [
+                          "maximise",
+                          "minimise",
+                          "target"
+                        ]
                       }
                     },
                     "required": [

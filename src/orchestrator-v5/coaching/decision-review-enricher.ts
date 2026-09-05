@@ -70,7 +70,7 @@ import {
   readOptionResultSources,
   isUsableWinProbability,
 } from '../../orchestrator/context/option-result-source.js';
-import { isRecommendableOption } from '../tools/handlers/recommendable-option.js';
+import { readObjectiveRecommendation, readFactObjectiveRecommendation } from '../../orchestrator/context/objective-recommendation.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   buildScaffoldPromptDisclosure,
@@ -223,7 +223,7 @@ export async function enrichRunAnalysisWithDecisionReview(
   const invokeInput = buildInvokeInput(
     input.brief,
     enrichment,
-    fact.result.leading_option_id,
+    readFactObjectiveRecommendation(fact.result)?.option_id ?? null,
     scaffoldDisclosure,
     // T1 claim safety, read from the FACT (typed `result.constraint_verdict`
     // first, interim `enrichment.__cee_claim_safety` second, fail-closed on
@@ -739,60 +739,11 @@ function buildInvokeInput(
    */
   mayNameLeadingOption: boolean,
 ): DecisionReviewInvokeInput | null {
-  // Phase 3A fix (2026-05-17): walk every available results source until
-  // one can match `leading_option_id`. The previous "first non-empty
-  // source wins" shape would skip `no_winner` when (e.g.) a legacy
-  // `enrichment.results` was present but truncated, even though the
-  // current `enrichment.option_comparison` contained the declared
-  // leader. Returning at the first matching source guarantees we honour
-  // PLoT's declared winner whenever ANY source carries it.
-  //
-  // Source ordering for the null-leader case (no declared winner): WALK the
-  // sources current-first and take the first that yields a highest-probability
-  // winner. We deliberately do NOT pool entries across sources — that would mix
-  // shapes and could double-count the same option. (M1 minor: the previous
-  // `sources[0]` shortcut silently coerced to no_winner / a thin-current 0%
-  // when the current source had entries but none carried a usable
-  // win_probability, even though a richer legacy source could supply one.)
-  // Status gate (shared across all winner surfaces via the ONE
-  // isRecommendableOption predicate): a FAILED / skipped option is never
-  // crowned as the winner and never counted as the runner-up it is measured
-  // against, mirroring the direct receipt (run-analysis.ts), compactAnalysis
-  // and projectAnalysis. Applied per-source BEFORE selection so `chosenSource`
-  // — which selectRunnerUp reads — is already status-filtered. Absent status
-  // stays recommendable, so status-less enrichments are unaffected. A declared
-  // `leadingOptionId` that points at a failed option finds no match in any
-  // filtered source and yields the honest `no_winner` outcome.
-  const sources = readResultsArraySources(enrichment).map((source) =>
-    source.filter(isRecommendableOption),
-  );
-  if (sources.length === 0) return null;
-
-  let winner: DecisionReviewInvokeInput['winner'] | null = null;
-  let chosenSource: ReadonlyArray<Record<string, unknown>> | null = null;
-
-  if (typeof leadingOptionId === 'string' && leadingOptionId.length > 0) {
-    for (const source of sources) {
-      const w = selectWinner(source, leadingOptionId);
-      if (w !== null) {
-        winner = w;
-        chosenSource = source;
-        break;
-      }
-    }
-  } else {
-    for (const source of sources) {
-      const w = selectWinner(source, null);
-      if (w !== null) {
-        winner = w;
-        chosenSource = source;
-        break;
-      }
-    }
-  }
-
-  if (winner === null || chosenSource === null) return null;
-  const runnerUp = selectRunnerUp(chosenSource, winner);
+  const recommendation = readObjectiveRecommendation(enrichment);
+  if (!recommendation || leadingOptionId !== recommendation.option_id) return null;
+  let winner = projectOptionAsWinner(recommendation.option);
+  // A descriptive raw ranking supplies neither a permitted rival nor a lead gap.
+  const runnerUp = null;
 
   // Trust-spine board #1 (CEE half): when the leading option violates a hard
   // constraint, flag the winner infeasible so the decision-review prompt does
@@ -868,9 +819,7 @@ function buildInvokeInput(
   const dcResult = normaliseDeterministicCoachingFromM1(enrichment);
   const deterministicCoaching = dcResult.value;
 
-  const margin = runnerUp !== null
-    ? winner.win_probability - runnerUp.win_probability
-    : null;
+  const margin = null;
   const robustnessLevel = readRobustnessLevel(enrichment);
 
   const meta: DecisionReviewMeta = {
@@ -922,11 +871,8 @@ function buildInvokeInput(
  * precedence + shape documentation. The name is kept so this module's existing
  * consumers (headline + contract tests) import it unchanged.
  *
- * The caller (`buildInvokeInput`) walks the returned sources in order until one
- * can match `leading_option_id`, honouring PLoT's declared winner whenever ANY
- * source carries it. `projectOptionAsWinner` is shape-tolerant (`option_id ||
- * id`, `option_label || label`, nested or flat `outcome.mean`), so every source
- * shape feeds into the same projector unchanged.
+ * This compatibility reader is for ancillary result data. Recommendation
+ * selection uses objective-recommendation.ts and never falls back across sources.
  */
 export const readResultsArraySources = readOptionResultSources;
 
@@ -938,78 +884,15 @@ function filterObjectEntries(arr: readonly unknown[]): ReadonlyArray<Record<stri
   );
 }
 
-/**
- * Select the winner option, preferring an exact `leading_option_id` match
- * when PLoT has declared one.
- *
- * Tightening (Phase 3A fix, 2026-05-17): when `leadingOptionId` is
- * provided but none of the results carry a matching `option_id` / `id`,
- * return `null` rather than falling back to "highest probability in the
- * envelope". The previous fallback would invent a winner whenever the
- * declared leader was missing from the envelope, masking real
- * data-integrity issues; the enricher's `no_winner` skip is the honest
- * outcome for that case.
- *
- * Round-4 review MAJOR-A: the leader-present branch also returns `null`
- * when the leader-matched entry lacks a {@link isUsableWinProbability}
- * win_probability, so the `buildInvokeInput` walk falls through to a richer
- * source — exactly like headline `resolveWinner`. Previously it returned the
- * thin leader with win_probability coerced to 0 (a phantom 0% winner) on a
- * thin-current envelope, disagreeing with the walking headline/compact/state.
- *
- * When `leadingOptionId` is null or empty, fall back to the highest-USABLE
- * -probability entry (returns null if none of the entries carry a usable
- * win_probability).
- */
+/** Exact structural-ID lookup only; missing identity never authorises argmax. */
 export function selectWinner(
   results: ReadonlyArray<Record<string, unknown>>,
   leadingOptionId: string | null,
 ): DecisionReviewInvokeInput['winner'] | null {
-  if (results.length === 0) return null;
-  if (typeof leadingOptionId === 'string' && leadingOptionId.length > 0) {
-    const byId = results.find(
-      (r) => r.option_id === leadingOptionId || r.id === leadingOptionId,
-    );
-    return byId && isUsableWinProbability(byId.win_probability)
-      ? projectOptionAsWinner(byId)
-      : null;
-  }
-  const top = highestWinProbability(results);
-  return top ? projectOptionAsWinner(top) : null;
-}
-
-function selectRunnerUp(
-  results: ReadonlyArray<Record<string, unknown>>,
-  winner: DecisionReviewInvokeInput['winner'],
-): DecisionReviewInvokeInput['runner_up'] {
-  // Filter against BOTH `option_id` and `id` so entries from the
-  // `option_comparison` shape (which populates both) and the
-  // `decision_brief.options` shape (which only populates `option_id`)
-  // are both excluded correctly from the runner-up candidate set.
-  const others = results.filter(
-    (r) => r.option_id !== winner.id && r.id !== winner.id,
-  );
-  const top = highestWinProbability(others);
-  return top ? projectOptionAsWinner(top) : null;
-}
-
-function highestWinProbability(
-  results: ReadonlyArray<Record<string, unknown>>,
-): Record<string, unknown> | null {
-  let best: Record<string, unknown> | null = null;
-  let bestProb = -Infinity;
-  for (const r of results) {
-    // Round-4 review MAJOR-A: gate on the SHARED usable-probability predicate
-    // (finite AND in [0,1]) so the null-leader + runner-up paths skip a thin /
-    // out-of-range source exactly like the other selectors.
-    if (!isUsableWinProbability(r.win_probability)) continue;
-    const p = r.win_probability;
-    if (p > bestProb) {
-      best = r;
-      bestProb = p;
-    }
-  }
-  return best;
+  if (!leadingOptionId) return null;
+  const matching = results.filter((row) => row.option_id === leadingOptionId);
+  return matching.length === 1 && isUsableWinProbability(matching[0].win_probability)
+    ? projectOptionAsWinner(matching[0]) : null;
 }
 
 function projectOptionAsWinner(r: Record<string, unknown>): DecisionReviewInvokeInput['winner'] {

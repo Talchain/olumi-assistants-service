@@ -24,6 +24,7 @@
  *     in Phase 1b D9 if time permits)
  */
 
+import { readSummaryObjectiveRecommendation } from '../../orchestrator/context/objective-recommendation.js';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import type { SessionTurnWithContent } from '../session/conversation-content.js';
@@ -159,6 +160,8 @@ export interface ContextPackGraph {
 }
 
 export interface ContextPackAnalysisOption {
+  /** Producer dense rank, absent when comparison authority is unavailable. */
+  readonly rank?: number;
   readonly label: string;
   readonly probability: number;
   /**
@@ -788,8 +791,8 @@ export interface AssembleContextPackInput {
    * Production supplies this from the same scenario-scoped verdict that gates
    * deterministic response copy. The assembler does not re-select or infer it.
    *
-   * Omission exists only for legacy/direct callers and preserves their
-   * historical behaviour. A withheld arm is projected before the single
+   * Omission fails closed for current recommendations. A withheld arm is
+   * projected before the single
    * whole-pack ceiling so bytes the model is forbidden to receive cannot evict
    * authorised conversation or other context.
    */
@@ -1621,6 +1624,11 @@ export function assembleContextPackWithSummary(
     analysis: selectedDisplayAnalysisSource,
     scenarioId: input.payload.scenario_id ?? null,
   });
+  // A display-bound current recommendation needs producer truth and freshness.
+  // This conjunction can only remove the existing claim permission.
+  const currentObjectiveRecommendationAvailable =
+    input.coachingContext?.freshness === 'fresh' &&
+    readSummaryObjectiveRecommendation(budgeted.analysis) !== null;
   // Keep raw handler policy on its hot-window source. It is not part of the
   // model context budget once a distinct display source is supplied. Legacy
   // callers still reuse the budgeted value exactly as before.
@@ -1703,7 +1711,7 @@ export function assembleContextPackWithSummary(
       ? null
       : buildRunDelta({
           priorFacts: input.priorFacts,
-          mayNameLeadingOption: input.mayNameLeadingOption === true,
+          mayNameLeadingOption: input.mayNameLeadingOption === true && currentObjectiveRecommendationAvailable,
         });
   // Strip the frozen-empty `flip_thresholds` — see the projection comment and
   // `ContextPackRunDeltaSchema`. Destructured rather than deleted so a wire
@@ -1772,7 +1780,8 @@ export function assembleContextPackWithSummary(
   // passes the verdict selected once in TurnExecutor; this module only applies
   // its deterministic projection and never authors permission.
   const withholdModelFacingLeader =
-    input.modelFacingClaimSafety?.status === 'withheld';
+    input.modelFacingClaimSafety?.status !== 'permitted' ||
+    !currentObjectiveRecommendationAvailable;
   const modelFacingAnalysisContext: ContextPackAnalysisContext | undefined =
     input.modelFacingClaimSafety?.status === 'withheld' &&
     input.modelFacingClaimSafety.provenance === 'fail_closed_unavailable'
@@ -2478,8 +2487,10 @@ export function projectAnalysis(
     .slice()
     .sort((a, b) => b.win_probability - a.win_probability);
 
-  const leadingSrc = validOptions[0];
-  const runnerUpSrc = validOptions[1];
+  const recommendation = readSummaryObjectiveRecommendation(analysis);
+  const leadingSrc = recommendation
+    ? validOptions.find((option) => option.option_id === recommendation.option_id)
+    : undefined;
 
   // Lane 30 — per-option goal-fit + outcome carriage. Resolvers shared by
   // the leading pair and the full option list so the same option can never
@@ -2505,6 +2516,7 @@ export function projectAnalysis(
     return {
       label: o.option_label,
       probability: o.win_probability,
+      ...(recommendation ? { rank: recommendation.ranking.ranked_options.find((entry) => entry.option_id === o.option_id)!.rank } : {}),
       ...(goalFit !== undefined ? { goal_fit_probability: goalFit } : {}),
       ...(outcomeMean !== undefined ? { outcome_mean: outcomeMean } : {}),
       ...(flaggedInfeasibleWinnerId !== null && o.option_id === flaggedInfeasibleWinnerId
@@ -2516,16 +2528,9 @@ export function projectAnalysis(
   const leading: ContextPackAnalysisOption | null = leadingSrc
     ? projectOption(leadingSrc)
     : null;
-  const runnerUp: ContextPackAnalysisOption | null = runnerUpSrc
-    ? projectOption(runnerUpSrc)
-    : null;
-
-  // margin_pp is pre-computed upstream in compactAnalysis — passthrough.
-  // When the upstream margin_pp is missing (legacy callers) or scale-guard
-  // dropped one of the leading two options, fall through to null rather
-  // than recompute here (F.6).
-  const marginPp =
-    leading && runnerUp ? analysis.margin_pp ?? null : null;
+  // PLoT supplies no permitted runner-up or gap in this contract.
+  const runnerUp = null;
+  const marginPp = null;
 
   // 2. Top drivers — shared with the chip-click dispatch via projectTopDrivers:
   //    filter non-finite, re-attach sign (neutral → 0), sort by |signed value|,

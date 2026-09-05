@@ -10,6 +10,7 @@ import {
 } from '../compare-runs.js';
 import { selectRunAnalysisFact } from '../../context/freshness.js';
 import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
+import { attestedConsumerFixture, boundFixtureShares } from '../../../../tests/fixtures/plot/attested-consumer-fixture.js';
 
 // ── fixtures ───────────────────────────────────────────────────────────
 
@@ -24,10 +25,11 @@ interface OptionSpec {
 
 function envelope(opts: {
   options: OptionSpec[];
+  recommendedOptionId?: string;
   band?: string; // robustness_synthesis.overall_assessment
   status?: string;
 }): V2RunResponseEnvelope {
-  return {
+  const enrichment = {
     analysis_status: opts.status ?? 'completed',
     results: opts.options.map((o) => ({
       option_id: o.id,
@@ -44,7 +46,9 @@ function envelope(opts: {
       })),
     })),
     ...(opts.band ? { robustness_synthesis: { overall_assessment: opts.band } } : {}),
-  } as unknown as V2RunResponseEnvelope;
+  };
+  return (opts.recommendedOptionId === undefined ? enrichment :
+    attestedConsumerFixture(enrichment, opts.recommendedOptionId, enrichment.results)) as unknown as V2RunResponseEnvelope;
 }
 
 function makeRunFact(
@@ -61,6 +65,8 @@ function makeRunFact(
     meta?.computed_at === undefined ? '2026-06-06T00:00:00.000Z' : meta.computed_at;
   const result: Record<string, unknown> = {
     enrichment: env,
+    leading_option_id: (env.robustness as Record<string, unknown> | undefined)?.recommended_option_id ?? null,
+    win_probabilities: boundFixtureShares(env),
     graph_hash_at_run: meta?.graph_hash ?? 'hash-1',
   };
   if (computedAt !== null) result.computed_at = computedAt;
@@ -86,6 +92,7 @@ function projectEnv(env: V2RunResponseEnvelope): RunProjection {
 
 // prior: Offshore leads 0.62 vs 0.38 (margin 24pp), fragile band.
 const PRIOR_ENV = envelope({
+  recommendedOptionId: 'a',
   options: [
     { id: 'a', label: 'Offshore', win: 0.62, drivers: [
       { id: 'q', label: 'Quality', sensitivity: 0.5, influence_score: 0.5 },
@@ -99,6 +106,7 @@ const PRIOR_ENV = envelope({
 // current: Onshore leads 0.55 vs 0.45 (margin 10pp, narrowed), stable band,
 // driver ranks swapped (Communication overhead now #1).
 const CURRENT_ENV = envelope({
+  recommendedOptionId: 'b',
   options: [
     { id: 'b', label: 'Onshore', win: 0.55, drivers: [
       { id: 'c', label: 'Communication overhead', sensitivity: 0.6, influence_score: 0.6 },
@@ -190,7 +198,7 @@ describe('projectRunFact', () => {
     const s = projectRunFact(makeRunFact(PRIOR_ENV));
     expect(s).not.toBeNull();
     expect(s!.summary.winner.option_label).toBe('Offshore');
-    expect(s!.summary.margin_pp).toBe(24);
+    expect(s!.summary.margin_pp).toBeNull();
     // The leading option's identity comes off the RAW record, not the label.
     expect(s!.leader_option_id).toBe('a');
   });
@@ -209,7 +217,7 @@ describe('projectRunFact', () => {
 // ── compareRuns ────────────────────────────────────────────────────────
 
 describe('compareRuns', () => {
-  it('detects a leading-option flip with narrowed margin, band change, and driver rank swap', () => {
+  it('detects a producer recommendation change, band change, and driver rank swap without inventing a gap', () => {
     const prior = projectEnv(PRIOR_ENV);
     const current = projectEnv(CURRENT_ENV);
     const delta = compareRuns(prior, current);
@@ -218,8 +226,8 @@ describe('compareRuns', () => {
     expect(delta.leading_option_changed).toBe(true);
     expect(delta.prior_leading_label).toBe('Offshore');
     expect(delta.current_leading_label).toBe('Onshore');
-    expect(delta.margin_direction).toBe('narrowed');
-    expect(delta.margin_shift_pp).toBe(-14);
+    expect(delta.margin_direction).toBe('unavailable');
+    expect(delta.margin_shift_pp).toBe(0);
     expect(delta.robustness_changed).toBe(true);
     expect(delta.prior_band).toBe('fragile');
     expect(delta.current_band).toBe('stable');
@@ -230,29 +238,29 @@ describe('compareRuns', () => {
     ]);
   });
 
-  it('reports a widened margin and no flip', () => {
-    const prior = projectEnv(envelope({ options: [
+  it('reports no flip but no permitted margin when raw shares diverge', () => {
+    const prior = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'A', win: 0.55 }, { id: 'b', label: 'B', win: 0.45 }] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'A', win: 0.70 }, { id: 'b', label: 'B', win: 0.30 }] }));
     const delta = compareRuns(prior, current);
     expect(delta.leading_option_changed).toBe(false);
-    expect(delta.margin_direction).toBe('widened');
-    expect(delta.margin_shift_pp).toBe(30);
+    expect(delta.margin_direction).toBe('unavailable');
+    expect(delta.margin_shift_pp).toBe(0);
   });
 
-  it('reports unchanged margin within the epsilon', () => {
-    const prior = projectEnv(envelope({ options: [
+  it('does not manufacture a permitted margin from nearly identical raw shares', () => {
+    const prior = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'A', win: 0.60 }, { id: 'b', label: 'B', win: 0.40 }] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'A', win: 0.602 }, { id: 'b', label: 'B', win: 0.398 }] }));
     const delta = compareRuns(prior, current);
-    expect(delta.margin_direction).toBe('unchanged');
+    expect(delta.margin_direction).toBe('unavailable');
   });
 
   it('reports margin unavailable when a run has fewer than two options', () => {
     const prior = projectEnv(envelope({ options: [{ id: 'a', label: 'A', win: 0.9 }] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'A', win: 0.7 }, { id: 'b', label: 'B', win: 0.3 }] }));
     const delta = compareRuns(prior, current);
     expect(delta.margin_direction).toBe('unavailable');
@@ -285,9 +293,9 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
   }
 
   it('a RENAME of the same leading option is NOT a leader change', () => {
-    const prior = projectEnv(envelope({ options: [
+    const prior = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'Offshore (EU)', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }] }));
     const delta = compareRuns(prior, current);
     expect(delta.comparable).toBe(true);
@@ -310,9 +318,9 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
   it('an id change whose LABEL is unchanged is still a leader change', () => {
     // The mirror of the rename case: two distinct options sharing a display
     // label. Labels cannot see this; ids can.
-    const prior = projectEnv(envelope({ options: [
+    const prior = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'Partner', win: 0.62 }, { id: 'b', label: 'Build', win: 0.38 }] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'b', options: [
       { id: 'b', label: 'Partner', win: 0.62 }, { id: 'a', label: 'Build', win: 0.38 }] }));
     expect(compareRuns(prior, current).leading_option_changed).toBe(true);
   });
@@ -322,12 +330,10 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
       { label: 'Offshore', win: 0.62 }, { label: 'Onshore', win: 0.38 }]));
     const current = projectEnv(labelOnlyEnvelope([
       { label: 'Offshore (EU)', win: 0.62 }, { label: 'Onshore', win: 0.38 }]));
-    // compactAnalysis falls back `option_id <- option_label`, so a naive id
-    // compare would have degraded silently back into a label compare here.
-    expect(prior.summary.winner.option_id).toBe('Offshore');
+    expect(prior.summary.winner.option_id).toBe('');
     expect(prior.leader_option_id).toBeNull();
     const delta = compareRuns(prior, current);
-    expect(delta.comparable).toBe(true);
+    expect(delta.comparable).toBe(false);
     expect(delta.leader_identity_basis).toBe('indeterminate');
     expect(delta.leading_option_changed).toBe(false);
   });
@@ -335,7 +341,7 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
   it('LEGACY: one identified run + one legacy run is still indeterminate', () => {
     const prior = projectEnv(labelOnlyEnvelope([
       { label: 'Offshore', win: 0.62 }, { label: 'Onshore', win: 0.38 }]));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'b', options: [
       { id: 'b', label: 'Onshore', win: 0.62 }, { id: 'a', label: 'Offshore', win: 0.38 }] }));
     expect(current.leader_option_id).toBe('b');
     const delta = compareRuns(prior, current);
@@ -360,13 +366,11 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
       ],
     } as unknown as V2RunResponseEnvelope;
     const prior = projectEnv(priorEnv);
-    expect(prior.summary.winner.option_label).toBe('Offshore');
-    // compactAnalysis' label fallback makes the projected winner id collide
-    // with the SIBLING's genuine id.
-    expect(prior.summary.winner.option_id).toBe('Offshore');
+    expect(prior.summary.winner.option_label).toBe('');
+    expect(prior.summary.winner.option_id).toBe('');
     expect(prior.leader_option_id).toBeNull();
 
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'b', options: [
       { id: 'b', label: 'Onshore', win: 0.62 }, { id: 'a', label: 'Offshore', win: 0.38 }] }));
     const delta = compareRuns(prior, current);
     expect(delta.leader_identity_basis).toBe('indeterminate');
@@ -404,8 +408,8 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
       ],
     } as unknown as V2RunResponseEnvelope;
     const prior = projectEnv(priorEnv);
-    expect(prior.summary.winner.option_label).toBe('Offshore');
-    expect(prior.summary.winner.option_id).toBe('Offshore');
+    expect(prior.summary.winner.option_label).toBe('');
+    expect(prior.summary.winner.option_id).toBe('');
     expect(prior.leader_option_id).toBeNull();
   });
 
@@ -413,10 +417,10 @@ describe('compareRuns — leader identity is the option id, not the label (F3)',
     // The structural-coincidence trap: `option_id === option_label` is not
     // evidence of a missing id. Reading the RAW record rather than inferring
     // from compactAnalysis's fallback is what makes this case work.
-    const prior = projectEnv(envelope({ options: [
+    const prior = projectEnv(envelope({ recommendedOptionId: 'Offshore', options: [
       { id: 'Offshore', label: 'Offshore', win: 0.62 },
       { id: 'b', label: 'Onshore', win: 0.38 }] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'Offshore', options: [
       { id: 'Offshore', label: 'Offshore (EU)', win: 0.62 },
       { id: 'b', label: 'Onshore', win: 0.38 }] }));
     expect(prior.leader_option_id).toBe('Offshore');
@@ -431,14 +435,14 @@ describe('compareRuns — Spine A option-controlled-driver suppression', () => {
   const onshore = (win: number) => ({ id: 'b', label: 'Onshore', win });
 
   it('excludes an option-controlled lever from driver_rank_changes', () => {
-    const prior = projectEnv(envelope({ options: [
+    const prior = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
         { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9, influence_score: 0.9 },
         { id: 'fac_ext', label: 'Market demand', sensitivity: 0.5, influence_score: 0.5 },
       ] },
       onshore(0.38),
     ] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
         { id: 'fac_ext', label: 'Market demand', sensitivity: 0.9, influence_score: 0.9 },
         { id: 'fac_lever', label: 'Capacity', sensitivity: 0.5, influence_score: 0.5 },
@@ -455,7 +459,7 @@ describe('compareRuns — Spine A option-controlled-driver suppression', () => {
   });
 
   it('still reports an external driver rank change (no over-suppression)', () => {
-    const prior = projectEnv(envelope({ options: [
+    const prior = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
         { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9, influence_score: 0.9 },
         { id: 'fac_b', label: 'Brand sentiment', sensitivity: 0.5, influence_score: 0.5 },
@@ -463,7 +467,7 @@ describe('compareRuns — Spine A option-controlled-driver suppression', () => {
       ] },
       onshore(0.38),
     ] }));
-    const current = projectEnv(envelope({ options: [
+    const current = projectEnv(envelope({ recommendedOptionId: 'a', options: [
       { id: 'a', label: 'Offshore', win: 0.62, drivers: [
         { id: 'fac_lever', label: 'Capacity', sensitivity: 0.9, influence_score: 0.9 },
         { id: 'fac_c', label: 'Conversion rate', sensitivity: 0.5, influence_score: 0.5 },

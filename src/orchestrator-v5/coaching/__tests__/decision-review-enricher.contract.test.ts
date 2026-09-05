@@ -19,13 +19,14 @@ import {
 import { buildDecisionReviewUserMessage } from '../../../cee/decision-review/invoke.js';
 import { DECOMPOSE_FALLBACK_MIN_TIMEOUT_MS } from '../../../cee/decision-review/decompose.js';
 import { DECISION_REVIEW_TIMEOUT_MS } from '../../../config/timeouts.js';
+import { attestedConsumerFixture } from '../../../../tests/fixtures/plot/attested-consumer-fixture.js';
 
 // ============================================================================
 // Populated synthetic fixture — mirrors a real staging run_analysis enrichment
 // ============================================================================
 
 function makePopulatedEnrichment(): Record<string, unknown> {
-  return {
+  const enrichment = {
     graph: {
       nodes: [
         { id: 'goal', kind: 'goal', label: 'Q3 revenue target', data: {} },
@@ -120,6 +121,7 @@ function makePopulatedEnrichment(): Record<string, unknown> {
       ],
     },
   };
+  return attestedConsumerFixture(enrichment, 'opt_partner', enrichment.results);
 }
 
 const BRIEF = "Should we engage an offshore partner or hire locally to deliver Q3?";
@@ -244,8 +246,8 @@ describe('decision-review-enricher — Tier 3 contract', () => {
     expect(meta.model_critiques_dropped_count).toBe(0);
     expect(meta.model_critiques_capped_count).toBe(0);
     expect(meta.has_deterministic_coaching).toBe(false);
-    // margin = 0.48 - 0.25 = 0.23
-    expect(meta.margin).toBeCloseTo(0.23, 6);
+    // The producer does not attest a permitted runner-up or gap.
+    expect(meta.margin).toBeNull();
     expect(meta.robustness_level).toBe('moderate');
   });
 
@@ -446,7 +448,9 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
     if (!block) throw new Error('fixture: no analysis_result block');
     const enrichment = block.enrichment as Record<string, unknown>;
     if (!enrichment) throw new Error('fixture: no enrichment on analysis_result block');
-    return enrichment;
+    // Keep the capture unchanged; adapt this positive fixture to the current
+    // producer contract with the test's explicitly declared recommendation.
+    return attestedConsumerFixture(enrichment, 'opt_hire_local', enrichment.option_comparison as Record<string, unknown>[]);
   }
 
   it('REAL staging capture: option_comparison is read from the CURRENT envelope shape (results absent)', () => {
@@ -490,16 +494,13 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
     }
   });
 
-  it('legacy-only envelope (results present, option_comparison absent) still populates — fallback preserved', () => {
-    // makePopulatedEnrichment() is exactly the legacy shape: results[]
-    // present, no top-level option_comparison.
+  it('legacy-only envelope cannot license a current recommendation', () => {
     const enrichment = makePopulatedEnrichment();
+    delete enrichment.option_comparison;
+    delete enrichment.objective_ranking;
     expect(enrichment.option_comparison).toBeUndefined();
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
-    const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
-    expect(oc).toHaveLength(2);
-    expect(oc.map((r) => r.option_id).sort()).toEqual(['opt_hire', 'opt_partner']);
+    expect(buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')).toBeNull();
   });
 
   it('both sources present: prefers the current shape, never double-counts', () => {
@@ -521,7 +522,8 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
       },
     ];
 
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
+    const current = attestedConsumerFixture(enrichment, 'opt_partner', enrichment.option_comparison as Record<string, unknown>[]);
+    const input = buildInvokeInputForTests(BRIEF, current, 'opt_partner')!;
     const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
     // 2 entries, not 4 — the legacy `results` copies must NOT be pooled in.
     expect(oc).toHaveLength(2);
@@ -531,27 +533,24 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
     expect((partner.outcome as Record<string, unknown>).mean).toBe(1_300_000);
   });
 
-  it('current shape present but EMPTY: falls back to legacy results', () => {
+  it('current shape present but EMPTY: cannot recover a recommendation from legacy results', () => {
     const enrichment = makePopulatedEnrichment();
     enrichment.option_comparison = [];
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
-    const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
-    expect(oc).toHaveLength(2);
+    expect(buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')).toBeNull();
   });
 
-  it('both sources absent: option_comparison stays [] (no fabrication)', () => {
+  it('both sources absent: decision_brief cannot license a recommendation', () => {
     const enrichment = makePopulatedEnrichment();
     delete enrichment.results;
-    // Keep a winner source so buildInvokeInput still returns an input:
-    // decision_brief.options is the third published shape.
+    delete enrichment.option_comparison;
+    // Historical descriptive data does not replace current authority.
     enrichment.decision_brief = {
       options: [
         { option_id: 'opt_partner', label: 'Engage Offshore Partner', win_probability: 0.48, rank: 1 },
         { option_id: 'opt_hire', label: 'Hire Two Senior Engineers Locally', win_probability: 0.25, rank: 2 },
       ],
     };
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
-    expect(input.isl_results.option_comparison).toEqual([]);
+    expect(buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')).toBeNull();
   });
 });
 
@@ -565,7 +564,7 @@ describe('decision-review-enricher — isl_results.option_comparison envelope sh
 
 describe('decision-review-enricher — winner-source precedence (current-first, legacy fallback)', () => {
   function conflictingEnrichment(): Record<string, unknown> {
-    return {
+    const enrichment = {
       graph: { nodes: [], edges: [] },
       // Legacy envelope: STALE numbers for the same options.
       results: [
@@ -579,6 +578,7 @@ describe('decision-review-enricher — winner-source precedence (current-first, 
         { option_id: 'opt_hire', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.28, outcome: { mean: 950_000, p10: 700_000, p90: 1_200_000 } },
       ],
     };
+    return attestedConsumerFixture(enrichment, 'opt_partner', enrichment.option_comparison);
   }
 
   it('both sources carry the leader with CONFLICTING numbers: winner comes from the CURRENT envelope', () => {
@@ -588,33 +588,24 @@ describe('decision-review-enricher — winner-source precedence (current-first, 
     expect(input.winner.label).toBe('Engage Offshore Partner');
     expect(input.winner.win_probability).toBe(0.72);
     expect(input.winner.outcome_mean).toBe(1_300_000);
-    // Runner-up from the SAME (current) source — never mixed across envelopes.
-    expect(input.runner_up).not.toBeNull();
-    expect(input.runner_up!.win_probability).toBe(0.28);
+    expect(input.runner_up).toBeNull(); // no permitted runner-up attestation
     // And the winner now AGREES with the option_comparison slice the prompt sees.
     const oc = input.isl_results.option_comparison as Array<Record<string, unknown>>;
     const partner = oc.find((r) => r.option_id === 'opt_partner')!;
     expect(partner.win_probability).toBe(input.winner.win_probability);
   });
 
-  it('truncated CURRENT (leader missing) still falls back to legacy — the walk is preserved', () => {
+  it('truncated CURRENT (leader missing) cannot recover a recommendation from legacy data', () => {
     const enrichment = conflictingEnrichment();
     // Current envelope truncated: the declared leader is absent from it.
     enrichment.option_comparison = [
       { option_id: 'opt_hire', option_label: 'Hire Two Senior Engineers Locally', win_probability: 0.28, outcome: { mean: 950_000 } },
     ];
-    const input = buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')!;
-    expect(input).not.toBeNull();
-    // Leader rescued from the legacy source (walk-until-match unchanged).
-    expect(input.winner.label).toBe('Engage Offshore Partner (stale)');
-    expect(input.winner.win_probability).toBe(0.41);
+    expect(buildInvokeInputForTests(BRIEF, enrichment, 'opt_partner')).toBeNull();
   });
 
-  it('null leader: the argmax is taken from the CURRENT source first', () => {
-    const input = buildInvokeInputForTests(BRIEF, conflictingEnrichment(), null)!;
-    expect(input).not.toBeNull();
-    expect(input.winner.win_probability).toBe(0.72);
-    expect(input.winner.label).toBe('Engage Offshore Partner');
+  it('null leader remains withheld even when a current raw argmax exists', () => {
+    expect(buildInvokeInputForTests(BRIEF, conflictingEnrichment(), null)).toBeNull();
   });
 });
 

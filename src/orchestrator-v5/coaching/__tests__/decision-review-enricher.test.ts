@@ -12,6 +12,7 @@ import * as turnDebugMod from '../../debug/turn-debug-store.js';
 import { DECISION_REVIEW_TIMEOUT_MS } from '../../../config/timeouts.js';
 import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
 import { config, _resetConfigCache } from '../../../config/index.js';
+import { attestedConsumerFixture, boundFixtureShares } from '../../../../tests/fixtures/plot/attested-consumer-fixture.js';
 
 /**
  * Fixture resolution returned alongside the mocked invoke result. Matches
@@ -30,16 +31,24 @@ const MOCK_RESOLUTION: ModelResolution = {
 function runAnalysisFact(overrides: {
   enrichment?: Record<string, unknown>;
   leading_option_id?: string | null;
-} = {}): HandlerFact {
+  attest?: boolean;
+} = {}): Extract<HandlerFact, { fact_type: 'run_analysis' }> {
+  const declaredId = 'leading_option_id' in overrides ? overrides.leading_option_id! : 'opt-1';
+  const enrichment = overrides.attest && overrides.enrichment && declaredId
+    ? attestedConsumerFixture(overrides.enrichment, declaredId,
+        (overrides.enrichment.option_comparison ?? overrides.enrichment.results) as Record<string, unknown>[])
+    : overrides.enrichment;
+
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
     noop: false,
     result: {
       scenario_id: 'scen-a',
-      leading_option_id: overrides.leading_option_id ?? 'opt-1',
+      leading_option_id: 'leading_option_id' in overrides ? overrides.leading_option_id! : 'opt-1',
+      ...(boundFixtureShares(enrichment) ? { win_probabilities: boundFixtureShares(enrichment) } : {}),
       summary: 'Ran analysis',
-      ...(overrides.enrichment !== undefined ? { enrichment: overrides.enrichment } : {}),
+      ...(enrichment !== undefined ? { enrichment } : {}),
     },
   };
 }
@@ -48,7 +57,11 @@ function minimalEnrichment(): Record<string, unknown> {
   // No `v5.brief` field here — brief now travels out-of-band through
   // EnrichDecisionReviewInput.brief to keep the handler fact enrichment a
   // verbatim pass-through of the PLoT envelope (handler-ownership invariant).
-  return {
+  const rows = [
+    { option_id: 'opt-1', option_label: 'Option A', win_probability: 0.7 },
+    { option_id: 'opt-2', option_label: 'Option B', win_probability: 0.3 },
+  ];
+  return attestedConsumerFixture({
     results: [
       { option_id: 'opt-1', option_label: 'Option A', win_probability: 0.7 },
       { option_id: 'opt-2', option_label: 'Option B', win_probability: 0.3 },
@@ -56,7 +69,7 @@ function minimalEnrichment(): Record<string, unknown> {
     factor_sensitivity: [{ label: 'Price', direction: 'positive', elasticity: 0.2 }],
     robustness: { level: 'stable', fragile_edges: [] },
     graph: { nodes: [], edges: [] },
-  };
+  }, 'opt-1', rows);
 }
 
 const DEFAULT_BRIEF = 'Decision brief about pricing strategy';
@@ -648,6 +661,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
+      attest: true,
       leading_option_id: 'opt-2',
       enrichment: {
         results: [
@@ -679,6 +693,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
+      attest: true,
       leading_option_id: 'opt_offshore',
       enrichment: {
         // NO enrichment.results — pure option_comparison source.
@@ -700,12 +715,12 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     expect(callArg.winner.win_probability).toBeCloseTo(0.722);
     // outcome.mean nested path is also picked up.
     expect(callArg.winner.outcome_mean).toBeCloseTo(0.10);
-    // Runner-up resolves correctly (next-highest after the winner is filtered out).
-    expect(callArg.runner_up?.id).toBe('opt_local_hire');
+    // No permitted runner-up is supplied by this producer contract.
+    expect(callArg.runner_up).toBeNull(); // raw objective order does not license a permitted runner-up
   });
 
   // Test 3: enrichment.decision_brief.options fallback.
-  it('source 3: enrichment.decision_brief.options — leaner shape still selects the leading_option_id winner', async () => {
+  it('source 3: enrichment.decision_brief.options — legacy data cannot license a current recommendation', async () => {
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
@@ -726,13 +741,8 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
     });
-    expect(spy).toHaveBeenCalledTimes(1);
-    const callArg = spy.mock.calls[0]![0];
-    expect(callArg.winner.id).toBe('opt_offshore');
-    expect(callArg.winner.label).toBe('Engage Offshore Partner');
-    expect(callArg.winner.win_probability).toBeCloseTo(0.722);
-    // No outcome.mean in this shape — adapter must not invent one.
-    expect(callArg.winner.outcome_mean).toBeUndefined();
+    expect(spy).not.toHaveBeenCalled();
+    expect(fact.result.leading_option_id).toBe('opt_offshore'); // retained historical data
   });
 
   // Test 4: all three sources missing → skip `no_winner`.
@@ -796,6 +806,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
+      attest: true,
       leading_option_id: 'opt_offshore',
       enrichment: {
         // results is non-empty but does NOT contain the declared leader.
@@ -822,15 +833,13 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
     expect(callArg.winner.id).toBe('opt_offshore');
     expect(callArg.winner.label).toBe('Engage Offshore Partner');
     expect(callArg.winner.win_probability).toBeCloseTo(0.722);
-    // Runner-up is selected from the SAME source as the winner
-    // (option_comparison) — never from the rejected `results` source —
-    // so margin calculation stays consistent within a single shape.
-    expect(callArg.runner_up?.id).toBe('opt_local_hire');
+    // A raw second place is not a permitted runner-up.
+    expect(callArg.runner_up).toBeNull(); // raw objective order does not license a permitted runner-up
   });
 
   // Test 5c: cross-source walker — leader only present in
   // decision_brief.options (skipped through both prior sources).
-  it('cross-source walker: leader missing from results AND option_comparison but present in decision_brief.options → adapter walks to it', async () => {
+  it('cross-source walker: leader missing from results AND option_comparison but present in decision_brief.options → withholds without current authority', async () => {
     const spy = vi.spyOn(invokeMod, 'invokeDecisionReview').mockResolvedValue({
       output: { narrative_summary: 'ok' },
       raw: '{}', model: 'gpt-4.1', provider: 'openai', llm_latency_ms: 10,
@@ -862,11 +871,8 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       signal: notAbortedSignal(),
       brief: DEFAULT_BRIEF,
     });
-    expect(spy).toHaveBeenCalledTimes(1);
-    const callArg = spy.mock.calls[0]![0];
-    expect(callArg.winner.id).toBe('opt_offshore');
-    expect(callArg.winner.label).toBe('Engage Offshore Partner');
-    expect(callArg.winner.win_probability).toBeCloseTo(0.722);
+    expect(spy).not.toHaveBeenCalled();
+    expect(fact.result.leading_option_id).toBe('opt_offshore'); // retained historical data
   });
 
   // Test 5d: cross-source walker — declared leader is in the CURRENT
@@ -880,6 +886,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       input_tokens: 1, output_tokens: 1, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
+      attest: true,
       leading_option_id: 'opt_current_match',
       enrichment: {
         option_comparison: [
@@ -962,6 +969,7 @@ describe('readResultsArray + selectWinner — input adapter fallback chain', () 
       input_tokens: 100, output_tokens: 200, prompt_version: 'v1', prompt_hash: 'sha256:fixturehash', prompt_source: 'default' as const, resolution: MOCK_RESOLUTION,
     });
     const fact = runAnalysisFact({
+      attest: true,
       leading_option_id: 'opt_offshore',
       enrichment: {
         // Mirrors what we observed on staging:
@@ -1050,7 +1058,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
    * option_comparison, and decision_brief.options.
    */
   function denseEnrichment(): Record<string, unknown> {
-    return {
+    const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt-1', option_label: 'Option A', win_probability: 0.7 },
       ],
@@ -1081,6 +1089,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
         edges: [{ id: 'e1', from_node_id: 'a', to_node_id: 'b' }],
       },
     };
+    return attestedConsumerFixture(enrichment, 'opt-1', enrichment.option_comparison as Record<string, unknown>[]);
   }
 
   /**
@@ -1230,6 +1239,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     // — every other field absent.
     const facts: readonly HandlerFact[] = [
       runAnalysisFact({
+        attest: true,
         enrichment: {
           results: [{ option_id: 'opt-1', option_label: 'Option A', win_probability: 1 }],
         },
@@ -1254,7 +1264,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
     expect(data!.enrichment_factor_sensitivity_with_confidence_count).toBe(0);
     expect(data!.enrichment_robustness_fragile_edges_count).toBe(0);
     expect(data!.enrichment_results_count).toBe(1);
-    expect(data!.enrichment_option_comparison_count).toBe(0);
+    expect(data!.enrichment_option_comparison_count).toBe(1); // current authority requires its comparison row
     expect(data!.enrichment_decision_brief_options_count).toBe(0);
     expect(data!.output_narrative_summary_length).toBe('Option A leads.'.length);
     expect(data!.output_robustness_explanation_summary_length).toBe(0);
@@ -1384,6 +1394,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
 
     const facts: readonly HandlerFact[] = [
       runAnalysisFact({
+        attest: true,
         enrichment: {
           results: [{ option_id: idMarker, option_label: labelMarker, win_probability: 1 }],
           graph: {
@@ -1435,6 +1446,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
 
     const facts: readonly HandlerFact[] = [
       runAnalysisFact({
+        attest: true,
         enrichment: {
           results: [{ option_id: 'opt-1', option_label: 'Option A', win_probability: 1 }],
           // Pathological graph: object present, but nodes is a string and
@@ -1526,6 +1538,7 @@ describe('V5DecisionReviewCompleted — Phase 3A density telemetry', () => {
 
     const facts: readonly HandlerFact[] = [
       runAnalysisFact({
+        attest: true,
         enrichment: {
           results: [{ option_id: 'opt-1', option_label: 'Option A', win_probability: 1 }],
         },
@@ -2007,11 +2020,12 @@ describe('decision_review contract gate (auto-fire consume seam)', () => {
   /** Enrichment whose graph carries real node/edge ids (for entity grounding). */
   function groundedEnrichment(): Record<string, unknown> {
     return {
+      ...minimalEnrichment(),
       results: [
         { option_id: 'opt-1', option_label: 'Option A', win_probability: 0.7 },
         { option_id: 'opt-2', option_label: 'Option B', win_probability: 0.3 },
       ],
-      robustness: { level: 'stable', fragile_edges: [] },
+      robustness: { level: 'stable', fragile_edges: [], recommended_option_id: 'opt-1' },
       graph: { nodes: [{ id: 'node-price', label: 'Price' }], edges: [] },
     };
   }

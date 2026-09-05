@@ -77,6 +77,7 @@ export function computeDeterministicGraphHash(
  *   nodes: sorted by id, each → {
  *     id, kind, category, factor_type, is_baseline,
  *     observed_state: { value, baseline, cap },
+ *     goal_direction, goal_threshold_frame,
  *     goal_threshold, goal_threshold_raw, goal_threshold_cap,
  *     intercept,
  *     prior: { distribution, range_min, range_max },
@@ -230,6 +231,8 @@ function projectNode(raw: unknown): NodeProjection {
     'category',
     'factor_type',
     'is_baseline',
+    'goal_direction',
+    'goal_threshold_frame',
     'goal_threshold',
     'goal_threshold_raw',
     'goal_threshold_cap',
