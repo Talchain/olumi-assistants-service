@@ -402,19 +402,55 @@ describe('buildAnalysisResultHeadline', () => {
     expect(out).toBeNull();
   });
 
-  it('near-tie bare winner (3-way 0.34/0.33/0.33) falls back to Case E label-only floor', () => {
-    // Originally pinned Case D's local `≥ 0.5` check. The probability/
-    // margin guard still catches the weak lead (0.34 < 0.4 floor), so
-    // strong cases A/B/C/D do not fire. The link-safe Case-E floor
-    // (link-safe response floor workstream) now produces the minimum
-    // non-overclaiming "{label} currently leads." instead of null.
-    // The label-only output cannot overclaim by construction — it has
-    // no driver/fragility clause and no probability number.
+  it('near-tie bare winner (3-way 0.34/0.33/0.33) is now WITHHELD, not floored to Case E', () => {
+    // ⚠ POLICY REVERSAL, 31 Aug 2026 — this test previously asserted
+    //     expect(out).toBe('Option A currently leads.');
+    // on the reasoning, recorded verbatim here because it was deliberate and a
+    // reviewer is owed it: "The label-only output cannot overclaim by
+    // construction — it has no driver/fragility clause and no probability
+    // number."
+    //
+    // WHAT WAS WRONG WITH IT. Dropping the clauses removes the EVIDENCE, not
+    // the CLAIM. "Option A currently leads" is still a statement about which of
+    // three options is ahead, and on 0.34 / 0.33 / 0.33 it is not supportable —
+    // stripping the number makes the sentence read MORE confident, not less,
+    // because nothing is left for a reader to discount.
+    //
+    // Measured on deployed CEE `3a79b40`: the identical open-ended brief run 15
+    // times named four different winners, and on the flattest draw the product
+    // shipped exactly this shape. See `option-separability.ts`.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
+      ],
+    };
+    const out = buildAnalysisResultHeadline({
+      enrichment,
+      leading_option_id: 'opt_a',
+      status_kind: 'ok',
+    });
+    expect(out).toBeNull();
+    expect(
+      describeAnalysisHeadline({
+        enrichment,
+        leading_option_id: 'opt_a',
+        status_kind: 'ok',
+      }).reason,
+    ).toBe('options_not_separable');
+  });
+
+  it('TWIN — the same weak leader, CLEAR of the field, still gets its Case E floor', () => {
+    // The opposite-direction twin of the reversal above, and the reason the
+    // gate needs a second parameter. Identical leader (0.34), identical labels,
+    // identical absence of driver/fragility — only the rivals move clear of the
+    // contender band. A weak leader is NOT by itself a reason to go silent.
+    const enrichment: Record<string, unknown> = {
+      results: [
+        { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.22 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.22 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -461,7 +497,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
   // of at least MIN_LEAD_MARGIN (5pp). Near-ties and weak leaders
   // fall back to the locked template by returning null.
 
-  it('near-tie 0.34 / 0.33 / 0.33 + driver + fragility — falls back to Case E label-only floor (no overclaim)', () => {
+  it('near-tie 0.34 / 0.33 / 0.33 + driver + fragility — WITHHELD (was: Case E label-only floor)', () => {
     // The reviewer-blocking case: the bare Case A path used to emit
     // "currently leads because…" on a 1pp lead. The probability/margin
     // guard still suppresses Case A — Case E now provides the minimum
@@ -487,15 +523,17 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // provisional_doctrine_v0 (Mission B): level 'low' now appends the
-    // robustness-honesty sentence; the Case E floor itself is unchanged.
-    expect(out).toBe(
-      'Option A currently leads. The result is not yet robust — small changes could flip it.',
-    );
-    // The strong-case clauses must NOT appear.
-    expect(out).not.toContain('because');
-    expect(out).not.toContain('sensitive to');
-    expect(out).not.toMatch(/\d+%/);
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. Previously:
+    //   expect(out).toBe('Option A currently leads. The result is not yet
+    //                     robust — small changes could flip it.')
+    //
+    // The robustness sentence goes with it, and that is the right trade rather
+    // than a loss: "the result is not yet robust" is a caveat ON a result, and
+    // once no leader is named there is no result for it to qualify. The user is
+    // not left with less honesty — they are left without a claim that needed
+    // the caveat. The per-option numbers are unaffected and stay on screen;
+    // only the ranking sentence is withheld.
+    expect(out).toBeNull();
   });
 
   it('weak margin 0.42 / 0.40 (2pp) + driver — near-tie close-call line, not a confident lead', () => {
@@ -1073,7 +1111,7 @@ describe('isAllowedRunAnalysisAssistantText predicate', () => {
 // ════════════════════════════════════════════════════════════════════
 
 describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
-  it('soft confidence (winner 0.34) + clean label → "{label} currently leads."', () => {
+  it('soft confidence (winner 0.34) on a LEVEL field → withheld (was: "{label} currently leads.")', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
@@ -1086,7 +1124,10 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Hire X currently leads.');
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. Was: expect(out).toBe('Hire X currently
+    // leads.'). Three options inside one percentage point of each other do not
+    // have a leader to name. See `option-separability.ts`.
+    expect(out).toBeNull();
   });
 
   it('low margin (0.42 / 0.40, 2pp) + clean label → near-tie close-call line', () => {
@@ -1104,11 +1145,17 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     expect(out).toBe('Option A came out ahead in 42% of runs of this model, but the options are close.');
   });
 
-  it('soft confidence + driver + fragility → still Case E (no overclaim)', () => {
-    // The data has driver + fragility BUT the lead is too weak. Case E
-    // intentionally drops the driver/fragility clauses to avoid
-    // overclaiming on a soft lead — the lead itself is the only safe
-    // signal at this confidence level.
+  it('soft confidence + driver + fragility on a LEVEL field → withheld (was: Case E)', () => {
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. The superseded reasoning, kept verbatim
+    // because it was deliberate: "The data has driver + fragility BUT the lead
+    // is too weak. Case E intentionally drops the driver/fragility clauses to
+    // avoid overclaiming on a soft lead — the lead itself is the only safe
+    // signal at this confidence level."
+    //
+    // That last clause is the one this change contests. On 0.34 vs 0.33 the
+    // lead is not a safe signal at all; it is the LEAST safe thing in the
+    // envelope, because it is a one-point difference between two numbers the
+    // same run's own robustness block calls unstable.
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
@@ -1127,18 +1174,16 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // provisional_doctrine_v0 (Mission B): level 'low' appends the
-    // robustness-honesty sentence; the Case E floor itself is unchanged.
-    expect(out).toBe(
-      'Hire X currently leads. The result is not yet robust — small changes could flip it.',
-    );
+    // Was: 'Hire X currently leads. The result is not yet robust — small
+    // changes could flip it.'
+    expect(out).toBeNull();
   });
 
   it('Case E preserves partial status suffix', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
-        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.22 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -1155,7 +1200,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
-        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.22 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -1172,7 +1217,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
-        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.22 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -1188,7 +1233,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
-        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.22 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -1205,7 +1250,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
-        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.22 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -1221,7 +1266,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
-        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.22 },
       ],
     };
     const out = buildAnalysisResultHeadline({
@@ -1354,7 +1399,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.34 },
-        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
+        { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.22 },
       ],
     };
     const descriptor = describeAnalysisHeadline({
@@ -1786,9 +1831,15 @@ describe('isAllowedRunAnalysisAssistantText <-> emission lockstep (allowlist pro
       name: 'soft confidence floor (E)',
       id: 'opt_a',
       enrichment: {
+        // ⚠ CARRIER ONLY — this matrix asserts that every EMITTED headline
+        // passes the egress grammar, so each row must actually emit one. The
+        // rival was 0.33; the separability gate now (correctly) declines to
+        // name a leader on a 1pp field, so the row emitted null and the matrix
+        // could no longer test the grammar it exists for. Moved clear of the
+        // contender band: still the weak-leader Case E floor, still separable.
         results: [
           { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
-          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
+          { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.22 },
         ],
       },
     },
@@ -1933,12 +1984,13 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // provisional_doctrine_v0 (Mission B): level 'low' appends the
-    // robustness-honesty sentence; the Case E floor itself is unchanged.
-    expect(out).toBe(
-      'Option A currently leads. The result is not yet robust — small changes could flip it.',
-    );
-    expect(out).not.toContain('sensitive to');
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. Was: 'Option A currently leads. The
+    // result is not yet robust — small changes could flip it.'
+    //
+    // The old title's own words were "never reads a tie as a lead" — and then
+    // it asserted a sentence naming a leader on a 1pp tie. The intent was
+    // right; Case E was the wrong floor to land it on.
+    expect(out).toBeNull();
   });
 
   it('soft-confidence enriched headline carries no raw decimals, no internal IDs, no forbidden vocab', () => {
@@ -1993,8 +2045,8 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.29 },
-        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.24 },
-        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.24 },
+        { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.20 },
+        { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.20 },
         { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.23 },
       ],
       factor_sensitivity: driver,
@@ -2069,14 +2121,16 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
     const out = buildAnalysisResultHeadline(input);
-    // provisional_doctrine_v0 (Mission B): level 'low' appends the
-    // robustness-honesty sentence; the Case E floor itself is unchanged.
-    expect(out).toBe(
-      'Option A currently leads. The result is not yet robust — small changes could flip it.',
-    );
-    expect(out).not.toContain('percentage points');
-    expect(out).not.toContain('sensitive to');
-    expect(describeAnalysisHeadline(input).case).toBe('E');
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. Was: 'Option A currently leads. The
+    // result is not yet robust — small changes could flip it.', with
+    // `case === 'E'`.
+    //
+    // This is the case the old suite itself called "the motivating case", and
+    // the change is in the SAME direction it was already travelling: it wanted
+    // no enriched headline on a 5-way race led by 0.24 over four options at
+    // 0.19. It stopped one step short — the bare floor still named a winner.
+    expect(out).toBeNull();
+    expect(describeAnalysisHeadline(input).reason).toBe('options_not_separable');
   });
 });
 

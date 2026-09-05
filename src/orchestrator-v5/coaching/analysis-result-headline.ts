@@ -138,6 +138,13 @@ import {
 // — a builder-side mirror is exactly the drift class that silently
 // swallowed the disclosure for ID-shaped labels ("Plan E_2").
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
+// SEPARABILITY (31 Aug 2026): "does this model tell the options apart at all?"
+// A leaf module rather than a predicate inlined here, because the question has
+// to be named APART from the five neighbouring ones it resembles — and in
+// particular apart from PROVENANCE ("did the user supply these numbers?"),
+// whose ruled answer is caveat-not-withhold and which is owned elsewhere. The
+// module header carries the full disclaimer list.
+import { isFieldUnseparable } from './option-separability.js';
 
 export const MAX_HEADLINE_CHARS = 220;
 
@@ -568,6 +575,13 @@ export type HeadlineFallbackReason =
   // the INTAKE, not about the run's evidence, and conflating them on the
   // dashboard would hide a drafter defect inside a producer statistic.
   | 'intake_options_missing'
+  // SEPARABILITY: the win-probability field does not separate the options, so
+  // the bare Case E leader assertion is withheld (see `option-separability.ts`
+  // for the question this answers and the five neighbouring questions it does
+  // NOT). Its own reason code — conflating it with `low_margin` or
+  // `soft_confidence` would hide a withhold inside two codes that today mean
+  // "a weaker headline was emitted", not "no leader was named".
+  | 'options_not_separable'
   | 'unknown';
 
 export interface HeadlineDescriptor {
@@ -1221,6 +1235,84 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // SEPARABILITY — the last gate before the Case E floor, and the only place
+  // in this function that can decline to name a leader on the FIELD's shape.
+  // ══════════════════════════════════════════════════════════════════════════
+  //
+  // ⚠ THE DEFECT, MEASURED. Case E calls itself "the minimum non-overclaiming"
+  // output. It is not: `"{Label} currently leads."` NAMES A WINNER, and it does
+  // so with every statistic and every hedge stripped away — so the weakest
+  // evidence in this module produces the most confident-READING sentence in it.
+  // Witnessed on deployed CEE `3a79b40`, run `20260831T002215Z-fresh-6c5a96`,
+  // an open-ended retention brief whose four explanations came back at
+  // 0.3045 / 0.2895 / 0.2177 / 0.1883 with the producer's own
+  // `near_tie.is_tie: true` and `robustness.level: very_low`:
+  //
+  //     "Selling to the Wrong Customers currently leads."
+  //
+  // The same brief, re-run 15 times on that build, named FOUR different winners
+  // (6/4/3/2) with leader probabilities from 0.297 to 0.881. Which explanation
+  // the team was told to act on depended on the draw.
+  //
+  // ⭐ WHY HERE AND NOT AT THE TOP WITH THE OTHER FOUR WITHHOLDS. Placement is
+  // the substantive design decision in this change, not a detail.
+  //
+  // The four sibling withholds are facts about the RUN (a constraint broken,
+  // unchecked, unreconcilable; a candidate missing), true before any copy is
+  // chosen, so they preempt everything. Separability is different: the near-tie
+  // authority ALREADY says something honest and useful about a close field
+  // ("…but the analysis treats this as a close call"), and the soft-confidence
+  // band already caveats a weak leader. Preempting either would replace true,
+  // informative copy with the bland locked template — a loss to the user and no
+  // gain in honesty. That is trap 21 in its constructive form: a neighbouring
+  // authority answering its own question correctly must not be overridden by
+  // this one.
+  //
+  // So this gate fires ONLY where every other authority has already declined
+  // and the sole remaining output is the bare leader assertion. On the 21
+  // measured runs (7 class-a, 7 class-b, 7 class-c — the committed fixture)
+  // exactly ONE run changes, and it is the one quoted above. Every other run in
+  // all three classes is byte-identical, INCLUDING the two class-b runs whose
+  // fields are near-uniform but which reach honest near-tie copy first.
+  //
+  // ⚠ AND WHAT IT DOES NOT FIX, STATED SO NOBODY INHERITS THE OPTIMISM. Winner
+  // INSTABILITY BETWEEN RUNS is invisible from inside one envelope. The 0.881
+  // draw is decisive within itself and is untouched here. This gate stops the
+  // product asserting a leader its own field does not support; it does not make
+  // the leader reproducible, and reporting it against the winner-stability
+  // metric would be measuring the symptom the fix was not aimed at.
+  const separability = isFieldUnseparable(
+    winner.fieldProbabilities,
+    // ⭐ DERIVED, NOT MINTED. The contender band IS this module's existing
+    // meaningful-lead margin. That identity is what makes the safety property
+    // structural rather than measured: cases A/B/C/D all require a margin ≥
+    // MIN_LEAD_MARGIN, so a run that qualifies for a confident headline can
+    // have no rival inside the band, so this verdict cannot fire for it — at
+    // ANY value of MIN_FIELD_SEPARATION. A second constant here would have
+    // turned a proof into a corpus result.
+    MIN_LEAD_MARGIN,
+    // ⭐ The SAME ceiling that generates "N options are effectively eliminated
+    // (each has less than a 1% chance of winning)" a few lines below. Passing
+    // it in keeps one definition of "cannot win" in this module and closes the
+    // zero-tail hole found at `9afa8699`: without it, appending two zero-win
+    // options to a withheld field moved the uniform reference from 1/4 to 1/6,
+    // raised separation 0.0727 → 0.1654, and handed the suppressed leader claim
+    // straight back — while the product was calling those same arms eliminated
+    // in the next sentence.
+    ELIMINATED_WIN_PROBABILITY_CEILING,
+  );
+  if (separability.unseparable) {
+    return {
+      text: null,
+      descriptor: buildDescriptor(null, 'options_not_separable', {
+        hasDriver,
+        hasFragility,
+        marginBucket,
+      }),
+    };
+  }
+
   // Case E (link-safe floor): we have a clean winner label but the
   // stronger cases didn't qualify or didn't fit. Output is the minimum
   // non-overclaiming "{Label} currently leads." (+ status suffix).
@@ -1374,6 +1466,19 @@ interface ResolvedWinner {
    * never mix probabilities across envelope shapes.
    */
   readonly eliminatedCount: number;
+  /**
+   * Every usable `win_probability` in the ACCEPTED source, the winner's
+   * included, in source order. The separability verdict's only input.
+   *
+   * SAME-SOURCE BY CONSTRUCTION, which is the point of collecting it here
+   * rather than re-reading the envelope at the call site: this module's
+   * cardinal rule is that the label, the winner's probability and every
+   * probability it is compared against come from ONE accepted source. A
+   * separability statistic assembled from a second read could mix a fresh
+   * `option_comparison[]` with a stale `results[]` and describe a field that
+   * never existed.
+   */
+  readonly fieldProbabilities: readonly number[];
 }
 
 /**
@@ -1472,7 +1577,18 @@ function resolveWinner(
         '';
       runnerUpLabel = sanitiseLabel(rawRunnerUpLabel, runnerUpId);
     }
-    return { label: cleanedLabel, winnerProb, runnerUpProb, runnerUpLabel, eliminatedCount };
+    // The whole field, from THIS accepted source only (see fieldProbabilities).
+    const fieldProbabilities = source
+      .map((r) => r.win_probability)
+      .filter((p): p is number => isUsableWinProbability(p));
+    return {
+      label: cleanedLabel,
+      winnerProb,
+      runnerUpProb,
+      runnerUpLabel,
+      eliminatedCount,
+      fieldProbabilities,
+    };
   }
   return null;
 }
