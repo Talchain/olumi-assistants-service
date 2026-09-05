@@ -196,6 +196,53 @@ describe('handleEditGraph no-op — the witnessed collapse, and its repair', () 
     }
   });
 
+  it('EVERY no-op turn keeps an affordance — an empty chip list is the dead end Lane 22 already fixed', async () => {
+    // ⚠ THIS TEST EXISTS BECAUSE THE FIRST VERSION OF THE FIX BROKE IT, and an
+    // EXISTING telemetry test caught it, not this lane's own kit: the composer
+    // emits chips only where the user's words bound a value, so the
+    // `named_target_no_value` branch shipped ZERO chips and
+    // `deterministic_chips_emitted` fell to 0. An empty offer now means "I have
+    // no offer of my own", and the generic label chips (which carry no number)
+    // still ship. Both halves are asserted: chips exist, and none of them
+    // invents a number the user did not bound.
+    for (const message of [
+      ...Object.values(WITNESSED_MESSAGES),
+      'Change this',
+      'Change Team coordination overhead',
+    ]) {
+      const result = await handleEditGraph(
+        makeContext(),
+        message,
+        makeNoOpAdapter(),
+        'req',
+        'turn',
+      );
+      expect(result.suggestedActions, `no affordance for: ${message}`).toBeDefined();
+      expect(result.suggestedActions!.length, `no affordance for: ${message}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('a number is offered ONLY where the user’s own words bounded one', async () => {
+    // W2 said "low", so the band bounds the offer → numbers are allowed.
+    const bounded = await handleEditGraph(
+      makeContext(),
+      WITNESSED_MESSAGES.W2,
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    expect(bounded.suggestedActions!.some((c) => /\d/.test(c.prompt))).toBe(true);
+    // This one bounds nothing → not one chip may carry a number.
+    const unbounded = await handleEditGraph(
+      makeContext(),
+      'Change Team coordination overhead',
+      makeNoOpAdapter(),
+      'req',
+      'turn',
+    );
+    expect(unbounded.suggestedActions!.some((c) => /\d/.test(c.prompt))).toBe(false);
+  });
+
   it('KNOWN-DROPPED still lands on the pristine copy — the fallback is preserved, not replaced', async () => {
     // "Change this" names no node, so the composer grounds nothing and the
     // caller keeps its existing copy. That is the status quo, deliberately.

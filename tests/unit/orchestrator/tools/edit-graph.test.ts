@@ -1482,7 +1482,16 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     // Deterministic forward-looking default must fire when no warnings either.
     // Forward-looking (not a denial) so it passes the V5 egress forbidden-
     // phrase guard intact — see edit-graph.ts NO_OP_FALLBACK_TEXT comment.
-    expect(text).toMatch(/Tell me the specific factor/i);
+    // ROADMAP 2.1361 — REBOUND FROM THE COPY TO THE VERDICT. This line read
+    // `toMatch(/Tell me the specific factor/i)`, using one fallback SENTENCE as
+    // the proxy for "the deterministic fallback fired". That proxy stopped
+    // holding when the no-op branch learned to say what it understood — the
+    // message here names "Price", so the reply now names it back. The subject of
+    // this test is the R10 SAFETY PROPERTY, and `noOpClarificationPreserved` is
+    // that verdict as a structured field: binding to it is copy-independent and
+    // strictly stronger than a prose match (CLAUDE.md trap 19 — bind by
+    // identity, never by a predicate other output could satisfy).
+    expect(result.noOpClarificationPreserved).toBe(false);
     expect(text).not.toMatch(/\bno changes were\b/i);
     // No-commit contract preserved.
     expect(result.wasRejected).toBe(false);
@@ -1535,7 +1544,16 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     // Coaching content does NOT reach assistant_text.
     expect(text).not.toMatch(/I['’]ve\s+applied/i);
     // Deterministic copy used instead.
-    expect(text).toMatch(/Tell me the specific factor/i);
+    // ROADMAP 2.1361 — REBOUND FROM THE COPY TO THE VERDICT. This line read
+    // `toMatch(/Tell me the specific factor/i)`, using one fallback SENTENCE as
+    // the proxy for "the deterministic fallback fired". That proxy stopped
+    // holding when the no-op branch learned to say what it understood — the
+    // message here names "Price", so the reply now names it back. The subject of
+    // this test is the R10 SAFETY PROPERTY, and `noOpClarificationPreserved` is
+    // that verdict as a structured field: binding to it is copy-independent and
+    // strictly stronger than a prose match (CLAUDE.md trap 19 — bind by
+    // identity, never by a predicate other output could satisfy).
+    expect(result.noOpClarificationPreserved).toBe(false);
   });
 
   it("LLM emits operations=[] with FALSE-SUCCESS warning text → no leak to assistant_text (Codex P0)", async () => {
@@ -1559,7 +1577,16 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     expect(text).not.toContain("Updated Price");
     expect(text).not.toContain("Done");
     expect(text).not.toContain("value set");
-    expect(text).toMatch(/Tell me the specific factor/i);
+    // ROADMAP 2.1361 — REBOUND FROM THE COPY TO THE VERDICT. This line read
+    // `toMatch(/Tell me the specific factor/i)`, using one fallback SENTENCE as
+    // the proxy for "the deterministic fallback fired". That proxy stopped
+    // holding when the no-op branch learned to say what it understood — the
+    // message here names "Price", so the reply now names it back. The subject of
+    // this test is the R10 SAFETY PROPERTY, and `noOpClarificationPreserved` is
+    // that verdict as a structured field: binding to it is copy-independent and
+    // strictly stronger than a prose match (CLAUDE.md trap 19 — bind by
+    // identity, never by a predicate other output could satisfy).
+    expect(result.noOpClarificationPreserved).toBe(false);
   });
 
   it("LLM emits operations=[] with JARGON warning text → no leak to assistant_text (Codex P0)", async () => {
@@ -1582,7 +1609,16 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
     );
     const text = result.assistantText ?? "";
     expect(text).not.toMatch(/\bvalidator\b/i);
-    expect(text).toMatch(/Tell me the specific factor/i);
+    // ROADMAP 2.1361 — REBOUND FROM THE COPY TO THE VERDICT. This line read
+    // `toMatch(/Tell me the specific factor/i)`, using one fallback SENTENCE as
+    // the proxy for "the deterministic fallback fired". That proxy stopped
+    // holding when the no-op branch learned to say what it understood — the
+    // message here names "Price", so the reply now names it back. The subject of
+    // this test is the R10 SAFETY PROPERTY, and `noOpClarificationPreserved` is
+    // that verdict as a structured field: binding to it is copy-independent and
+    // strictly stronger than a prose match (CLAUDE.md trap 19 — bind by
+    // identity, never by a predicate other output could satisfy).
+    expect(result.noOpClarificationPreserved).toBe(false);
   });
 
   it("LLM emits operations=[] with no warnings and no coaching → safe default", async () => {
@@ -1599,7 +1635,16 @@ describe("V5 H5 — handleEditGraph no-op branch (Mode B fix)", () => {
       "req-1",
       "turn-1",
     );
-    expect(result.assistantText).toMatch(/Tell me the specific factor/i);
+    // ROADMAP 2.1361 — REBOUND FROM THE COPY TO THE VERDICT. This line read
+    // `toMatch(/Tell me the specific factor/i)`, using one fallback SENTENCE as
+    // the proxy for "the deterministic fallback fired". That proxy stopped
+    // holding when the no-op branch learned to say what it understood — the
+    // message here names "Price", so the reply now names it back. The subject of
+    // this test is the R10 SAFETY PROPERTY, and `noOpClarificationPreserved` is
+    // that verdict as a structured field: binding to it is copy-independent and
+    // strictly stronger than a prose match (CLAUDE.md trap 19 — bind by
+    // identity, never by a predicate other output could satisfy).
+    expect(result.noOpClarificationPreserved).toBe(false);
     expect(result.assistantText).not.toMatch(/\bno changes were\b/i);
     expect(result.wasRejected).toBe(false);
     expect(result.appliedGraph).toBeNull();

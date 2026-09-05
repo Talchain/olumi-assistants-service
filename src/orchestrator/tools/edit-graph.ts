@@ -2680,12 +2680,34 @@ export async function handleEditGraph(
               label: string;
             }>,
           });
-      const clarifyFallback = noOpClarificationPreserved
+      const genericFallback = noOpClarificationPreserved
         ? null
-        : unappliedEditReply ??
-          buildEditClarifyFallbackParts(
+        : buildEditClarifyFallbackParts(
             context.graph.nodes as ReadonlyArray<{ id: string; kind: string; label: string }>,
           );
+      // ⚠ TEXT AND CHIPS COME FROM DIFFERENT PLACES, DELIBERATELY — and this
+      // split is a REGRESSION REPAIR, caught by an existing telemetry test
+      // (`edit-graph-no-op-telemetry.test.ts`) rather than by inspection.
+      //
+      // The composer emits chips ONLY where the user's own words bound a
+      // value, because a number nobody bounded is the silent coercion this
+      // whole change refuses. But an EMPTY chip list is not an improvement: it
+      // is the chip-less dead end Lane 22 already fixed. So an empty offer
+      // means "I have no offer of my own", NOT "emit nothing" — the generic
+      // label chips (which carry no number) still ship, and the user always
+      // keeps an affordance.
+      const clarifyFallback =
+        genericFallback === null
+          ? null
+          : unappliedEditReply === null
+            ? genericFallback
+            : {
+                text: unappliedEditReply.text,
+                chips:
+                  unappliedEditReply.chips.length > 0
+                    ? unappliedEditReply.chips
+                    : genericFallback.chips,
+              };
       const assistantText = noOpClarificationPreserved
         ? noOpCandidate
         : clarifyFallback!.text;
