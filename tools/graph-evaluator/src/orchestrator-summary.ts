@@ -4,8 +4,20 @@
  * Extracted from `cli.ts` so it can be exercised directly: `cli.ts` runs
  * `main()` at import time, which makes it unimportable from a test, and a
  * report section nobody can render is a report section nobody can verify.
- * This module is a PURE MOVE of `generateOrchestratorSummary` — no behaviour
- * change — plus the result type it consumes.
+ *
+ * Two separate statements, because conflating them misreads what changed:
+ *
+ * 1. The EXTRACTION is a pure move. The 80-line body lifted out of `cli.ts`
+ *    and the corresponding 80 lines here are identical apart from the added
+ *    `export` keyword on the signature, plus the result type it consumes.
+ * 2. The MODULE is NOT behaviour-neutral. It adds an always-printed
+ *    "Unattested Scale Renders" section (41 lines below), so
+ *    `generateOrchestratorSummary` now emits output it did not emit before.
+ *    The section is printed unconditionally, including its zero case, so
+ *    "measured, found none" stays distinguishable from "not measured".
+ *
+ * The diagnostic it reports changes no score and gates nothing — see
+ * `orchestrator-scorer.ts` — but the report text is genuinely different.
  */
 
 import type {

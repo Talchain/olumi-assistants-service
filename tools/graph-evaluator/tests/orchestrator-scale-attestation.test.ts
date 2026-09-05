@@ -172,6 +172,62 @@ describe("unattested scale renders — the defect is now visible", () => {
     expect(result.scale_conversions[0].source_ref).toBe("top_driver:fac_cost.sensitivity");
     expect(result.scale_conversions[0].attestation).toBe("unattested");
   });
+
+  // ── edge.strength_mean — the LARGEST source class in the fixture corpus ────
+  // Measured over all 23 orchestrator fixtures: 45 of the 65 records come from
+  // `edge.*.strength_mean`, and 10 fixtures are exposed by NO other source. It
+  // was also the class the first exposure count omitted. A causal strength is
+  // unitless and is not a probability (`orchestrator-scorer.ts`, the `edges`
+  // loop), so its percentage form is unattested — these two pin that.
+
+  it("reports an edge strength_mean rendered as a percentage", () => {
+    const fixture = makeFixture({
+      edges: [{ from: "fac_upsell", to: "goal_arr", strength_mean: 0.7, exists_probability: 0.9 }],
+    });
+    const result = scoreOrchestrator(
+      fixture,
+      response("Enterprise Upsell pushes ARR at 70% strength on this path.")
+    );
+
+    // PRECONDITION pinned in-test: the number is GROUNDED, so the record is
+    // the diagnostic's doing and not an ungrounded number falling through.
+    expect(result.fabrication_check).toBe(true);
+
+    expect(result.scale_conversions).toHaveLength(1);
+    const [record] = result.scale_conversions;
+    // Bound by IDENTITY to the edge that supplied it. The sibling
+    // `exists_probability` (0.9) sits in the same corpus and is ATTESTED, so a
+    // weaker "array is non-empty" assertion would not distinguish them.
+    expect(record.source_ref).toBe("edge:fac_upsell->goal_arr.strength_mean");
+    expect(record.rendered).toBe("70%");
+    expect(record.source_value).toBe(0.7);
+    expect(record.attestation).toBe("unattested");
+  });
+
+  it("reports a NEGATIVE edge strength rendered as a positive percentage", () => {
+    // The scorer grounds `Math.abs(strength_mean)`, so a -0.5 strength grounds
+    // "50%" — the render silently drops the SIGN as well as inventing the
+    // scale, which is the more misleading of the two. Pinned as its own case
+    // so the negative half of the value range is not certified by a corpus
+    // that only ever contains positives.
+    const fixture = makeFixture({
+      edges: [{ from: "fac_churn", to: "goal_arr", strength_mean: -0.5, exists_probability: 0.95 }],
+    });
+    const result = scoreOrchestrator(
+      fixture,
+      response("Customer Churn moves ARR at 50% strength on this path.")
+    );
+
+    expect(result.fabrication_check).toBe(true);
+
+    expect(result.scale_conversions).toHaveLength(1);
+    const [record] = result.scale_conversions;
+    expect(record.source_ref).toBe("edge:fac_churn->goal_arr.strength_mean");
+    expect(record.rendered).toBe("50%");
+    // The model value is -0.5; what reached the corpus is its magnitude.
+    expect(record.source_value).toBe(0.5);
+    expect(record.attestation).toBe("unattested");
+  });
 });
 
 // =============================================================================
