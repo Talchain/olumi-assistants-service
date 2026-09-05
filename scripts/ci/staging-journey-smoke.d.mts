@@ -12,6 +12,21 @@
  * against the real module by tests/unit/ci/staging-journey-smoke.test.ts,
  * including a positive control on a real captured outage response. A stale
  * declaration can only make types imprecise, never make a broken journey pass.
+ *
+ * ⚠ BUT IT COST A CI CYCLE, AND THE COST IS NOW GUARDED. Adding five exports to
+ * the .mjs and forgetting them here produced SEVEN TS2305 errors that NO local
+ * gate could see: `pnpm build` typechecks `tsconfig.build.json`, which EXCLUDES
+ * tests, and this file is only read BY a test. So the required job passed
+ * locally and the separate `Typecheck Drift (ratchet)` job — green on the three
+ * preceding staging commits — went red. That is the hand-maintained mirror
+ * defect exactly (CLAUDE.md trap 12), inside a file whose own header discloses
+ * that it is one.
+ *
+ * The mirror stays (the .mjs must remain dependency-free plain JS, and `scripts/**`
+ * is outside tsconfig's `include`), but it is no longer maintained by memory:
+ * `staging-journey-smoke.test.ts` DERIVES the .mjs's export list and asserts
+ * this file declares every one, so the next omission reds a unit test in
+ * seconds instead of a CI job ten minutes later.
  */
 
 /** Minimum node count for a drafted graph to count as usable. */
@@ -108,3 +123,50 @@ export declare function assertPromptProvenance(
   diagnostics: Array<Pick<ReturnType<typeof extractDiagnostics>, "exit_path" | "prompt_identity_count"> | null>,
   bodies?: readonly unknown[],
 ): string[];
+
+/** The two failure classes. A finding's class is a property of the CHECK that produced it. */
+export declare const VERDICT_JOURNEY_BROKEN: string;
+export declare const VERDICT_PROVENANCE_DARK: string;
+
+/**
+ * The dashboard-only flag gating `_diagnostic_trace`. Named in the alarm
+ * because finding it cost five days.
+ */
+export declare const TRACE_FLAG: string;
+
+/**
+ * PROVENANCE — every turn must be able to say WHICH PATH and WHICH BUILD served
+ * it. Applies to every turn, not just turn 1, and `build_sha` is asserted here
+ * for the first time (it was previously printed and never checked).
+ * @returns failure messages; an empty array means the trace is observable.
+ */
+export declare function assertTraceObservability(
+  turns: ReadonlyArray<{
+    label: string;
+    d: Pick<ReturnType<typeof extractDiagnostics>, "build_sha" | "exit_path"> | null;
+  }>,
+): string[];
+
+/**
+ * PROVENANCE — the continuity check could not be PERFORMED because the trace is
+ * dark. Not a journey failure: the product may be fine and the gate simply
+ * cannot see well enough to judge.
+ * @returns failure messages; an empty array means every later turn was classifiable.
+ */
+export declare function assertContinuityJudgeable(frameBody: unknown, followUpBody: unknown): string[];
+
+/**
+ * The deployed service's OWN report of the trace posture, read from /healthz.
+ * ABSENT IS NEVER REPORTED AS OFF — a build predating the field cannot speak to it.
+ */
+export declare function readTracePosture(healthBody: unknown): "on" | "off" | "not-reported";
+
+/**
+ * THE VERDICT. Pure, so the one thing this gate is read for is unit-testable.
+ * Both failure classes exit non-zero: this separates the MESSAGE, never the severity.
+ */
+export declare function buildVerdict(input?: {
+  journeyFailures?: readonly string[];
+  provenanceFailures?: readonly string[];
+  tracePosture?: "on" | "off" | "not-reported";
+}): { exitCode: number; lines: string[] };

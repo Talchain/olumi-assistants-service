@@ -904,6 +904,45 @@ app.get("/healthz", async (_request, reply) => {
     prompts_ready,
     critical_prompts_pms,
     prompt_environment: promptEnvironment.environment,
+    /**
+     * ⭐ THE DIAGNOSTIC-TRACE POSTURE, MADE OBSERVABLE.
+     *
+     * `CEE_DIAGNOSTIC_TRACE_ENABLED` gates `_diagnostic_trace`, which carries
+     * `exit_path`, `build_sha` and `prompt_identity` — i.e. every staging
+     * witness in this estate rests on it. It was set to "false" on the Render
+     * staging service and the live-journey gate went red 101 consecutive times
+     * across 5 days 3 hours with all three null, while nobody could name the
+     * cause from the alarm.
+     *
+     * The derivation was never wrong — it was UNOBSERVABLE:
+     *   1. The flag is DASHBOARD-ONLY. `rg -a CEE_DIAGNOSTIC_TRACE_ENABLED
+     *      render.yaml render-staging.yaml` returns ZERO hits (contrast control
+     *      `NODE_ENV|CEE_` returns 2 and 1 in the same run, so the probe is not
+     *      blind). Nothing in this repository records its value, and nothing in
+     *      it can set it.
+     *   2. The posture IS already logged correctly at boot (`event:
+     *      config.startup_health`, after the ISSUE-9020 fix above) — but a log
+     *      line lives inside Render's log stream. CI cannot read it, a reviewer
+     *      cannot read it, and nothing can turn it into a finding.
+     *
+     * `/healthz` is the surface a remote reader already polls: the live-journey
+     * gate's Phase 1 hits it on every push to `staging`. Reporting the posture
+     * here is what turns "the trace is absent" from an inference into an
+     * observation, and lets that gate tell a switched-off flag (a deploy-config
+     * regression) apart from a broken trace (a code regression).
+     *
+     * ⚠ DIFFERENTLY-NAMED TWIN. `/healthz/detail` reports `diagnostics_enabled`,
+     * which reads `CEE_DIAGNOSTICS_ENABLED` — a DIFFERENT variable. They are one
+     * word apart and mean different things; taking one for the other gives a
+     * confident wrong answer. Pinned by driving the two in OPPOSITE directions
+     * in tests/unit/healthz.diagnostic-trace-posture.test.ts.
+     *
+     * It reports the GATE THE CODE CONSULTS (`config.features
+     * .diagnosticTraceEnabled`, default FALSE), never the variable's presence.
+     * There is deliberately no second value to keep in step: ISSUE-9020 was
+     * exactly that defect one surface over.
+     */
+    diagnostic_trace_enabled: config.features.diagnosticTraceEnabled,
   };
 });
 

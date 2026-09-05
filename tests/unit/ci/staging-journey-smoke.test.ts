@@ -33,6 +33,13 @@ import {
   readinessDiagnosis,
   draftGraphCensus,
   assertNoUnrequestedAnalysisRefusal,
+  assertTraceObservability,
+  assertContinuityJudgeable,
+  readTracePosture,
+  buildVerdict,
+  VERDICT_JOURNEY_BROKEN,
+  VERDICT_PROVENANCE_DARK,
+  TRACE_FLAG,
   READINESS_PRODUCING_EXIT_PATHS,
   MIN_NODES,
   MIN_OPTIONS,
@@ -666,9 +673,17 @@ describe("2.1300 F3 — an absent analysis_ready is only a LOSS where readiness 
     // The gate cannot tell a loss from a legitimate omission without the exit
     // path. Silently passing is the same silent-disable this round is fixing;
     // asserting a loss would be a fabrication. Say what is actually true.
+    //
+    // ⚠ THE FINDING MOVED CLASS, NOT AWAY. This is caused by a DARK TRACE, not
+    // by a broken journey, so it is now raised by `assertContinuityJudgeable`
+    // into the PROVENANCE bucket — see "the verdict must be TRUE" below.
+    // Reporting it as JOURNEY BROKEN is exactly the false headline that printed
+    // 101 times. Both halves are asserted here so the hole cannot reopen by
+    // deleting the new check: the provenance function must SPEAK, and the
+    // journey function must stay SILENT.
     const noExit = { assistant_text: "…", analysis_ready: { options: [] } };
+    expect(assertContinuityJudgeable(LIVE_DRAFTFIRST_TURN1, noExit).join(" ")).toContain("exit_path");
     const failures = assertHealthyJourney(LIVE_DRAFTFIRST_TURN1, noExit);
-    expect(failures.join(" ")).toContain("exit_path");
     expect(failures.join(" ")).not.toContain("PUT NO COMPARABLE OPTIONS ON THE WIRE");
   });
 
@@ -1110,7 +1125,525 @@ describe("C-2 — a conversational turn answered with an ANALYSIS REFUSAL is its
     const block = call.slice(0, call.indexOf("]),"));
     expect(block).toContain('label: "turn 1", body: t1.body, requestedAnalysis: false');
     expect(block).toContain('label: "turn 2", body: t2.body, requestedAnalysis: false');
-    // And the result must actually reach `failures`, or the call is decorative.
-    expect(src).toContain("failures.push(\n    ...assertNoUnrequestedAnalysisRefusal(");
+    // And the result must actually reach the JOURNEY bucket, or the call is
+    // decorative. A routing defect is a product defect, not a provenance one.
+    expect(src).toContain("journeyFailures.push(\n    ...assertNoUnrequestedAnalysisRefusal(");
+  });
+});
+
+/**
+ * THE VERDICT MUST BE TRUE.
+ *
+ * WHY THIS BLOCK EXISTS — measured, not hypothesised.
+ * --------------------------------------------------
+ * This gate failed 101 CONSECUTIVE RUNS across 5 days 3 hours (last green run
+ * 32983522511 @ 76e86bb8, 2026-08-26T14:58Z; first red 32992061388 @ 45cf25e1,
+ * 2026-08-26T17:04Z). The script blob is byte-identical across that boundary —
+ * the INSTRUMENT did not change. Every one of the 101 failures was the SAME
+ * single fact: `_diagnostic_trace` was absent from the envelope, because
+ * `CEE_DIAGNOSTIC_TRACE_ENABLED` was set to "false" on the Render staging
+ * service (measured at the Render API, 2026-08-31; it is dashboard-only and
+ * appears in NO render*.yaml).
+ *
+ * The PRODUCT assertions passed on every one of those runs. A fresh guest got
+ * a 10-node model with 2 options and readiness `ready` in 33 seconds. And the
+ * gate printed:
+ *
+ *     The live user journey is broken on the deployed staging build.
+ *
+ * That sentence was FALSE for 101 runs. ⭐ THE DEFECT IS NOT THAT THE ALARM
+ * FIRED — it was right to fire, the trace absence is a real regression and this
+ * change does NOT soften it. The defect is that a TRUE alarm printed a FALSE
+ * HEADLINE, so every reader who checked the product found it working, concluded
+ * the alarm was broken, and stopped looking. A red that says the wrong thing is
+ * how a real regression survives five days under a gate built specifically to
+ * make regressions unmissable.
+ *
+ * So the two failure classes are separated AT THE SOURCE — the class is a
+ * property of the CHECK that produced the finding, never a string match on its
+ * message (that would be the hand-maintained mirror this repo keeps paying
+ * for). Both classes still FAIL the run.
+ */
+describe("the verdict must be TRUE — a broken journey and a dark trace are different failures", () => {
+  /** The exact 101-run shape, built from the REAL captures by removing the trace. */
+  function stripTrace(body: any) {
+    const { _diagnostic_trace: _drop, ...rest } = body;
+    return rest;
+  }
+
+  describe("readTracePosture — absent is never reported as OFF", () => {
+    it("reports on / off from the deployed service's own /healthz", () => {
+      expect(readTracePosture({ ok: true, diagnostic_trace_enabled: true })).toBe("on");
+      expect(readTracePosture({ ok: true, diagnostic_trace_enabled: false })).toBe("off");
+    });
+
+    it("TWIN: a build whose /healthz does not report the field is NOT reported as off", () => {
+      // Collapsing "this build does not say" into "it is off" is the same
+      // two-facts-one-symbol defect `graphLine` and `readinessDiagnosis` were
+      // rewritten to remove. It would also make the gate confidently name a
+      // deploy-config cause on a build that cannot speak to it.
+      expect(readTracePosture({ ok: true, build: "d054424" })).toBe("not-reported");
+      expect(readTracePosture(null)).toBe("not-reported");
+      expect(readTracePosture({ diagnostic_trace_enabled: "true" })).toBe("not-reported");
+    });
+  });
+
+  describe("assertTraceObservability — PROVENANCE class: which build, which path", () => {
+    it("FIRES when a turn cannot say which path served it", () => {
+      const turns = [{ label: "turn 1", d: extractDiagnostics(stripTrace(LIVE_DRAFTFIRST_TURN1)) }];
+      expect(assertTraceObservability(turns).join(" ")).toContain("exit_path");
+    });
+
+    it("FIRES when a turn cannot say which BUILD served it — the per-turn build stamp", () => {
+      // The script's own turn-2 comment records why build_sha is per-turn
+      // evidence: Render made a rolled-back parent build live mid-window on
+      // 17 Aug 2026, so "the run confirmed the build at the start" is not
+      // evidence about which build answered a given turn. That argument was
+      // written and then never asserted — build_sha was printed and never
+      // checked, so a null one produced no finding at all.
+      const turns = [{ label: "turn 1", d: extractDiagnostics(stripTrace(LIVE_DRAFTFIRST_TURN1)) }];
+      expect(assertTraceObservability(turns).join(" ")).toContain("build_sha");
+    });
+
+    it("OPPOSITE-DIRECTION TWIN: the real captures, trace intact, are SILENT", () => {
+      const turns = [
+        { label: "turn 1", d: extractDiagnostics(LIVE_DRAFTFIRST_TURN1) },
+        { label: "turn 2", d: extractDiagnostics(LIVE_DRAFTFIRST_TURN2) },
+      ];
+      expect(assertTraceObservability(turns)).toEqual([]);
+    });
+
+    it("names the turn, so an on-call engineer reads the right log line", () => {
+      const turns = [
+        { label: "turn 1", d: extractDiagnostics(LIVE_DRAFTFIRST_TURN1) },
+        { label: "turn 2", d: extractDiagnostics(stripTrace(LIVE_DRAFTFIRST_TURN2)) },
+      ];
+      const out = assertTraceObservability(turns).join(" ");
+      expect(out).toContain("turn 2");
+      expect(out).not.toContain("turn 1");
+    });
+  });
+
+  describe("assertContinuityJudgeable — PROVENANCE class: the check could not be performed", () => {
+    it("FIRES on the unclassifiable follow-up — the gate cannot tell a loss from a legitimate exit", () => {
+      const noExit = { assistant_text: "…", analysis_ready: { options: [] } };
+      expect(assertContinuityJudgeable(LIVE_DRAFTFIRST_TURN1, noExit).join(" ")).toContain("exit_path");
+    });
+
+    it("OPPOSITE-DIRECTION TWIN: the real healthy journey is SILENT", () => {
+      expect(assertContinuityJudgeable(LIVE_DRAFTFIRST_TURN1, LIVE_DRAFTFIRST_TURN2)).toEqual([]);
+    });
+
+    it("TWIN: a classifiable non-readiness exit is NOT reported as unjudgeable", () => {
+      const clarify = { assistant_text: "…", _diagnostic_trace: { exit_path: "clarify_v2" } };
+      expect(assertContinuityJudgeable(LIVE_DRAFTFIRST_TURN1, clarify)).toEqual([]);
+    });
+  });
+
+  describe("assertHealthyFrame no longer owns a PROVENANCE check", () => {
+    it("is SILENT about a missing exit_path — that finding belongs to the provenance class", () => {
+      // It used to push `exit_path missing` into the same flat list as
+      // `assistant_text was empty`, which is what made the two classes
+      // indistinguishable at the verdict. One check, one class.
+      const noExit = { assistant_text: "Before I draft…" };
+      expect(assertHealthyFrame(noExit)).toEqual([]);
+    });
+
+    it("TWIN: it still fails an empty reply, and still fails draft_graph_error", () => {
+      expect(assertHealthyFrame({ assistant_text: "  " }).join(" ")).toContain("assistant_text was empty");
+      expect(
+        assertHealthyFrame({ assistant_text: "x", _diagnostic_trace: { exit_path: "draft_graph_error" } }).join(" "),
+      ).toContain("draft_graph_error");
+    });
+  });
+
+  describe("buildVerdict — the printed headline must match what actually failed", () => {
+    it("PASS when both classes are clean", () => {
+      const v = buildVerdict({ journeyFailures: [], provenanceFailures: [], tracePosture: "on" });
+      expect(v.exitCode).toBe(0);
+      expect(v.lines.join("\n")).toContain("PASS");
+    });
+
+    it("⭐ THE 101-RUN REGRESSION PIN: journey clean + trace dark must NOT say the journey is broken", () => {
+      const v = buildVerdict({
+        journeyFailures: [],
+        provenanceFailures: ["turn 1: _diagnostic_trace.exit_path missing"],
+        tracePosture: "off",
+      });
+      const out = v.lines.join("\n");
+      expect(v.exitCode, "PROVENANCE DARK must still FAIL the run — this is not a softening").toBe(1);
+      expect(out).toContain(VERDICT_PROVENANCE_DARK);
+      expect(out).not.toContain(VERDICT_JOURNEY_BROKEN);
+      // The exact false sentence that printed 101 times.
+      expect(out).not.toContain("The live user journey is broken on the deployed staging build");
+      // What a reader needs instead.
+      expect(out).toContain("PRODUCT assertions PASSED");
+      expect(out).toContain(TRACE_FLAG);
+    });
+
+    it("says a 'witnessed on staging' claim is UNSUPPORTED while provenance is dark", () => {
+      // The sharp one. The journey ran; the run cannot say which build or which
+      // prompt produced what it saw, so it is not a witness of anything.
+      const out = buildVerdict({
+        journeyFailures: [],
+        provenanceFailures: ["turn 1: prompt_identity was empty"],
+        tracePosture: "off",
+      }).lines.join("\n");
+      expect(out).toContain("witnessed on staging");
+      expect(out.toUpperCase()).toContain("UNSUPPORTED");
+    });
+
+    it("OPPOSITE-DIRECTION TWIN: a real journey break still says the journey is BROKEN", () => {
+      const v = buildVerdict({
+        journeyFailures: ["journey: neither turn carried a draft_graph"],
+        provenanceFailures: [],
+        tracePosture: "on",
+      });
+      const out = v.lines.join("\n");
+      expect(v.exitCode).toBe(1);
+      expect(out).toContain(VERDICT_JOURNEY_BROKEN);
+      expect(out).not.toContain(VERDICT_PROVENANCE_DARK);
+    });
+
+    it("does NOT claim a user was let down when the DEPLOY never shipped", () => {
+      // `DEPLOY DID NOT SHIP` is routed to the journey bucket, and on that path
+      // NO TURN IS DRIVEN — the script returns before Phase 2. A headline
+      // asserting "what a user is promised did not happen" would therefore be
+      // unfounded: nothing was measured about a user at all. This is the same
+      // class of false statement as the 101-run headline, one case narrower,
+      // and it would have been introduced BY this change.
+      const out = buildVerdict({
+        journeyFailures: ["DEPLOY DID NOT SHIP: … is still serving build \"e22f8a6\" but this commit is 45cf25e"],
+        provenanceFailures: [],
+        tracePosture: "not-reported",
+      }).lines.join("\n");
+      expect(out).toContain(VERDICT_JOURNEY_BROKEN);
+      expect(out).toContain("DEPLOY DID NOT SHIP");
+      // The headline must name the HALF that is red, not assert an outcome for
+      // a user this run never observed.
+      expect(out).not.toContain("what a user is promised did not happen");
+      expect(out).not.toContain("The live user journey is BROKEN");
+    });
+
+    it("reports BOTH classes independently when both fail, and says so", () => {
+      const out = buildVerdict({
+        journeyFailures: ["journey: neither turn carried a draft_graph"],
+        provenanceFailures: ["turn 1: _diagnostic_trace.exit_path missing"],
+        tracePosture: "off",
+      }).lines.join("\n");
+      expect(out).toContain(VERDICT_JOURNEY_BROKEN);
+      expect(out).toContain(VERDICT_PROVENANCE_DARK);
+      expect(out).toContain("independent");
+      // …and must NOT claim the product passed, because it did not.
+      expect(out).not.toContain("PRODUCT assertions PASSED");
+    });
+
+    it("DISCRIMINATES a deploy-config regression from a code regression, using the deployed posture", () => {
+      // posture=off  → the flag is off: nothing in the repo changed, and
+      //                nothing in the repo CAN change it (dashboard-only).
+      // posture=on   → the flag is on and the trace is missing anyway: a code
+      //                regression in the trace itself.
+      // Two different seams, two different owners. A single message that named
+      // one of them would be the confident-wrong-cause defect this script's own
+      // continuity message was rewritten to remove.
+      const dark = ["turn 1: _diagnostic_trace.exit_path missing"];
+      const off = buildVerdict({ journeyFailures: [], provenanceFailures: dark, tracePosture: "off" }).lines.join("\n");
+      const on = buildVerdict({ journeyFailures: [], provenanceFailures: dark, tracePosture: "on" }).lines.join("\n");
+      const unknown = buildVerdict({
+        journeyFailures: [],
+        provenanceFailures: dark,
+        tracePosture: "not-reported",
+      }).lines.join("\n");
+      expect(off).toContain("DEPLOY-CONFIG");
+      expect(on).toContain("CODE");
+      expect(on).not.toContain("DEPLOY-CONFIG");
+      // The honest third state: this build cannot tell us which it is.
+      expect(unknown).toContain("cannot tell");
+      expect(unknown).not.toContain("DEPLOY-CONFIG regression");
+    });
+
+    it("names the flag as dashboard-only, because that is why it went dark unobserved", () => {
+      // Measured at this tip: `rg -a CEE_DIAGNOSTIC_TRACE_ENABLED render*.yaml`
+      // returns ZERO hits, with the contrast control `NODE_ENV|CEE_` returning
+      // 2 and 1 in the same run — so the probe is not blind.
+      const out = buildVerdict({
+        journeyFailures: [],
+        provenanceFailures: ["turn 1: _diagnostic_trace.exit_path missing"],
+        tracePosture: "off",
+      }).lines.join("\n");
+      expect(out).toContain("render");
+      expect(out).toContain(TRACE_FLAG);
+    });
+  });
+
+  /**
+   * ⭐⭐ THE SECOND FALSE CLAIM IN THE SAME VERDICT — found by an independent
+   * claim-integrity audit AFTER the headline fix was written.
+   *
+   * The headline said the journey was broken when it was not. The CLOSING LINE
+   * said "Do not merge over this" — which reads as a merge gate. It is not one,
+   * and cannot be:
+   *   · `staging` protection requires exactly ["Lint, TypeCheck, Unit Tests"];
+   *     this check is not in it (derived at the API, 2026-08-31).
+   *   · the workflow triggers ONLY on `push: branches: [staging]` and
+   *     `workflow_dispatch` — never on `pull_request`, which is what a required
+   *     status check is matched against.
+   *   · and it cannot be moved to `pull_request`: Phase 1 polls /healthz until
+   *     the DEPLOYED build matches this commit, and a PR head is never deployed.
+   *
+   * ⭐ THIS IS THE DEEPER REASON THE RED SURVIVED, and it is not the headline.
+   * 125 commits were merged over the 101 red runs. An alarm whose authority
+   * claim is visibly unenforced teaches readers that the whole message is
+   * theatre — so a repair that only fixed the wording would leave a check that
+   * is STRUCTURALLY IGNORABLE whatever it says. Both claims had to go.
+   *
+   * The lane deliberately does NOT make the check required (impossible as
+   * written — it would block every merge forever on a status that never
+   * arrives) and does NOT soften it (the regression is real). Whether someone
+   * OWNS responding to it is an owner's decision, reported rather than taken.
+   */
+  describe("the verdict must not claim an authority it does not have", () => {
+    it("DERIVED FROM THE YAML: this workflow has no pull_request trigger, so it cannot gate a merge", () => {
+      // The premise of the authority sentence, derived rather than remembered.
+      // If anyone ever DOES make this a pre-merge check, this reds and the
+      // wording must be revisited with it — a fail-loud pin, not a mirror.
+      const wf = parse(readFileSync(WORKFLOW_PATH, "utf8")) as any;
+      const triggers = Object.keys(wf.on ?? wf.true ?? {});
+      expect(triggers).toContain("push");
+      expect(triggers).not.toContain("pull_request");
+      expect(Object.keys(wf.on.push ?? {})).toEqual(["branches"]);
+      expect(wf.on.push.branches).toEqual(["staging"]);
+    });
+
+    it("the OLD gate claim is gone from every failing verdict", () => {
+      for (const input of [
+        { journeyFailures: ["journey: neither turn carried a draft_graph"], provenanceFailures: [] },
+        { journeyFailures: [], provenanceFailures: ["turn 1: exit_path absent"] },
+        {
+          journeyFailures: ["journey: neither turn carried a draft_graph"],
+          provenanceFailures: ["turn 1: exit_path absent"],
+        },
+      ]) {
+        const out = buildVerdict({ ...input, tracePosture: "off" }).lines.join("\n");
+        expect(out, `still claims to be a merge gate: ${out}`).not.toContain("Do not merge over this");
+      }
+    });
+
+    it("says plainly that it blocks nothing, and that responding is a person's job", () => {
+      const out = buildVerdict({
+        journeyFailures: [],
+        provenanceFailures: ["turn 1: exit_path absent"],
+        tracePosture: "off",
+      }).lines.join("\n");
+      expect(out).toContain("BLOCKS NOTHING");
+      expect(out).toContain("after the merge");
+      expect(out).toContain("ALREADY DEPLOYED");
+      expect(out).toContain("PERSON's job");
+    });
+
+    it("OPPOSITE-DIRECTION TWIN: a PASS carries no authority disclaimer — there is nothing to act on", () => {
+      const v = buildVerdict({ journeyFailures: [], provenanceFailures: [], tracePosture: "on" });
+      expect(v.exitCode).toBe(0);
+      expect(v.lines.join("\n")).not.toContain("BLOCKS NOTHING");
+    });
+
+    it("STILL EXITS NON-ZERO: telling the truth about its authority is not a softening", () => {
+      // The one thing this must never become is `continue-on-error` by prose.
+      expect(
+        buildVerdict({ journeyFailures: [], provenanceFailures: ["x"], tracePosture: "off" }).exitCode,
+      ).toBe(1);
+      expect(buildVerdict({ journeyFailures: ["x"], provenanceFailures: [], tracePosture: "on" }).exitCode).toBe(1);
+    });
+  });
+
+  /**
+   * ⭐ THE DECLARATION MIRROR, MADE FAIL-LOUD.
+   *
+   * `scripts/ci/staging-journey-smoke.d.mts` is a HAND-WRITTEN type mirror of
+   * the .mjs's exports, and its own header says so. It has to exist: the gate
+   * is dependency-free plain `.mjs` (so the alarm still works when the
+   * dependency graph is what broke) and `scripts/**` is outside tsconfig's
+   * `include`, so this test's import needs a declaration.
+   *
+   * ⚠ IT DRIFTED ON THIS VERY CHANGE, and no local gate could see it. Five new
+   * exports were added to the .mjs and not to the mirror. That produced SEVEN
+   * TS2305 errors which:
+   *   · `pnpm build` cannot see — it typechecks `tsconfig.build.json`, which
+   *     EXCLUDES tests, and the mirror is only read BY a test; and
+   *   · the required job therefore passed locally and in CI;
+   *   · while `Typecheck Drift (ratchet)` — GREEN on the three preceding
+   *     staging commits — went red ten minutes after the push.
+   *
+   * That is trap 12 inside a file that discloses it is a mirror, and a
+   * disclosed mirror is still a mirror. Deriving the list is what stops it.
+   */
+  describe("the .d.mts mirror cannot drift from the .mjs it mirrors", () => {
+    const MJS = resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs");
+    const DTS = resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.d.mts");
+
+    /** Every `export function X` / `export const X` at the top level of a file. */
+    function exportedNames(src: string, declare: boolean): string[] {
+      const re = declare
+        ? /^export declare (?:function|const) ([A-Za-z_$][\w$]*)/gm
+        : /^export (?:function|const) ([A-Za-z_$][\w$]*)/gm;
+      return [...src.matchAll(re)].map((m) => m[1]).sort();
+    }
+
+    it("POSITIVE CONTROL: both parses see a plausible number of exports", () => {
+      // An absence assertion needs to prove it can see a presence. A regex that
+      // silently stopped matching would make the comparison below agree on two
+      // empty sets — trap 13, and the exact shape that would make this guard
+      // useless the first time the file's formatting changed.
+      const impl = exportedNames(readFileSync(MJS, "utf8"), false);
+      const decl = exportedNames(readFileSync(DTS, "utf8"), true);
+      expect(impl.length, "the .mjs export parse found nothing — the guard is blind").toBeGreaterThan(10);
+      expect(decl.length, "the .d.mts export parse found nothing — the guard is blind").toBeGreaterThan(10);
+      // …and it must really be finding the things we know are there.
+      expect(impl).toContain("assertHealthyJourney");
+      expect(decl).toContain("assertHealthyJourney");
+    });
+
+    it("every .mjs export is declared in the .d.mts", () => {
+      const impl = exportedNames(readFileSync(MJS, "utf8"), false);
+      const decl = new Set(exportedNames(readFileSync(DTS, "utf8"), true));
+      const missing = impl.filter((n) => !decl.has(n));
+      expect(
+        missing,
+        `these exports have no declaration, so every consumer gets TS2305: ${missing.join(", ")}`,
+      ).toEqual([]);
+    });
+
+    it("and the mirror declares nothing the .mjs does not export", () => {
+      // The other direction: a declaration for a deleted export types a call
+      // that will throw at runtime.
+      const impl = new Set(exportedNames(readFileSync(MJS, "utf8"), false));
+      const decl = exportedNames(readFileSync(DTS, "utf8"), true);
+      const phantom = decl.filter((n) => !impl.has(n));
+      expect(phantom, `declared but not exported: ${phantom.join(", ")}`).toEqual([]);
+    });
+  });
+
+  describe("⭐ END-TO-END: the real 101-run payload, classified", () => {
+    it("PREMISE: stripping the trace really does reproduce the observed failure", () => {
+      // If this stops being true, every assertion below is about a shape the
+      // gate never saw. Fail loudly here first.
+      expect(LIVE_DRAFTFIRST_TURN1._diagnostic_trace).toBeTruthy();
+      expect(stripTrace(LIVE_DRAFTFIRST_TURN1)._diagnostic_trace).toBeUndefined();
+      expect(carriedDraftGraph(stripTrace(LIVE_DRAFTFIRST_TURN1))).toBe(true);
+    });
+
+    it("the JOURNEY bucket is EMPTY and the PROVENANCE bucket is NOT — the product was fine", () => {
+      const t1 = stripTrace(LIVE_DRAFTFIRST_TURN1);
+      const t2 = stripTrace(LIVE_DRAFTFIRST_TURN2);
+      const d1 = extractDiagnostics(t1);
+      const d2 = extractDiagnostics(t2);
+
+      const journey = [
+        ...assertHealthyFrame(t1),
+        ...assertHealthyJourney(t1, t2),
+        ...assertNoUnrequestedAnalysisRefusal([
+          { label: "turn 1", body: t1, requestedAnalysis: false },
+          { label: "turn 2", body: t2, requestedAnalysis: false },
+        ]),
+      ];
+      const provenance = [
+        ...assertTraceObservability([
+          { label: "turn 1", d: d1 },
+          { label: "turn 2", d: d2 },
+        ]),
+        ...assertContinuityJudgeable(t1, t2),
+        ...assertPromptProvenance([d1, d2], [t1, t2]),
+      ];
+
+      expect(journey, `journey findings should be empty, got: ${journey.join(" | ")}`).toEqual([]);
+      expect(provenance.length).toBeGreaterThan(0);
+
+      const out = buildVerdict({
+        journeyFailures: journey,
+        provenanceFailures: provenance,
+        tracePosture: "off",
+      }).lines.join("\n");
+      expect(out).not.toContain("The live user journey is broken on the deployed staging build");
+      expect(out).toContain(VERDICT_PROVENANCE_DARK);
+      expect(out).not.toContain(VERDICT_JOURNEY_BROKEN);
+    });
+
+    it("OPPOSITE-DIRECTION TWIN: the SAME captures with the trace INTACT produce a clean PASS", () => {
+      // Proves the classification is doing work, not just always-provenance.
+      const t1 = LIVE_DRAFTFIRST_TURN1;
+      const t2 = LIVE_DRAFTFIRST_TURN2;
+      const d1 = extractDiagnostics(t1);
+      const d2 = extractDiagnostics(t2);
+      const journey = [...assertHealthyFrame(t1), ...assertHealthyJourney(t1, t2)];
+      const provenance = [
+        ...assertTraceObservability([
+          { label: "turn 1", d: d1 },
+          { label: "turn 2", d: d2 },
+        ]),
+        ...assertContinuityJudgeable(t1, t2),
+        ...assertPromptProvenance([d1, d2], [t1, t2]),
+      ];
+      expect(journey).toEqual([]);
+      expect(provenance).toEqual([]);
+      expect(buildVerdict({ journeyFailures: journey, provenanceFailures: provenance, tracePosture: "on" }).exitCode).toBe(0);
+    });
+
+    it("TWIN: a REAL journey break with the trace intact still lands in the JOURNEY bucket", () => {
+      // The outage this alarm exists for must still be classified as an outage.
+      const journey = assertHealthyJourney(
+        { assistant_text: "…", _diagnostic_trace: { exit_path: "clarify_v2" } },
+        { assistant_text: "…", _diagnostic_trace: { exit_path: "clarify_v2" } },
+      );
+      expect(journey.join(" ")).toContain("neither turn carried a draft_graph");
+      expect(buildVerdict({ journeyFailures: journey, provenanceFailures: [], tracePosture: "on" }).lines.join("\n")).toContain(
+        VERDICT_JOURNEY_BROKEN,
+      );
+    });
+  });
+
+  describe("CALL-SITE PINS: the CLI must keep the two buckets apart", () => {
+    const src = () => readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+
+    it("the CLI maintains two named buckets and never a single flat list", () => {
+      // Without this, the whole fix is revertible at the call site with every
+      // test above still green: the functions would be correct and the CLI
+      // would go on printing one false headline. Same bounded, fail-loud
+      // source-pin technique this file already uses on the workflow YAML.
+      const s = src();
+      expect(s).toContain("const journeyFailures = []");
+      expect(s).toContain("const provenanceFailures = []");
+      // The superseded single list must not come back.
+      expect(s).not.toContain("const failures = []");
+    });
+
+    it("the PROVENANCE checks are wired into the provenance bucket, not the journey one", () => {
+      const s = src();
+      expect(s).toContain("provenanceFailures.push(...assertTraceObservability(");
+      expect(s).toContain("provenanceFailures.push(...assertContinuityJudgeable(");
+      expect(s).toContain("provenanceFailures.push(...assertPromptProvenance(turnDiagnostics, turnBodies))");
+    });
+
+    it("the deployed trace posture is READ from /healthz, not inferred", () => {
+      // Phase 1 already polls /healthz. Reading the posture there is what turns
+      // "the trace is absent" from an inference into an observation — and what
+      // lets the alarm name CEE_DIAGNOSTIC_TRACE_ENABLED instead of leaving the
+      // reader to find it in the source, which is what cost five days.
+      const s = src();
+      expect(s).toContain("readTracePosture(");
+      expect(s).toContain("diagnostic_trace_enabled");
+      // …and the verdict must be given the OBSERVED posture, not a literal. A
+      // hardcoded posture would satisfy the two lines above (the function is
+      // also used for the per-run [posture] log line) while making the alarm
+      // confidently name a seam it never measured — the confident-wrong-cause
+      // defect, reintroduced through the call site.
+      expect(s).toContain("tracePosture: readTracePosture(health)");
+    });
+
+    it("the verdict is produced by buildVerdict, so the headline cannot drift from the buckets", () => {
+      const s = src();
+      expect(s).toContain("buildVerdict({");
+      // The old always-false headline must be gone from the CLI entirely.
+      expect(s).not.toContain("The live user journey is broken on the deployed staging build. Do not merge over this.");
+    });
   });
 });
