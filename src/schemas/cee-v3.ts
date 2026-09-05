@@ -306,10 +306,11 @@ export const NodeV3 = z.object({
    *  coincidence waiting to lapse — which is exactly what happened when the UI
    *  renamed this node's vocabulary and the server kept minting the old word.
    *
-   *  RESPONSE-ONLY, like `provenance`, `source_quote` and `label_authored`:
-   *  RE-DERIVED by `transformResponseToV3` on every response from the banked
-   *  provenance AND the node's current label, so a user rename clears it by
-   *  derivation rather than by a rename writer remembering to drop it.
+   *  RESPONSE-ONLY at the V1→V3 lift, like `provenance`, `source_quote` and
+   *  `label_authored`: RE-DERIVED by `transformResponseToV3` from the banked
+   *  provenance AND the node's current label. Once a GraphV3 is authoritative,
+   *  however, the structural-rename writer persists that graph directly and
+   *  therefore clears this superseded marker alongside `label_authored`.
    *
    *  ⚠ NARROW BY DESIGN. A BLANK label is NOT marked — `NodeV3` accepts `""`
    *  and `"   "` and no validator rejects them, but "unnamed" is a different
