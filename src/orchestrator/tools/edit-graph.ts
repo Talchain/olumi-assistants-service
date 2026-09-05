@@ -2674,10 +2674,23 @@ export async function handleEditGraph(
         ? null
         : composeUnappliedEditReply({
             message: editDescription,
+            // ⚠ THE CAST MUST NOT NARROW. It previously said
+            // `{ id; kind; label }`, which is a claim that only those three
+            // fields reach the composer — and that is exactly the false signal
+            // behind the field-path defect this module shipped: it read
+            // `node.unit`/`node.raw_value`, which no node carries, so the
+            // measured-factor branch was unreachable and a £-denominated
+            // factor was told it was on a 0-1 scale. The composer resolves a
+            // factor's SCALE from `observed_state` (see `resolveFactorScale`),
+            // so the cast names that field and nothing is narrowed away.
             nodes: context.graph.nodes as ReadonlyArray<{
               id: string;
               kind: string;
               label: string;
+              observed_state?: unknown;
+              data?: unknown;
+              unit?: unknown;
+              cap?: unknown;
             }>,
           });
       const genericFallback = noOpClarificationPreserved

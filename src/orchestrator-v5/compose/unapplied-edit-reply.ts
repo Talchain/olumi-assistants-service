@@ -38,8 +38,16 @@
  * The two are exported as SEPARATE predicates with separate names, and the
  * composer consumes both. They are NOT one predicate with two defaults —
  * aligning defaults is the fix that recreates the defect (CLAUDE.md trap 21).
- * `__tests__/unapplied-edit-reply.test.ts` mutates them back into one and
- * asserts RED.
+ *
+ * ⚠ WHAT THE SPEC ACTUALLY DOES, stated precisely because the previous version
+ * of this sentence overstated it. `__tests__/unapplied-edit-reply.test.ts`'s
+ * "TWO QUESTIONS, NOT ONE" cases (`:452-486` before this change) SIMULATE a
+ * merged predicate inline — they call the two real predicates and show the
+ * verdicts diverge. They do not rewrite this module, so nothing there "mutates
+ * them back into one and asserts RED". The merge is proven by a MUTANT applied
+ * to this file in a throwaway worktree and recorded on the PR, not by the
+ * suite. A false comment describing verification is the finding, not a
+ * footnote: it tells the next reader a guard exists where none does.
  *
  * ── WHY THIS IS NOT ANOTHER ROUND OF THE OSCILLATING PREDICATE ─────────────
  * ROADMAP 2.1361 measured four rounds of imperative-vs-noun tuning on
@@ -74,10 +82,23 @@
  * The offered points are DERIVED by round-tripping a grid through
  * `qualitativeBand` (never a hand-copied band table — trap 12), and the chip
  * copy is pinned to route: `Set <label> to <n>` satisfies
- * `isValueUpdatePhrasing`, which suppresses `edit_graph` dispatch and sends
- * the turn to the deterministic value lane where `set_factor_value` lives.
- * The spec asserts that routing by execution, so this module can never
- * advertise an action that terminates in refusal.
+ * `shouldSuppressEditDispatchForValueUpdate`
+ * (`orchestrator/routing/value-update-gate.ts:411`), which suppresses
+ * `edit_graph` dispatch and sends the turn to the deterministic value lane
+ * where `set_factor_value` lives. The spec asserts that routing by execution,
+ * so this module can never advertise an action that terminates in refusal.
+ *
+ * ⚠ THIS SENTENCE PREVIOUSLY NAMED `isValueUpdatePhrasing`
+ * (`value-update-gate.ts:382`) AS THE SUPPRESSING PREDICATE. It is not: that
+ * file's own header at `:386-388` calls
+ * `shouldSuppressEditDispatchForValueUpdate` "Route-v2's ACTUAL suppression
+ * predicate", and `isValueUpdatePhrasing` is one of its two conjuncts. The
+ * spec asserted the weaker conjunct too, so the mixed value+structural case
+ * was never measured. Both are now asserted, and they are genuinely different:
+ * "Update the churn rate to 5% and delete the status quo option" passes the
+ * weak one and fails the real one (measured; the mixed example quoted in
+ * `value-update-gate.ts`'s own header no longer separates them, because that
+ * comment predates a tightening of the regex).
  *
  * ── AND ONE THING THE PRODUCT SIMPLY CANNOT DO (row 1) ─────────────────────
  * Row 1 asks to change an UNCERTAINTY RANGE. `edit-graph.ts`'s LEGACY_FIELDS
@@ -110,15 +131,127 @@ import type { SuggestedAction } from './types.js';
 /**
  * Minimal structural node shape. Compatible with GraphV3 nodes and with the
  * projected id/kind/label triples the edit-clarify composer already takes.
+ *
+ * ⚠⚠ `unit` AND `raw_value` ARE NOT NODE-LEVEL FIELDS, AND READING THEM THERE
+ * IS THE DEFECT THIS INTERFACE ONCE SHIPPED. `NodeV3Schema`
+ * (`@talchain/schemas` 0.50.0, `dist/graph.js:256` — the Zod runtime, not just
+ * the `.d.ts`) declares `id, kind, label, body, type, categories, category,
+ * observed_state, state_space, goal_threshold, goal_threshold_frame`. `unit`
+ * lives at `observed_state.unit` (`ObservedStateSchema`, `dist/graph.js:139`);
+ * `raw_value` is not in the published schema at all and rides its
+ * `.passthrough()`.
+ *
+ * Because `.passthrough()` cannot prove absence, the claim was settled at the
+ * PRODUCERS instead — 491 graph nodes across every `*.json` under `src/`, with
+ * a contrast control at the same level:
+ *
+ *   node.unit       (top level) ...   0 / 491
+ *   node.raw_value  (top level) ...   0 / 491
+ *   node.label      (top level) ... 491 / 491   <- CONTRAST
+ *   node.observed_state.unit ......  23
+ *   node.observed_state.raw_value .  26
+ *
+ * The colliding names belong to `DisplayValueInput`
+ * (`cee/factor-extraction/display-value.ts:30-36`) — the very module this file
+ * imports `qualitativeBand` from. One name, two objects.
  */
 export interface UnappliedEditNode {
   readonly id: string;
   readonly kind: string;
   readonly label: string;
-  /** Present when the factor is measured in something (£, %, days). */
+  /** GraphV3's `observed_state`. Where a unit and a magnitude actually live. */
+  readonly observed_state?: unknown;
+  /** A legacy sibling carrier some persisted shapes still use. */
+  readonly data?: unknown;
+  /** Legacy top-level carriers. 0/491 in every capture; read defensively only. */
   readonly unit?: unknown;
-  /** Present when the factor carries a user-scale magnitude beside its level. */
-  readonly raw_value?: unknown;
+  readonly cap?: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WHAT SCALE IS THIS FACTOR ON? — three answers, because absence is one of them
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * ⭐⭐ THREE STATES, NOT TWO, AND THE THIRD IS THE DOMINANT ONE.
+ *
+ * The obvious repair for the wrong field path — read `observed_state.unit`
+ * instead of `node.unit` — fixes the 31 measured nodes and leaves the majority
+ * of real nodes still receiving a false claim. Measured over the same 491:
+ *
+ *   no `observed_state` at all ................... 403 (82%)  scale UNKNOWABLE
+ *   `observed_state` with unit or raw_value ......  31        MEASURED
+ *   `observed_state` with cap, no unit/raw .......   1        normalised from raw
+ *   `observed_state.value` in [0,1], nothing else .  56       provably 0-1
+ *   `observed_state.value` outside [0,1] .........   0
+ *
+ * Telling 403 nodes "On this factor's 0-1 scale…" is the SAME harm as F1 — a
+ * false claim about the user's own model — one class wider. Absence of
+ * `observed_state` is UNDECLARED, never "unitless": the contract's own
+ * `declared_scale` doc states the rule, and `declared_scale` itself appears on
+ * 0 of the 491, so it cannot be the discriminator either.
+ *
+ * A numeric claim is licensed by POSITIVE EVIDENCE, never by the absence of
+ * counter-evidence.
+ */
+type FactorScale = 'measured' | 'unit_interval' | 'unknown';
+
+function firstString(...candidates: readonly unknown[]): string | undefined {
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim().length > 0) return c.trim();
+  }
+  return undefined;
+}
+
+function firstFiniteNumber(...candidates: readonly unknown[]): number | undefined {
+  for (const c of candidates) {
+    if (typeof c === 'number' && Number.isFinite(c)) return c;
+  }
+  return undefined;
+}
+
+function asRecord(v: unknown): Record<string, unknown> | undefined {
+  return v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+}
+
+/**
+ * Resolve a factor's scale using the SAME candidate order as the shipped
+ * resolver `buildFactorScaleMap`
+ * (`orchestrator-v5/tools/plot-intervention-scale.ts:419-422`) — including its
+ * asymmetry, which is deliberate and is not tidied here: `unit` has a
+ * top-level fallback, `raw_value` does not.
+ *
+ * Deriving the paths from the shipped reader rather than minting a fourth one
+ * is what stops this becoming another list to keep in sync.
+ *
+ * The top-level fallbacks read 0/491 in every capture and are kept only
+ * because they are FAIL-SAFE: a hit can move a factor from `unit_interval` to
+ * `measured`, i.e. towards fewer numeric claims and fewer chips, never towards
+ * more.
+ */
+function resolveFactorScale(node: UnappliedEditNode): FactorScale {
+  const observed = asRecord(node.observed_state);
+  const data = asRecord(node.data);
+
+  const unit = firstString(observed?.unit, data?.unit, node.unit);
+  const raw = firstFiniteNumber(observed?.raw_value, data?.raw_value);
+  // A cap means the 0-1 number is a NORMALISATION of a user-scale magnitude,
+  // so the word the user said ("low") is about that magnitude, not about the
+  // normalised number. Treated as measured — the fail-safe direction.
+  const cap = firstFiniteNumber(observed?.cap, data?.cap, node.cap);
+  if (unit !== undefined || raw !== undefined || cap !== undefined) return 'measured';
+
+  const value = firstFiniteNumber(observed?.value, data?.value);
+  if (value !== undefined && value >= 0 && value <= 1) return 'unit_interval';
+
+  return 'unknown';
+}
+
+/** The user-facing unit, when there is one. Same candidate order as above. */
+function resolveUnitLabel(node: UnappliedEditNode): string | undefined {
+  const observed = asRecord(node.observed_state);
+  const data = asRecord(node.data);
+  return firstString(observed?.unit, data?.unit, node.unit);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -218,6 +351,18 @@ export type UnappliedEditUnderstanding =
       readonly level: string;
     }
   | {
+      /**
+       * A level word against a factor whose scale NOTHING IN THE PAYLOAD
+       * DECLARES — the dominant real class (403 of 491 nodes). We understood
+       * the object and the word; we cannot say what the word maps to, and
+       * saying "0-1 scale" here would be inventing a fact about the user's
+       * model. No number is claimed and none is offered.
+       */
+      readonly kind: 'level_on_unknown_scale';
+      readonly node: UnappliedEditNode;
+      readonly level: string;
+    }
+  | {
       /** The object was named; no value we could read. */
       readonly kind: 'named_target_no_value';
       readonly node: UnappliedEditNode;
@@ -264,13 +409,6 @@ function offersForBand(band: string): readonly number[] {
   return OFFER_GRID.filter((v) => qualitativeBand(v) === band).slice(0, 2);
 }
 
-/** A factor is unitless-0–1 when it carries neither a unit nor a magnitude. */
-function isUnitlessFactor(node: UnappliedEditNode): boolean {
-  const hasUnit = typeof node.unit === 'string' && node.unit.trim().length > 0;
-  const hasRaw = typeof node.raw_value === 'number' && Number.isFinite(node.raw_value);
-  return !hasUnit && !hasRaw;
-}
-
 /**
  * Longest-label-first so "Team coordination overhead" wins over a shorter
  * label that happens to be a substring of it. Binding is by the node's own
@@ -315,8 +453,15 @@ export function resolveUnappliedEditUnderstanding(
       ? LEVEL_SYNONYMS.get(levelMatch[1].toLowerCase().replace(/\s+/g, ' ')) ?? null
       : null;
 
+  // ⭐ ONE scale read, shared by both branches below. Two branches deciding
+  // the same question with their own predicates is how one name comes to
+  // answer two questions; there is exactly one answer here and both consume it.
+  const scale = resolveFactorScale(node);
+
   if (UNCERTAINTY_ASPECT_PATTERN.test(message)) {
-    const offerable = band !== null && isUnitlessFactor(node);
+    // A number may be offered ONLY where the band is real: the user's own word
+    // bounded it AND the factor is provably on the 0-1 scale that word maps to.
+    const offerable = band !== null && scale === 'unit_interval';
     return {
       kind: 'unsupported_aspect',
       node,
@@ -326,17 +471,19 @@ export function resolveUnappliedEditUnderstanding(
     };
   }
 
-  if (levelMatch) {
-    if (band !== null) {
-      if (!isUnitlessFactor(node)) {
+  if (levelMatch !== null && band !== null) {
+    switch (scale) {
+      case 'measured':
         return { kind: 'level_on_measured_factor', node, level: band };
-      }
-      return {
-        kind: 'level_on_unitless_factor',
-        node,
-        level: band,
-        offers: offersForBand(band),
-      };
+      case 'unknown':
+        return { kind: 'level_on_unknown_scale', node, level: band };
+      case 'unit_interval':
+        return {
+          kind: 'level_on_unitless_factor',
+          node,
+          level: band,
+          offers: offersForBand(band),
+        };
     }
   }
 
@@ -411,6 +558,50 @@ export function composeUnappliedEditReply(input: {
   // they never offered one, and demanding one is what made the witnessed
   // reply read as a non-sequitur.
   if (frame === 'deliberation') {
+    const answerChip = chip(
+      'unapplied_edit_deliberation_answer',
+      'Give me your view first',
+      "Set the model aside for a moment and tell me what you think about that.",
+    );
+
+    // ⭐⭐ F2 — Q1 MUST NOT SHORT-CIRCUIT Q2.
+    //
+    // The first version of this composer returned here without ever reading
+    // the understanding it had already resolved one line above. So
+    // "Do you agree? Change the team coordination overhead to low." — which
+    // grounds the node AND the level — was answered "That read as a question",
+    // discarding both. That is the witnessed harm (a user who named the object
+    // and the value told to name the object and the value) reproduced inside
+    // the fix written for it.
+    //
+    // The two questions stay two: Q1 still decides the KIND of answer (this is
+    // a question, so we do not demand an instruction), and Q2 supplies WHAT WE
+    // UNDERSTOOD. Both are said. Merging them back into one predicate is what
+    // the spec's merge cases assert against.
+    if (understanding !== null) {
+      const named = understanding.node.label.trim();
+      const levelSuffix =
+        'level' in understanding && typeof understanding.level === 'string'
+          ? ` to ${understanding.level.toLowerCase()}`
+          : '';
+      return {
+        text:
+          `${NOTHING_WRITTEN} That read as a question about whether to make a ` +
+          `change rather than an instruction to make one, so I treated it as a ` +
+          `question and left the model alone. I did understand what you named ` +
+          `— "${named}"${levelSuffix}. Tell me to go ahead and I'll take it ` +
+          `from there, or ask me again and I'll give you my read on it first.`,
+        chips: [
+          answerChip,
+          chip(
+            'unapplied_edit_deliberation_proceed',
+            `Yes — change ${named}`,
+            `Change ${named}${levelSuffix}.`,
+          ),
+        ],
+      };
+    }
+
     return {
       text:
         `${NOTHING_WRITTEN} That read as a question about whether to make a ` +
@@ -418,11 +609,7 @@ export function composeUnappliedEditReply(input: {
         `question. Ask me again and I'll give you my read on it — or, if you ` +
         `already want it in, tell me what to add and I'll add it.`,
       chips: [
-        chip(
-          'unapplied_edit_deliberation_answer',
-          'Give me your view first',
-          "Set the model aside for a moment and tell me what you think about that.",
-        ),
+        answerChip,
         chip(
           'unapplied_edit_deliberation_proceed',
           'Yes — put it in the model',
@@ -474,8 +661,22 @@ export function composeUnappliedEditReply(input: {
       };
     }
 
+    case 'level_on_unknown_scale':
+      // ⭐ THE DOMINANT CLASS (403 of 491 real nodes). We understood the object
+      // and the word. We do NOT know what scale the factor is on, so we say
+      // that, claim no scale, and offer no number. An offer here would be a
+      // number invented from an absence.
+      return {
+        text:
+          `${NOTHING_WRITTEN} I understood it: set "${label}" to ` +
+          `${understanding.level.toLowerCase()}. But I don't have a value on ` +
+          `"${label}" yet, so I can't tell what that word maps to without ` +
+          `guessing. Give me the value and I'll write it.`,
+        chips: [],
+      };
+
     case 'level_on_measured_factor': {
-      const unit = typeof understanding.node.unit === 'string' ? understanding.node.unit.trim() : '';
+      const unit = resolveUnitLabel(understanding.node) ?? '';
       const measuredIn = unit.length > 0 ? ` in ${unit}` : ' as an amount';
       return {
         text:

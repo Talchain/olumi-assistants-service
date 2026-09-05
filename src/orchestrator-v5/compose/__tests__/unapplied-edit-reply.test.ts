@@ -313,19 +313,30 @@ describe('QUESTION 2 — the understanding, and the coercion boundary', () => {
       resolveUnappliedEditUnderstanding('Change Server cost to high', [atRealShape])!.kind,
     ).toBe('level_on_measured_factor');
 
-    // CONTRAST CONTROL — the very same node with the very same two fields at
-    // the TOP level (the rejected path) carries no scale information at all,
-    // because nothing reads them there. If this ever stops being
-    // 'unknown_scale', the module has grown a second reader on the dead path.
-    const atRejectedPath = {
+    // ⚠ AND THE HONEST OTHER HALF, WHICH CORRECTED THIS TEST. I first asserted
+    // that the same fields at the TOP level yield 'unknown_scale' — i.e. that
+    // the dead path is not read at all. That was wrong, and deliberately so:
+    // `resolveFactorScale` keeps `node.unit` as a last-resort candidate
+    // because the shipped resolver `buildFactorScaleMap`
+    // (plot-intervention-scale.ts:419-422) does, and because the fallback is
+    // FAIL-SAFE — a hit can only move a factor towards 'measured', i.e. fewer
+    // numeric claims, never more. `raw_value` has no top-level fallback there,
+    // and that asymmetry is preserved rather than tidied.
+    const atLegacyPath = {
       id: 'n1',
       kind: 'factor',
       label: 'Server cost',
       unit: '$',
-      raw_value: 400,
     } as unknown as UnappliedEditNode;
     expect(
-      resolveUnappliedEditUnderstanding('Change Server cost to high', [atRejectedPath])!.kind,
+      resolveUnappliedEditUnderstanding('Change Server cost to high', [atLegacyPath])!.kind,
+    ).toBe('level_on_measured_factor');
+
+    // THE DISCRIMINATION, then, is not top-level-vs-nested — it is DECLARED vs
+    // UNDECLARED. A node with neither is the one that must not be claimed.
+    const undeclared = { id: 'n1', kind: 'factor', label: 'Server cost' };
+    expect(
+      resolveUnappliedEditUnderstanding('Change Server cost to high', [undeclared])!.kind,
     ).toBe('level_on_unknown_scale');
   });
 
