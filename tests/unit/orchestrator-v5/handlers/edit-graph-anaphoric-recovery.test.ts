@@ -27,6 +27,11 @@ import { describe, expect, it } from 'vitest';
 import { decideNoOpRecovery } from '../../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { findForbiddenPhraseHit } from '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
 import {
+  isEditClarifyTargetKind,
+  selectEditClarifyTargets,
+} from '../../../../src/orchestrator-v5/compose/edit-clarify-response.js';
+import { NodeKindV3 } from '../../../../src/schemas/cee-v3.js';
+import {
   RANK_ORDER,
   type TurnReferent,
   type TurnReferents,
@@ -217,15 +222,47 @@ describe('THE BANNED OUTCOME — a reset is unreachable for an anaphoric edit', 
     undefined,
   ];
 
-  it('never returns the reset text, and always asks, across every register state', () => {
-    for (const referents of everyRegister) {
-      const r = decideNoOpRecovery({ ...BASE, referents });
-      expect(r.assistantText).not.toBe(BANNED_RESET_TEXT);
-      expect(r.branch).not.toBe('vague_edit');
-      // Asserting nothing and asking nothing is the failure mode being removed.
-      expect(r.assistantText).toContain('?');
-      expect(r.assistantText).not.toBeNull();
+  /**
+   * ⚠ THE MESSAGE IS VARIED, NOT JUST THE REGISTER (review finding, PR #1362).
+   *
+   * The first version of this test held `BASE.message` fixed and swept the
+   * register, so it proved unreachability across REGISTER STATES only — it said
+   * nothing about the thing that decides which branch is entered, which is the
+   * MESSAGE. A predicate change could have re-admitted every one of these to
+   * the reset and this test would have stayed green on all six registers.
+   *
+   * These messages are the ones this change MOVED, plus the witnessed one. They
+   * are the covered set; the family that is NOT covered is pinned by name in
+   * its own describe below, deliberately separate — an unreachability claim and
+   * a known gap are two different claims and must not share one assertion.
+   */
+  const coveredAnaphoricMessages: readonly string[] = [
+    WITNESSED_MESSAGE,
+    'Change this.',
+    'Adjust this.',
+    'Improve this.',
+    'Update it.',
+    'Tweak that.',
+    'Can you update it?',
+    'Revise this.',
+  ];
+
+  it('every covered anaphoric message avoids the reset in every register state', () => {
+    let cases = 0;
+    for (const message of coveredAnaphoricMessages) {
+      for (const referents of everyRegister) {
+        const r = decideNoOpRecovery({ ...BASE, message, referents });
+        expect(r.assistantText).not.toBe(BANNED_RESET_TEXT);
+        expect(r.branch).not.toBe('vague_edit');
+        // Asserting nothing and asking nothing is the failure mode being removed.
+        expect(r.assistantText).toContain('?');
+        expect(r.assistantText).not.toBeNull();
+        cases += 1;
+      }
     }
+    // The loop is not vacuous, and it is the CROSS PRODUCT it claims to be.
+    expect(cases).toBe(coveredAnaphoricMessages.length * everyRegister.length);
+    expect(cases).toBe(48);
   });
 
   it('CONTRAST: a genuinely target-less edit still gets the vague-edit reset', () => {
@@ -328,6 +365,260 @@ describe('branch precedence', () => {
       noOpClarificationPreserved: true,
     });
     expect(r.branch).not.toBe('anaphoric_edit_bound');
+    expect(r.assistantText).toBeNull();
+  });
+});
+
+/**
+ * ⭐ ELIGIBILITY — the bind must not reach a kind that cannot be edited.
+ *
+ * The branch offers its target through `buildLabelChip`, whose sibling
+ * `selectEditClarifyTargets` admits `factor|option` ONLY. The first version of
+ * this branch copied that function's 3-cap and left its eligibility filter
+ * behind, so it bound an `outcome` and asked "what value would you like it set
+ * to?" about a node whose value the user cannot set.
+ *
+ * Witnessed by replay against the 5 Sep founder capture: turn 8's assistant
+ * message resolved to the `outcome` MRR Growth and BOUND it —
+ * "Taking that as MRR Growth. What value would you like it set to?"
+ *
+ * The predicate is IMPORTED from the composer, so the two surfaces cannot
+ * present different eligibility for the same question.
+ */
+describe('§4.2 eligibility — only kinds this product can offer as an edit target', () => {
+  function referentOfKind(kind: TurnReferent['kind'], ref: string, label: string): TurnReferent {
+    return { ...referent(ref, label), kind };
+  }
+
+  const INELIGIBLE = ['outcome', 'decision', 'risk', 'goal', 'action'] as const;
+  const ELIGIBLE = ['factor', 'option'] as const;
+
+  it('the two sets are disjoint and together cover NodeKindV3 (the sweep is not vacuous)', () => {
+    // Positive control on the corpus itself: a sweep that quietly lost members
+    // would report a clean pass over nothing.
+    expect([...ELIGIBLE, ...INELIGIBLE].sort()).toEqual(
+      [...NodeKindV3.options].sort(),
+    );
+  });
+
+  it.each(INELIGIBLE)('a lone %s candidate is NOT bound — it asks instead', (kind) => {
+    const r = decideNoOpRecovery({
+      ...BASE,
+      referents: {
+        referents: [referentOfKind(kind, 'node:5a596708', 'MRR Growth')],
+        source: 'complete',
+      },
+    });
+    expect(r.branch).toBe('anaphoric_edit_ask_unresolved');
+    // The banned outcome stays unreachable: filtering to zero still ASKS.
+    expect(r.assistantText).not.toBe(BANNED_RESET_TEXT);
+    expect(r.assistantText).toContain('?');
+    // And it offers nothing it cannot honour.
+    expect(r.suggestedActions).toEqual([]);
+  });
+
+  it.each(ELIGIBLE)('CONTRAST: a lone %s candidate IS bound', (kind) => {
+    // The opposite-direction twin. Without it, a filter that rejected
+    // everything would satisfy every assertion above.
+    const r = decideNoOpRecovery({
+      ...BASE,
+      referents: {
+        referents: [referentOfKind(kind, 'node:919d7f50', 'Sales Headcount Investment')],
+        source: 'complete',
+      },
+    });
+    expect(r.branch).toBe('anaphoric_edit_bound');
+    expect(r.assistantText).toContain('Sales Headcount Investment');
+    expect(r.suggestedActions.map((a) => a.id)).toEqual(['edit_clarify_919d7f50']);
+  });
+
+  it('an ineligible candidate is dropped from a MIXED set, not just from a lone one', () => {
+    // Binds by identity. Two candidates before the filter, one after — so the
+    // branch moves from ASK to BIND, and it binds the eligible one.
+    const r = decideNoOpRecovery({
+      ...BASE,
+      referents: {
+        referents: [
+          referentOfKind('risk', 'node:428612e0', 'Runway Depletion Risk'),
+          referentOfKind('factor', 'node:919d7f50', 'Sales Headcount Investment'),
+        ],
+        source: 'complete',
+      },
+    });
+    expect(r.branch).toBe('anaphoric_edit_bound');
+    expect(r.assistantText).toContain('Sales Headcount Investment');
+    expect(r.assistantText).not.toContain('Runway Depletion Risk');
+    expect(r.suggestedActions.map((a) => a.id)).toEqual(['edit_clarify_919d7f50']);
+  });
+
+  it('the chips offered on the ASK path are eligible kinds only', () => {
+    const r = decideNoOpRecovery({
+      ...BASE,
+      referents: {
+        referents: [
+          referentOfKind('option', 'node:501e2731', 'ICP Validation Sprint Before Hiring'),
+          referentOfKind('factor', 'node:919d7f50', 'Sales Headcount Investment'),
+          referentOfKind('risk', 'node:428612e0', 'Runway Depletion Risk'),
+        ],
+        source: 'complete',
+      },
+    });
+    expect(r.branch).toBe('anaphoric_edit_ask_candidates');
+    expect(r.suggestedActions.map((a) => a.id)).toEqual([
+      'edit_clarify_501e2731',
+      'edit_clarify_919d7f50',
+    ]);
+  });
+
+  it('the filter is the COMPOSER’s, not a copy — the predicate agrees with it', () => {
+    // Derived agreement, not a second list: `selectEditClarifyTargets` and this
+    // branch must admit the same kinds. Asserting the predicate against the
+    // composer’s own behaviour is what makes the single-sourcing checkable.
+    for (const kind of NodeKindV3.options) {
+      const offered = selectEditClarifyTargets([
+        { id: 'n1', label: 'Some Label', kind },
+      ]);
+      expect(offered.length > 0).toBe(isEditClarifyTargetKind(kind));
+    }
+  });
+});
+
+/**
+ * ⭐ KNOWN NOT COVERED — the gap this change NARROWED but did not close, named
+ * in the suite rather than left invisible.
+ *
+ * `ANAPHORIC_EDIT_PATTERNS` requires VERB–PRONOUN ADJACENCY (`update it`), so
+ * the NOMINALISED form of the same request — `make a change to it`, `do an edit
+ * on this` — is not recognised as anaphoric and still reaches the reset (or,
+ * where a mutation signal fires, the `ambiguous` branch, which is the spec's
+ * own "different bad answer, not a better one").
+ *
+ * ⚠ EXTENDING THE PATTERN WAS TRIED FIRST AND REJECTED, ON MEASUREMENT. Adding
+ * the nominalised shape to `ANAPHORIC_EDIT_PATTERNS` would recover 96 of these
+ * 120 messages. The other 24 — every `(change|update) to <pronoun>` form —
+ * would NOT move, because `hasMutationSignal` fires on them and the anaphoric
+ * branch is gated behind `!mutationSignal`. Reaching those needs a change to
+ * the mutation-signal gate, i.e. an adjustment in the OPPOSITE direction, which
+ * is where this estate's oscillating rounds come from (CLAUDE.md trap 22f). One
+ * predicate change buying one direction and opening another is the signal to
+ * stop and name the gap instead.
+ *
+ * ⚠ THIS SET IS A SAMPLED FLOOR OVER AN OPEN CLASS, never an enumeration of it.
+ * English has more ways to refer than a generated family covers. What the
+ * assertions below pin exactly is the partition of THIS corpus: they RED if it
+ * GROWS (a covered case regressing into the gap) and they RED if it SHRINKS (a
+ * later fix landing without updating the record).
+ */
+describe('KNOWN NOT COVERED — the nominalised anaphoric form still resets', () => {
+  const VERBS = ['make', 'do'] as const;
+  const NOUN_PHRASES = ['a change', 'an update', 'an edit', 'an adjustment', 'a tweak'] as const;
+  const PREPOSITIONS = ['to', 'on'] as const;
+  const PRONOUNS = ['it', 'this', 'that'] as const;
+
+  /** Generated from the lists above, so the corpus is not a hand-typed mirror. */
+  const FAMILY: readonly string[] = (() => {
+    const out: string[] = [];
+    for (const verb of VERBS) {
+      for (const noun of NOUN_PHRASES) {
+        for (const preposition of PREPOSITIONS) {
+          for (const pronoun of PRONOUNS) {
+            const core = `${verb} ${noun} ${preposition} ${pronoun}`;
+            out.push(`${core.charAt(0).toUpperCase()}${core.slice(1)}.`);
+            out.push(`Can you ${core}?`);
+          }
+        }
+      }
+    }
+    return out;
+  })();
+
+  /**
+   * The subset that reaches `ambiguous` rather than the reset, listed in full.
+   * Every member is a `(change|update) to <pronoun>` form — the shape
+   * `hasMutationSignal` fires on. Pinned as strings, not as a predicate, so the
+   * record says WHICH sentences rather than restating the rule that produced
+   * them.
+   */
+  const AMBIGUOUS_MEMBERS: readonly string[] = [
+    'Can you do a change to it?',
+    'Can you do a change to that?',
+    'Can you do a change to this?',
+    'Can you do an update to it?',
+    'Can you do an update to that?',
+    'Can you do an update to this?',
+    'Can you make a change to it?',
+    'Can you make a change to that?',
+    'Can you make a change to this?',
+    'Can you make an update to it?',
+    'Can you make an update to that?',
+    'Can you make an update to this?',
+    'Do a change to it.',
+    'Do a change to that.',
+    'Do a change to this.',
+    'Do an update to it.',
+    'Do an update to that.',
+    'Do an update to this.',
+    'Make a change to it.',
+    'Make a change to that.',
+    'Make a change to this.',
+    'Make an update to it.',
+    'Make an update to that.',
+    'Make an update to this.',
+  ];
+
+  function branchOf(message: string): string {
+    return decideNoOpRecovery({ ...BASE, message, referents: ONE_CANDIDATE }).branch;
+  }
+
+  it('the generated corpus is the size it claims to be', () => {
+    expect(FAMILY).toHaveLength(120);
+    expect(new Set(FAMILY).size).toBe(120);
+  });
+
+  it('POSITIVE CONTROL: the covered form does reach an anaphoric branch', () => {
+    // Without this, every assertion below would also pass if the whole feature
+    // were broken and nothing anywhere reached an anaphoric branch.
+    for (const message of ['Update it.', 'Change this.', 'Adjust that.']) {
+      expect(branchOf(message)).toBe('anaphoric_edit_bound');
+    }
+  });
+
+  it('PINNED: not one member of this family reaches an anaphoric branch', () => {
+    const covered = FAMILY.filter((m) => branchOf(m).startsWith('anaphoric_'));
+    expect(covered).toEqual([]);
+  });
+
+  it('PINNED: exactly where they land instead', () => {
+    const counts: Record<string, number> = {};
+    for (const message of FAMILY) {
+      const branch = branchOf(message);
+      counts[branch] = (counts[branch] ?? 0) + 1;
+    }
+    expect(counts).toEqual({ vague_edit: 96, ambiguous: 24 });
+  });
+
+  it('PINNED: the ambiguous subset, by name', () => {
+    const ambiguous = FAMILY.filter((m) => branchOf(m) === 'ambiguous').sort();
+    expect(ambiguous).toEqual([...AMBIGUOUS_MEMBERS].sort());
+  });
+
+  it('the cost is stated, not implied: the 96 ship the banned reset verbatim', () => {
+    const r = decideNoOpRecovery({
+      ...BASE,
+      message: 'Do an edit on this.',
+      referents: ONE_CANDIDATE,
+    });
+    expect(r.branch).toBe('vague_edit');
+    expect(r.assistantText).toBe(BANNED_RESET_TEXT);
+  });
+
+  it('and the 24 get no copy at all', () => {
+    const r = decideNoOpRecovery({
+      ...BASE,
+      message: 'Make a change to it.',
+      referents: ONE_CANDIDATE,
+    });
+    expect(r.branch).toBe('ambiguous');
     expect(r.assistantText).toBeNull();
   });
 });

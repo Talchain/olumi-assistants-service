@@ -147,7 +147,10 @@ import {
   looksLikeAnaphoricEdit,
   looksLikeVagueEdit,
 } from '../routing/analytical-intent.js';
-import { buildLabelChip } from '../compose/edit-clarify-response.js';
+import {
+  buildLabelChip,
+  isEditClarifyTargetKind,
+} from '../compose/edit-clarify-response.js';
 import {
   candidatesAtTopPopulatedRank,
   projectTurnReferents,
@@ -801,10 +804,26 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
     // but all three ASK, so the distinction changes telemetry, not the user's
     // outcome. An empty `complete` register is an authoritative zero.
     const register = input.referents ?? null;
-    const candidates =
+    const atTopRank =
       register !== null && register.source !== 'degraded'
         ? candidatesAtTopPopulatedRank(register)
         : [];
+    // ⚠ ELIGIBILITY, not just a cap. The chip this branch offers comes from
+    // `buildLabelChip`, and its sibling `selectEditClarifyTargets` — the other
+    // caller of that builder — admits `factor|option` ONLY. The first version
+    // of this branch copied that function's 3-cap and left its eligibility
+    // filter behind, so it bound an `outcome` and asked "what value would you
+    // like it set to?" about a node whose value the user cannot set. Witnessed
+    // by replay against the 5 Sep founder capture: turn 8 bound the `outcome`
+    // MRR Growth.
+    //
+    // The predicate is IMPORTED from the composer rather than restated here, so
+    // the two surfaces cannot present different eligibility for one question.
+    //
+    // ⚠ AN INELIGIBLE CANDIDATE IS NOT A RESET. Filtering to zero falls through
+    // to `anaphoric_edit_ask_unresolved`, which still asks. The banned outcome
+    // stays unreachable — measured, not assumed.
+    const candidates = atTopRank.filter((c) => isEditClarifyTargetKind(c.kind));
 
     if (candidates.length === 1) {
       const bound = candidates[0]!;
@@ -3982,6 +4001,42 @@ export async function dispatchEditGraph(
       ) {
         const before = response.suggested_actions;
         const after = before.filter((a) => a.action_type !== 'run_analysis');
+        if (after.length !== before.length) {
+          strippedActions = before.length - after.length;
+          response = { ...response, suggested_actions: after };
+        }
+      }
+      // ⭐ SECOND STRIP CASE — the anaphoric branches that OFFER A TARGET SET.
+      //
+      // ⚠ MEASURED ON THE WIRE, and it refutes what this lane first assumed.
+      // The turn-5 reset was briefed as shipping `suggested_actions: []`. True
+      // of the branch, FALSE of the response: the 5 Sep capture carries THREE
+      // chips (`edit_graph_action_0/1/2`), each naming a different node, none
+      // carrying an `action_type` — so the dedupe above, which keys on
+      // `action_type`, cannot see them and the recovery chip is APPENDED beside
+      // them. A reply reading "Taking that as Sales Headcount Investment" would
+      // have shipped under four chips, three of them naming other entities.
+      // That contradicts the disclosure in the sentence directly above it.
+      //
+      // ⛔ DELIBERATELY NARROW, in three ways:
+      //   · Only the two branches that themselves offer targets. The
+      //     `_ask_unresolved` branch offers none and says so, and there the
+      //     pre-existing target chips are the user's only affordance — a strip
+      //     would take something away and give nothing back.
+      //   · Only chips WITHOUT an `action_type`. That is exactly the class the
+      //     dedupe above documents as "message-replay only". A functional
+      //     affordance (`run_analysis`, `explain_result`) answers a different
+      //     question from "which node did you mean" and survives.
+      //   · Nothing is invented: the recovery's own chips are appended by the
+      //     existing merge below, unchanged.
+      else if (
+        (recoveryOutcome.branch === 'anaphoric_edit_bound'
+          || recoveryOutcome.branch === 'anaphoric_edit_ask_candidates')
+        && response.suggested_actions
+        && response.suggested_actions.length > 0
+      ) {
+        const before = response.suggested_actions;
+        const after = before.filter((a) => Boolean(a.action_type));
         if (after.length !== before.length) {
           strippedActions = before.length - after.length;
           response = { ...response, suggested_actions: after };
