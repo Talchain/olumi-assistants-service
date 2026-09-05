@@ -87,6 +87,28 @@ function turnLabel(t: TurnCapture): string {
   return t.index === BRIEF_TURN_INDEX ? 'turn 0 (the brief)' : `turn ${t.index}`;
 }
 
+/**
+ * What the turn SAID, for the evidence of any limb that FAILS on structure.
+ *
+ * ⚠ ADDED AFTER THE FIRST LIVE RUN, WHICH RETURNED C5 FAIL AND COULD NOT BE
+ * ADJUDICATED. Turn 5 carried no `graph_patch` block and the graph hash did not
+ * move — structurally, the correction did not reach the object. But "Can you
+ * update it with the correct range?" names no range, so a CLARIFYING QUESTION
+ * is a legitimate answer, and a clarifying question also produces no patch and
+ * no hash movement. The two are indistinguishable from structure alone, and the
+ * report printed no prose, so the FAIL could not be told from correct
+ * behaviour by anyone reading it.
+ *
+ * The structural verdict is unchanged — the criterion is about the correction
+ * REACHING the object, and it did not. What changes is that a reader can now
+ * see WHY, and can say whether the product asked or claimed.
+ */
+function saidWhat(t: TurnCapture | undefined): string {
+  if (t === undefined || t.body === undefined) return 'said: (no body)';
+  const text = collectUserVisibleStrings(t.body).find((s) => s.path === 'assistant_text')?.value;
+  return text === undefined ? 'said: (no assistant_text)' : `said: "${excerpt(text, 600)}"`;
+}
+
 // ---------------------------------------------------------------------------
 // C1 — no leader / rank / standing / robustness designation before the licence
 // ---------------------------------------------------------------------------
@@ -960,6 +982,10 @@ function evaluateC5(input: EvaluationInput): CriterionResult {
 
     const evidence: string[] = [
       `named object bound by identity: ${target.nodeId} "${target.label}" (value at draft: ${JSON.stringify(target.value)})`,
+      // The prose is what tells a CLARIFYING QUESTION (legitimate: the turn
+      // names no range) from a CLAIMED CHANGE THAT DID NOT HAPPEN (the defect).
+      // Structure cannot separate them; both produce no patch and no movement.
+      `turn 5 ${saidWhat(t5)}`,
       `turn 5 graph_patch blocks: ${patches.length} (${onTarget.length} on target, ${offTarget.length} off target)`,
       ...onTarget.map(
         (p) =>
@@ -1042,6 +1068,7 @@ function evaluateC5(input: EvaluationInput): CriterionResult {
     let verdict: Verdict;
     const evidence: string[] = [
       `turn 6 carries an analysis result: ${ran}`,
+      `turn 6 ${saidWhat(t6)}`,
       `admission: ${admission.kind === 'present' ? `structurally_analysable=${admission.structurally_analysable}, mode=${admission.permitted_analysis_mode}` : admission.why}`,
       `reasons: ${reasons.length === 0 ? 'none' : reasons.map((r) => `${r.field}/${r.code}`).join(', ')}`,
     ];
@@ -1178,6 +1205,7 @@ function evaluateC6(input: EvaluationInput): CriterionResult {
 
     const evidence: string[] = [
       `turn 7 blocks: [${blockTypesPresent(body).join(', ')}]`,
+      `turn 7 ${saidWhat(t7)}`,
       `graph hash turn 6 → turn 7: ${hashBefore ?? 'absent'} → ${hashAfter ?? 'absent'}` +
         (hashMoved === undefined ? ' (not comparable)' : hashMoved ? ' — MOVED' : ' — unchanged'),
       '⚠ THE ROUTE IS NOT ON THE WIRE. `turn_class` is telemetry-only and content-free; ' +

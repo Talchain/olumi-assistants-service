@@ -192,5 +192,30 @@ export function renderReport(outcome: HarnessOutcome): string {
   );
   L.push('');
 
+  // ---- what each turn said ----------------------------------------------
+  // A structural verdict without the prose beside it cannot be adjudicated.
+  // The first live run FAILED C5 on "no patch, no hash movement" — which is
+  // also exactly what a legitimate clarifying question produces. Nobody
+  // reading that report could tell the two apart.
+  L.push('## What each turn said');
+  L.push('');
+  L.push(
+    'A structural verdict is not adjudicable without the prose beside it: "no patch and no graph ' +
+      'movement" is the signature of a correction that failed AND of a clarifying question that was ' +
+      'the right answer. Both are printed so a reader can tell them apart.',
+  );
+  L.push('');
+  for (const turn of turns) {
+    const text = turn.body === undefined ? undefined : (turn.body as { assistant_text?: unknown }).assistant_text;
+    L.push(`**turn ${turn.index}** — _${turn.probes}_`);
+    L.push('');
+    L.push(
+      typeof text === 'string' && text.length > 0
+        ? `> ${text.replace(/\n+/g, '\n> ')}`
+        : `> _(no assistant_text${turn.transportError ? `; ${turn.transportError}` : ''})_`,
+    );
+    L.push('');
+  }
+
   return `${L.join('\n')}\n`;
 }

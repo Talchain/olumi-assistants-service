@@ -363,6 +363,45 @@ async function main(): Promise<number> {
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, md, 'utf8');
     process.stderr.write(`\nreport → ${out}\n`);
+    // PROTOCOL.md rule 9 — route evidence to a FILE. A harness that decides a
+    // FAIL and keeps none of the payload it decided on cannot be checked, and
+    // its verdict has to be taken on trust. The captures go beside the report
+    // in the SAME SHAPE the replay mode reads, so any live run can be replayed
+    // through the classifiers without re-driving the service.
+    //
+    // There is no secret on this seam to redact: /proxy/v5/turn takes no
+    // credential and CEE strips `user_id`, so a capture is a guest scenario's
+    // own turns and nothing else.
+    if (outcome.context.mode === 'live') {
+      const capturesPath = out.replace(/\.md$/, '') + '.captures.json';
+      writeFileSync(
+        capturesPath,
+        `${JSON.stringify(
+          {
+            note:
+              'Raw captures from a LIVE run. Replayable: `--replay <this file>`. ' +
+              'Not a committed fixture — turning a live run into one is the golden-journey ' +
+              'capture flow and needs the same authorisation.',
+            brief_sha256: outcome.context.briefSha256,
+            scenario_id: outcome.context.scenarioId,
+            builds: outcome.context.builds,
+            turns: outcome.turns.map((t) => ({
+              index: t.index,
+              probes: t.probes,
+              message: t.sent.message,
+              http_status: t.httpStatus,
+              elapsed_ms: t.elapsedMs,
+              ...(t.transportError === undefined ? {} : { transport_error: t.transportError }),
+              body: t.body,
+            })),
+          },
+          null,
+          2,
+        )}\n`,
+        'utf8',
+      );
+      process.stderr.write(`captures → ${capturesPath}\n`);
+    }
   } else {
     process.stdout.write(md);
   }
