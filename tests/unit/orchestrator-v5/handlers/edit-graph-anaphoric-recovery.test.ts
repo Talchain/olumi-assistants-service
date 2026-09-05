@@ -79,6 +79,26 @@ const TWO_CANDIDATES: TurnReferents = {
 const EMPTY_COMPLETE: TurnReferents = { referents: [], source: 'complete' };
 const DEGRADED: TurnReferents = { referents: [], source: 'degraded' };
 
+/**
+ * ⚠ A DEGRADED REGISTER THAT NEVERTHELESS CARRIES AN ENTRY.
+ *
+ * This fixture exists because a mutant survived without it. Deleting the
+ * `source !== 'degraded'` guard changed nothing observable, because the only
+ * degraded fixture was also EMPTY — so the two conditions could not be told
+ * apart and the guard was, on the evidence, asserting nothing.
+ *
+ * `projectTurnReferents` happens to return an empty list whenever it degrades,
+ * so today's producer cannot emit this shape. The guard is not about today's
+ * producer: `source` is the field that says whether the CONTENTS can be
+ * trusted, and a caller that supplies a partially-read register must still get
+ * a question rather than a confident bind. §4.2 is explicit — "0, **or**
+ * `source: 'degraded'`" — so degraded ASKS regardless of what it contains.
+ */
+const DEGRADED_WITH_ENTRY: TurnReferents = {
+  referents: [referent('node:919d7f50', 'Sales Headcount Investment')],
+  source: 'degraded',
+};
+
 const BASE = {
   message: WITNESSED_MESSAGE,
   priorFacts: [],
@@ -143,6 +163,7 @@ describe('§4.2 outcome 3 — nothing to bind to ASKS, and says what it looked a
   const cases: readonly [string, TurnReferents | null | undefined][] = [
     ['an empty but authoritative register', EMPTY_COMPLETE],
     ['a degraded register', DEGRADED],
+    ['a degraded register that still carries an entry', DEGRADED_WITH_ENTRY],
     ['no register supplied at all', undefined],
     ['an explicitly null register', null],
   ];
@@ -155,6 +176,24 @@ describe('§4.2 outcome 3 — nothing to bind to ASKS, and says what it looked a
       expect(r.assistantText).not.toBe(BANNED_RESET_TEXT);
     });
   }
+
+  it('a DEGRADED source is never trusted, even when it carries a lone candidate', () => {
+    // The discriminating case. An empty-degraded register cannot distinguish
+    // "we checked the source flag" from "the list happened to be empty"; this
+    // one can. Without it the `source !== 'degraded'` guard asserts nothing.
+    const r = decideNoOpRecovery({ ...BASE, referents: DEGRADED_WITH_ENTRY });
+    expect(r.branch).toBe('anaphoric_edit_ask_unresolved');
+    expect(r.assistantText).not.toContain('Taking that as');
+    expect(r.assistantText).not.toContain('Sales Headcount Investment');
+  });
+
+  it('CONTRAST: the SAME lone candidate under a complete source DOES bind', () => {
+    // Opposite-direction twin. Proves the refusal above is caused by `source`,
+    // not by anything about the candidate itself.
+    const r = decideNoOpRecovery({ ...BASE, referents: ONE_CANDIDATE });
+    expect(r.branch).toBe('anaphoric_edit_bound');
+    expect(r.assistantText).toContain('Sales Headcount Investment');
+  });
 
   it('says what it actually looked at, and claims nothing it did not', () => {
     const r = decideNoOpRecovery({ ...BASE, referents: EMPTY_COMPLETE });
