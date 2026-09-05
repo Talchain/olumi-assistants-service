@@ -1223,8 +1223,56 @@ export function buildRecordsCompletionPrompt(args: {
     renderLegalEdgeVocabulary(),
     "",
     "Set `effect` to `positive` or `negative` on every link. On a link FROM an option TO a factor,",
-    "set `sets_to` to the level that factor takes under that option, in the factor's own unit —",
-    "but only where the brief gives you the basis for it.",
+    "set `sets_to` to the level that factor takes under that option, in the factor's own unit.",
+    "",
+    // ⭐⭐ THE MAGNITUDE POLICY IS THE DRAFT'S, WORD FOR WORD (`instruction.ts`,
+    // `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES`) — re-wrapped for this
+    // array, not reworded.
+    //
+    // Until 2026-09-05 this clause ended *"— but only where the brief gives you
+    // the basis for it"*: v9's withholding rule, which the DRAFT prompt deleted
+    // on 2026-08-30 and this prompt kept. Both prompts answer ONE question —
+    // "how much does this option move this factor?" — so that was a
+    // hand-maintained mirror (trap 12), not two authorities answering different
+    // questions (trap 21).
+    //
+    // The consequence was self-defeating: this pass exists to close
+    // `option_without_chain` / `NO_EFFECT_PATH`, and it closed them while
+    // withholding the magnitude on exactly the edges it had just created — so
+    // every new option→factor pair raised `MISSING_OPTION_VALUE`
+    // (`analysis-ready-helper.ts:734`) and the user was asked to type the number
+    // in by hand. `instruction.ts:99-113` records the draft-side measurement:
+    // 20 of 23 fresh journeys, and *"THE MODEL WAS NOT FAILING TO COMPLY; IT WAS
+    // COMPLYING."*
+    //
+    // ⭐ NOTHING NEW IS TRUSTED BY THIS CHANGE, and that is not inherited from
+    // the draft side — it is a property of the seam. `anthropic.ts:2076`
+    // re-projects the MERGED record set through `projectRecordsToGraph`, whose
+    // signature takes `(records, brief?)` and carries NO pass or turn argument:
+    // it is structurally incapable of telling a completion-produced claim from a
+    // draft-produced one. So an uncited magnitude from this prompt is stamped
+    // `cee_hypothesis` and a cited one `brief_extraction`, by the same
+    // `bindDirectStatedMagnitude` and on the same evidence.
+    //
+    // `basis` is emittable here: `buildRecordsCompletionSchema` reuses
+    // `buildDraftClaimItemSchema` (`grammar.ts:516`), and this prompt renders
+    // `stated_items` above, so the indices resolve.
+    //
+    // Kept in agreement by `completion-magnitude-policy-agrees-with-draft.test.ts`,
+    // which EXTRACTS these paragraphs from the draft instruction rather than
+    // holding a third copy — so the next drift on either side REDs.
+    "Where the brief gives you the figure — a number the user stated, or a change they described —",
+    "use that, and set `basis` to the stated_items it came from. Where the brief does not give you a",
+    "figure, give your best estimate, reasoned from what the brief does tell you: the scale of the",
+    "numbers already in it, and the direction and rough size of the change this option describes.",
+    "Keep the factor's own unit, and keep your estimates consistent across the options, so the",
+    "comparison between them means something.",
+    "",
+    "Leave `sets_to` out only where you genuinely cannot form a defensible estimate even from the",
+    "brief's own scale. That is a truthful answer, and it also stops the analysis running on that",
+    "option — so do not reach for it merely because you are unsure of the exact number. An estimate",
+    "you can defend is worth more to the user than a gap they must fill before they can see anything",
+    "at all.",
     "",
     "Where two options are listed above as indistinguishable: the analysis cannot compare them, and",
     "a model carrying such a pair is rejected outright — so leaving them as they are is not a safe",
