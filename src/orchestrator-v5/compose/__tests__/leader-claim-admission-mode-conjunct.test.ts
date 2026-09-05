@@ -91,6 +91,25 @@ const ANSWER = `${RECEIPT} ${FOUNDER_CLAIM}`;
  * below the floor caps a CLAIM only on a model that can actually run; when the
  * run itself is refused the field is answering a different question and this
  * gate stands down. Both directions are asserted below.
+ *
+ * ⚠⚠ AND THREE CELLS THIS HELPER CAN BUILD ARE PRODUCER-UNREACHABLE — NAMED HERE
+ * SO THE NEXT READER DOES NOT INHERIT THEM AS REACHABILITY CLAIMS (CLAUDE.md
+ * trap 20: a fixture proves what it was pointed at, and a row minted from it
+ * must not generalise). `analysisAdmissionFrom` mints `structurally_analysable`
+ * from the very `admission.willProceed` that `deriveMode` branches on, so
+ * production can emit ONLY `{none, exploratory} × false` and
+ * `{quantified_provisional, comparative_leader} × true`. These three arms are
+ * UNIT-LEVEL BINDING PROOFS, not coverage of live cells:
+ *
+ *   `none` + `true`                     the discriminating twin — without it the
+ *                                       gate could be a string match on 'none'
+ *   `exploratory` + `true`              the below-floor rung, held analysable so
+ *                                       that it reaches the mode reader at all
+ *   `quantified_provisional` + `false`  proves the structural half governs a
+ *                                       self-contradictory payload
+ *
+ * They are deliberate and the discriminating twin genuinely needs one. They are
+ * simply not evidence about the wire.
  */
 function analysisReady(
   mode: string | null,
