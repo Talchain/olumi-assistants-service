@@ -1112,11 +1112,21 @@ const EXPLICIT_ANALYSIS_REQUEST_PATTERNS: readonly RegExp[] = [
   // two answer different questions and have opposite safe directions).
   // Asserted directly in TWIN E, over this exact eight-message set.
   //
-  // ⚠ KNOWN-DROPPED, pinned rather than papered over (trap 22f). Non-bare
-  // neighbours still decline: "Please rerun.", "Rerun, please.", "Rerun...",
-  // "Rerun and explain." Each costs one click on the offered chip. Adding a
-  // clause for any of them is the second round trap 22f bans — the exit is to
-  // ask the user, not to widen this again.
+  // ⚠ KNOWN-DROPPED — A SAMPLED FLOOR, NOT THE SET, and stated rather than
+  // papered over (trap 22f). Non-bare neighbours still decline: "Please
+  // rerun.", "Rerun, please.", "Rerun...", "Rerun and explain." — and, measured
+  // at this tip and NOT fixed here, "Run." and "Run!" (the same defect one word
+  // shorter, and the nearest neighbours of the founder's own turn), plus "Rerun
+  // please.", "Yes, rerun.", "Just rerun.", "Rerun now.", "Rerun again.",
+  // "Rerun!!" and "re run". All of them decline identically before and after
+  // this change, so none is a regression from it. That list is a SAMPLE of an
+  // open class, never a census of it: `analysis-election-gate.test.ts` pins six
+  // messages exactly — the four above plus "Fine, rerun." and "OK. Rerun." —
+  // and it does so over a nine-message candidate array, which makes it silent
+  // about any message it does not spell. Do not grow either list to track the
+  // class; that is the mirror trap 12 bans. Each drop costs one click on the
+  // offered chip. Adding a clause for any of them is the second round trap 22f
+  // bans — the exit is to ask the user, not to widen this again.
   /^\s*re-?run\s*[.!]?\s*$/i,
 ];
 

@@ -15,7 +15,12 @@
  *      the product itself emits. This is preamble P8's obligation made
  *      executable: the product must be able to accept the sentence it printed.
  *   3. KNOWN-DROPPED — pinned EXACTLY, so the honest gap REDs if it grows OR
- *      shrinks (trap 22f's rule for shipping a known gap).
+ *      shrinks (trap 22f's rule for shipping a known gap). ⚠ READ THE SCOPE
+ *      WITH IT: each `toEqual` is exact over ITS OWN `CANDIDATES` array and
+ *      silent about every message that array does not spell. They are SAMPLED
+ *      FLOORS on an open class, never censuses of it — do not grow one to
+ *      "match what drops" (trap 12's tracking mirror); add a row only when a
+ *      real captured turn hits it.
  *
  * The fixture is hash-bound to the wire, so corpus 1 cannot decay into a
  * tautology when the prompt is re-pinned (trap 12b): the binding assertion
@@ -402,26 +407,48 @@ describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', 
   });
 
   /**
-   * ⭐ THE HONEST GAP, PINNED EXACTLY (trap 22f's rule for shipping a known
-   * one). The shipped pattern is anchored at `^`, so a bare `rerun` that
-   * follows a licensed left context is DROPPED. These are genuine requests and
-   * each costs the user one click on the offered chip.
+   * ⭐ THE HONEST GAP — A SAMPLED FLOOR, NOT THE SET (trap 22f's rule for
+   * shipping a known one). The shipped pattern is anchored at `^`, so a bare
+   * `rerun` that follows a licensed left context is DROPPED. These are genuine
+   * requests and each costs the user one click on the offered chip.
    *
-   * ⚠ THIS SET IS ALSO THE ONLY THING THAT MAKES THE `^` ANCHOR OBSERVABLE.
-   * Measured: with the `^` removed, "Fine, rerun." and "OK. Rerun." flip to
-   * admitted and this assertion REDs. Every other message in every corpus in
-   * this file declines by some other route, so without these rows the `^`
-   * could be deleted with the whole suite green — it survived exactly that
-   * mutant before they were added.
+   * ⚠ WHAT THE `toEqual` BELOW ACTUALLY PINS, stated so it is not over-read.
+   * It is exact over ONE THING: the nine-message `CANDIDATES` array in the test
+   * beneath it. It is a FLOOR on an OPEN class, never an inventory of that
+   * class — a message this file does not spell cannot make it RED, however
+   * plainly it belongs. Do NOT grow the list to "match what drops": enumerating
+   * an open class is the tracking mirror this estate's doctrine bans (trap 12),
+   * and it would trade a true small claim for a false large one. Add a row only
+   * when a REAL captured turn hits it, and name the capture.
+   *
+   * ⚠ FURTHER MEMBERS OF THE SAME CLASS — MEASURED AT THIS TIP, DELIBERATELY
+   * NEITHER PINNED NOR FIXED. `"Run."` and `"Run!"` are the same defect one
+   * word shorter, and the nearest neighbours of the founder's own turn; also
+   * declining are `"Rerun please."`, `"Yes, rerun."`, `"Just rerun."`,
+   * `"Rerun now."`, `"Rerun again."`, `"Rerun!!"` and `"re run"`. All nine
+   * decline identically at the base commit and at this head, so none is a
+   * regression from this change — they are recorded so this file cannot read as
+   * closing more of the class than it does. Adding a clause for any of them is
+   * the second round trap 22f bans.
+   *
+   * ⚠ THE ROWS BELOW ARE ALSO THE ONLY THING THAT MAKES THE `^` ANCHOR
+   * OBSERVABLE. Measured: with the `^` removed, "Fine, rerun." and "OK. Rerun."
+   * flip to admitted and this assertion REDs. Every other message in every
+   * corpus in this file declines by some other route, so without these rows the
+   * `^` could be deleted with the whole suite green — it survived exactly that
+   * mutant before they were added (re-measured: run the `^`-dropped source
+   * against the pre-pin spec at `e68fb825` and it reads 81 passed, 0 failed).
    *
    * ⚠⚠ AND THE REASON WE ARE NOT SIMPLY DROPPING THE `^`. It was RUN, not
-   * argued about: removing it closes both rows below and REDs nothing in this
-   * file. That makes it a plausible follow-up, NOT a free win — it widens the
-   * predicate from "the message IS the verb" to "the message ENDS in the verb
-   * at a licensed left context", which is a different and much larger input
-   * space that this file's corpora barely sample. A second widening needs its
-   * own corpus from outside the author's head, in BOTH directions (trap 22b).
-   * Adding another clause here instead is the second round trap 22f bans.
+   * argued about — and the run says the opposite of "free": with the `^`
+   * removed this file goes `1 failed | 81 passed`, and the failure is the
+   * `toEqual` immediately below. So dropping it is a plausible follow-up that
+   * must bring its own evidence, NOT a free win — it widens the predicate from
+   * "the message IS the verb" to "the message ENDS in the verb at a licensed
+   * left context", which is a different and much larger input space that this
+   * file's corpora barely sample. A second widening needs its own corpus from
+   * outside the author's head, in BOTH directions (trap 22b). Adding another
+   * clause here instead is the second round trap 22f bans.
    */
   const KNOWN_DROPPED_BARE: readonly string[] = [
     'Fine, rerun.',
@@ -432,13 +459,17 @@ describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', 
     'Rerun...',
   ];
 
-  it('the bare-imperative dropped set is EXACTLY the pinned list', () => {
+  it('over these nine candidates, the bare-imperative dropped set is EXACTLY the pinned floor', () => {
+    // ⚠ THE SCOPE IS THIS ARRAY AND NOTHING WIDER. `toEqual` makes the claim
+    // exact over `CANDIDATES`, so it REDs if one of these nine changes side in
+    // either direction — and it is SILENT about every message not listed here.
+    // That is deliberate (see the sampled-floor note above), not an oversight.
     const CANDIDATES = [
       // Must be admitted — the bare verb itself.
       'Rerun.',
       'Re-run.',
       'rerun',
-      // The honest gap.
+      // The honest gap, sampled — not the whole class.
       ...KNOWN_DROPPED_BARE,
     ];
     // Positive control (trap 13): the corpus is non-empty and mixed, so this
