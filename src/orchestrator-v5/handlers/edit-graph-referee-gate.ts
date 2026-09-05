@@ -566,6 +566,55 @@ export function buildNeedsEncodingAddNotice(
 }
 
 /**
+ * ⭐⭐ THE ORDER OF A HELD REPLY — what the user needs in order to decide
+ * comes FIRST; the change we are offering comes LAST.
+ *
+ * WITNESSED (founder session, 5 Sep 2026, deployed UI a9c2e050). Asked for
+ * THOUGHTS on context he had just supplied, the reply opened with the
+ * changeset: "I'm holding these changes rather than applying them straight
+ * away: add option 'Hire a Temporary Technical Lead', …". Paul's ruling:
+ * "It should start by providing its initial thoughts, recommendations and
+ * questions concisely, and THEN offer the update."
+ *
+ * The HOLD is correct and is untouched. Its POSITION was the defect, and so
+ * was the disclosure's: measured over the frozen live corpus
+ * (`live-assistant-text-corpus-2026-08-17/digit-bearing-replies.json`, 688
+ * recorded replies, 8 of them holds), 8/8 opened with the enumeration and
+ * 8/8 buried the needs-encoding disclosure in the last third — AFTER the
+ * consent sentence, i.e. after the reader has already been asked to decide.
+ * The parts were in exactly the wrong order.
+ *
+ * ⚠ WHAT THIS DELIBERATELY DOES NOT DO. The larger fix — stop discarding
+ * the edit LLM's own `coaching.summary` at `edit-graph-dispatch.ts` and lead
+ * with THAT — was measured and rejected. Running the shipped guards over the
+ * product's own prompt exemplars (`src/prompts/edit-graph-v6.ts`, n=7):
+ * `findSuccessClaimHit` trips on 2/7 ("Added competitor response…",
+ * "Removed brand perception…") and PASSES "Churn now has a stronger negative
+ * effect on revenue." and "Raise price now also reduces marketing spend to
+ * 25k." — present-tense STATE claims that are false on a held turn, because
+ * nothing was applied. Every shipped guard lets them through: the success
+ * detector is calibrated for the perfective "I've applied" family on the
+ * ZERO-OPERATION path. Leading with narration would have shipped a lie under
+ * a green suite, and telling true state claims from false ones is a new
+ * predicate over natural language — the oscillating class ROADMAP 2.1361
+ * measured over four rounds. This function classifies nothing and therefore
+ * has no direction to reverse.
+ *
+ * KNOWN-DROPPED, EXPLICIT: a hold with no disclosure still opens with the
+ * offer. There is nothing true and deterministic to put in front of it, and
+ * inventing a preamble would be new copy making new claims.
+ * `held-reply-leads-with-thinking.test.ts` pins that set exactly, so the
+ * behaviour REDs if it widens into "always prepend something".
+ */
+export function composeHeldReply(parts: {
+  readonly disclosure: string | null;
+  readonly offer: string;
+}): string {
+  const disclosure = parts.disclosure?.trim() ?? '';
+  return disclosure.length === 0 ? parts.offer : `${disclosure} ${parts.offer}`;
+}
+
+/**
  * P0 held-proposal survival (2026-07-15, DGAI #340) requirement 4 — honest
  * supersession. A newer hold for the SAME target silently retires the older
  * one via the commit carry-forward's same-key rule (`gmHeldProposalRef` is
@@ -1132,8 +1181,13 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         blockApply: true,
         // CONSENT-CLARITY AMENDMENT — the ask names the held change
         // (falls back to the generic swept copy when no safe subject).
-        assistantText:
-          needsEncodingNotice === null ? heldAsk : `${heldAsk} ${needsEncodingNotice}`,
+        // ⭐ ORDER: the disclosure leads, the offer closes. See
+        // `composeHeldReply` for the witness and for why the LLM's own
+        // narration is NOT what leads here.
+        assistantText: composeHeldReply({
+          disclosure: needsEncodingNotice,
+          offer: heldAsk,
+        }),
         suggestedActions: [held.chip],
         pendingActions: [held.pending],
         publicReason,
