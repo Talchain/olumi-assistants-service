@@ -169,6 +169,24 @@ function asRecord(v: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * Same keys, same values by `Object.is`. Used ONLY to decide whether a merge
+ * actually changed anything, so the module can keep its by-reference identity
+ * contract on a no-op. Deliberately shallow: `observed_state`'s tunable leaves
+ * are scalars, and a deep compare here would be a second, driftable opinion
+ * about a shape this module does not own.
+ */
+function shallowEqualRecords(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every(
+    (k) => Object.prototype.hasOwnProperty.call(b, k) && Object.is(a[k], b[k]),
+  );
+}
+
 /** Locate a node by id on an arbitrary (possibly hostile) ingress graph. */
 function findNode(graph: unknown, nodeId: string): Record<string, unknown> | null {
   const g = asRecord(graph);
@@ -194,9 +212,11 @@ function canonicaliseUpdateNodeValue(
   let observedPatch: Record<string, unknown> | null = null;
 
   for (const [key, to] of Object.entries(value)) {
-    // A key the schema already declares (including a canonical `observed_state`
-    // whole-object write) is passed through UNTOUCHED — its existing semantics,
-    // whatever they are, are not this lane's to change.
+    // A key the schema already declares is passed through UNTOUCHED — its
+    // existing semantics are not this lane's to change. `observed_state` is
+    // declared and so lands here too; it is passed through in the SAME sense,
+    // and the merge below then applies PLoT's `deepMerge` to it exactly as it
+    // does to a translated leaf. See the merge comment for why.
     if (NODE_DECLARED_FIELDS.has(key)) {
       out[key] = to;
       continue;
@@ -239,16 +259,52 @@ function canonicaliseUpdateNodeValue(
     out[key] = to;
   }
 
-  if (observedPatch === null) return null;
+  // ⭐ THE MERGE COVERS THE LITERAL WHOLE-OBJECT WRITE TOO, AND THAT IS THE
+  // FIX. This gate used to be `if (observedPatch === null) return null;`, so
+  // the merge below ran ONLY when some alias-spelled leaf had been translated.
+  // A literal `{ observed_state: { value } }` took the declared-field branch,
+  // translated nothing, returned null here, and `applyUpdateNode`'s
+  // `Object.assign` (its `NODE_REQUIRED_NESTED_FIELDS` set is EMPTY, because
+  // every object-typed NodeV3 field is `.optional()`) then REPLACED the whole
+  // object — dropping `unit` / `cap` / `raw_value`.
+  //
+  // The op key alone decided the semantics, and the edit LLM has no way to
+  // know which vocabulary is safe:
+  //     { 'data/value': v }            → merged
+  //     { 'observed_state/value': v }  → merged
+  //     { data: { value: v } }         → merged
+  //     { observed_state: { value: v } } → REPLACED  ← the only wiping spelling
+  // The divergence is not a decision anyone took; it falls out of
+  // `NODE_DECLARED_FIELDS` (= `Object.keys(NodeV3.shape)`) happening to
+  // contain `observed_state` and not `data`. One intent must have one outcome.
+  //
+  // `reconcileObservedValuePair` records this wipe as "a real and separate
+  // defect … Recorded, not absorbed" and declines to repair it there —
+  // correctly, because the repair belongs at the writer, which is here.
+  const literalObserved = asRecord(value[OBSERVED_ROOT]);
+  if (observedPatch === null && literalObserved === null) return null;
 
   // PLoT's `update_node` semantics (`deepMerge`): merge onto what the node
   // already has, so a value write never wipes `unit` / `raw_value` / `cap`.
   // An explicit `observed_state` in the same op still wins over the node's
   // existing state; the translated leaves win over both (they are the write
-  // the user confirmed).
+  // the user confirmed). That precedence is UNCHANGED — only the gate moved.
   const existing = asRecord(currentNode?.observed_state) ?? {};
   const explicit = asRecord(out[OBSERVED_ROOT]) ?? {};
-  out[OBSERVED_ROOT] = { ...existing, ...explicit, ...observedPatch };
+  const merged: Record<string, unknown> = {
+    ...existing,
+    ...explicit,
+    ...(observedPatch ?? {}),
+  };
+
+  // Identity is load-bearing (the module contract: an op that needs no
+  // translation is returned BY REFERENCE, and `translatedCount` is what the
+  // pinned tests assert). A literal write onto a node with NO stored
+  // observed_state — or one the merge leaves byte-equal — changes nothing, so
+  // it must still report zero translations rather than manufacture churn.
+  if (observedPatch === null && shallowEqualRecords(merged, explicit)) return null;
+
+  out[OBSERVED_ROOT] = merged;
   return out;
 }
 
