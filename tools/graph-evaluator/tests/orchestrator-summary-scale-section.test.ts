@@ -53,6 +53,24 @@ const UNATTESTED: ScaleConversionRecord = {
   attestation: "unattested",
 };
 
+/**
+ * Pull the DATA ROWS out of the section's markdown table.
+ *
+ * ⚠ Why this exists, and it is the point of the whole file: the section's own
+ * explanatory prose contains "A unitless `0.5` shown as `50%`". A bare
+ * `expect(md).toContain("`0.5`")` therefore passes off the PROSE and says
+ * nothing about the table — proven by a mutant that deleted the source-value
+ * column and left the suite green. Assertions here bind to the row.
+ */
+function scaleTableRows(md: string): string[] {
+  const section = md.split("## Unattested Scale Renders")[1] ?? "";
+  return section
+    .split("\n")
+    .filter((l) => l.trimStart().startsWith("|"))
+    .filter((l) => !/^\|\s*-{2,}/.test(l.trim()))       // separator
+    .filter((l) => !l.includes("Source value"));         // header
+}
+
 describe("run summary — unattested scale renders section", () => {
   it("prints a row naming the render, the source value and the factor behind it", () => {
     const md = generateOrchestratorSummary(
@@ -63,13 +81,45 @@ describe("run summary — unattested scale renders section", () => {
     );
 
     expect(md).toContain("## Unattested Scale Renders (diagnostic — not scored)");
-    // The three facts a reader needs to act: what was shown, what it came from,
-    // and which entity supplied it.
-    expect(md).toContain("`50%`");
-    expect(md).toContain("`0.5`");
-    expect(md).toContain("`factor:fac_retention`");
-    expect(md).toContain("unattested");
+
+    const rows = scaleTableRows(md);
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
+    // The facts a reader needs in order to act, asserted ON THE ROW: what was
+    // shown, what it came from, which entity supplied it, and why it counts.
+    expect(row).toContain("`50%`");
+    expect(row).toContain("`0.5`");
+    expect(row).toContain("`factor:fac_retention`");
+    expect(row).toContain("unattested");
+    expect(row).toContain("03-explain-results");
+
     expect(md).toContain("**1** unattested render(s) across **1** of **1** scored response(s)");
+  });
+
+  it("gives every record its own row", () => {
+    const md = generateOrchestratorSummary(
+      [
+        makeResult("case-a", [
+          UNATTESTED,
+          {
+            rendered: "35%",
+            rendered_value: 35,
+            source_value: 0.35,
+            source_ref: "top_driver:fac_cost.sensitivity",
+            attestation: "unattested",
+          },
+        ]),
+      ],
+      config,
+      "hash123",
+      false
+    );
+
+    const rows = scaleTableRows(md);
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toContain("`35%`");
+    expect(rows[1]).toContain("`0.35`");
+    expect(rows[1]).toContain("`top_driver:fac_cost.sensitivity`");
   });
 
   it("distinguishes MEASURED-AND-CLEAN from NOT-MEASURED", () => {
