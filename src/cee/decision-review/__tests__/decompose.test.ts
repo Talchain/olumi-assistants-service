@@ -93,6 +93,9 @@ function baseInput(): DecisionReviewInvokeInput {
       fragile_edge_count: 1,
       model_critique_count: 0,
       evidence_gaps_dropped_count: 0,
+      // No gap here was withheld for zero value of information — this fixture's
+      // gaps are all investigable. Distinct from the malformed count above.
+      evidence_gaps_zero_voi_count: 0,
       model_critiques_dropped_count: 0,
       model_critiques_capped_count: 0,
       has_deterministic_coaching: true,
