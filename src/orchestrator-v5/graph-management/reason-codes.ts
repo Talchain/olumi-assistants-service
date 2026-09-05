@@ -99,6 +99,13 @@ export const REMOVE_UNCONFIRMED = 'REMOVE_UNCONFIRMED' as const;
 // @talchain/schemas HeldProposalReasonCode enum is a wire contract this
 // service cannot extend unilaterally.
 export const USER_PROTECTED_ENTITY = 'USER_PROTECTED_ENTITY' as const;
+// P0 (witnessed 2026-09-04): the batch proposes a link the ENGINE deletes before
+// the analysis runs — PLoT's `filterOptionNodes` drops every edge incident to an
+// option or decision node (`src/normalisation/option-filter.ts:91-96`), with no
+// target-kind test. Holding such a batch for confirmation asks the user to
+// approve something that cannot take effect, so the gate refuses it instead.
+// See handlers/engine-discarded-link-gate.ts.
+export const ENGINE_DISCARDS_OPTION_LINK = 'ENGINE_DISCARDS_OPTION_LINK' as const;
 
 // --- Slice 4 idempotency ------------------------------------------------------
 export const PROPOSAL_ALREADY_APPLIED = 'PROPOSAL_ALREADY_APPLIED' as const;
@@ -140,6 +147,7 @@ export const MUTATION_REASON_CODES = Object.freeze([
   TUNABLE_APPLY_HELD,
   REMOVE_UNCONFIRMED,
   USER_PROTECTED_ENTITY,
+  ENGINE_DISCARDS_OPTION_LINK,
   PROPOSAL_ALREADY_APPLIED,
   CLASSIFY_FAILED,
 ] as const);
