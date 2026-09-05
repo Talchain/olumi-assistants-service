@@ -319,6 +319,34 @@ describe('display-safe drivers carry the investigation MAGNITUDE', () => {
     expect(investigation).not.toContain('strong measured value in resolving this');
   });
 
+  it('the verdict gate holds: an UNSCORED driver renders nothing even if a magnitude rides along', () => {
+    // ⭐ THIS CASE WAS FOUND BY A SURVIVING MUTANT, and it is NOT equivalent.
+    // Loosening the `verdict === 'informative'` gate in
+    // `informativeMagnitudePhrase` left all 37 tests green, because nothing
+    // pinned the ONE input class that discriminates: an `unscored` verdict
+    // carrying a positive magnitude. Measured, unmutated vs mutated:
+    //     unscored + voi 0.62 -> null   vs   "moderate measured value..."
+    // Unreachable through `deriveFactorInvestigationFromEnrichment` today
+    // (unscored ⟺ the VoI field was absent, so no magnitude is derived), but
+    // reachable at THIS boundary — and "unscored keeps today's behaviour
+    // byte-for-byte" is the invariant that would break. Absence of a producer
+    // signal must never be rendered as a measurement.
+    const out = formatAnalysisForContext(
+      analysisWithDrivers([
+        {
+          factor_label: 'Legacy factor',
+          sensitivity_value: 0.22,
+          investigation_verdict: 'unscored',
+          investigation_voi: 0.62,
+        },
+      ]),
+    );
+    expect(driverNamed(out, 'Legacy factor')).toEqual({
+      label: 'Legacy factor',
+      influence: 'weak positive influence',
+    });
+  });
+
   it('DOCTRINE A2: the banded magnitude carries no digits, like every other display phrase', () => {
     for (const voi of [0.004, 0.62]) {
       const out = formatAnalysisForContext(
