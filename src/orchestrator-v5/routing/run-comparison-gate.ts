@@ -8,6 +8,10 @@
  *
  *   - freshness === 'fresh' AND >= 2 successful runs: deterministic
  *     prior/current comparison. This is the ONLY verdict that grounds one.
+ *     When the two compared runs carry EQUAL `graph_hash_at_run` values the
+ *     mode is `same_inputs` rather than `compared`: the same comparison is
+ *     given, led by a sentence saying the pair cannot show the effect of an
+ *     update — see {@link SAME_INPUTS_LEAD_TEXT}.
  *   - freshness === 'stale' (the model was edited after the latest run):
  *     lead with re-run guidance. An old comparison is NEVER presented as
  *     the current edited model.
@@ -71,6 +75,13 @@ export type RunComparisonMode =
   | 'stale'
   | 'unconfirmed'
   | 'compared'
+  /**
+   * A confirmed-fresh pair whose two runs carry EQUAL, non-empty
+   * `graph_hash_at_run` values: both analyses ran on the same analysis
+   * inputs. The comparison is still given (scoped to those two runs), but it
+   * is led by the attribution limit in {@link SAME_INPUTS_LEAD_TEXT}.
+   */
+  | 'same_inputs'
   | 'insufficient_runs'
   | 'incomparable';
 
@@ -186,6 +197,68 @@ const INSUFFICIENT_RUNS_TEXT =
 const INCOMPARABLE_TEXT =
   'I could not line up the last two runs cleanly enough to compare them. '
   + 'Re-running the analysis is the most reliable way to see the current result.';
+
+/**
+ * The invitation that closes a `compared` answer. Extracted from the composer
+ * so the `same_inputs` mode can REPLACE it with {@link SAME_INPUTS_OFFER_TEXT}
+ * while the `compared` bytes stay exactly as they were.
+ */
+export const COMPARED_FOLLOW_UP_TEXT =
+  'If you want to test this further, ask what would change the result.';
+
+/**
+ * ⭐ THE SAME-INPUTS LEAD (turn 7 of the 5 Sep 2026 founder journey, CEE
+ * 1af54f6c). Opens a `same_inputs` answer: both compared runs carry the same
+ * `graph_hash_at_run`, so whatever the user was asking about, THIS PAIR cannot
+ * attribute a movement, or its absence, to it.
+ *
+ * WHAT THE DEFECT WAS. The user asked "How has the update changed the
+ * analysis?" after an edit that was never applied. The two newest successful
+ * runs both predated the edit attempt, so the gate answered "X still leads. The
+ * size of its lead is essentially unchanged." — true of the two runs, silent
+ * about the fact that neither run could have seen the update.
+ *
+ * WHAT THIS SENTENCE MAY AND MAY NOT CLAIM. Equal hashes mean equal analysis
+ * inputs at both runs. They do NOT mean a requested change never reached the
+ * model: apply A→H, then run H twice, and the hashes are equal while the edit
+ * succeeded (Codex CCC-DIALOGUE-038). So this copy only LIMITS ATTRIBUTION. It
+ * never says "not applied", "not reached", or any variant — a `same_inputs`
+ * answer must be equally true after a refused edit and after a successful one,
+ * and `run-comparison-same-inputs.test.ts` pins the whole emitted answer
+ * against that denial class.
+ *
+ * WHY NOT THE OBVIOUS WORDING. "Nothing changed" / "no changes were applied"
+ * are banned at egress (`compose/forbidden-user-facing-phrases.ts`) because
+ * they were lies after a real edit landed; the same sentence would be true
+ * here, which is one vocabulary answering two questions (CLAUDE.md trap #21).
+ * This copy is measured against `findForbiddenPhraseHit`,
+ * `findSuccessClaimHit` and the leader alarm in the same test file, each with a
+ * positive control.
+ *
+ * "inputs" is the hash's scope — the analysis-affecting fields — and no wider.
+ */
+export const SAME_INPUTS_LEAD_TEXT =
+  'These two analyses ran on the same inputs, so I can\'t use this pair to '
+  + 'show the effect of an update to the model.';
+
+/**
+ * The offer that closes a `same_inputs` answer, replacing
+ * {@link COMPARED_FOLLOW_UP_TEXT}.
+ *
+ * Written to be true in every state that reaches this mode: after a refused
+ * edit ("check that it was saved" finds it was not), after a successful edit
+ * whose pre-edit run does not exist ("check" finds it was; the second sentence
+ * says what is missing), and on an explicit two-rerun comparison (the
+ * conditional does not apply). It does not ask the user to repeat anything
+ * and does not run an analysis.
+ *
+ * ⚠ Deliberately NO re-run chip on this mode: re-running the same inputs
+ * produces the same pair again.
+ */
+export const SAME_INPUTS_OFFER_TEXT =
+  'If you were expecting an update to show here, check that it was saved to '
+  + 'the model. To show what an update changed, I need one analysis from '
+  + 'before it and one from after it.';
 
 /**
  * T1 claim safety (ROADMAP 1.233) — the sentence that replaces the
@@ -402,6 +475,10 @@ function assertWithheldCopyIsLeaderFree(): void {
     ['UNCONFIRMED_TEXT', UNCONFIRMED_TEXT],
     ['INSUFFICIENT_RUNS_TEXT', INSUFFICIENT_RUNS_TEXT],
     ['INCOMPARABLE_TEXT', INCOMPARABLE_TEXT],
+    // The `same_inputs` frame ships around a withheld comparison too.
+    ['COMPARED_FOLLOW_UP_TEXT', COMPARED_FOLLOW_UP_TEXT],
+    ['SAME_INPUTS_LEAD_TEXT', SAME_INPUTS_LEAD_TEXT],
+    ['SAME_INPUTS_OFFER_TEXT', SAME_INPUTS_OFFER_TEXT],
   ];
   for (const [name, copy] of probes) {
     if (textNamesLeadingOption(copy)) {
@@ -476,6 +553,20 @@ function composeComparison(
   authority: RunComparisonLeaderAuthority,
   movementLicence: MovementDirectionLicence,
 ): string {
+  return [...composeComparisonParts(delta, authority, movementLicence), COMPARED_FOLLOW_UP_TEXT].join(' ');
+}
+
+/**
+ * The comparison sentences WITHOUT the closing invitation, so the two modes
+ * that carry a comparison (`compared`, `same_inputs`) share one composer and
+ * differ only in the frame around it. All of the doc on
+ * {@link composeComparison} applies here.
+ */
+function composeComparisonParts(
+  delta: ContentSafeRunDelta,
+  authority: RunComparisonLeaderAuthority,
+  movementLicence: MovementDirectionLicence,
+): readonly string[] {
   const parts: string[] = [];
   const mayNamePrior = authority.prior;
   const mayNameCurrent = authority.current;
@@ -609,8 +700,7 @@ function composeComparison(
     parts[0] = WITHHELD_NOTHING_ELSE_CHANGED_TEXT;
   }
 
-  parts.push('If you want to test this further, ask what would change the result.');
-  return parts.join(' ');
+  return parts;
 }
 
 export function tryRunComparisonGate(
@@ -757,18 +847,47 @@ export function tryRunComparisonGate(
       && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option,
   };
 
+  // ⭐ THE SAME TWO FACTS THE DELTA WAS PROJECTED FROM. `pair` is this gate's
+  // own selection, so the band is computed over the pair the sentence
+  // quantifies — not over a second selection that could name a different
+  // "previous run".
+  const movementLicence = licenceForPair(pair.prior, pair.current);
+
+  // ⭐ SAME ANALYSIS INPUTS AT BOTH RUNS (turn 7, 5 Sep 2026). The hashes are
+  // the freshness reader's, carried on `pair` by the selector above — not a
+  // second read. Two NON-NULL equal hashes: the null side is `compared`, as
+  // today (a legacy fact with no hash proves nothing either way), and the
+  // selector already reads an empty string as null.
+  //
+  // Placed AFTER the comparability checks on purpose: an incomparable pair is
+  // `incomparable` whatever its hashes say, exactly as before.
+  if (
+    pair.current_graph_hash_at_run !== null
+    && pair.current_graph_hash_at_run === pair.prior_graph_hash_at_run
+  ) {
+    return {
+      matched: true,
+      mode: 'same_inputs',
+      // The scoped comparison is the SAME sentences `compared` would give —
+      // per-run leader authority, identity basis and movement licence all
+      // apply unchanged — framed by the attribution limit and the offer.
+      assistant_text: [
+        SAME_INPUTS_LEAD_TEXT,
+        ...composeComparisonParts(delta, authority, movementLicence),
+        SAME_INPUTS_OFFER_TEXT,
+      ].join(' '),
+      // No chip: re-running the same inputs produces the same pair again.
+      suggested_actions: [],
+      // As for `compared` below: the factual delta, for telemetry only.
+      leading_option_changed: delta.leading_option_changed,
+      leader_identity_basis: delta.leader_identity_basis,
+    };
+  }
+
   return {
     matched: true,
     mode: 'compared',
-    assistant_text: composeComparison(
-      delta,
-      authority,
-      // ⭐ THE SAME TWO FACTS THE DELTA WAS PROJECTED FROM. `pair` is this
-      // gate's own selection, so the band is computed over the pair the
-      // sentence quantifies — not over a second selection that could name a
-      // different "previous run".
-      licenceForPair(pair.prior, pair.current),
-    ),
+    assistant_text: composeComparison(delta, authority, movementLicence),
     suggested_actions: [],
     // Deliberately NOT gated on `authority`. This field has exactly one
     // consumer — the `v5.run_comparison_gate` telemetry event in
