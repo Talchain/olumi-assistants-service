@@ -15,7 +15,12 @@
  *      the product itself emits. This is preamble P8's obligation made
  *      executable: the product must be able to accept the sentence it printed.
  *   3. KNOWN-DROPPED — pinned EXACTLY, so the honest gap REDs if it grows OR
- *      shrinks (trap 22f's rule for shipping a known gap).
+ *      shrinks (trap 22f's rule for shipping a known gap). ⚠ READ THE SCOPE
+ *      WITH IT: each `toEqual` is exact over ITS OWN `CANDIDATES` array and
+ *      silent about every message that array does not spell. They are SAMPLED
+ *      FLOORS on an open class, never censuses of it — do not grow one to
+ *      "match what drops" (trap 12's tracking mirror); add a row only when a
+ *      real captured turn hits it.
  *
  * The fixture is hash-bound to the wire, so corpus 1 cannot decay into a
  * tautology when the prompt is re-pinned (trap 12b): the binding assertion
@@ -287,6 +292,271 @@ describe('the four discriminating twins (predicate level)', () => {
     // It must invite the model work the user actually asked about.
     expect(text).toMatch(/\bmodel\b/i);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 3b. THE BARE IMPERATIVE — the founder's "Rerun."
+// ---------------------------------------------------------------------------
+
+/**
+ * ⭐ PROVENANCE: a REAL user turn, not an invented one. Founder journey on
+ * deployed staging (CEE `1af54f6c`), 2026-09-05T16:53Z, turn 6 of eleven. The
+ * user typed exactly `Rerun.` and was answered with
+ * {@link ANALYSIS_ELECTION_DEMOTION_TEXT} — a sentence that tells them to say
+ * "run the analysis" instead. No analysis ran: `computed_at` was
+ * byte-identical across turns 3 through 11.
+ *
+ * WHY THE PREDICATE MISSED IT. `ANALYSIS_REQUEST_VERB_SOURCE` (`(?:re-?)?run`)
+ * requires an OBJECT, because `run` is an everyday transitive verb and `rerun`
+ * has a nominal homograph. A message that is NOTHING BUT the verb has no
+ * object to give it, so it fell to the bare-noun reading and was demoted.
+ *
+ * ⚠⚠ AND THE OBJECT REQUIREMENT DOES NOT ACTUALLY BUY THE EXCLUSION IT IS
+ * DEFENDED FOR — MEASURED AT THIS TIP, NOT ASSUMED. The homograph sentence the
+ * sibling predicate's ⚠ note names as the reason for the object rule,
+ * "Rerun analysis showed a different leader.", ALREADY reads TRUE here: the
+ * determiner is OPTIONAL in `ANALYSIS_REQUEST_OBJECT_SOURCE`, so `rerun` +
+ * `analysis` matches and the gate ADMITS it today. Pinned below, because it is
+ * the whole argument for why this change is strictly safe: an anchored pattern
+ * that matches ONLY a message consisting of the bare verb cannot admit any
+ * noun phrase, and therefore cannot make an already-admitted homograph worse.
+ *
+ * SCOPE, stated so it is not over-read. This admits an ELECTION the LLM router
+ * already made; it does NOT widen {@link looksLikeImperativeRerun}, the
+ * LLM-free DISPATCH predicate, whose false positive destroys a computed result
+ * and which must stay narrow (trap 21 — two questions under one name). That
+ * separation is asserted, not asserted-about.
+ */
+describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', () => {
+  it('the founder\'s exact turn-6 message is ADMITTED', () => {
+    // Bound by IDENTITY: this exact string, this exact outcome. Not a value
+    // predicate another message could satisfy (CLAUDE.md trap 19).
+    const outcome = evaluateAnalysisElection({
+      electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+      message: 'Rerun.',
+    });
+    expect(outcome.kind).toBe('admitted');
+    expect(outcome.kind === 'admitted' && outcome.reason).toBe('explicit_analysis_request');
+  });
+
+  it.each([
+    'Rerun.',
+    'Re-run.',
+    'rerun',
+    'RERUN.',
+    'Rerun!',
+    '  Rerun.  ',
+    're-run.',
+    'Rerun .',
+  ])('MUST-FIRE — a message that is nothing but the verb, %j, is ADMITTED', (message) => {
+    expect(
+      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message }).kind,
+    ).toBe('admitted');
+  });
+
+  it.each([
+    // Every must-fire row above has its OPPOSITE-DIRECTION TWIN here, in the
+    // same order (trap 22b: a corpus that tests one direction is a guard
+    // watching one door).
+    ['Rerun.', 'Rerun?'],            // instruction vs question
+    ['Re-run.', 'Re-runs.'],         // verb vs plural noun
+    ['rerun', 'reruns'],             // verb vs plural noun, no punctuation
+    ['RERUN.', 'RERUN COSTS.'],      // verb vs noun-modifier, case-insensitive
+    ['Rerun!', 'Rerun what?'],       // instruction vs question with an object
+    ['  Rerun.  ', '  The rerun.  '],// verb vs determiner + noun
+    ['re-run.', 're-run cost.'],     // verb vs compound noun
+    ['Rerun .', 'Rerun later.'],     // verb vs verb + adjunct (not bare)
+  ])('TWIN — %j is admitted but its neighbour %j is still DEMOTED', (_fire, decline) => {
+    expect(
+      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message: decline })
+        .kind,
+    ).toBe('demoted');
+  });
+
+  it.each([
+    // The four nominal readings this repo RECORDS as having once wrongly
+    // EXECUTED a re-run (see `IMPERATIVE_RERUN_PATTERNS`' ⚠ note). They are
+    // questions about a PAST run and must never be read as instructions.
+    'What changed in the re-run?',
+    'Show me the re-run results.',
+    'How long did the rerun take?',
+    'Was the rerun better?',
+    // Refusals — the shared negation veto must still outrank the new pattern.
+    "Don't rerun.",
+    'Do not rerun.',
+    'Never rerun.',
+    // Interrogatives — the shared interrogative veto must still fire.
+    'Should I rerun?',
+    'Do we rerun?',
+  ])('UNCHANGED — %j stays DEMOTED (the shared safety envelope still governs)', (message) => {
+    expect(
+      evaluateAnalysisElection({ electedHandlerId: GATED_ANALYSIS_HANDLER_ID, message }).kind,
+    ).toBe('demoted');
+  });
+
+  it('the homograph the object rule is defended for was ALREADY admitted — this change cannot worsen it', () => {
+    // Pinned so the load-bearing argument for this change cannot silently
+    // become false. If this ever flips to `demoted`, the justification above
+    // is stale and TWIN E must be re-argued, not merely re-run.
+    expect(
+      evaluateAnalysisElection({
+        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+        message: 'Rerun analysis showed a different leader.',
+      }).kind,
+    ).toBe('admitted');
+  });
+
+  /**
+   * ⭐ THE HONEST GAP — A SAMPLED FLOOR, NOT THE SET (trap 22f's rule for
+   * shipping a known one). The shipped pattern is anchored at `^`, so a bare
+   * `rerun` that follows a licensed left context is DROPPED. These are genuine
+   * requests and each costs the user one click on the offered chip.
+   *
+   * ⚠ WHAT THE `toEqual` BELOW ACTUALLY PINS, stated so it is not over-read.
+   * It is exact over ONE THING: the nine-message `CANDIDATES` array in the test
+   * beneath it. It is a FLOOR on an OPEN class, never an inventory of that
+   * class — a message this file does not spell cannot make it RED, however
+   * plainly it belongs. Do NOT grow the list to "match what drops": enumerating
+   * an open class is the tracking mirror this estate's doctrine bans (trap 12),
+   * and it would trade a true small claim for a false large one. Add a row only
+   * when a REAL captured turn hits it, and name the capture.
+   *
+   * ⚠ FURTHER MEMBERS OF THE SAME CLASS — MEASURED AT THIS TIP, DELIBERATELY
+   * NEITHER PINNED NOR FIXED. `"Run."` and `"Run!"` are the same defect one
+   * word shorter, and the nearest neighbours of the founder's own turn; also
+   * declining are `"Rerun please."`, `"Yes, rerun."`, `"Just rerun."`,
+   * `"Rerun now."`, `"Rerun again."`, `"Rerun!!"` and `"re run"`. All nine
+   * decline identically at the base commit and at this head, so none is a
+   * regression from this change — they are recorded so this file cannot read as
+   * closing more of the class than it does. Adding a clause for any of them is
+   * the second round trap 22f bans.
+   *
+   * ⚠ THE ROWS BELOW ARE ALSO THE ONLY THING THAT MAKES THE `^` ANCHOR
+   * OBSERVABLE. Measured: with the `^` removed, "Fine, rerun." and "OK. Rerun."
+   * flip to admitted and this assertion REDs. Every other message in every
+   * corpus in this file declines by some other route, so without these rows the
+   * `^` could be deleted with the whole suite green — it survived exactly that
+   * mutant before they were added (re-measured: run the `^`-dropped source
+   * against the pre-pin spec at `e68fb825` and it reads 81 passed, 0 failed).
+   *
+   * ⚠⚠ AND THE REASON WE ARE NOT SIMPLY DROPPING THE `^`. It was RUN, not
+   * argued about — and the run says the opposite of "free": with the `^`
+   * removed this file goes `1 failed | 83 passed (84)`, and the failure is the
+   * `toEqual` immediately below (it read `1 failed | 81 passed (82)` before the
+   * two `m`-flag rows below were added; the failing assertion is the same one). So dropping it is a plausible follow-up that
+   * must bring its own evidence, NOT a free win — it widens the predicate from
+   * "the message IS the verb" to "the message ENDS in the verb at a licensed
+   * left context", which is a different and much larger input space that this
+   * file's corpora barely sample. A second widening needs its own corpus from
+   * outside the author's head, in BOTH directions (trap 22b). Adding another
+   * clause here instead is the second round trap 22f bans.
+   */
+  const KNOWN_DROPPED_BARE: readonly string[] = [
+    'Fine, rerun.',
+    'OK. Rerun.',
+    'Please rerun.',
+    'Rerun and explain.',
+    'Rerun, please.',
+    'Rerun...',
+  ];
+
+  it('over these nine candidates, the bare-imperative dropped set is EXACTLY the pinned floor', () => {
+    // ⚠ THE SCOPE IS THIS ARRAY AND NOTHING WIDER. `toEqual` makes the claim
+    // exact over `CANDIDATES`, so it REDs if one of these nine changes side in
+    // either direction — and it is SILENT about every message not listed here.
+    // That is deliberate (see the sampled-floor note above), not an oversight.
+    const CANDIDATES = [
+      // Must be admitted — the bare verb itself.
+      'Rerun.',
+      'Re-run.',
+      'rerun',
+      // The honest gap, sampled — not the whole class.
+      ...KNOWN_DROPPED_BARE,
+    ];
+    // Positive control (trap 13): the corpus is non-empty and mixed, so this
+    // assertion can fail in both directions.
+    expect(CANDIDATES.length).toBe(9);
+    const dropped = CANDIDATES.filter((m) => !looksLikeExplicitAnalysisRequest(m)).sort();
+    expect(dropped).toEqual([...KNOWN_DROPPED_BARE].sort());
+  });
+
+  it('does NOT widen the LLM-free dispatch predicate (trap 21 — the separation holds)', () => {
+    const bareImperatives = [
+      'Rerun.',
+      'Re-run.',
+      'rerun',
+      'RERUN.',
+      'Rerun!',
+      '  Rerun.  ',
+      're-run.',
+      'Rerun .',
+    ];
+    // Positive control: the corpus is non-empty and the assertion is reachable.
+    expect(bareImperatives.length).toBe(8);
+    for (const message of bareImperatives) {
+      // `looksLikeImperativeRerun` may DISPATCH with no LLM call, and a false
+      // positive there destroys the user's computed result. It must stay
+      // exactly as narrow as it was.
+      expect(
+        looksLikeImperativeRerun(message),
+        `${message} must NOT become an LLM-free dispatch`,
+      ).toBe(false);
+      // …while the admission predicate now admits it.
+      expect(
+        looksLikeExplicitAnalysisRequest(message),
+        `${message} must be admitted by the gate's predicate`,
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * ⭐ THE ABSENT `m` FLAG IS A PROTECTION, SO IT IS PINNED HERE.
+   *
+   * The pattern's block comment credits `^`, `$` AND the absence of the `m`
+   * flag with keeping the match confined to a message that IS the bare verb.
+   * The first two were observable (mutants M5/M6, and the `toEqual` floor
+   * above). The third was NOT: adding `m` left the whole suite green, so a
+   * successor could have added it — or written the pattern fresh with it —
+   * and nothing would have gone red. This test is that missing guard.
+   *
+   * WHAT `m` WOULD DO, MEASURED at this head rather than argued: it turns `^`
+   * and `$` into LINE anchors, so the property degrades from "the message IS
+   * the verb" to "SOME LINE of the message is the verb" — and a message may
+   * then carry arbitrary other content, including the nominal readings the
+   * anchors exist to exclude. Both rows below read `demoted` at this head and
+   * `admitted` with `/…/im`.
+   *
+   * The single-line control in the same test is what stops this passing
+   * vacuously (trap 13): it fails if the predicate stops admitting anything,
+   * so a green here is evidence about the ANCHORS, not about the predicate
+   * being inert.
+   */
+  it.each([
+    // A genuine bare imperative on line 1, then a QUESTION about a past run.
+    // With `m` this is read as an explicit request to compute, and the
+    // question is answered by destroying the result it asks about.
+    'Rerun.\nWhat changed?',
+    // A bare `rerun` line inside a plainly NOMINAL message — the exact class
+    // the block comment says the anchors exclude.
+    'Notes:\nrerun\nThe rerun was slow.',
+  ])(
+    'the `m` flag is ABSENT and that is load-bearing — the multi-line message %j stays DEMOTED',
+    (message) => {
+      // Bound by IDENTITY to this exact string (trap 19), and asserted at the
+      // GATE, so what is pinned is the outcome the user gets.
+      const outcome = evaluateAnalysisElection({
+        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+        message,
+      });
+      expect(outcome.kind).toBe('demoted');
+      expect(looksLikeExplicitAnalysisRequest(message)).toBe(false);
+      // POSITIVE CONTROL, same predicate, same run: the single-line form the
+      // whole PR exists to admit must still be admitted. Without this the
+      // assertion above would pass just as happily against a predicate that
+      // had stopped matching anything at all.
+      expect(looksLikeExplicitAnalysisRequest('Rerun.')).toBe(true);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
