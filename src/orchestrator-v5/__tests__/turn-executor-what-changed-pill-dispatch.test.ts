@@ -274,6 +274,38 @@ describe('F2 CHANGE B — typed what_changed pill dispatch', () => {
     expect(text).not.toContain(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
   });
 
+  it("FREE-TEXT DOOR: the founder's verbatim turn-7 sentence reaches the gate by the regex, not the typed door, and gets the same-inputs answer", async () => {
+    // "How has the update changed the analysis?" typed as ordinary chat — no
+    // chip, no `chipClickForcedIntent` — on the two same-input runs. The spy
+    // records the executor passing `forceIntent: false`, so the free-text
+    // classifier is what admitted the turn.
+    mockState.priorFacts = sameInputsRuns();
+
+    const result = await runTurnExecutor(
+      makeMessagePayload({
+        scenario_id: SCENARIO_ID,
+        turn_id: `t-${randomUUID()}`,
+        message: 'How has the update changed the analysis?',
+        turn_class: 'decide',
+        stage: 'analyse',
+      }),
+      'req-wc-same-inputs-free-text',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        graphState: READY_GRAPH as never,
+      },
+    );
+
+    expect(gateSpy.calls).toBeGreaterThanOrEqual(1);
+    expect(gateSpy.forceIntents).toContain(false);
+    expect(gateSpy.forceIntents).not.toContain(true);
+    const text = assistantTextOf(result);
+    expect(text.startsWith(SAME_INPUTS_LEAD_TEXT)).toBe(true);
+    expect(text).toContain('Freelance + Moderate Ad Spend still leads.');
+    expect(text.endsWith(SAME_INPUTS_OFFER_TEXT)).toBe(true);
+    expect(text).not.toContain(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  });
+
   it('FAIL-CLOSED untouched: the same typed pill on a STALE model gets the honest re-run answer, never a comparison', async () => {
     mockState.priorFacts = twoRuns();
     // Persisted graph diverges from the runs' hash → stale verdict.

@@ -235,11 +235,19 @@ export const COMPARED_FOLLOW_UP_TEXT =
  * `findSuccessClaimHit` and the leader alarm in the same test file, each with a
  * positive control.
  *
- * "inputs" is the hash's scope — the analysis-affecting fields — and no wider.
+ * "analytical inputs" is the hash's scope — the analysis-affecting fields
+ * (`context/graph-hash.ts` excludes labels, descriptions and display fields)
+ * — and no wider: after a label-only rename and a re-run the hashes are equal
+ * (`run-comparison-gate.test.ts`, the F3 rename cases), so "the same inputs"
+ * would be false to that user while "the same analytical inputs" is not.
+ *
+ * "an update", not "that update": the lead is message-independent (the same
+ * bytes on a bare "What changed between the last two runs?", which names no
+ * update — `run-comparison-same-inputs.test.ts`).
  */
 export const SAME_INPUTS_LEAD_TEXT =
-  'These two analyses ran on the same inputs, so I can\'t use this pair to '
-  + 'show the effect of an update to the model.';
+  'These two analyses used the same analytical inputs. I can\'t use this pair '
+  + 'to show the effect of an update to the model.';
 
 /**
  * The offer that closes a `same_inputs` answer, replacing

@@ -32,7 +32,12 @@ import { describe, expect, it } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import * as gate from '../run-comparison-gate.js';
-import { tryRunComparisonGate, WITHHELD_NOTHING_ELSE_CHANGED_TEXT } from '../run-comparison-gate.js';
+import {
+  tryRunComparisonGate,
+  WITHHELD_CURRENT_LEADER_COMPARISON_TEXT,
+  WITHHELD_NOTHING_ELSE_CHANGED_TEXT,
+  WITHHELD_PRIOR_LEADER_COMPARISON_TEXT,
+} from '../run-comparison-gate.js';
 import { classifyAnalyticalIntent, hasMutationSignal } from '../analytical-intent.js';
 import { selectTwoNewestRunAnalysisFacts } from '../../coaching/compare-runs.js';
 import { findLeaderClaims } from '../../compose/leading-option-egress-guard.js';
@@ -60,11 +65,16 @@ function envelope(
   } as unknown as V2RunResponseEnvelope;
 }
 
-/** `hash` is EXPLICIT on every fixture: the hash pair is the axis under test. */
+/**
+ * `hash` is EXPLICIT on every fixture: the hash pair is the axis under test.
+ * `mayName` is the run's OWN persisted verdict (the per-run authority the
+ * gate conjoins with the turn's), permitted unless a case says otherwise.
+ */
 function runFact(
   env: V2RunResponseEnvelope,
   hash: string | null | undefined,
   computedAt: string,
+  mayName = true,
 ): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -74,8 +84,8 @@ function runFact(
       computed_at: computedAt,
       ...(hash === undefined ? {} : { graph_hash_at_run: hash }),
       constraint_verdict: {
-        may_name_leading_option: true,
-        constraint_verdict_state: 'evaluated_feasible' as const,
+        may_name_leading_option: mayName,
+        constraint_verdict_state: mayName ? ('evaluated_feasible' as const) : ('evaluated_infeasible' as const),
       },
     },
   } as unknown as HandlerFact;
@@ -101,6 +111,20 @@ const SAME_INPUTS_CHANGED = pair(runFact(ENV_B, 'H', T_CURRENT), runFact(ENV_A, 
 const DISTINCT_CHANGED = pair(runFact(ENV_B, 'h-current', T_CURRENT), runFact(ENV_A, 'h-prior', T_PRIOR));
 
 const FOUNDER_MESSAGE = 'How has the update changed the analysis?';
+
+// ── Codex's four minimal histories (BRIEF-BUILD-TURN7, acceptance table) ────
+//
+// Rows 1, 2 and 4 are ONE gate-visible state: two successful runs on hash H
+// under a fresh verdict. What differs between them happened AROUND the runs —
+// an edit refused after both, an edit applied before both, or nothing but an
+// explicit request to compare two reruns — and none of it is persisted (the V5
+// edit path writes no fact when nothing is applied), so the gate cannot tell
+// the three apart. One reply has to be true in all three, which is why it may
+// only limit attribution and never deny an edit.
+const ROW1_REFUSED_EDIT_AFTER_TWO_RUNS = SAME_INPUTS_IDENTICAL;
+const ROW2_EDIT_APPLIED_BEFORE_BOTH_RUNS = SAME_INPUTS_IDENTICAL;
+const ROW3_EDIT_APPLIED_BETWEEN_RUNS = DISTINCT_IDENTICAL;
+const ROW4_EXPLICIT_TWO_RERUN_COMPARISON = SAME_INPUTS_IDENTICAL;
 
 const ask = (
   priorFacts: readonly HandlerFact[],
@@ -129,6 +153,10 @@ function comparedBody(priorFacts: readonly HandlerFact[]): string {
 
 // The design ban (Codex CCC-DIALOGUE-038): no "not applied" / "not reached" class.
 const DENIAL_CLASS = /\bnot\s+(?:been\s+)?(?:applied|reached|saved|made|tested)\b|\bnever\s+(?:applied|reached|saved|made|tested)\b|\bhas\s+not\s+(?:changed|reached)\b|\bno\s+(?:update|change|edit)s?\s+(?:was|were)\b/i;
+
+// Row 4's "never invent a failed edit": an edit/update/change noun followed,
+// within the sentence, by a failure verb.
+const INVENTED_FAILED_EDIT = /\b(?:edit|update|change)s?\b[^.]*\b(?:failed|refused|rejected|blocked)\b/i;
 
 // Copy rules shared with the sibling gate suite.
 const FORBIDDEN = /\b(node|edge|graph|winner|sensitivity|robustness|_meta|option_id|node_id)\b/i;
@@ -199,6 +227,60 @@ describe('run-comparison: a fresh pair with EQUAL graph hashes (same analysis in
   });
 });
 
+// ── 1b. Codex's four minimal histories, one case per row ────────────────────
+
+describe("run-comparison: Codex's four minimal histories, one per row", () => {
+  it("the lead and the offer are the brief's bytes (interim response shape, CCC-DIALOGUE-038)", () => {
+    expect(gate.SAME_INPUTS_LEAD_TEXT).toBe(
+      "These two analyses used the same analytical inputs. I can't use this pair to show the effect of an update to the model.",
+    );
+    expect(gate.SAME_INPUTS_OFFER_TEXT).toBe(
+      'If you were expecting an update to show here, check that it was saved to the model. '
+      + 'To show what an update changed, I need one analysis from before it and one from after it.',
+    );
+  });
+
+  it('row 1 — run H; run H; a requested edit REFUSED: the attribution limit comes before any "still leads", and the next step closes it', () => {
+    const out = ask(ROW1_REFUSED_EDIT_AFTER_TWO_RUNS, FOUNDER_MESSAGE);
+    expect(out.matched && out.mode).toBe('same_inputs');
+    const text = textOf(out);
+    expect(text.startsWith(gate.SAME_INPUTS_LEAD_TEXT + ' ')).toBe(true);
+    expect(text.indexOf(gate.SAME_INPUTS_LEAD_TEXT)).toBeLessThan(text.indexOf('still leads'));
+    expect(text.endsWith(' ' + gate.SAME_INPUTS_OFFER_TEXT)).toBe(true);
+    // The next step is the offer, not a re-run chip.
+    expect(out.matched && out.suggested_actions).toHaveLength(0);
+  });
+
+  it('row 2 — apply A→H; run H; run H: the SAME reply as row 1, and it denies nothing', () => {
+    const row1 = ask(ROW1_REFUSED_EDIT_AFTER_TWO_RUNS, FOUNDER_MESSAGE);
+    const row2 = ask(ROW2_EDIT_APPLIED_BEFORE_BOTH_RUNS, FOUNDER_MESSAGE);
+    expect(row2).toEqual(row1);
+    expect(textOf(row2)).not.toMatch(DENIAL_CLASS);
+  });
+
+  it("row 3 — run A; apply A→H; run H: today's `compared` answer, byte-identical", () => {
+    const out = ask(ROW3_EDIT_APPLIED_BETWEEN_RUNS, FOUNDER_MESSAGE);
+    expect(out.matched && out.mode).toBe('compared');
+    expect(textOf(out)).toBe(
+      `Offshore still leads. The size of its lead is essentially unchanged. ${COMPARED_FOLLOW_UP}`,
+    );
+  });
+
+  it('row 4 — an explicit comparison of two unchanged-model reruns: the scoped comparison is given, and no failed edit is invented', () => {
+    const out = ask(ROW4_EXPLICIT_TWO_RERUN_COMPARISON, 'What changed between the last two runs?');
+    expect(out.matched && out.mode).toBe('same_inputs');
+    const text = textOf(out);
+    expect(text).toContain('Offshore still leads.');
+    expect(text).not.toMatch(DENIAL_CLASS);
+    expect(text).not.toMatch(INVENTED_FAILED_EDIT);
+  });
+
+  it('POSITIVE CONTROL: the invented-failed-edit pin sees an invented failed edit', () => {
+    expect('Your edit was refused, so the runs match.').toMatch(INVENTED_FAILED_EDIT);
+    expect('The update failed to save.').toMatch(INVENTED_FAILED_EDIT);
+  });
+});
+
 // ── 2. the egress guards read this copy ─────────────────────────────────────
 
 describe('run-comparison: same-inputs copy vs the egress guards', () => {
@@ -246,6 +328,47 @@ describe('run-comparison: same-inputs mode under a WITHHELD verdict', () => {
   it('POSITIVE CONTROL: the permitted arm IS visible to the alarm', () => {
     const text = textOf(ask(SAME_INPUTS_IDENTICAL, FOUNDER_MESSAGE, true));
     expect(findLeaderClaims({ assistant_text: text } as never).length).toBeGreaterThan(0);
+  });
+});
+
+// ── 3b. per-run authority (the MIXED verdicts) in the new mode ──────────────
+
+describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => {
+  // Equal hashes; one run's OWN persisted verdict withholds, the other's
+  // permits. The distinct-hash twins give the `compared` bytes to compare with.
+  const PRIOR_WITHHELD = pair(runFact(ENV_B, 'H', T_CURRENT, true), runFact(ENV_A, 'H', T_PRIOR, false));
+  const PRIOR_WITHHELD_DISTINCT = pair(runFact(ENV_B, 'h-current', T_CURRENT, true), runFact(ENV_A, 'h-prior', T_PRIOR, false));
+  const CURRENT_WITHHELD = pair(runFact(ENV_B, 'H', T_CURRENT, false), runFact(ENV_A, 'H', T_PRIOR, true));
+  const CURRENT_WITHHELD_DISTINCT = pair(runFact(ENV_B, 'h-current', T_CURRENT, false), runFact(ENV_A, 'h-prior', T_PRIOR, true));
+
+  it('PRECONDITION: the two mixed fixtures reach the mixed branches (the both-permitted twin names a leader change; they do not)', () => {
+    expect(textOf(ask(SAME_INPUTS_CHANGED))).toContain('The leading option has changed.');
+    expect(textOf(ask(PRIOR_WITHHELD))).not.toContain('The leading option has changed.');
+    expect(textOf(ask(CURRENT_WITHHELD))).not.toContain('The leading option has changed.');
+  });
+
+  it('prior withheld / current permitted: the withheld run stays withheld inside the same-inputs frame', () => {
+    const out = ask(PRIOR_WITHHELD);
+    expect(out.matched && out.mode).toBe('same_inputs');
+    const text = textOf(out);
+    expect(text).toBe(
+      `${gate.SAME_INPUTS_LEAD_TEXT} ${comparedBody(PRIOR_WITHHELD_DISTINCT)} ${gate.SAME_INPUTS_OFFER_TEXT}`,
+    );
+    expect(text).toContain('Onshore leads on the latest result.');
+    expect(text).toContain(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT);
+    expect(text).not.toContain('Offshore');
+  });
+
+  it('current withheld / prior permitted (the mirror): likewise', () => {
+    const out = ask(CURRENT_WITHHELD);
+    expect(out.matched && out.mode).toBe('same_inputs');
+    const text = textOf(out);
+    expect(text).toBe(
+      `${gate.SAME_INPUTS_LEAD_TEXT} ${comparedBody(CURRENT_WITHHELD_DISTINCT)} ${gate.SAME_INPUTS_OFFER_TEXT}`,
+    );
+    expect(text).toContain('Offshore came out ahead in the earlier run.');
+    expect(text).toContain(WITHHELD_CURRENT_LEADER_COMPARISON_TEXT);
+    expect(text).not.toContain('Onshore');
   });
 });
 
