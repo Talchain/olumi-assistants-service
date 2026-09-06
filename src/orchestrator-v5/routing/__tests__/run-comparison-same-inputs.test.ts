@@ -323,11 +323,24 @@ describe('run-comparison: same-inputs mode under a WITHHELD verdict', () => {
     expect(text).not.toContain('Offshore');
     expect(text).not.toContain('Onshore');
     expect(findLeaderClaims({ assistant_text: text } as never)).toHaveLength(0);
+    // The denial-class ban holds on THIS arm's bytes too. The withheld text is
+    // composed from its own constant, which the permitted-arm pins in section 1
+    // never read — so a denial injected there would otherwise ship unseen
+    // (#1364 review, F1: proven by injecting "That update has not reached the
+    // model." into WITHHELD_NOTHING_ELSE_CHANGED_TEXT — 33/33 green without this).
+    expect(text).not.toMatch(DENIAL_CLASS);
+    expect(WITHHELD_NOTHING_ELSE_CHANGED_TEXT).not.toMatch(DENIAL_CLASS);
   });
 
   it('POSITIVE CONTROL: the permitted arm IS visible to the alarm', () => {
     const text = textOf(ask(SAME_INPUTS_IDENTICAL, FOUNDER_MESSAGE, true));
     expect(findLeaderClaims({ assistant_text: text } as never).length).toBeGreaterThan(0);
+  });
+
+  it('POSITIVE CONTROL: the denial-class pin sees a denial spliced into the withheld frame', () => {
+    expect(
+      `${gate.SAME_INPUTS_LEAD_TEXT} ${WITHHELD_NOTHING_ELSE_CHANGED_TEXT} That update has not reached the model. ${gate.SAME_INPUTS_OFFER_TEXT}`,
+    ).toMatch(DENIAL_CLASS);
   });
 });
 
@@ -357,6 +370,9 @@ describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => 
     expect(text).toContain('Onshore leads on the latest result.');
     expect(text).toContain(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT);
     expect(text).not.toContain('Offshore');
+    // Denial-class ban on the mixed arm's bytes (see section 3).
+    expect(text).not.toMatch(DENIAL_CLASS);
+    expect(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT).not.toMatch(DENIAL_CLASS);
   });
 
   it('current withheld / prior permitted (the mirror): likewise', () => {
@@ -369,6 +385,15 @@ describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => 
     expect(text).toContain('Offshore came out ahead in the earlier run.');
     expect(text).toContain(WITHHELD_CURRENT_LEADER_COMPARISON_TEXT);
     expect(text).not.toContain('Onshore');
+    // Denial-class ban on the mirror arm's bytes (see section 3).
+    expect(text).not.toMatch(DENIAL_CLASS);
+    expect(WITHHELD_CURRENT_LEADER_COMPARISON_TEXT).not.toMatch(DENIAL_CLASS);
+  });
+
+  it('POSITIVE CONTROL: the denial-class pin sees a denial spliced into a mixed frame', () => {
+    expect(
+      `${gate.SAME_INPUTS_LEAD_TEXT} Onshore leads on the latest result. ${WITHHELD_PRIOR_LEADER_COMPARISON_TEXT} That update has not reached the model. ${gate.SAME_INPUTS_OFFER_TEXT}`,
+    ).toMatch(DENIAL_CLASS);
   });
 });
 

@@ -223,9 +223,12 @@ export const COMPARED_FOLLOW_UP_TEXT =
  * model: apply A→H, then run H twice, and the hashes are equal while the edit
  * succeeded (Codex CCC-DIALOGUE-038). So this copy only LIMITS ATTRIBUTION. It
  * never says "not applied", "not reached", or any variant — a `same_inputs`
- * answer must be equally true after a refused edit and after a successful one,
- * and `run-comparison-same-inputs.test.ts` pins the whole emitted answer
- * against that denial class.
+ * answer must be equally true after a refused edit and after a successful one.
+ * `run-comparison-same-inputs.test.ts` pins the emitted answer of every arm
+ * (permitted, withheld, and both mixed per-run verdicts), plus the lead, offer
+ * and `WITHHELD_*` constants, against that denial class, with a positive
+ * control per arm shape; a denial injected into any `WITHHELD_*` constant
+ * REDs its arm.
  *
  * WHY NOT THE OBVIOUS WORDING. "Nothing changed" / "no changes were applied"
  * are banned at egress (`compose/forbidden-user-facing-phrases.ts`) because
