@@ -264,7 +264,7 @@ describe('categorical evidence reaches actual prompt serialization', () => {
     expect(rows.find(r => r.edge_id === SALES_TO_RUNWAY)).toMatchObject({
       flip_requirement: 'weaker', flip_consequence_status: 'unverified',
     });
-    const monolith = buildDecisionReviewUserMessage(input);
+    const monolith = buildDecisionReviewUserMessage(input, null);
     const { slices } = buildSlices(input);
     for (const text of [monolith, slices.r3]) {
       expect(text).toContain('"flip_requirement": "weaker"');
