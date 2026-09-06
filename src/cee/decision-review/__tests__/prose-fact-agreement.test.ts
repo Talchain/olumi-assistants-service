@@ -23,6 +23,8 @@ import { join } from 'node:path';
 
 import {
   EDGE_KEY_SEPARATOR,
+  UNVERIFIED_CONSEQUENCE,
+  composeScopedVoiClaim,
   checkProseFactAgreement,
   classifyAssertedMovement,
   VOI_SUPERLATIVE_REPLACEMENT,
@@ -211,8 +213,8 @@ function enrichmentWith(requirement: 'weaker' | 'stronger'): Record<string, unkn
   return {
     edge_e_values: [
       requirement === 'weaker'
-        ? { from_id: 'a', to_id: 'b', current_mean: 0.65, flip_mean: 0.355, flip_direction: 'decrease' }
-        : { from_id: 'a', to_id: 'b', current_mean: 0.45, flip_mean: 0.745, flip_direction: 'increase' },
+        ? { from_label: 'Alpha', to_label: 'Beta', from_id: 'a', to_id: 'b', current_mean: 0.65, flip_mean: 0.355, flip_direction: 'decrease' }
+        : { from_label: 'Alpha', to_label: 'Beta', from_id: 'a', to_id: 'b', current_mean: 0.45, flip_mean: 0.745, flip_direction: 'increase' },
     ],
   };
 }
@@ -224,92 +226,102 @@ const REVIEW = (trigger: string) => ({
   },
 });
 
-describe('checkProseFactAgreement — directional remedy', () => {
-  it('redacts a claim that contradicts the fact', () => {
-    const r = checkProseFactAgreement(
-      REVIEW('If A drives B more than forecast,'),
-      enrichmentWith('weaker'),
-    );
-    expect(r.redactedContradicted).toBe(1);
-    expect(Object.keys(r.output.scenario_contexts as object)).toEqual([]);
-    // The remedy is a redaction, not a drop — the rest of the review survives.
-    expect(r.output.narrative_summary).toBe('Founder-led sales leads.');
-  });
+describe('checkProseFactAgreement — directional remedy (synthetic controls)', () => {
+  const scenario = (r: ReturnType<typeof checkProseFactAgreement>, key = 'a->b') =>
+    (r.output.scenario_contexts as Record<string, Record<string, string>>)[key];
 
-  it('KEEPS the same sentence when the fact points the same way — the twin', () => {
-    // Without this, "redacts a contradiction" is satisfied by a seam that
-    // redacts everything.
-    const r = checkProseFactAgreement(
-      REVIEW('If A drives B more than forecast,'),
-      enrichmentWith('stronger'),
-    );
-    expect(r.redactedContradicted).toBe(0);
-    expect(r.redactedUngrounded).toBe(0);
+  it.each(['weaker', 'stronger'] as const)('keeps the supported %s relationship challenge', requirement => {
+    const review = REVIEW('If Alpha drives Beta more than forecast,');
+    const r = checkProseFactAgreement(review, enrichmentWith(requirement));
+    expect(scenario(r).trigger_description).toBe(
+      `If the link from Alpha to Beta turns out ${requirement} than the model assumes,`);
+    expect(scenario(r).consequence).toBe(UNVERIFIED_CONSEQUENCE);
+    expect(r.output.narrative_summary).toBe(review.narrative_summary);
     expect(Object.keys(r.output.scenario_contexts as object)).toEqual(['a->b']);
-    expect(r.violations).toEqual([]);
+    expect(review.scenario_contexts['a->b'].consequence).toBe('then B overtakes A.');
   });
 
-  it('redacts an ungrounded claim when the producer shipped no fact for the edge', () => {
-    const r = checkProseFactAgreement(REVIEW('If A drives B more than forecast,'), {
-      edge_e_values: [
-        { from_id: 'x', to_id: 'y', current_mean: 1, flip_mean: 2, flip_direction: 'increase' },
-      ],
+  it.each([{}, { edge_e_values: [] }, { edge_e_values: [
+    { from_id: 'x', to_id: 'y', current_mean: 1, flip_mean: 2, flip_direction: 'increase' },
+  ] }])('qualifies condition AND consequence when this edge has no usable fact', enrichment => {
+    const r = checkProseFactAgreement(REVIEW('If Alpha drives Beta more than forecast,'), enrichment);
+    expect(scenario(r).trigger_description).toBe('If this relationship differs from what the model assumes,');
+    expect(scenario(r).consequence).toBe(UNVERIFIED_CONSEQUENCE);
+    expect(r.qualifiedTriggers).toBe(1);
+    expect(r.qualifiedConsequences).toBe(1);
+    expect(r.violations).toContainEqual({ rule: 'scenario_consequence_unverified', observed: 1 });
+  });
+
+  it.each([
+    'If Alpha drives Beta more slowly than expected,',
+    'If Alpha does not drive Beta less than forecast,',
+    'If Alpha decreases Beta more than forecast,',
+    'If Alpha rises faster than expected,',
+  ])('uses the structured coefficient fact for ambiguous/value prose: %s', trigger => {
+    const r = checkProseFactAgreement(REVIEW(trigger), enrichmentWith('weaker'));
+    expect(scenario(r).trigger_description).toBe('If the link from Alpha to Beta turns out weaker than the model assumes,');
+    expect(scenario(r).consequence).toBe(UNVERIFIED_CONSEQUENCE);
+  });
+
+  it.each(['then B overtakes A.', 'then C overtakes A.', 'then B overtakes C.'])(
+    'does not infer a run-bound pair from the separate fragile-edge alternative: %s', consequence => {
+      const review = REVIEW('If Alpha drives Beta less than forecast,');
+      review.scenario_contexts['a->b'].consequence = consequence;
+      const r = checkProseFactAgreement(review, { ...enrichmentWith('weaker'),
+        robustness: { fragile_edges: [{ from_id: 'a', to_id: 'b', alternative_winner_id: 'B' }] },
+        results: [{ option_id: 'A', win_probability: 0.7 }, { option_id: 'B', win_probability: 0.3 }],
+      });
+      expect(scenario(r).consequence).toBe(UNVERIFIED_CONSEQUENCE);
+      expect(JSON.stringify(r.output)).not.toContain(consequence);
     });
-    expect(r.redactedUngrounded).toBe(1);
-    expect(r.redactedContradicted).toBe(0);
-    expect(r.violations).toEqual([{ rule: 'directional_claim_ungrounded', observed: 1 }]);
+
+  it('uses same-run fragile labels when direction is absent', () => {
+    const r = checkProseFactAgreement(REVIEW('If Alpha grows,'), {
+      robustness: { fragile_edges: [{ from_id: 'a', to_id: 'b', from_label: 'Alpha', to_label: 'Beta' }] },
+    });
+    expect(scenario(r).trigger_description).toBe('If the link from Alpha to Beta turns out different from what the model assumes,');
+    expect(r.factsUnavailable).toBe(true);
   });
 
-  it('KEEPS an unclassifiable claim on a grounded edge, and counts it', () => {
-    const r = checkProseFactAgreement(
-      REVIEW('If A drives B more slowly than expected,'),
-      enrichmentWith('weaker'),
-    );
-    expect(r.unclassifiedKept).toBe(1);
-    expect(r.redactedContradicted).toBe(0);
-    expect(r.redactedUngrounded).toBe(0);
-    expect(Object.keys(r.output.scenario_contexts as object)).toEqual(['a->b']);
+  it.each(['a::b', 'not-an-edge'])('handles alternate or missing edge identity: %s', key => {
+    const r = checkProseFactAgreement({ scenario_contexts: { [key]: {
+      trigger_description: 'If Alpha drives Beta more than forecast,', consequence: 'then B overtakes A.',
+    } } }, enrichmentWith('weaker'));
+    expect(scenario(r, key).trigger_description).toContain(key === 'a::b' ? 'weaker' : 'differs');
+    expect(scenario(r, key).consequence).toBe(UNVERIFIED_CONSEQUENCE);
   });
 
-  it('resolves a "from::to" scenario key as well as "from->to"', () => {
-    const review = {
-      scenario_contexts: {
-        'a::b': { trigger_description: 'If A drives B more than forecast,', consequence: 'x' },
-      },
-    };
-    expect(checkProseFactAgreement(review, enrichmentWith('weaker')).redactedContradicted).toBe(1);
+  it('expresses sign reversal instead of treating merely weaker as sufficient', () => {
+    const r = checkProseFactAgreement(REVIEW('If Alpha drives Beta less than forecast,'), {
+      edge_e_values: [{ from_id: 'a', to_id: 'b', from_label: 'Alpha', to_label: 'Beta',
+        current_mean: 0.55, flip_mean: -0.6, flip_direction: 'decrease' }],
+    });
+    expect(scenario(r).trigger_description).toContain('opposite way');
+    expect(scenario(r).consequence).toBe(UNVERIFIED_CONSEQUENCE);
   });
 
-  it('treats an unsplittable key as ungrounded rather than skipping it', () => {
-    const review = {
-      scenario_contexts: {
-        'not-an-edge': { trigger_description: 'If A drives B more than forecast,', consequence: 'x' },
-      },
-    };
-    expect(checkProseFactAgreement(review, enrichmentWith('weaker')).redactedUngrounded).toBe(1);
-  });
-
-  it('says nothing about a "reversed" requirement in either direction', () => {
-    const reversed = {
-      edge_e_values: [
-        { from_id: 'a', to_id: 'b', current_mean: 0.55, flip_mean: -0.6, flip_direction: 'decrease' },
-      ],
-    };
-    for (const trigger of [
-      'If A drives B more than forecast,',
-      'If A drives B less than forecast,',
-    ]) {
-      const r = checkProseFactAgreement(REVIEW(trigger), reversed);
-      expect(r.redactedContradicted).toBe(0);
-      expect(r.unclassifiedKept).toBe(0);
+  it('rejects conflicting duplicate evidence regardless of row order', () => {
+    const rows = [...enrichmentWith('weaker').edge_e_values as object[],
+      ...enrichmentWith('stronger').edge_e_values as object[]];
+    for (const ordered of [rows, [...rows].reverse()]) {
+      const r = checkProseFactAgreement(REVIEW('If Alpha drives Beta less than forecast,'), { edge_e_values: ordered });
+      expect(scenario(r).trigger_description).toContain('different');
+      expect(r.factsUnavailable).toBe(true);
     }
   });
 
-  it('is total on unreadable input and makes no claim', () => {
+  it('is idempotent once both halves are qualified', () => {
+    const first = checkProseFactAgreement(REVIEW('If Alpha grows,'), enrichmentWith('weaker'));
+    const second = checkProseFactAgreement(first.output, enrichmentWith('weaker'));
+    expect(second.output).toEqual(first.output);
+    expect(second.violations).toEqual([]);
+  });
+
+  it('preserves unrelated reasoning on unreadable analytical input', () => {
     for (const bad of [null, undefined, 42, 'x', []]) {
-      const r = checkProseFactAgreement({ narrative_summary: 'x' }, bad, bad);
+      const r = checkProseFactAgreement({ narrative_summary: 'Investigate the evidence gap.' }, bad, bad);
       expect(r.violations).toEqual([]);
-      expect(r.output).toEqual({ narrative_summary: 'x' });
+      expect(r.output).toEqual({ narrative_summary: 'Investigate the evidence gap.' });
     }
   });
 });
@@ -356,92 +368,59 @@ describe('countVoiSuperlativeClaims', () => {
   });
 });
 
-describe('deriveVoiLicence', () => {
-  /**
-   * ⚠ EVERY CASE HERE IS BUILT FROM THE INVOKE INPUT, NOT THE ENRICHMENT, and
-   * that distinction is the correction this suite exists to hold. An earlier
-   * draft licensed superlatives from `factor_evppi` / `p_win_sensitivity` on
-   * the enrichment — fields `readIslResults` does not forward, so the model
-   * never sees them — and its "it licenses correctly" twin passed against a
-   * status literal (`above_resolution`) the producer does not emit. Both the
-   * fixture and the expectation came out of the author's head; they agreed
-   * with each other and with nothing else.
-   */
-  it('does not license when the input carried no evidence gaps at all', () => {
-    const licence = deriveVoiLicence({
-      deterministic_coaching: { readiness: 'unknown', evidence_gaps: [], model_critiques: [] },
-      isl_results: { factor_sensitivity: [{ factor_id: 'f1', elasticity: 1 }] },
-    });
-    expect(licence.rowsInspected).toBe(0);
-    expect(licence.licensed).toBe(false);
-  });
+// Synthetic EVPI controls use the producer's existing metric/method/identity fields.
+const evpiRow = (id: string, label: string, value: number, method = 'heuristic') => ({
+  factor_id: id, factor_label: label, evpi_percentage_points: value, evpi_method: method,
+});
+const voiInput = (rows: object[]) => ({ deterministic_coaching: { evidence_gaps: rows } });
+const comparableVoi = () => voiInput([evpiRow('a', 'Alpha', 4), evpiRow('b', 'Beta', 2)]);
+const supportedScopedClaim =
+  'Among the assessed factors (Alpha, Beta), checking Alpha has the highest estimated value of information using heuristic estimates.';
 
-  it('does not license from a zero voi', () => {
-    const licence = deriveVoiLicence({
-      deterministic_coaching: { evidence_gaps: [{ factor_id: 'f1', voi: 0, confidence: 0.5 }] },
-    });
-    expect(licence.rowsInspected).toBe(1);
-    expect(licence.licensed).toBe(false);
+describe('deriveVoiLicence — identity, unit, method and scope', () => {
+  it('supports the unique winner among two distinct comparable factors', () => {
+    const licence = deriveVoiLicence(comparableVoi());
+    expect(licence).toMatchObject({ licensed: true, winnerId: 'a', winnerLabel: 'Alpha',
+      method: 'heuristic', readingsCompared: 2, rowsInspected: 2 });
+    expect(licence.scope).toEqual([{ id: 'a', label: 'Alpha' }, { id: 'b', label: 'Beta' }]);
+    expect(composeScopedVoiClaim(licence)).toBe(supportedScopedClaim);
   });
-
-  it('licenses a non-zero voi — the twin', () => {
-    expect(
-      deriveVoiLicence({
-        deterministic_coaching: { evidence_gaps: [{ factor_id: 'f1', voi: 0.3, confidence: 0.5 }] },
-      }).licensed,
-    ).toBe(true);
+  it.each([
+    [evpiRow('a', 'Alpha', 4)],
+    [evpiRow('a', 'Alpha', 4), evpiRow('a', 'Alpha', 2)],
+    [evpiRow('a', 'Alpha', 4), evpiRow('b', 'Beta', 4)],
+    [evpiRow('a', 'Alpha', 0), evpiRow('b', 'Beta', 0)],
+    [evpiRow('a', 'Alpha', -4), evpiRow('b', 'Beta', 2)],
+    [evpiRow('a', 'Alpha', NaN), evpiRow('b', 'Beta', 2)],
+    [evpiRow('a', 'Alpha', Infinity), evpiRow('b', 'Beta', 2)],
+    [evpiRow('a', 'Alpha', 4), evpiRow('b', 'Beta', 2, 'different')],
+    [evpiRow('a', 'Alpha', 4), { factor_id: 'b', factor_label: 'Beta', voi: 0.2 }],
+    [evpiRow('a', 'Alpha', 4), { factor_id: 'b', factor_label: 'Beta', voi_score: 0.2 }],
+    [evpiRow('a', 'Alpha', 4), { factor_id: 'b', factor_label: 'Beta', evpi_percentage_points: 2 }],
+    [evpiRow('a', 'Alpha', 4), { ...evpiRow('b', 'Beta', 2), status: 'below_resolution' }],
+    [evpiRow('a', 'Alpha', 4), evpiRow('b', 'Alpha', 2)],
+  ])('rejects an insufficient or incompatible comparison %#', (...rows) => {
+    expect(deriveVoiLicence(voiInput(rows)).licensed).toBe(false);
   });
-
-  it('reads the upstream voi_score spelling as well as the renamed voi', () => {
-    for (const key of ['voi_score', 'voi']) {
-      expect(
-        deriveVoiLicence({
-          deterministic_coaching: { evidence_gaps: [{ factor_id: 'f1', [key]: 0.3 }] },
-        }).licensed,
-      ).toBe(true);
-    }
+  it('deduplicates the same factor across both input collections', () => {
+    const a = evpiRow('a', 'Alpha', 4);
+    const single = { ...voiInput([a]), isl_results: { factor_sensitivity: [a] } };
+    expect(deriveVoiLicence(single)).toMatchObject({ licensed: false, readingsCompared: 1 });
+    const double = { ...voiInput([a, evpiRow('b', 'Beta', 2)]), isl_results: { factor_sensitivity: [a] } };
+    expect(deriveVoiLicence(double)).toMatchObject({ licensed: true, readingsCompared: 2 });
   });
-
-  it('licenses a non-zero evpi_percentage_points on the forwarded sensitivity rows', () => {
-    expect(
-      deriveVoiLicence({
-        isl_results: {
-          factor_sensitivity: [{ factor_id: 'f1', evpi_percentage_points: 4.2 }],
-        },
-      }).licensed,
-    ).toBe(true);
-  });
-
-  it('does not license from enrichment-only VOI fields the prompt never receives', () => {
-    // factor_evppi / decision_evpi / p_win_sensitivity / factor_sensitivity
-    // .value_of_information are NOT forwarded by readIslResults. ISL states of
-    // p_win_sensitivity that it "is NOT value-of-information" at all, and
-    // enrichment-manifest.ts::R_VOI_NOT_COACH_NARRATED records that narrating
-    // the family in prose is forbidden pending doctrine. Licensing a
-    // superlative from any of them would cite evidence the model never saw.
-    expect(
-      deriveVoiLicence({
-        factor_evppi: [{ factor_id: 'f1', evppi: 0.4, status: 'resolved' }],
-        p_win_sensitivity: [{ factor_id: 'f1', p_win_delta: 0.4, status: 'resolved' }],
-        decision_evpi: 99,
-        factor_sensitivity: [{ factor_id: 'f1', value_of_information: 0.9 }],
-      }).licensed,
-    ).toBe(false);
-  });
-
-  it('reports zero rows inspected on an unreadable input', () => {
-    for (const bad of [null, undefined, 7, 'x', []]) {
-      expect(deriveVoiLicence(bad).rowsInspected).toBe(0);
-      expect(deriveVoiLicence(bad).licensed).toBe(false);
+  it('does not substitute other scientific quantities or unknown input', () => {
+    for (const input of [null, undefined, 7, 'x', [], { decision_evpi: 99,
+      factor_evppi: [{ factor_id: 'a', evppi: 0.4, status: 'resolved' }],
+      p_win_sensitivity: [{ factor_id: 'b', p_win_delta: 0.9, status: 'resolved' }] }]) {
+      expect(deriveVoiLicence(input)).toMatchObject({ licensed: false, rowsInspected: 0 });
     }
   });
 });
 
 describe('checkProseFactAgreement — VOI remedy', () => {
   const unlicensed = { deterministic_coaching: { evidence_gaps: [] } };
-  const licensed = {
-    deterministic_coaching: { evidence_gaps: [{ factor_id: 'f1', voi: 0.3 }] },
-  };
+  const licensed = comparableVoi();
   const review = () => ({
     narrative_summary: 'Founder-led sales leads.',
     readiness_rationale:
@@ -467,12 +446,26 @@ describe('checkProseFactAgreement — VOI remedy', () => {
     expect(Object.keys(r.output).sort()).toEqual(['narrative_summary', 'readiness_rationale']);
   });
 
-  it('leaves the same review byte-identical when a voi reading exists — the twin', () => {
-    const input = review();
-    const r = checkProseFactAgreement(input, {}, licensed);
-    expect(r.voiFieldsRedacted).toBe(0);
-    expect(r.violations).toEqual([]);
-    expect(r.output).toEqual(input);
+  it('preserves a supported scoped claim but rejects a wrong named winner or broader scope', () => {
+    const right = { readiness_rationale: supportedScopedClaim };
+    expect(checkProseFactAgreement(right, {}, licensed).output).toEqual(right);
+    for (const text of [supportedScopedClaim.replace('checking Alpha', 'checking Beta'),
+      supportedScopedClaim.replace('checking Alpha', 'checking Gamma'),
+      supportedScopedClaim.replace('Among the assessed factors (Alpha, Beta)', 'Across the whole model'),
+      'Alpha has the highest-value check. Beta is worth checking later.',
+      'Checking Gamma is the highest-value check; Alpha was assessed too.']) {
+      const r = checkProseFactAgreement({ readiness_rationale: text }, {}, licensed);
+      expect(r.voiFieldsRedacted).toBe(1);
+      expect(r.output.readiness_rationale).not.toContain('highest-value check; Alpha');
+      expect(r.output.readiness_rationale).toContain(VOI_SUPERLATIVE_REPLACEMENT);
+    }
+  });
+
+  it('describes a tie without falsely saying no comparison was produced', () => {
+    const r = checkProseFactAgreement(review(), {}, voiInput([evpiRow('a', 'Alpha', 4), evpiRow('b', 'Beta', 4)]));
+    expect(r.output.readiness_rationale).toContain('does not establish which uncertainty');
+    expect(r.output.readiness_rationale).not.toContain('no value-of-information comparison');
+    expect(r.output.readiness_rationale).toContain('Interview ten customers.');
   });
 
   it('never mutates the caller\u2019s review object', () => {
@@ -522,13 +515,13 @@ describe('summariseProseFactViolations', () => {
   it('emits bounded rule codes and a count only', () => {
     const summary = summariseProseFactViolations([
       { rule: 'voi_superlative_without_voi_evidence', observed: 3 },
-      { rule: 'directional_claim_ungrounded', observed: 1 },
-      { rule: 'directional_claim_ungrounded', observed: 1 },
+      { rule: 'directional_claim_unverified', observed: 1 },
+      { rule: 'directional_claim_unverified', observed: 1 },
     ]);
     expect(summary).toEqual({
-      reason: 'directional_claim_ungrounded',
-      reasons: 'directional_claim_ungrounded,voi_superlative_without_voi_evidence',
-      violation_count: 2,
+      reason: 'directional_claim_unverified',
+      reasons: 'directional_claim_unverified,voi_superlative_without_voi_evidence',
+      rule_count: 2,
     });
   });
 });

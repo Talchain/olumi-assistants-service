@@ -36,6 +36,8 @@ import {
 } from '../../cee/decision-review/contract-gate.js';
 import {
   checkProseFactAgreement,
+  deriveEdgeFlipFacts,
+  edgeFlipKey,
   summariseProseFactViolations,
 } from '../../cee/decision-review/prose-fact-agreement.js';
 import { recordModelResolution } from '../debug/turn-debug-store.js';
@@ -577,42 +579,24 @@ export async function enrichRunAnalysisWithDecisionReview(
     );
     const gapRedacted = gapRedaction.value as Record<string, unknown>;
 
-    // PROSE / FACT AGREEMENT — the THIRD consumer of this single egress seam,
-    // and a DIFFERENT question from both of its neighbours. The contract gate
-    // above asks "does this output obey the prompt contract?"; the gap
-    // redaction beside it asks "does this sentence state a retired statistic?";
-    // this asks **"does this prose agree with the signed analytical fact the
-    // producer shipped in the same payload?"** A review can pass both of the
-    // others and still tell the user that a link getting STRONGER flips the
-    // result when the producer's own `edge_e_values` row says it must get
-    // WEAKER — measured on the 2026-09-03 capture, on both narrated edges.
-    //
-    // Two inputs, read separately on purpose:
-    //   `enrichment`  — the signed edge facts (`edge_e_values`), which are NOT
-    //                   forwarded to the prompt and so are the independent
-    //                   check rather than a second reading of the model's own
-    //                   input;
-    //   `invokeInput` — what the model was actually shown, which is the only
-    //                   thing that can license a value-of-information claim.
-    //                   Licensing from the enrichment would cite evidence the
-    //                   model never saw.
-    //
-    // Neither remedy drops the review — see the module header and the
-    // per-field ruling cited on the redaction above.
+    // Validate the stored review against this selected run's enrichment and
+    // its review input. Categorical movement is also forwarded before generation;
+    // raw edge_e_values magnitudes never enter the prompt. The current producer
+    // does not bind both outcome identities to that coefficient search, so the
+    // condition and consequence are corrected together without dropping the card.
+    // This is independent of shape/claim-permission gates and does not grant
+    // a leader designation or certify conversational assistant_text.
     const proseFact = checkProseFactAgreement(gapRedacted, enrichment, invokeInput);
     if (proseFact.violations.length > 0) {
       emit(TelemetryEvents.V5DecisionReviewProseFactViolation, {
         request_id: input.requestId,
         scenario_id: input.scenarioId,
         duration_ms: Date.now() - startedAt,
-        redacted_contradicted: proseFact.redactedContradicted,
-        redacted_ungrounded: proseFact.redactedUngrounded,
+        corrected_triggers: proseFact.correctedTriggers,
+        qualified_triggers: proseFact.qualifiedTriggers,
+        qualified_consequences: proseFact.qualifiedConsequences,
+        facts_unavailable: Number(proseFact.factsUnavailable),
         voi_fields_redacted: proseFact.voiFieldsRedacted,
-        // The honest residue: directional claims KEPT because this seam
-        // declined to classify their prose. Counted so the gap is observable
-        // rather than inferred — it is the number that says how much of the
-        // surface the deterministic check is not reaching.
-        unclassified_kept: proseFact.unclassifiedKept,
         ...summariseProseFactViolations(proseFact.violations),
       });
     }
@@ -1101,7 +1085,7 @@ function readIslResults(
   // factor_sensitivity: rename id → factor_id and label → factor_label;
   // pin elasticity / confidence to numbers (or null — never invent).
   // Allowlisted additive fields (attribution_stability, rank_flip_rate,
-  // evpi_percentage_points, direction, sensitivity_score, confidence_components,
+  // evpi_percentage_points, evpi_method, direction, sensitivity_score, confidence_components,
   // confidence_source, confidence_provenance) are forwarded when upstream
   // supplies them — see normaliseFactorSensitivity. Unknown PLoT fields are
   // NOT auto-forwarded.
@@ -1117,13 +1101,16 @@ function readIslResults(
   // resolve from_label / to_label via the graph node label map when the
   // edge entry uses *_node_id keys without inline labels.
   const fragileEdges: Record<string, unknown>[] = [];
+  const edgeFlipFacts = deriveEdgeFlipFacts(enrichment);
   const rob = readRecord(enrichment.robustness);
   if (rob && Array.isArray(rob.fragile_edges)) {
     for (const raw of rob.fragile_edges) {
       const e = readRecord(raw);
       if (!e) continue;
-      const fromNodeId = typeof e.from_node_id === 'string' ? e.from_node_id : null;
-      const toNodeId = typeof e.to_node_id === 'string' ? e.to_node_id : null;
+      const fromNodeId = typeof e.from_id === 'string' ? e.from_id :
+        typeof e.from_node_id === 'string' ? e.from_node_id : null;
+      const toNodeId = typeof e.to_id === 'string' ? e.to_id :
+        typeof e.to_node_id === 'string' ? e.to_node_id : null;
       const fromLabel = (typeof e.from_label === 'string' && e.from_label)
         ? e.from_label
         : (fromNodeId ? labelMap.get(fromNodeId) ?? fromNodeId : null);
@@ -1146,6 +1133,13 @@ function readIslResults(
       if (typeof e.alternative_winner_label === 'string') {
         out.alternative_winner_label = e.alternative_winner_label;
       }
+      // Categorical structured gate only: no raw edge_e_values magnitudes.
+      // Requirement describes the reported coefficient movement. It does NOT
+      // bind a named alternative from this separate fragility assessment.
+      const flipFact = fromNodeId && toNodeId
+        ? edgeFlipFacts.get(edgeFlipKey(fromNodeId, toNodeId)) : undefined;
+      out.flip_requirement = flipFact?.requirement ?? null;
+      out.flip_consequence_status = 'unverified';
       fragileEdges.push(out);
     }
   }
@@ -1407,7 +1401,7 @@ function normaliseEvidenceGap(e: Record<string, unknown>): Record<string, unknow
  * (number|null), confidence (number|null).
  *
  * Allowlisted additive passthrough: attribution_stability, rank_flip_rate,
- * evpi_percentage_points, direction, sensitivity_score,
+ * evpi_percentage_points, evpi_method, direction, sensitivity_score,
  * confidence_components, confidence_source, confidence_provenance. Unknown
  * upstream fields are NOT auto-forwarded *at the top level of the entry* —
  * this guards v11 against surfacing fields it doesn't know how to interpret.
@@ -1458,6 +1452,7 @@ function normaliseFactorSensitivity(
   ) {
     out.evpi_percentage_points = e.evpi_percentage_points;
   }
+  if (typeof e.evpi_method === 'string') out.evpi_method = e.evpi_method;
   if (typeof e.direction === 'string') out.direction = e.direction;
   if (typeof e.sensitivity_score === 'number' && Number.isFinite(e.sensitivity_score)) {
     out.sensitivity_score = e.sensitivity_score;

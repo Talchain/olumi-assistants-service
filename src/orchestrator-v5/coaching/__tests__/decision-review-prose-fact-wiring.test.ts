@@ -22,9 +22,11 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import * as invokeMod from '../../../cee/decision-review/invoke.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
-import { enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
+import { buildSlices } from '../../../cee/decision-review/decompose.js';
+import { buildDecisionReviewUserMessage } from '../../../cee/decision-review/invoke.js';
+import { buildInvokeInputForTests, enrichRunAnalysisWithDecisionReview } from '../decision-review-enricher.js';
 import { TelemetryEvents, setTestSink } from '../../../utils/telemetry.js';
-import { VOI_SUPERLATIVE_REPLACEMENT } from '../../../cee/decision-review/prose-fact-agreement.js';
+import { UNVERIFIED_CONSEQUENCE, VOI_SUPERLATIVE_REPLACEMENT } from '../../../cee/decision-review/prose-fact-agreement.js';
 
 const CAPTURE = JSON.parse(
   readFileSync(
@@ -136,6 +138,7 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
   });
 
   function proseFactEvents(requestId: string) {
+    expect(TelemetryEvents.V5DecisionReviewProseFactViolation).toBe('v5.decision_review.prose_fact_violation');
     return events.filter(
       (e) =>
         e.name === TelemetryEvents.V5DecisionReviewProseFactViolation &&
@@ -143,7 +146,7 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
     );
   }
 
-  it('strips both inverted counterfactuals from the ATTACHED enrichment', async () => {
+  it('repairs both conditions and qualifies outcomes in the ATTACHED enrichment', async () => {
     const review = liveReview();
     // PRECONDITION PINNED IN-TEST: the payload we are about to send really
     // does carry the two inverted claims. Without this the assertion below
@@ -154,7 +157,11 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
     ]);
 
     const attached = await enrich(review, 'req-pf-directional');
-    expect(Object.keys(attached.scenario_contexts as Record<string, unknown>)).toEqual([]);
+    expect(Object.keys(attached.scenario_contexts as Record<string, unknown>)).toEqual([SALES_TO_RUNWAY, CAC_TO_GOAL]);
+    for (const entry of Object.values(attached.scenario_contexts as Record<string, Record<string, string>>)) {
+      expect(entry.trigger_description).toContain('weaker than the model assumes');
+      expect(entry.consequence).toBe(UNVERIFIED_CONSEQUENCE);
+    }
   });
 
   it('keeps the rest of the review — this is a redaction, not a drop', async () => {
@@ -171,10 +178,10 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
     await enrich(liveReview(), 'req-pf-telemetry');
     const fired = proseFactEvents('req-pf-telemetry');
     expect(fired).toHaveLength(1);
-    expect(fired[0].data.reason).toBe('directional_claim_contradicts_flip_fact');
-    expect(fired[0].data.redacted_contradicted).toBe(2);
-    expect(fired[0].data.redacted_ungrounded).toBe(0);
-    expect(fired[0].data.unclassified_kept).toBe(0);
+    expect(fired[0].data.reason).toBe('directional_claim_corrected');
+    expect(fired[0].data.corrected_triggers).toBe(2);
+    expect(fired[0].data.qualified_triggers).toBe(0);
+    expect(fired[0].data.qualified_consequences).toBe(2);
     expect(fired[0].data.voi_fields_redacted).toBe(0);
     // R-004: nothing on the event may carry prose or an id from the model's
     // output. Asserted by inspection of every value, not by a field list that
@@ -199,19 +206,21 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
     const attached = await enrich(review, 'req-pf-twin');
     expect(Object.keys(attached.scenario_contexts as Record<string, unknown>)).toEqual([
       SALES_TO_RUNWAY,
+      CAC_TO_GOAL,
     ]);
     const fired = proseFactEvents('req-pf-twin');
     expect(fired).toHaveLength(1);
-    expect(fired[0].data.redacted_contradicted).toBe(1);
+    expect(fired[0].data.corrected_triggers).toBe(2);
   });
 
-  it('is silent when every claim agrees with the producer', async () => {
+  it('is silent when a previously corrected review passes through again', async () => {
     const review = liveReview();
     const scenarios = review.scenario_contexts as Record<string, Record<string, string>>;
     scenarios[SALES_TO_RUNWAY].trigger_description =
-      'If Sales Headcount Investment drives runway depletion risk less than forecast,';
+      'If the link from Sales Headcount Investment to Runway Depletion Risk turns out weaker than the model assumes,';
     scenarios[CAC_TO_GOAL].trigger_description =
-      'If Customer Acquisition Cost weighs on the goal less than forecast,';
+      'If the link from Customer Acquisition Cost to Reach £30k MRR Within 18 Months turns out weaker than the model assumes,';
+    for (const entry of Object.values(scenarios)) entry.consequence = UNVERIFIED_CONSEQUENCE;
     const attached = await enrich(review, 'req-pf-clean');
     expect(Object.keys(attached.scenario_contexts as Record<string, unknown>)).toEqual([
       SALES_TO_RUNWAY,
@@ -239,5 +248,58 @@ describe('prose/fact agreement is wired into the live decision_review path', () 
     const attached = await enrich(review, 'req-pf-voi-twin');
     expect(attached.readiness_rationale).toBe(influence);
     expect(proseFactEvents('req-pf-voi-twin')[0].data.voi_fields_redacted).toBe(0);
+  });
+});
+
+
+describe('categorical evidence reaches actual prompt serialization', () => {
+  function project(enrichment = liveEnrichment()) {
+    const input = buildInvokeInputForTests('Assess our sales strategy.', enrichment, '94b13741');
+    expect(input).not.toBeNull();
+    return input!;
+  }
+  it('joins actual from_id/to_id and carries movement through both generation paths', () => {
+    const input = project();
+    const rows = input.isl_results.fragile_edges as Record<string, unknown>[];
+    expect(rows.find(r => r.edge_id === SALES_TO_RUNWAY)).toMatchObject({
+      flip_requirement: 'weaker', flip_consequence_status: 'unverified',
+    });
+    const monolith = buildDecisionReviewUserMessage(input);
+    const { slices } = buildSlices(input);
+    for (const text of [monolith, slices.r3]) {
+      expect(text).toContain('"flip_requirement": "weaker"');
+      expect(text).toContain('"flip_consequence_status": "unverified"');
+      expect(text).not.toContain('"current_mean"');
+      expect(text).not.toContain('"flip_mean"');
+      expect(text).not.toContain('"e_value"');
+    }
+  });
+  it('does not turn a missing row into no reversal found', () => {
+    const enrichment = liveEnrichment();
+    delete enrichment.edge_e_values;
+    const input = project(enrichment);
+    const rows = input.isl_results.fragile_edges as Record<string, unknown>[];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.flip_requirement).toBeNull();
+      expect(row.flip_consequence_status).toBe('unverified');
+    }
+  });
+  it('keeps each run isolated without caching the earlier movement', () => {
+    const first = project();
+    const later = liveEnrichment();
+    delete later.edge_e_values;
+    const second = project(later);
+    const row = (i: typeof first) => (i.isl_results.fragile_edges as Record<string, unknown>[])
+      .find(r => r.edge_id === SALES_TO_RUNWAY)!;
+    expect(row(first).flip_requirement).toBe('weaker');
+    expect(row(second).flip_requirement).toBeNull();
+  });
+  it('forwards existing EVPI method together with its metric', () => {
+    const input = project();
+    const rows = input.isl_results.factor_sensitivity as Record<string, unknown>[];
+    const evpi = rows.filter(r => r.evpi_percentage_points !== undefined);
+    expect(evpi).toHaveLength(4);
+    for (const row of evpi) expect(row.evpi_method).toBe('heuristic');
   });
 });
