@@ -295,9 +295,11 @@ export const MAX_CANDIDATES = 4;
 /**
  * How a candidate was selected — useful for routing diagnostics. `score: 0`
  * alone is too implicit for telemetry, so each candidate carries an explicit
- * source tag. `register` is a candidate the referent register bound for a bare
- * pronoun (`tryAnaphoricValueUpdate`); it never came from label evidence in
- * the message, and the tag says so rather than borrowing `substring`.
+ * source tag. `register` is a candidate the referent register bound
+ * (`tryAnaphoricValueUpdate` — BOTH of its forms: the bare pronoun and the
+ * bare quantity, which share one candidate); it never came from label
+ * evidence in the message, and the tag says so rather than borrowing
+ * `substring`.
  */
 export type CandidateSource = 'substring' | 'dice' | 'register';
 
@@ -1450,10 +1452,22 @@ export type AnaphoricValueDispatch =
     }
   /**
    * The bare-quantity form ASKS, naming the bound factor as the sole
-   * candidate. Measured at this head: the label path refuses a bare quantity
+   * candidate. Measured at this head: the LABEL path refuses a bare quantity
    * even for a NAMED target (`tryDeterministicValueUpdate('Sales Headcount
-   * Investment 100000', …)` → `no_edit_verb`), so no existing path applies a
-   * bare number, and this one does not start.
+   * Investment 100000', …)` → `no_edit_verb`), so the LABEL path applies no
+   * bare number, and this one does not start one either.
+   *
+   * ⚠ SCOPE — that is a claim about the LABEL path, NOT about the route.
+   * Seams dispatched BEFORE this pre-route DO bind a bare quantity when they
+   * hold an outstanding ask to bind it to: `resolveAnswerForKnownSlot`
+   * (`repair-value-binding.ts`) returns `{ kind: 'value' }` for a
+   * whole-message `'25%'` or `'0.25'` against the asked cell (pinned in the
+   * `slot-bound-effect-answer` acceptance table), and `readMissingValueAnswer`
+   * returns `{ kind: 'numeric', elliptical: true }` for a bare number, which
+   * `resolveRepairValueBinding` turns into a `bind` whenever
+   * `deriveOnScreenEffectAsk` is non-null — and a match there re-enters the
+   * edit dispatch (`orchestrator/route-v2.ts`), i.e. it can WRITE. Nothing
+   * here measures those seams.
    */
   | {
       readonly matched: true;

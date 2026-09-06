@@ -6929,13 +6929,17 @@ export async function runTurnExecutor(
         downgrade_reason: downgradeReason,
         candidate_count: telemetryCandidates.length,
         top_score: telemetryCandidates[0]?.score ?? null,
-        // Per-candidate source tags ('substring' | 'dice') so routing
-        // diagnostics can distinguish exact-label hits from fuzzy hits
-        // without inferring from `score`.
+        // Per-candidate source tags — the `CandidateSource` union in
+        // `routing/deterministic-value-update.ts`, which is
+        // 'substring' | 'dice' | 'register' at this head — so routing
+        // diagnostics can tell exact-label hits from fuzzy hits, and both
+        // from a candidate the referent register bound with no label
+        // evidence at all, without inferring from `score`.
         candidate_sources: telemetryCandidates.map((c) => c.source),
         // Quantity-attribution tag — 'from_to' when the dispatch
         // originated from the row-7 from/to branch, null otherwise.
-        // Distinct from candidate.source (label-match concern); kept
+        // Distinct from candidate.source (how the candidate was selected —
+        // label evidence for 'substring'/'dice', none for 'register'); kept
         // separate so dashboards can filter rows independently.
         attribution:
           deterministicValueUpdate.matched &&
