@@ -663,6 +663,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
         V5DecisionReviewCompleted: "v5.decision_review.completed",
         V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+        V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
         V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
@@ -1210,6 +1211,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // Clarification events are diagnostic and logged locally
       // Multi-turn clarifier events are diagnostic and logged locally
       const debugOnlyEvents: string[] = [
+        // Registered live review correction event; currently structured-log only.
+        TelemetryEvents.V5DecisionReviewProseFactViolation,
         TelemetryEvents.Stage,
         // Structured-outputs fallback: diagnostic WARN companion, no Datadog metric
         TelemetryEvents.CeeStructuredOutputsFellBack,
@@ -2196,6 +2199,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
         "v5.decision_review.contract_violation",
+        "v5.decision_review.prose_fact_violation",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",
