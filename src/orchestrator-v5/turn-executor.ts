@@ -6403,7 +6403,15 @@ export async function runTurnExecutor(
       // ⭐ SPEC §4.3 — the VALUE-BEARING ANAPHORIC EDIT ("Set it to 100000.",
       // "Can you update it to 100000?", "100000" after the product asked
       // "What value would you like it set to?"). Runs only when neither the
-      // label path nor the deictic path claimed the message, and binds ONLY
+      // label path nor the deictic path claimed the message — and a deictic
+      // CLARIFY is a claim: `tryDeicticValueUpdate` returns `matched: true`
+      // for "Set this factor to 100000." with nothing selected, promotes
+      // nothing into `deterministicValueUpdate`, and its branch below composes
+      // the reply, so the gate reads `deicticDispatch.matched` directly rather
+      // than inferring the claim from the promotion (the pronoun pattern's
+      // trailing `\b` after `this` admits "this factor" too, so without this
+      // conjunct the block would re-claim a message the deictic path already
+      // owns and record a `set_factor_value` row that never executes). Binds ONLY
       // under the register precondition: the referent register is projected
       // from the same newest-first conversation window
       // (`CONTEXT_PACK_RECENT_TURNS_CAP` turns of `context.prior_turns`) the
@@ -6418,7 +6426,8 @@ export async function runTurnExecutor(
       if (
         routingResult === undefined &&
         !typedChipMutationUnroutedFallThrough &&
-        !deterministicValueUpdate.matched
+        !deterministicValueUpdate.matched &&
+        !deicticDispatch.matched
       ) {
         const referentNodes = (graphStateForTurn?.nodes ?? []).flatMap((n) => {
           const node = n as { id?: unknown; label?: unknown; kind?: unknown };
