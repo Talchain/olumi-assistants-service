@@ -429,6 +429,19 @@ export function countVoiSuperlativeClaims(text: unknown): number {
   return hits;
 }
 
+/**
+ * A limited subject-seeking question asks WHICH check deserves attention; it
+ * does not assert that a named factor wins. Match the complete sentence only.
+ * A question mark alone is insufficient: "Why is Alpha the highest-value
+ * check?" and "What makes Alpha ...?" still presuppose a ranking. Other
+ * ambiguous forms retain the existing qualification rather than claiming
+ * general question understanding from this small grammar.
+ */
+function isOpenVoiEnquiry(unit: string): boolean {
+  return /^(?:what|which)\s+(?:is|would\s+be|could\s+be)\s+(?:the\s+)?(?:highest[-\s]value\s+check|most\s+valuable\s+thing\s+to\s+(?:learn|test|resolve))(?:\s+here)?\?$/i
+    .test(unit.trim());
+}
+
 // ============================================================================
 // The seam
 // ============================================================================
@@ -538,7 +551,8 @@ export function checkProseFactAgreement(
     if (typeof node === 'string') {
       if (countVoiSuperlativeClaims(node) === 0) return node;
       const replaced = replaceAssertingUnits(node,
-        unit => countVoiSuperlativeClaims(unit) > 0 && unit.trim() !== supportedVoiClaim,
+        unit => countVoiSuperlativeClaims(unit) > 0 &&
+          !isOpenVoiEnquiry(unit) && unit.trim() !== supportedVoiClaim,
         VOI_SUPERLATIVE_REPLACEMENT);
       if (replaced !== node) voiFieldsRedacted += 1;
       return replaced;

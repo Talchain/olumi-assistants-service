@@ -483,10 +483,44 @@ describe('checkProseFactAgreement — VOI remedy', () => {
       decision_quality_prompts: [{ question: 'What is the highest-value check here?' }],
     };
     const r = checkProseFactAgreement(nested, {}, unlicensed);
-    expect(r.voiFieldsRedacted).toBe(2);
+    expect(r.voiFieldsRedacted).toBe(1);
+    expect(r.output.decision_quality_prompts).toEqual(nested.decision_quality_prompts);
     expect(
       (r.output.evidence_enhancements as Record<string, Record<string, string>>).f1.rationale,
     ).toBe(VOI_SUPERLATIVE_REPLACEMENT);
+  });
+
+  it.each([
+    'What is the highest-value check here?',
+    'Which would be the highest-value check?',
+    'What could be the most valuable thing to learn here?',
+  ])('preserves an open VOI enquiry without asserting a ranking: %s', question => {
+    const input = { decision_quality_prompts: [{ question }] };
+    const r = checkProseFactAgreement(input, {}, unlicensed);
+    expect(r.output).toEqual(input);
+    expect(r.voiFieldsRedacted).toBe(0);
+    expect(r.violations).toEqual([]);
+  });
+
+  it.each([
+    'Checking Alpha is the highest-value check.',
+    'Why is Alpha the highest-value check?',
+    'What makes Alpha the highest-value check?',
+    'Which evidence proves Alpha is the highest-value check?',
+  ])('still qualifies an assertion or presupposed VOI ranking: %s', question => {
+    const input = { decision_quality_prompts: [{ question }] };
+    const r = checkProseFactAgreement(input, {}, unlicensed);
+    expect(r.output.decision_quality_prompts).toEqual([{ question: VOI_SUPERLATIVE_REPLACEMENT }]);
+    expect(r.voiFieldsRedacted).toBe(1);
+    expect(r.violations).toContainEqual({ rule: 'voi_superlative_without_voi_evidence', observed: 1 });
+  });
+
+  it('does not use an open enquiry to exempt another sentence in the same field', () => {
+    const enquiry = 'What is the highest-value check here?';
+    const r = checkProseFactAgreement({ readiness_rationale:
+      `${enquiry} Checking Alpha is the highest-value check.` }, {}, unlicensed);
+    expect(r.output.readiness_rationale).toBe(`${enquiry} ${VOI_SUPERLATIVE_REPLACEMENT}`);
+    expect(r.voiFieldsRedacted).toBe(1);
   });
 
   it('leaves ids, timestamps and enum values alone', () => {
