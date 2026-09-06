@@ -43,7 +43,11 @@ import type {
   OlumiResponse,
   FailureTypeLiteral,
 } from '@talchain/schemas/boundary';
-import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+import type {
+  HandlerFact,
+  RunAnalysisHandlerFact,
+  V5ActionType,
+} from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import {
@@ -52,6 +56,14 @@ import {
   composeToolCallResponse,
   type AnswerKind,
 } from './compose.js';
+// Ship the run fact the model-facing prose was built from. See the module
+// header for why this is scoped to the substantive prose branches, why it is
+// gated on the SAME freshness rule the prior-fact lifecycle path already uses,
+// and why it deliberately does not touch any leader-naming authority.
+import {
+  asRunAnalysisFact,
+  buildProseGroundingBlocks,
+} from './compose/prose-grounding-block.js';
 // ROADMAP 2.640 §3.4 — the gate-close remedy gesture (the advice gate's
 // deterministic "open the surface the blocker is fixed on").
 import {
@@ -1691,6 +1703,34 @@ export async function runTurnExecutor(
   // finalizeRun() surfaces; `routingFreshness` is internal-only.
   let routingFreshness: FreshnessDerivation | null = null;
   let promptAnalysisFreshness: FreshnessDerivation | null = null;
+  /**
+   * THE RUN FACT THE MODEL-FACING PROSE WAS BUILT FROM, or null when the prose
+   * carried no projected analysis.
+   *
+   * WHY IT IS HOISTED HERE rather than mirrored into a new variable near the
+   * compose sites: this is the house pattern already stated for
+   * `functionalAnswerText` and `handlerFactsForCommit` below — a mirror needs
+   * every assignment site to remember to update it, which is the
+   * hand-maintained-mirror defect (CLAUDE.md trap 12). There is exactly ONE
+   * assignment, co-located with `promptAnalysisSummary`'s, under the SAME
+   * guard and over the SAME array.
+   *
+   * ⭐ WHY THE TWO CANNOT DIVERGE, which is the load-bearing claim of the change
+   * that consumes it. `promptAnalysisSummary` is
+   * `buildAnalysisFromPriorFacts(scenarioAnalysisFacts, …)`, whose FIRST act is
+   * `selectRunAnalysisFact(priorFacts)` (`context/analysis-fallback.ts`). This
+   * binding is `selectRunAnalysisFact(scenarioAnalysisFacts)` — the SAME pure
+   * selector over the SAME `readonly` array, assigned inside the SAME
+   * `if (durableFallback)` block. Same input, same function, same guard: the
+   * projection and the block are statements about one fact, not two.
+   *
+   * It is deliberately NOT derived from `context.prior_facts` (the bounded hot
+   * window) nor from the post-dispatch unified array. Those are the arrays the
+   * OTHER surfaces select over, and selecting a fact from one array to
+   * corroborate prose projected from another is precisely the two-derivations
+   * defect this comment exists to rule out.
+   */
+  let promptAnalysisSourceFact: RunAnalysisHandlerFact | null = null;
   let freshness: FreshnessDerivation | null = null;
   // V5 M5 (read-only / diagnostic): unified canonical analysis state, assembled
   // post-dispatch from the SAME fact set + post-handler graph hash that
@@ -2575,6 +2615,12 @@ export async function runTurnExecutor(
     );
     if (durableFallback) {
       promptAnalysisSummary = durableFallback;
+      // Co-assigned with the projection above, from the SAME array through the
+      // SAME selector `buildAnalysisFromPriorFacts` itself uses. See the
+      // declaration for why this is one fact rather than two derivations.
+      promptAnalysisSourceFact = asRunAnalysisFact(
+        selectRunAnalysisFact(scenarioAnalysisFacts)?.fact ?? null,
+      );
       promptAnalysisStateSource = 'fallback';
       if (
         promptAnalysisFreshness.freshness === 'stale' ||
@@ -11863,6 +11909,16 @@ export async function runTurnExecutor(
         stage: context.stage,
         suggested_actions: coachGuarded.suggested_actions,
         answerKind: 'substantive',
+        // Ground the coach's own figures. This prose was rendered from
+        // `display_analysis`, which the prompt orders into sentences like
+        // "leads in 69% of simulations" — so the turn is already making a
+        // quantified claim and shipped nothing a consumer could check it
+        // against. Empty on every turn that projected no analysis and on every
+        // non-fresh turn (see the helper's header).
+        blocks: buildProseGroundingBlocks({
+          sourceFact: promptAnalysisSourceFact,
+          freshness: promptAnalysisFreshness,
+        }),
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The coach ANSWER prose
@@ -12034,6 +12090,13 @@ export async function runTurnExecutor(
         stage: context.stage,
         suggested_actions: converseGuarded.suggested_actions,
         answerKind: 'substantive',
+        // Same rationale as the coach branch above — one helper, one rule, so
+        // the two substantive branches cannot drift apart about when a prose
+        // turn grounds its own numbers.
+        blocks: buildProseGroundingBlocks({
+          sourceFact: promptAnalysisSourceFact,
+          freshness: promptAnalysisFreshness,
+        }),
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The converse / text_only
