@@ -289,9 +289,12 @@ export type AnaphoricResolution =
 /**
  * ⭐ THE ONE AUTHORITY FOR THE §4.2 DECISION.
  *
- * Two surfaces resolve a bare pronoun: the no-op recovery layer
- * (`decideNoOpRecovery`, "Update it.") and the value pre-route
- * (`tryAnaphoricValueUpdate`, "Set it to 100000."). The recovery branch
+ * Two surfaces resolve a bare pronoun THROUGH THIS AUTHORITY — its only two
+ * production callers: the no-op recovery layer (`decideNoOpRecovery`,
+ * "Update it.") and the value pre-route (`tryAnaphoricValueUpdate`, "Set it
+ * to 100000."). That is NOT an estate-wide enumeration of who reads a bare
+ * pronoun: `missing-value-answer.ts` (`BARE_REFERENTS`) and
+ * `vague-edit-guard.ts` read them on their own seams. The recovery branch
  * carried this decision inline ("top populated rank, eligible kinds, count")
  * until this function replaced it; the value pre-route is its second caller.
  * Two predicates deciding one question is this estate's signature defect
