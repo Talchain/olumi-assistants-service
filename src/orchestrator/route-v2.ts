@@ -5743,9 +5743,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       // `confirm`, `ask` — each requires a LIVE, hash-valid recorded ask) but
       // never REFUSE on its behalf: `stale` / `ambiguous` / `unavailable` are
       // terminal refusals below, and before this change a selection-carrying
-      // turn never reached them. They collapse to today's route, so the change
-      // is additive for every selection-carrying turn. Pinned by the expired-ask
-      // twin pair in `route-v2-recorded-ask-selection-gate.test.ts`.
+      // turn never reached them. Collapsing those three to `unrelated` enforces
+      // exactly one property, and it is the only one claimed here: NO
+      // SELECTION-CARRYING TURN GAINS A REFUSAL IT DID NOT HAVE. It is NOT a
+      // claim that the change is additive for such turns — a selection-carrying
+      // turn with a LIVE ask now reaches a deterministic bind/ask/confirm it
+      // did not reach before, which is the defect this lane closes. Pinned by
+      // the expired-ask twin pair in
+      // `route-v2-recorded-ask-selection-gate.test.ts`.
       const recorded: ReturnType<typeof resolveRecordedOptionEffectAnswer> =
         repairSelectionPresent
           && (recordedRaw.kind === 'stale' || recordedRaw.kind === 'ambiguous'

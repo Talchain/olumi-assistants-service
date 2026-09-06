@@ -16,10 +16,10 @@
  *           (`exit_path: turn_executor`, one routing call, `blocks: []`) and the
  *           same chip was offered again.
  *
- * MECHANISM, established by execution (diagnosis file in the PR): the answered-
- * ask block of the pre-route is guarded by `!repairSelectionPresent`, which is
- * true for ANY non-empty `selected_elements`. The pending read and the recorded-
- * ask resumer both sit INSIDE that block, so the ask was never READ. Had it been,
+ * MECHANISM, established by execution: the answered-ask block of the pre-route
+ * is guarded by `!repairSelectionPresent`, which is true for ANY non-empty
+ * `selected_elements`. The pending read and the recorded-ask resumer both sit
+ * INSIDE that block, so the ask was never READ. Had it been,
  * `resolveRecordedOptionEffectAnswer("Let's go for 50%")` binds 0.5 to the
  * recorded cell (slot contract: `lets`, `go`, `for` are filler).
  *
@@ -130,6 +130,9 @@ const { buildCanonicalAnalysisReadyFromGraph } = await import(
 const { resolveRecordedOptionEffectAnswer } = await import(
   '../../../src/orchestrator-v5/routing/repair-value-binding.js'
 );
+const { carriesDeicticReference } = await import(
+  '../../../src/orchestrator-v5/routing/deterministic-value-update.js'
+);
 type PendingAction = import('../../../src/orchestrator-v5/session/pending-action.js').PendingAction;
 
 // ── The C5 identities, verbatim from the captures ─────────────────────────
@@ -237,6 +240,19 @@ function repairEvents() {
 /** Every `dispatchEditGraph` call's `recordedEffectAnswer`, so "not bound to the ask" is a claim about EVERY dispatch. */
 function recordedAnswersDispatched(): unknown[] {
   return dispatchEditGraphMock.mock.calls.map((c) => (c[0] as { recordedEffectAnswer?: unknown }).recordedEffectAnswer);
+}
+/**
+ * How many TERMINAL handlers the turn reached.
+ *
+ * ⚠ `recordedAnswersDispatched().every(r => r === undefined)` is VACUOUSLY TRUE
+ * when nothing was dispatched at all, so on its own it cannot tell "the ask was
+ * correctly not bound" from "the turn died before any terminal" — the same
+ * assertion would pass against a route that threw. Every not-bound claim below
+ * therefore pairs it with this count, so the claim is about a turn that
+ * demonstrably ENDED somewhere carrying no recorded answer.
+ */
+function terminalsReached(): number {
+  return dispatchEditGraphMock.mock.calls.length + runTurnExecutorMock.mock.calls.length;
 }
 
 async function send(app: FastifyInstance, message: string, selection?: unknown) {
@@ -347,20 +363,43 @@ describe('POST /orchestrate/v2/turn — the recorded ask survives an incidental 
     expect(args?.recordedEffectAnswer?.pair).toMatchObject({ optionId: OPT, factorId: FAC });
   });
 
+  // ── THE PREDICATE'S DOCUMENTED BOUNDARY: bare "it" is NOT deictic ─────────
+  // `carriesDeicticReference`'s own doc comment claims bare "it" stays OUT of
+  // the pattern, because a reply saying "it" has no selection-aware path to
+  // claim it and a recorded ask is therefore its only deterministic antecedent.
+  // That is a claim about behaviour under a selection, and nothing pinned it —
+  // a comment beside a predicate is not coverage of the predicate (trap 22b).
+  // If the pattern is ever widened to swallow "it", THIS test goes red rather
+  // than the founder's defect quietly reopening for a whole phrasing class.
+  it('BOUNDARY — "set it to 50%" WITH the selection is still bound to the recorded ask (bare "it" is not deictic)', async () => {
+    const { status } = await send(app, 'set it to 50%', INCIDENTAL_SELECTION);
+    expect(status).toBe(200);
+    expect(carriesDeicticReference('set it to 50%')).toBe(false);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    const args = dispatchEditGraphMock.mock.calls[0]![0] as {
+      recordedEffectAnswer?: { pair: { optionId: string; factorId: string }; valueText: string };
+    };
+    expect(args.recordedEffectAnswer?.pair).toMatchObject({ optionId: OPT, factorId: FAC });
+    expect(args.recordedEffectAnswer?.valueText).toBe('0.5');
+    expect(runTurnExecutorMock).not.toHaveBeenCalled();
+  });
+
   // ── AN EXPLICIT SWITCH TO ANOTHER TARGET is never the ask's answer ─────────
   it.each([
     'set Developer Headcount Added to 50%',
     'Set Code Quality and Architecture to 50%',
     'Set Two Developers to 50%',
-  ])('TWIN — "%s" WITH the selection is NOT bound to the recorded ask', async (message) => {
+  ])('TWIN — "%s" WITH the selection is NOT bound to the recorded ask, and reaches a terminal', async (message) => {
     const { status } = await send(app, message, INCIDENTAL_SELECTION);
     expect(status).toBe(200);
+    expect(terminalsReached()).toBe(1);
     expect(recordedAnswersDispatched().every((r) => r === undefined)).toBe(true);
   });
 
   it('TWIN CONTRAST — an explicit switch WITHOUT the selection is not bound either (the discriminator is the named entity)', async () => {
     const { status } = await send(app, 'set Developer Headcount Added to 50%');
     expect(status).toBe(200);
+    expect(terminalsReached()).toBe(1);
     expect(recordedAnswersDispatched().every((r) => r === undefined)).toBe(true);
   });
 
@@ -410,11 +449,16 @@ describe('POST /orchestrate/v2/turn — the recorded ask survives an incidental 
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
   });
 
-  it('TWIN — a RANGE is never turned into a scalar for the ask, selection or not', async () => {
+  it('TWIN — a RANGE is never turned into a scalar for the ask, selection or not, and each arm reaches a terminal', async () => {
     for (const selection of [INCIDENTAL_SELECTION, undefined]) {
+      // ⚠ BOTH terminal mocks are cleared per arm: clearing only the dispatch
+      // mock would let the executor count accumulate across the loop, so the
+      // second arm's terminal assertion would pass on the FIRST arm's call.
       dispatchEditGraphMock.mockClear();
+      runTurnExecutorMock.mockClear();
       const { status } = await send(app, 'somewhere between 40% and 60%', selection);
       expect(status).toBe(200);
+      expect(terminalsReached()).toBe(1);
       expect(recordedAnswersDispatched().every((r) => r === undefined)).toBe(true);
     }
   });
