@@ -20,14 +20,14 @@ import {
 import { computeGraphIdentityHash } from '../graph-identity.js';
 
 // Synthetic data. Hashes below come from the established producer projection.
-const GRAPH = {
-  nodes: [{ id: 'factor', kind: 'factor', observed_state: { value: 0.5 } }],
+const GRAPH: GraphStateIngress = {
+  nodes: [{ id: 'factor', kind: 'factor', label: 'Synthetic factor', observed_state: { value: 0.5 } }],
   edges: [],
-} as GraphStateIngress;
-const CHANGED_GRAPH = {
-  nodes: [{ id: 'factor', kind: 'factor', observed_state: { value: 0.6 } }],
+};
+const CHANGED_GRAPH: GraphStateIngress = {
+  nodes: [{ id: 'factor', kind: 'factor', label: 'Synthetic factor', observed_state: { value: 0.6 } }],
   edges: [],
-} as GraphStateIngress;
+};
 const SHORT = computeAnalysisAffectingGraphHash(GRAPH)!;
 const FULL = computeAnalysisAffectingGraphHashSha256(GRAPH)!;
 const OTHER_SHORT = computeAnalysisAffectingGraphHash(CHANGED_GRAPH)!;
@@ -143,10 +143,10 @@ describe('scenario-scoped run-fact identity', () => {
   });
 
   it('keeps historical binding when the real freshness derivation reports a changed current graph', () => {
-    const fact = {
+    const fact: HandlerFact = {
       fact_type: 'run_analysis', fact_version: 1, noop: false,
-      result: { ...IDENTITY, enrichment: { analysis_status: 'completed' } },
-    } as HandlerFact;
+      result: { ...IDENTITY, summary: 'Synthetic fixture', leading_option_id: null, enrichment: { analysis_status: 'completed' } },
+    };
     expect(deriveAnalysisFreshness([fact], SHORT).freshness).toBe('fresh');
     expect(deriveAnalysisFreshness([fact], OTHER_SHORT)).toMatchObject({
       freshness: 'stale', reason: 'graph_hash_diverged',
