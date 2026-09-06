@@ -72,6 +72,11 @@ import type { OlumiResponse, StageType } from '@talchain/schemas/boundary';
 
 import { composeDirectAnswerResponse } from '../compose.js';
 import type { SuggestedAction } from './types.js';
+import {
+  candidatesAtTopPopulatedRank,
+  type TurnReferent,
+  type TurnReferents,
+} from '../context/turn-referents.js';
 
 export type EditClarifyReason = 'chip_simplify' | 'vague_edit';
 
@@ -268,6 +273,63 @@ export function isEditClarifyTargetKind(
   return (
     kind !== undefined && (EDIT_CLARIFY_TARGET_KINDS as readonly string[]).includes(kind)
   );
+}
+
+/**
+ * Spec §4.2 — the three outcomes of resolving `it` / `this` / `that` against
+ * the referent register. `bound` is exactly one eligible candidate at the top
+ * populated rank; `ask_candidates` is more than one; `unresolved` is zero, a
+ * missing register, or a `degraded` one (whose contents are not trusted).
+ */
+export type AnaphoricResolution =
+  | { readonly outcome: 'bound'; readonly referent: TurnReferent }
+  | { readonly outcome: 'ask_candidates'; readonly candidates: readonly TurnReferent[] }
+  | { readonly outcome: 'unresolved' };
+
+/**
+ * ⭐ THE ONE AUTHORITY FOR THE §4.2 DECISION.
+ *
+ * Two surfaces resolve a bare pronoun: the no-op recovery layer
+ * (`decideNoOpRecovery`, "Update it.") and the value pre-route
+ * (`tryAnaphoricValueUpdate`, "Set it to 100000."). The recovery branch
+ * carried this decision inline ("top populated rank, eligible kinds, count")
+ * until this function replaced it; the value pre-route is its second caller.
+ * Two predicates deciding one question is this estate's signature defect
+ * (CLAUDE.md trap 21). The kind filter is `isEditClarifyTargetKind`, so a node
+ * this composer would not offer as an edit target can never be bound as one
+ * either.
+ *
+ * `null` / `undefined` and `source: 'degraded'` all resolve to `unresolved`:
+ * "could not look" is not "looked and found nothing", but every caller ASKS on
+ * both, so the distinction changes telemetry rather than the outcome.
+ */
+export function resolveAnaphoricReferent(
+  register: TurnReferents | null | undefined,
+): AnaphoricResolution {
+  if (register === null || register === undefined || register.source === 'degraded') {
+    return { outcome: 'unresolved' };
+  }
+  const candidates = candidatesAtTopPopulatedRank(register).filter((c) =>
+    isEditClarifyTargetKind(c.kind),
+  );
+  if (candidates.length === 1) {
+    return { outcome: 'bound', referent: candidates[0]! };
+  }
+  if (candidates.length > 1) {
+    return { outcome: 'ask_candidates', candidates };
+  }
+  return { outcome: 'unresolved' };
+}
+
+/**
+ * The disclosure sentence for a bound pronoun — one sentence, ending in a full
+ * stop, naming the label the register bound. Shared by the recovery reply
+ * ("I have not changed the model yet. Taking that as X. What value …?") and the
+ * value pre-route's receipt ("Taking that as X. Updated X from … to ….") so the
+ * user reads one phrase for one concept.
+ */
+export function buildAnaphoricBindingDisclosure(label: string): string {
+  return `Taking that as ${label}.`;
 }
 
 export function selectEditClarifyTargets(

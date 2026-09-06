@@ -148,12 +148,13 @@ import {
   looksLikeVagueEdit,
 } from '../routing/analytical-intent.js';
 import {
+  buildAnaphoricBindingDisclosure,
   buildLabelChip,
-  isEditClarifyTargetKind,
+  resolveAnaphoricReferent,
 } from '../compose/edit-clarify-response.js';
 import {
-  candidatesAtTopPopulatedRank,
-  projectTurnReferents,
+  nodeIdFromRef,
+  projectTurnReferentsFromWindow,
   type TurnReferents,
 } from '../context/turn-referents.js';
 import {
@@ -445,25 +446,17 @@ const ANAPHORIC_LEAD_TEXT = 'I have not changed the model yet.';
 const ANAPHORIC_CANDIDATE_CHIP_CAP = 3;
 
 /**
- * `node:<id>` → `<id>`, per the §3.2 address grammar. A ref that is not a node
- * address is returned unchanged; `buildLabelChip` uses it only to build a chip
- * id, so a non-node ref degrades to a still-unique chip id rather than throwing.
- */
-function refToNodeId(ref: string): string {
-  return ref.startsWith('node:') ? ref.slice('node:'.length) : ref;
-}
-
-/**
  * Exactly one candidate: BIND, and disclose the binding in its own sentence,
  * immediately after the mutation-status lead — sentence index 1, asserted by
  * position in `edit-graph-anaphoric-recovery.test.ts` so this sentence cannot
  * drift from the copy. Never silently — the user must be able to see what was
  * assumed and correct it, which is also what makes the next turn's "no, the
- * other one" resolvable.
+ * other one" resolvable. The disclosure sentence itself is the composer's
+ * `buildAnaphoricBindingDisclosure`, shared with the value pre-route's receipt.
  */
 function buildAnaphoricBoundText(label: string): string {
   return (
-    `${ANAPHORIC_LEAD_TEXT} Taking that as ${label}. `
+    `${ANAPHORIC_LEAD_TEXT} ${buildAnaphoricBindingDisclosure(label)} `
     + 'What value would you like it set to?'
   );
 }
@@ -802,34 +795,26 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
   //   0, or no/degraded    → ASK, and say what was looked at
   //     register
   if (intentClass === null && !mutationSignal && looksLikeAnaphoricEdit(input.message)) {
+    // ⭐ THE DECISION IS THE COMPOSER'S `resolveAnaphoricReferent`, not a
+    // predicate of this branch: top populated rank, the composer's own
+    // eligibility set (`factor|option` — the first version of this branch left
+    // that filter behind and bound the `outcome` MRR Growth on turn 8 of the
+    // 5 Sep founder capture), and the count. The value pre-route in
+    // `turn-executor.ts` calls the same function for "Set it to 100000.", so
+    // the two surfaces cannot resolve one pronoun two ways.
+    //
     // ⚠ ABSENCE SEMANTICS. An omitted register and a `degraded` one both mean
     // "could not look", which is NOT the same as "looked and found nothing" —
     // but all three ASK, so the distinction changes telemetry, not the user's
     // outcome. An empty `complete` register is an authoritative zero.
-    const register = input.referents ?? null;
-    const atTopRank =
-      register !== null && register.source !== 'degraded'
-        ? candidatesAtTopPopulatedRank(register)
-        : [];
-    // ⚠ ELIGIBILITY, not just a cap. The chip this branch offers comes from
-    // `buildLabelChip`, and its sibling `selectEditClarifyTargets` — the other
-    // caller of that builder — admits `factor|option` ONLY. The first version
-    // of this branch copied that function's 3-cap and left its eligibility
-    // filter behind, so it bound an `outcome` and asked "what value would you
-    // like it set to?" about a node whose value the user cannot set. Witnessed
-    // by replay against the 5 Sep founder capture: turn 8 bound the `outcome`
-    // MRR Growth.
     //
-    // The predicate is IMPORTED from the composer rather than restated here, so
-    // the two surfaces cannot present different eligibility for one question.
-    //
-    // ⚠ AN INELIGIBLE CANDIDATE IS NOT A RESET. Filtering to zero falls through
-    // to `anaphoric_edit_ask_unresolved`, which still asks. The banned outcome
-    // stays unreachable — measured, not assumed.
-    const candidates = atTopRank.filter((c) => isEditClarifyTargetKind(c.kind));
+    // ⚠ AN INELIGIBLE CANDIDATE IS NOT A RESET. Filtering to zero resolves to
+    // `unresolved`, which still asks. The banned outcome stays unreachable —
+    // measured, not assumed.
+    const resolution = resolveAnaphoricReferent(input.referents ?? null);
 
-    if (candidates.length === 1) {
-      const bound = candidates[0]!;
+    if (resolution.outcome === 'bound') {
+      const bound = resolution.referent;
       return {
         branch: 'anaphoric_edit_bound',
         intent_class: null,
@@ -837,19 +822,19 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
         assistantText: buildAnaphoricBoundText(bound.label),
         // The chip carries the SAME message convention as every other
         // label chip, via the composer's own exported builder.
-        suggestedActions: [buildLabelChip(refToNodeId(bound.ref), bound.label)],
+        suggestedActions: [buildLabelChip(nodeIdFromRef(bound.ref), bound.label)],
       };
     }
 
-    if (candidates.length > 1) {
+    if (resolution.outcome === 'ask_candidates') {
       return {
         branch: 'anaphoric_edit_ask_candidates',
         intent_class: null,
         has_run_analysis_fact: hasRunAnalysisFact,
         assistantText: ANAPHORIC_ASK_CANDIDATES_TEXT,
-        suggestedActions: candidates
+        suggestedActions: resolution.candidates
           .slice(0, ANAPHORIC_CANDIDATE_CHIP_CAP)
-          .map((c) => buildLabelChip(refToNodeId(c.ref), c.label)),
+          .map((c) => buildLabelChip(nodeIdFromRef(c.ref), c.label)),
       };
     }
 
@@ -3881,18 +3866,13 @@ export async function dispatchEditGraph(
       // user is the node LABEL, which is already model-facing via
       // `display_graph`. So this adds no new channel for assistant-authored
       // text and does not touch the withheld-claim redaction guarantee.
-      const lastAssistantIdx = recentConversationSlice.findIndex(
-        (t) => (t.assistant_message ?? '').trim().length > 0,
-      );
-      const turnReferents = projectTurnReferents({
-        lastAssistantMessage:
-          lastAssistantIdx >= 0
-            ? (recentConversationSlice[lastAssistantIdx]!.assistant_message ?? null)
-            : null,
-        lastAssistantTurnIndex:
-          lastAssistantIdx >= 0
-            ? recentConversationSlice.length - 1 - lastAssistantIdx
-            : null,
+      //
+      // The window-to-register step is the producer's own
+      // `projectTurnReferentsFromWindow`, shared with the value pre-route in
+      // `turn-executor.ts`, so both consumers build the register from the same
+      // rule over the same newest-first shape.
+      const turnReferents = projectTurnReferentsFromWindow({
+        turnsNewestFirst: recentConversationSlice,
         nodes: parsedGraph.nodes,
       });
       const recoveryOutcome = decideNoOpRecovery({

@@ -70,6 +70,7 @@ import {
   impliesOptionInterventionEdit,
 } from './option-intervention-guard.js';
 import { EDIT_VERB_BASES, hasExplicitNoModelChangeIntent } from './mutation-warrant.js';
+import { buildAnaphoricBindingDisclosure } from '../compose/edit-clarify-response.js';
 
 /**
  * ⭐ EXPORTED 2026-08-05 so the calibration pre-route gates on the SAME edit
@@ -294,9 +295,11 @@ export const MAX_CANDIDATES = 4;
 /**
  * How a candidate was selected — useful for routing diagnostics. `score: 0`
  * alone is too implicit for telemetry, so each candidate carries an explicit
- * source tag.
+ * source tag. `register` is a candidate the referent register bound for a bare
+ * pronoun (`tryAnaphoricValueUpdate`); it never came from label evidence in
+ * the message, and the tag says so rather than borrowing `substring`.
  */
-export type CandidateSource = 'substring' | 'dice';
+export type CandidateSource = 'substring' | 'dice' | 'register';
 
 export interface ValueUpdateCandidate {
   readonly id: string;
@@ -1370,6 +1373,258 @@ export function tryDeicticValueUpdate(
 }
 
 
+// ---------------------------------------------------------------------------
+// Spec §4.3 (PR C of the referent stack) — the VALUE-BEARING anaphoric edit
+// ---------------------------------------------------------------------------
+
+/**
+ * The referent the register bound for this turn — resolved by the CALLER
+ * through the composer's `resolveAnaphoricReferent` (the one §4.2 authority)
+ * and handed in, or `null` when the register did not yield exactly one
+ * eligible candidate. This module never reads the register itself, so "the
+ * register is the only precondition" is testable here as "no binding → never
+ * matches".
+ */
+export interface AnaphoricValueBinding {
+  readonly id: string;
+  readonly label: string;
+  /** The register's kind for the node (`NodeKindV3` member for node refs). */
+  readonly kind: string;
+}
+
+/**
+ * Which message shape claimed the turn:
+ *   - `pronoun`       — an edit verb followed by a bare `it` / `this` / `that`
+ *                       and a quantity ("Set it to 100000.");
+ *   - `bare_quantity` — the whole message is one quantity ("100000", "£100k",
+ *                       "50%"), the natural reply to "What value would you
+ *                       like it set to?".
+ */
+export type AnaphoricValueForm = 'pronoun' | 'bare_quantity';
+
+export type AnaphoricSkipReason =
+  | 'degraded_extraction'
+  /** Neither the pronoun form nor the bare-quantity form — not this path's. */
+  | 'no_anaphor'
+  /** The shape matched but the register bound nothing: today's route stands. */
+  | 'no_binding'
+  | 'explicit_no_model_change'
+  | 'hypothetical_gate'
+  | 'no_quantity'
+  | 'ambiguous_quantity'
+  | 'no_graph'
+  | 'option_intervention_edit'
+  /**
+   * A canvas selection that is not the bound node. The register's selection
+   * rank has no producer yet (spec §3.5), so this path cannot tell a fresh
+   * click from a stale one; a foreign selection withdraws the claim and the
+   * turn keeps today's route.
+   */
+  | 'selection_conflict'
+  /**
+   * A bare quantity with a non-factor binding. The clarify branch in
+   * `turn-executor.ts` persists a `set_factor_value` pending for every
+   * candidate it is handed and runs its node-kind gate only on the
+   * `set_factor_value` dispatch, so a bare quantity bound to an option would
+   * persist a pending the handler cannot honour. Refused here instead.
+   */
+  | 'bare_quantity_needs_factor';
+
+export type AnaphoricValueDispatch =
+  | { readonly matched: false; readonly skip_reason: AnaphoricSkipReason }
+  /**
+   * The pronoun form: the caller promotes this into the label path's
+   * `set_factor_value` shape, and the executor's existing node-kind gate
+   * decides whether the bound node can take a value (an `option` binding
+   * reaches that gate and is refused there, disclosed).
+   */
+  | {
+      readonly matched: true;
+      readonly form: 'pronoun';
+      readonly dispatch: 'set_factor_value';
+      readonly candidate: ValueUpdateCandidate;
+      readonly quantity: QuantityExtractionResult;
+      /** `buildAnaphoricBindingDisclosure(label)` — its own sentence. */
+      readonly disclosure: string;
+      readonly attribution?: QuantityAttribution;
+    }
+  /**
+   * The bare-quantity form ASKS, naming the bound factor as the sole
+   * candidate. Measured at this head: the label path refuses a bare quantity
+   * even for a NAMED target (`tryDeterministicValueUpdate('Sales Headcount
+   * Investment 100000', …)` → `no_edit_verb`), so no existing path applies a
+   * bare number, and this one does not start.
+   */
+  | {
+      readonly matched: true;
+      readonly form: 'bare_quantity';
+      readonly dispatch: 'clarify';
+      readonly candidates: readonly ValueUpdateCandidate[];
+      readonly quantity: QuantityExtractionResult;
+    };
+
+/**
+ * The pronoun form, anchored to the START of the message: an optional run of
+ * closed-set openers ("OK,", "Yes", "Please"), an optional request frame
+ * ("can you", "please", "let's"), then an `EDIT_VERB_BASES` verb followed by
+ * a bare pronoun. The verb alternation is DERIVED from `EDIT_VERB_BASES`, the
+ * same vocabulary `EDIT_VERB_PATTERN` and the no-change veto read.
+ *
+ * ⚠ WHY A START ANCHOR OVER A CLOSED SET rather than an anywhere-match plus a
+ * negation list: the value path's own veto (`hasExplicitNoModelChangeIntent`)
+ * returns FALSE for "Don't set it to 5" (measured at this head), so a bare
+ * `\bset it\b` match would bind a refusal. A message that does not OPEN with
+ * the request cannot match here at all, and the failure direction is a SKIP —
+ * today's route — never a write. `repair-value-binding.ts` chose the same
+ * shape for the same reason: a full-message anchor over a closed set cannot
+ * creep, only decline.
+ */
+const ANAPHORIC_OPENER_SOURCE = String.raw`(?:(?:ok(?:ay)?|yes|yeah|sure|right|fine|great|thanks|please|now|then|just)[,!.]?\s+)*`;
+const ANAPHORIC_REQUEST_SOURCE = String.raw`(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|please\s+|let['’]?s\s+)?`;
+export const ANAPHORIC_VALUE_EDIT_PATTERN = new RegExp(
+  String.raw`^\s*` +
+    ANAPHORIC_OPENER_SOURCE +
+    ANAPHORIC_REQUEST_SOURCE +
+    String.raw`(?:${EDIT_VERB_BASES.join('|')})\s+(?:it|this|that)\b`,
+  'i',
+);
+
+/**
+ * The bare-quantity form: the WHOLE message is one quantity, in a shape whose
+ * value the extractor reads the way a reader would. Reuses CQE's own
+ * `CURRENCY_SYMBOL_SOURCE` and `NUMERIC_SUFFIX_SOURCE` verbatim, like the
+ * from/to anchor above, so the grammars cannot drift.
+ *
+ * ⚠ A MAGNITUDE SUFFIX IS ADMITTED ONLY AFTER A CURRENCY SYMBOL. Measured at
+ * this head: `extractQuantities('£100k')[0].value === 100000` but
+ * `extractQuantities('100k')[0].value === 100`. Claiming the bare "100k" would
+ * put 100 in the chip; it is left to today's route, and the spec pins it.
+ */
+export const BARE_QUANTITY_PATTERN = new RegExp(
+  String.raw`^\s*(?:(?:` +
+    CURRENCY_SYMBOL_SOURCE +
+    String.raw`)\s*\d[\d,]*(?:\.\d+)?\s*(?:` +
+    NUMERIC_SUFFIX_SOURCE +
+    String.raw`)?|\d[\d,]*(?:\.\d+)?\s*%?)\s*[.!]?\s*$`,
+  'i',
+);
+
+/**
+ * Spec §4.3, second paragraph — admit a bare `it` / `this` / `that` in the
+ * value path ONLY under the register precondition, disclosed.
+ *
+ * `DEICTIC_REFERENCE_PATTERN` excludes bare `it` because a misfire on
+ * "set it to £30k" silently mutating the wrong factor is worse than falling
+ * through. That refusal STANDS here for every turn where the caller hands in
+ * `binding: null` — the register did not yield exactly one eligible candidate
+ * at the top populated rank — and the skip is `no_binding`, so the twin is
+ * observable. Only a bound referent, and only the two message shapes above,
+ * reach a dispatch.
+ *
+ * Gate order mirrors `tryDeicticValueUpdate`: degraded extraction first, then
+ * the shape, then the binding, then the value path's own vetoes (no-change,
+ * hypothetical, quantity arity, graph, option-intervention framing), then the
+ * selection check. Every gate fails to a skip.
+ *
+ * `selectedNodeIds` is EVERY selected node id, not the factor-narrowed set the
+ * label path takes: any selection that is not the bound node withdraws the
+ * claim (see `selection_conflict`).
+ */
+export function tryAnaphoricValueUpdate(
+  message: string,
+  parsedQuantities: readonly QuantityExtractionResult[],
+  graphLookup: GraphLookup | undefined,
+  binding: AnaphoricValueBinding | null,
+  selectedNodeIds: readonly string[],
+  /** See `tryDeterministicValueUpdate`'s parameter of the same name. */
+  extractionDegraded: boolean = false,
+): AnaphoricValueDispatch {
+  if (extractionDegraded) {
+    return { matched: false, skip_reason: 'degraded_extraction' };
+  }
+  const form: AnaphoricValueForm | null = ANAPHORIC_VALUE_EDIT_PATTERN.test(message)
+    ? 'pronoun'
+    : BARE_QUANTITY_PATTERN.test(message)
+      ? 'bare_quantity'
+      : null;
+  if (form === null) {
+    return { matched: false, skip_reason: 'no_anaphor' };
+  }
+  if (binding === null) {
+    return { matched: false, skip_reason: 'no_binding' };
+  }
+  if (form === 'pronoun') {
+    // The veto's domain is the bound label plus the model-object vocabulary —
+    // the only entity this path can write.
+    if (hasExplicitNoModelChangeIntent(message, [binding.label])) {
+      return { matched: false, skip_reason: 'explicit_no_model_change' };
+    }
+    for (const pat of HYPOTHETICAL_PATTERNS) {
+      if (pat.test(message)) {
+        return { matched: false, skip_reason: 'hypothetical_gate' };
+      }
+    }
+  }
+  const nonNullQuantities = parsedQuantities.filter((q) => q.value !== null);
+  if (nonNullQuantities.length === 0) {
+    return { matched: false, skip_reason: 'no_quantity' };
+  }
+  let quantity: QuantityExtractionResult;
+  let attribution: QuantityAttribution | undefined = undefined;
+  if (
+    form === 'pronoun' &&
+    nonNullQuantities.length === 2 &&
+    FROM_TO_NUMERIC_ANCHOR_PATTERN.test(message)
+  ) {
+    quantity = { ...nonNullQuantities[1]!, operator: 'set', direction: 'set' };
+    attribution = 'from_to';
+  } else if (nonNullQuantities.length > 1) {
+    return { matched: false, skip_reason: 'ambiguous_quantity' };
+  } else {
+    quantity = nonNullQuantities[0]!;
+  }
+  if (graphLookup === undefined) {
+    return { matched: false, skip_reason: 'no_graph' };
+  }
+  if (form === 'pronoun') {
+    const guardLabels = collectOptionGuardLabels(graphLookup);
+    if (
+      impliesOptionInterventionEdit(
+        message,
+        guardLabels.optionLabels,
+        guardLabels.nonOptionLabels,
+      )
+    ) {
+      return { matched: false, skip_reason: 'option_intervention_edit' };
+    }
+  }
+  if (selectedNodeIds.some((id) => id !== binding.id)) {
+    return { matched: false, skip_reason: 'selection_conflict' };
+  }
+  const candidate: ValueUpdateCandidate = {
+    id: binding.id,
+    label: binding.label,
+    score: 1,
+    source: 'register',
+    labelMatchIndex: null,
+  };
+  if (form === 'bare_quantity') {
+    if (binding.kind !== 'factor') {
+      return { matched: false, skip_reason: 'bare_quantity_needs_factor' };
+    }
+    return { matched: true, form, dispatch: 'clarify', candidates: [candidate], quantity };
+  }
+  return {
+    matched: true,
+    form,
+    dispatch: 'set_factor_value',
+    candidate,
+    quantity,
+    disclosure: buildAnaphoricBindingDisclosure(binding.label),
+    ...(attribution ? { attribution } : {}),
+  };
+}
+
 /**
  * User-facing clarification copy for the deictic-but-ambiguous path.
  * British English, no internal terms.
@@ -1457,6 +1712,14 @@ export function buildNonFactorKindRefusalText(
   label: string,
   nodeKind: string,
   factorLabels: readonly string[],
+  /**
+   * The anaphoric binding disclosure ("Taking that as X.") when the refused
+   * candidate was bound from a bare pronoun by `tryAnaphoricValueUpdate`, so
+   * the refusal says what "it" was read as before saying why it is refused.
+   * `null` (the default) for the label path, whose message already names the
+   * node.
+   */
+  disclosure: string | null = null,
 ): string {
   const examples = factorLabels.slice(0, 2);
   const exampleClause =
@@ -1466,6 +1729,7 @@ export function buildNonFactorKindRefusalText(
         ? `You can set a value on a factor instead — ${examples[0]}, for example.`
         : `You can set a value on a factor instead — ${examples[0]} or ${examples[1]}, for example.`;
   return (
+    (disclosure === null ? '' : `${disclosure} `) +
     `${label} is ${articleFor(nodeKind)} ${nodeKind}, not a factor, and I can't ` +
     `set a value on ${articleFor(nodeKind)} ${nodeKind} directly. The model is unchanged so far. ` +
     `${exampleClause} ` +
