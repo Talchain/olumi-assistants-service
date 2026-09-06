@@ -233,6 +233,43 @@ function buildClarifyChips(
  * Returns the trimmed labels — the bytes the user actually read — not the raw
  * node labels.
  */
+/**
+ * ⭐ THE ELIGIBILITY FILTER, NAMED AND EXPORTED — the question "which node kinds
+ * may be offered as an edit target at all?", separated from the question "in
+ * what order, and how many?" that the rest of `selectEditClarifyTargets`
+ * answers.
+ *
+ * ⚠ WHY IT IS EXPORTED. `edit-graph-dispatch.ts`'s anaphoric-edit branch
+ * resolves a referent and offers it as a target using this module's own
+ * `buildLabelChip`. Its first version copied this function's 3-cap and left the
+ * eligibility filter behind, so it could bind an `outcome` and ask "what value
+ * would you like it set to?" about a node whose value the user cannot set —
+ * measured on turn 8 of the 5 Sep founder capture (`outcome` MRR Growth).
+ *
+ * Both surfaces now read THIS set, so they cannot present different eligibility
+ * for the same question. A second copy at the call site is the hand-maintained
+ * mirror this repo keeps paying for (trap 12), and a drift would read green
+ * because nothing compares the two.
+ *
+ * ⚠ THIS IS THE KIND FILTER ONLY. The 3-char label floor, the case-insensitive
+ * dedup and the factors-before-options ordering below are this composer's
+ * PRESENTATION rules and are deliberately NOT exported: the anaphoric branch's
+ * candidate set comes from the register, which is already deduped by node id
+ * and ordered by rank. Sharing eligibility is single-sourcing one concept;
+ * sharing presentation would be conflating two.
+ */
+export const EDIT_CLARIFY_TARGET_KINDS = ['factor', 'option'] as const;
+export type EditClarifyTargetKind = (typeof EDIT_CLARIFY_TARGET_KINDS)[number];
+
+/** Membership in `EDIT_CLARIFY_TARGET_KINDS`, derived from it, never restated. */
+export function isEditClarifyTargetKind(
+  kind: string | undefined,
+): kind is EditClarifyTargetKind {
+  return (
+    kind !== undefined && (EDIT_CLARIFY_TARGET_KINDS as readonly string[]).includes(kind)
+  );
+}
+
 export function selectEditClarifyTargets(
   nodes: readonly EditClarifyComposerNode[] | null | undefined,
 ): readonly { readonly node_id: string; readonly label: string }[] {
@@ -242,6 +279,12 @@ export function selectEditClarifyTargets(
 
   for (const node of nodes ?? []) {
     if (factors.length + options.length >= 3) break;
+    // The eligibility question, asked through the exported predicate so this
+    // composer and the anaphoric branch cannot disagree about it. Behaviour is
+    // unchanged: an ineligible node never reached `seen` or either bucket
+    // before either — the `factor` / `option` tests below were already the
+    // admission, and this only names them.
+    if (!isEditClarifyTargetKind(node.kind)) continue;
     const label = typeof node.label === 'string' ? node.label.trim() : '';
     if (label.length < 3) continue;
     const dedupKey = label.toLowerCase();
@@ -258,7 +301,18 @@ export function selectEditClarifyTargets(
   return [...factors, ...options].slice(0, 3);
 }
 
-function buildLabelChip(nodeId: string, label: string): SuggestedAction {
+/**
+ * ⚠ EXPORTED, not copied. The anaphoric-edit branch in `edit-graph-dispatch.ts`
+ * offers candidate chips for a referent it could not narrow to one, and those
+ * chips must carry EXACTLY this message convention. The convention is
+ * load-bearing, not cosmetic — see the comment inside: a submit message
+ * containing an `EDIT_GRAPH_POSITIVE_REGEX` verb re-triggers the V4 edit
+ * dispatch with a value-less prompt and dead-ends in the same recovery loop the
+ * chip was meant to escape. A second copy of that rule at the call site would
+ * be the hand-maintained mirror this repo keeps paying for (trap 12), and a
+ * drift would read green because nothing compares the two.
+ */
+export function buildLabelChip(nodeId: string, label: string): SuggestedAction {
   // The submit message must NOT contain any verb in route-v2's
   // `EDIT_GRAPH_POSITIVE_REGEX`
   // (change|update|edit|modify|remove|delete|add|adjust|set|reduce|

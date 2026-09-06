@@ -85,7 +85,13 @@ describe('decideNoOpRecovery — proposal-continuation branches', () => {
 
   it('falls back to vague_edit when pending is null and message is a vague edit', () => {
     const r = decideNoOpRecovery({
-      message: 'Let me change it.',
+      // ⚠ RE-FIXTURED, NOT RE-POINTED (PR #1362). This case was written for the
+      // VAGUE-EDIT fall-through, and its old fixture 'Let me change it.' stopped
+      // being a vague edit: `it` is an anaphoric object and now routes to the
+      // anaphoric branch. Re-pointing the expectation would have kept the suite
+      // green while quietly deleting the only coverage of the fall-through this
+      // test names. A genuinely target-less message keeps it testing that.
+      message: 'Change something.',
       priorFacts: NO_FACTS,
       freshness: 'fresh',
       graphReady: true,
@@ -96,7 +102,12 @@ describe('decideNoOpRecovery — proposal-continuation branches', () => {
 
   it('falls back to vague_edit when pending is present but message is neither agreement nor add-as-factor', () => {
     const r = decideNoOpRecovery({
-      message: 'Adjust it.',
+      // ⚠ RE-FIXTURED, NOT RE-POINTED (PR #1362) — same reason as above.
+      // 'Adjust it.' is now an anaphoric edit. This case is about the proposal
+      // ladder NOT taking precedence over an unrelated message, and the
+      // target-less message exercises exactly that with the vague-edit
+      // fall-through intact.
+      message: 'Adjust the model.',
       priorFacts: NO_FACTS,
       freshness: 'fresh',
       graphReady: true,
@@ -453,7 +464,13 @@ describe('decideNoOpRecovery — proposal-continuation chip-duplication guard', 
 describe('decideNoOpRecovery — vague_edit fallback copy is schema-vocab-free', () => {
   it('vague edit returns clean copy (no "factor or edge" / node / edge / graph / schema / patch)', () => {
     const r = decideNoOpRecovery({
-      message: 'Let me change it.',
+      // ⚠ THE COPY GUARD OF THE THREE — RE-FIXTURED, and re-pointing it would
+      // have been the damaging fix. This asserts the VAGUE-EDIT copy is free of
+      // schema vocabulary (PR #218 Fix B). Pointing it at the anaphoric branch
+      // would have made it assert the new copy instead and left the vague-edit
+      // copy — the one that actually regressed once — with no guard at all,
+      // green and testing nothing. A target-less fixture keeps it on its object.
+      message: 'Change something.',
       priorFacts: NO_FACTS,
       freshness: 'fresh',
       graphReady: true,
