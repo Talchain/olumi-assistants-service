@@ -454,9 +454,12 @@ function refToNodeId(ref: string): string {
 }
 
 /**
- * Exactly one candidate: BIND, and disclose the binding in the first clause.
- * Never silently — the user must be able to see what was assumed and correct
- * it, which is also what makes the next turn's "no, the other one" resolvable.
+ * Exactly one candidate: BIND, and disclose the binding in its own sentence,
+ * immediately after the mutation-status lead — sentence index 1, asserted by
+ * position in `edit-graph-anaphoric-recovery.test.ts` so this sentence cannot
+ * drift from the copy. Never silently — the user must be able to see what was
+ * assumed and correct it, which is also what makes the next turn's "no, the
+ * other one" resolvable.
  */
 function buildAnaphoricBoundText(label: string): string {
   return (

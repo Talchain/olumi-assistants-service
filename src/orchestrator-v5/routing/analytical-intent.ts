@@ -1245,10 +1245,19 @@ export function looksLikeVagueEdit(message: string): boolean {
  * See `ANAPHORIC_EDIT_PATTERNS` for why this is a separate predicate and why
  * its negation gate is shared while its positive patterns are not.
  *
- * A `true` here is NOT a licence to guess. The caller must resolve the referent
- * against the register and disclose whatever it binds; where the register
- * yields nothing, or more than one candidate, the contract is to ASK. The one
- * banned outcome is the reset this predicate exists to remove.
+ * A `true` here is NOT a licence to guess. For an anaphoric edit WITHOUT a
+ * concrete mutation signal (`hasMutationSignal` false), the caller resolves the
+ * referent against the register and discloses whatever it binds; where the
+ * register yields nothing, or more than one candidate, the contract is to ASK.
+ * The one banned outcome is the reset this predicate exists to remove.
+ *
+ * ⚠ SCOPE. An anaphoric message that ALSO carries a value ("Can you update it
+ * to 100000?") is `true` here but is gated OUT of that branch by
+ * `hasMutationSignal`, so at this head it reaches none of the three outcomes
+ * and falls to `ambiguous` (`assistantText: null`). Pinned by name in
+ * `edit-graph-anaphoric-recovery.test.ts` (KNOWN NOT COVERED). Admitting it
+ * through the deterministic value path under the register precondition is
+ * spec §4.3 and lands in a separate PR.
  */
 export function looksLikeAnaphoricEdit(message: string): boolean {
   const trimmed = message.trim();

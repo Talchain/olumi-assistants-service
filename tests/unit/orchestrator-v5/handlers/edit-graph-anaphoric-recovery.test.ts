@@ -26,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 
 import { decideNoOpRecovery } from '../../../../src/orchestrator-v5/handlers/edit-graph-dispatch.js';
 import { findForbiddenPhraseHit } from '../../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
+import { hasMutationSignal } from '../../../../src/orchestrator-v5/routing/analytical-intent.js';
 import {
   isEditClarifyTargetKind,
   selectEditClarifyTargets,
@@ -123,6 +124,20 @@ describe('§4.2 outcome 1 — exactly one candidate BINDS, and discloses it', ()
     const r = decideNoOpRecovery({ ...BASE, referents: ONE_CANDIDATE });
     expect(r.assistantText).toContain('Taking that as');
     expect(r.assistantText).toContain('?');
+  });
+
+  it('discloses it in its OWN sentence, immediately after the mutation-status lead', () => {
+    // ⚠ POSITION, not presence. The docstring on `buildAnaphoricBoundText` and
+    // the PR body both describe WHERE the disclosure sits; a `toContain` cannot
+    // hold that sentence to the copy. Split on sentence terminators and pin the
+    // index: the lead is sentence 0, the disclosure is sentence 1, the question
+    // is last. A reorder in either direction REDs here.
+    const r = decideNoOpRecovery({ ...BASE, referents: ONE_CANDIDATE });
+    const sentences = (r.assistantText ?? '').split(/(?<=[.?!])\s+/);
+    expect(sentences.length).toBeGreaterThanOrEqual(3);
+    expect(sentences[0]).toBe('I have not changed the model yet.');
+    expect(sentences[1]).toBe('Taking that as Sales Headcount Investment.');
+    expect(sentences[sentences.length - 1]).toMatch(/\?$/);
   });
 
   it('offers the bound referent as a chip addressed by its node id', () => {
@@ -620,5 +635,53 @@ describe('KNOWN NOT COVERED — the nominalised anaphoric form still resets', ()
     });
     expect(r.branch).toBe('ambiguous');
     expect(r.assistantText).toBeNull();
+  });
+});
+
+/**
+ * ⭐ KNOWN NOT COVERED, second class — the VALUE-BEARING anaphoric edit.
+ *
+ * The bound reply above asks "What value would you like it set to?", and the
+ * natural answer carries a value: "Set it to 100000." / "Can you update it to
+ * 100000?". Both carry a concrete mutation signal, and the anaphoric branch is
+ * gated `!mutationSignal` — so the message the product's own question elicits
+ * reaches NONE of §4.2's three outcomes at this layer and falls to `ambiguous`
+ * (`assistantText: null`, the V4 handler's copy). This is the SAME gate that
+ * blocks the 24 nominalised members above, and the same "different bad answer".
+ *
+ * Not fixed here, by design: the fix is spec §4.3 — admit the bare pronoun in
+ * `deterministic-value-update.ts` under the register precondition — which is a
+ * value-path change, not a recovery-branch change, and lands in its own PR.
+ * Pinned so the suite REDs when it moves, exactly as the family above is.
+ */
+describe('KNOWN NOT COVERED — the value-bearing anaphoric edit reaches no §4.2 outcome here', () => {
+  const VALUE_BEARING: readonly string[] = [
+    'Can you update it to 100000?', // anaphoric by predicate AND a mutation signal
+    'Set it to 100000.',            // `set` is not in the anaphoric verb list; mutation signal only
+  ];
+
+  it('POSITIVE CONTROL: the same request WITHOUT a value binds', () => {
+    // Without this the pins below would also pass with the whole feature broken.
+    for (const message of ['Can you update it?', 'Update it.']) {
+      const r = decideNoOpRecovery({ ...BASE, message, referents: ONE_CANDIDATE });
+      expect(r.branch, message).toBe('anaphoric_edit_bound');
+    }
+  });
+
+  it('PRECONDITION: every member carries a mutation signal', () => {
+    // The pin's cause, asserted in-test: if a later change to
+    // `MUTATION_SIGNAL_PATTERNS` stopped firing on these, the pin below would
+    // pass for a different reason and this is what says so.
+    for (const message of VALUE_BEARING) {
+      expect(hasMutationSignal(message), message).toBe(true);
+    }
+  });
+
+  it('PINNED: with exactly one register candidate, each still lands on ambiguous / null', () => {
+    for (const message of VALUE_BEARING) {
+      const r = decideNoOpRecovery({ ...BASE, message, referents: ONE_CANDIDATE });
+      expect(r.branch, message).toBe('ambiguous');
+      expect(r.assistantText, message).toBeNull();
+    }
   });
 });
