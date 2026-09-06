@@ -1097,14 +1097,40 @@ const EXPLICIT_ANALYSIS_REQUEST_PATTERNS: readonly RegExp[] = [
   // Both facts are pinned in `analysis-election-gate.test.ts` § TWIN E, so
   // this paragraph REDs if it ever stops being true.
   //
-  // ⚠ ANCHORED, DELIBERATELY, AND THE ANCHORS ARE THE WHOLE PATTERN. `^` and
-  // `$` (no `m` flag) are what keep this from becoming a bare `/\brerun\b/i`,
-  // which would admit every nominal reading in English — the exact defect the
-  // sibling predicate shipped once and whose ⚠ note says "never restore the
-  // `?`". Trailing `[.!]?` admits a full stop or an exclamation mark and NOT a
+  // ⚠ ANCHORED, DELIBERATELY — AND THERE ARE THREE THINGS DOING IT, NOT TWO:
+  // `^`, `$`, AND THE ABSENCE OF THE `m` FLAG. All three are pinned by named
+  // tests in `analysis-election-gate.test.ts` § TWIN E; none of them is a
+  // claim this comment is making on its own behalf.
+  //
+  //   `^` and `$` are what keep this from degrading into a bare
+  //   `/\brerun\b/i`, which would admit every nominal reading in English — the
+  //   exact defect the sibling predicate shipped once and whose ⚠ note says
+  //   "never restore the `?`". Measured against this spec at this tip:
+  //   dropping `$` REDs 9 of its tests (the TWIN rows and the floor);
+  //   dropping `^` REDs exactly 1 — the known-dropped `toEqual` floor below,
+  //   where "Fine, rerun." and "OK. Rerun." flip to admitted. So `^` is
+  //   observable through that floor and nothing else in the file.
+  //
+  //   NO `m` FLAG — and this one was UNPINNED until the guard named
+  //   "the `m` flag is ABSENT and that is load-bearing" was added. Measured:
+  //   with `m` applied, all 82 of this spec's other tests still pass, so a
+  //   successor could have added it, or rewritten this pattern with it, and
+  //   nothing in this file would have gone red. What `m` does is NOT "make it
+  //   a bare `\brerun\b`" — it turns `^`/`$` into LINE anchors, degrading the
+  //   property from "the message IS the verb" to "SOME LINE of the message is
+  //   the verb", leaving the rest of the message unconstrained. Measured at
+  //   this tip with `/…/im`: "Rerun.\nWhat changed?" and
+  //   "Notes:\nrerun\nThe rerun was slow." both flip demoted → admitted — the
+  //   first would answer a question about a past run by recomputing over it,
+  //   the second is the nominal class the anchors exist to exclude. Both are
+  //   now pinned. The shared vetoes are NOT part of this protection and are
+  //   not credited with it: measured under `m`, "Don't rerun.\nRerun." and
+  //   "Should I rerun?\nRerun." still decline.
+  //
+  // Trailing `[.!]?` admits a full stop or an exclamation mark and NOT a
   // question mark: "Rerun?" is a question about whether to, and the shared
   // interrogative veto is not reached for it because there is no `do/should
-  // I/we`. Removing either anchor is a different predicate; do not.
+  // I/we`. Changing any of the three is a different predicate; do not.
   //
   // ⚠ SCOPE. This widens ADMISSION of an election the LLM router already made.
   // It does NOT widen `looksLikeImperativeRerun`, the LLM-free DISPATCH

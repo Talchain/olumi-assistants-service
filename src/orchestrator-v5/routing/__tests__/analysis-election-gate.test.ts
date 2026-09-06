@@ -441,8 +441,9 @@ describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', 
    *
    * ⚠⚠ AND THE REASON WE ARE NOT SIMPLY DROPPING THE `^`. It was RUN, not
    * argued about — and the run says the opposite of "free": with the `^`
-   * removed this file goes `1 failed | 81 passed`, and the failure is the
-   * `toEqual` immediately below. So dropping it is a plausible follow-up that
+   * removed this file goes `1 failed | 83 passed (84)`, and the failure is the
+   * `toEqual` immediately below (it read `1 failed | 81 passed (82)` before the
+   * two `m`-flag rows below were added; the failing assertion is the same one). So dropping it is a plausible follow-up that
    * must bring its own evidence, NOT a free win — it widens the predicate from
    * "the message IS the verb" to "the message ENDS in the verb at a licensed
    * left context", which is a different and much larger input space that this
@@ -507,6 +508,55 @@ describe('TWIN E — the bare imperative re-run (founder journey, 2026-09-05)', 
       ).toBe(true);
     }
   });
+
+  /**
+   * ⭐ THE ABSENT `m` FLAG IS A PROTECTION, SO IT IS PINNED HERE.
+   *
+   * The pattern's block comment credits `^`, `$` AND the absence of the `m`
+   * flag with keeping the match confined to a message that IS the bare verb.
+   * The first two were observable (mutants M5/M6, and the `toEqual` floor
+   * above). The third was NOT: adding `m` left the whole suite green, so a
+   * successor could have added it — or written the pattern fresh with it —
+   * and nothing would have gone red. This test is that missing guard.
+   *
+   * WHAT `m` WOULD DO, MEASURED at this head rather than argued: it turns `^`
+   * and `$` into LINE anchors, so the property degrades from "the message IS
+   * the verb" to "SOME LINE of the message is the verb" — and a message may
+   * then carry arbitrary other content, including the nominal readings the
+   * anchors exist to exclude. Both rows below read `demoted` at this head and
+   * `admitted` with `/…/im`.
+   *
+   * The single-line control in the same test is what stops this passing
+   * vacuously (trap 13): it fails if the predicate stops admitting anything,
+   * so a green here is evidence about the ANCHORS, not about the predicate
+   * being inert.
+   */
+  it.each([
+    // A genuine bare imperative on line 1, then a QUESTION about a past run.
+    // With `m` this is read as an explicit request to compute, and the
+    // question is answered by destroying the result it asks about.
+    'Rerun.\nWhat changed?',
+    // A bare `rerun` line inside a plainly NOMINAL message — the exact class
+    // the block comment says the anchors exclude.
+    'Notes:\nrerun\nThe rerun was slow.',
+  ])(
+    'the `m` flag is ABSENT and that is load-bearing — the multi-line message %j stays DEMOTED',
+    (message) => {
+      // Bound by IDENTITY to this exact string (trap 19), and asserted at the
+      // GATE, so what is pinned is the outcome the user gets.
+      const outcome = evaluateAnalysisElection({
+        electedHandlerId: GATED_ANALYSIS_HANDLER_ID,
+        message,
+      });
+      expect(outcome.kind).toBe('demoted');
+      expect(looksLikeExplicitAnalysisRequest(message)).toBe(false);
+      // POSITIVE CONTROL, same predicate, same run: the single-line form the
+      // whole PR exists to admit must still be admitted. Without this the
+      // assertion above would pass just as happily against a predicate that
+      // had stopped matching anything at all.
+      expect(looksLikeExplicitAnalysisRequest('Rerun.')).toBe(true);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
