@@ -16,16 +16,23 @@
  *   | `turn_referents` (this)   | What is available to be referred to, and  |
  *   |                           | by whom was it introduced?                |
  *
- * ⚠ THIS MODULE HAS NO PRODUCTION CONSUMER YET, AND THAT IS THE POINT.
- * The spec's sequencing constraint (§4.3) is not optional:
+ * THE PRODUCTION CONSUMER, named so nobody has to grep for it:
+ * `handlers/edit-graph-dispatch.ts` imports `projectTurnReferents` (with
+ * `candidatesAtTopPopulatedRank` and the `TurnReferents` type) and calls it
+ * inside `dispatchEditGraph` on the no-op path, passing the result as
+ * `referents` into `decideNoOpRecovery`. That function's anaphoric branch is
+ * the only reader and routes to one of `anaphoric_edit_bound`,
+ * `anaphoric_edit_ask_candidates` or `anaphoric_edit_ask_unresolved`.
+ * `dispatchEditGraph` is called from `orchestrator/route-v2.ts`, so this
+ * register is live on the production edit route.
+ *
+ * The spec's sequencing constraint (§4.3) is why the register was built first
+ * and the routing change landed on top of it, in that order:
  *
  *   > Removing pronouns from `VAGUE_EDIT_PATTERNS` before the register exists
  *   > sends those messages to the `ambiguous` branch (`assistantText: null`,
  *   > preserve existing copy) — a different bad answer, not a better one.
  *   > Register first, then the routing change, in that order, in separate PRs.
- *
- * So this PR is provably inert: it adds a pure module and its tests and changes
- * no behaviour anywhere. The routing change that consumes it is the follow-up.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT THIS DELIBERATELY DOES NOT DO

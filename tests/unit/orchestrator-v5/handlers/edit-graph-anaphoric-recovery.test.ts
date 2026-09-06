@@ -19,7 +19,7 @@
  *
  * Fixtures are transcribed verbatim from that capture. Assertions bind by
  * IDENTITY — node id `919d7f50`, the exact label — never by a value predicate
- * another node could satisfy (five nodes in this graph are factors).
+ * another node could satisfy (six nodes in this graph are factors).
  */
 
 import { describe, expect, it } from 'vitest';
