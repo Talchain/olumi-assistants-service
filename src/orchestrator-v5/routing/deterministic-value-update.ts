@@ -160,6 +160,23 @@ const DEICTIC_REFERENCE_PATTERN =
   /\b(?:(?:that|this) (?:factor|node|one)|(?:the (?:selected|highlighted|chosen)) (?:factor|node|one))\b/i;
 
 /**
+ * ⭐ C5 (6 Sep 2026) — does this message POINT AT the canvas selection?
+ *
+ * Exported so the route's recorded-ask pre-route consults THIS definition of
+ * "the selection owns the referent" instead of re-spelling it (trap 12). That
+ * gate withdrew a recorded option-effect ask on ANY selection, and an
+ * incidental one lost the user's answer; the deictic shapes above are the ones
+ * a selection genuinely claims. Bare "it" stays out, per the note above — a
+ * reply saying "it" has no selection-aware path to claim it, so a recorded ask
+ * remains its only deterministic antecedent.
+ *
+ * The pattern carries no `g` flag, so `.test` is stateless here.
+ */
+export function carriesDeicticReference(message: string): boolean {
+  return typeof message === 'string' && DEICTIC_REFERENCE_PATTERN.test(message);
+}
+
+/**
  * V5 Golden Journey row 7 — strict "from <numeric> to <numeric>" anchor.
  *
  * History (PR #192 reviewer iteration log):
