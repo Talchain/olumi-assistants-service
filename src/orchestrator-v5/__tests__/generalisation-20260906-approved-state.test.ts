@@ -2,7 +2,8 @@
  * Synthetic approval replay through the real executor, held-action validator,
  * patch applier, commit composer and freshness derivation. The session store
  * models its JSON boundary only: this is not a database or browser restore test.
- * Prior run metadata is a fixture; no engine input or result is manufactured here.
+ * Prior run metadata is synthetic. No engine is called; these facts cannot
+ * establish engine consumption.
  */
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
