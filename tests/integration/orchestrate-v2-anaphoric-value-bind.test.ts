@@ -27,6 +27,13 @@ import type { FastifyInstance } from 'fastify';
 import { setTestSink } from '../../src/utils/telemetry.js';
 import { parseDeliveredOlumiResponse } from '../helpers/parse-delivered-response.js';
 import type { SessionTurnWithContent } from '../../src/orchestrator-v5/session/conversation-content.js';
+import { extractQuantities } from '../../src/orchestrator-v5/context/cqe/extract-quantities.js';
+import type { GraphLookup } from '../../src/orchestrator-v5/routing/validator.js';
+import {
+  ANAPHORIC_VALUE_EDIT_PATTERN,
+  buildDeicticClarifyAssistantText,
+  tryDeicticValueUpdate,
+} from '../../src/orchestrator-v5/routing/deterministic-value-update.js';
 
 const llmCallTracker = { count: 0 };
 
@@ -464,5 +471,104 @@ describe('POST /orchestrate/v2/turn — §4.3 value-bearing anaphoric edit binds
       payload: buildRequest('100000'),
     });
     expect(llmCallTracker.count).toBeGreaterThanOrEqual(1);
+  });
+
+  // ── a DEICTIC claim is a claim (review finding F1 at d102d0f6) ──
+
+  /**
+   * The same node table `buildGraphState` carries, in the `GraphLookup` shape the
+   * pre-routes read — so the in-test precondition probes the deictic module
+   * with the graph the executor will hand it.
+   */
+  const DEICTIC_PROBE_LOOKUP: GraphLookup = {
+    findEntityById: (id) => {
+      const n = buildGraphState().nodes.find((x) => x.id === id);
+      return n ? { id: n.id, kind: n.kind === 'option' ? 'option' : 'node', label: n.label } : null;
+    },
+    listEntitiesByKind: (kind) => {
+      const nodes = buildGraphState().nodes;
+      if (kind === 'node') return nodes.filter((n) => n.kind !== 'option').map((n) => ({ id: n.id, label: n.label }));
+      if (kind === 'option') return nodes.filter((n) => n.kind === 'option').map((n) => ({ id: n.id, label: n.label }));
+      return [];
+    },
+  };
+
+  it('a message the DEICTIC path claims ("Set this factor to 100000.", nothing selected) is left to the deictic clarify: no patch, no disclosure, no set_factor_value telemetry row', async () => {
+    // PRECONDITION, pinned in-test so this cannot pass on a fixture that stopped
+    // triggering: the deictic module claims the message (`clarify_deictic`,
+    // nothing selected) AND the anaphoric pronoun pattern admits it too — its
+    // trailing `\b` after `this` is satisfied by the space before "factor". The
+    // executor's gate is the ONLY thing standing between those two claims, and
+    // the deictic one was made first.
+    const message = 'Set this factor to 100000.';
+    const deictic = tryDeicticValueUpdate(
+      message,
+      extractQuantities(message),
+      DEICTIC_PROBE_LOOKUP,
+      [],
+      () => null,
+      false,
+    );
+    expect(deictic).toMatchObject({ matched: true, dispatch: 'clarify_deictic', reason: 'no_factor_selected' });
+    expect(ANAPHORIC_VALUE_EDIT_PATTERN.test(message)).toBe(true);
+
+    mockedRecentRows = [priorAssistantTurn(PRIOR_BOUND_REPLY)];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(message),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
+    const body = JSON.parse(res.body);
+    expect(patchBlocks(body)).toEqual([]);
+    const text = String(body.assistant_text ?? '');
+    expect(text).toBe(buildDeicticClarifyAssistantText('no_factor_selected'));
+    expect(text).not.toContain('Taking that as');
+
+    // The telemetry must read as a build WITHOUT the §4.3 block reads: the label
+    // path's honest no-match row, then the deictic clarify row — and NO row
+    // claiming a `set_factor_value` dispatch that never executed.
+    const rows = events.filter((e) => e.event === 'v5.deterministic_value_update');
+    expect(rows.map((r) => r.data.dispatch)).toEqual([null, 'clarify_deictic']);
+    expect(rows[0]?.data.matched).toBe(false);
+    expect(rows[0]?.data.skip_reason).toBe('no_candidate_match');
+    expect(rows.some((r) => r.data.dispatch === 'set_factor_value')).toBe(false);
+    expect(
+      rows.some((r) => Array.isArray(r.data.candidate_sources) && r.data.candidate_sources.includes('register')),
+    ).toBe(false);
+    // The deictic clarify persists no pending naming the bound factor.
+    expect(JSON.stringify(appendCalls)).not.toContain('"factor_id":"fac_shi"');
+  });
+
+  it('CONTRAST — the bare pronoun ("Set this to 100000.") is NOT deictic, so this path binds and writes as designed', async () => {
+    const message = 'Set this to 100000.';
+    const deictic = tryDeicticValueUpdate(
+      message,
+      extractQuantities(message),
+      DEICTIC_PROBE_LOOKUP,
+      [],
+      () => null,
+      false,
+    );
+    expect(deictic).toMatchObject({ matched: false, skip_reason: 'no_deictic' });
+
+    mockedRecentRows = [priorAssistantTurn(PRIOR_BOUND_REPLY)];
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: buildRequest(message),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(llmCallTracker.count).toBe(0);
+    const body = JSON.parse(res.body);
+    const patch = patchBlocks(body)[0];
+    expect(patch?.operation).toBe('set_factor_value');
+    expect(patch?.target_id).toBe('fac_shi');
+    const sentences = String(body.assistant_text).split(/(?<=[.?!])\s+/);
+    expect(sentences[0]).toBe('Taking that as Sales Headcount Investment.');
+    const rows = events.filter((e) => e.event === 'v5.deterministic_value_update');
+    expect(rows.map((r) => r.data.dispatch)).toEqual(['set_factor_value']);
+    expect(rows[0]?.data.candidate_sources).toEqual(['register']);
   });
 });
