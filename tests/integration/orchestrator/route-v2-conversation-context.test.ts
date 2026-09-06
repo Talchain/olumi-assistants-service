@@ -7,6 +7,9 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
+import { randomUUID } from 'node:crypto';
+import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
+import { parsePendingAction } from '../../../src/orchestrator-v5/session/pending-action.js';
 import type { FastifyInstance } from 'fastify';
 
 const dispatchEditGraphMock = vi.fn();
@@ -27,16 +30,20 @@ vi.mock('../../../src/orchestrator-v5/turn-executor.js', () => ({
 }));
 
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const loadGraphMock = vi.fn();
+const readPendingsMock = vi.fn();
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
+    readScenarioRunAnalysisFactsFor: async () => ({ facts: [], total_count: 0 }),
+    readMostRecentPendingActions: readPendingsMock,
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
     storeDraftGraph: async () => undefined,
-    loadGraph: async () => null,
+    loadGraph: loadGraphMock,
     loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
   }),
   resetSessionStoreForTests: () => {},
@@ -182,6 +189,7 @@ const DISCUSSIONS = [
   ['negated description', 'The senior developer cannot increase productivity; what do you think?'],
   ['question before context', 'What do you think — the senior developer can increase productivity'],
   ['single sentence contextual question', 'What do you think of adding a temporary technical lead?'],
+  ['colon introduces a proposed idea', 'What do you think: add a temporary lead?'],
   ['meta-question', 'Did my edit affect the ranking?'],
   ['hypothetical', 'What if we increase the team size?'],
   ['ambiguous concern', "I'm worried about the increase in coordination overhead."],
@@ -192,6 +200,7 @@ const DISCUSSIONS = [
 const EDITS = [
   'Add a temporary technical lead as an option',
   'Can you add a temporary technical lead as an option?',
+  'Could you please add a temporary technical lead as an option?',
   'I want to add a temporary technical lead as an option',
   'Please remove the temporary technical lead option',
   "Don't just add a factor, add an option for a temporary technical lead",
@@ -214,6 +223,10 @@ describe('conversation context reaches the intended application path', () => {
       assistantText: 'Router reached with supplied context.',
     }));
     appendMock.mockClear();
+    loadGraphMock.mockReset();
+    loadGraphMock.mockResolvedValue(null);
+    readPendingsMock.mockReset();
+    readPendingsMock.mockResolvedValue([]);
   });
 
   it.each(DISCUSSIONS)('%s goes to reasoning without an edit proposal', async (_label, message) => {
@@ -235,6 +248,46 @@ describe('conversation context reaches the intended application path', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(turnExecutorMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['50%', 'Set it to about 0.5.'])('keeps a pending value answer: %j', async (message) => {
+    const pair = { optionId: 'opt_lead', optionLabel: 'Temporary technical lead',
+      factorId: 'fac_capacity', factorLabel: 'Technical Leadership Capacity' };
+    const graph = {
+      goal_node_id: 'goal',
+      nodes: [
+        { id: 'goal', kind: 'goal', label: 'Launch readiness' },
+        { id: pair.factorId, kind: 'factor', label: pair.factorLabel, category: 'controllable' },
+        { id: pair.optionId, kind: 'option', label: pair.optionLabel },
+      ],
+      edges: [[pair.optionId, pair.factorId], [pair.factorId, 'goal']].map(([from, to]) => ({
+        from, to, strength: { mean: 0.5, std: 0.1 }, exists_probability: 1,
+        effect_direction: 'positive',
+      })),
+    };
+    const graphHash = computeAnalysisAffectingGraphHash(graph);
+    expect(graphHash).not.toBeNull();
+    const pending = {
+      id: randomUUID(), scenario_id: SCENARIO_ID, chip_id: 'chip_configure_option_clarify',
+      action: { kind: 'elicit_option_effect', option_id: pair.optionId,
+        option_label: pair.optionLabel, factor_id: pair.factorId, factor_label: pair.factorLabel },
+      preconditions: { graph_hash: graphHash },
+      expires_at_turn_count: 3, emitted_at_iso: new Date().toISOString(),
+      expires_at_iso: new Date(Date.now() + 120_000).toISOString(),
+    };
+    expect(parsePendingAction(pending)).not.toBeNull();
+    loadGraphMock.mockResolvedValue(graph);
+    readPendingsMock.mockResolvedValue([pending]);
+    const response = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: payload({ message, graph_state: graph }),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(dispatchEditGraphMock).toHaveBeenCalledTimes(1);
+    expect(dispatchEditGraphMock.mock.calls[0]![0].recordedEffectAnswer).toMatchObject({
+      pending: { id: pending.id }, pair, valueText: '0.5',
+    });
     expect(turnExecutorMock).not.toHaveBeenCalled();
   });
 
