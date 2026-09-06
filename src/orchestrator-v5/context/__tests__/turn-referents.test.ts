@@ -181,7 +181,7 @@ describe('projectTurnReferents — the witnessed case (5 Sep 2026 founder run)',
     });
 
     expect(register.source).toBe('complete');
-    // BIND BY IDENTITY. Not "length === 1 and kind is factor" — five nodes in
+    // BIND BY IDENTITY. Not "length === 1 and kind is factor" — six nodes in
     // this graph are factors and any of them would satisfy that.
     expect(register.referents.map((r) => r.ref)).toEqual(['node:919d7f50']);
     const [referent] = register.referents;
