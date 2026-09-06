@@ -100,9 +100,16 @@ describe('decideNoOpRecovery', () => {
   });
 
   describe('vague edit-like message', () => {
+    // ⚠ 'Change this.' WAS IN THIS LIST AND HAS MOVED, deliberately. `this` is a
+    // REFERENT, not the absence of a target, so it now takes an
+    // `anaphoric_edit_*` branch — see
+    // `edit-graph-anaphoric-recovery.test.ts`, which asserts the same string
+    // reaches the new branch and never the reset. It is asserted `false` for
+    // the vague predicate in `analytical-intent.test.ts`, so neither branch can
+    // quietly reclaim it. The remaining entries are all genuinely target-less
+    // and their behaviour is unchanged.
     const vagueEdits = [
       'Update something.',
-      'Change this.',
       'Adjust the model.',
       'Fix the model please.',
       'Can you change something?',
