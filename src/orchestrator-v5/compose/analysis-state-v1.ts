@@ -34,7 +34,8 @@
  *                        exit and read fail-closed) ∧ the engine's own
  *                        `near_tie` separation
  *   robustness           the engine's `enrichment.robustness` as it ships
- *   the five predicates  CanonicalAnalysisState — copied, never recomputed
+ *   the five predicates  CanonicalAnalysisState; unavailable when an adopted
+ *                        run-fact binding cannot be confirmed
  *   contradictions       CanonicalAnalysisState.contradictions
  *
  * ─── `refused`, and why it is signalled rather than inferred ────────────────
@@ -148,6 +149,7 @@ import type {
   AnalysisRobustness,
   AnalysisRunState,
   AnalysisStateV1,
+  OlumiResponse,
 } from '@talchain/schemas/boundary';
 
 import { blockerIssue } from '../../orchestrator/tools/analysis-ready-helper.js';
@@ -155,6 +157,11 @@ import type { CanonicalAnalysisState } from '../context/canonical-analysis-state
 import type { FreshnessDerivation } from '../context/freshness.js';
 import { readRawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
 import type { RawRobustnessSignals } from '../coaching/pick-raw-robustness.js';
+import { compareAnalysisRunFactIdentity } from '../context/analysis-interpretation-identity.js';
+import {
+  projectAnalysisSummaryForWithheldClaim,
+  projectTransportEnrichmentForWithheldClaim,
+} from './withheld-claim-projection.js';
 
 /**
  * The readiness status this producer emits when the turn supplied no readiness
@@ -175,6 +182,8 @@ export const REFUSAL_REASON_UNSPECIFIED = 'analysis_refused_unspecified';
 export const WITHHELD_CONSTRAINT_VERDICT = 'constraint_verdict_withheld';
 export const WITHHELD_NEAR_TIE = 'options_do_not_separate';
 export const WITHHELD_SEPARATION_UNAVAILABLE = 'separation_unavailable';
+export const WITHHELD_RUN_IDENTITY_UNCONFIRMED = 'analysis_run_identity_unconfirmed';
+export const WITHHELD_RUN_IDENTITY_CONFLICT = 'analysis_run_identity_conflict';
 
 /**
  * ⭐ TWO DIFFERENT FACTS WEAR THE SAME `withheld_reason` FIELD (S6, 2026-08-26).
@@ -238,6 +247,8 @@ export const LEADER_CLAIM_REASON_KINDS: Readonly<
   [WITHHELD_CONSTRAINT_VERDICT]: 'withheld',
   [WITHHELD_NEAR_TIE]: 'withheld',
   [WITHHELD_SEPARATION_UNAVAILABLE]: 'not_evaluated',
+  [WITHHELD_RUN_IDENTITY_UNCONFIRMED]: 'not_evaluated',
+  [WITHHELD_RUN_IDENTITY_CONFLICT]: 'not_evaluated',
 };
 
 /**
@@ -382,6 +393,17 @@ export const NO_ANALYSIS_CONTEXT_DERIVATION: FreshnessDerivation = Object.freeze
 });
 
 export interface AnalysisStateComposeInput {
+  /**
+   * Optional adoption seam: a caller that has read a scenario's facts supplies
+   * the selected fact's original result fields. Scenario scope comes from the
+   * request, independently of the fact. Never use the current graph hash here.
+   * Absence preserves callers that cannot yet supply a fact; it proves no C2
+   * binding. This is not a persisted or versioned interpretation record.
+   */
+  readonly runFactBinding?: {
+    readonly scenarioId: string | undefined;
+    readonly selectedResult: unknown;
+  };
   /**
    * The turn's canonical analysis verdict. `null` ⇒ this producer has no
    * verdict to supply and emits NOTHING — contract-licensed absence, which
@@ -629,6 +651,40 @@ export function composeAnalysisStateV1(
   const readinessStatus =
     readNonEmptyString(canonical.status) ?? READINESS_STATUS_UNSUPPLIED;
 
+  const binding = input.runFactBinding === undefined ? undefined : compareAnalysisRunFactIdentity(
+    input.runFactBinding.selectedResult,
+    {
+      scenario_id: input.runFactBinding.scenarioId,
+      graph_hash_at_run: canonical.graph_hash_at_run,
+      computed_at: canonical.computed_at,
+    },
+  );
+  if (binding !== undefined && binding.status !== 'match') {
+    const reason = binding.status === 'mismatch'
+      ? WITHHELD_RUN_IDENTITY_CONFLICT
+      : WITHHELD_RUN_IDENTITY_UNCONFIRMED;
+    // The existing schema uses store_unreadable for an uninterpretable fact
+    // as well as a failed store read (composeRunState's invariant_failed arm).
+    // Do not emit complete_current or never_run from a failed identity join.
+    // Original facts and freshness inputs are read-only; this is presentation.
+    const lifecycle = composeRunState(input);
+    const runState = lifecycle.kind === 'refused' || lifecycle.kind === 'blocked' || lifecycle.kind === 'running'
+      ? lifecycle
+      : { kind: 'unknown_degraded' as const, cause: 'store_unreadable' as const };
+    return {
+      run_state: runState,
+      readiness: { status: readinessStatus, blockers: mapWireBlockers(input.readiness?.blockers, readinessStatus) },
+      leader_claim: { permitted: false, withheld_reason: reason },
+      robustness: {},
+      usable_for_prose: false,
+      usable_for_chips: false,
+      usable_for_followup: false,
+      requires_rerun: false,
+      blocked_unusable: lifecycle.kind === 'blocked' && canonical.blockedUnusable,
+      contradictions: [...canonical.contradictions, `${reason}:${binding.reason}`],
+    };
+  }
+
   return {
     run_state: composeRunState(input),
     readiness: {
@@ -651,6 +707,34 @@ export function composeAnalysisStateV1(
     // consistency guarantee (contract limit L3, left disclosed).
     contradictions: [...canonical.contradictions],
   };
+}
+
+/**
+ * The analysis block follows the composed binding verdict. Conflicting facts
+ * cannot supply a result for this run. Unconfirmed legacy binding retains its
+ * available figures but cannot supply a leader designation. The fact remains
+ * intact in both cases. This does not police other response prose or coaching.
+ */
+export function projectAnalysisBlocksForRunBinding(
+  blocks: OlumiResponse['blocks'],
+  state: AnalysisStateV1,
+): OlumiResponse['blocks'] {
+  const reason = state.leader_claim.withheld_reason;
+  if (reason === WITHHELD_RUN_IDENTITY_CONFLICT) {
+    return blocks.filter((block) => block.type !== 'analysis_result');
+  }
+  if (reason !== WITHHELD_RUN_IDENTITY_UNCONFIRMED) return blocks;
+  return blocks.map((block) => {
+    if (block.type !== 'analysis_result') return block;
+    return {
+      ...block,
+      leading_option_id: null,
+      summary: projectAnalysisSummaryForWithheldClaim(block.summary),
+      ...(block.enrichment === undefined ? {} : {
+        enrichment: projectTransportEnrichmentForWithheldClaim(block.enrichment),
+      }),
+    };
+  });
 }
 
 /**

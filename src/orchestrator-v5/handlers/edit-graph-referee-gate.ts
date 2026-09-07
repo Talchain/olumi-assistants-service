@@ -52,7 +52,15 @@ import { refereeMutationBatch } from '../graph-management/referee.js';
 import {
   demoteProtectedEntityTargets,
 } from '../graph-management/protection-scope.js';
-import { USER_PROTECTED_ENTITY, TUNABLE_APPLY_HELD } from '../graph-management/reason-codes.js';
+import {
+  USER_PROTECTED_ENTITY,
+  TUNABLE_APPLY_HELD,
+  ENGINE_DISCARDS_OPTION_LINK,
+} from '../graph-management/reason-codes.js';
+import {
+  buildEngineDiscardedLinkRefusal,
+  findEngineDiscardedLinks,
+} from './engine-discarded-link-gate.js';
 import { parseEnvelope } from '../graph-management/parse-envelope.js';
 import { mutationTargetKey } from '../graph-management/pending-projection.js';
 import {
@@ -558,6 +566,55 @@ export function buildNeedsEncodingAddNotice(
 }
 
 /**
+ * ⭐⭐ THE ORDER OF A HELD REPLY — what the user needs in order to decide
+ * comes FIRST; the change we are offering comes LAST.
+ *
+ * WITNESSED (founder session, 5 Sep 2026, deployed UI a9c2e050). Asked for
+ * THOUGHTS on context he had just supplied, the reply opened with the
+ * changeset: "I'm holding these changes rather than applying them straight
+ * away: add option 'Hire a Temporary Technical Lead', …". Paul's ruling:
+ * "It should start by providing its initial thoughts, recommendations and
+ * questions concisely, and THEN offer the update."
+ *
+ * The HOLD is correct and is untouched. Its POSITION was the defect, and so
+ * was the disclosure's: measured over the frozen live corpus
+ * (`live-assistant-text-corpus-2026-08-17/digit-bearing-replies.json`, 688
+ * recorded replies, 8 of them holds), 8/8 opened with the enumeration and
+ * 8/8 buried the needs-encoding disclosure in the last third — AFTER the
+ * consent sentence, i.e. after the reader has already been asked to decide.
+ * The parts were in exactly the wrong order.
+ *
+ * ⚠ WHAT THIS DELIBERATELY DOES NOT DO. The larger fix — stop discarding
+ * the edit LLM's own `coaching.summary` at `edit-graph-dispatch.ts` and lead
+ * with THAT — was measured and rejected. Running the shipped guards over the
+ * product's own prompt exemplars (`src/prompts/edit-graph-v6.ts`, n=7):
+ * `findSuccessClaimHit` trips on 2/7 ("Added competitor response…",
+ * "Removed brand perception…") and PASSES "Churn now has a stronger negative
+ * effect on revenue." and "Raise price now also reduces marketing spend to
+ * 25k." — present-tense STATE claims that are false on a held turn, because
+ * nothing was applied. Every shipped guard lets them through: the success
+ * detector is calibrated for the perfective "I've applied" family on the
+ * ZERO-OPERATION path. Leading with narration would have shipped a lie under
+ * a green suite, and telling true state claims from false ones is a new
+ * predicate over natural language — the oscillating class ROADMAP 2.1361
+ * measured over four rounds. This function classifies nothing and therefore
+ * has no direction to reverse.
+ *
+ * KNOWN-DROPPED, EXPLICIT: a hold with no disclosure still opens with the
+ * offer. There is nothing true and deterministic to put in front of it, and
+ * inventing a preamble would be new copy making new claims.
+ * `held-reply-leads-with-thinking.test.ts` pins that set exactly, so the
+ * behaviour REDs if it widens into "always prepend something".
+ */
+export function composeHeldReply(parts: {
+  readonly disclosure: string | null;
+  readonly offer: string;
+}): string {
+  const disclosure = parts.disclosure?.trim() ?? '';
+  return disclosure.length === 0 ? parts.offer : `${disclosure} ${parts.offer}`;
+}
+
+/**
  * P0 held-proposal survival (2026-07-15, DGAI #340) requirement 4 — honest
  * supersession. A newer hold for the SAME target silently retires the older
  * one via the commit carry-forward's same-key rule (`gmHeldProposalRef` is
@@ -975,6 +1032,65 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
     const gv = verdicts[gi]!;
     const publicReason = publicReasonOf(gv);
 
+    // ⭐⭐ P0 (witnessed 2026-09-04) — NEVER ASK FOR CONSENT TO A LINK THE ENGINE
+    // THROWS AWAY. PLoT deletes every edge incident to an option or decision node
+    // before the analysis runs (`src/normalisation/option-filter.ts:91-96`), so a
+    // hold ask for such a link asks the user to approve something that cannot
+    // take effect, and the confirmation receipt that follows is untrue. The batch
+    // is refused WHOLE — partial-applying its legal half would be the same lie
+    // one level down, and `stale` already refuses whole for that reason.
+    //
+    // ⚠ WHY THE VERDICT MOVES AND NOT JUST THE COPY. `confirmationSatisfies`
+    // (gm-held-execute.ts:407-423) accepts `held` and `proceed`, so a gate that
+    // only rewrote `assistantText` would still let the confirm-time re-referee
+    // apply the discarded edit — including for a hold minted before this ships.
+    // `clarify_required` is refused there and carries exactly the semantics this
+    // is: well-formed, non-appliable, needs direction. ONE predicate, both paths.
+    //
+    // Placed AFTER the shadow / proceed early return so shadow mode stays
+    // log-only, and after the per-verdict telemetry so the referee's own events
+    // are unchanged; the batch-level outcome is disclosed through publicReason.
+    // `add_edge` is unconditionally `held` at the referee
+    // (graph-management/referee.ts:383-389), so there is no `proceed` path to
+    // guard.
+    //
+    // ⚠ SCOPED TO `held`, DELIBERATELY. `rejected` and `stale` outrank `held`
+    // (`governingOf`) and ALREADY refuse the whole batch without a confirm, so
+    // firing there would only replace a correct refusal with a differently
+    // worded one — and worse, a batch is `rejected` precisely when its entities
+    // could not be resolved, which is the state in which this predicate knows
+    // least. One question, one owner.
+    const discardedLinks =
+      governing === 'held'
+        ? findEngineDiscardedLinks(input.operations, input.currentGraph)
+        : [];
+    if (discardedLinks.length > 0) {
+      return {
+        governing: 'clarify_required',
+        blockApply: true,
+        // ⭐ THE TOTAL OPERATION COUNT IS PASSED, NOT THE LINK COUNT. The batch
+        // is refused WHOLE, so every operation beyond the discarded links is a
+        // change the user asked for and does not get — including a perfectly
+        // legal one. The builder turns its withheld-change disclosure on that
+        // difference; passing only the links would make the sentence structurally
+        // unable to fire (which is exactly the defect this round closed).
+        assistantText: buildEngineDiscardedLinkRefusal(
+          discardedLinks,
+          input.operations.length,
+        ),
+        suggestedActions: [],
+        pendingActions: null,
+        publicReason: {
+          ...publicReason,
+          verdict: 'clarify_required',
+          blocker_code: ENGINE_DISCARDS_OPTION_LINK,
+          blocker_readable:
+            'The proposed link is removed before the analysis runs, so it cannot be applied.',
+        },
+        verdictCounts,
+      };
+    }
+
     if (governing === 'held') {
       const held = buildHeldPending(input, gv, envelopes[gi] ?? null);
       if (held === null) {
@@ -1065,8 +1181,13 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         blockApply: true,
         // CONSENT-CLARITY AMENDMENT — the ask names the held change
         // (falls back to the generic swept copy when no safe subject).
-        assistantText:
-          needsEncodingNotice === null ? heldAsk : `${heldAsk} ${needsEncodingNotice}`,
+        // ⭐ ORDER: the disclosure leads, the offer closes. See
+        // `composeHeldReply` for the witness and for why the LLM's own
+        // narration is NOT what leads here.
+        assistantText: composeHeldReply({
+          disclosure: needsEncodingNotice,
+          offer: heldAsk,
+        }),
         suggestedActions: [held.chip],
         pendingActions: [held.pending],
         publicReason,

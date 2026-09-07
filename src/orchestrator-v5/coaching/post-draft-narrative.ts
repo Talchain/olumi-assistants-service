@@ -670,16 +670,42 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // A direction clarification gets its OWN slot and is therefore removed from
   // the general-purpose pickers below. Leaving it in both would surface the
   // same question twice, and leaving it ONLY in the generic pool is the defect
-  // being fixed — see `pickDirectionClarifications`. Non-ready turns cannot
-  // trust it, however: at this boundary a producer-built clarification and an
-  // LLM item are distinguished only by a spoofable ID prefix, and package
-  // deduplication can let the latter occupy that ID. Until provenance is
-  // carried structurally, direction copy follows the same ready-only policy.
-  const directionBullets = mayServeFreeformCoaching
-    ? pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
-        (text) => toDirectionBullet(text),
-      )
-    : [];
+  // being fixed — see `pickDirectionClarifications`.
+  //
+  // ⭐⭐ IT IS NO LONGER GATED ON READINESS, AND THE PRECONDITION THE OLD GATE
+  // NAMED HAS BEEN MET. The previous comment here read: "at this boundary a
+  // producer-built clarification and an LLM item are distinguished only by a
+  // spoofable ID prefix, and package deduplication can let the latter occupy
+  // that ID. Until provenance is carried structurally, direction copy follows
+  // the same ready-only policy." The prefix is now a RESERVED NAMESPACE:
+  // `runStagePackage` evicts every `direction_unresolved_*` item it did not
+  // mint itself, unconditionally, immediately before its own append — so an LLM
+  // item cannot reach this function under that id, and cannot displace the
+  // producer's card either.
+  //
+  // ⚠ WHY THE READY-ONLY POLICY DOES NOT APPLY TO THIS CLASS ANYWAY. That
+  // policy exists to keep FREEFORM LLM PROSE off non-ready turns ("do not
+  // inspect those bytes at all"). These bullets are not that: the copy is
+  // composed deterministically by `renderDirectionClarifications` from a fixed
+  // template over the user's own quoted amount, and every candidate still
+  // passes `gateCoachingCardBody` and is DROPPED WHOLE if it trips it. The
+  // freeform pool below keeps the ready-only gate unchanged, which is the
+  // discrimination this pair of lines exists to make.
+  //
+  // ⚠ AND THE HARM THE OLD GATE CAUSED, MEASURED — this is why it moved rather
+  // than being left alone. Across 13 live draft turns on staging build
+  // `3427aea` (2026-09-07), `analysis_ready.status` was `ready` on 4 and not
+  // ready on 9. The limit question reached the user on 4 of 4 ready turns and 0
+  // of 9 non-ready ones, a perfect correlation. So the user was told their
+  // stated limit had not been understood exactly when their model was already
+  // in good shape, and was told nothing when it was not — and a brief whose
+  // limits are the part that failed to land is more likely, not less, to leave
+  // the draft non-ready. Silent loss of a stated constraint is the worse
+  // defect; that is the whole argument the gate below it makes for asking.
+  const directionBullets = pickDirectionClarifications(
+    strengthenItems,
+    MAX_DIRECTION_BULLETS,
+  ).map((text) => toDirectionBullet(text));
   const generalStrengthenItems = mayServeFreeformCoaching && Array.isArray(strengthenItems)
     ? strengthenItems.filter((i) => !isDirectionClarificationItem(i))
     : [];

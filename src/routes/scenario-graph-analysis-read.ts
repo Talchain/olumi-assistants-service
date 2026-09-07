@@ -40,7 +40,7 @@
  *   the result block    `buildAnalysisResultBlock` — the one builder, which
  *                       applies all three claim-safety layers internally from
  *                       the fact's own persisted verdict
- *                       (`mayNameLeadingOptionForFact`, the transport keep-list,
+ *                       (`mayPresentLeaderClaimForFact`, the transport keep-list,
  *                       and the withheld projections of `summary`,
  *                       `leading_option_id` and the enrichment blobs).
  *
@@ -93,8 +93,9 @@ import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
 import {
   composeAnalysisStateV1,
   readRawRobustnessFromResponseBody,
+  projectAnalysisBlocksForRunBinding,
 } from '../orchestrator-v5/compose/analysis-state-v1.js';
-import { mayNameLeadingOptionForFact } from '../orchestrator-v5/compose/withheld-claim-projection.js';
+import { mayPresentLeaderClaimForFact } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
 import { deriveAnalysisFreshness, selectRunAnalysisFact } from '../orchestrator-v5/context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from '../orchestrator-v5/context/graph-hash.js';
@@ -112,8 +113,9 @@ export interface ScenarioAnalysisRead {
   readonly analysis_state: AnalysisStateV1 | null;
   /**
    * The `analysis_result` block for the fact the verdict selected, present ONLY
-   * on a `fresh` verdict. `null` means no CURRENT result is being delivered —
-   * never "the analysis is empty".
+   * on a fresh graph-hash verdict with no conflicting run identity. Legacy
+   * identity may remain unconfirmed; its figures then carry no designation or
+   * currentness claim. `null` never means "the analysis is empty".
    */
   readonly analysis_result: OlumiResponse['blocks'][number] | null;
 }
@@ -172,7 +174,10 @@ export async function readScenarioAnalysis(
     // against the robustness signals the consumer ACTUALLY receives — the same
     // reason `finaliseV5Response` reads them off the body rather than off the
     // fact.
-    const selected = derivation.freshness === 'fresh' ? selectRunAnalysisFact(read.facts) : null;
+    // Historical selection is independent of permission to display a CURRENT
+    // result. A changed graph must not replace the original run's hash/time.
+    const historical = selectRunAnalysisFact(read.facts);
+    const selected = derivation.freshness === 'fresh' ? historical : null;
     const fact =
       selected !== null && selected.fact.fact_type === 'run_analysis'
         ? (selected.fact as RunAnalysisHandlerFact)
@@ -183,20 +188,41 @@ export async function readScenarioAnalysis(
       composeAnalysisStateV1({
         canonical: canonicalStateFromFreshness(derivation, {}),
         freshness: derivation,
+        ...(historical === null ? {} : {
+          runFactBinding: {
+            scenarioId: params.scenarioId,
+            selectedResult: historical.fact.result,
+          },
+        }),
         // ⚠ NOT hardcoded `false`. The entitlement is read from the SELECTED
         // FACT by the canonical fail-closed reader — the same one
         // `buildAnalysisResultBlock` uses internally — so the verdict's
         // `leader_claim` and the block's projections answer the SAME question
         // about the SAME fact. Two answers here would be trap 21 at a new
         // surface. With no fact, `false` is the fail-closed direction.
-        mayNameLeadingOption: fact !== null ? mayNameLeadingOptionForFact(fact) : false,
+        //
+        // ⭐⭐ AND THAT SENTENCE IS WHY THIS LINE MOVED TO
+        // `mayPresentLeaderClaimForFact`. The block builder stopped answering
+        // the constraint-verdict question alone the day the post-draft auto-run
+        // gained a confinement: it now also asks whether anybody REQUESTED the
+        // analysis. This leg is the auto-run's OWN delivery path, so keeping the
+        // leaf reader here would have made the paragraph above false at exactly
+        // the surface it was written about — an `analysis_result` naming no
+        // leader, beside an `analysis_state.leader_claim.permitted: true` that
+        // grants the UI permission to name one. Same fact, same second, two
+        // answers. The shared admission is the fix; copying the conjunction here
+        // would have been the mirror.
+        mayNameLeadingOption: fact !== null ? mayPresentLeaderClaimForFact(fact) : false,
         rawRobustness:
           analysisResult !== null
             ? readRawRobustnessFromResponseBody({ blocks: [analysisResult] })
             : null,
       }) ?? null;
 
-    return { analysis_state: analysisState, analysis_result: analysisResult };
+    const boundResult = analysisResult !== null && analysisState !== null
+      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState)[0] ?? null
+      : analysisResult;
+    return { analysis_state: analysisState, analysis_result: boundResult };
   } catch (err) {
     // ADDITIVE MEANS ADDITIVE: the graph read stands whatever happens here.
     log.warn(

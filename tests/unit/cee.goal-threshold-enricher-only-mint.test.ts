@@ -54,6 +54,7 @@ import {
   CEE_MINTED_GOAL_FIELDS,
   stripModelAuthoredGoalThreshold,
 } from '../../src/adapters/llm/normalisation.js';
+import { projectDraftRecords } from '../../src/cee/draft/records/index.js';
 import { enrichGraphWithFactorsAsync } from '../../src/cee/factor-extraction/enricher.js';
 import { CEE_GOAL_THRESHOLD_FRAME } from '../../src/utils/goal-threshold-cap.js';
 import type { GraphT } from '../../src/schemas/graph.js';
@@ -280,6 +281,66 @@ describe('2.281 B — the draft ingress strip', () => {
     }).nodeIds).toEqual([]);
   });
 
+  /**
+   * ⭐⭐ THE CLASS THIS FILE'S CORPUS COULD NOT SEE — and that omission is why a
+   * purely-destructive strip survived on the Anthropic path for a whole cutover.
+   *
+   * Every other fixture here is `modelAuthoredDraftResponse()`: a graph the
+   * MODEL wrote. Swept with a contrast control,
+   * `applyStatedGoalTarget|projectDraftRecords|projectRecordsToGraph` occurred
+   * ZERO times in this file against `modelAuthoredDraftResponse` → 4. So the
+   * corpus contained no CEE-MINTED input at all, and a predicate that cannot
+   * tell the two apart looked perfectly correct against it (trap 22: a corpus
+   * drawn from the author's head cannot see the class the author did not
+   * imagine).
+   *
+   * This case is deliberately NOT an assertion that the strip spares a projected
+   * value — it does not, and cannot, because it keys on presence alone. It pins
+   * the SHAPE the strip is indifferent to, so the next reader of this file meets
+   * the distinction the code does not make, and any future attempt to give the
+   * strip a provenance-aware exemption has a fixture to write against.
+   */
+  it('CANNOT DISTINGUISH a CEE-minted target from a model-authored one — presence is its only test', () => {
+    // Produced by the REAL projector through its exported entry point, not
+    // hand-typed, so this fixture cannot drift into describing a shape CEE no
+    // longer mints (trap 16-inverse: a self-authored input encodes the author's
+    // model of the producer rather than the producer).
+    const seam = projectDraftRecords({
+      stated_items: [
+        { kind: 'goal', source_quote: 'Reach £30k MRR Within 18 Months', value: 30_000, unit: '£', role: 'target' },
+        { kind: 'option', source_quote: 'hire two AEs' },
+        { kind: 'option', source_quote: 'launch self-serve' },
+      ],
+      claims: [
+        { claim_kind: 'factor', label: 'Sales capacity', basis: [0], category: 'controllable' },
+        { claim_kind: 'causal_link', label: 'capacity drives MRR', basis: [0], from_claim: 0, to_stated: 0, effect: 'positive' },
+      ],
+    }, 'We need to reach £30k MRR within 18 months.');
+    expect(seam.ok, seam.ok ? '' : `projection failed: ${JSON.stringify(seam)}`).toBe(true);
+    if (!seam.ok) return;
+
+    const graph: AnyRec = { ...seam.projection.graph };
+    const goal: AnyRec = graph.nodes.find((n: AnyRec) => n.kind === 'goal');
+
+    // The projector minted the quintet from ONE derivation…
+    expect(goal.goal_threshold_raw).toBe(30_000);
+    expect(goal.goal_threshold_unit).toBe('£');
+    expect(goal.goal_threshold_frame).toBe(CEE_GOAL_THRESHOLD_FRAME);
+
+    const result = stripModelAuthoredGoalThreshold(graph);
+
+    // …and the strip deletes it exactly as it deletes a model's. This is the
+    // MEASURED behaviour, not the desired one: on the ANTHROPIC draft path this
+    // input is the ONLY input the strip can receive, which is why that call site
+    // was removed rather than the function. `openai.ts` still calls it, and there
+    // the model genuinely is the only possible author.
+    expect(result.nodeIds).toEqual([goal.id]);
+    for (const field of CEE_MINTED_GOAL_FIELDS) {
+      if (field.startsWith('goal_baseline')) continue; // never minted by the projector
+      expect(goal).not.toHaveProperty(field);
+    }
+  });
+
   it('the field list covers every goal_* field the node schema declares (trap 12)', async () => {
     // DERIVED, not mirrored. If someone adds a new `goal_*` field to
     // schemas/graph.ts and forgets this list, the new field silently becomes
@@ -382,29 +443,81 @@ describe('2.281 D — the strip is wired to draft ingress only', () => {
   const adapterSrc = (name: string) =>
     readFileSync(fileURLToPath(new URL(`../../src/adapters/llm/${name}`, import.meta.url)), 'utf8');
 
-  for (const adapter of ['anthropic.ts', 'openai.ts']) {
-    it(`${adapter}: strips exactly once, and BEFORE the draft normalisation`, () => {
-      const src = adapterSrc(adapter);
-      const callSites = [...src.matchAll(/\bstripModelAuthoredGoalThreshold\(/g)];
-      const normSites = [...src.matchAll(/\bnormaliseDraftResponse\(/g)];
+  /**
+   * ⚠⚠ THIS EXPECTATION MOVED DELIBERATELY, AND THE ASYMMETRY IS THE FINDING.
+   *
+   * It used to loop over BOTH adapters asserting `callSites.length === 1`. That
+   * was right when both adapters handed the strip the MODEL's own JSON. It is no
+   * longer right for `anthropic.ts`, because the records cutover put a CEE MINT
+   * above the strip on that path:
+   *
+   *     projectDraftRecords(rawJson, brief)      ← applyStatedGoalTarget mints
+   *   → rawJson = { ...activeProjection.graph }
+   *   → stripModelAuthoredGoalThreshold(rawJson) ← deleted what CEE just minted
+   *
+   * The strip's own premise — "at this seam no legitimate, attested threshold
+   * can exist yet" — was FALSE there, so it removed 100 % CEE-minted values and
+   * 0 % model-authored ones, and the user's stated target vanished from the
+   * canvas. `openai.ts` has no projection seam (swept with a contrast control:
+   * `projectDraftRecords|activeProjection|projectRecordsToGraph` → 0, against
+   * `rawJson` → 15 in the same file, same run), so its premise still holds and
+   * its call site STAYS.
+   *
+   * The defect was CALL-SITE-SCOPED, not function-scoped. The behavioural
+   * discriminating pair lives in
+   * `src/adapters/llm/__tests__/projector-goal-target-survives-draft.test.ts`;
+   * what THIS test still owns is the wiring — so it now asserts the two adapters
+   * SEPARATELY rather than pretending they answer the same question (trap 21).
+   */
+  it('openai.ts: strips exactly once, and BEFORE the draft normalisation', () => {
+    const src = adapterSrc('openai.ts');
+    const callSites = [...src.matchAll(/\bstripModelAuthoredGoalThreshold\(/g)];
+    const normSites = [...src.matchAll(/\bnormaliseDraftResponse\(/g)];
 
-      // ONE normalisation site per adapter. There used to be two (draft, then
-      // repair); ROADMAP 2.763 retired the LLM repair seam entirely, so the
-      // repair site is gone. The claim this test makes is UNCHANGED and now
-      // strictly stronger: the strip is wired to the draft ingress and to
-      // nothing else. If a repair seam is ever re-introduced, this REDs at 2
-      // and the reviewer must re-decide where the strip belongs.
-      expect(normSites.length, 'expected exactly the draft site (repair seam retired, 2.763)').toBe(1);
-      // Exactly ONE strip — the draft one. Historically a second would have hit
-      // the repair path, which ran at Stage 4 AFTER Stage 3 had enriched, and
-      // would have deleted a threshold the enricher had already minted.
-      expect(
-        callSites.length,
-        'the strip must be wired to the draft seam exactly once',
-      ).toBe(1);
-      // …and it must run before the draft normalisation, so the degenerate-cap
-      // repair below it can never "repair" a quad that is about to be deleted.
-      expect(callSites[0].index!).toBeLessThan(normSites[0].index!);
-    });
-  }
+    // ONE normalisation site. There used to be two (draft, then repair);
+    // ROADMAP 2.763 retired the LLM repair seam entirely, so the repair site is
+    // gone. If a repair seam is ever re-introduced, this REDs at 2 and the
+    // reviewer must re-decide where the strip belongs.
+    expect(normSites.length, 'expected exactly the draft site (repair seam retired, 2.763)').toBe(1);
+    // Exactly ONE strip — the draft one. Historically a second would have hit
+    // the repair path, which ran at Stage 4 AFTER Stage 3 had enriched, and
+    // would have deleted a threshold the enricher had already minted.
+    expect(
+      callSites.length,
+      'the strip must be wired to the OpenAI draft seam exactly once — this path ' +
+        'has no projection above it, so the model IS the only possible author',
+    ).toBe(1);
+    // …and it must run before the draft normalisation, so the degenerate-cap
+    // repair below it can never "repair" a quad that is about to be deleted.
+    expect(callSites[0].index!).toBeLessThan(normSites[0].index!);
+  });
+
+  it('anthropic.ts: does NOT strip — the projector mints above this seam', () => {
+    const src = adapterSrc('anthropic.ts');
+    const callSites = [...src.matchAll(/\bstripModelAuthoredGoalThreshold\(/g)];
+    expect(
+      callSites.length,
+      'the strip must not run after the projection seam: on this path its only ' +
+        'possible input is CEE-minted, so it can delete nothing else',
+    ).toBe(0);
+
+    // ⭐ PRECONDITION PINNED IN-TEST, so this is not a vacuous zero. The claim
+    // is "no strip AFTER A PROJECTION", not "no strip anywhere" — if the
+    // projection seam were removed from this adapter, a bare 0 would silently
+    // start certifying an unprotected path (trap 13b).
+    expect(
+      [...src.matchAll(/\bprojectDraftRecords\(/g)].length,
+      'the projection seam is what makes the strip wrong here — if it is gone, ' +
+        'this test is asserting the wrong thing and the strip must be re-decided',
+    ).toBe(1);
+  });
+
+  it('the strip itself is still exported and still wired somewhere — not quietly deleted', () => {
+    // The fix was to remove ONE call site, never the function. Without this,
+    // deleting `stripModelAuthoredGoalThreshold` outright would leave every
+    // assertion above green while the OpenAI path lost its only defence.
+    const openai = adapterSrc('openai.ts');
+    expect(openai).toContain('stripModelAuthoredGoalThreshold');
+    expect(typeof stripModelAuthoredGoalThreshold).toBe('function');
+  });
 });

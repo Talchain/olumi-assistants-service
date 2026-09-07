@@ -2148,11 +2148,6 @@ export async function draftGraphWithAnthropic(
     }
     // Use full raw text for debug output (preserves preamble/suffix for forensics)
     const jsonText = content.text.trim();
-    // ROADMAP 2.281 — the goal-threshold contract is CEE-minted. Runs BEFORE
-    // normalisation so the degenerate-cap repair below it can never "repair" a
-    // quad that is about to be deleted. DRAFT ONLY: the repair_graph call site
-    // (:2624) deliberately does NOT strip — it runs after Stage 3 has enriched,
-    // where a threshold IS attested and must survive.
     // ── ⭐ THE PROJECTION SEAM ───────────────────────────────────────────────
     //
     // `rawJson` is a RECORD SET, not a graph. The deterministic projector turns
@@ -2162,9 +2157,7 @@ export async function draftGraphWithAnthropic(
     //
     // WHY EXACTLY HERE. Any later and a graph-shaped consumer would already have
     // read a record set; any earlier and it would run before the truncation
-    // salvage that `rawJson` depends on. It sits immediately above
-    // `stripModelAuthoredGoalThreshold` because that strip is the first consumer
-    // that reads graph structure.
+    // salvage that `rawJson` depends on.
     //
     // HONEST FAILURE, NEVER A PHANTOM GRAPH. If the response is not a record set
     // — including the case where the model ignored the instruction and returned a

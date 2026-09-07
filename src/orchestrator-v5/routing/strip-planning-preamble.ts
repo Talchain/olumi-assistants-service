@@ -89,55 +89,40 @@
  */
 
 /**
- * Sentence boundary that does NOT cut at a decimal point.
+ * ⚠⚠ THE MARKER SET AND THE SPLITTER NOW LIVE IN ONE PLACE, AND IT IS NOT HERE
+ * (3 Sep 2026). The 3 Sep capture leaked a monologue past this module's own
+ * third-person pattern on a ONE-CHARACTER miss — it carried `is\s+asking` and
+ * the leak opened *"The user's asking…"*. The same session leaked a routing
+ * verdict no pattern anywhere matched. Two lists of markers guarding one
+ * concern is the hand-maintained mirror this estate loses most time to
+ * (CLAUDE.md trap 12), so `PLANNING_PATTERNS` and `SENTENCE_SPLIT` are gone
+ * from this file and imported from `compose/process-narration.ts`, which owns
+ * the vocabulary.
  *
- * ⚠ `£1.5 million` split on a bare `[.!?]` is how a magnitude guard was fed the
- * string `1` and could not fire (CLAUDE.md trap 22). The delimiter must be
- * followed by whitespace AND an opening character, which a decimal never is.
- */
-const SENTENCE_SPLIT = /(?<=[.!?])\s+(?=["'([]?[A-Z])/;
-
-/**
- * An internal system-prompt rule, cited by number. The user cannot see the
- * numbered rules, so any reference to one is deliberation that escaped.
+ * ⭐ WHAT IS *NOT* SHARED, AND MUST NOT BE: THE REMEDY. That module and this
+ * one answer DIFFERENT QUESTIONS (its header states both). This module asks
+ * whether a PRE-TOOL-CALL ORIENTATION BLOCK is deliberation, and answers by
+ * dropping the whole block — safe here, and only here, because a receipt or a
+ * deterministic clarification follows it (see the failure-direction note
+ * above). The egress guard asks whether the text ABOUT TO SHIP narrates the
+ * system's process, and can never return nothing. Sharing the vocabulary while
+ * keeping the remedies apart is deliberate; aligning the remedies would be the
+ * trap-21 mistake.
  *
- * Both witnessed forms are covered: *"Per rule 9 (one action per turn), …"* and
- * *"rule 9 says one action per turn"*. Bare `rule 9` is NOT matched on its own —
- * a user's model may legitimately discuss a numbered rule of a real regulation.
+ * Consequence, stated because it is a behaviour change: this module now
+ * condemns a block on the WIDER set — the self-honesty-policy, internal
+ * identifier and routing-taxonomy classes as well. The direction is safe by
+ * the same argument that already licensed whole-block drops here, and it is
+ * the correct direction: a block citing `ContextPack` is not orientation.
  */
-const RULE_CITATION_PATTERNS: readonly RegExp[] = [
-  /\b(?:as\s+)?per\s+rules?\s+\d+\b/i,
-  /\brules?\s+\d+\s+(?:says?|states?|requires?|means?|is\b|applies\b)/i,
-  /\brules?\s+\d+\s*\(/i,
-];
-
-/**
- * The product speaking ABOUT its reader rather than TO them.
- *
- * Bound to a mental or communicative verb so a model legitimately containing
- * "the user" — a user-journey factor, a user-base estimate — is untouched.
- */
-const THIRD_PERSON_USER_PATTERNS: readonly RegExp[] = [
-  /\bthe\s+user\s+(?:wants?|is\s+asking|asked|asks|has\s+asked|needs?|would\s+like|is\s+trying|said|means|expects?)\b/i,
-];
-
-/**
- * Routing vocabulary that only exists inside the orchestrator's own frame.
- */
-const ROUTING_SELF_TALK_PATTERNS: readonly RegExp[] = [
-  /\bone\s+action\s+per\s+turn\b/i,
-  /\bi\s+can\s+only\s+(?:route|dispatch|handle)\s+one\b/i,
-];
-
-const PLANNING_PATTERNS: readonly RegExp[] = [
-  ...RULE_CITATION_PATTERNS,
-  ...THIRD_PERSON_USER_PATTERNS,
-  ...ROUTING_SELF_TALK_PATTERNS,
-];
+import {
+  PROCESS_NARRATION_PATTERNS,
+  SENTENCE_SPLIT,
+} from '../compose/process-narration.js';
 
 /** Exported so a spec can assert the marker set without re-deriving it. */
 export function isPlanningText(text: string): boolean {
-  return PLANNING_PATTERNS.some((p) => p.test(text));
+  return PROCESS_NARRATION_PATTERNS.some((p) => p.test(text));
 }
 
 /**
