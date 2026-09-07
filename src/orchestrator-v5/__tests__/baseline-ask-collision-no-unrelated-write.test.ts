@@ -39,7 +39,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
-import { setTestSink } from '../../utils/telemetry.js';
+import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
 import { makeMessagePayload } from './fixtures.js';
 import type {
   ChatWithToolsArgs,
@@ -261,12 +261,37 @@ function observedStateOf(graph: unknown, nodeId: string): unknown {
   return node?.observed_state;
 }
 
+/**
+ * ⭐⭐ THE DEMOTION IS BOUND BY IDENTITY, NOT BY ITS SENTENCE.
+ *
+ * These cases used to assert the demotion by quoting its copy — `"You did not
+ * ask me to edit the model"`. **#1312 withdrew that clause** (INV-3: the reply
+ * must describe what the PRODUCT did, never what the user asked), and three
+ * cases here went RED on the sentence while their safety assertions
+ * — `graphWrites()` empty, `constraintsOn(...)` empty — kept passing. The harm
+ * was still refused; only the words reporting it had moved.
+ *
+ * A test that pins a sentence another lane owns has moved once and will move
+ * again (trap 12). `V5MutationWarrantAbsent` is the demotion's own identity,
+ * emitted by this seam at the moment the write is demoted, and it cannot drift
+ * with copy. Captured here rather than discarded so the cases can bind to it.
+ */
+const telemetry: Array<{ readonly name: string }> = [];
+
+/** TRUE when the mutation-warrant gate demoted this turn's write. */
+function warrantDemotionFired(): boolean {
+  return telemetry.some((e) => e.name === TelemetryEvents.V5MutationWarrantAbsent);
+}
+
 beforeEach(() => {
   appendCalls.length = 0;
   persistedGraph = null;
   servedGraph = buildGraph();
   pendingActionsForRead = [];
-  setTestSink(() => undefined);
+  telemetry.length = 0;
+  setTestSink((name: string) => {
+    telemetry.push({ name });
+  });
 });
 
 describe('an answer to the baseline question never writes onto the competing ask', () => {
@@ -451,8 +476,12 @@ describe('a reply that names its own subject is not the collision case', () => {
  * Reaching the model was the previous link; this is the outcome. With the
  * reply through, the executor's mutation-warrant gate then DEMOTED the write
  * ("You did not ask me to edit the model"), so the stated baseline still never
- * landed. The gate's message signal is LEXICAL, and measured at this seam with
- * a live baseline question and a competing ask:
+ * landed. ⚠ APPENDED, NOT REWRITTEN: that clause was WITHDRAWN by #1312 on
+ * 1 Sep 2026 (INV-3 — the reply describes what the product did, never what the
+ * user asked). The sentence above is a record of what a dated build actually
+ * emitted and is left standing as evidence; the demotion is now observed by its
+ * telemetry identity, not by that copy. The gate's message signal is LEXICAL,
+ * and measured at this seam with a live baseline question and a competing ask:
  *
  *     "Churn rate is at 30%"  → warrant granted  → the baseline commits
  *     "Churn rate is 30%"     → warrant ABSENT   → demoted, nothing lands
@@ -563,14 +592,18 @@ describe("the product's offered answer commits, and licenses nothing else", () =
   it('THE OFFERED ANSWER commits the stated baseline on the node it names', async () => {
     pendingActionsForRead = [baselinePending(), effectPending()];
 
-    const { response } = await runTurnExecutor(payload(offered), 'req-offered-commits', {
+    await runTurnExecutor(payload(offered), 'req-offered-commits', {
       routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 10),
       graphState: mintEligibleGraph(),
     });
 
     expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
-    // Not the demotion the reviewer witnessed.
-    expect(response.assistant_text).not.toContain('You did not ask me to edit the model');
+    // Not the demotion the reviewer witnessed — asserted on the demotion's
+    // IDENTITY. ⚠ The old form quoted the withdrawn clause, so after #1312 it
+    // passed on every turn in the suite, demotion or not: an assertion that
+    // could no longer fail (trap 13). This one still discriminates — the three
+    // LICENSES NOTHING WIDER cases below drive it TRUE.
+    expect(warrantDemotionFired(), 'the write was NOT demoted').toBe(false);
     // And nothing else moved.
     expect(baselineOn(stateAfterTurn(), FACTOR_ID)).toBeUndefined();
     expect(constraintsOn(stateAfterTurn(), FACTOR_ID)).toHaveLength(0);
@@ -596,14 +629,16 @@ describe("the product's offered answer commits, and licenses nothing else", () =
     // fourth source has become a whole-turn warrant.
     pendingActionsForRead = [baselinePending(), effectPending()];
 
-    const { response } = await runTurnExecutor(payload(offered), 'req-offered-other-node', {
+    await runTurnExecutor(payload(offered), 'req-offered-other-node', {
       routingAdapter: proposesConstraintOnNodeAdapter(FACTOR_ID, FACTOR_LABEL, 30),
       graphState: mintEligibleGraph(),
     });
 
     expect(graphWrites()).toHaveLength(0);
     expect(constraintsOn(stateAfterTurn(), FACTOR_ID)).toHaveLength(0);
-    expect(response.assistant_text).toContain('You did not ask me to edit the model');
+    // BOUND BY IDENTITY, not by the sentence: the demotion's own telemetry
+    // event. `assistant_text` is #1312's to change; this is not.
+    expect(warrantDemotionFired(), 'the mutation-warrant gate demoted the write').toBe(true);
   });
 
   it('LICENSES NOTHING WIDER — strips the AUTHORITY: an unrelated numeric sentence cannot write', async () => {
@@ -612,7 +647,7 @@ describe("the product's offered answer commits, and licenses nothing else", () =
     // numeric sentence gets a warrant" out.
     pendingActionsForRead = [baselinePending(), effectPending()];
 
-    const { response } = await runTurnExecutor(
+    await runTurnExecutor(
       payload(`${FACTOR_LABEL} is 30%`),
       'req-unrelated-sentence',
       {
@@ -622,7 +657,9 @@ describe("the product's offered answer commits, and licenses nothing else", () =
     );
 
     expect(graphWrites()).toHaveLength(0);
-    expect(response.assistant_text).toContain('You did not ask me to edit the model');
+    // BOUND BY IDENTITY, not by the sentence: the demotion's own telemetry
+    // event. `assistant_text` is #1312's to change; this is not.
+    expect(warrantDemotionFired(), 'the mutation-warrant gate demoted the write').toBe(true);
   });
 
   it('LICENSES NOTHING WIDER — strips the LIVE QUESTION: same wording, no baseline ask, no write', async () => {
@@ -631,13 +668,15 @@ describe("the product's offered answer commits, and licenses nothing else", () =
     // grant ignored the pending set entirely.
     pendingActionsForRead = [effectPending()];
 
-    const { response } = await runTurnExecutor(payload(offered), 'req-no-baseline-live', {
+    await runTurnExecutor(payload(offered), 'req-no-baseline-live', {
       routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 10),
       graphState: mintEligibleGraph(),
     });
 
     expect(graphWrites()).toHaveLength(0);
-    expect(response.assistant_text).toContain('You did not ask me to edit the model');
+    // BOUND BY IDENTITY, not by the sentence: the demotion's own telemetry
+    // event. `assistant_text` is #1312's to change; this is not.
+    expect(warrantDemotionFired(), 'the mutation-warrant gate demoted the write').toBe(true);
   });
 
   it('the bare elliptical answer on the SAME turn is still stopped upstream', async () => {

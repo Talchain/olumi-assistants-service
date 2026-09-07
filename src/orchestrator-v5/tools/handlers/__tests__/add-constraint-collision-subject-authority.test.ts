@@ -51,7 +51,10 @@ const TARGET_LABEL = 'Churn rate';
  * it, and the `ambiguousSibling` variant below keeps it deliberately in order to
  * pin that the rule is still there.
  */
-function graphWithConstraintTargets(opts?: { readonly ambiguousSibling?: boolean }): GraphV3T {
+function graphWithConstraintTargets(opts?: {
+  readonly ambiguousSibling?: boolean;
+  readonly secondLimitRow?: boolean;
+}): GraphV3T {
   const g = buildD1Fixture();
   if (opts?.ambiguousSibling !== true) {
     const sibling = g.nodes.find((n) => n.label === 'Customer churn');
@@ -97,6 +100,22 @@ function graphWithConstraintTargets(opts?: { readonly ambiguousSibling?: boolean
       unit: '%',
       value_frame: 'level',
     },
+    // A SECOND limit on the SAME node, opposite operator — a floor beside the
+    // ceiling. Off by default so every existing case is byte-identical.
+    ...(opts?.secondLimitRow === true
+      ? [
+          {
+            constraint_id: 'gc-persisted-2',
+            node_id: TARGET_ID,
+            operator: '>=',
+            value: 2,
+            label: TARGET_LABEL,
+            provenance: 'explicit',
+            unit: '%',
+            value_frame: 'level',
+          },
+        ]
+      : []),
   ];
   return g;
 }
@@ -174,7 +193,17 @@ function makeProposal(): ProposalAction {
 async function runTurn(
   message: string,
   pendings: readonly PendingAction[],
-  graphOpts?: { readonly ambiguousSibling?: boolean },
+  graphOpts?: { readonly ambiguousSibling?: boolean; readonly secondLimitRow?: boolean },
+  proposalOverride?: ProposalAction,
+  /**
+   * ⚠ THE SIDE BAND IS SET BY THE EXECUTOR, NEVER BY THIS HANDLER.
+   * `baselineAnswerAuthority` is written at `turn-executor.ts:10644` and is the
+   * ONLY thing that arms the limit-preserving branch at `add-constraint.ts:377`.
+   * A handler-level case that omits it silently exercises the UNPROTECTED path —
+   * which is a different question wearing the same fixture, and would have made
+   * the two-row cases below fail for a harness reason rather than a product one.
+   */
+  baselineAnswerAuthorityTargetId?: string,
 ) {
   const handler = createAddConstraintHandler();
   return handler({
@@ -198,7 +227,10 @@ async function runTurn(
     requestId: 'req-1',
     signal: new AbortController().signal,
     orientationText: '',
-    proposal: makeProposal(),
+    proposal: proposalOverride ?? makeProposal(),
+    ...(baselineAnswerAuthorityTargetId !== undefined
+      ? { baselineAnswerAuthority: { targetId: baselineAnswerAuthorityTargetId } }
+      : {}),
     graphForTurn: graphWithConstraintTargets(graphOpts),
   });
 }
@@ -302,5 +334,124 @@ describe('DIRECTION 1 — an elliptical answer records nothing while a competito
     const graph = outcome.mutated_graph as GraphV3T;
     expect(baselineOf(graph, TARGET_ID)).toBe(0.3);
     expectNoOtherBaselines(graph);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⭐⭐ THE TWO-ROW TARGET — the case the round-4 triage named as the most likely
+//    home of a blocking defect, and did not examine:
+//
+//      "`constraintRowThisAnswerPreserves` uses `.find()` — FIRST matching row.
+//       A target carrying two constraint rows is unexamined by me, and this
+//       PR's whole thesis is that one target carries more than one quantity."
+//
+//    Driven rather than reasoned about, because a reading of a `.find()` is not
+//    evidence about what the upsert does with it.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('a target carrying TWO limits keeps both when its baseline is answered', () => {
+  /** The model mis-reads the answer as a NEW ceiling — the witnessed defect. */
+  function proposalRewritingTheCeiling(): ProposalAction {
+    return {
+      handler_id: 'add_constraint',
+      entity: {
+        id: TARGET_ID,
+        kind: 'node',
+        resolution_status: 'resolved',
+        resolution_method: 'id_match',
+      },
+      parameters: [
+        { name: 'constraint_type', value: 'at_most', source: 'user_explicit' },
+        { name: 'value', value: 30, source: 'user_explicit' },
+        { name: 'unit', value: '%', source: 'user_explicit' },
+      ],
+      cited_context_fields: [],
+    };
+  }
+
+  const rowsOn = (graph: GraphV3T, nodeId: string): Array<Record<string, unknown>> => {
+    const rows = (graph as unknown as { goal_constraints?: unknown }).goal_constraints;
+    return Array.isArray(rows)
+      ? (rows as Array<Record<string, unknown>>).filter((r) => r.node_id === nodeId)
+      : [];
+  };
+
+  /** By IDENTITY (`constraint_id`), never "the row whose value is 10" (trap 19). */
+  const rowById = (graph: GraphV3T, id: string): Record<string, unknown> | undefined =>
+    rowsOn(graph, TARGET_ID).find((r) => r.constraint_id === id);
+
+  it('PRECONDITION — the fixture really does carry two rows on one node', async () => {
+    // Asserted before anything rests on it: without this the case below could
+    // pass on a one-row graph and prove nothing (trap 13).
+    const outcome = await runTurn(
+      'Churn rate is 30%',
+      [baselinePending, effectPending],
+      { secondLimitRow: true },
+      undefined,
+      TARGET_ID,
+    );
+    expect(rowsOn(outcome.mutated_graph as GraphV3T, TARGET_ID)).toHaveLength(2);
+  });
+
+  it('BOTH limits survive intact — the ceiling is not rewritten and the floor is not touched', async () => {
+    const outcome = await runTurn(
+      'Churn rate is 30%',
+      [baselinePending, effectPending],
+      { secondLimitRow: true },
+      proposalRewritingTheCeiling(),
+      TARGET_ID,
+    );
+    const graph = outcome.mutated_graph as GraphV3T;
+
+    const ceiling = rowById(graph, 'gc-persisted-1');
+    const floor = rowById(graph, 'gc-persisted-2');
+    expect(ceiling, 'the ceiling row survives by id').toBeDefined();
+    expect(floor, 'the floor row survives by id').toBeDefined();
+
+    // The answer stated a LEVEL, so neither LIMIT may move.
+    expect(ceiling!.operator).toBe('<=');
+    expect(ceiling!.value).toBe(10);
+    expect(ceiling!.value_frame, 'the attestation the mint depends on').toBe('level');
+    expect(floor!.operator).toBe('>=');
+    expect(floor!.value).toBe(2);
+
+    // Exactly two — the proposal must not have APPENDED a third.
+    expect(rowsOn(graph, TARGET_ID)).toHaveLength(2);
+  });
+
+  it('and the baseline the answer DID state still records', async () => {
+    // The discriminating counterpart: without it, everything above would pass
+    // just as well if the whole turn had been refused outright.
+    const outcome = await runTurn(
+      'Churn rate is 30%',
+      [baselinePending, effectPending],
+      { secondLimitRow: true },
+      proposalRewritingTheCeiling(),
+      TARGET_ID,
+    );
+    expect(baselineOf(outcome.mutated_graph as GraphV3T, TARGET_ID)).toBe(0.3);
+  });
+
+  /**
+   * ⭐⭐ THE DISCRIMINATING TWIN. Same graph, same two rows, same proposal — the
+   * authority side band REMOVED. The ceiling IS rewritten to 30, which is the
+   * witnessed harm and today's behaviour without this branch.
+   *
+   * Neither half shows anything alone: the protection alone is consistent with
+   * the handler simply never writing on this fixture, and the rewrite alone is
+   * consistent with the branch being dead. The PAIR proves the preservation is
+   * bound to the AUTHORITY and not to something incidental about the graph.
+   */
+  it('TWIN — without the authority the SAME proposal rewrites the ceiling, so the branch is doing the work', async () => {
+    const outcome = await runTurn(
+      'Churn rate is 30%',
+      [baselinePending, effectPending],
+      { secondLimitRow: true },
+      proposalRewritingTheCeiling(),
+      // no authority
+    );
+    const graph = outcome.mutated_graph as GraphV3T;
+    expect(rowById(graph, 'gc-persisted-1')!.value, 'the unprotected ceiling moves').toBe(30);
+    // The floor is untouched either way — the idempotency key is (node, operator).
+    expect(rowById(graph, 'gc-persisted-2')!.value).toBe(2);
   });
 });
