@@ -111,6 +111,7 @@ import type { ComposeContext, SuggestedAction } from './compose/types.js';
 import {
   tryDeterministicValueUpdate,
   tryDeicticValueUpdate,
+  tryAnaphoricValueUpdate,
   tryCompoundValueUpdate,
   buildClarifyAssistantText,
   buildNonFactorKindRefusalText,
@@ -120,7 +121,12 @@ import {
   deriveOperator,
   EDIT_VERB_PATTERN as CALIBRATION_EDIT_VERB_PATTERN,
 } from './routing/deterministic-value-update.js';
-import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
+import type {
+  AnaphoricValueBinding,
+  CompoundUpdatePart,
+} from './routing/deterministic-value-update.js';
+import { resolveAnaphoricReferent } from './compose/edit-clarify-response.js';
+import { nodeIdFromRef, projectTurnReferentsFromWindow } from './context/turn-referents.js';
 import {
   resolveOutstandingAskClarifyRedirect,
   buildOutstandingAskChipMessage,
@@ -2436,6 +2442,13 @@ export async function runTurnExecutor(
       readonly notice: string;
       readonly partsUncovered: number;
     } | null = null;
+    // Spec §4.3 — the disclosure sentence ("Taking that as X.") for a
+    // `set_factor_value` the anaphoric pre-route bound from a bare pronoun.
+    // Set at the dispatch site; prepended wherever THIS turn's reply is
+    // composed for that proposal (the receipt after STEP 3.5, the
+    // validator-recovered copy, the non-factor-kind refusal). Null on every
+    // other path, so those replies are byte-identical.
+    let anaphoricBindingDisclosure: string | null = null;
     // Resumed pending action, if the short-confirm pre-route synthesised
     // a tool_call. Cleared after the commit-success consumed-telemetry
     // emit. Null on every other path.
@@ -6387,6 +6400,98 @@ export async function runTurnExecutor(
         };
       }
 
+      // ⭐ SPEC §4.3 — the VALUE-BEARING ANAPHORIC EDIT ("Set it to 100000.",
+      // "Can you update it to 100000?", "100000" after the product asked
+      // "What value would you like it set to?"). Runs only when neither the
+      // label path nor the deictic path claimed the message — and a deictic
+      // CLARIFY is a claim: `tryDeicticValueUpdate` returns `matched: true`
+      // for "Set this factor to 100000." with nothing selected, promotes
+      // nothing into `deterministicValueUpdate`, and its branch below composes
+      // the reply, so the gate reads `deicticDispatch.matched` directly rather
+      // than inferring the claim from the promotion (the pronoun pattern's
+      // trailing `\b` after `this` admits "this factor" too, so without this
+      // conjunct the block would re-claim a message the deictic path already
+      // owns and record a `set_factor_value` row that never executes). Binds ONLY
+      // under the register precondition: the referent register is projected
+      // from the same newest-first conversation window
+      // (`CONTEXT_PACK_RECENT_TURNS_CAP` turns of `context.prior_turns`) the
+      // no-op recovery layer reads, and the §4.2 decision is the composer's
+      // `resolveAnaphoricReferent` — the same function
+      // `decideNoOpRecovery` calls for "Update it." — so exactly one eligible
+      // candidate at the top populated rank binds and anything else hands in
+      // `null`, which the pre-route refuses as `no_binding`. On no match
+      // `deterministicValueUpdate` is left exactly as the label path produced
+      // it, so the telemetry and every later branch are byte-identical to a
+      // build without this block.
+      if (
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough &&
+        !deterministicValueUpdate.matched &&
+        !deicticDispatch.matched
+      ) {
+        const referentNodes = (graphStateForTurn?.nodes ?? []).flatMap((n) => {
+          const node = n as { id?: unknown; label?: unknown; kind?: unknown };
+          return typeof node.id === 'string' && typeof node.label === 'string'
+            ? [
+                {
+                  id: node.id,
+                  label: node.label,
+                  ...(typeof node.kind === 'string' ? { kind: node.kind } : {}),
+                },
+              ]
+            : [];
+        });
+        const anaphoricResolution = resolveAnaphoricReferent(
+          projectTurnReferentsFromWindow({
+            turnsNewestFirst: context.prior_turns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP),
+            nodes: referentNodes,
+          }),
+        );
+        const anaphoricBinding: AnaphoricValueBinding | null =
+          anaphoricResolution.outcome === 'bound'
+            ? {
+                id: nodeIdFromRef(anaphoricResolution.referent.ref),
+                label: anaphoricResolution.referent.label,
+                kind: anaphoricResolution.referent.kind,
+              }
+            : null;
+        const anaphoricDispatch = tryAnaphoricValueUpdate(
+          payload.message,
+          contextPack.parsed_quantities,
+          graphLookupForValidate,
+          anaphoricBinding,
+          // EVERY selected node id, deliberately not `selectedFactorIds`: a
+          // selection of any other node — factor or not — withdraws the claim.
+          options.selectedElements?.node_ids ?? [],
+          cqeSummary.degraded,
+        );
+        if (anaphoricDispatch.matched && anaphoricDispatch.dispatch === 'set_factor_value') {
+          // Promote into the label path's shape so the node-kind gate, the
+          // registry guard, the synthesised proposal and the telemetry below
+          // all run unchanged — the same promotion the deictic path makes.
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'set_factor_value',
+            candidate: anaphoricDispatch.candidate,
+            quantity: anaphoricDispatch.quantity,
+            ...(anaphoricDispatch.attribution
+              ? { attribution: anaphoricDispatch.attribution }
+              : {}),
+          };
+          anaphoricBindingDisclosure = anaphoricDispatch.disclosure;
+        } else if (anaphoricDispatch.matched) {
+          // The bare-quantity form ASKS, naming the bound factor as the sole
+          // candidate, through the ordinary clarify branch below (its chip
+          // carries the value; its pending names the factor by id).
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'clarify',
+            candidates: anaphoricDispatch.candidates,
+            quantity: anaphoricDispatch.quantity,
+          };
+        }
+      }
+
       // O-1 batch lifecycle — COMPOUND value update. When the single-edit path
       // bailed (its multi-quantity `ambiguous_quantity` guard fires on "Set A
       // to 0.6 and B to 0.8") AND the deictic path did not match, try the
@@ -6824,13 +6929,17 @@ export async function runTurnExecutor(
         downgrade_reason: downgradeReason,
         candidate_count: telemetryCandidates.length,
         top_score: telemetryCandidates[0]?.score ?? null,
-        // Per-candidate source tags ('substring' | 'dice') so routing
-        // diagnostics can distinguish exact-label hits from fuzzy hits
-        // without inferring from `score`.
+        // Per-candidate source tags — the `CandidateSource` union in
+        // `routing/deterministic-value-update.ts`, which is
+        // 'substring' | 'dice' | 'register' at this head — so routing
+        // diagnostics can tell exact-label hits from fuzzy hits, and both
+        // from a candidate the referent register bound with no label
+        // evidence at all, without inferring from `score`.
         candidate_sources: telemetryCandidates.map((c) => c.source),
         // Quantity-attribution tag — 'from_to' when the dispatch
         // originated from the row-7 from/to branch, null otherwise.
-        // Distinct from candidate.source (label-match concern); kept
+        // Distinct from candidate.source (how the candidate was selected —
+        // label evidence for 'substring'/'dice', none for 'register'); kept
         // separate so dashboards can filter rows independently.
         attribution:
           deterministicValueUpdate.matched &&
@@ -7025,6 +7134,10 @@ export async function runTurnExecutor(
             refusedCandidate.label,
             refusedKind,
             factorLabelsForRefusal,
+            // Spec §4.3 — an `option` the register bound for a bare pronoun
+            // reaches this gate; the refusal then opens with what "it" was
+            // read as. Null on the label path.
+            anaphoricBindingDisclosure,
           ),
           stage: context.stage,
           suggested_actions: refusalChips,
@@ -9607,6 +9720,18 @@ export async function runTurnExecutor(
           recoveredChipType = recovered.chip_type;
         }
 
+        // Spec §4.3 — when the rejected proposal was bound from a bare pronoun,
+        // the recovery copy may not name the node ("This factor uses £; the
+        // value provided is in %."), so the disclosure sentence leads it. Null
+        // on every other path, so the recovered copy is byte-identical.
+        if (anaphoricBindingDisclosure !== null) {
+          recoveredResponse = {
+            ...recoveredResponse,
+            assistant_text:
+              `${anaphoricBindingDisclosure} ${recoveredResponse.assistant_text}`.trim(),
+          };
+        }
+
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The recoverable-
         // validation responses (unsupported-action coaching + the per-code
         // recovery copy) are FUNCTIONAL — deterministic decline/coaching, not a
@@ -10321,6 +10446,16 @@ export async function runTurnExecutor(
               handlerEmittedMutatedGraph = true;
             }
           }
+        }
+
+        // Spec §4.3 — a receipt for a pronoun the register bound says what
+        // "it" was read as, in its own sentence, BEFORE the receipt. Null on
+        // every other path, so ordinary value updates are byte-identical.
+        if (anaphoricBindingDisclosure !== null && proposedHandlerId === 'set_factor_value') {
+          handlerOutcome = {
+            ...handlerOutcome,
+            assistant_text: `${anaphoricBindingDisclosure} ${handlerOutcome.assistant_text}`.trim(),
+          };
         }
 
         // Part-accounting conservation law (defence in depth) — the

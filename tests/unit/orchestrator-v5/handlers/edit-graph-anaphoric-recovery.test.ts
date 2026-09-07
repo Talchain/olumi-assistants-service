@@ -29,6 +29,7 @@ import { findForbiddenPhraseHit } from '../../../../src/orchestrator-v5/compose/
 import { hasMutationSignal } from '../../../../src/orchestrator-v5/routing/analytical-intent.js';
 import {
   isEditClarifyTargetKind,
+  resolveAnaphoricReferent,
   selectEditClarifyTargets,
 } from '../../../../src/orchestrator-v5/compose/edit-clarify-response.js';
 import { NodeKindV3 } from '../../../../src/schemas/cee-v3.js';
@@ -291,6 +292,35 @@ describe('THE BANNED OUTCOME — a reset is unreachable for an anaphoric edit', 
     });
     expect(r.branch).toBe('vague_edit');
     expect(r.assistantText).toBe(BANNED_RESET_TEXT);
+  });
+});
+
+describe('ONE AUTHORITY — the branch taken is the resolver\'s outcome, for every register fixture', () => {
+  // Spec §4.2's decision is made in exactly one place, `resolveAnaphoricReferent`,
+  // and the value pre-route calls the same function for "Set it to 100000.".
+  // This pins that this branch has not grown a second predicate.
+  const expected: Record<string, string> = {
+    bound: 'anaphoric_edit_bound',
+    ask_candidates: 'anaphoric_edit_ask_candidates',
+    unresolved: 'anaphoric_edit_ask_unresolved',
+  };
+  const fixtures: readonly [string, TurnReferents | null | undefined][] = [
+    ['one candidate', ONE_CANDIDATE],
+    ['two candidates', TWO_CANDIDATES],
+    ['empty complete', EMPTY_COMPLETE],
+    ['degraded', DEGRADED],
+    ['degraded with entry', DEGRADED_WITH_ENTRY],
+    ['null', null],
+    ['undefined', undefined],
+  ];
+  it('agrees on all seven fixtures, and the seven cover all three outcomes', () => {
+    const seen = new Set<string>();
+    for (const [name, register] of fixtures) {
+      const outcome = resolveAnaphoricReferent(register).outcome;
+      seen.add(outcome);
+      expect(decideNoOpRecovery({ ...BASE, referents: register }).branch, name).toBe(expected[outcome]);
+    }
+    expect([...seen].sort()).toEqual(['ask_candidates', 'bound', 'unresolved']);
   });
 });
 
