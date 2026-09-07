@@ -78,7 +78,10 @@
  * ENABLE_V5_ORCHESTRATOR flag was deleted in O-7 wave 2.
  *
  * Transport invariant: buffered JSON only (no raw-stream writes, no SSE
- * Content-Type). Enforced by scripts/validate-transport-invariants.sh in CI.
+ * Content-Type). Checked by scripts/validate-transport-invariants.sh, which runs
+ * ONLY from the manually-installed pre-push hook (scripts/install-hooks.sh) —
+ * it is in no CI workflow, so it does not gate merges. Do not cite it as CI
+ * enforcement; tests/meta/guard-liveness.test.ts pins that distinction.
  *
  * No imports from V4 pipeline (pipeline-v4, response-assembler, handlers).
  */
