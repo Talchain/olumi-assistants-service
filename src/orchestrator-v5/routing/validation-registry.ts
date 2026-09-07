@@ -14,8 +14,6 @@
 
 import type { HandlerValidationRegistry, PreconditionCheck } from './validator.js';
 import { SetFactorValueValueSchema } from '../tools/handlers/set-factor-value.js';
-import { SCAFFOLD_ANY_DISCLOSURE_RE_SRC } from '../coaching/scaffold-disclosure.js';
-import { CONSTRAINT_GAP_DISCLOSURE_RE_SRC } from '../coaching/constraint-gap-disclosure.js';
 import {
   AddConstraintLabelSchema,
   AddConstraintTypeSchema,
@@ -26,7 +24,10 @@ import {
   AdjustEdgeStrengthSchema,
   AdjustEdgeStrengthStdSchema,
 } from '../tools/handlers/adjust-edge-strength.js';
-import { isAllowedRunAnalysisAssistantText } from '../coaching/analysis-result-headline.js';
+import {
+  isAllowedRunAnalysisAssistantText,
+  TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS,
+} from '../coaching/analysis-result-headline.js';
 
 /**
  * run_analysis precondition (Phase 1.5 review — P0-1 wire reality fix).
@@ -92,15 +93,38 @@ const noopHandlerConfirmationTemplate = (outcome: unknown): string => {
 // stricter allowlist after the PR #210 review flagged the substring
 // match as too permissive.
 const RUN_ANALYSIS_FALLBACK_TEXT = 'Ran analysis on your current scenario.';
-// Compiled once; source is the disclosure's own published grammar.
-const SCAFFOLD_DISCLOSURE_EXTRACT_RE = new RegExp(SCAFFOLD_ANY_DISCLOSURE_RE_SRC);
-// T1: the same honesty floor for the constraint-gap disclosure. A run whose
-// ratified condition was never evaluated may not render undisclosed either, so
-// if the composed summary is rejected the gap sentence is salvaged onto the
-// fallback exactly as the scaffold one is — and the COMBINED result is
-// re-checked against the allowlist before shipping, so the salvage cannot
-// smuggle through content the allowlist just rejected.
-const CONSTRAINT_GAP_EXTRACT_RE = new RegExp(CONSTRAINT_GAP_DISCLOSURE_RE_SRC);
+
+/**
+ * T2 — the salvage's family list is DERIVED, never hand-listed.
+ *
+ * This used to be a hand-written pair (scaffold + constraint-gap) while the
+ * allowlist's own template branch admitted THREE — and FOUR by the time this
+ * change merged, because #1179 landed the unset-option-effect family while it
+ * sat unmerged. The intake-option and unset-option-effect disclosures were
+ * therefore composed by the handler, rejected as part of the whole summary, and
+ * then silently dropped — the user got a bare "Ran analysis on your current
+ * scenario." with no hint that the ranked set was not the set they described,
+ * or that the compared options had no effects set. CLAUDE.md trap 12, and the
+ * gap WIDENED between the fix being written and the fix landing, which is the
+ * argument for deriving rather than a footnote to it.
+ *
+ * `TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS` is the right source precisely because it
+ * is the CONSUMER'S OWN predicate: the salvage's whole job is to produce a
+ * `fallback + suffix` string that `isAllowedRunAnalysisAssistantText` will
+ * accept on its template branch, and that branch is compiled from this same
+ * ordered array. Extracting anything it does not admit could only produce a
+ * combination the re-check below is guaranteed to reject.
+ *
+ * Consequences worth stating, because they are the point:
+ *   - the ORDER is the handler's append order, taken from the array rather than
+ *     re-asserted here;
+ *   - the objective-contradiction tail is excluded automatically, with its
+ *     reason recorded at `TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS` — it names a
+ *     leading option, and the fallback is a WITHHELD shape (G-CEE-1);
+ *   - a family added to the array is salvaged here with NO edit to this file.
+ */
+const TEMPLATE_SUFFIX_EXTRACT_RES: ReadonlyArray<RegExp> =
+  TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map(({ source }) => new RegExp(source));
 const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   if (
     outcome === null ||
@@ -123,17 +147,25 @@ const runAnalysisConfirmationTemplate = (outcome: unknown): string => {
   // allowlist rejected through the backstop itself). Genuine builder
   // disclosures pass; a poisoned disclosure-shaped slice falls back bare.
   if (typeof candidate === 'string') {
-    // Salvage in the handler's own append order (scaffold, then gap) so the
-    // combined text is a shape the allowlist's template branch recognises.
-    // Either, neither, or both may be present.
-    const scaffold = candidate.match(SCAFFOLD_DISCLOSURE_EXTRACT_RE)?.[0] ?? '';
-    const gap = candidate.match(CONSTRAINT_GAP_EXTRACT_RE)?.[0] ?? '';
-    if (scaffold.length > 0 || gap.length > 0) {
-      const combined = RUN_ANALYSIS_FALLBACK_TEXT + scaffold + gap;
+    // Salvage in the handler's own append order, taken from the registry array
+    // itself, so the combined text is a shape the allowlist's template branch
+    // recognises. Any, none, or all may be present.
+    const slices = TEMPLATE_SUFFIX_EXTRACT_RES.map((re) => candidate.match(re)?.[0] ?? '');
+    if (slices.some((slice) => slice.length > 0)) {
+      const combined = RUN_ANALYSIS_FALLBACK_TEXT + slices.join('');
       if (isAllowedRunAnalysisAssistantText(combined)) return combined;
-      // A poisoned slice in one disclosure must not cost us the other: retry
+      // A poisoned slice in one disclosure must not cost us the others: retry
       // with each alone before giving up on disclosure entirely.
-      for (const only of [gap, scaffold]) {
+      //
+      // ⚠ REVERSE append order, preserved verbatim from the hand-listed
+      // implementation this replaced (which retried `[gap, scaffold]` against an
+      // append order of `scaffold, gap`). It decides which family wins when two
+      // are individually admissible but their combination is not — reachable
+      // only via the length cap. No comment ever recorded a reason for the
+      // direction, so this derivation KEEPS the observed behaviour rather than
+      // quietly changing it: a salvage-precedence change is a product decision,
+      // not a refactor, and does not belong in a mirror-removal.
+      for (const only of [...slices].reverse()) {
         if (only.length === 0) continue;
         const single = RUN_ANALYSIS_FALLBACK_TEXT + only;
         if (isAllowedRunAnalysisAssistantText(single)) return single;

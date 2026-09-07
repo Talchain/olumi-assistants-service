@@ -29,7 +29,10 @@ import { makeMessagePayload } from './fixtures.js';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import type { PendingAction } from '../session/pending-action.js';
-import { PENDING_ACTION_DEFAULT_TURN_TTL } from '../session/pending-action.js';
+import {
+  PENDING_ACTION_ASK_TURN_TTL,
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+} from '../session/pending-action.js';
 
 const appendCalls: Array<Record<string, unknown>> = [];
 let mockedPendingActions: ReadonlyArray<PendingAction> = [];
@@ -469,7 +472,11 @@ describe('R2918B ROUTE — an unreadable ANSWER is re-asked; a non-answer is not
       (reAsked[0]!.action as { target_id: string }).target_id,
     ).toBe('o-churn-rate');
     // REFRESHED, not decremented. Carry-forward alone would persist 1 here.
-    expect(reAsked[0]!.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+    // The "full TTL" for a recorded ASK is PENDING_ACTION_ASK_TURN_TTL, not the
+    // offer default — see the two-dial note in session/pending-action.ts. The
+    // mechanism this line discriminates (refresh vs re-persist) is unchanged;
+    // only the constant naming "full" moved.
+    expect(reAsked[0]!.expires_at_turn_count).toBe(PENDING_ACTION_ASK_TURN_TTL);
     // ...and the wall clock is NOT refreshed with it — the bound the re-ask
     // may never extend (identity preserved too, so telemetry tracks one
     // question across re-asks).
@@ -520,7 +527,11 @@ describe('R2918B ROUTE — an unreadable ANSWER is re-asked; a non-answer is not
     ]);
     const question = persisted.find((p) => p.action.kind === 'elicit_target_baseline')!;
     const carried = persisted.find((p) => p.action.kind === 'run_analysis')!;
-    expect(question.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+    // The re-asked QUESTION is a recorded ask (ask window); the carried
+    // run_analysis OFFER keeps the default and is one turn down. Asserting both
+    // in one place is deliberate: it is the twin, and it fails if the widening
+    // ever leaks onto the offer.
+    expect(question.expires_at_turn_count).toBe(PENDING_ACTION_ASK_TURN_TTL);
     expect(carried.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL - 1);
     // Exactly one copy of the question: the explicit list SUPERSEDES the
     // carried copy by `chip_id` rather than sitting alongside it as a second
@@ -720,8 +731,8 @@ describe('R2918C — the re-ask REFRESHES the turn-TTL, it does not merely re-pe
     // PRECONDITION PINNED IN-TEST: the input really was below the full TTL, so
     // a green result here cannot be the fixture failing to set up the case.
     expect(mockedPendingActions[0]!.expires_at_turn_count).toBeLessThan(
-      PENDING_ACTION_DEFAULT_TURN_TTL,
+      PENDING_ACTION_ASK_TURN_TTL,
     );
-    expect(question[0]!.expires_at_turn_count).toBe(PENDING_ACTION_DEFAULT_TURN_TTL);
+    expect(question[0]!.expires_at_turn_count).toBe(PENDING_ACTION_ASK_TURN_TTL);
   });
 });

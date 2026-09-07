@@ -39,6 +39,7 @@ import { GraphV3, NodeV3, type GraphV3T } from '../schemas/cee-v3.js';
 import { config } from '../config/index.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
+  canonicalAnalysisReadyFrom,
   mergeInterventionSourceObjects,
 } from '../orchestrator/tools/analysis-ready-helper.js';
 import {
@@ -46,6 +47,7 @@ import {
   canonicaliseForAnalysis,
   resolveRunAdmission,
   admittedVerdict,
+  refusedVerdict,
   AnalysisNotReadyError,
   type ReadinessResult,
 } from './tools/handlers/analysis-ready-core.js';
@@ -62,6 +64,7 @@ import {
 import { deriveAuthoritativeStage } from './context/derive-stage.js';
 import { deriveAnalysisFreshness } from './context/freshness.js';
 import type { FreshnessDerivation } from './context/freshness.js';
+import { applyGraphAbsenceWarrant } from './context/graph-absence-warrant.js';
 import { computeAnalysisAffectingGraphHash } from './context/graph-hash.js';
 import { extractGraphOptionIds } from './context/option-identity.js';
 import { GraphStateIngressSchema } from './boundary/request-extensions.js';
@@ -108,7 +111,33 @@ import type { PendingAction } from './session/pending-action.js';
  */
 export type CanonicalGraphReadState =
   | { readonly status: 'ok_present'; readonly graph: unknown }
-  | { readonly status: 'ok_absent' }
+  | {
+      readonly status: 'ok_absent';
+      /**
+       * ⚠ TWO QUESTIONS, ONE STATE (CLAUDE.md trap 21). `status` answers
+       * "did the read succeed?"; THIS answers "does a successful read of
+       * nothing ENTITLE us to say the user has no model?". They are not the
+       * same question, and collapsing them is what let the product tell a
+       * user watching a completed analysis that they had no model started
+       * yet — see `context/graph-absence-warrant.ts` for the witness.
+       *
+       * `false` means a completed analysis PROVES a model existed, so the
+       * absence CLAIM is unwarranted even though the READ genuinely succeeded.
+       *
+       * OPTIONAL, and omission means WARRANTED — i.e. exactly today's
+       * behaviour. That direction is deliberate: hand-built and legacy
+       * contexts must keep the ordinary empty-state answer rather than
+       * hedging, and the only producer that can know better
+       * (`buildTurnContext`) always sets it explicitly.
+       *
+       * ⚠ IT IS DELIBERATELY NOT A `degraded` READ. `degraded` would suppress
+       * the first-touch `provisional` promotion of a caller-supplied graph —
+       * a genuine, tested recovery path that can still give this very user a
+       * truthful answer from their own bytes. The claim is withdrawn; the
+       * read is not falsified.
+       */
+      readonly absenceWarranted?: boolean;
+    }
   | { readonly status: 'degraded'; readonly errorCode: string };
 
 export interface EnrichedTurnContext extends TurnContext {
@@ -823,6 +852,41 @@ export async function buildTurnContext(
     store,
   );
 
+  // ── ARE WE ENTITLED TO SAY THIS USER HAS NO MODEL? ─────────────────────
+  // `fetchPersistedScenarioState` answers "did the read succeed?"; this
+  // answers "does a successful read of nothing WARRANT the absence claim?".
+  // Two questions under one state, and collapsing them is what let the product
+  // tell a user watching a completed analysis that they had no model started
+  // yet (see `context/graph-absence-warrant.ts` for the witness and the proof).
+  //
+  // ONE derivation, ONE consumer of the new bit: it rides `persistedGraphRead`
+  // to `selectContextGraphSnapshot`, which is the single place that turns a
+  // read state into the authority token the model reads. Deriving it a second
+  // time anywhere downstream would be a second authority over one question.
+  //
+  // The `status` is UNCHANGED (`ok_absent` stays `ok_absent`), so the commit
+  // chokepoints and the selection-honesty resolvers below — all of which key on
+  // `status` — behave exactly as before. Only the ENTITLEMENT is new.
+  const canonicalGraphRead = applyGraphAbsenceWarrant(
+    scenarioState.read,
+    scenarioAnalysisFacts,
+  );
+  if (
+    canonicalGraphRead.status === 'ok_absent' &&
+    canonicalGraphRead.absenceWarranted === false
+  ) {
+    // Never dark: this means a model is PROVEN to have existed and this read
+    // did not produce it — the server half of the witnessed P0.
+    log.warn(
+      {
+        event: 'v5.canonical_graph.absence_unwarranted',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+      },
+      'V5 buildTurnContext: persisted graph read produced nothing while a completed analysis proves one existed — the absence claim is withdrawn (the model is unavailable, not absent)',
+    );
+  }
+
   // V5 Wave 2: read pending actions from the most recent prior turn.
   // Read failures are non-fatal — empty array on degradation, mirrors
   // the prior_turns degradation path.
@@ -1039,7 +1103,7 @@ export async function buildTurnContext(
   const turnSelection = resolveTurnSelection(
     selectedNodeIds,
     scenarioState.graph,
-    scenarioState.read.status,
+    canonicalGraphRead.status,
     unreadableEdgeRefIds,
   );
   // Edge selections participate ONLY in this existence classification. The
@@ -1050,7 +1114,7 @@ export async function buildTurnContext(
     options.selectedElements,
     turnSelection,
     scenarioState.graph,
-    scenarioState.read.status,
+    canonicalGraphRead.status,
   );
   if (turnSelection !== null) {
     try {
@@ -1091,7 +1155,7 @@ export async function buildTurnContext(
     prior_facts_with_turn: priorFactsWithTurn,
     scenarioBriefText: scenarioState.briefText,
     persistedGraph: scenarioState.graph,
-    persistedGraphRead: scenarioState.read,
+    persistedGraphRead: canonicalGraphRead,
     most_recent_pending_actions: mostRecentPendingActions,
     decision_context: decisionContext,
     coaching_state: coachingState,
@@ -2765,24 +2829,51 @@ export async function loadScenarioSnapshotForRunAnalysis(
     //
     // NOT a second derivation. `admission` is the assessment made on
     // `sigmaFloor.graph` — GraphV3-valid, parsed above — and `assessment` is
-    // exposed for precisely this reuse. `{ ...analysisReady, may_run }` is
-    // literally `buildCanonicalAnalysisReadyFromGraph`'s body, so the carrier
-    // is byte-identical to the canonical projection of the same graph.
+    // exposed for precisely this reuse.
     //
-    // `may_run` is `willProceed`, which is FALSE on this branch by construction
-    // — carried rather than hardcoded so the field keeps one source and cannot
-    // drift from the boolean that decided the throw.
+    // ⚠⚠ CORRECTED IN PLACE (trap 14 — the old sentence is kept so the reasoning
+    // that failed stays visible). It used to read:
+    //   ~~"`{ ...analysisReady, may_run }` is literally
+    //     `buildCanonicalAnalysisReadyFromGraph`'s body, so the carrier is
+    //     byte-identical to the canonical projection of the same graph."~~
+    // TRUE WHEN WRITTEN, AND FALSE THE MOMENT THE CANONICAL BUILDER GAINED A
+    // FIELD. Re-spelling a shared shape inline is a mirror with no drift alarm
+    // of its own; this one drifted, and only the byte-identity test caught it.
+    //
+    // So the carrier now calls the ONE builder, in its admission-parameterised
+    // form — `canonicalAnalysisReadyFrom` — which takes the admission this
+    // branch already holds and therefore does NOT re-resolve. Byte-identity is
+    // no longer a claim in a comment; it is the same function.
+    //
+    // `may_run` inside it is `willProceed`, FALSE on this branch by
+    // construction — carried rather than hardcoded so the field keeps one
+    // source and cannot drift from the boolean that decided the throw.
     //
     // ⛔ THE OTHER THREE THROWS IN THIS FUNCTION STAY ONE-ARGUMENT, and that is
     // measured, not assumed: `assessCanonicalAnalysisReadiness` returns
     // `analysisReady: undefined` for NO_GRAPH (:2331) and for a graph that
     // fails GraphV3 (:2400 / :2407). There is no model to name, and inventing
     // one would be the mirror of the defect being closed.
+    //
+    // ⭐⭐ AND THE SENTENCE, which used to stop one hop short of the user.
+    //
+    // This argument was `admission.strict`. `strict.nextStep` is `null`
+    // whenever strict readiness had NO complaint — which is exactly the
+    // zero-alternatives cell the IDENTICAL_OPTIONS floor refuses on the SECOND
+    // term. `run-analysis.ts:337` writes `next_step` only when the verdict
+    // carries one, so on that cell the key was omitted entirely and the
+    // composer fell back to "This scenario needs a quick fix before it can be
+    // analysed." — a refusal naming nothing, on the one press a user makes.
+    //
+    // `refusedVerdict` carries `admission.blockedNextStep`, which this module
+    // already derives once, into the field the run path reads. NOT a second
+    // authority and NOT a rewrite: a refusal that already has its own specific
+    // sentence is returned untouched, so the three explicable branches keep
+    // their copy byte for byte. Both directions are pinned at the SURFACE in
+    // `tests/unit/analysis-refusal-carries-a-reason.test.ts`.
     throw new AnalysisNotReadyError(
-      admission.strict,
-      admission.assessment.analysisReady
-        ? { ...admission.assessment.analysisReady, may_run: admission.willProceed }
-        : undefined,
+      refusedVerdict(admission),
+      canonicalAnalysisReadyFrom(admission, sigmaFloor.graph),
     );
   }
   const verdict = admittedVerdict(admission);

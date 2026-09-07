@@ -46,7 +46,10 @@
 import { describe, it, expect } from 'vitest';
 import { MISSING_VALUE_ASK_FORMAT_HINT } from '../../routing/missing-value-answer.js';
 
-import { composeConfigureOptionClarifyResponse } from '../configure-option-clarify-response.js';
+import {
+  CONFIGURE_OPTION_EXAMPLE_VALUE,
+  composeConfigureOptionClarifyResponse,
+} from '../configure-option-clarify-response.js';
 import { findForbiddenPhraseHit } from '../forbidden-user-facing-phrases.js';
 import {
   buildRepairPairChip,
@@ -192,7 +195,13 @@ describe('identification NOT complete — the teach-the-format branch is untouch
   ])('%s — still gets the routable phrasing', (_name, message) => {
     const text = compose(message);
     expect(text).toContain(RETYPE_LEAD_IN);
-    expect(text).toContain(buildConfigureOptionAdvisedFormat(OPTION, FACTOR, '0.6'));
+    // ⚠ DERIVED, NOT HAND-COPIED. This was the literal `'0.6'` — a mirror of a
+    // constant owned one file over (trap 12), which went stale the moment the
+    // exemplar became a percentage. The property under test is "this branch
+    // still advertises the ROUTABLE SENTENCE", never "it advertises 0.6".
+    expect(text).toContain(
+      buildConfigureOptionAdvisedFormat(OPTION, FACTOR, CONFIGURE_OPTION_EXAMPLE_VALUE),
+    );
   });
 
   // ⛔⛔ P8, ON THE BRANCH THAT BROKE IT. This lane appended the percentage
@@ -204,18 +213,40 @@ describe('identification NOT complete — the teach-the-format branch is untouch
   // ⚠ THE REVIEWER'S MUTANT R2 SURVIVED GREEN AT 543/543 because nothing
   // pinned this. It is pinned now: this branch advertises exactly ONE value
   // form, and it is the one its own reader accepts.
+  //
+  // ⚠⚠ THE PARENTHESISED MEASUREMENT ABOVE IS WITHDRAWN — RE-MEASURED AND
+  // REFUTED at `de58cff3`, quoted rather than deleted (trap 14). The percent
+  // conversion landed in `option-effect-write.ts` on 30 Aug 2026, so
+  // `resolveOptionEffectWrite("…to 60%")` now MATCHES and reads 0.6 (driven
+  // against the wire-witnessed graph fixture, both controls firing; the full
+  // table is on `CONFIGURE_OPTION_EXAMPLE_VALUE`). The exemplar is therefore a
+  // PERCENTAGE now, so this branch and the identified branches teach the same
+  // notation — the product used to give a tester two different instructions
+  // about what to type.
+  //
+  // ⭐ THE ASSERTION IS UNCHANGED IN SUBSTANCE AND STAYS: **exactly one value
+  // form**, and no anchor sentence whose "just the percentage is enough" claim
+  // is false HERE, because this branch needs the user to name the pair. What
+  // changed is which single form that is — not that there is one.
   it.each([
     ['option named, factor absent', `Configure ${OPTION}`],
     ['nothing named', 'help me with this'],
   ])('%s — advertises ONE value form, never a second scale', (_name, message) => {
     const text = compose(message);
-    // The routable sentence is present …
-    expect(text).toContain(buildConfigureOptionAdvisedFormat(OPTION, FACTOR, '0.6'));
-    // … and the percentage anchors, whose reader does NOT run on this branch,
-    // are absent. Asserted on the anchors themselves rather than on the hint
-    // constant, so re-wording the hint cannot silently un-pin this.
+    // The routable sentence is present … (derived, never a copied literal)
+    expect(text).toContain(
+      buildConfigureOptionAdvisedFormat(OPTION, FACTOR, CONFIGURE_OPTION_EXAMPLE_VALUE),
+    );
+    // … and the ANCHOR SENTENCE, whose "just the percentage is enough" claim is
+    // false on this branch, is absent. Asserted on the anchors themselves rather
+    // than on the hint constant, so re-wording the hint cannot silently un-pin
+    // this.
     expect(text).not.toContain('0% means');
     expect(text).not.toContain('100% means');
-    expect(text).not.toMatch(/\bpercentage\b/i);
+    expect(text).not.toContain(MISSING_VALUE_ASK_FORMAT_HINT);
+    // ⭐ AND THE SECOND SCALE IS GONE FOR GOOD: the internal normalised
+    // coefficient must not appear in user copy anywhere (founder ruling,
+    // 30 Aug 2026). This branch was the last one still showing it.
+    expect(text).not.toMatch(/\b0\.\d/);
   });
 });

@@ -87,3 +87,90 @@ describe('recorded option-effect answer identity', () => {
     } }], duplicate).kind).toBe('stale');
   });
 });
+
+/**
+ * ⭐⭐⭐ THE SIGN, END TO END ON THE REPO'S OWN BINDING FIXTURE.
+ *
+ * ⚠⚠ MEASURED AT `e777309f`, THROUGH THIS EXACT `resolve` HELPER:
+ *
+ *     "-0.9"                 ->  bind  valueText=0.9
+ *     "set it to -0.9"       ->  bind  valueText=0.9
+ *     "make it -90% please"  ->  bind  valueText=0.9
+ *
+ * At base every one of those returned `null` from the reader and never bound —
+ * a safe LOSS. The slot contract converted that loss into a WRONG WRITE: the
+ * product would have recorded the OPPOSITE DIRECTION of what the user said, on
+ * a domain where negative effects are ordinary. Pinned here rather than only at
+ * the pure resolver, because "the pure function refuses it" and "no bind
+ * reaches the writer" are different claims and only the second one is the harm.
+ */
+describe('a stated NEGATIVE never reaches the write path', () => {
+  it.each([
+    '-0.9',
+    'set it to -0.9',
+    'make it -90% please',
+    '−0.9',
+    'minus 0.9',
+    'negative 0.9',
+    'put it at -0.25',
+  ])('%s does not bind', message => {
+    const result = resolve(message);
+    expect(result.kind).not.toBe('bind');
+  });
+
+  /**
+   * ⚠ THE POSITIVE CONTROL. Every assertion above is satisfied by a resolver
+   * that binds nothing at all, so on its own the block proves nothing about
+   * this fixture (trap 13). These are the same sentences with the sign removed:
+   * they MUST bind, and to the recorded pair by identity.
+   */
+  it.each([
+    ['0.9', '0.9'],
+    ['set it to 0.9', '0.9'],
+    ['make it 90% please', '0.9'],
+    ['put it at 0.25', '0.25'],
+  ])('CONTRAST — %s still binds to the recorded pair', (message, expected) => {
+    const result = resolve(message);
+    expect(result.kind).toBe('bind');
+    if (result.kind !== 'bind') return;
+    expect(result.answer.valueText).toBe(expected);
+    expect(result.answer.pair.optionId).toBe('second');
+    expect(result.answer.pair.factorId).toBe('factor');
+  });
+});
+
+/**
+ * ⭐⭐ THE ATTEMPT COUNT ADVANCES — the half that made the whole counter dark.
+ *
+ * ⚠⚠ THE RESOLVER USED TO RETURN THE RECORDED ASK'S OWN COUNT. Combined with
+ * the route's `pending_actions: []` carry-forward, which replays the recorded
+ * row VERBATIM, the stored count never moved: every re-ask composed at attempt
+ * 1, the attempt-2 copy was unreachable in production, and two identical
+ * unreadable replies produced BYTE-IDENTICAL re-asks — the exact repetition
+ * this exit exists to end, surviving inside its own fix.
+ *
+ * Emitting the re-ask IS the next attempt, so the verdict carries the recorded
+ * count PLUS ONE, and hands back the row the route must rewrite.
+ */
+describe('the confirm verdict advances the attempt it will be recorded under', () => {
+  it('a first ask (no attempt field) yields the SECOND attempt', () => {
+    const result = resolve('a third');
+    expect(result.kind).toBe('confirm');
+    if (result.kind !== 'confirm') return;
+    expect(result.attempt).toBe(2);
+    // The route rewrites THIS row in its carry-forward list; without the row it
+    // cannot find which pending to advance.
+    expect(result.pending.id).toBe(pending.id);
+  });
+
+  it.each([[1, 2], [2, 3], [4, 5]])(
+    'a row recorded at attempt %i yields %i',
+    (recorded, expected) => {
+      const row = { ...pending, action: { ...pending.action, attempt: recorded } } as PendingAction;
+      const result = resolve('a third', [row]);
+      expect(result.kind).toBe('confirm');
+      if (result.kind !== 'confirm') return;
+      expect(result.attempt).toBe(expected);
+    },
+  );
+});

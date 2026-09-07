@@ -36,6 +36,7 @@ export type ContextGraphSelectionReason =
   | 'persisted_absent_request_invalid_numeric'
   | 'canonical_read_degraded'
   | 'canonical_read_state_missing'
+  | 'canonical_absence_unwarranted'
   | 'persisted_invalid_shape'
   | 'persisted_invalid_numeric';
 
@@ -65,6 +66,7 @@ export type ContextGraphSelection =
       readonly reason:
         | 'canonical_read_degraded'
         | 'canonical_read_state_missing'
+        | 'canonical_absence_unwarranted'
         | 'persisted_invalid_shape'
         | 'persisted_invalid_numeric';
     };
@@ -179,31 +181,46 @@ export function selectContextGraphSnapshot(input: {
     });
   }
 
+  // ── THE ABSENCE CLAIM, AND WHETHER WE ARE ENTITLED TO MAKE IT ──────────
+  // `ok_absent` says the read succeeded and found nothing. It does NOT by
+  // itself entitle us to tell the user they have no model: a completed
+  // analysis proves one existed, so a read that produces nothing is a model we
+  // could not produce (see `graph-absence-warrant.ts` for the witness — the
+  // product told a user watching a finished analysis that they had no model).
+  //
+  // Applied ONLY on the fall-through, never before the promotion below. Where
+  // the caller supplied a usable graph, that first-touch `provisional` rescue
+  // is strictly better than an unavailable verdict — it can still answer this
+  // user truthfully from their own bytes — so it keeps precedence and its
+  // behaviour is unchanged. Only the outcomes that WOULD have asserted "no
+  // Living Model exists yet" are withdrawn.
+  const absentUnlessUnwarranted = (
+    reason: Extract<ContextGraphSelection, { status: 'absent' }>['reason'],
+  ): ContextGraphSelection =>
+    attestSelection(
+      canonicalRead.absenceWarranted === false
+        ? {
+            status: 'unavailable',
+            graph: null,
+            reason: 'canonical_absence_unwarranted',
+          }
+        : { status: 'absent', graph: null, reason },
+    );
+
   if (requestGraph === null || requestGraph === undefined) {
-    return attestSelection({
-      status: 'absent',
-      graph: null,
-      reason: 'persisted_absent_no_request',
-    });
+    return absentUnlessUnwarranted('persisted_absent_no_request');
   }
 
   const request = validateGraph(requestGraph);
   if (!request.ok) {
-    return attestSelection({
-      status: 'absent',
-      graph: null,
-      reason:
-        request.failure === 'invalid_shape'
-          ? 'persisted_absent_request_invalid_shape'
-          : 'persisted_absent_request_invalid_numeric',
-    });
+    return absentUnlessUnwarranted(
+      request.failure === 'invalid_shape'
+        ? 'persisted_absent_request_invalid_shape'
+        : 'persisted_absent_request_invalid_numeric',
+    );
   }
   if (request.graph.nodes.length === 0) {
-    return attestSelection({
-      status: 'absent',
-      graph: null,
-      reason: 'persisted_absent_request_empty',
-    });
+    return absentUnlessUnwarranted('persisted_absent_request_empty');
   }
 
   return attestSelection({

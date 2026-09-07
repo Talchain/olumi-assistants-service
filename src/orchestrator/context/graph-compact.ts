@@ -14,23 +14,38 @@
 import type { GraphV3T } from "../../schemas/cee-v3.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
+import {
+  valueSourceAuthorship,
+  type ProvenanceDisplay,
+  type ValueSourceDisplay,
+} from "../../cee/transforms/provenance-display.js";
 import { collectDirectedReachable } from "../../graph/reachability.js";
 
 // ============================================================================
 // Output Types
 // ============================================================================
 
-export type CompactNodeSource = 'user' | 'assumption' | 'system';
+/**
+ * ⚠ ALIAS, NOT A SECOND DECLARATION. This vocabulary and
+ * `provenance-display.ts`'s were declared separately and identically — two
+ * spellings of one list, i.e. the hand-maintained twin this codebase keeps
+ * paying for (CLAUDE.md trap 12). The name is kept for its consumers; the
+ * definition now has one home, beside the table that projects into it.
+ */
+export type CompactNodeSource = ValueSourceDisplay;
 
 /**
  * Display-safe provenance vocabulary for the UI/coaching layer. Mapped from
- * upstream extractionType (nodes) or provenance.source (edges); the raw
- * upstream value is preserved on `_raw_provenance` for diagnostics.
+ * `observed_state.source` where the producer stamped one (nodes) or
+ * provenance.source (edges), falling back to the upstream extractionType; the
+ * raw upstream value is preserved on `_raw_provenance` for diagnostics.
  *
  * Unknown / absent upstream values map to `'ai_inferred'` (safe default —
  * anything not explicitly user-set or brief-extracted is treated as inferred).
+ *
+ * ⚠ ALIAS, for the same reason as {@link CompactNodeSource} above.
  */
-export type CompactProvenance = 'from_brief' | 'ai_inferred' | 'user_set';
+export type CompactProvenance = ProvenanceDisplay;
 
 /**
  * Existing compactor-owned display bands for a producer-attested causal
@@ -646,28 +661,56 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         }
 
         // Provenance: derive both legacy `source` (for context-pack-assembler
-        // / telemetry consumers) and the new `provenance` projection (for the
+        // / telemetry consumers) and the `provenance` projection (for the
         // UI/coaching layer). Raw upstream value is retained on
         // `_raw_provenance` for diagnostics.
         //
-        // source mapping (unchanged):
-        //   explicit  → user
-        //   inferred  → assumption
-        //   range/observed/anything-else → system
+        // ⭐⭐ AUTHORSHIP COMES FROM `observed_state.source` FIRST.
         //
-        // provenance mapping (new):
-        //   explicit, observed → from_brief   (value came from the brief / observation)
-        //   inferred, range    → ai_inferred  (LLM-derived / range estimate)
-        //   anything-else      → ai_inferred  (safe default per brief)
-        //   user_specified path: not currently emitted by upstream nodes;
-        //     reserved for future user-edit pipelines.
+        // This block used to read `extractionType` ALONE, and the comment it
+        // replaces said of the `user_set` arm: *"not currently emitted by
+        // upstream nodes; reserved for future user-edit pipelines."* The
+        // user-edit pipelines have existed for months. They just do not write
+        // to this field, and CANNOT: `extractionType`'s four members
+        // (`explicit | inferred | range | observed`) all describe how the
+        // EXTRACTION PIPELINE READ THE BRIEF, and none of them means "the user
+        // typed this". So the arm was unreachable by construction, and every
+        // value a user personally corrected arrived at the model stamped
+        // `source: 'assumption' / provenance: 'ai_inferred'` — after which the
+        // model, reading its own context, described the user's own number back
+        // to them as its estimate.
+        //
+        // `observed_state.source` is the authoritative authorship field: the
+        // shared contract owns its vocabulary, every user-edit writer in the
+        // estate stamps it (`USER_EDIT_SOURCE`), and `build-turn-context.ts`
+        // already names it authoritative while refusing the response-only
+        // `NodeV3.provenance`. The table lives in `provenance-display.ts` with
+        // its question stated and is exhaustive over the contract enum BY TYPE.
+        //
+        // ⚠ FALLBACK, NOT REPLACEMENT. `source` is optional on the wire and
+        // most producer-drafted nodes carry only `extractionType`. An absent or
+        // unrecognised stamp yields `undefined` here — the contract forbids
+        // reading absence as any class — and the extractionType mapping below
+        // then runs BYTE-UNCHANGED, so no unstamped graph moves.
+        //
+        // extractionType mapping (unchanged, and now the fallback):
+        //   explicit  → user      / from_brief
+        //   inferred  → assumption/ ai_inferred
+        //   observed  → system    / from_brief
+        //   range     → system    / ai_inferred
+        //   anything-else → system / ai_inferred (safe default)
+        //
         // `_raw_provenance` is debug-only and only emitted when the upstream
         // value falls OUTSIDE the four canonical extractionType values — i.e.
         // when something would be lost by the projection. For the canonical
         // values the raw is fully recoverable from `provenance` + the mapping
         // table, so emitting it would just burn LLM context tokens.
         const et = obsState.extractionType;
-        if (et === 'explicit') {
+        const authored = valueSourceAuthorship(obsState.source);
+        if (authored !== undefined) {
+          n.source = authored.source;
+          n.provenance = authored.provenance;
+        } else if (et === 'explicit') {
           n.source = 'user';
           n.provenance = 'from_brief';
         } else if (et === 'inferred') {

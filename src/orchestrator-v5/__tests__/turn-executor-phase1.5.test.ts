@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { makeMessagePayload } from './fixtures.js';
 
-import { log, setTestSink } from '../../utils/telemetry.js';
+import { log, setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
 import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
@@ -519,6 +519,30 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],
   } as GraphStateIngress;
 
+  // AMENDED AGAIN (run_analysis TARGET REPAIR). The 2026-07-27 amendment
+  // re-pointed the refusal case at a FACTOR, on the reasoning that
+  // run_analysis "genuinely cannot serve" wire kind 'node'. True of the
+  // handler, but no longer true of the TURN: `run_analysis`'s entity is a
+  // proxy for the whole scenario (the validation registry says so), so an
+  // unaddressable target on an ADMITTED analysis is now retargeted to an
+  // option and revalidated rather than refused.
+  //
+  // The guard's PURPOSE is unchanged and still tested below — a hallucinated
+  // kind must never aim a handler at a node class it cannot serve, and it
+  // does not: run_analysis receives an OPTION or nothing. What changed is
+  // that run_analysis is no longer a vehicle for demonstrating the refusal
+  // when the graph can supply a target. Removing the option removes the
+  // repair's raw material, so the mismatch is reachable again — and the
+  // precondition is ASSERTED IN-TEST below rather than left implicit, because
+  // adding an option back here would silently hollow the case out.
+  const KIND_GUARD_GRAPH_NO_OPTION: GraphStateIngress = {
+    nodes: [
+      { id: 'goal_1', kind: 'goal', label: 'Profit' },
+      { id: 'fac_x', kind: 'factor', label: 'Factor X' },
+    ],
+    edges: [],
+  } as GraphStateIngress;
+
   it('P0-1: validator rejects kind mismatch with ENTITY_KIND_MISMATCH (LLM hallucination guard)', async () => {
     // Sonnet claims kind='option' on an id that resolves to a factor.
     // run_analysis accepts ['option','goal'] and the graph says 'node', so the
@@ -546,9 +570,20 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
       ),
     );
 
+    // PRECONDITION, PINNED IN-TEST: with no option node the target repair has
+    // nothing to substitute, so it declines and this refusal is reachable. If
+    // an option is ever added to this fixture the repair fires and the case
+    // below stops testing the rejection branch — this REDs first and says so.
+    expect(
+      KIND_GUARD_GRAPH_NO_OPTION.nodes.some(
+        (n) => (n as { kind?: string }).kind === 'option',
+      ),
+      'the refusal fixture must carry NO option, or run_analysis is repaired instead',
+    ).toBe(false);
+
     const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-kind', {
       routingAdapter,
-      graphState: KIND_GUARD_GRAPH,
+      graphState: KIND_GUARD_GRAPH_NO_OPTION,
     });
 
     expect(telemetry.validation_error_code).toBe('ENTITY_KIND_MISMATCH');
@@ -557,6 +592,61 @@ describe('TurnExecutor — Phase 1.5 graph threading', () => {
     expect(telemetry.commit_performed).toBe(true);
     expect(telemetry.failure_type).toBeNull();
     expect(telemetry.turn_class).toBe('direct_answer');
+  });
+
+  it('P0-1 (target repair): the SAME unservable proposal RUNS when the graph can supply an option', async () => {
+    // ⭐ THE DISCRIMINATING TWIN of the case above: byte-identical proposal,
+    // the only difference is whether the graph carries an option. One graph
+    // refuses, the other repairs. Neither half alone shows anything — together
+    // they prove the outcome turns on target availability and not on the
+    // handler id, the message, or the entity's kind.
+    const routingAdapter = mockRoutingAdapter(
+      mkToolUseResult(
+        {
+          intent_class: 'execute',
+          action: {
+            handler_id: 'run_analysis',
+            entity: {
+              id: 'fac_x',
+              kind: 'option',
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+              label: 'Factor X',
+            },
+            parameters: [],
+            cited_context_fields: [],
+          },
+        },
+        'Running',
+      ),
+    );
+
+    // PRECONDITION: this fixture DOES carry an option, which is the whole
+    // difference between the two halves.
+    expect(
+      KIND_GUARD_GRAPH.nodes.some((n) => (n as { kind?: string }).kind === 'option'),
+    ).toBe(true);
+
+    const { telemetry } = await runTurnExecutor(BASE_PAYLOAD, 'req-p15-target-repair', {
+      routingAdapter,
+      graphState: KIND_GUARD_GRAPH,
+    });
+
+    expect(telemetry.validation_error_code).toBeNull();
+
+    // The substitution must be OBSERVABLE — it turns a user-visible refusal
+    // into a run, so it may not be silent. Bound to the frozen enum, never a
+    // re-typed literal.
+    const repair = events.find(
+      (e) => e.event === TelemetryEvents.V5RunAnalysisTargetRepair,
+    );
+    expect(repair).toBeDefined();
+    expect(repair!.data).toMatchObject({
+      handler_id: 'run_analysis',
+      outcome: 'repaired',
+      proposed_kind: 'node',
+      repaired_kind: 'option',
+    });
   });
 
   it('P0-1 (repair): a mislabelled kind on a servable target lands end-to-end', async () => {

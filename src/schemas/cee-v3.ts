@@ -282,6 +282,46 @@ export const NodeV3 = z.object({
    *  factors, and for the goals whose quote states a decision rather than an
    *  objective, where authoring is refused rather than guessed. */
   label_authored: z.boolean().optional(),
+  /** ⭐⭐ TRUE when `label` is the GENERIC MINT we fall back to, not a name the
+   *  user chose or that we derived from their brief.
+   *
+   *  ── TWO QUESTIONS, NAMED APART (trap 21). READ THIS BEFORE "FIXING" EITHER.
+   *    Q1  "is this display string OURS rather than the user's?"  -> Q1 is what
+   *        a surface needs to decide whether to show an empty/unnamed state.
+   *    Q2  "did we DERIVE a meaningful label from the brief?"     -> Q2 is what
+   *        the post-draft narrative needs to decide whether to hedge its claim
+   *        about the model it built.
+   *
+   *  `label_authored` (above) encodes **Q2** while its own comment documents
+   *  **Q1**. On every node but the decision placeholder the two answers
+   *  coincide, which is why the divergence went unseen. THIS field answers Q1
+   *  for that one node. ⚠ DO NOT "RECONCILE" THEM: `label_authored`'s Q2
+   *  reading has a live consumer (`hasProvisionalDecision`,
+   *  `post-draft-narrative.ts`), and gating on that flag alone already shipped
+   *  a witnessed false claim in the opposite direction.
+   *
+   *  ── WHY A BOOLEAN AND NOT A STRING MATCH ──────────────────────────────────
+   *  It exists so a consumer never has to compare `label` against a known
+   *  placeholder word. Two services agreeing on a display string is a
+   *  coincidence waiting to lapse — which is exactly what happened when the UI
+   *  renamed this node's vocabulary and the server kept minting the old word.
+   *
+   *  RESPONSE-ONLY, like `provenance`, `source_quote` and `label_authored`:
+   *  RE-DERIVED by `transformResponseToV3` on every response from the banked
+   *  provenance AND the node's current label, so a user rename clears it by
+   *  derivation rather than by a rename writer remembering to drop it.
+   *
+   *  ⚠ NARROW BY DESIGN. A BLANK label is NOT marked — `NodeV3` accepts `""`
+   *  and `"   "` and no validator rejects them, but "unnamed" is a different
+   *  question from "generic mint" and the surface's own unnamed handling owns
+   *  it. Widening this to mean "not a real name" would put two questions back
+   *  under one boolean.
+   *
+   *  Additive and optional, and `NodeV3` is not mirrored in `openapi.yaml`
+   *  (re-derived: `label_authored`/`source_quote`/`is_baseline` return 0 hits
+   *  there while `provenance` returns 41 and `label` 80), so this is not a
+   *  published-contract change. A consumer on a stale pin simply drops it. */
+  label_placeholder: z.boolean().optional(),
 }); // CIL Phase 1: declared fields only — unknown fields stripped with warning
 export type NodeV3T = z.infer<typeof NodeV3>;
 

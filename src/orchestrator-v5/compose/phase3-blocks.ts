@@ -158,9 +158,12 @@ import {
   overrideStressTestSignals,
   reviewCardSignals,
 } from './guidance-signals.js';
-// ROADMAP 2.989 — the fragile-edge selector (pure) and the PER-FACT withheld
-// leaf. `mayNameLeadingOptionForFact` is IMPORTED, not restated: the offer's
+// ROADMAP 2.989 — the fragile-edge selector (pure) and the leader admission.
+// `mayPresentLeaderClaimForFact` is IMPORTED, not restated: the offer's
 // wire-reached telemetry must branch on the same predicate compose branches on.
+// ⚠ It was the per-fact withheld LEAF until the unrequested-run confinement;
+// the leaf answers only "does the constraint verdict permit a leader?", and
+// compose now also asks "did anybody request this analysis?".
 import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
 // Lane C — the grounded counter-case. NOTE it answers a DIFFERENT question
 // from `selectFragileEdge` above ("what should the team argue against?" vs
@@ -173,7 +176,7 @@ import {
   selectFactorEvppiPriorityGuidance,
   type FactorEvppiPriorityGuidanceDecision,
 } from '../coaching/select-factor-evppi.js';
-import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
+import { mayPresentLeaderClaimForFact } from './unrequested-analysis-confinement.js';
 
 const SOURCE_HANDLER = 'decision_review_enricher';
 const FACTOR_EVPPI_SOURCE_HANDLER = 'run_analysis';
@@ -2153,10 +2156,17 @@ export function buildLensSurface(
   // measurement this event exists for — silently wrong.
   //
   // So the emit is gated on the SAME predicate compose branches on, IMPORTED
-  // rather than restated (`mayNameLeadingOptionForFact`, the per-fact leaf): one
-  // pure function of one fact, evaluated twice, cannot disagree with itself. A
-  // hand-copied kind list here would be the mirror class instead.
-  if (offer !== null && mayNameLeadingOptionForFact(fact)) {
+  // rather than restated (`mayPresentLeaderClaimForFact`, the shared admission):
+  // one pure function of one fact, evaluated twice, cannot disagree with itself.
+  // A hand-copied kind list here would be the mirror class instead.
+  //
+  // ⚠ IT IS THE SHARED ADMISSION, NOT THE CONSTRAINT-VERDICT LEAF, AND THE
+  // DIFFERENCE IS THIS EVENT'S WHOLE POINT. Since the post-draft auto-run a
+  // `strengthen` block can be suppressed because NOBODY ASKED for the analysis,
+  // with the constraint verdict perfectly happy. On the leaf this emit would
+  // count an offer on exactly the turns where it was suppressed — the
+  // over-count the paragraph above exists to prevent.
+  if (offer !== null && mayPresentLeaderClaimForFact(fact)) {
     emit(TelemetryEvents.V5FragileEdgeOfferEmitted, {
       // The fulfilment FAMILY, not a wire field: the composed prompt routes
       // through `edit_graph` to the registered `adjust_edge_strength` handler.

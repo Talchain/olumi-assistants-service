@@ -84,6 +84,7 @@ import {
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
 import { boundNodeLabel } from "./label-bound.js";
+import { isNameShapedLabel } from "./claim-label-shape.js";
 import {
   deriveGoalObjectiveLabel,
   deriveDecisionLabel,
@@ -94,6 +95,7 @@ import {
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
+  DraftRecordStatedKind,
   DraftRecordSet,
   DraftStatedItem,
 } from "./grammar.js";
@@ -258,6 +260,35 @@ export interface RecordProvenance {
    */
   readonly merged_refinements?: readonly string[];
   /**
+   * Labels of `factor` claims merged into this STATED cause. The cause-side twin
+   * of `merged_refinements`, kept apart from it for the same reason the
+   * disclosure reasons are: a restatement of an explanation is not a refinement
+   * of an alternative. APPEND-ONLY and additive.
+   *
+   * ⭐ THE COMPLETE READER MANIFEST for the twin field `merged_refinements`,
+   * swept with `rg -a` across the whole repo (contrast control:
+   * `undeveloped_duplicates`, its same-family sibling, present in 3 files). FOUR
+   * sites in `src/`, and each is named with its verdict rather than left to be
+   * inferred from a count — an absence claim needs the manifest, not a number:
+   *
+   *   · `completion.ts` content accounting  — TWIN ADDED. Without it a
+   *     legitimately-absorbed label reads as lost content and a FALSE completion
+   *     gap is manufactured.
+   *   · `completion.ts` reclassification guard — TWIN ADDED. It watched only the
+   *     option-side receipt, so a completion pass could silently drop a label
+   *     the cause-side merge had absorbed. An asymmetric guard is a guard
+   *     watching one door.
+   *   · `projector.ts` the write site — this file.
+   *   · `option-framing.ts` the recovery receipt — **DELIBERATELY NOT TWINNED,
+   *     and listed here so the absence is a decision rather than an omission.**
+   *     `recoverableRefinement` runs only on a node carrying a
+   *     `decision_framing_not_an_option` disclosure, which is raised on OPTION
+   *     nodes. A merged cause is a FACTOR node and can never reach it, so a
+   *     cause-side branch there would be unreachable code pretending to be
+   *     coverage.
+   */
+  readonly merged_restatements?: readonly string[];
+  /**
    * Labels of MODEL options withdrawn because their intervention signature was
    * identical to this one's (`undeveloped_duplicate_of_*`). APPEND-ONLY, and
    * DELIBERATELY NOT `merged_refinements`: a demote is not a merge. Nothing of
@@ -307,6 +338,13 @@ export interface RecordProvenance {
    * — `deriveGoalObjectiveLabel` returns the two together from one computation.
    */
   readonly label_authored?: boolean;
+  /**
+   * TRUE when the label is the generic mint rather than a derived or
+   * user-chosen name — see `NodeV3.label_placeholder` for the two questions
+   * this keeps apart. DERIVED from the producer's own refusal
+   * (`authored === false`), never from a string comparison.
+   */
+  readonly label_placeholder?: boolean;
 }
 
 /** A reference the model emitted that the projector could not resolve. */
@@ -425,6 +463,18 @@ export interface DroppedRecordRef {
      */
     | "refinement_merged_into_stated_option"
     /**
+     * ⭐ THE CAUSE-SIDE TWIN, NAMED APART ON PURPOSE (trap 21).
+     *
+     * A `factor` claim restating a stated `cause` is folded into it. It is NOT
+     * `refinement_merged_into_stated_option`: nothing about the user's
+     * ALTERNATIVES was consolidated, and reusing that name would tell a reader
+     * their choice set had been combined when their choice set was never touched.
+     * Same absorption direction as its twin — MODEL-origin content into a
+     * USER-stated node — which is what keeps `completion.ts`'s accounting
+     * invariant true.
+     */
+    | "factor_merged_into_stated_cause"
+    /**
      * ⭐⭐ THE DEMOTE. A MODEL-emitted option whose intervention signature is
      * IDENTICAL to a USER-STATED option's: the model proposed an alternative and
      * never quantified how it differs, so the analysis cannot tell the two apart
@@ -541,7 +591,29 @@ export interface DroppedRecordRef {
      * One is chosen canonically; the others are named here rather than silently
      * absorbed — the same treatment 2(c) gives the intervention levels.
      */
-    | "parallel_causal_link_conflict";
+    | "parallel_causal_link_conflict"
+    /**
+     * ⭐ THE CLAIM MINTED A NODE AND NAMED IT WITH A SENTENCE.
+     *
+     * The node IS on the graph — `node_id` resolves and `withdrawn` is FALSE.
+     * Nothing was dropped, refused or shortened; what is disclosed is that the
+     * model's display string is a statement rather than a name, so a surface
+     * that clamps a title (the canvas clamps to two lines) may render it
+     * indistinguishably from its neighbours. Witnessed exactly that way on
+     * 6 Sep 2026: a 105-character `prior` label and the `"<Factor> Impact"`
+     * outcome minted from it rendered the same visible title.
+     *
+     * ⚠ THE LABEL IS SHIPPED UNCHANGED, AND THAT IS THE POINT. Truncating would
+     * move the lie rather than remove it — the node would still be named by a
+     * mutilated claim, and two nodes sharing a prefix would still collide.
+     * `label-bound.ts` may truncate only because a verbatim `source_quote` is
+     * conserved beside it; an `ai_inferred` claim node has none by construction.
+     *
+     * ⚠ SCOPED TO CLAIMS THAT MINT A NODE (trap 13d). A `causal_link` label is a
+     * relationship sentence by design, runs to 103 characters in the banked
+     * corpora, and mints an EDGE — it is never judged by this predicate.
+     */
+    | "claim_label_not_a_name";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
@@ -786,6 +858,33 @@ const STATED_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"]>> 
   constraint: "constraint",
   // A stated figure is a quantity the user asserted: a factor node carrying it.
   figure: "factor",
+  // ⭐ A stated cause is an EXPLANATION the user offered — an answer to "why",
+  // which is true or false rather than something they carry out. It is a factor,
+  // and it is emphatically NOT an option: projecting it as one is #1287, where
+  // the product prepared to compute a win probability for "The Price Rise We
+  // Pushed Through in January".
+  cause: "factor",
+};
+
+/**
+ * ⭐⭐ WHICH STATED KIND MAY PARENT WHICH CLAIM KIND, IN PASS 1b.
+ *
+ * `basis` is an EVIDENCE field ("what did you build on?") that this projector
+ * REPURPOSED as a parent pointer ("which stated item is this a restatement of?").
+ * One field, two questions — so something must tell them apart, and that
+ * something is the PARENT'S STATED KIND. This table is that discriminator, and
+ * reading it as a safety gate about optionhood is a misreading: it is
+ * parent-ELIGIBILITY, which is why widening it is coherent.
+ *
+ *   · an `option_refinement` refines a stated `option`   — an alternative
+ *   · a `factor` restates a stated `cause`               — an explanation
+ *
+ * A claim kind absent from this table never merges, which is the default and the
+ * safe direction: it mints its own node and keeps its own identity.
+ */
+const MERGE_PARENT_STATED_KIND: Readonly<Record<string, DraftRecordStatedKind | undefined>> = {
+  option_refinement: "option",
+  factor: "cause",
 };
 
 const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | null>> = {
@@ -1026,240 +1125,30 @@ function isOptionControlledFactor(
  */
 
 /**
- * THE UNIT'S SCALE CLASS. ONE AUTHORITY — replacing two overlapping `startsWith`
- * predicates whose contract could not describe the domain.
+ * ⭐ THE UNIT'S SCALE CLASS — MOVED, NOT CHANGED.
  *
- * ⛔⛔ THERE IS A THIRD `isPercentScaled`, AND IT IS DELIBERATELY NOT CONVERGED
- * HERE. `src/cee/compound-goal/constraint-frame-evidence.ts:69` carries
- * `unit === "fraction" || unit.startsWith("%")`. It is named in this docstring so
- * that a future "one authority" sweep, arriving by symbol, finds the reason
- * BEFORE it finds the similarity — an unnamed twin is what gets converged by a
- * grep. The two answer DIFFERENT QUESTIONS (trap 21):
+ * The classifier, its two vocabulary tables and its two derived predicates now
+ * live in `./unit-scale-class.js`, a leaf that imports nothing, and are
+ * RE-EXPORTED here byte-for-byte so every existing importer and every existing
+ * guard keeps pointing at the same symbols through the same path.
  *
- *   this file  — "which SCALE FAMILY is this unit token in, for choosing a
- *                 display FRAME?" Trims, lower-cases, prefix-matched.
- *   that file  — "is THIS PRODUCER's stored `value` already divided by 100, so a
- *                 x100 reading must be allowed when comparing two producers'
- *                 numbers?" A question about `parseValue`'s storage convention,
- *                 not about vocabulary.
- *
- * ⚠ AND THEY DISAGREE IN BOTH DIRECTIONS — measured, 13 probes, with the copied
- * body pinned byte-identical to the committed source: 6 spellings are percent
- * HERE and not there (`percent`, `per cent`, `pct`, `percentage`, `PCT`,
- * `'  percent  '` — that file is case-sensitive and does not trim), and 1 is
- * percent THERE and not here (`"fraction"`, the label
- * `normaliseConstraintUnits` applies to a sub-unit value; this classifier calls
- * it `unknown` and is right to). Each is CORRECT for its own question.
- * Converging them would be the two-`generateGraphHash`-twins defect run in
- * reverse: not two names for one concept, but one name over two.
- *
- * ⭐⭐ THIS CHANGE IS A CONVERGENCE, NOT A SEMANTICS CHANGE. Every spelling
- * classifies exactly as the two predicates it replaces classified it, and
- * `deriveFactorScaleFrame` therefore returns a byte-identical frame for every
- * unit string. `__tests__/unit-scale-class.test.ts` asserts that differentially
- * against a generated corpus, in both directions. **One authority** and **new
- * semantics** are two decisions; the second one is rowed, not taken here.
- *
- * ⚠⚠ WHY THAT RESTRAINT IS THE WHOLE POINT, and it is measured, not stylistic.
- * The first version of this classifier was EXACT-MATCH ONLY. Measured base→head
- * across 32 spellings × 9 magnitudes, 18 spellings moved, silently:
- *
- *     '% churn' at max 1.5   level 0.015 → 0.75      a 50× OVERSTATEMENT
- *     '% churn' at max 3     level 0.03  → 0.6       20×
- *     'percentage points' 1.5  0.015     → 0.75      50×
- *     'bps of revenue' 4500    0.45      → 0.9       2×
- *
- * unbounded as `max → 1+`, and the frame also became DATA-DEPENDENT (adding one
- * option rescaled every sibling: baseline level 0.8 → 0.4 → 0.16), which
- * `projector.ts`'s own header forbids by name. `deriveFactorScaleFrame` CAN
- * refuse — it returns `undefined` for negatives, for `max <= 1`, for a non-finite
- * frame — but it does not refuse for an unclassified unit: it falls through to
- * the derived ladder and hands back a number the caller cannot distinguish from
- * a pinned one. So a narrowed classifier does not fail loudly. It fails silently,
- * on `% NRR` — the exact class named in the ruling behind #1106, whose deciding
- * argument was that "refusing more than needed is safe; a silent wrong number is
- * not". EXACT-ONLY MATCHING PUT THIS SEAM ON THE WRONG SIDE OF THAT DOOR.
- *
- * ⚠ THE STRUCTURE: EXACT FIRST, THEN PREFIX, MOST-SPECIFIC CLASS FIRST.
- *
- *     percent            frame 100    '%' 'percent' 'per cent' 'pct' 'percentage'
- *                                     …and any string PREFIXED by those, which is
- *                                     how '% NRR' / 'pcts' / 'percentage points'
- *                                     reach it — see the rowed door below
- *     percentage_points  no pin       'pp' 'ppt' 'pps' and 'pp'-prefixed strings
- *     basis_points       frame 10000  'bps' 'basis point(s)' and their prefixes
- *     unknown            no pin       everything else
- *
- * The prefix sets are the PREVIOUS PREDICATES' OWN SETS, reproduced token for
- * token. The exact layer sits in front of them so a spelling can be pinned to a
- * class against its prefix — the mechanism the rowed decision below will need —
- * without any spelling changing class today.
- *
- * ⛔⛔ THE ROWED ONE-WAY DOOR — DO NOT "TIDY" THE ASYMMETRY BELOW.
- * 'pp' / 'ppt' / 'pps' classify as `percentage_points`, but the SPELLED-OUT
- * 'percentage point(s)' classifies as `percent`. That is inconsistent AS
- * VOCABULARY and it is deliberate: it is exactly what the predicates being
- * replaced did, and it is what makes this change zero-blast-radius.
- *   · the abbreviations matched NEITHER old predicate — a genuinely homeless
- *     family, which is this classifier's real finding;
- *   · the spelled-out forms matched `startsWith("percent")` and were pinned to
- *     frame 100 by every build to date.
- * Whether percentage points are a ×1 class that must STOP taking frame 100 is a
- * real question with a real answer, and it moves live numbers in the direction
- * this seam has already been burned by. It is ROWED, with the measurement above
- * attached, and it does not ship beside an architectural tidy-up. Closing the
- * asymmetry in either direction IS that decision — take it deliberately, with a
- * frame table, or not at all.
- *
- * ⚠ WHAT 'unknown' AND 'percentage_points' ACTUALLY DO, stated honestly because
- * the previous docstring here said "NO CLAIM" and that was not what the code did.
- * They pin no FIXED frame — and `deriveFactorScaleFrame` then falls through to
- * the derived {1,2,5}·10^k ladder and returns a frame anyway. THAT IS NOT A
- * REFUSAL, and the class is discarded at the boundary, so a caller cannot tell a
- * laddered frame from a pinned one. Pre-existing behaviour, unchanged here, and
- * named so the next reader does not mistake the class for a guard.
- *
- * ⚠ BARE 'bp' IS DELIBERATELY UNKNOWN. Inherited from the original
- * `isBasisPointsUnit`, which argued it explicitly: "a bare 'bp' is left to the
- * derived frame rather than guessed." Suppress-rather-than-guess. Do not add it
- * without refuting that argument.
- *
- * ⚠⚠ THE UNIT ALONE IS NEVER SUFFICIENT — DO NOT RE-ADD A BARE `unit === '%'`.
- * The producer's convention is MAGNITUDE-DEPENDENT. CEE's extractor emits "4%" as
- * `{ value: 0.04, unit: '%' }` — a FRACTION under a '%' label — while a '%' value
- * `>= 1` IS percentage points. PLoT documents both halves at
- * `intervention-normaliser.ts:1153-1180`, citing CEE's own
- * `compound-goal/extractor.ts:925-934`, and CEE's relabel runs only on the
- * regex-extracted branch, so a fractional value under a raw '%' label reaches PLoT
- * on the primary draft path. Any caller converting a magnitude MUST read the VALUE
- * as well as the unit. This classifier answers "which scale family is this token?"
- * and NOTHING about which convention a given number is already in.
- *
- * Percent spellings originally: the banked corpus's ('%-prefixed, all 30 record
- * sets), plus the spelt-out forms the adversarial review supplied from OUTSIDE
- * that corpus ("per cent" — this is a British-English estate — and "pct").
- * Trap 22: the corpus-only version silently read "3 per cent" as a derived-frame
- * 0.6.
+ * The move exists so `orchestrator-v5`'s edit writer can read the same
+ * authority without importing this 3,000-line module. See that file's header
+ * for why the edit seam may consult `unitPinnedScaleFrame` but must NEVER
+ * consult `deriveFactorScaleFrame` — the pinned frames are magnitude-
+ * independent, the laddered one is not, and re-deriving the ladder at an edit
+ * is the measured-worse behaviour this module's persist site forbids.
  */
-export type UnitScaleClass = "percent" | "percentage_points" | "basis_points" | "unknown";
+import { unitPinnedScaleFrame } from "./unit-scale-class.js";
 
-/**
- * Exact tokens per class, consulted FIRST.
- *
- * ⭐ EXPORTED SO ITS GUARD CAN BE DERIVED FROM IT. It was previously private and
- * this docstring claimed to be the "single source for the classifier and its
- * tests"; that sentence was FALSE AS WRITTEN, and the correction is left here in
- * place rather than deleted because the reason matters more than the tidiness.
- * `unit-scale-class.test.ts` iterated an ELEVEN-TOKEN LITERAL DECLARED INSIDE THE
- * TEST — a second copy of this vocabulary, i.e. exactly the hand-maintained
- * mirror the classifier was built to abolish, one level up in the test. Measured:
- * adding the single token `"percentile"` to the `basis_points` row below moved
- * `deriveFactorScaleFrame([45], "percentile")` from **100 to 10000** — level 0.45
- * to 0.0045, a 100x understatement — with **26/26 GREEN** in that spec at
- * `8111337c`, the commit before this one. The literal did not
- * list the token, and the generated corpus (1785 spellings) does not contain it
- * either, so BOTH layers of cover missed it. Neither guard was weak; both were
- * pointed at tokens somebody had already thought of.
- *
- * ⚠ WHAT THE GUARD NOW PROVES: for EVERY token in this array — including one
- * added after this sentence was written — the exact layer and the prefix layer
- * return the SAME class. The test iterates THIS EXPORT, so a new token is covered
- * the moment it is added and nobody has to remember a second list.
- *
- * ⚠⚠ AND WHAT IT STILL CANNOT SEE, stated because a guard that bounds its own
- * claim is worth more than one that reads as total:
- *   1. It CANNOT see a token that OUGHT to be here and is absent. Derivation
- *      proves AGREEMENT between two copies; it is structurally blind to a short
- *      list. The hand-written `MUST_CONTAIN` subset beside it is the other half,
- *      and it only catches the removal of the eleven tokens it names.
- *   2. It CANNOT tell you the class is the RIGHT one. It judges the two layers
- *      against each other, never against the vocabulary. `"percentile" ->
- *      percent` would pass silently — both layers agree — even though admitting
- *      it is a product decision about what the percent family means.
- *   3. It says NOTHING about `UNIT_SCALE_CLASS_PREFIXES` below. A prefix added
- *      there is judged only by the generated differential corpus in
- *      `unit-scale-class.test.ts`, which is a sample, not a proof.
- *
- * ⚠ THIS WHOLE LAYER IS INERT TODAY, AND ITS TESTS ARE NOT BEHAVIOURAL COVERAGE.
- * Every token here resolves to the same class by prefix, so DELETING the exact
- * lookup limb in `classifyUnitScaleClass` is an EQUIVALENT MUTANT — DEMONSTRATED,
- * not asserted, because a survivor is a claim either way. With the limb removed:
- * both spec files stay green (80/80) and 0 of 1785 generated corpus spellings
- * change class, a comparator whose contrast control reports 1 when one row is
- * deliberately altered. And that sample only corroborates a COMPLETE argument:
- * the deleted limb is reachable ONLY by a string that IS an exact token, and the
- * guard below asserts every exact token's prefix answer equals its exact answer —
- * so equivalence holds over the whole input domain, not over 1785 samples.
- * That redundancy is WHY this change is byte-for-byte, and the layer is kept
- * because it is the mechanism the rowed one-way door will need. A reader must not
- * mistake the tests below for evidence that this table does anything yet: they
- * pin a MECHANISM, not a behaviour, and deleting it today would cost nothing
- * measurable.
- */
-export const UNIT_SCALE_CLASS_TOKENS: ReadonlyArray<readonly [UnitScaleClass, readonly string[]]> = [
-  ["percent", ["%", "percent", "per cent", "pct", "percentage"]],
-  ["percentage_points", ["pp", "ppt", "pps"]],
-  ["basis_points", ["bps", "basis point", "basis points"]],
-];
-
-/**
- * Prefix fallback, MOST-SPECIFIC CLASS FIRST. ⚠ These are the REPLACED
- * PREDICATES' OWN PREFIX SETS — `isPercentScaledUnit` was
- * `startsWith('%'|'percent'|'per cent'|'pct')` and `isBasisPointsUnit` was
- * `startsWith('bps'|'basis point')`. Reproduced token for token so no spelling
- * changes class. `'pp'` is NEW as a prefix and is behaviour-neutral by
- * construction: nothing that starts with `'pp'` starts with any percent or
- * basis-point prefix, and `percentage_points` pins no frame, so a `'pp'`-tailed
- * string lands on the same derived ladder `unknown` already sent it to.
- */
-const UNIT_SCALE_CLASS_PREFIXES: ReadonlyArray<readonly [UnitScaleClass, readonly string[]]> = [
-  ["percentage_points", ["pp"]],
-  ["basis_points", ["bps", "basis point"]],
-  ["percent", ["%", "percent", "per cent", "pct"]],
-];
-
-const UNIT_SCALE_CLASS_BY_TOKEN: ReadonlyMap<string, UnitScaleClass> = (() => {
-  const m = new Map<string, UnitScaleClass>();
-  for (const [cls, tokens] of UNIT_SCALE_CLASS_TOKENS) for (const t of tokens) m.set(t, cls);
-  return m;
-})();
-
-export function classifyUnitScaleClass(unit: string | undefined): UnitScaleClass {
-  if (typeof unit !== "string") return "unknown";
-  const t = unit.trim().toLowerCase();
-  if (t.length === 0) return "unknown";
-  const exact = UNIT_SCALE_CLASS_BY_TOKEN.get(t);
-  if (exact !== undefined) return exact;
-  for (const [cls, prefixes] of UNIT_SCALE_CLASS_PREFIXES) {
-    for (const p of prefixes) if (t.startsWith(p)) return cls;
-  }
-  return "unknown";
-}
-
-/**
- * Percent spellings. RETAINED as a named question ("is this the percent family?")
- * and now DERIVED from `classifyUnitScaleClass` rather than carrying its own
- * token list — two copies of this vocabulary is the hand-maintained mirror that
- * lets a token be added to one and not the other.
- *
- * ⚠ ITS ANSWER IS UNCHANGED FOR EVERY INPUT. This is the convergence, not the
- * semantics change: `'percentage points'` and `'% NRR'` still return `true`, via
- * the prefix layer, exactly as they did before. See the rowed one-way door on
- * `classifyUnitScaleClass` for why that is deliberate and what it costs.
- */
-export function isPercentScaledUnit(unit: string | undefined): boolean {
-  return classifyUnitScaleClass(unit) === "percent";
-}
-
-/**
- * Basis points declare scale 10,000 — NOT 100. Lumping "bps" into the percent
- * set would be a 100× error in the opposite direction (30 bps = 0.003, never
- * 0.3). Narrow on purpose: "bps" and "basis point(s)"; a bare "bp" is left to
- * the derived frame rather than guessed.
- */
-export function isBasisPointsUnit(unit: string | undefined): boolean {
-  return classifyUnitScaleClass(unit) === "basis_points";
-}
+export {
+  classifyUnitScaleClass,
+  isPercentScaledUnit,
+  isBasisPointsUnit,
+  unitPinnedScaleFrame,
+  UNIT_SCALE_CLASS_TOKENS,
+} from "./unit-scale-class.js";
+export type { UnitScaleClass } from "./unit-scale-class.js";
 
 /**
  * The exponent span of an IEEE-754 double, decades: 10^-324 (the smallest
@@ -1472,15 +1361,25 @@ export function deriveFactorScaleFrame(
   // class is discarded here. Pre-existing behaviour, named rather than trusted.
   // Widening either family's membership therefore moves LIVE LEVELS silently;
   // `classifyUnitScaleClass`'s rowed one-way door is exactly that risk.
-  const scaleClass = classifyUnitScaleClass(unit);
-  if (scaleClass === "percent" && max <= 100) return 100;
-  if (scaleClass === "basis_points" && max <= 10000) return 10000;
-  // ~1.6e308 upward the {1,2,5}·10^k ladder overflows, and an infinite frame
-  // would ship a fabricated level 0 under a green guard (review breadth
-  // finding). That refusal now lives INSIDE `nextNiceNumberAbove`, whose
-  // postcondition is "a finite positive number, or nothing" — so the single
-  // `undefined` test below covers it, and there is no second guard here that
-  // no test could ever kill. Unframed is the honest path either way.
+  //
+  // ⭐ THE TWO PINNED LIMBS ARE NOW DERIVED, NOT REPEATED. They read from
+  // `unitPinnedScaleFrame`, the one authority the edit writer also consults, so
+  // the draft and the edit cannot answer "what frame does '%' pin?" differently
+  // — two copies of this mapping is exactly the hand-maintained mirror whose
+  // drift reads as green. Behaviour here is byte-identical: same classes, same
+  // bounds, same constants, same order relative to the ladder below.
+  //
+  // ⚠ MERGE RESOLUTION, 2026-08-31 — BOTH SIDES KEPT, NEITHER TAKEN WHOLESALE.
+  // This branch replaced the two inline pinned limbs with the call below;
+  // `staging` concurrently moved the non-finite refusal INSIDE
+  // `nextNiceNumberAbove` (whose signature is now `number | undefined` and
+  // whose postcondition is "a finite positive number, or nothing"), removing a
+  // second guard here that no test could kill. Those are independent
+  // improvements to the same six lines: the derivation is kept, and the tail is
+  // `staging`'s. Taking either side whole would have silently reverted the
+  // other.
+  const pinned = unitPinnedScaleFrame(unit, max);
+  if (pinned !== undefined) return pinned;
   return nextNiceNumberAbove(max);
 }
 
@@ -1595,8 +1494,46 @@ function causalTargetKey(claim: DraftInferenceClaim): string | null {
  * A refinement is not the same alternative when it assigns a different value
  * to a factor the stated option already assigns. Compare the raw record values,
  * before either route aliases to a minted option id.
+ *
+ * ⚠⚠ KNOWN GAP, MEASURED AND DELIBERATELY LEFT OPEN — READ BEFORE "FIXING" IT.
+ *
+ * This is the right question for an `option_refinement`, where BOTH sides are
+ * options and both carry option→factor magnitudes. **On the cause side it is
+ * STRUCTURALLY INERT**: a `factor` carries no `sets_to` on its outgoing links —
+ * the instruction asks for one only FROM an option — so both magnitude maps come
+ * back empty, no conflict can ever be found, and every single `factor` citing a
+ * stated `cause` merges. A factor that cites the cause as EVIDENCE rather than
+ * restating it is therefore absorbed and its own identity deleted. `factor` is
+ * the general-purpose claim kind, so this net is far wider than
+ * `option_refinement`'s.
+ *
+ * ── WHY NO GUARD IS SHIPPED HERE, AND THE MEASUREMENT THAT SETTLED IT ───────
+ * The obvious fix — require POSITIVE evidence of restatement, i.e. the cause's
+ * own outgoing links all land on that factor — was implemented and **refuted by
+ * this repo's own suite**: in the mixed-brief case (`cause-stated-kind.test.ts`
+ * A2) a stated cause draws NO outgoing link at all. The factor expresses the
+ * cause and the OPTION acts on that factor, which is the correct modelling shape
+ * and the one the model actually produces. The guard would have blocked the
+ * merge the feature exists to perform.
+ *
+ * The deeper reason is the one `misfiled-explanation.test.ts` measures over
+ * three rounds: **a restatement and a distinct claim are isomorphic in the
+ * record set.** Nothing here can tell them apart, and a guard that guesses would
+ * trade a silent over-merge for a silent under-merge — the exact oscillation
+ * this estate has paid for. A wrong guard is worse than a recorded gap.
+ *
+ * ── WHAT BOUNDS THE HARM TODAY ──────────────────────────────────────────────
+ * `cause` spans occur ZERO times across the complete corpus of raw record sets
+ * in this repo (one deployed-wire capture, six fixtures, 18 stated options;
+ * pinned with a contrast control by `misfiled-explanation.test.ts` C1). The gap
+ * is unreachable until a producer emits `cause` at all — and closing it is a
+ * precondition for that producer landing, not a follow-up to it.
+ *
+ * ⚠ Note the one shape that is already safe: two factors citing the same cause
+ * make `claimIndices.length === 2`, and NEITHER merges. The gap is exactly the
+ * single-candidate case.
  */
-function refinementConflictsWithStatedOption(
+function claimConflictsWithStatedParent(
   claims: readonly DraftInferenceClaim[],
   parentStatedIndex: number,
   refinementClaimIndex: number,
@@ -2751,7 +2688,17 @@ function projectOnce(
   {
     const candidates = new Map<number, number[]>();
     claims.forEach((claim, index) => {
-      if (claim.claim_kind !== "option_refinement") return;
+      // ⭐⭐ TWO CLAIM KINDS MERGE, AND THE PARENT'S STATED KIND IS WHAT TELLS
+      // THEM APART. Derived from one table rather than two hand-written branches,
+      // so a third pairing cannot be added to one half and forgotten in the other
+      // (trap 12 — the hand-maintained mirror).
+      //
+      // ⚠ BOTH HALVES ARE LOAD-BEARING, measured by a discriminating mutant pair:
+      // revert the parent filter alone and this OVER-MERGES a genuine factor into
+      // a stated option; revert the candidate widening alone and the cause merge
+      // goes inert. Neither mutant alone shows the binding — the pair does.
+      const parentStatedKind = MERGE_PARENT_STATED_KIND[claim.claim_kind];
+      if (parentStatedKind === undefined) return;
       // ⭐ A DEMOTED REFINEMENT IS NOT A CANDIDATE, AND THIS IS WHY THE PASS MUST
       // ITERATE. Two refinements naming one parent trip the choice-set guard and
       // NEITHER merges. Withdraw one and the other becomes the parent's only
@@ -2764,7 +2711,9 @@ function projectOnce(
       // option twice still names one option.
       const namedOptions = [
         ...new Set(
-          basis.filter((b) => Number.isInteger(b) && statedItems[b]?.kind === "option"),
+          basis.filter(
+            (b) => Number.isInteger(b) && statedItems[b]?.kind === parentStatedKind,
+          ),
         ),
       ];
       if (namedOptions.length !== 1) return;
@@ -2780,12 +2729,16 @@ function projectOnce(
       // alternatives; leave them standing.
       if (
         claimIndices.length === 1 &&
-        !refinementConflictsWithStatedOption(claims, parent, claimIndices[0]!)
+        !claimConflictsWithStatedParent(claims, parent, claimIndices[0]!)
       ) {
         refinementParentStatedIndex.set(claimIndices[0]!, parent);
       }
     }
   }
+
+  /** The stated kind of a merge parent, by its record index. */
+  const parentStatedKindOf = (statedIndex: number): string | undefined =>
+    statedItems[statedIndex]?.kind;
 
   // ── Pass 2: claims → nodes. Badge is `ai_inferred`, again taken from the loop.
   claims.forEach((claim, index) => {
@@ -2812,10 +2765,20 @@ function projectOnce(
           // refinement is added alongside them so the record shows what the
           // model contributed without the model's words ever being attributed to
           // the user.
-          provenance[parentId] = {
-            ...parentProv,
-            merged_refinements: [...(parentProv.merged_refinements ?? []), label],
-          };
+          // The absorbed label lands on the field that names what it IS. Both
+          // are append-only, both consume MODEL-origin content into a
+          // USER-stated node, and `completion.ts` accounts for both — see the
+          // invariant stated there.
+          provenance[parentId] =
+            parentStatedKindOf(mergedParent) === "cause"
+              ? {
+                  ...parentProv,
+                  merged_restatements: [...(parentProv.merged_restatements ?? []), label],
+                }
+              : {
+                  ...parentProv,
+                  merged_refinements: [...(parentProv.merged_refinements ?? []), label],
+                };
           const parentNode = nodes.find((n) => n.id === parentId);
           if (parentNode) parentNode.provenance = provenance[parentId];
         }
@@ -2835,7 +2798,10 @@ function projectOnce(
           claim_index: index,
           claim_kind: claim.claim_kind,
           label,
-          reason: "refinement_merged_into_stated_option",
+          reason:
+            parentStatedKindOf(mergedParent) === "cause"
+              ? "factor_merged_into_stated_cause"
+              : "refinement_merged_into_stated_option",
         });
         return;
       }
@@ -3524,7 +3490,11 @@ function projectOnce(
     // they do not have.
     const decisionProv: RecordProvenance = {
       ...structuralProv,
-      ...(authoredDecision.authored ? { label_authored: true } : {}),
+      ...(authoredDecision.authored
+        ? { label_authored: true }
+        : // The producer REFUSED, so this label is our generic mint. Marked from
+          // the refusal itself — never by comparing the label to a known word.
+          { label_placeholder: true }),
     };
     provenance[decisionId] = decisionProv;
     // Unshifted so the decision precedes its options in emission order.
@@ -3973,11 +3943,97 @@ export function projectRecordsToGraph(
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
-  return boundEveryNodeLabel({
-    graph: projection.graph,
-    provenance: projection.provenance,
-    dropped: projection.dropped,
-  });
+  return boundEveryNodeLabel(
+    discloseNodesNamedWithASentence({
+      graph: projection.graph,
+      provenance: projection.provenance,
+      dropped: projection.dropped,
+    }),
+  );
+}
+
+/**
+ * ⭐⭐ A NODE THE MODEL NAMED WITH A SENTENCE IS DISCLOSED, NEVER SHORTENED.
+ *
+ * ── THE WITNESSED DEFECT (Paul's manual test, 6 Sep 2026) ──────────────────
+ * A `factor` node carried a 105-character belief sentence, and
+ * `fixFactorGoalEdges` minted a mediating outcome labelled
+ * `${factorLabel} Impact` from it. The canvas clamps a title to two lines, so
+ * both nodes rendered the SAME visible string. The sweep's mint is correct in
+ * intent (`deterministic-sweep.ts:1163`) and inherited a bad input — which is
+ * why the guard is here, at the source, and that file is untouched.
+ *
+ * The mechanism is `claims[].label` answering two questions at once (trap 21):
+ * for `factor`/`risk`/`outcome`/`option_refinement` the model supplies a noun
+ * phrase, while `instruction.ts` asks a `prior` for *"what you believe about a
+ * quantity, and how sure you are"* — and `CLAIM_KIND_TO_NODE_KIND` maps
+ * `prior → "factor"`. See {@link isNameShapedLabel} for the measured corpus.
+ *
+ * ── ⚠ WHY HERE AND NOT AT THE CLAIM MINT SITE ─────────────────────────────
+ * Two reasons, and the first is a defect this pass had when it was written
+ * there — caught by `shape-gate-withdrawal-is-named-honestly.test.ts`:
+ *
+ *  1. THE MINT SITE DOES NOT KNOW WHETHER THE NODE SURVIVES. The connectivity
+ *     prune runs after the claims pass, so a node disclosed at mint time can be
+ *     withdrawn afterwards — and `transformResponseToV3` derives `withdrawn`
+ *     from whether `node_id` resolves in the FINAL node list. The notice would
+ *     then read "withdrawn" on a channel whose entire purpose is telling the
+ *     truth about what was lost, while claiming the opposite in its own
+ *     docblock. Running over the FINAL nodes makes `withdrawn: false` true by
+ *     construction rather than by hope.
+ *  2. It is the same argument `boundEveryNodeLabel` states one function below:
+ *     a check installed at each mint site is a hand-maintained list that a
+ *     fourth mint site silently escapes (trap 12). One pass over the finished
+ *     node list covers every site and anything added later.
+ *
+ * ── THE SCOPE IS DERIVED FROM PROVENANCE, NOT FROM A KIND LIST ────────────
+ * `ai_inferred` is exactly "the model authored this display string". A STATED
+ * node's label is the user's own canonicalised quote (or an objective derived
+ * from it by `deriveGoalObjectiveLabel`), and judging the user's words by a
+ * predicate written for model-authored names is a different question with a
+ * different answer — the same scope discipline `label-bound.ts` states for
+ * truncation. A `causal_link` mints an EDGE and has no node to reach here at
+ * all, so its 103-character relationship sentences are out of scope by
+ * construction rather than by exclusion.
+ *
+ * ── IT RUNS BEFORE `boundEveryNodeLabel`, DELIBERATELY ────────────────────
+ * So the predicate sees the label the MODEL wrote, not one already shortened to
+ * 200 characters. A guard that is correct but pointed at the wrong bytes is
+ * trap 22's other half.
+ *
+ * ⭐ IDENTITY WHEN EVERY NODE IS NAMED. The ordinary draft returns the input
+ * object unchanged — the over-correction control expressed as code.
+ */
+function discloseNodesNamedWithASentence(projection: RecordProjection): RecordProjection {
+  const unnamed: DroppedRecordRef[] = [];
+
+  for (const node of projection.graph.nodes) {
+    // Model-authored display strings only. Derived from the provenance the
+    // projector already banked, so a new node kind cannot escape by not being
+    // on a list.
+    if (projection.provenance[node.id]?.provenance_class !== "ai_inferred") continue;
+    if (isNameShapedLabel(node.label)) continue;
+
+    unnamed.push({
+      // Named by NODE, not by claim — like `unconnected_to_goal`, which uses the
+      // same convention for the same reason: this pass runs after both node
+      // passes and holds no claim index.
+      claim_index: -1,
+      claim_kind: node.kind,
+      // ⚠ THE LABEL IS CARRIED UNCHANGED AND IS NOT REWRITTEN ANYWHERE IN THIS
+      // FUNCTION. Truncating would move the lie rather than remove it: the node
+      // would still be named by a mutilated claim, and two nodes sharing a
+      // prefix would still collide on a clamped canvas. `label-bound.ts` may
+      // shorten only because a verbatim `source_quote` is conserved beside it,
+      // and an `ai_inferred` node has none by construction.
+      label: node.label,
+      node_id: node.id,
+      reason: "claim_label_not_a_name",
+    });
+  }
+
+  if (unnamed.length === 0) return projection;
+  return { ...projection, dropped: [...projection.dropped, ...unnamed] };
 }
 
 /**

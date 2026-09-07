@@ -213,6 +213,14 @@ export const TelemetryEvents = {
   // the turn). `configured` marks whether the option lands with effect values.
   // Content-free — never user text. See
   // src/orchestrator-v5/handlers/add-option-dispatch.ts.
+  //
+  // 2026-09-01 — the TEXT leg rides this SAME event rather than minting a
+  // second one: `origin` is 'text', and the focused proposer's every outcome
+  // is already named here (`fell_through:text_rejected` with `rejection_code`,
+  // `fell_through:text_unavailable` with `unavailable_reason`,
+  // `fell_through:text_clarify`, `fell_through:text_no_grounding`,
+  // `fell_through:text_no_budget`). One event, one place to read the whole
+  // add-option funnel — and no widening of this frozen registry.
   V5AddOptionTransaction: "v5.add_option_transaction",
 
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
@@ -547,6 +555,24 @@ export const TelemetryEvents = {
 
   // Prompt Management events (v2.0)
   PromptStoreError: "prompt.store_error",
+  /**
+   * A prompt-store JSONB list column could not be established as a list, so the
+   * store SUBSTITUTED an empty list rather than failing the whole read.
+   *
+   * WHY IT EXISTS. The tolerant decoder that replaced three
+   * `JSON.parse(x || '[]')` sites correctly stopped one poisoned row taking
+   * down every version of a task — but it originally returned `[]` and emitted
+   * NOTHING, which converts a crash into a silent degradation: exactly the
+   * failure mode of the ~2.5h incident it was written to end (`draft_graph`
+   * served the bundled default while `/healthz` reported `prompts_ready: true`).
+   *
+   * FAILURE TO KNOW IS NOT KNOWLEDGE THAT NOTHING EXISTS. The returned `[]` is
+   * indistinguishable from a genuinely empty column, so this event is the ONLY
+   * thing that tells the two apart. It carries `outcome: 'unavailable'` and, by
+   * construction, no survivor/recovery vocabulary — there is no per-item
+   * salvage on this path, and an event that claimed some would be lying.
+   */
+  PromptStoreJsonColumnDegraded: "prompt.store.jsonb_column_degraded",
   PromptLoaderError: "prompt.loader.error",
   PromptLoadedFromStore: "prompt.loader.store",
   PromptLoadedFromDefault: "prompt.loader.default",
@@ -888,6 +914,28 @@ export const TelemetryEvents = {
   //   - reason: 'mutation_signal' | 'no_option_target' | 'handler_unavailable'
   //     | null
   V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
+  // ⭐ THE TARGET REPAIR on an ADMITTED `run_analysis` election. `entity` is
+  // required on every proposal while run_analysis's target is semantically the
+  // whole scenario, so the routing model invents one — and on the measured
+  // builds it picked the DECISION node about half the time, which resolves to
+  // entity kind 'node' and is rejected by `['option','goal']`. The user asked
+  // for an analysis and was told "I can't make that change to it".
+  //
+  // This event is how the substitution is observable, INCLUDING its declines:
+  // a rising `repaired` rate is a routing-prompt signal, and `declined` with a
+  // reason distinguishes "the graph could not support a target" from silence.
+  // Without it the fix would hide the very behaviour that motivated it — the
+  // same argument the `v5.entity_kind_repaired` log makes one seam down.
+  //
+  // Payload — structural only, no user text, no labels, no graph content:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - handler_id: 'run_analysis'
+  //   - outcome: 'repaired' | 'declined'
+  //   - proposed_kind: EntityKind (what validation actually rejected)
+  //   - repaired_kind: 'option' | null
+  //   - reason: 'no_option_target' | 'revalidation_failed' | null
+  V5RunAnalysisTargetRepair: "v5.run_analysis.target_repair",
   // D-ask-1 (ROADMAP 2.11 P0-1) — run_analysis scaffolded DISCLOSED
   // placeholder interventions for unconfigured options so the analysis
   // completed instead of 422-blocking. Redacted: option ids + per-option
@@ -1222,7 +1270,13 @@ export const TelemetryEvents = {
   //   intent_class: 'coach' | 'converse'
   //   headline_length: number
   //   bullet_count: number   (≤3 by schema)
-  //   detail_length: number
+  //   detail_length: number  (0 on an answer-only turn — `detail` is optional)
+  //   answer_shape_kind: 'answer_only' | 'coached'
+  //     DERIVED from the shape's own content by `classifyAnswerShape`, never
+  //     model-authored, so it cannot disagree with the lengths beside it.
+  //     This is how we can tell on staging whether concise answers are
+  //     actually being emitted, and — the direction that matters just as
+  //     much — whether coaching is still arriving when it should.
   V5AnswerShapeEmitted: "v5.answer_shape.emitted",
 
   // ROADMAP 1.132 (F2) hardening — the captured answer_shape no longer
@@ -1583,6 +1637,10 @@ export const TelemetryEvents = {
   // prose, graph label, raw id, brief text, or review content ever appears on
   // this event.
   V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+
+  // Stored review prose/fact corrections, emitted by decision-review-enricher.
+  // Routing keys, bounded rule codes and counts only; no user prose or values.
+  V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
 
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,
@@ -2319,6 +2377,29 @@ export const TelemetryEvents = {
   // user retains a recovery affordance.
   V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
 
+  // ⭐ The product narrated its OWN PROCESS instead of answering — witnessed on
+  // a real user session (3 Sep 2026): a routing-call chain of thought and a
+  // routing verdict, both shipped verbatim as `assistant_text`, both 200/OK.
+  // Payload:
+  //   - request_id, scenario_id: string
+  //   - marker: string — the matched substring VERBATIM (not the regex
+  //     source), so a dashboard groups by readable phrase.
+  //   - remedy: 'sentences_removed' | 'block_replaced'.
+  //   - dispatch_path: 'turn_executor_finalise' | 'edit_graph_finalise' |
+  //     'chip_click_finalise' — which surface produced it.
+  //   - sentences_total, sentences_removed: number.
+  //   - narration_length: number — bytes routed to the `_reasoning`
+  //     disclosure channel rather than destroyed.
+  //
+  // ⚠ NOT AN ERROR RATE, AND THE TWO REMEDIES MEAN DIFFERENT THINGS.
+  // `sentences_removed` means the block carried a real answer and some
+  // narration around it. `block_replaced` means the whole reply was
+  // deliberation and the user would have read a monologue — that is the
+  // number that measures the defect this guard exists for, and it should
+  // fall as the prompt and the thinking channel improve. A rising
+  // `block_replaced` rate on one `dispatch_path` localises the producer.
+  V5EgressProcessNarrationDetected: "v5.egress.process_narration_detected",
+
   // F6 — the defaulted-value egress invariant fired on an analysis-bearing
   // conversational answer over a run whose engine reported defaulted values.
   // Payload: { request_id, scenario_id, dispatch_path, defaulted_count,
@@ -2643,6 +2724,20 @@ export const TelemetryEvents = {
   // tells us whether the "four turns and nothing applies" dead-end is actually
   // being rescued, rather than merely having a rescue path in the code.
   V5StructuralEditToolEntry: "v5.structural_edit_tool.entry",
+
+  // ⭐ DRAFT-QUALITY PASS (src/cee/draft-quality/). CeeDraftQuality is emitted on
+  // EVERY assessed draw — nominated or not, judged or not, redrawn or not, and
+  // on every fail-open arm. That is deliberate: a repair pass whose fail-open is
+  // silent converts a measurable problem into an unmeasurable one, and this
+  // estate cannot currently answer "is the drafter getting better or worse?"
+  // without a bespoke 16-draw experiment. CeeDraftQualityRedraw is emitted once
+  // per turn on which a redraw was actually spent, and carries `improved` — the
+  // acceptance metric for the whole capability (a redraw rate that rises while
+  // `improved` stays flat is money and latency spent reproducing the same
+  // failure; trap 23's shape, and reporting both is the only way to see it).
+  // Coded reasons, counts and model ids only — no labels, no brief content.
+  CeeDraftQuality: "cee.draft_graph.quality",
+  CeeDraftQualityRedraw: "cee.draft_graph.quality_redraw",
 } as const;
 
 /**
@@ -3781,6 +3876,28 @@ export function emit(event: string, data: Event) {
           datadogClient.increment("prompt.store.error", 1, {
             operation: String((eventData.operation as string) || "unknown"),
             error: String((eventData.error as string) || "unknown"),
+          });
+          break;
+        }
+
+        case TelemetryEvents.PromptStoreJsonColumnDegraded: {
+          // A prompt-store JSONB list column could not be established as a list,
+          // so an empty list was SUBSTITUTED. Nothing downstream can tell that
+          // apart from a genuinely empty column — the substituted `[]` is
+          // byte-identical to a real one at every consumer — so this counter is
+          // the only thing that can ever say it happened. Ops can alert on
+          // `prompt.store.jsonb_column_degraded_total > 0` over a short window.
+          //
+          // Tagged by `column` and `reason` because they are different faults
+          // with the same consequence: "the column is not a list" (data drift
+          // in the row) versus "the string is not JSON" (a bad write), and the
+          // remedies differ. Same reasoning as `session.read_degraded_total`.
+          //
+          // Deliberately NOT tagged with `prompt_id`/`version`: those are
+          // unbounded and belong in the ERROR log line, which carries them.
+          datadogClient.increment("prompt.store.jsonb_column_degraded_total", 1, {
+            column: String((eventData.column as string) || "unknown"),
+            reason: String((eventData.reason as string) || "unknown"),
           });
           break;
         }

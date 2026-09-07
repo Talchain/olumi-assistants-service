@@ -1105,6 +1105,7 @@ const ConfigSchema = z.object({
       edit_graph: z.string().optional(), // Model for edit_graph tool handler
       m2_review: z.string().optional(), // Model for V6 dual-draft M2 graph review (CEE_MODEL_M2_REVIEW; recommended claude-opus-4-8 at activation)
       summary: z.string().optional(), // Context v2 S4 rolling summariser (CEE_MODEL_SUMMARY; haiku-class default, 1.74 estate re-points it)
+      draft_quality: z.string().optional(), // Draft-quality semantic-coverage judge (CEE_MODEL_DRAFT_QUALITY; cross-provider default in TASK_MODEL_DEFAULTS)
     }).default({}),
     // Per-operation max tokens limits
     maxTokens: z.object({
@@ -1124,6 +1125,7 @@ const ConfigSchema = z.object({
       edit_graph: z.coerce.number().int().positive().optional(), // Max tokens for edit_graph tool
       m2_review: z.coerce.number().int().positive().optional(), // Max tokens for V6 dual-draft M2 review (default 4096 in m2-review.ts)
       summary: z.coerce.number().int().positive().optional(), // Context v2 S4 rolling summariser (the module sets its own default)
+      draft_quality: z.coerce.number().int().positive().optional(), // Draft-quality judge (default 512 in draft-quality/judge.ts — the verdict is a handful of tokens)
     }).default({}),
     // Tiered model selection (Phase: Model Selection)
     modelSelection: z.object({
@@ -1719,6 +1721,7 @@ function parseConfig(): Config {
         edit_graph: env.CEE_MODEL_EDIT_GRAPH,
         m2_review: env.CEE_MODEL_M2_REVIEW,
         summary: env.CEE_MODEL_SUMMARY,
+        draft_quality: env.CEE_MODEL_DRAFT_QUALITY,
       },
       // Per-operation max tokens limits
       maxTokens: {
@@ -1733,6 +1736,7 @@ function parseConfig(): Config {
         orchestrator: env.CEE_MAX_TOKENS_ORCHESTRATOR,
         edit_graph: env.CEE_MAX_TOKENS_EDIT_GRAPH,
         m2_review: env.CEE_MAX_TOKENS_M2_REVIEW,
+        draft_quality: env.CEE_MAX_TOKENS_DRAFT_QUALITY,
       },
       // Tiered model selection
       modelSelection: {

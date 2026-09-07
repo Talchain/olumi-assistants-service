@@ -59,6 +59,9 @@ const OPERATIONS = {
   // V6 dual-draft M2 graph review (fail-closed sentinel default; see
   // src/cee/dual-draft/prompt-sentinel.ts and src/prompts/defaults.ts).
   m2_graph_review: 'm2_graph_review',
+  // Draft-quality pass — the independent semantic-coverage judge
+  // (src/cee/draft-quality/judge.ts). Resolvable through getSystemPrompt().
+  draft_quality_review: 'draft_quality_review',
   // Note: isl_synthesis is NOT here - it's deterministic (template-based, no LLM calls)
 } as const satisfies Record<string, CeeTaskId>;
 
