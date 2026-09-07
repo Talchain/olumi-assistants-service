@@ -15,7 +15,11 @@ import { describe, expect, it } from 'vitest';
 
 import { evaluateCriteria } from '../../../tools/founder-fixture-harness/criteria.js';
 import { buildDetectors } from '../../../tools/founder-fixture-harness/detectors.js';
-import { exitCodeFor, fixtureToCaptures } from '../../../tools/founder-fixture-harness/index.js';
+import {
+  exitCodeFor,
+  fixtureToCaptures,
+  type ReplayFixture,
+} from '../../../tools/founder-fixture-harness/index.js';
 import { headline, renderReport, tally } from '../../../tools/founder-fixture-harness/report.js';
 import { RELOAD_SEMANTICS } from '../../../tools/founder-fixture-harness/script.js';
 import { composeVerdict } from '../../../tools/founder-fixture-harness/types.js';
@@ -25,9 +29,9 @@ const FIXTURES = join(process.cwd(), 'tools/founder-fixture-harness/fixtures');
 
 async function outcomeFor(
   name: string,
-  transform?: (fixture: any) => any,
+  transform?: (fixture: ReplayFixture) => ReplayFixture,
 ): Promise<HarnessOutcome> {
-  const raw = JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'));
+  const raw = JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8')) as ReplayFixture;
   const fixture = transform === undefined ? raw : transform(raw);
   const turns = fixtureToCaptures(fixture);
   const detectors = await buildDetectors(undefined);
@@ -175,7 +179,7 @@ describe('exit 4 — the journey did not complete', () => {
     // A refutation that landed outranks an incomplete journey, so this is 1.
     const outcome = await outcomeFor('red-c3-narration', (f) => ({
       ...f,
-      turns: f.turns.map((t: { index: number }) =>
+      turns: f.turns.map((t) =>
         t.index >= 9 ? { ...t, body: undefined, http_status: 0, transport_error: 'fetch failed' } : t,
       ),
     }));
