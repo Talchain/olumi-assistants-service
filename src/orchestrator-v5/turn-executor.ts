@@ -509,6 +509,7 @@ import {
   evaluateAnalysisElection,
   GATED_ANALYSIS_HANDLER_ID,
 } from './routing/analysis-election-gate.js';
+import { resolveRunAnalysisTargetEntity } from './routing/run-analysis-target.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
 import {
@@ -7473,14 +7474,14 @@ export async function runTurnExecutor(
         // valid addressable target". An OPTION is chosen (not the goal)
         // because the precondition tests for option presence, so picking one
         // makes the proposal and the precondition agree by construction.
-        const rerunTargetNode = (graphStateForTurn?.nodes ?? []).find(
-          (n): n is typeof n & { id: string } =>
-            typeof n === 'object' &&
-            n !== null &&
-            (n as { kind?: unknown }).kind === 'option' &&
-            typeof (n as { id?: unknown }).id === 'string' &&
-            ((n as { id: string }).id).length > 0,
-        );
+        //
+        // ⚠ THE RULE NOW LIVES IN `routing/run-analysis-target.ts` AND IS READ,
+        // NOT RE-IMPLEMENTED. It was inline here; the target-repair site at
+        // STEP 2 needs the identical answer, and two implementations of one
+        // rule in one file is this estate's signature defect (the two
+        // `generateGraphHash` twins). Its unit suite pins the entity shape
+        // this pre-route used to build, so the extraction cannot have moved it.
+        const rerunTargetEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
         const rerunValidationRegistry =
           options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
         const rerunHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
@@ -7488,25 +7489,10 @@ export async function runTurnExecutor(
           rerunValidationRegistry.run_analysis !== undefined &&
           resolveHandler(rerunHandlerRegistry, 'run_analysis') !== null;
 
-        if (rerunTargetNode !== undefined && rerunHandlerExecutable) {
-          const rerunLabel = (rerunTargetNode as { label?: unknown }).label;
+        if (rerunTargetEntity !== null && rerunHandlerExecutable) {
           const rerunProposal: ProposalAction = {
             handler_id: 'run_analysis',
-            entity: {
-              id: rerunTargetNode.id,
-              kind: 'option',
-              ...(typeof rerunLabel === 'string' && rerunLabel.length > 0
-                ? { label: rerunLabel }
-                : {}),
-              resolution_status: 'resolved',
-              // `context_inference`, not `label_match`: the target was not
-              // named by the user and was not matched against their text — it
-              // was inferred from the scenario, which is exactly what this
-              // method means. Declaring `label_match` would invite the
-              // validator's Dice label-suspicion check to reason about a
-              // comparison that never happened.
-              resolution_method: 'context_inference',
-            },
+            entity: rerunTargetEntity,
             parameters: [],
             cited_context_fields: ['graph.options'],
           };
@@ -7545,7 +7531,7 @@ export async function runTurnExecutor(
             scenario_id: context.session_id,
             outcome: 'fell_through',
             reason:
-              rerunTargetNode === undefined ? 'no_option_target' : 'handler_unavailable',
+              rerunTargetEntity === null ? 'no_option_target' : 'handler_unavailable',
           });
         }
       }
@@ -9114,6 +9100,105 @@ export async function runTurnExecutor(
         graphLookupForValidate,
         validationRegistry,
       );
+
+      // ══════════════════════════════════════════════════════════════════
+      // ⭐⭐ RUN-ANALYSIS TARGET REPAIR — the founder-loop break
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // THE DEFECT, and note that it is in the TARGET, not in any predicate.
+      // `looksLikeExplicitAnalysisRequest('Rerun.')` is already TRUE, so the
+      // election gate ADMITS the turn — that half works. What fails is what
+      // the admitted proposal CARRIES. `entity` is required on every proposal
+      // (`ProposalActionSchema`), while `run_analysis`'s target is
+      // semantically the whole scenario — the validation registry says so
+      // itself. So the router must fill a field that holds no information, it
+      // invents one, and on the measured builds it named the DECISION node
+      // about half the time. `toEntityKind('decision')` is `'node'`;
+      // `['option','goal']` rejects it; the user who asked for an analysis is
+      // answered with "I found <Decision>, but I can't make that change to
+      // it." Deployed staging, no-edit arm: `"Rerun."` failed 5 of 10 and
+      // `"Run analysis." — the product's own chip label — 1 of 2.
+      //
+      // ⭐ WHY THIS WIDENS NOTHING, which is the load-bearing argument.
+      // Same message, same build, the analysis ALREADY RUNS on the other side
+      // of that coin flip. The decision to run was taken upstream — by the
+      // election gate, which fails CLOSED and demotes anything that is not an
+      // explicit request, or by a deterministic pre-route which builds a valid
+      // target by construction. This repair makes an already-taken decision
+      // EXECUTABLE; it cannot make a run reachable that was not already
+      // reachable, and a kind mismatch that fires on a model's coin flip was
+      // never a safety mechanism. TWIN B in
+      // `__tests__/run-analysis-target-repair.integration.test.ts` pins the
+      // opposite direction: a demoted election gains nothing here, because
+      // demotion happens before validation and this line never sees it.
+      //
+      // ⚠ THE PREDICATE IS THE VALIDATOR'S OWN VERDICT, NOT A RE-DERIVATION.
+      // Whether this entity is acceptable is a question `validateToolCall`
+      // already answers — including its graph-authoritative kind repair, which
+      // is what turns a model-declared `'option'` on a decision id into the
+      // `'node'` that actually gets rejected. Asking "would this fail?" a
+      // second time here would be a second implementation of the acceptance
+      // rule and would drift from it (trap 21). So: let it fail, then repair
+      // and RE-VALIDATE, and take the result only if the second pass is
+      // genuinely valid.
+      //
+      // FALL-THROUGH CONTRACT. A substitution happens only when the graph
+      // offers an option target and the revalidated proposal is valid.
+      // Otherwise `validationResult` is left exactly as it was and today's
+      // refusal stands — substituting the goal instead would only trade
+      // ENTITY_KIND_MISMATCH for PRECONDITION_UNMET, a different refusal
+      // rather than a fix. The decline is emitted with a reason so "no option
+      // in the graph" and "the repair did not validate" are distinguishable in
+      // ops instead of both being silence.
+      if (
+        !validationResult.valid &&
+        validationResult.error.code === 'ENTITY_KIND_MISMATCH' &&
+        proposedHandlerId === 'run_analysis'
+      ) {
+        // The kind that was actually REJECTED — the graph-resolved one when
+        // the validator repaired it, else the model's own. Read off the error
+        // details the validator populated, never re-derived here.
+        const rejectedKind =
+          (validationResult.error.details as { resolved_kind?: unknown; proposed_kind?: unknown })
+            ?.resolved_kind ??
+          (validationResult.error.details as { proposed_kind?: unknown })?.proposed_kind ??
+          null;
+        const repairEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
+        const repairedValidation =
+          repairEntity === null
+            ? null
+            : validateToolCall(
+                { ...action, entity: repairEntity },
+                graphLookupForValidate,
+                validationRegistry,
+              );
+        if (repairEntity !== null && repairedValidation?.valid === true) {
+          action = { ...action, entity: repairEntity };
+          validationResult = repairedValidation;
+          // Keep the observability fields honest about what is now executing:
+          // the entity below this line is ours, inferred from the scenario.
+          resolutionStatus = repairEntity.resolution_status;
+          emit(TelemetryEvents.V5RunAnalysisTargetRepair, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: 'run_analysis',
+            outcome: 'repaired',
+            proposed_kind: rejectedKind,
+            repaired_kind: repairEntity.kind,
+            reason: null,
+          });
+        } else {
+          emit(TelemetryEvents.V5RunAnalysisTargetRepair, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: 'run_analysis',
+            outcome: 'declined',
+            proposed_kind: rejectedKind,
+            repaired_kind: null,
+            reason: repairEntity === null ? 'no_option_target' : 'revalidation_failed',
+          });
+        }
+      }
 
       // CONSUME THE REPAIRED PROPOSAL. The validator returns a copy carrying
       // the graph's kind and label; until now every caller threw it away and
