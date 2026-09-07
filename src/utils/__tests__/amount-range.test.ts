@@ -211,10 +211,13 @@ describe("shapes with no single reading are refused, and the refused set is exac
     ).toEqual({ min: 50, max: 70, magnitudeDistributed: false });
   });
 
-  // ⚠⚠ THE NAME THIS TEST CARRIED UNTIL NOW WAS FALSE, AND IT WAS FALSE FROM
-  // THE FIRST COMMIT OF THIS PR (`git log -S` dates it to `d2847f2c`). It read
-  // *"refuses a lower-only magnitude and a descending elliptical pair, and
-  // nothing else"*, and it was wrong in BOTH halves:
+  // ⚠⚠⚠ THIS NAME HAS NOW BEEN FALSE TWICE, IN THE SAME WAY BOTH TIMES, SO IT
+  // NO LONGER CLOSES A SET AT ALL.
+  //
+  // Round 1 — the name this test carried from the first commit of this PR
+  // (`git log -S` dates it to `d2847f2c`) read *"refuses a lower-only magnitude
+  // and a descending elliptical pair, and nothing else"*, and it was wrong in
+  // BOTH halves:
   //
   //   - "a descending elliptical pair" OVER-CLAIMS. `80,000-120k` is a
   //     descending elliptical pair and it MINTS — it is the headline row of
@@ -225,12 +228,25 @@ describe("shapes with no single reading are refused, and the refused set is exac
   //     `5m-2m` — a descending pair carrying a magnitude on BOTH bounds, which
   //     is a third refusal the name never mentioned.
   //
-  // The commit that split the branch three ways (`d95f5dee`) changed the
-  // behaviour and left the name describing the two-way version. The pinned SET
-  // was renamed for exactly this reason on the same PR; this is its twin, and
-  // it was missed. A test name is read far more often than a test body, so a
-  // false one is a false claim about the product with a green tick beside it.
-  it("refuses a lower-only magnitude, an AMBIGUOUS descending elliptical pair and a descending BOTH-magnitude pair — and reads the rest", () => {
+  // Round 2 — the replacement listed those three classes and closed the set a
+  // second time, with *"— and reads the rest"*. Also false, and refuted by
+  // EXECUTION at `d6f2eef9`: `5,000,000-2m`, `5000000-2m` and `9,000,000-2m`
+  // all return `null`, and none of them is any of the three. Each is the
+  // GENUINELY-DESCENDING elliptical sub-class — the one where NEITHER reading
+  // ascends — which the comment above names and the name omitted. The
+  // attribution is a mutant, not a reading: deleting `if (minDigits > maxValue)
+  // return null;` makes exactly those three resolve (to `5,000,000..2,000,000`
+  // and so on) while all three of the named classes stay refused.
+  //
+  // ⭐ SO THE THIRD NAME MAKES NO TOTALITY CLAIM. It says which shapes this
+  // body asserts and stops there. "And nothing else" / "and reads the rest" is
+  // the hardest claim in a test name to keep true, because it goes stale on a
+  // change to the PREDICATE that nobody makes to the test — twice here, on one
+  // PR. A test name is read far more often than a test body, so a false one is
+  // a false claim about the product with a green tick beside it; the
+  // enumeration of every refusing class lives in `resolveAmountRange`'s own
+  // branches, which is the only place that cannot drift from them.
+  it("a lower-only magnitude, an AMBIGUOUS elliptical pair and a descending both-magnitude pair each refuse; the ascending both-magnitude twin and the magnitude-free descending pair each resolve", () => {
     expect(
       resolveAmountRange({
         minDigits: "2",
@@ -1273,10 +1289,30 @@ describe("the range grammar reads the WHOLE currency prefix, not the `$` inside 
     }
   });
 
-  it("⭐ the alternation is LONGEST-FIRST, so a longer prefix cannot be shadowed by the character it ends in", () => {
-    // `A$`, `C$` and `NZ$` all END in `$`. Ordered shortest-first, the engine
-    // would match the bare `$` and the prefix letter would be dropped — which
-    // is the defect, arriving through ordering instead of through membership.
+  it("⭐ the alternation carries every key exactly once and in descending length order — an ORDERING property", () => {
+    // ⚠⚠ WHAT THIS TEST DOES NOT PROVE, and the name used to say it did. It
+    // read *"so a longer prefix cannot be shadowed by the character it ends
+    // in"*, over a comment claiming that shortest-first would make the engine
+    // match the bare `$` and drop the prefix letter. That mechanism does not
+    // exist: JS alternation scans by START POSITION, and `$` is a SUFFIX of
+    // `A$`, so the two never compete at the same index. Ordering can only
+    // shadow a PROPER PREFIX overlap, and this vocabulary has none.
+    //
+    // MEASURED at `d6f2eef9`. Flipping the comparator behind
+    // `CURRENCY_PREFIX_ALTERNATION` to shortest-first REDs this assertion and
+    // nothing else — 327 of 328 green across the ten specs this PR touches,
+    // every behavioural row among them. A shortest-first alternation built from
+    // the same keys matches all ten identically. What keeps `A$` reading as
+    // `A$` is MEMBERSHIP — the derivation from `CURRENCY_SYMBOL_TO_CODE` —
+    // pinned by the per-key rows above this, not by the order.
+    //
+    // ⭐ IT IS STILL WORTH KEEPING, for what it does assert: the alternation
+    // carries every key, carries none twice, and holds the descending-length
+    // convention — the one that WOULD become load-bearing the day a key became
+    // a proper prefix of another. `magnitude-alphabet.ts` is already there
+    // (`m` ⊂ `mn`, `b` ⊂ `bn`, `t` ⊂ `trillion`, six pairs), which is why its
+    // twin asserts the PREFIX property directly rather than a length ordering.
+    // Do not read this one as a guard on which currency a range publishes.
     const alternatives = CURRENCY_PREFIX_ALTERNATION.split("|");
     expect(alternatives.length, "the alternation lost an alternative").toBe(
       Object.keys(CURRENCY_SYMBOL_TO_CODE).length,

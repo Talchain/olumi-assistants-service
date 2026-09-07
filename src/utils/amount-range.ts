@@ -310,8 +310,18 @@ const CURRENCY_SYMBOL_CLASS: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
   .join("");
 
 /**
- * The multi-character prefixes, longest-first so a longer key cannot be
- * shadowed by a shorter one that prefixes it (`NZ$` before `C$`).
+ * The multi-character prefixes, sorted longest-first.
+ *
+ * ⚠ THE SORT GUARDS NOTHING ON THIS ONE, and saying so is the point. The
+ * sentence that stood here — "longest-first so a longer key cannot be shadowed
+ * by a shorter one that prefixes it (`NZ$` before `C$`)" — offered a
+ * non-example: `C$` is not a prefix of `NZ$`, and no key in this vocabulary is
+ * a proper prefix of any other. Worse, this string is spliced into a NEGATIVE
+ * LOOKBEHIND in `BARE_AMOUNT_RANGE_START_GUARD`, whose answer is a boolean over
+ * the whole disjunction — no alternative's position can change it. MEASURED at
+ * `d6f2eef9`: flipping this comparator to shortest-first left the ten specs
+ * this PR touches at 328 passed / 0 failed, and no test anywhere reads this
+ * one's order. It is kept as a convention shared with the alternation below.
  *
  * `A$`/`C$`/`NZ$` are also caught by the class above when they sit flush
  * against the digits — they END in `$` — but they are here too so a prefix
@@ -324,9 +334,33 @@ const CURRENCY_MULTICHAR_ALTERNATION: string = Object.keys(CURRENCY_SYMBOL_TO_CO
   .join("|");
 
 /**
- * ⭐⭐ EVERY CURRENCY PREFIX THE VOCABULARY CARRIES, AS ONE ALTERNATION —
- * LONGEST FIRST, so a multi-character prefix can never be shadowed by the
- * single character it ends in (`A$`, `C$` and `NZ$` all end in `$`).
+ * ⭐⭐ EVERY CURRENCY PREFIX THE VOCABULARY CARRIES, AS ONE ALTERNATION,
+ * SORTED LONGEST-FIRST.
+ *
+ * ⚠⚠ THE ORDER IS A CONVENTION, NOT WHAT MAKES `A$` READ AS `A$`. The sentence
+ * that stood here said longest-first stops a multi-character prefix being
+ * "shadowed by the single character it ends in". That mechanism does not
+ * exist: JS alternation scans by START POSITION, so `$` — a SUFFIX of `A$` —
+ * is never an alternative competing at the same index. Ordering can only
+ * shadow a PROPER PREFIX overlap.
+ *
+ * MEASURED at `d6f2eef9`, two ways. (a) A shortest-first alternation built from
+ * the same keys matches all ten of them identically (`£ $ € ¥ ₹ A$ C$ NZ$ CHF
+ * kr`): 0 keys where the order changes the match. (b) Flipping this comparator
+ * to shortest-first leaves 327 of 328 tests green across the ten specs this PR
+ * touches — the single failure is the length-ordering test in
+ * `__tests__/amount-range.test.ts`, which asserts the ORDER and no behaviour.
+ * A proper-prefix census over this vocabulary returns ZERO; the same census
+ * over `magnitude-alphabet.ts` returns SIX (`m` ⊂ `mn`, `b` ⊂ `bn`, `t` ⊂
+ * `trillion`, …), which is the contrast control proving the census can see an
+ * overlap where one exists — and is why longest-first IS load-bearing there.
+ *
+ * ⭐ THE SORT STAYS ANYWAY: it costs nothing, it is the ordering that would
+ * start mattering the day a key became a proper prefix of another (add `CH`
+ * beside `CHF` and shortest-first reads `CH` — checked), and it keeps the two
+ * alternations in this file written the same way. What actually keeps a range
+ * publishing the right currency is MEMBERSHIP — the derivation from
+ * `CURRENCY_SYMBOL_TO_CODE` below — pinned by the per-key behavioural rows.
  *
  * ⚠⚠ WHAT A HAND-SPELLED CLASS COST, MEASURED ON THIS PR AT `302556d4` AND AT
  * BASE `f4c8f501`, through `parseNumericValue`. `cee/extraction/numeric-parser`'s
@@ -580,11 +614,16 @@ export function resolveAmountRange(input: {
   //   ⚠ `479c7c97` IS NOT THIS FUNCTION'S ANSWER: the refusal below returns
   //   `null` for that pair, so do not read those numbers as current behaviour.
   //     PINNED BY `__tests__/amount-range.test.ts` at both levels — the
-  //     `resolveAmountRange(…) → null` assertion in "refuses a lower-only
-  //     magnitude and a descending elliptical pair, and nothing else", and
-  //     "⭐ the refusal reaches the USER-REACHABLE path: a stated figure is no
-  //     longer replaced by a midpoint", where `extractFactors` yields exactly
-  //     [500_000, 2_000_000].
+  //     `resolveAmountRange(…) → null` assertion in "a lower-only magnitude, an
+  //     AMBIGUOUS elliptical pair and a descending both-magnitude pair each
+  //     refuse; …", and "⭐ the refusal reaches the USER-REACHABLE path: a
+  //     stated figure is no longer replaced by a midpoint", where
+  //     `extractFactors` yields exactly [500_000, 2_000_000].
+  //     ⚠ THAT CITATION NAMED A TEST TITLE THAT NO LONGER EXISTED, and it
+  //     quoted the false "and nothing else" clause while doing so. The title
+  //     has been repaired twice on this PR; citing one by its full text is a
+  //     hand-maintained mirror, so the reference above is deliberately a
+  //     PREFIX and the assertion it points at is named by what it does.
   //
   // That is the OVER-READ direction this module's header calls the worse of
   // the two, arriving on the path that reaches a user. So the ordering
