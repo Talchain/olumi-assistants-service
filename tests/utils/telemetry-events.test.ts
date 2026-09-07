@@ -710,6 +710,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // never reach the finalise guard above.
         V5WithheldLeaderClaimNeutralisedAtWire: "v5.egress.leading_option_claim_neutralised_at_wire",
         V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
+        // 3 Sep 2026 — the process-narration egress guard (the chain-of-thought
+        // leak). See the enum entry for the payload and for why the
+        // `block_replaced` remedy is the number worth watching.
+        V5EgressProcessNarrationDetected: "v5.egress.process_narration_detected",
         V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
         V5ExplicitGenerateReceived: "v5.explicit_generate_received",
@@ -1583,6 +1587,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5InterceptedChipClarify,
         TelemetryEvents.V5InterceptedVagueEdit,
         TelemetryEvents.V5EgressForbiddenPhraseDetected,
+        // 3 Sep 2026 — the process-narration guard, same posture as the
+        // forbidden-phrase guard directly above: a finaliser-level egress
+        // guard whose hits are diagnostic and logged locally, with no Datadog
+        // counter wired yet. ⚠ WORTH A DASHBOARD WHEN ONE IS WIRED: the
+        // `block_replaced` remedy counts turns on which the user WOULD have
+        // read a monologue instead of an answer.
+        TelemetryEvents.V5EgressProcessNarrationDetected,
         // F6 — same posture as the forbidden-phrase guard directly above: a
         // finaliser-level egress guard whose hits are diagnostic and logged
         // locally, with no Datadog counter wired yet.
@@ -2324,6 +2335,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.egress.defaulted_value_applied",
         "v5.egress.blocked_slot_claim_refused",
         "v5.egress.forbidden_phrase_detected",
+        "v5.egress.process_narration_detected",
         "v5.egress.leading_option_claim_withheld_violated",
         "v5.claim_safety.fail_closed_unavailable",
         // The ENFORCING sibling of the line above: same subject, same

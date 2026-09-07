@@ -725,8 +725,12 @@ describe("envelope and coaching wiring", () => {
     // The false-success claim must not reach the user.
     expect(result.assistantText).not.toContain("Done — value set");
     expect(result.assistantText).not.toContain("value set");
-    // Deterministic forward-looking clarify copy used instead (Lane 22).
-    expect(result.assistantText).toMatch(/Tell me the specific factor/i);
+    // ROADMAP 2.1361 — REBOUND FROM THE COPY TO THE VERDICT. See the note in
+    // edit-graph.test.ts: the closing sentence is no longer constant, because
+    // the branch now says what it understood. `noOpClarificationPreserved`
+    // (asserted false above) IS the "deterministic fallback fired" verdict.
+    // The LEAD sentence is still constant — every branch must be able to say
+    // the turn wrote nothing — so that half stays pinned.
     expect(result.assistantText).toContain("I haven't changed anything from that.");
   });
 

@@ -84,6 +84,7 @@ import {
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
 import { boundNodeLabel } from "./label-bound.js";
+import { isNameShapedLabel } from "./claim-label-shape.js";
 import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
 import type {
   DraftInferenceClaim,
@@ -573,7 +574,29 @@ export interface DroppedRecordRef {
      * One is chosen canonically; the others are named here rather than silently
      * absorbed — the same treatment 2(c) gives the intervention levels.
      */
-    | "parallel_causal_link_conflict";
+    | "parallel_causal_link_conflict"
+    /**
+     * ⭐ THE CLAIM MINTED A NODE AND NAMED IT WITH A SENTENCE.
+     *
+     * The node IS on the graph — `node_id` resolves and `withdrawn` is FALSE.
+     * Nothing was dropped, refused or shortened; what is disclosed is that the
+     * model's display string is a statement rather than a name, so a surface
+     * that clamps a title (the canvas clamps to two lines) may render it
+     * indistinguishably from its neighbours. Witnessed exactly that way on
+     * 6 Sep 2026: a 105-character `prior` label and the `"<Factor> Impact"`
+     * outcome minted from it rendered the same visible title.
+     *
+     * ⚠ THE LABEL IS SHIPPED UNCHANGED, AND THAT IS THE POINT. Truncating would
+     * move the lie rather than remove it — the node would still be named by a
+     * mutilated claim, and two nodes sharing a prefix would still collide.
+     * `label-bound.ts` may truncate only because a verbatim `source_quote` is
+     * conserved beside it; an `ai_inferred` claim node has none by construction.
+     *
+     * ⚠ SCOPED TO CLAIMS THAT MINT A NODE (trap 13d). A `causal_link` label is a
+     * relationship sentence by design, runs to 103 characters in the banked
+     * corpora, and mints an EDGE — it is never judged by this predicate.
+     */
+    | "claim_label_not_a_name";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
@@ -3797,11 +3820,97 @@ export function projectRecordsToGraph(
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
-  return boundEveryNodeLabel({
-    graph: projection.graph,
-    provenance: projection.provenance,
-    dropped: projection.dropped,
-  });
+  return boundEveryNodeLabel(
+    discloseNodesNamedWithASentence({
+      graph: projection.graph,
+      provenance: projection.provenance,
+      dropped: projection.dropped,
+    }),
+  );
+}
+
+/**
+ * ⭐⭐ A NODE THE MODEL NAMED WITH A SENTENCE IS DISCLOSED, NEVER SHORTENED.
+ *
+ * ── THE WITNESSED DEFECT (Paul's manual test, 6 Sep 2026) ──────────────────
+ * A `factor` node carried a 105-character belief sentence, and
+ * `fixFactorGoalEdges` minted a mediating outcome labelled
+ * `${factorLabel} Impact` from it. The canvas clamps a title to two lines, so
+ * both nodes rendered the SAME visible string. The sweep's mint is correct in
+ * intent (`deterministic-sweep.ts:1163`) and inherited a bad input — which is
+ * why the guard is here, at the source, and that file is untouched.
+ *
+ * The mechanism is `claims[].label` answering two questions at once (trap 21):
+ * for `factor`/`risk`/`outcome`/`option_refinement` the model supplies a noun
+ * phrase, while `instruction.ts` asks a `prior` for *"what you believe about a
+ * quantity, and how sure you are"* — and `CLAIM_KIND_TO_NODE_KIND` maps
+ * `prior → "factor"`. See {@link isNameShapedLabel} for the measured corpus.
+ *
+ * ── ⚠ WHY HERE AND NOT AT THE CLAIM MINT SITE ─────────────────────────────
+ * Two reasons, and the first is a defect this pass had when it was written
+ * there — caught by `shape-gate-withdrawal-is-named-honestly.test.ts`:
+ *
+ *  1. THE MINT SITE DOES NOT KNOW WHETHER THE NODE SURVIVES. The connectivity
+ *     prune runs after the claims pass, so a node disclosed at mint time can be
+ *     withdrawn afterwards — and `transformResponseToV3` derives `withdrawn`
+ *     from whether `node_id` resolves in the FINAL node list. The notice would
+ *     then read "withdrawn" on a channel whose entire purpose is telling the
+ *     truth about what was lost, while claiming the opposite in its own
+ *     docblock. Running over the FINAL nodes makes `withdrawn: false` true by
+ *     construction rather than by hope.
+ *  2. It is the same argument `boundEveryNodeLabel` states one function below:
+ *     a check installed at each mint site is a hand-maintained list that a
+ *     fourth mint site silently escapes (trap 12). One pass over the finished
+ *     node list covers every site and anything added later.
+ *
+ * ── THE SCOPE IS DERIVED FROM PROVENANCE, NOT FROM A KIND LIST ────────────
+ * `ai_inferred` is exactly "the model authored this display string". A STATED
+ * node's label is the user's own canonicalised quote (or an objective derived
+ * from it by `deriveGoalObjectiveLabel`), and judging the user's words by a
+ * predicate written for model-authored names is a different question with a
+ * different answer — the same scope discipline `label-bound.ts` states for
+ * truncation. A `causal_link` mints an EDGE and has no node to reach here at
+ * all, so its 103-character relationship sentences are out of scope by
+ * construction rather than by exclusion.
+ *
+ * ── IT RUNS BEFORE `boundEveryNodeLabel`, DELIBERATELY ────────────────────
+ * So the predicate sees the label the MODEL wrote, not one already shortened to
+ * 200 characters. A guard that is correct but pointed at the wrong bytes is
+ * trap 22's other half.
+ *
+ * ⭐ IDENTITY WHEN EVERY NODE IS NAMED. The ordinary draft returns the input
+ * object unchanged — the over-correction control expressed as code.
+ */
+function discloseNodesNamedWithASentence(projection: RecordProjection): RecordProjection {
+  const unnamed: DroppedRecordRef[] = [];
+
+  for (const node of projection.graph.nodes) {
+    // Model-authored display strings only. Derived from the provenance the
+    // projector already banked, so a new node kind cannot escape by not being
+    // on a list.
+    if (projection.provenance[node.id]?.provenance_class !== "ai_inferred") continue;
+    if (isNameShapedLabel(node.label)) continue;
+
+    unnamed.push({
+      // Named by NODE, not by claim — like `unconnected_to_goal`, which uses the
+      // same convention for the same reason: this pass runs after both node
+      // passes and holds no claim index.
+      claim_index: -1,
+      claim_kind: node.kind,
+      // ⚠ THE LABEL IS CARRIED UNCHANGED AND IS NOT REWRITTEN ANYWHERE IN THIS
+      // FUNCTION. Truncating would move the lie rather than remove it: the node
+      // would still be named by a mutilated claim, and two nodes sharing a
+      // prefix would still collide on a clamped canvas. `label-bound.ts` may
+      // shorten only because a verbatim `source_quote` is conserved beside it,
+      // and an `ai_inferred` node has none by construction.
+      label: node.label,
+      node_id: node.id,
+      reason: "claim_label_not_a_name",
+    });
+  }
+
+  if (unnamed.length === 0) return projection;
+  return { ...projection, dropped: [...projection.dropped, ...unnamed] };
 }
 
 /**

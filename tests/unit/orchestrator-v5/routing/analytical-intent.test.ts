@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  __predicateSourcesForGuard,
   classifyAnalyticalIntent,
   hasMutationSignal,
+  looksLikeAnaphoricEdit,
   looksLikeImperativeRerun,
   looksLikeVagueEdit,
 } from '../../../../src/orchestrator-v5/routing/analytical-intent.js';
@@ -115,13 +117,18 @@ describe('classifyAnalyticalIntent', () => {
 });
 
 describe('looksLikeVagueEdit', () => {
+  // ⚠ 'Adjust this.' AND 'Improve this.' WERE HERE AND HAVE MOVED, deliberately,
+  // to the `looksLikeAnaphoricEdit` corpus below. They are the only two cases in
+  // this file the vague/anaphoric split flips, and the flip is the point: `this`
+  // is a REFERENT, and classifying it as the absence of a target is the defect
+  // being removed. Measured before the change: this suite collected 263 tests
+  // and exactly these two went RED. They are asserted `false` here and `true`
+  // there, so neither predicate can quietly reclaim them.
   const positives = [
     'Update something.',
     'Change something please.',
-    'Adjust this.',
     'Modify the model.',
     'Fix the graph.',
-    'Improve this.',
     'Tweak something.',
     'Make a change.',
     'Make an adjustment.',
@@ -138,6 +145,10 @@ describe('looksLikeVagueEdit', () => {
   }
 
   const negatives = [
+    // ⭐ THE MOVED PAIR — anaphoric, therefore NOT vague. Opposite-direction
+    // twins of the two positives in the anaphoric corpus below.
+    'Adjust this.',
+    'Improve this.',
     // Concrete edits — caught by hasMutationSignal, not vague-edit
     'Set Pricing to 0.7.',
     'Add a new risk for supply chain.',
@@ -184,6 +195,136 @@ describe('looksLikeVagueEdit', () => {
       expect(looksLikeVagueEdit(msg)).toBe(false);
     });
   }
+});
+
+/**
+ * ⭐ `looksLikeAnaphoricEdit` — spec §4.3's predicate split.
+ *
+ * ⚠ THE CORPUS BELOW COMES FROM OUTSIDE THE AUTHOR'S HEAD. Every message marked
+ * (capture) is transcribed verbatim from a real fresh-guest founder journey
+ * driven against deployed staging on 5 Sep 2026 (CEE `1af54f6c`); the rest are
+ * either the spec's own table or the existing corpus above, written by others.
+ * This estate has shipped four consecutive rounds of oscillation on one
+ * natural-language predicate, each fixing one direction and reopening the
+ * other, so EVERY positive here has an opposite-direction twin in the negatives.
+ */
+describe('looksLikeAnaphoricEdit', () => {
+  const positives = [
+    // The witnessed message. 41 characters, the turn that produced the reset.
+    'Can you update it with the correct range?', // (capture, turn 5)
+    'Can you fix that?',
+    // Moved out of the vague corpus above.
+    'Adjust this.',
+    'Improve this.',
+    'Update it.',
+    'Change that.',
+    'Can you change it?',
+    'Tweak this.',
+  ];
+  for (const msg of positives) {
+    it(`flags "${msg}" as an anaphoric edit`, () => {
+      expect(looksLikeAnaphoricEdit(msg)).toBe(true);
+    });
+  }
+
+  const negatives = [
+    // ⭐ NEGATION TWINS. The shared negation gate is the ONE thing the two
+    // predicates legitimately share — "is the user refusing?" is genuinely one
+    // question. Without these, "Don't change it" would newly route to a
+    // resolution attempt, which is the mirror defect of the one being fixed.
+    "Don't change it.",
+    'Do not change it.',
+    "I don't want to change it.",
+    "Please don't update that.",
+    'Never change this.',
+    "I won't adjust that.",
+    "I can't change this right now.",
+    // ⭐ GENUINELY TARGET-LESS — must stay with looksLikeVagueEdit, never here.
+    'Update something.',
+    'Change something please.',
+    'Modify the model.',
+    'Fix the graph.',
+    'Make a change.',
+    'Do an update.',
+    'Update.',
+    'Adjust.',
+    // Concrete targets — resolved upstream, never anaphoric.
+    'Set Pricing to 0.7.',
+    'Change pricing factor',
+    'Can you update Sales Headcount Investment to 100000?',
+    'Update the churn factor to 5%',
+    // ⭐ REAL TURNS FROM THE CAPTURED JOURNEY that must NOT be treated as edits.
+    // Note the fourth: it contains a bare "that" ("That doesn't seem right"),
+    // and the seventh contains both "update" and "changed" — the two shapes
+    // most likely to over-trigger a pronoun predicate.
+    "What do you think I'm missing?", // (capture, turn 2)
+    'Run analysis.', // (capture, turn 3)
+    'Explain the result.', // (capture, turn 4)
+    "Why is the sales headcount investment £80? That doesn't seem right.", // (capture, turn 5)
+    'Rerun.', // (capture, turn 7)
+    'How has the update changed the analysis?', // (capture, turn 8)
+    'Why are all of the outcome and risk strengths 50%?', // (capture, turn 9)
+    'Run a pre-mortem.', // (capture, turn 10)
+    'What would you do next?', // (capture, turn 11)
+    'Where did we get to?', // (capture, turn 12)
+    // General conversation.
+    'Hi.',
+    'OK, thanks.',
+    'That is interesting.',
+    'I see.',
+    'Why is this happening?',
+    '',
+    '   ',
+  ];
+  for (const msg of negatives) {
+    it(`does not flag "${msg}" as an anaphoric edit`, () => {
+      expect(looksLikeAnaphoricEdit(msg)).toBe(false);
+    });
+  }
+
+  it('is DISJOINT from looksLikeVagueEdit across the whole corpus', () => {
+    // Two questions, two predicates. No message may satisfy both, or the
+    // dispatcher's branch order would silently decide which harm applies.
+    const everything = [...positives, ...negatives];
+    const both = everything.filter((m) => looksLikeVagueEdit(m) && looksLikeAnaphoricEdit(m));
+    expect(both).toEqual([]);
+    // Positive control: the corpus is non-trivial in BOTH directions, so the
+    // emptiness above is a real disjointness result and not an empty sweep.
+    expect(everything.filter((m) => looksLikeAnaphoricEdit(m)).length).toBe(positives.length);
+    expect(everything.filter((m) => looksLikeVagueEdit(m)).length).toBeGreaterThan(0);
+  });
+
+  it('DERIVED GUARD: both predicates carry the identical verb alternation', () => {
+    // The verb lists are hand-copied across two regexes, so they are a mirror.
+    // A mirror in this repo must FAIL LOUD rather than drift, and it is derived
+    // from the regexes' OWN sources here rather than from a third hand-written
+    // copy. Extending one verb list without the other REDs this.
+    const verbs = (source: string): string | null => {
+      // NB the `\\s\+` here matches the two literal characters `\` and `s` (then
+      // `+`) inside the regex's own SOURCE STRING — not a whitespace character.
+      const m = source.match(/\(\?:((?:update|change)[^)]*)\)\\s\+/);
+      return m ? m[1]! : null;
+    };
+    const vague = verbs(__predicateSourcesForGuard.vagueEditPattern0);
+    const anaphoric = verbs(__predicateSourcesForGuard.anaphoricEditPattern0);
+    // Positive control: the extractor must actually have extracted something.
+    // Without this, two nulls would "agree" and the guard would assert nothing.
+    expect(vague).not.toBeNull();
+    expect(anaphoric).not.toBeNull();
+    expect(vague).toContain('update');
+    expect(anaphoric).toEqual(vague);
+  });
+
+  it('the vague predicate no longer accepts any anaphor as its object', () => {
+    for (const anaphor of ['it', 'this', 'that']) {
+      expect(looksLikeVagueEdit(`Update ${anaphor}.`)).toBe(false);
+      expect(looksLikeVagueEdit(`Can you update ${anaphor}?`)).toBe(false);
+    }
+    // Opposite direction: the target-less objects it DOES own are untouched.
+    for (const object of ['something', 'things', 'stuff', 'anything', 'the model']) {
+      expect(looksLikeVagueEdit(`Update ${object}.`)).toBe(true);
+    }
+  });
 });
 
 describe('hasMutationSignal', () => {

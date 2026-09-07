@@ -50,9 +50,15 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 // Fixtures. Self-contained; no shared integration mocks.
 // ---------------------------------------------------------------------------
 
+/**
+ * ⚠ `nSamples` IS REQUIRED, NOT DEFAULTED — see the sibling note in
+ * `run-comparison-gate.test.ts`. The margin sentence this suite's
+ * PERMITTED/PERMITTED control asserts needs evidence the quantity moved.
+ */
 function envelope(
   options: Array<{ id: string; label: string; win: number }>,
   band: string,
+  nSamples: number | null,
 ): V2RunResponseEnvelope {
   return {
     analysis_status: 'completed',
@@ -60,10 +66,14 @@ function envelope(
       option_id: o.id,
       option_label: o.label,
       win_probability: o.win,
+      ...(nSamples === null ? {} : { outcome: { n_samples: nSamples } }),
     })),
     robustness_synthesis: { overall_assessment: band },
   } as unknown as V2RunResponseEnvelope;
 }
+
+/** The capture's real Monte-Carlo budget (2026-09-03, all three options). */
+const N = 10_000;
 
 /**
  * How a run's claim-safety verdict is recorded on the persisted fact.
@@ -75,10 +85,17 @@ function envelope(
  */
 type VerdictShape = 'permitted' | 'withheld' | 'unstamped';
 
+/**
+ * `hash` is explicit (2026-09-06): the gate now answers `same_inputs` on two
+ * EQUAL hashes. This suite's pair models a model that CHANGED between the runs
+ * (leader flip, band shift), so `ask` gives the two runs distinct hashes and
+ * every case below stays in `compared`, as it always described.
+ */
 function runFact(
   env: V2RunResponseEnvelope,
   shape: VerdictShape,
   computedAt: string,
+  hash: string,
 ): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -86,7 +103,7 @@ function runFact(
     result: {
       enrichment: env,
       computed_at: computedAt,
-      graph_hash_at_run: 'h',
+      graph_hash_at_run: hash,
       ...(shape === 'unstamped'
         ? {}
         : {
@@ -106,6 +123,7 @@ const PRIOR_ENV = envelope(
     { id: 'b', label: 'Onshore', win: 0.38 },
   ],
   'low',
+  N,
 );
 const CURRENT_ENV = envelope(
   [
@@ -113,6 +131,7 @@ const CURRENT_ENV = envelope(
     { id: 'a', label: 'Offshore', win: 0.45 },
   ],
   'high',
+  N,
 );
 
 const PRIOR_LEADER = 'Offshore';
@@ -131,8 +150,8 @@ function ask(prior: VerdictShape, current: VerdictShape, turn = true) {
     message: 'What changed?',
     // Newest-first, per the loader convention the pair selector relies on.
     priorFacts: [
-      runFact(CURRENT_ENV, current, '2026-06-07T00:00:00.000Z'),
-      runFact(PRIOR_ENV, prior, '2026-06-06T00:00:00.000Z'),
+      runFact(CURRENT_ENV, current, '2026-06-07T00:00:00.000Z', 'h-current'),
+      runFact(PRIOR_ENV, prior, '2026-06-06T00:00:00.000Z', 'h-prior'),
     ],
     freshness: 'fresh',
     mayNameLeadingOption: turn,

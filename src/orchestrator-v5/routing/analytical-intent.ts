@@ -208,7 +208,95 @@ export type AnalyticalIntentClass =
 interface IntentPattern {
   readonly cls: AnalyticalIntentClass;
   readonly pattern: RegExp;
+  /**
+   * When true, this entry does NOT claim a message that carries a concrete
+   * graph-mutation signal OUTSIDE its own matched span — the match is skipped
+   * and classification continues down the list.
+   *
+   * ⭐ WHY THIS EXISTS. `classifyAnalyticalIntent` is read by two different
+   * questions under one name: "may this turn reach an analytical answer?" AND
+   * (via `isAnalyticalQuestion` → route-v2.ts:4840) "must this turn NOT
+   * dispatch an edit?". For a COMPOUND message — a comparison question plus a
+   * real edit instruction — those two answers must differ. Without this flag a
+   * compound message loses the edit lane to the suppressor while
+   * `tryRunComparisonGate` refuses it anyway on `hasMutationSignal`
+   * (run-comparison-gate.ts:624, tested BEFORE the classifier admission at
+   * :630) — so the user's edit is dropped and they get SILENCE. That is
+   * verbatim the outcome this fix's own rationale gives as the reason for
+   * rejecting the negative-regex alternative; trading a wrong edit for silence
+   * is the same bad trade in the other direction.
+   *
+   * The mechanism is this module's OWN established idiom — the
+   * strip-and-recheck `hasIndependentMutationSignal` already uses for the
+   * `what_would_flip` collision, applied to the matched span instead of to a
+   * fixed pattern list.
+   *
+   * ⚠ SCOPE, stated precisely: this flag is set on ONE entry — the transitive
+   * `what_changed` pattern THIS change adds. It is deliberately NOT set on the
+   * pre-existing intransitive sibling, which has the identical property at base
+   * and is left exactly as it was. That restraint buys a structural invariant
+   * worth more than the extra coverage: when the flag fires, the classifier
+   * returns EXACTLY what it returned before this change, because the only
+   * pattern this change introduced has yielded and every other entry is
+   * untouched. Pinned by `classification is never worse than base` in
+   * `analytical-intent-what-changed.test.ts`.
+   */
+  readonly yieldsToOutsideMutation?: boolean;
 }
+
+/**
+ * The outcome nouns the `what_changed` `how …` patterns anchor on.
+ *
+ * Extracted so the INTRANSITIVE ("how has the analysis changed?") and
+ * TRANSITIVE ("how has the update changed the analysis?") voices of the same
+ * question share ONE alternation instead of two hand-maintained copies — the
+ * "shared grammar must be imported, never re-stated" rule this module's
+ * siblings already follow (analytical-question-guard.ts:21-23).
+ *
+ * ⚠ Deliberately NOT reused by the `why (did|has|have) … chang` pattern above,
+ * which carries an extra `numbers?` limb. That is a REAL difference in that
+ * pattern's coverage, not drift, and widening it is a separate change with its
+ * own evidence — folding it in here would be an unmeasured behaviour change
+ * riding a refactor.
+ */
+const WHAT_CHANGED_SUBJECT_NOUNS = String.raw`(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option)`;
+
+/**
+ * The SUBJECT slot of the TRANSITIVE `what_changed` voice — the thing that did
+ * the changing in "how has THE UPDATE changed the analysis?".
+ *
+ * ⭐ THIS ANCHOR IS THE DELIBERATE ANSWER TO A CLASS QUESTION, not a tightening
+ * for its own sake. `what_changed` means "compare the last two RUNS", and
+ * `tryRunComparisonGate` answers it with a two-run `RunDelta`. A question whose
+ * subject is a DOMAIN DRIVER — "how did the price rise affect the outcome?",
+ * "how has competition impacted the analysis?" — is not that question at all:
+ * it is driver attribution, which `what_drove` owns and which the comparison
+ * gate cannot answer. Left unanchored, the verb alternation below (which mixes
+ * the DELTA verbs `chang|shift|alter` with the CAUSAL verbs `affect|impact`)
+ * hands those questions to the gate, and on a single-run session the gate
+ * answers "there is only one analysis run so far, so there is nothing to
+ * compare yet" — a confident, wrongly-framed answer to a question nobody asked.
+ *
+ * So the subject is anchored on a CHANGE EVENT (an update / edit / revision /
+ * re-run, or an anaphoric `this|that|it` pointing at one). That keeps the
+ * causal verbs usable in their delta sense ("how has the change AFFECTED the
+ * results?") while a domain-driver subject falls straight through to the
+ * `what_drove` and `explain` limbs below, exactly as it did before this change.
+ */
+const WHAT_CHANGED_TRANSITIVE_SUBJECT = String.raw`(?:(?:(?:the|this|that|these|those|my|our|your|their|last|latest|recent)\s+)*(?:updates?|edits?|changes?|revisions?|adjustments?|tweaks?|re-?runs?|new\s+(?:value|number|version|input|assumption)s?|(?:latest|last)\s+(?:run|version)s?)|this|that|it)`;
+
+/**
+ * The gap between the transitive subject and its verb.
+ *
+ * ⚠ `.`, `?` and `!` are not the only clause boundaries a user types. The
+ * original gap excluded only those three, so it could stitch the opening of one
+ * clause to the verb of the NEXT one across a `;`, a `,`, a `:` or a dash —
+ * which is how "How has this gone; change the ranking to put B first" was read
+ * as a comparison question and lost its edit. `,` is in the set because the
+ * compound "question, and <edit>" shape is exactly the case this must not span.
+ * Narrow window (adverbs only: "how has the update ACTUALLY changed …").
+ */
+const CLAUSE_LOCAL_GAP = String.raw`[^.?!;,:—–\n]{0,24}?`;
 
 const INTENT_PATTERNS: readonly IntentPattern[] = [
   // ── rerun_question (most specific — anchored on rerun/stale vocabulary) ─
@@ -293,7 +381,66 @@ const INTENT_PATTERNS: readonly IntentPattern[] = [
   // otherwise the state-query guard answers the graph-edit sense.
   { cls: 'what_changed', pattern: /\bwhat(?:'s|\s+(?:has|just))?\s+changed\b/i },
   { cls: 'what_changed', pattern: /\bwhy\s+(?:did|has|have)\s+(?:the\s+)?(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option|numbers?)\s+chang/i },
-  { cls: 'what_changed', pattern: /\bhow\s+(?:did|has|have)\s+(?:the\s+)?(?:result|results|outcome|outcomes|analysis|ranking|leading\s+option)\s+chang/i },
+  // INTRANSITIVE voice — the outcome noun is the SUBJECT of the change verb
+  // ("how has THE ANALYSIS changed?"). Byte-identical to the literal it
+  // replaced; `WHAT_CHANGED_SUBJECT_NOUNS` is the extracted alternation and
+  // `analytical-intent-what-changed.test.ts` pins `.source` against the
+  // original literal so this stays a pure move.
+  {
+    cls: 'what_changed',
+    pattern: new RegExp(
+      String.raw`\bhow\s+(?:did|has|have)\s+(?:the\s+)?${WHAT_CHANGED_SUBJECT_NOUNS}\s+chang`,
+      'i',
+    ),
+  },
+  // ⭐ TRANSITIVE voice of the SAME question — the outcome noun is the OBJECT
+  // ("how has THE UPDATE changed THE ANALYSIS?"). This is the founder's actual
+  // post-rerun EXPLAIN sentence, and until now it classified `null`, which cost
+  // it BOTH halves of the loop's EXPLAIN step at once:
+  //
+  //   1. `isAnalyticalQuestion` (analytical-question-guard.ts, which delegates
+  //      here) returned false, so route-v2's `editVerbCandidate` conjunction
+  //      (route-v2.ts:5018) saw only a positive edit-verb hit — matched on the
+  //      NOUN "update" — and dispatched the EDIT lane. The product answered a
+  //      question as if it were an edit request, then reported no change.
+  //   2. `tryRunComparisonGate` (run-comparison-gate.ts:630) admits only
+  //      `what_changed`, so the one mechanism that can actually answer the
+  //      question — the two-run `RunDelta` comparison — declined it.
+  //
+  // Deliberately NOT fixed by adding "how has" to `EDIT_GRAPH_NEGATIVE_REGEX`:
+  // that list is a flat alternation of meta-question markers with no grammar,
+  // it is consumed by 14 modules, and a literal added there suppresses the
+  // misroute WITHOUT routing the turn anywhere useful — the founder would get
+  // silence instead of a wrong edit. Classifying at the canonical SSOT fixes
+  // the suppression and the destination with one predicate. (CEE #888 spent
+  // four rounds proving one-more-literal oscillates on this predicate family.)
+  //
+  // Anchored on THREE sides so it cannot reach an imperative edit:
+  //
+  //   LEFT   an interrogative `how` + a PAST/PERFECT auxiliary (an edit command
+  //          never opens that way). `how do/can/should I change …` is a HOW-TO
+  //          or advice question, carries no past auxiliary, and is out.
+  //   SUBJECT a CHANGE EVENT (`WHAT_CHANGED_TRANSITIVE_SUBJECT`) — this is what
+  //          keeps driver-attribution questions out of the comparison gate; see
+  //          that constant for the decision and its reasoning.
+  //   RIGHT  the same outcome-noun alternation as the intransitive sibling.
+  //
+  // The middle is a lazy, CLAUSE-local gap (`CLAUSE_LOCAL_GAP`) — narrower than
+  // the sentence-local idiom used elsewhere in this file, because a comma or a
+  // semicolon is exactly where a compound "question + edit" message turns.
+  //
+  // `yieldsToOutsideMutation` is the fourth anchor and the one that operates on
+  // the REST of the message: a compound message carrying a real edit clause
+  // keeps its edit lane instead of being silently suppressed into silence. See
+  // the flag's own docs on `IntentPattern`.
+  {
+    cls: 'what_changed',
+    yieldsToOutsideMutation: true,
+    pattern: new RegExp(
+      String.raw`\bhow\s+(?:has|have|did)\s+${WHAT_CHANGED_TRANSITIVE_SUBJECT}\b${CLAUSE_LOCAL_GAP}\b(?:chang|affect|shift|alter|impact)\w*\s+(?:the\s+|our\s+|this\s+|that\s+)?${WHAT_CHANGED_SUBJECT_NOUNS}\b`,
+      'i',
+    ),
+  },
   { cls: 'what_changed', pattern: /\bdid\s+(?:the\s+)?(?:result|outcome|ranking|leading\s+option|winner)\s+chang/i },
   { cls: 'what_changed', pattern: /\bwhat[''']?s\s+different\s+(?:now|in\s+(?:the\s+)?(?:result|results|outcome|analysis|ranking))\b/i },
 
@@ -379,9 +526,47 @@ export function classifyAnalyticalIntent(
   const trimmed = message.trim();
   if (trimmed.length === 0) return null;
   for (const entry of INTENT_PATTERNS) {
-    if (entry.pattern.test(trimmed)) return entry.cls;
+    // `.exec` rather than `.test` so a `yieldsToOutsideMutation` entry can see
+    // its own span. Every pattern in this table is non-global (asserted by
+    // `no INTENT_PATTERN carries a stateful flag` in the unit tests), so this
+    // is stateless and `.test`-equivalent for every other entry.
+    const match = entry.pattern.exec(trimmed);
+    if (match === null) continue;
+    if (
+      entry.yieldsToOutsideMutation === true &&
+      carriesMutationSignalOutsideMatch(trimmed, match)
+    ) {
+      continue;
+    }
+    return entry.cls;
   }
   return null;
+}
+
+/**
+ * Does the message carry a concrete graph-mutation signal in the text OUTSIDE
+ * the span this pattern matched?
+ *
+ * Blanks the matched span to spaces — preserving every offset, so the
+ * line-anchored mutation pattern (`/^\s*(?:set|add|remove|…)/im`) still sees
+ * the same line structure — and re-runs `hasMutationSignal` on the remainder.
+ *
+ * Blanking rather than deleting matters: it is what makes
+ * "How has the update changed the analysis? Add a risk node for supply delays"
+ * expose `Add a risk node` while
+ * "How has the update changed the analysis compared to before?" exposes
+ * nothing, even though the word "update" is itself in the mutation-verb
+ * alternation and would otherwise pair with a later "to <X>".
+ */
+function carriesMutationSignalOutsideMatch(
+  message: string,
+  match: RegExpExecArray,
+): boolean {
+  const blanked =
+    message.slice(0, match.index) +
+    ' '.repeat(match[0].length) +
+    message.slice(match.index + match[0].length);
+  return hasMutationSignal(blanked);
 }
 
 /**
@@ -885,6 +1070,90 @@ const EXPLICIT_ANALYSIS_REQUEST_PATTERNS: readonly RegExp[] = [
   // Object-less form, for the verbs with no nominal homograph:
   // "Analyse.", "Analyse options", "Simulate it", "Re-analyse."
   new RegExp(String.raw`\b${OBJECTLESS_ANALYSIS_VERB_SOURCE}\b`, 'i'),
+  // ⭐ BARE-IMPERATIVE `rerun` — ANCHORED TO THE WHOLE MESSAGE.
+  //
+  // WITNESS, not a hypothetical: founder journey on deployed staging (CEE
+  // `1af54f6c`), 2026-09-05T16:53Z, turn 6 of eleven. The user typed exactly
+  // `Rerun.` and the gate demoted it, so the product answered "I did not read
+  // that as a request to run one… Say \"run the analysis\"" and no analysis
+  // ran (`computed_at` byte-identical across turns 3-11). The single most
+  // natural word for the action, answered by teaching the user our vocabulary.
+  //
+  // WHY IT MISSED. `ANALYSIS_REQUEST_VERB_SOURCE` requires an object, for the
+  // good reason given above it. A message that is NOTHING BUT the verb has no
+  // object to give, so it fell through.
+  //
+  // ⚠ WHY THIS IS NOT A WEAKENING OF THE OBJECT RULE, and the argument is
+  // MEASURED at this tip rather than assumed. The homograph that rule is
+  // defended for — "Rerun analysis showed a different leader." — ALREADY reads
+  // TRUE here, because the determiner is OPTIONAL in
+  // `ANALYSIS_REQUEST_OBJECT_SOURCE`. The exclusion the ⚠ note above claims is
+  // not in force in THIS predicate (it is in force in the sibling
+  // `IMPERATIVE_RERUN_PATTERNS`, which does require the determiner — and which
+  // this entry does not touch). So the object requirement here is not buying
+  // the protection it is credited with, and an anchored alternation that can
+  // match ONLY a message consisting of the bare verb cannot reduce it further:
+  // it admits no noun phrase, because a noun phrase has something either side.
+  // Both facts are pinned in `analysis-election-gate.test.ts` § TWIN E, so
+  // this paragraph REDs if it ever stops being true.
+  //
+  // ⚠ ANCHORED, DELIBERATELY — AND THERE ARE THREE THINGS DOING IT, NOT TWO:
+  // `^`, `$`, AND THE ABSENCE OF THE `m` FLAG. All three are pinned by named
+  // tests in `analysis-election-gate.test.ts` § TWIN E; none of them is a
+  // claim this comment is making on its own behalf.
+  //
+  //   `^` and `$` are what keep this from degrading into a bare
+  //   `/\brerun\b/i`, which would admit every nominal reading in English — the
+  //   exact defect the sibling predicate shipped once and whose ⚠ note says
+  //   "never restore the `?`". Measured against this spec at this tip:
+  //   dropping `$` REDs 9 of its tests (the TWIN rows and the floor);
+  //   dropping `^` REDs exactly 1 — the known-dropped `toEqual` floor below,
+  //   where "Fine, rerun." and "OK. Rerun." flip to admitted. So `^` is
+  //   observable through that floor and nothing else in the file.
+  //
+  //   NO `m` FLAG — and this one was UNPINNED until the guard named
+  //   "the `m` flag is ABSENT and that is load-bearing" was added. Measured:
+  //   with `m` applied, all 82 of this spec's other tests still pass, so a
+  //   successor could have added it, or rewritten this pattern with it, and
+  //   nothing in this file would have gone red. What `m` does is NOT "make it
+  //   a bare `\brerun\b`" — it turns `^`/`$` into LINE anchors, degrading the
+  //   property from "the message IS the verb" to "SOME LINE of the message is
+  //   the verb", leaving the rest of the message unconstrained. Measured at
+  //   this tip with `/…/im`: "Rerun.\nWhat changed?" and
+  //   "Notes:\nrerun\nThe rerun was slow." both flip demoted → admitted — the
+  //   first would answer a question about a past run by recomputing over it,
+  //   the second is the nominal class the anchors exist to exclude. Both are
+  //   now pinned. The shared vetoes are NOT part of this protection and are
+  //   not credited with it: measured under `m`, "Don't rerun.\nRerun." and
+  //   "Should I rerun?\nRerun." still decline.
+  //
+  // Trailing `[.!]?` admits a full stop or an exclamation mark and NOT a
+  // question mark: "Rerun?" is a question about whether to, and the shared
+  // interrogative veto is not reached for it because there is no `do/should
+  // I/we`. Changing any of the three is a different predicate; do not.
+  //
+  // ⚠ SCOPE. This widens ADMISSION of an election the LLM router already made.
+  // It does NOT widen `looksLikeImperativeRerun`, the LLM-free DISPATCH
+  // predicate whose false positive destroys a computed result (trap 21 — the
+  // two answer different questions and have opposite safe directions).
+  // Asserted directly in TWIN E, over this exact eight-message set.
+  //
+  // ⚠ KNOWN-DROPPED — A SAMPLED FLOOR, NOT THE SET, and stated rather than
+  // papered over (trap 22f). Non-bare neighbours still decline: "Please
+  // rerun.", "Rerun, please.", "Rerun...", "Rerun and explain." — and, measured
+  // at this tip and NOT fixed here, "Run." and "Run!" (the same defect one word
+  // shorter, and the nearest neighbours of the founder's own turn), plus "Rerun
+  // please.", "Yes, rerun.", "Just rerun.", "Rerun now.", "Rerun again.",
+  // "Rerun!!" and "re run". All of them decline identically before and after
+  // this change, so none is a regression from it. That list is a SAMPLE of an
+  // open class, never a census of it: `analysis-election-gate.test.ts` pins six
+  // messages exactly — the four above plus "Fine, rerun." and "OK. Rerun." —
+  // and it does so over a nine-message candidate array, which makes it silent
+  // about any message it does not spell. Do not grow either list to track the
+  // class; that is the mirror trap 12 bans. Each drop costs one click on the
+  // offered chip. Adding a clause for any of them is the second round trap 22f
+  // bans — the exit is to ask the user, not to widen this again.
+  /^\s*re-?run\s*[.!]?\s*$/i,
 ];
 
 /**
@@ -943,8 +1212,13 @@ export function looksLikeExplicitAnalysisRequest(message: string): boolean {
  */
 const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
   // Imperative edit verb + abstract object: "Change something",
-  // "Update things", "Adjust this", "Modify the model", "Fix the graph".
-  /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|stuff|anything|this|that|it|the\s+(?:model|graph|decision|setup|analysis))\b/i,
+  // "Update things", "Modify the model", "Fix the graph".
+  //
+  // ⚠ `this` / `that` / `it` WERE IN THIS ALTERNATION AND HAVE BEEN MOVED OUT,
+  // to `ANAPHORIC_EDIT_PATTERNS` below. See that constant's header for why —
+  // the short version is that they are a different KIND of object and belong to
+  // a different question.
+  /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|stuff|anything|the\s+(?:model|graph|decision|setup|analysis))\b/i,
   // "Make/do a change/update/adjustment/edit".
   /\b(?:make|do)\s+(?:a|an|some)\s+(?:change|changes|update|updates|adjustment|adjustments|edit|edits|tweak|tweaks)\b/i,
   // Bare imperative edit verb alone, optionally with trailing
@@ -957,7 +1231,53 @@ const VAGUE_EDIT_PATTERNS: readonly RegExp[] = [
   // safe fallback rather than asking for a different factor.
   /^\s*(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s*\.?\s*$/i,
   // "Can you change/update/adjust …" without a concrete factor/value.
-  /\bcan\s+you\s+(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|this|that|it|the\s+(?:model|graph|decision))\b/i,
+  // Same anaphor removal as pattern 0 above.
+  /\bcan\s+you\s+(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:something|things?|the\s+(?:model|graph|decision))\b/i,
+];
+
+/**
+ * ⭐ ANAPHORIC EDIT — a DIFFERENT QUESTION FROM `VAGUE_EDIT_PATTERNS`, and the
+ * whole point of naming them apart.
+ *
+ * | predicate                 | the question it answers                        |
+ * |---------------------------|------------------------------------------------|
+ * | `looksLikeVagueEdit`      | *Did the user ask for an edit with NO target?* |
+ * | `looksLikeAnaphoricEdit`  | *Did the user ask for an edit whose target is  |
+ * |                           |  a REFERENT to be resolved?*                   |
+ *
+ * `it` / `this` / `that` used to sit in the same alternation as `something` /
+ * `stuff` / `anything`, so a pronoun was classified as **the absence of a
+ * target** rather than as a referent to resolve. Witnessed on deployed staging
+ * (CEE `1af54f6c`, 5 Sep 2026): the product asked *"What would you like the
+ * sales headcount investment set to: the low end of £80k, the high end of
+ * £120k, or a blended figure like £100k?"*, the user replied *"Can you update
+ * it with the correct range?"*, and the next turn answered *"I have not changed
+ * the model yet. Tell me what you want to change, and I will help apply it."*
+ * — a reset that asserts nothing and asks nothing, one turn after the product
+ * itself named the object.
+ *
+ * ⚠ DO NOT ALIGN THESE TWO PREDICATES' POSITIVE PATTERNS. Two questions under
+ * one name is this estate's signature defect; the fix is to name the concepts
+ * apart and let each answer its own question, never to reconcile their objects.
+ *
+ * ⚠ THE NEGATION GATE IS DELIBERATELY SHARED, and that is NOT the same thing.
+ * `NEGATED_EDIT_PATTERNS` answers *"is the user REFUSING an edit?"*, which is
+ * genuinely one question for both predicates — "Don't change it" is a refusal
+ * exactly as "Don't change anything" is. Sharing a genuinely-shared
+ * precondition is correct; sharing the OBJECT CLASS is what would be wrong.
+ *
+ * ⚠ THE VERB LIST HERE IS INTENTIONALLY IDENTICAL to `VAGUE_EDIT_PATTERNS`
+ * pattern 0's, because the split is about the OBJECT, never the verb. It is a
+ * hand-copied list, so it is a mirror — and mirrors in this repo must FAIL LOUD
+ * rather than drift silently. `analytical-intent.test.ts` derives both verb
+ * alternations from the two regexes' own sources and asserts they are equal, so
+ * extending one without the other REDs.
+ *
+ * `\bcan you <verb> it\b` needs no separate pattern: it contains `<verb> it`,
+ * which this pattern already matches.
+ */
+const ANAPHORIC_EDIT_PATTERNS: readonly RegExp[] = [
+  /\b(?:update|change|adjust|modify|fix|improve|edit|tweak|revise|amend|tune)\s+(?:this|that|it)\b/i,
 ];
 
 /**
@@ -1001,3 +1321,47 @@ export function looksLikeVagueEdit(message: string): boolean {
   }
   return false;
 }
+
+/**
+ * Does this message ask for an edit whose target is a REFERENT — `it`, `this`,
+ * `that` — rather than an absent target?
+ *
+ * See `ANAPHORIC_EDIT_PATTERNS` for why this is a separate predicate and why
+ * its negation gate is shared while its positive patterns are not.
+ *
+ * A `true` here is NOT a licence to guess. For an anaphoric edit WITHOUT a
+ * concrete mutation signal (`hasMutationSignal` false), the caller resolves the
+ * referent against the register and discloses whatever it binds; where the
+ * register yields nothing, or more than one candidate, the contract is to ASK.
+ * The one banned outcome is the reset this predicate exists to remove.
+ *
+ * ⚠ SCOPE. An anaphoric message that ALSO carries a value ("Can you update it
+ * to 100000?") is `true` here but is gated OUT of that branch by
+ * `hasMutationSignal`, so at this head it reaches none of the three outcomes
+ * and falls to `ambiguous` (`assistantText: null`). Pinned by name in
+ * `edit-graph-anaphoric-recovery.test.ts` (KNOWN NOT COVERED). Admitting it
+ * through the deterministic value path under the register precondition is
+ * spec §4.3 and lands in a separate PR.
+ */
+export function looksLikeAnaphoricEdit(message: string): boolean {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  // Shared precondition, not an aligned default: "Don't change it" is a refusal.
+  for (const re of NEGATED_EDIT_PATTERNS) {
+    if (re.test(trimmed)) return false;
+  }
+  for (const re of ANAPHORIC_EDIT_PATTERNS) {
+    if (re.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/**
+ * Test-only accessors for the derived mirror guard described on
+ * `ANAPHORIC_EDIT_PATTERNS`. Exported so the guard reads the REGEXES' OWN
+ * SOURCES rather than a third hand-written copy of the verb list.
+ */
+export const __predicateSourcesForGuard = Object.freeze({
+  vagueEditPattern0: VAGUE_EDIT_PATTERNS[0]!.source,
+  anaphoricEditPattern0: ANAPHORIC_EDIT_PATTERNS[0]!.source,
+});

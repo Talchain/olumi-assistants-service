@@ -213,6 +213,14 @@ export const TelemetryEvents = {
   // the turn). `configured` marks whether the option lands with effect values.
   // Content-free — never user text. See
   // src/orchestrator-v5/handlers/add-option-dispatch.ts.
+  //
+  // 2026-09-01 — the TEXT leg rides this SAME event rather than minting a
+  // second one: `origin` is 'text', and the focused proposer's every outcome
+  // is already named here (`fell_through:text_rejected` with `rejection_code`,
+  // `fell_through:text_unavailable` with `unavailable_reason`,
+  // `fell_through:text_clarify`, `fell_through:text_no_grounding`,
+  // `fell_through:text_no_budget`). One event, one place to read the whole
+  // add-option funnel — and no widening of this frozen registry.
   V5AddOptionTransaction: "v5.add_option_transaction",
 
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
@@ -2342,6 +2350,29 @@ export const TelemetryEvents = {
   // path produces it. The chip set + blocks are preserved so the
   // user retains a recovery affordance.
   V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
+
+  // ⭐ The product narrated its OWN PROCESS instead of answering — witnessed on
+  // a real user session (3 Sep 2026): a routing-call chain of thought and a
+  // routing verdict, both shipped verbatim as `assistant_text`, both 200/OK.
+  // Payload:
+  //   - request_id, scenario_id: string
+  //   - marker: string — the matched substring VERBATIM (not the regex
+  //     source), so a dashboard groups by readable phrase.
+  //   - remedy: 'sentences_removed' | 'block_replaced'.
+  //   - dispatch_path: 'turn_executor_finalise' | 'edit_graph_finalise' |
+  //     'chip_click_finalise' — which surface produced it.
+  //   - sentences_total, sentences_removed: number.
+  //   - narration_length: number — bytes routed to the `_reasoning`
+  //     disclosure channel rather than destroyed.
+  //
+  // ⚠ NOT AN ERROR RATE, AND THE TWO REMEDIES MEAN DIFFERENT THINGS.
+  // `sentences_removed` means the block carried a real answer and some
+  // narration around it. `block_replaced` means the whole reply was
+  // deliberation and the user would have read a monologue — that is the
+  // number that measures the defect this guard exists for, and it should
+  // fall as the prompt and the thinking channel improve. A rising
+  // `block_replaced` rate on one `dispatch_path` localises the producer.
+  V5EgressProcessNarrationDetected: "v5.egress.process_narration_detected",
 
   // F6 — the defaulted-value egress invariant fired on an analysis-bearing
   // conversational answer over a run whose engine reported defaulted values.

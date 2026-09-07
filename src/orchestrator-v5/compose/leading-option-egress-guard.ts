@@ -101,6 +101,7 @@
 
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
 
 /**
  * Copy that NAMES or PRESUMES a leading option.
@@ -552,6 +553,26 @@ export interface LeadingOptionEgressGuardOpts {
    */
   readonly mayNameLeadingOption: boolean;
   /**
+   * The `analysis_ready` payload this exit is shipping (`ctx.analysisReady`),
+   * read for ONE thing: `analysis_admission.permitted_analysis_mode`, via the
+   * shared {@link analysisReadyPermitsLeaderNaming}.
+   *
+   * ⭐ WHY THE ALARM READS IT TOO — AND IT IS NOT REDUNDANCY. The enforcer
+   * (`enforceLeadingOptionClaimsAtWire`) gained this same conjunct, so without
+   * it here the two rails would disagree about which turns are even IN SCOPE:
+   * the enforcer would edit prose on a below-`comparative_leader` turn while the
+   * alarm, still short-circuiting on the entitlement alone, reported nothing.
+   * That is the failure mode this module's own docstring exists to prevent — *"a
+   * degraded enforcer cannot make the estate go quiet"* — arriving from the
+   * other direction, as a NARROWER alarm rather than a broken one. The detector
+   * must never be narrower than the thing it is measuring.
+   *
+   * ⚠ OPTIONAL, AND FAILS OPEN. Absent or unparseable ⇒ the mode reader returns
+   * `true` and this member changes nothing, so every existing caller and every
+   * pre-`analysis_admission` producer keeps its current behaviour exactly.
+   */
+  readonly analysisReady?: unknown;
+  /**
    * ⚠ THERE IS DELIBERATELY NO `enforce` MEMBER HERE (ROADMAP 2.1264). It
    * existed, it gated no byte of the response, and its only effect was to
    * mislabel the telemetry — see the module docstring. If you are reaching for
@@ -898,7 +919,14 @@ export function guardLeadingOptionClaimsAtEgress(
   response: OlumiResponse,
   opts: LeadingOptionEgressGuardOpts,
 ): OlumiResponse {
-  if (opts.mayNameLeadingOption) return response;
+  // PERMIT-WINS, BOTH HALVES — mirrored from the enforcer so the alarm cannot go
+  // quiet on the population the enforcer now acts on. See `analysisReady` on the
+  // opts for why a narrower detector than enforcer is the defect to avoid, and
+  // `compose/leading-option-wire-enforcement.ts` for the two questions being
+  // conjoined. Fail-open on an absent admission, identically.
+  if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
+    return response;
+  }
 
   let hits: LeaderClaimHit[];
   try {
