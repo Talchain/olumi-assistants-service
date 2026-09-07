@@ -76,6 +76,7 @@ import {
   MAGNITUDE_SUFFIX_ANON_REQUIRED,
   magnitudeSuffixPattern,
   parseAmountDigits,
+  requiredMagnitudeSuffixPattern,
   resolveMagnitude,
 } from "./magnitude-alphabet.js";
 
@@ -223,8 +224,67 @@ export const RANGE_SEPARATOR_WORDS_ONLY = "(?:\\s+(?:to|and)\\s+)";
  * passed. A guard proven only through a caller that supplies its missing
  * precondition has not been proven.
  */
+export const RANGE_LOWER_BOUND_DEFERRAL_SEPARATOR = "\\s*[-–—]\\s*";
+
+/**
+ * ⭐⭐ THE DOMAIN THE GUARD DECLINES — SPELLED ONCE, BECAUSE A RANGE PATTERN
+ * HAS TO READ EXACTLY IT (ROADMAP 2.1131, PR #1327 behaviour seat, finding B).
+ *
+ * The guard below declines a point on the PROMISE that a range pattern will
+ * read the pair instead. MEASURED at `8ba54157` against base `f4c8f501`,
+ * through `extractFactors`: for a pair with **no currency symbol** no range
+ * pattern could keep that promise — `currencyRange` REQUIRES `[£$€]`,
+ * `genericRange` REQUIRES the literal word `between` — so nine strings in a
+ * 32-string corpus lost every factor they had at base, and two of them were
+ * CORRECT at base:
+ *
+ *     "Budget of 80k-120k for the hire."  f4c8f501 → Budget 80,000 (0.90)
+ *                                         8ba54157 → NOTHING
+ *     "roughly 800-900k users"            f4c8f501 → 800 (0.70)
+ *                                         8ba54157 → NOTHING
+ *
+ * ⚠ ONE PREDICATE, TWO OPPOSITE HARMS (trap 22b), and this constant is what
+ * stops them sharing a parameter by accident. Declining too widely DELETES a
+ * stated figure; reading too widely MINTS a band nobody wrote. The two are
+ * kept in agreement structurally: `PATTERNS.bareAmountRange` is built from
+ * this same tail, so the set of pairs the point patterns defer on and the set
+ * a range pattern reads cannot drift apart — which is the only fix that does
+ * not need someone to remember (CLAUDE.md trap 12).
+ */
+export const RANGE_LOWER_BOUND_DEFERRAL_TAIL =
+  `${RANGE_LOWER_BOUND_DEFERRAL_SEPARATOR}${AMOUNT_DIGITS}${MAGNITUDE_SUFFIX_ANON_REQUIRED}`;
+
 export const RANGE_LOWER_BOUND_ABSENT_GUARD =
-  `${AMOUNT_RUN_END}(?!\\s*[-–—]\\s*${AMOUNT_DIGITS}${MAGNITUDE_SUFFIX_ANON_REQUIRED})`;
+  `${AMOUNT_RUN_END}(?!${RANGE_LOWER_BOUND_DEFERRAL_TAIL})`;
+
+/**
+ * "THIS AMOUNT IS NOT ALREADY OWNED BY A CURRENCY-PREFIXED SIBLING, AND IS NOT
+ * THE TAIL OF A LONGER DIGIT RUN" — the start anchor for the bare range.
+ *
+ * ⚠ THE CURRENCY LIMB IS NOT COSMETIC. `currencyRange` reads "£80-120k" and
+ * emits one `£` range; without this lookbehind the bare pattern reads the very
+ * same digits and emits a SECOND, unitless range beside it — one written range
+ * arriving as two factors on two scales, which is the exact harm
+ * `RANGE_SEPARATOR_WORDS_ONLY` exists to prevent one pattern over.
+ *
+ * ⚠ AND THE DIGIT/SEPARATOR LIMB STOPS A PARTIAL-RUN START. With `/g` the
+ * engine advances one character at a time, so "£80,000-120k" would otherwise
+ * be matched from its "000", yielding a lower bound of **0**. `AMOUNT_RUN_END`
+ * closes the same hole at the other end of the run; this closes it at the
+ * front.
+ *
+ * ⚠⚠ THE SIGN LIMB WAS MEASURED, NOT ANTICIPATED, and it is the OVER-read this
+ * repair could have shipped. Without `+`/`-`/en dash/em dash in the class,
+ * "Growth of -5-10k users." matched from its **5** and published a
+ * 5,000..10,000 band for a stated lower bound of MINUS five — a sign silently
+ * dropped, which is the fabricated-magnitude direction (trap 22b), and it was
+ * invisible to base and head alike because both returned nothing there. A
+ * signed lower bound is genuinely ambiguous between "−5 to 10k" and a range
+ * whose separator is that same dash, so the doctrine applies unchanged: refuse
+ * rather than guess. Pinned in
+ * `factor-extraction/__tests__/bare-amount-range-deferral.test.ts`.
+ */
+export const BARE_AMOUNT_RANGE_START_GUARD = "(?<![£$€\\d.,+\\-–—])";
 
 /**
  * The full range grammar: two amounts, each with an OPTIONAL magnitude, joined
@@ -241,17 +301,34 @@ export function amountRangePattern(
   minMagGroup: string,
   maxGroup: string,
   maxMagGroup: string,
-  options?: { readonly currencyBeforeMax?: string; readonly separator?: string },
+  options?: {
+    readonly currencyBeforeMax?: string;
+    readonly separator?: string;
+    /**
+     * Require a magnitude on the UPPER bound (default: optional).
+     *
+     * ⚠ IT IS HOW A PATTERN WITH NO UNIT OF ITS OWN STAYS NARROW. A bare
+     * dash-joined pair with no magnitude on either side — "3-5 people",
+     * "2024-2025", "£50,000 - 3 months" — is not a range this module can read,
+     * and minting a band from it is the OVER-read direction, the worse of the
+     * two. Required, the pattern's domain is exactly
+     * `RANGE_LOWER_BOUND_DEFERRAL_TAIL`'s, which is the point.
+     */
+    readonly requireMaxMagnitude?: boolean;
+  },
 ): string {
   const maxPrefix = options?.currencyBeforeMax ?? "";
   const separator = options?.separator ?? RANGE_SEPARATOR;
+  const maxMagnitude = options?.requireMaxMagnitude === true
+    ? requiredMagnitudeSuffixPattern(maxMagGroup)
+    : magnitudeSuffixPattern(maxMagGroup);
   return (
     `(?<${minGroup}>${AMOUNT_DIGITS})` +
     magnitudeSuffixPattern(minMagGroup) +
     separator +
     maxPrefix +
     `(?<${maxGroup}>${AMOUNT_DIGITS})` +
-    magnitudeSuffixPattern(maxMagGroup)
+    maxMagnitude
   );
 }
 

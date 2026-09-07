@@ -292,6 +292,21 @@ const SEPARATOR_CORPUS: Readonly<Record<string, readonly SeparatorCase[]>> = {
       pristine: "NO FACTORS AT ALL — silent total loss",
     },
   ],
+  // ⚠ THE `pristine` FIELD HERE NAMES A DIFFERENT PAIR OF COMMITS FROM THE
+  // ENTRIES ABOVE, and says so rather than borrowing their `02f7a674` label:
+  // this pattern did not exist at `02f7a674`. Both figures below were
+  // MEASURED, not inferred.
+  bareAmountRange: [
+    {
+      brief: "Budget of 1,500-2,000k for the hire.",
+      span: "1,500-2,000k",
+      value: 1_750_000,
+      pristine:
+        "at f4c8f501: one factor, span `Budget of 1,500`, value 1,500 — the separator read " +
+        "correctly and the magnitude thrown away, 1,000x short. At 8ba54157: NO FACTORS AT " +
+        "ALL — the point pattern deferred and no range pattern could take it.",
+    },
+  ],
 };
 
 describe("ROADMAP 2.338 — a thousands separator loses nothing, in EVERY extractor", () => {

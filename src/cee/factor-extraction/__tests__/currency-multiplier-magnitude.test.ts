@@ -523,6 +523,15 @@ const CANONICAL_COVERAGE: Readonly<
   genericRange: [["Headcount between 50 and 70.", [
     ["Headcount", 60, null, "range", 0.8, null],
   ]]],
+  // ⭐ THE BARE PAIR — no currency symbol, no "between" (ROADMAP 2.1131, #1327
+  // finding B). At `8ba54157` this brief extracted NOTHING: three point
+  // patterns declined it on the promise of a range pattern, and every range
+  // pattern required either a `[£$€]` or the literal word "between". The
+  // COMPLETE array is pinned, so re-narrowing the pattern REDs here and
+  // widening it into a second factor REDs here too.
+  bareAmountRange: [["Budget of 80k-120k for the hire.", [
+    ["Budget", 100_000, null, "range", 0.8, null],
+  ]]],
   goalTargetWithBaseline: [["Our target is 800 customers, currently at 500.", [
     ["Target", 800, null, "explicit", 0.95, 500],
   ]]],
