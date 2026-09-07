@@ -134,7 +134,58 @@ function computeNormalisationCap(rawValue: number): number {
   if (rawValue <= 0) return 1;
   // Round up to next order of magnitude
   const orderOfMagnitude = Math.pow(10, Math.ceil(Math.log10(rawValue)));
-  return orderOfMagnitude;
+  // ⭐ THE CAP MUST LEAVE HEADROOM, AND ON A ROUND NUMBER IT DID NOT
+  // (ROADMAP 2.1131). `Math.ceil(log10(100000))` is 5 exactly, so a factor
+  // stated at £100,000 — a round number, which is how people state budgets —
+  // received `cap: 100000`, normalised to exactly **1.0**, and sat on its own
+  // ceiling: every later edge of that value is `value_exceeds_cap` and the
+  // user is told to extend a scale the extraction had already pinned them to.
+  // That is the 3 Sep failure's second half. A cap equal to the value is not a
+  // scale, it is a wall at the only point on it.
+  //
+  // ⚠ THE FIX IS DELIBERATELY THE SMALLEST ONE: an exact power of ten goes ONE
+  // rung up, and every other value keeps the cap it had. Widening the ladder
+  // generally would move live normalised values for every factor in the estate
+  // and change ISL's inputs wholesale; this moves only the class that had zero
+  // headroom, where any change is an improvement in the same direction.
+  return orderOfMagnitude === rawValue ? orderOfMagnitude * 10 : orderOfMagnitude;
+}
+
+/**
+ * The cap for an extracted factor, and the ONE place a RANGE's scale is
+ * decided (ROADMAP 2.1131).
+ *
+ * ⚠⚠ NEVER DERIVE A SCALE FROM THE POINT WHEN THE USER STATED A RANGE. The
+ * enricher normalises against `computeNormalisationCap(factor.value)`, and for
+ * a range `factor.value` is the MIDPOINT — so "£80k-120k" would have been
+ * scaled against 100,000 and the user's own upper bound, £120,000, would fall
+ * OUTSIDE the factor's own stated range. The scale has to cover what the user
+ * wrote, not the point this service picked out of it.
+ *
+ * ⚠ AND WHY THIS IS NOT MERELY THE 3 SEP BUG'S SYMPTOM (trap 23). Fixing the
+ * magnitude alone makes THAT brief work and leaves this alive for every other
+ * range: the cap would still be derived from a number the user never typed.
+ * The extraction defect and the scale defect are two defects; closing one does
+ * not close the other, and the corpus asserts them separately.
+ *
+ * ⚠ WHAT THIS DOES **NOT** CLOSE, stated so nobody reads it as more than it is.
+ * An unconfirmed POINT extraction still mints an enforced cap: the 3 Sep factor
+ * carried `uncertainty_drivers: ["Extracted from brief — confirm value"]` and
+ * its cap was enforced against the user's correction anyway. Making an
+ * unconfirmed extraction's cap advisory rather than enforced is a change at
+ * `orchestrator-v5/tools/handlers/d1-shared/evaluate-factor-value-proposal.ts`
+ * §6 and its three call sites — a different seam, owned elsewhere this wave.
+ * This lane stops at the boundary and names it (ROADMAP 2.1132).
+ */
+function computeExtractedFactorCap(factor: {
+  readonly value: number;
+  readonly rangeMax?: number;
+}): number {
+  const ceiling =
+    typeof factor.rangeMax === "number" && Number.isFinite(factor.rangeMax)
+      ? Math.max(factor.rangeMax, factor.value)
+      : factor.value;
+  return computeNormalisationCap(ceiling);
 }
 
 /**
@@ -1148,7 +1199,7 @@ export async function enrichGraphWithFactorsAsync(
 
           if (factor.unit !== "%" && factor.value > 1) {
             // Large absolute value - normalise using cap
-            cap = computeNormalisationCap(factor.value);
+            cap = computeExtractedFactorCap(factor);
             rawValue = factor.value;
             normalizedValue = factor.value / cap;
           }
@@ -1234,7 +1285,7 @@ export async function enrichGraphWithFactorsAsync(
 
     if (factor.unit !== "%" && factor.value > 1) {
       // Large absolute value - normalise using cap
-      cap = computeNormalisationCap(factor.value);
+      cap = computeExtractedFactorCap(factor);
       rawValue = factor.value;
       normalizedValue = factor.value / cap;
 
