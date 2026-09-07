@@ -21,6 +21,7 @@ import {
 } from '../../compose/forbidden-user-facing-phrases.js';
 import { buildAnalysisReadyPayload } from '../../../cee/transforms/analysis-ready.js';
 import { renderDirectionClarifications } from '../../../cee/compound-goal/direction-gate.js';
+import { UNAUTHORED_DECISION_LABEL } from '../../../cee/draft/records/objective-label.js';
 import type { GraphV3T, DraftCoachingWideningLog } from '../../../orchestrator/types.js';
 import type { AnalysisReadyPayloadT } from '../../../schemas/analysis-ready.js';
 
@@ -2032,7 +2033,7 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
  * the pin below is what stops that distinction rotting.
  */
 describe('provisional-decision framing (open brief)', () => {
-  const DECISION_UNAUTHORED = { id: 'd1', kind: 'decision' as const, label: 'Decision' };
+  const DECISION_UNAUTHORED = { id: 'd1', kind: 'decision' as const, label: UNAUTHORED_DECISION_LABEL };
   const DECISION_AUTHORED = {
     id: 'd1',
     kind: 'decision' as const,
@@ -2053,7 +2054,7 @@ describe('provisional-decision framing (open brief)', () => {
     const decisionRecord = (authored: boolean) => ({
       id: 'dec1',
       kind: 'decision',
-      label: authored ? 'Build our own fleet or partner with couriers' : 'Decision',
+      label: authored ? 'Build our own fleet or partner with couriers' : UNAUTHORED_DECISION_LABEL,
       provenance: {
         provenance_class: 'projector_structural',
         source_quote: 'structural',
@@ -2203,7 +2204,7 @@ describe('provisional-decision framing (open brief)', () => {
     expect(authored.authored).toBe(true);
 
     expect(declined.authored).toBe(false);
-    expect(declined.label).toBe('Decision');
+    expect(declined.label).toBe(UNAUTHORED_DECISION_LABEL);
   });
 
   /**
@@ -2314,7 +2315,7 @@ describe('provisional-decision framing (open brief)', () => {
     // (c) The caught members are caught for the producer's actual reason — the
     // placeholder literal this builder's gate reads — not incidentally.
     for (const d of derived.filter((x) => !x.authored)) {
-      expect(d.label, `${d.name}: expected the placeholder`).toBe('Decision');
+      expect(d.label, `${d.name}: expected the placeholder`).toBe(UNAUTHORED_DECISION_LABEL);
     }
   });
 
@@ -2468,10 +2469,10 @@ describe('provisional-decision framing (open brief)', () => {
    * Its discriminating twin is the "unflagged decision with a REAL label"
    * control above, which the OTHER conjunct decides.
    */
-  it('PIN: an authored decision is not hedged even when its label reads "Decision"', () => {
+  it('PIN: an authored decision is not hedged even when its label reads as the placeholder', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision', label_authored: true },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL, label_authored: true },
         GOAL_NODE,
         OPTION_A,
         OPTION_B,
@@ -2617,7 +2618,7 @@ describe('the provisional opener claims only what the product did', () => {
   it('the provisional opener names what the builder did, and invites correction', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision' },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
         OPTION_A,
         OPTION_B,
         OPTION_C,
@@ -2634,7 +2635,7 @@ describe('the provisional opener claims only what the product did', () => {
   it('the provisional opener quotes a whole goal when one exists, and still invites correction', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision' },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
         { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Cut delivery cost per parcel' },
         OPTION_A,
         OPTION_B,
@@ -2703,7 +2704,7 @@ describe('every draft says the model is one of several the system could build', 
 
   const authoredGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
   const provisionalGraph = makeGraph([
-    { id: 'd1', kind: 'decision', label: 'Decision' },
+    { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
     OPTION_A,
     OPTION_B,
     OPTION_C,
@@ -2829,7 +2830,7 @@ describe('every draft says the model is one of several the system could build', 
   it('the 140-word narrative budget still holds with the note in it', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision' },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
         GOAL_NODE,
         OPTION_A,
         OPTION_B,

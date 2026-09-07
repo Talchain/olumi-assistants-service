@@ -268,6 +268,26 @@ export const M2_REVIEW_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("CEE_M2_REVIEW_TIMEOUT_MS", 25_000),
 );
 
+/**
+ * Draft-quality semantic-coverage judge timeout (default: 12s, clamped 5s-5m).
+ *
+ * SIZED AGAINST WHAT IT BLOCKS, not against what a judge could take. Unlike
+ * `validate_graph` (10-28s, parked behind the coaching pass so the user never
+ * waits on it), this call is SYNCHRONOUS in the redraw decision: every
+ * millisecond here is a millisecond the user waits and a millisecond removed
+ * from the window a redraw would need. 12s is generous for a fast non-reasoning
+ * model returning a two-field JSON verdict; a call that exceeds it fails OPEN
+ * and the draft ships unjudged, which is the correct trade — a quality pass
+ * must never be able to break drafting.
+ *
+ * The judge ALSO refuses to start when `remainingRequestBudgetMs(elapsed)`
+ * cannot absorb this plus post-call headroom, so a slow attempt 1 costs nothing
+ * here rather than eating the budget a redraw would need.
+ */
+export const DRAFT_QUALITY_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("CEE_DRAFT_QUALITY_TIMEOUT_MS", 12_000),
+);
+
 /** Clarify-brief LLM call timeout (default: 10s, clamped 5s–5m) */
 export const CLARIFY_BRIEF_TIMEOUT_MS = clampTimeout(
   parseTimeoutEnv("CLARIFY_BRIEF_TIMEOUT_MS", 10_000),

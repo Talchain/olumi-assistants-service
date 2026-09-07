@@ -1995,42 +1995,185 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // in the run_analysis handler.
 const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?`;
 
+/** One disclosure family admitted on the locked-template (withheld) branch. */
+export interface TemplateSuffixDisclosureGrammar {
+  /**
+   * The exported symbol name in `src/orchestrator-v5/coaching/`. Not decoration:
+   * the completeness guard resolves this name back to its own module's export
+   * and asserts it IS `source`, so a mislabelled entry fails loudly instead of
+   * quietly registering the wrong grammar.
+   */
+  readonly name: string;
+  /** That module's published grammar source. */
+  readonly source: string;
+}
+
+/**
+ * ⭐ THE CANONICAL TEMPLATE-SUFFIX DISCLOSURE REGISTRY — one ordered list, two
+ * consumers.
+ *
+ * Consumer 1 is {@link TEMPLATE_SUFFIX_ONLY_REGEX} below, which decides what the
+ * WITHHELD egress path admits. Consumer 2 is the `run_analysis` confirmation
+ * SALVAGE in `routing/validation-registry.ts`, which rescues disclosure
+ * sentences onto the locked fallback when a composed summary is rejected, so
+ * "a run may never render undisclosed" survives the rejection.
+ *
+ * Those two were hand-listed independently, and they drifted: the salvage
+ * extracted TWO families while this branch admitted FOUR, so a rejected summary
+ * carrying the intake-option disclosure lost the sentence that says the set
+ * being ranked is not the set the user described, and one carrying the
+ * unset-option-effect disclosure lost the sentence that says the compared
+ * options had no effects set. CLAUDE.md trap 12 — a list a human must remember
+ * to sync WILL drift, and the drift reads as green. Deriving both consumers from
+ * here makes that particular drift impossible.
+ *
+ * ⚠ THE DRIFT GREW WHILE THIS PR SAT UNMERGED, which is the argument for the
+ * derivation rather than a footnote to it: the branch admitted THREE families
+ * when the registry was written and FOUR by the time it rebased (#1179 landed
+ * the unset-option-effect family on 28 Aug). The salvage stayed at TWO
+ * throughout, silently, and the suite stayed green. A hand-maintained mirror
+ * does not merely drift — it drifts FASTER than the reviews that check it.
+ *
+ * ⚠ IT DOES NOT MAKE THE LIST COMPLETE (trap 12d). Deriving a guard from a list
+ * moves the risk; it does not remove it. A family that never joins THIS array is
+ * still silently missed — the identical failure one level up. That is what
+ * {@link TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS} and the union assertion in
+ * `__tests__/template-suffix-disclosure-registry-completeness.test.ts` exist for,
+ * and they are NOT redundant with this derivation: the derivation stops
+ * consumers drifting from the list, the union assertion is what notices the list
+ * is short.
+ *
+ * ORDER IS SEMANTIC. It mirrors the run_analysis handler's own append order
+ * (`run-analysis.ts`: `${headline ?? template}${scaffoldDisclosure}${
+ * constraintGapDisclosure}${intakeDisclosure}…`), so a salvaged combination is a
+ * shape this regex recognises.
+ */
+export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclosureGrammar[] = [
+  { name: 'SCAFFOLD_ANY_DISCLOSURE_RE_SRC', source: SCAFFOLD_ANY_DISCLOSURE_RE_SRC },
+  { name: 'CONSTRAINT_GAP_DISCLOSURE_RE_SRC', source: CONSTRAINT_GAP_DISCLOSURE_RE_SRC },
+  { name: 'INTAKE_OPTION_DISCLOSURE_RE_SRC', source: INTAKE_OPTION_DISCLOSURE_RE_SRC },
+  // ⭐ THE UNSET-OPTION-EFFECT TAIL *IS* REGISTERED, and the contrast with
+  // OBJECTIVE_CONTRADICTION_RE_SRC in the exclusion list below is the whole
+  // reason both are spelled out. (Reasoning preserved verbatim from #1179,
+  // which wrote it against the regex literal this array replaced.)
+  //
+  // The test for this branch is not "does the tail name an option?" but "does
+  // the tail make a claim the withhold just denied?". The objective-contradiction
+  // tail asserts a LEADER, so `template + tail` is a composition the handler can
+  // never emit. This one asserts only that a value the user did not set was not
+  // set — true on a withheld turn, and the withheld turn is exactly where a user
+  // who ran past unset option effects most needs to be told.
+  //
+  // ⚠ REGISTERING IT HERE IS ALSO WHAT KEEPS IT SALVAGED. The rebase that
+  // brought #1179 and this derivation together conflicted on exactly this line,
+  // and resolving it by taking the derived expression alone would have
+  // un-registered this family from the withheld branch. Measured, so that the
+  // next reader inherits the scope and not a generalisation of it:
+  // `unset-option-effect-egress.test.ts` DOES catch that (it pins
+  // `template + disclosure` as admissible), but NOTHING caught the other half —
+  // break the SALVAGE for this family alone and all of #1179's specs, the
+  // completeness guard and the sibling salvage spec stay green.
+  // `unset-option-effect-salvage-registration.test.ts` closes that half and
+  // names this entry as the cause, because the completeness guard's union
+  // assertion is bookkeeping and is satisfied by moving this entry to the
+  // exclusion list — green, and wrong.
+  {
+    name: 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC',
+    source: UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
+  },
+];
+
+/** A `*_RE_SRC` grammar that is deliberately NOT on the template branch. */
+export interface TemplateSuffixDisclosureExclusion {
+  readonly name: string;
+  /** Why. An exclusion without a reason is an omission wearing a badge. */
+  readonly reason: string;
+}
+
+/**
+ * ⭐ THE EXPLICIT, REASONED EXCLUSION LIST — the other half of the completeness
+ * check.
+ *
+ * The guard asserts that EVERY `*_RE_SRC` exported from
+ * `src/orchestrator-v5/coaching/` is either in
+ * {@link TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS} or here. A new disclosure family
+ * that lands in neither REDs the suite — which is precisely the alarm that was
+ * missing when three families silently missed the salvage.
+ */
+export const TEMPLATE_SUFFIX_DISCLOSURE_EXCLUSIONS: readonly TemplateSuffixDisclosureExclusion[] = [
+  {
+    name: 'OBJECTIVE_CONTRADICTION_RE_SRC',
+    reason:
+      // ⚠⚠ THE OBJECTIVE-CONTRADICTION TAIL IS DELIBERATELY *NOT* REGISTERED,
+      // and adding it was a real defect caught by independent review.
+      //
+      // This branch is the TEMPLATE path — the shape a turn takes when NO
+      // headline was composed, i.e. when the analysis is not entitled to name a
+      // leading option. The tail NAMES OPTIONS and only ships when `headline !==
+      // null` (run-analysis.ts passes exactly that as the leader permission), so
+      // `template + tail` is a composition the handler can never emit.
+      // Registering it bought nothing and cost the one thing this branch exists
+      // to protect: it made the WITHHELD egress path ADMIT a leader-naming tail,
+      // reopening the G-CEE-1 class at the allowlist itself.
+      //
+      // The same reasoning excludes it from the SALVAGE, whose output is the
+      // locked fallback — a withheld shape. Appending a leader-naming tail there
+      // would assert the very leader the withhold denied.
+      //
+      // The tail belongs ONLY in TAIL_PATTERN, which is reached via a headline.
+      // `run-analysis-objective-contradiction-wiring.test.ts` pins `template +
+      // tail` as REJECTED, and
+      // `validation-registry-disclosure-salvage.test.ts` pins that the salvage
+      // never emits it, so this cannot be "helpfully" re-added in either place.
+      'NAMES A LEADING OPTION and ships only when `headline !== null`. The template ' +
+      'branch and the salvage are both WITHHELD shapes, so admitting it there would ' +
+      'assert a leader the withhold denied — the G-CEE-1 defect class. It belongs in ' +
+      'TAIL_PATTERN only, which is reached via a headline.',
+  },
+  // The five scaffold sub-grammars below are not separate families: each is
+  // composed INTO SCAFFOLD_ANY_DISCLOSURE_RE_SRC, which IS registered above, so
+  // registering them individually would double-admit the same sentences.
+  {
+    name: 'SCAFFOLD_DISCLOSURE_RE_SRC',
+    reason: 'Composed into the registered SCAFFOLD_ANY_DISCLOSURE_RE_SRC union.',
+  },
+  {
+    name: 'SCAFFOLD_BASELINE_HOLD_RE_SRC',
+    reason: 'Composed into the registered SCAFFOLD_ANY_DISCLOSURE_RE_SRC union.',
+  },
+  {
+    name: 'SCAFFOLD_OMITTED_RE_SRC',
+    reason:
+      'Composed into SCAFFOLD_OMITTED_ANY_RE_SRC, itself composed into the registered ' +
+      'SCAFFOLD_ANY_DISCLOSURE_RE_SRC union.',
+  },
+  {
+    name: 'SCAFFOLD_DEDUP_OMITTED_RE_SRC',
+    reason:
+      'Composed into SCAFFOLD_OMITTED_ANY_RE_SRC, itself composed into the registered ' +
+      'SCAFFOLD_ANY_DISCLOSURE_RE_SRC union.',
+  },
+  {
+    name: 'SCAFFOLD_OMITTED_ANY_RE_SRC',
+    reason: 'Composed into the registered SCAFFOLD_ANY_DISCLOSURE_RE_SRC union.',
+  },
+];
+
 /**
  * Anchored form of the DISCLOSURE grammars, for the locked-template branch of
  * {@link isAllowedRunAnalysisAssistantText}: a template-shaped text may carry
- * the scaffold disclosure, the T1 constraint-gap disclosure, or both in the
- * handler's append order — and nothing else.
+ * any of the registered disclosure suffixes, in the handler's append order —
+ * and nothing else.
  *
- * Both slots are optional here, but the caller only reaches this regex when the
+ * DERIVED from {@link TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS}; see the exclusion
+ * list above for what is deliberately absent and why.
+ *
+ * Every slot is optional here, but the caller only reaches this regex when the
  * remainder after the template literal is non-empty (`text.length >
  * template.length`), so an empty match cannot admit a bare template twice.
  */
 const TEMPLATE_SUFFIX_ONLY_REGEX = new RegExp(
-  // ⚠⚠ THE OBJECTIVE-CONTRADICTION TAIL IS DELIBERATELY *NOT* REGISTERED HERE,
-  // and adding it was a real defect caught by independent review.
-  //
-  // This branch is the TEMPLATE path — the shape a turn takes when NO headline
-  // was composed, i.e. when the analysis is not entitled to name a leading
-  // option. The objective-contradiction tail NAMES OPTIONS and only ships when
-  // `headline !== null`, so `template + tail` is a composition the handler can
-  // never emit. Registering it bought nothing and cost the one thing this
-  // branch exists to protect: it made the WITHHELD egress path ADMIT a
-  // leader-naming tail, contradicting the doctrine stated a few lines below and
-  // reopening the G-CEE-1 class at the allowlist itself.
-  //
-  // The tail belongs ONLY in TAIL_PATTERN, which is reached via a headline.
-  // `run-analysis-objective-contradiction-wiring.test.ts` pins `template + tail`
-  // as REJECTED so this cannot be "helpfully" re-added.
-  //
-  // ⭐ THE UNSET-OPTION-EFFECT TAIL *IS* REGISTERED HERE, and the contrast with
-  // the paragraph above is the whole reason both are spelled out. The test for
-  // this branch is not "does the tail name an option?" but "does the tail make
-  // a claim the withhold just denied?". The objective-contradiction tail asserts
-  // a LEADER, so `template + tail` is a composition the handler can never emit.
-  // This one asserts only that a value the user did not set was not set — true
-  // on a withheld turn, and the withheld turn is exactly where a user who ran
-  // past unset option effects most needs to be told.
-  `^(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?$`,
+  `^${TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS.map(({ source }) => `(?:${source})?`).join('')}$`,
 );
 
 // Mission A caution-reason alternation (provisional_doctrine_v0): the three

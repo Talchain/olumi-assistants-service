@@ -104,7 +104,8 @@ const SKIP_REASONS = new Set<string | null>([
 ]);
 
 // Locked enum for the V5 row-7 from/to attribution field (PR #192 follow-up).
-// Distinct from `candidate.source` (label-match concern) — this field is
+// Distinct from `candidate.source` (how the candidate was selected — label
+// evidence for 'substring'/'dice', none for 'register') — this field is
 // the quantity-attribution path the dispatch took.
 const ATTRIBUTION_VALUES = new Set<string | null>([null, 'from_to']);
 

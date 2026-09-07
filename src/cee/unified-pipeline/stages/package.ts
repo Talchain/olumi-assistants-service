@@ -31,6 +31,7 @@ import {
   computeModelQualityFactors,
 } from "../../structure/index.js";
 import { matchesStatusQuoLabel } from "../../structure/status-quo-patterns.js";
+import { optionFramingWarnings } from "../../draft/records/option-framing-recovery.js";
 import { verificationPipeline } from "../../verification/index.js";
 import { CEEDraftGraphResponseV1Schema } from "../../../schemas/ceeResponses.js";
 import {
@@ -656,6 +657,10 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     weak_paths: (goalConn as any).weakPaths,
   };
 
+  const framingWarnings = optionFramingWarnings(ctx.recordDisclosures);
+  if (framingWarnings.length > 0) {
+    draftWarnings = [...(draftWarnings ?? []), ...framingWarnings];
+  }
   ctx.draftWarnings = draftWarnings ?? [];
 
   // ── Step 7: Intervention hints extraction (inline) ───────────────────────

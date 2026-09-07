@@ -135,7 +135,7 @@ describe('A3 — the FOURTH surface: no answer may deny and assert flippability 
     ['explain_results', 'Explain the results.'],
     ['meaning', 'What does this mean?'],
     ['improvement', 'How can I improve this?'],
-    ['advice', 'What should I do?'],
+    ['composeAdvice via next_step', 'What is the next step?'],
   ])('%s — near-tie + attested-no-flip makes NO flippability claim anywhere', (_label, message) => {
     const text = run(message, NEAR_TIE_ANALYSIS, attested);
     expect(assertsFlippability(text)).toBe(false);
@@ -145,7 +145,7 @@ describe('A3 — the FOURTH surface: no answer may deny and assert flippability 
     ['explain_results', 'Explain the results.'],
     ['meaning', 'What does this mean?'],
     ['improvement', 'How can I improve this?'],
-    ['advice', 'What should I do?'],
+    ['composeAdvice via next_step', 'What is the next step?'],
   ])('POSITIVE CONTROL — %s DOES claim it without the posture', (_label, message) => {
     expect(assertsFlippability(run(message, NEAR_TIE_ANALYSIS))).toBe(true);
   });
@@ -157,8 +157,22 @@ describe('A3 — the FOURTH surface: no answer may deny and assert flippability 
     expect(text).toMatch(/no single factor we tested would change the order on its own/i);
   });
 
+  // This gate-decline control does not assert the contextual answer's claims.
+  // The scientific controls above still exercise the actual composeAdvice.
+  it.each(['attested_no_flip', 'permitted', undefined] as const)(
+    'generic advice declines with flip posture %s', (flipClaimPosture) => {
+      expect(tryPostAnalysisAdviceGate({
+        message: 'What should I do?',
+        analysis: NEAR_TIE_ANALYSIS,
+        freshness: 'fresh',
+        rawRobustness: { level: 'very_low', near_tie_is_tie: false },
+        flipClaimPosture,
+      })).toEqual({ matched: false, reason: 'reasoning_request' });
+    },
+  );
+
   it('composeMeaning and composeAdvice are byte-identical without the posture', () => {
-    for (const message of ['What does this mean?', 'What should I do?']) {
+    for (const message of ['What does this mean?', 'What is the next step?']) {
       expect(run(message, NEAR_TIE_ANALYSIS, { flipClaimPosture: 'permitted' as const })).toBe(
         run(message, NEAR_TIE_ANALYSIS),
       );

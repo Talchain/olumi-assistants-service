@@ -379,6 +379,10 @@ export function completionRegressesProtectedContent(
   for (const [survivorId, prov] of Object.entries(after.provenance)) {
     if (!afterById.has(survivorId)) continue; // an absorber that itself vanished excuses nothing
     for (const label of prov.merged_refinements ?? []) accountedFor.add(`${survivorId}␟${label}`);
+    // The cause-side twin. Omitting it would leave a legitimately-absorbed label
+    // unaccounted and manufacture a false completion gap — the absorption is the
+    // same shape and the same direction, only the parent's kind differs.
+    for (const label of prov.merged_restatements ?? []) accountedFor.add(`${survivorId}␟${label}`);
     for (const label of prov.undeveloped_duplicates ?? []) accountedFor.add(`${survivorId}␟${label}`);
   }
   /**
@@ -464,11 +468,22 @@ export function completionRegressesProtectedContent(
         }
       }
     }
-    const beforeMerged = before.provenance[node.id]?.merged_refinements ?? [];
-    if (beforeMerged.length > 0) {
-      const afterMerged = new Set(after.provenance[node.id]?.merged_refinements ?? []);
+    // ⭐ BOTH ABSORPTION RECEIPTS ARE PROTECTED, NOT JUST THE OPTION-SIDE ONE.
+    // `merged_restatements` is the cause-side twin of `merged_refinements`: same
+    // append-only discipline, same direction (MODEL content into a USER-stated
+    // node), same accounting in `completionRegressesProtectedContent` above. A
+    // guard that watched only one of them would let a completion pass silently
+    // drop a label the other had legitimately absorbed — an asymmetric guard is
+    // a guard watching one door.
+    for (const [field, tag] of [
+      ["merged_refinements", "refinement_reclassified"],
+      ["merged_restatements", "restatement_reclassified"],
+    ] as const) {
+      const beforeMerged = before.provenance[node.id]?.[field] ?? [];
+      if (beforeMerged.length === 0) continue;
+      const afterMerged = new Set(after.provenance[node.id]?.[field] ?? []);
       for (const label of beforeMerged) {
-        if (!afterMerged.has(label)) violations.push(`refinement_reclassified:${node.id}:${label}`);
+        if (!afterMerged.has(label)) violations.push(`${tag}:${node.id}:${label}`);
       }
     }
   }
@@ -672,9 +687,10 @@ export function enumerateCompletionAsk(
       //     `stated_items` whether or not it becomes a node, and that is what the
       //     fidelity postcondition measures.
       //
-      // `option_budget_exceeded` and `refinement_merged_into_stated_option` are
-      // likewise projector DECISIONS, not gaps: asking about either would ask the
-      // model to undo a deliberate, disclosed choice.
+      // `option_budget_exceeded`, `refinement_merged_into_stated_option` and
+      // `factor_merged_into_stated_cause` are likewise projector DECISIONS, not
+      // gaps: asking about any of them would ask the model to undo a deliberate,
+      // disclosed choice.
       //
       // ⭐ AND THE THREE DEMOTE REASONS ARE LISTED EXPLICITLY BELOW rather than
       // left to `default`, so their silence is a DECISION. A demote is a
@@ -889,8 +905,11 @@ export function enumerateCompletionAsk(
   // (`475a18b9:1.0000|dbc7be0a:0.0000`). They are genuinely different
   // alternatives — one sequences the work, one does not — and the model simply
   // never said how they differ. That is a gap the brief can close, so it is
-  // askable; the ask is phrased to permit "it does not", because a difference
-  // invented to satisfy a validator is a number the user will read as their own.
+  // askable; the ask is phrased to permit "it does not" because a difference
+  // manufactured only to clear this check decides the RANKING, which is the
+  // user's call. ⚠ NOT because the number would be read as the user's own —
+  // an uncited magnitude is stamped `cee_hypothesis` by the projector
+  // (`projector.ts:1712-1717`), and that premise is v9's, withdrawn at v10.
   {
     const bySignature = new Map<string, string[]>();
     for (const node of nodes) {
@@ -1145,6 +1164,44 @@ function renderRecordsForAsk(records: DraftRecordSet): string {
  * "do not invent" clause is load-bearing and is phrased as a PERMISSION to
  * return nothing, because a completion turn that feels obliged to produce
  * claims will produce them.
+ *
+ * ⭐⭐ TWO QUESTIONS, NAMED APART (CLAUDE.md trap 21). This prompt answers both
+ * and they have OPPOSITE answers, so collapsing them is how the contradiction
+ * below got written in the first place:
+ *
+ *   "may I add a RECORD the brief does not support?"  — NO. The closing
+ *     paragraph forbids it, and it is the property this whole mechanism exists
+ *     to defend.
+ *   "may I estimate a MAGNITUDE the brief does not state?" — YES, and it must
+ *     agree with `DRAFT_RECORDS_INSTRUCTION`'s
+ *     `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES`, because pass 2's links
+ *     are merged into pass 1's record set and projected as ONE graph.
+ *
+ * ⚠ v9's WITHDRAWN RULE SURVIVED HERE IN TWO PLACES, AND THEY WERE CLOSED
+ * SEPARATELY. The general rule above lost its clause *"— but only where the
+ * brief gives you the basis for it"* on 2026-09-05 (#1349), which carried the
+ * draft's magnitude policy across word for word. Its SIBLING was left standing
+ * seventeen lines below — *"Use only levels the brief gives you the basis for.
+ * Do not invent a number to tell them apart …"* — so the contradiction stopped
+ * being one BETWEEN two prompts and became one INSIDE this prompt: two opposite
+ * answers to the same question, to one model, in one turn. #1349's guard cannot
+ * see it, because its negative is scoped to the exact string *"but only where
+ * the brief gives you the basis for it"* (trailing *"for it"*), which the
+ * sibling does not contain. This change closes the sibling.
+ *
+ * The premise BOTH clauses rested on ("a guessed number is read as the user's
+ * own") is refuted at the projector's bytes: `bindDirectStatedMagnitude`
+ * (`projector.ts:1632`; stamp at `:1712-1717`) marks an UNCITED option→factor
+ * magnitude `cee_hypothesis`, and only a value equal to a stated figure that
+ * VERIFIES against the brief bytes is ever stamped `brief_extraction`
+ * (`:1799`). Agreement is pinned by
+ * `__tests__/sets-to-policy-agreement.test.ts`, which derives BOTH strings from
+ * their modules rather than copying either.
+ *
+ * ⚠ AND IT IS UNMEASURED. A prompt cannot be unit-tested for behaviour; the
+ * spec pins only that the two rules do not contradict. Whether it moves usable
+ * interventions per option is an OUTCOME question, and no instrument in this
+ * repo answers it yet.
  */
 export function buildRecordsCompletionPrompt(args: {
   brief: string;
@@ -1207,15 +1264,65 @@ export function buildRecordsCompletionPrompt(args: {
     renderLegalEdgeVocabulary(),
     "",
     "Set `effect` to `positive` or `negative` on every link. On a link FROM an option TO a factor,",
-    "set `sets_to` to the level that factor takes under that option, in the factor's own unit —",
-    "but only where the brief gives you the basis for it.",
+    "set `sets_to` to the level that factor takes under that option, in the factor's own unit.",
+    "",
+    // ⭐⭐ THE MAGNITUDE POLICY IS THE DRAFT'S, WORD FOR WORD (`instruction.ts`,
+    // `## HOW MUCH EACH OPTION MOVES WHAT IT CHANGES`) — re-wrapped for this
+    // array, not reworded.
+    //
+    // Until 2026-09-05 this clause ended *"— but only where the brief gives you
+    // the basis for it"*: v9's withholding rule, which the DRAFT prompt deleted
+    // on 2026-08-30 and this prompt kept. Both prompts answer ONE question —
+    // "how much does this option move this factor?" — so that was a
+    // hand-maintained mirror (trap 12), not two authorities answering different
+    // questions (trap 21).
+    //
+    // The consequence was self-defeating: this pass exists to close
+    // `option_without_chain` / `NO_EFFECT_PATH`, and it closed them while
+    // withholding the magnitude on exactly the edges it had just created — so
+    // every new option→factor pair raised `MISSING_OPTION_VALUE`
+    // (`analysis-ready-helper.ts:734`) and the user was asked to type the number
+    // in by hand. `instruction.ts:99-113` records the draft-side measurement:
+    // 20 of 23 fresh journeys, and *"THE MODEL WAS NOT FAILING TO COMPLY; IT WAS
+    // COMPLYING."*
+    //
+    // ⭐ NOTHING NEW IS TRUSTED BY THIS CHANGE, and that is not inherited from
+    // the draft side — it is a property of the seam. `anthropic.ts:2076`
+    // re-projects the MERGED record set through `projectRecordsToGraph`, whose
+    // signature takes `(records, brief?)` and carries NO pass or turn argument:
+    // it is structurally incapable of telling a completion-produced claim from a
+    // draft-produced one. So an uncited magnitude from this prompt is stamped
+    // `cee_hypothesis` and a cited one `brief_extraction`, by the same
+    // `bindDirectStatedMagnitude` and on the same evidence.
+    //
+    // `basis` is emittable here: `buildRecordsCompletionSchema` reuses
+    // `buildDraftClaimItemSchema` (`grammar.ts:516`), and this prompt renders
+    // `stated_items` above, so the indices resolve.
+    //
+    // Kept in agreement by `completion-magnitude-policy-agrees-with-draft.test.ts`,
+    // which EXTRACTS these paragraphs from the draft instruction rather than
+    // holding a third copy — so the next drift on either side REDs.
+    "Where the brief gives you the figure — a number the user stated, or a change they described —",
+    "use that, and set `basis` to the stated_items it came from. Where the brief does not give you a",
+    "figure, give your best estimate, reasoned from what the brief does tell you: the scale of the",
+    "numbers already in it, and the direction and rough size of the change this option describes.",
+    "Keep the factor's own unit, and keep your estimates consistent across the options, so the",
+    "comparison between them means something.",
+    "",
+    "Leave `sets_to` out only where you genuinely cannot form a defensible estimate even from the",
+    "brief's own scale. That is a truthful answer, and it also stops the analysis running on that",
+    "option — so do not reach for it merely because you are unsure of the exact number. An estimate",
+    "you can defend is worth more to the user than a gap they must fill before they can see anything",
+    "at all.",
     "",
     "Where two options are listed above as indistinguishable: the analysis cannot compare them, and",
     "a model carrying such a pair is rejected outright — so leaving them as they are is not a safe",
     "answer. Separate them using what the brief SAYS: a factor one of them acts on and the other",
-    "does not, or the same factor at different levels via `sets_to`. Use only levels the brief gives",
-    "you the basis for. Do not invent a number to tell them apart — a difference made up here is a",
-    "number the user will read as their own, and that is a worse failure than the rejection.",
+    "does not, or the same factor at different levels via `sets_to`, estimated the same way as",
+    "above and kept consistent across the options. What you must not do is manufacture a difference",
+    "you cannot defend: an estimated LEVEL leaves the ranking to the analysis, but a GAP invented",
+    "only to clear this check decides that ranking here, and the ranking is the user's to make — a",
+    "worse failure than the rejection.",
     "",
     "Do not restate anything the user said; you cannot, and you do not need to.",
     "Do not add a factor or a link the brief does not support. If a gap above cannot be closed from",

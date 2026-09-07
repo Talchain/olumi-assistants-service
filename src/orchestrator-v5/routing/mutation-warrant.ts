@@ -259,9 +259,15 @@ const WARRANT_EXTRA_EDIT_VERB_PATTERNS: readonly RegExp[] = [
  * Measured on a 9-edit-core x 9-fence-phrasing matrix, unguarded Term 0 stripped
  * the warrant from 81 of 81 ordinary scoped edits ("Set Churn to 0.5 and do not
  * change the model."), while the same 9 cores WITHOUT a fence lost 0 of 9. On a
- * wider 9x20 corpus: 151 of 177. The product's own reply on such a turn is
- * "Nothing has been changed. You did not ask me to edit the model, so I have
- * not." — refusing an explicit instruction AND misdescribing what the user said.
+ * wider 9x20 corpus: 151 of 177. The product's own reply on such a turn WAS, as
+ * measured, "Nothing has been changed. You did not ask me to edit the model, so
+ * I have not." — refusing an explicit instruction AND misdescribing what the
+ * user said. ⚠ THE SECOND HALF OF THAT HARM IS NOW CLOSED AT THE COPY (INV-3,
+ * `buildMutationWarrantDemotionText` below, 1 Sep 2026): the reply no longer
+ * asserts anything about what the user asked. The quoted sentence is retained
+ * here as the DATED MEASUREMENT it was, not as current output. The FIRST half —
+ * the warrant being stripped from a genuine fenced edit — is untouched by that
+ * change and is still exactly why Term 0 carries its two negated conjuncts.
  *
  * THAT is why Term 0 carries the two negated conjuncts. They are load-bearing,
  * not defensive: with them the same matrix loses 9 of 81 and the wide corpus 17
@@ -1149,6 +1155,35 @@ export function detectMutationWarrant(
  * It states the outcome in the FIRST clause. "Nothing has been changed" is
  * true by construction at this point — control has not reached a handler.
  *
+ * ── INV-3: IT DESCRIBES WHAT THE PRODUCT DID, NEVER WHAT THE USER ASKED ────
+ * ⚠⚠ THE SECOND CLAUSE USED TO READ "You did not ask me to edit the model, so
+ * I have not." IT WAS WITHDRAWN 1 Sep 2026, AFTER THREE SIGHTINGS OF THE SAME
+ * HARM ON THREE BUILDS:
+ *   1. 20 Aug, fresh-guest walk — the product had ASKED for a missing effect
+ *      value, the user answered, and this clause told them they had not
+ *      (`outstanding-effect-ask-misroute.ts:15`);
+ *   2. the consent-loop dead end — offer → the user says "yes" → "you did not
+ *      ask me" (`__tests__/mutation-warrant-consent-parity.test.ts:727`);
+ *   3. 1 Sep, deployed build — the user asked three times, was told they had
+ *      not asked, in the same message that then offered them exactly what they
+ *      had asked for. The clause CONTRADICTED THE REST OF ITS OWN MESSAGE.
+ *
+ * ⭐ THE FIX IS HERE, IN THE COPY, AND DELIBERATELY NOT IN THE PREDICATE.
+ * `hasMutationWarrantSignal` above closes with a standing ruling: four rounds
+ * and PR #1107 were burned trying to separate a scope fence from a retraction,
+ * and no further lexical rule will settle it. So the gate WILL keep missing a
+ * real instruction sometimes. A reply that merely declines to write survives
+ * that; a reply that also asserts the user never spoke turns every residual
+ * predicate miss into an insult. Removing the assertion makes the residual
+ * error BENIGN IN BOTH DIRECTIONS, and costs no new predicate.
+ *
+ * WHAT MUST SURVIVE, pinned as TWIN A in the spec: the no-write disclosure
+ * still fires ("Nothing has been changed." first), and the change is still
+ * OFFERED rather than applied. TWIN B pins the other direction — the copy
+ * asserts nothing about what the user did or did not ask for. The estate had
+ * already ratified this rule elsewhere and simply never applied it here:
+ * `coaching/pick-defaulted-assumptions.ts:217`.
+ *
  * ── INV-2 (ROADMAP 2.659 rider) ───────────────────────────────────────────
  * `residualDisclosure` carries the second sentence for the REPAIR shape: the
  * `add_constraint` idempotency key is `(node_id, operator)`, so a proposal
@@ -1164,8 +1199,8 @@ export function buildMutationWarrantDemotionText(
   residualDisclosure: string | null,
 ): string {
   const opening =
-    `Nothing has been changed. You did not ask me to edit the model, ` +
-    `so I have not — but ${changeDescription} looks like it would help. ` +
+    `Nothing has been changed. I want to confirm this with you before I edit ` +
+    `the model, and ${changeDescription} looks like it would help. ` +
     `Say the word and I will make it.`;
   return residualDisclosure === null ? opening : `${opening} ${residualDisclosure}`;
 }

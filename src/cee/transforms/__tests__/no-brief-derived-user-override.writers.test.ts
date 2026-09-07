@@ -160,6 +160,35 @@ const REVIEWED: Readonly<Record<string, string>> = {
   // label the system wrote about itself.
   "cee/context-integrity/not-modelled-manifest.ts":
     "reader only — treats the stamp as a user-write receipt so the brief-audit ledger REFUSES to claim the user's value as its own invention; the literal is a lookup key, no write path, and a wrong read can only withhold our own claim, never invent one about the user",
+  // ── The authorship-display projection. Reviewed 31 Aug 2026 against this
+  // ── guard's one truth condition.
+  //
+  // A READER, NOT A WRITER, for the same structural reason as the three entries
+  // above: the literal appears once, as a KEY in a
+  // `Record<KnownObservedStateSourceLiteral, ValueAuthorshipDisplay | null>`
+  // classifying a stamp someone else already wrote. No write path; it never
+  // touches `observed_state.source` and cannot cause `user_override` to appear
+  // anywhere.
+  //
+  // ⚠ THE DIRECTION OF HARM IS THE MOST DANGEROUS OF THE FOUR, so it is stated
+  // rather than inherited. The three readers above can only ever WITHDRAW an
+  // obligation, widen a sampling band, or withhold our own claim — none can
+  // make an assertion about the user. This one can: it decides what the MODEL
+  // is told about who authored a number, and the model then says so in prose.
+  // A wrong read in the permissive direction would have the product tell a user
+  // "you gave me this figure" about a value they never supplied — the 2.714
+  // untruth, spoken aloud.
+  //
+  // ⭐ WHICH IS WHY THE TABLE DEFERS RATHER THAN OVERRIDES ON EXACTLY THE TWO
+  // LITERALS THAT COULD BE STALE. `brief_extraction` and `cee_inference` are
+  // SYNTHESISED from `extractionType` by `schema-v3.ts:361-362`, and the 2.972
+  // withdrawal rewrites `extractionType` WITHOUT rewriting them — so a reader
+  // that let them win would resurrect a retracted brief claim through the one
+  // field the withdrawal does not reach. They map to `null` (defer), so the
+  // only stamps this module will act on are those a genuine user-edit writer
+  // wrote — i.e. precisely the ones the entries above establish as truthful.
+  "cee/transforms/provenance-display.ts":
+    "reader only — maps the stamp to the display vocabulary (from_brief/ai_inferred/user_set) that reaches the LLM context; the literal is a lookup key, the module has no write path, and the two synthesised-from-extractionType literals DEFER so it can only act on a genuine user-edit writer's stamp",
 };
 
 /**

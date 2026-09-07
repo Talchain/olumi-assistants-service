@@ -59,6 +59,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import Fastify from 'fastify';
+import {
+  PENDING_ACTION_ASK_TURN_TTL,
+  PENDING_ACTION_ASK_WALL_TTL_MS,
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+} from '../../../src/orchestrator-v5/session/pending-action.js';
 import type { FastifyInstance } from 'fastify';
 
 const dispatchEditGraphMock = vi.fn();
@@ -304,6 +309,55 @@ describe('the configure-option clarify intercept must PERSIST the question it as
     expect(serialised, 'the persisted referent must name the FACTOR the question was about').toContain(
       FACTOR_ID,
     );
+  });
+
+  // ─── THE LIFETIME — how long the persisted question stays answerable ─────
+  // Bound to the PERSISTED write, so this pins the commit-seam wiring
+  // (`applyRecordedAskLifetimes` in commit.ts), not just the helper in
+  // isolation. Removing that call leaves the helper's own unit tests green and
+  // REDs here, which is the point of asserting at the write.
+  //
+  // Measured defect (CEE staging, 2026-08-31, scenario `528e00b0…`): this very
+  // arming site persisted `expires_at_turn_count: 2` / a 10-minute wall, and
+  // the question was dropped 114 seconds later by two unrelated turns. The
+  // user answered 25 minutes on, against an unchanged graph hash, and the
+  // number had nothing to bind to.
+  it('the written question stays answerable for the recorded-ask window, not two turns', async () => {
+    await driveTheAsk();
+    const write = writes()[0];
+    expect(write, 'no write at all — see the first failing case').toBeDefined();
+
+    const pendings = (write!.pending_actions ?? []) as ReadonlyArray<Record<string, unknown>>;
+    // Bind BY IDENTITY to the cell the question named — never to "the first
+    // pending", which some other write could satisfy.
+    const asked = pendings.find(
+      (pa) =>
+        (pa.action as Record<string, unknown> | undefined)?.kind === 'elicit_option_effect' &&
+        (pa.action as Record<string, unknown> | undefined)?.option_id === OPTION_ID &&
+        (pa.action as Record<string, unknown> | undefined)?.factor_id === FACTOR_ID,
+    );
+    expect(asked, 'the asked cell must be among the persisted pendings').toBeDefined();
+
+    expect(asked!.expires_at_turn_count).toBe(PENDING_ACTION_ASK_TURN_TTL);
+    const emittedMs = Date.parse(asked!.emitted_at_iso as string);
+    expect(Number.isFinite(emittedMs)).toBe(true);
+    expect(Date.parse(asked!.expires_at_iso as string) - emittedMs).toBe(
+      PENDING_ACTION_ASK_WALL_TTL_MS,
+    );
+
+    // TWIN, in the same assertion block so the two cannot drift apart: the
+    // widening is scoped to recorded ASKS. Any OFFER persisted by this same
+    // commit keeps the default bounds — a longer window on an offer is the
+    // stale-hijack harm, which is the opposite direction of this change.
+    for (const pa of pendings) {
+      const kind = (pa.action as Record<string, unknown> | undefined)?.kind as
+        | string
+        | undefined;
+      if (kind !== undefined && kind.startsWith('elicit_')) continue;
+      expect(pa.expires_at_turn_count, `offer ${String(kind)} must keep the default TTL`).toBe(
+        PENDING_ACTION_DEFAULT_TURN_TTL,
+      );
+    }
   });
 
   // ─── THE TWIN (mandatory) ────────────────────────────────────────────────

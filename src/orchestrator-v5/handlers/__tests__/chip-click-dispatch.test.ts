@@ -231,12 +231,17 @@ describe('dispatchDeterministicChipClick — whitelist enforcement', () => {
     enrichRunAnalysisMock.mockImplementation(
       async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
     );
-    commitDirectAnswerMock.mockResolvedValue({
-      response: {},
+    // The real chokepoint RETURNS the response it committed: the SAME object on
+    // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+    // notice or suppressed competing run_analysis chips. `response: {}` misstated
+    // that contract, and the dispatcher now CONSUMES the returned value, so the
+    // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+    commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+      response: r,
       performed: true,
       persisted_row_id: 'row-1',
       graphPersisted: false,
-    });
+    }));
   });
 
   it('exposes the whitelisted action_types as an immutable set (audit-friendly)', () => {
@@ -338,12 +343,17 @@ describe('dispatchDeterministicChipClick — run_analysis regression', () => {
     enrichRunAnalysisMock.mockImplementation(
       async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
     );
-    commitDirectAnswerMock.mockResolvedValue({
-      response: {},
+    // The real chokepoint RETURNS the response it committed: the SAME object on
+    // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+    // notice or suppressed competing run_analysis chips. `response: {}` misstated
+    // that contract, and the dispatcher now CONSUMES the returned value, so the
+    // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+    commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+      response: r,
       performed: true,
       persisted_row_id: 'row-1',
       graphPersisted: false,
-    });
+    }));
   });
 
   it('run_analysis chip-click continues to dispatch with no behavioural change for the existing path', async () => {
@@ -460,12 +470,17 @@ describe('dispatchDeterministicChipClick — run_analysis post-analysis chip emi
     enrichRunAnalysisMock.mockImplementation(
       async ({ handlerFacts }: { handlerFacts: HandlerFact[] }) => handlerFacts,
     );
-    commitDirectAnswerMock.mockResolvedValue({
-      response: {},
+    // The real chokepoint RETURNS the response it committed: the SAME object on
+    // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+    // notice or suppressed competing run_analysis chips. `response: {}` misstated
+    // that contract, and the dispatcher now CONSUMES the returned value, so the
+    // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+    commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+      response: r,
       performed: true,
       persisted_row_id: 'row-1',
       graphPersisted: false,
-    });
+    }));
   });
 
   afterEach(async () => {

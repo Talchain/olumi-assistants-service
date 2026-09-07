@@ -50,6 +50,7 @@ import { resolveOptionCount } from './no-op-helpers.js';
 import {
   composeExplainFromStructureFallback,
   composeSelectedDependenciesEvidenceAnswer,
+  composeSelectedOutgoingInfluenceEvidenceAnswer,
   composeStructuralPairEvidenceAnswer,
 } from './explanation-fallback.js';
 import { mapFallbackReason } from './diagnostics.js';
@@ -77,6 +78,8 @@ export function createExplainFromStructureHandler(): HandlerFn {
     const hasSelectedDependenciesEvidence =
       invocation.selectedDependenciesEvidence !== undefined;
     const hasStructuralPairEvidence = invocation.structuralPairEvidence !== undefined;
+    const hasOutgoingInfluenceEvidence =
+      invocation.outgoingInfluenceEvidence !== undefined;
     // A valid authored answer is licensed only when the router explicitly
     // classified the question as the open-ended `general` arm. Direct-link and
     // reachability questions are answered from canonical typed evidence; an
@@ -85,21 +88,42 @@ export function createExplainFromStructureHandler(): HandlerFn {
     // topology authority introduced for the mounted failure.
     const mayUseAuthoredGeneralAnswer =
       invocation.proposal?.structure_query?.kind === 'general';
+    // ⚠ THE AUTHORED-PROSE LICENCE IS NOT WIDENED BY THE NEW KIND, AND THAT IS
+    // THE POINT. `outgoing_influence` is not `general`, so
+    // `mayUseAuthoredGeneralAnswer` is already false for it — a typed
+    // outgoing-influence turn is answered from canonical evidence, exactly like a
+    // dependencies turn. The extra conjunct below is defence-in-depth against a
+    // future change to the licence predicate, not a fix for a live gap; a test
+    // pins BOTH facts separately so neither can be mistaken for the other.
+    //
+    // This is why a new typed kind is the right shape and DEMOTING TO `general`
+    // is not: demotion sets this licence TRUE and re-opens the #1229 seam where
+    // fluent prose invented an unlisted dependency. Adding a kind NARROWS what
+    // the model may assert; widening a demotion predicate widens it.
     const useSonnetAnswer =
       sonnetValid &&
       mayUseAuthoredGeneralAnswer &&
-      !hasSelectedDependenciesEvidence;
+      !hasSelectedDependenciesEvidence &&
+      !hasOutgoingInfluenceEvidence;
+    // Each carrier renders its OWN predicate. The two are mutually exclusive by
+    // construction (each is keyed to a different `structure_query.kind`), so the
+    // order below is not a precedence rule between two live answers — a guard
+    // asserts they never co-occur.
     const assistantText = hasSelectedDependenciesEvidence
       ? composeSelectedDependenciesEvidenceAnswer(
           invocation.selectedDependenciesEvidence!,
         )
-      : hasStructuralPairEvidence
-        ? composeStructuralPairEvidenceAnswer(invocation.structuralPairEvidence!)
-        : useSonnetAnswer
-          ? explanation!.answer_text
-          : composeExplainFromStructureFallback(invocation.structureProjection, {
-              canRunAnalysis,
-            });
+      : hasOutgoingInfluenceEvidence
+        ? composeSelectedOutgoingInfluenceEvidenceAnswer(
+            invocation.outgoingInfluenceEvidence!,
+          )
+        : hasStructuralPairEvidence
+          ? composeStructuralPairEvidenceAnswer(invocation.structuralPairEvidence!)
+          : useSonnetAnswer
+            ? explanation!.answer_text
+            : composeExplainFromStructureFallback(invocation.structureProjection, {
+                canRunAnalysis,
+              });
 
     const fact: ExplainFromStructureHandlerFact = {
       fact_type: 'explain_from_structure',
@@ -108,10 +132,16 @@ export function createExplainFromStructureHandler(): HandlerFn {
       result: {
         option_count: optionCount,
         answer_source:
-          useSonnetAnswer && !hasStructuralPairEvidence && !hasSelectedDependenciesEvidence
+          useSonnetAnswer &&
+          !hasStructuralPairEvidence &&
+          !hasSelectedDependenciesEvidence &&
+          !hasOutgoingInfluenceEvidence
             ? 'sonnet'
             : 'deterministic_fallback',
-        fallback_reason: hasStructuralPairEvidence || hasSelectedDependenciesEvidence
+        fallback_reason:
+          hasStructuralPairEvidence ||
+          hasSelectedDependenciesEvidence ||
+          hasOutgoingInfluenceEvidence
           ? null
           : useSonnetAnswer
           ? null

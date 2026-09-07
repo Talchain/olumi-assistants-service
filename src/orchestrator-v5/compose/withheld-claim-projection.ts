@@ -944,11 +944,24 @@ export function projectConditionalWinnersForWithheldClaim(
  *
  *   1. `affected_option_ids` is dropped — it is raw option identity.
  *   2. S-bucket `user_message` is RE-RENDERED from the approved catalogue with
- *      no option ids supplied, so `resolveLabelOrFallback` yields the generic
- *      phrase. No withheld-specific copy is invented: the fallback wording is
- *      the same reviewed string the catalogue already uses when an id cannot be
- *      resolved. U-bucket copy is producer prose and is left alone here — the
- *      leading-option egress guard scans it (`ENRICHMENT_CLAIM_BLOBS`).
+ *      no option ids supplied, so each template returns its SUBJECT-FREE form
+ *      ("One of your options …"). No withheld-specific copy is invented: the
+ *      unnamed wording is the same reviewed string the catalogue already uses
+ *      whenever it cannot name an option. U-bucket copy is producer prose and
+ *      is left alone here — the leading-option egress guard scans it
+ *      (`ENRICHMENT_CLAIM_BLOBS`).
+ *
+ *      ⚠ THIS COMMENT USED TO SAY the re-render yielded "the generic phrase",
+ *      and reasoned that this was safe because it was the same string the
+ *      catalogue used for an unresolvable id. That premise was FALSE, and this
+ *      path was the guaranteed producer of the defect witnessed on deployed UI
+ *      `a9c2e050`: the generic phrase is PREFIX-AWARE, and with no id supplied
+ *      there is no prefix to read, so `genericFallbackForId('')` returned its
+ *      defensive `'the relevant node'` — rendering
+ *      `Option 'the relevant node' produces the same result in every
+ *      simulation`. The reasoning held for `opt_x` and never for `''`; nothing
+ *      pinned the difference because no guard was pointed at the empty-id
+ *      input this function always supplies.
  *
  * The rows THEMSELVES are kept. The claim being withheld is "which option
  * leads"; "this option changes nothing yet" is a different claim, and dropping

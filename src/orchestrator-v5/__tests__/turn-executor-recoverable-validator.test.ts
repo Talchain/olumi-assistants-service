@@ -252,15 +252,24 @@ const GRAPH_NO_OPTIONS: GraphStateIngress = {
   edges: [],
 } as GraphStateIngress;
 
+// AMENDED (run_analysis TARGET REPAIR). This fixture previously carried
+// `opt_a`. It no longer may: an ADMITTED `run_analysis` whose entity fails on
+// kind is now retargeted to an option and revalidated, because run_analysis's
+// entity is a proxy for the whole scenario rather than a real target. With an
+// option present the proposal below is REPAIRED and this case stops exercising
+// the graph-dependent ENTITY_KIND_MISMATCH branch it exists for.
+//
+// The branch itself is unchanged; only the raw material for the repair is
+// removed. The invariant is asserted below rather than left to this comment,
+// because a comment cannot fail (CLAUDE.md trap 12 — derive or fail loud,
+// never rely on a note someone must remember).
 const GRAPH_KIND_CROSSCHECK: GraphStateIngress = {
   nodes: [
     { id: 'goal_1', kind: 'goal', label: 'Profit' },
-    { id: 'opt_a', kind: 'option', label: 'A' },
     // Target of PROPOSAL_KIND_MISMATCH_GRAPH — resolves to wire kind 'node'.
     { id: 'fac_x', kind: 'factor', label: 'Factor X' },
   ],
   edges: [],
-  options: [{ id: 'opt_a', status: 'ready', interventions: { f1: { value: 1 } } }],
 } as GraphStateIngress;
 
 interface CaseDef {
@@ -324,6 +333,21 @@ afterEach(() => {
 });
 
 describe('TurnExecutor — recoverable validator outcomes (Phase 2.2)', () => {
+  it('FIXTURE INVARIANT: the cross-check graph carries NO option, or run_analysis is repaired instead of refused', () => {
+    // Not decoration. Add an option back to GRAPH_KIND_CROSSCHECK and the
+    // graph-dependent ENTITY_KIND_MISMATCH case silently becomes a passing
+    // run — the parameterised case would then be asserting a code that the
+    // turn no longer produces. This REDs first and names the reason.
+    expect(
+      GRAPH_KIND_CROSSCHECK.nodes.some((n) => (n as { kind?: string }).kind === 'option'),
+    ).toBe(false);
+    // Contrast control, same fixture: the factor target IS present, so the
+    // case is not passing merely because the graph is empty.
+    expect(
+      GRAPH_KIND_CROSSCHECK.nodes.some((n) => (n as { id?: string }).id === 'fac_x'),
+    ).toBe(true);
+  });
+
   it('PINNED: ENTITY_KIND_MISMATCH returns 200 + clean body + product-voice text', async () => {
     // Brief 2.2 pinned regression: Sonnet proposes run_analysis with a
     // decision-kind target → validator rejects → response is user-facing

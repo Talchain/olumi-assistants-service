@@ -161,6 +161,18 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
         },
       ] as unknown as Parameters<typeof receipts.formatBaselineAskCollision>[0]['competing'],
     }),
+  // The effect-slot re-ask: `formatBaselineReask`'s shape generalised to the
+  // option x factor cell, so it interpolates TWO labels and both are sentinels.
+  // Not a receipt — it reports no durable change; it asks one question about a
+  // reply the binder could read but is not entitled to write.
+  formatEffectSlotReask: () =>
+    receipts.formatEffectSlotReask({
+      heardText: 'a third',
+      suggestedModelUnitText: '0.33',
+      reason: 'imprecise_quantity',
+      optionLabel: SLOT,
+      factorLabel: SLOT2,
+    }),
   formatGoalTargetSet: () => receipts.formatGoalTargetSet({ goalLabel: SLOT, value: 2 }),
   formatGoalTargetUnchanged: () =>
     receipts.formatGoalTargetUnchanged({ goalLabel: SLOT, value: 2 }),

@@ -56,9 +56,9 @@
   When you're ready, you can re-run the analysis or look at what could change the outcome.
   ```
 
-### What should we do next — `next_step`
+### What is the next step — `next_step`
 
-- **User:** What should we do next?
+- **User:** What is the next step?
 - **Flag OFF:** data_unavailable_for_class
 - **Flag ON:** matched=true · copy_source=`canonical_rich` · llm_calls=0
 - **Notes:** deterministic gate · 0 LLM calls (synchronous; replaces the ~11s LLM-router fall-through)

@@ -542,6 +542,26 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    *     FACTOR nodes. Recorded as a second, structural reason — not relied on
    *     as the first, because the semantic answer is the one that stays true if
    *     the loop's scope ever widens.
+   *
+   * ── DECISION RECORDED, 1 Sep: `label_placeholder` ────────────────────────
+   * TRUE when the decision node's `label` is the generic mint we fall back to
+   * rather than a name derived from the brief or chosen by the user. Added so
+   * a surface never has to recognise the placeholder by comparing the string
+   * against a known word — the cross-service fragility that put a node
+   * **named** "Decision" of **type** "Question" on screen.
+   * The guard's question, answered explicitly, both ways:
+   *   · NOT value-bearing, and this is a claim about MEANING, not type. It is
+   *     a boolean ABOUT THE DISPLAY STRING — the same category as its sibling
+   *     `label_authored`, and recorded here for the same reason. It asserts no
+   *     quantity about the world, so it cannot be the "already asserts a
+   *     number" signal `carriesValue` exists to detect. It therefore does NOT
+   *     belong in `carriesValue`.
+   *   · And it could not reach the check in any case: it is written on the
+   *     TYPED record path (`schema-v3.ts:1201-1204`), which `continue`s at
+   *     `:1204` before `carriesValue` is evaluated at `:1215`. Recorded as a
+   *     second, STRUCTURAL reason and deliberately not relied on as the first
+   *     — the semantic answer is the one that survives the loop's scope
+   *     widening.
    */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
@@ -563,6 +583,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "kind",
       "label",
       "label_authored",
+      "label_placeholder",
       "observed_state",
       "prior",
       "provenance",

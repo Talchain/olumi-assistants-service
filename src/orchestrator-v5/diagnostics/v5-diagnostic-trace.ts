@@ -59,6 +59,7 @@ import {
 } from '../../orchestrator/pipeline/diagnostic-trace.js';
 import type { PromptAttributionSnapshot } from '../../orchestrator/pipeline/prompt-attribution.js';
 import type { PipelineOutcome } from '../../cee/unified-pipeline/types.js';
+import type { DraftQualityTraceRecord } from '../../cee/draft-quality/types.js';
 import type { DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { EditGraphResult } from '../../orchestrator/tools/edit-graph.js';
 import type { CommitResult } from '../commit.js';
@@ -174,6 +175,26 @@ export interface V5DiagnosticTrace extends DiagnosticTrace {
   benchmarking: V5BenchmarkingTimings;
   correlation_ids: V5CorrelationIds;
   pipeline_outcome?: PipelineOutcome;
+  /**
+   * ⭐⭐ THE DRAFT-QUALITY PASS'S RECORD, INCLUDING THE DISCARDED DRAW.
+   *
+   * Present only on a turn where the pass judged the draft thin and spent a
+   * second draw — so an absent block honestly means "the pass did not fire",
+   * never "we dropped it". This is the LAST HOP of the inspection route the
+   * owner's ruling requires: a repair pass that silently hides bad drafts
+   * destroys the only signal we have about draft quality, so the rejected
+   * original has to be readable at the product boundary rather than inside the
+   * pipeline. `route-v2` strips `_diagnostic_trace` before the egress validator
+   * and re-attaches this object verbatim afterwards, so what is here is what
+   * the wire carries and the debug export captures.
+   *
+   * ⚠ `discarded_graph` carries user-derived LABELS. It may ride here
+   * BECAUSE this whole builder short-circuits on
+   * `config.features.diagnosticTraceEnabled`; it may never ride telemetry,
+   * which is codes and counts only. ADDITIVE — the strip-validate-reattach
+   * pattern means a new key breaks no published contract.
+   */
+  draft_quality?: DraftQualityTraceRecord;
   retry?: V5Retry;
   environment?: V5Environment;
   /**
@@ -541,6 +562,10 @@ export function buildV5DiagnosticTrace(
     benchmarking,
     correlationIds,
     pipelineOutcome: input.draftResult.pipelineOutcome,
+    // ⭐ The discarded draw reaches the wire here. Typed off the ONE shared
+    // definition in `cee/draft-quality/types.ts`, which the producer also
+    // writes against, so the two ends cannot drift.
+    draftQuality: input.draftResult.draftQuality,
     retry: buildRetryFromPipelineOutcome(input.draftResult.pipelineOutcome),
     environment: buildEnvironment(),
     exitPath: 'draft_graph',
@@ -720,6 +745,7 @@ interface AssembleInput {
   readonly benchmarking: V5BenchmarkingTimings;
   readonly correlationIds: V5CorrelationIds;
   readonly pipelineOutcome?: PipelineOutcome;
+  readonly draftQuality?: DraftQualityTraceRecord;
   readonly retry?: V5Retry;
   readonly environment?: V5Environment;
   readonly exitPath: V5DiagnosticExitPath;
@@ -741,6 +767,7 @@ function assembleTrace(input: AssembleInput): V5DiagnosticTrace {
     benchmarking: input.benchmarking,
     correlation_ids: input.correlationIds,
     ...(input.pipelineOutcome ? { pipeline_outcome: input.pipelineOutcome } : {}),
+    ...(input.draftQuality ? { draft_quality: input.draftQuality } : {}),
     ...(input.retry ? { retry: input.retry } : {}),
     ...(input.environment ? { environment: input.environment } : {}),
     ...(input.coachingDelivery ? { coaching_delivery: input.coachingDelivery } : {}),
