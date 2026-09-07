@@ -239,10 +239,6 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
       graph: () => graphFor({ value: 0.5 }, 100000), event: { value: 0.85 },
     },
     {
-      name: 'bare 2 on frame-only 100000 also refuses; the guard is not a small-number ban',
-      graph: () => graphFor({ value: 0.5 }, 100000), event: { value: 2 },
-    },
-    {
       name: 'tiny inconsistent structured pair refuses a 1000x mismatch below the old absolute tolerance',
       graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
       event: { value: 8.5e-7, raw_value: 0.000085, unit: '£' },
@@ -318,6 +314,39 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
       event: { value: 0.3333333333333333, raw_value: 1, unit: '£' }, intended: 1 / 3, raw: 1,
     },
   ];
+
+  // ⚠⚠ KNOWN DIVERGENCE — ONE INPUT CLASS, TWO SHIPPED ANSWERS, PAUL'S OPEN
+  // QUESTION. Pinned rather than quietly dropped, so the suite is green for the
+  // RIGHT reason and REDs if this moves in EITHER direction.
+  //
+  // The class: a bare value >= 1, no `raw_value`, no `unit`, on a CAPLESS
+  // factor with a resolvable `scale_frame`.
+  //   · This PR (#1272, authored 31 Aug 13:40) asserted REFUSE — "the guard is
+  //     not a small-number ban": 2 on a 100000 frame is an unverifiable
+  //     100000x transformation, so do not guess.
+  //   · #1280 (merged 31 Aug 18:06, DEPLOYED) asserted ACCEPT — capless amount
+  //     editors send raw magnitudes in `value`, so 2 on a 50000 frame is the
+  //     raw amount 2 and canonically 0.00004. Its own suite pins exactly that.
+  // Both are defensible; they cannot both hold. The merge cannot invent a third
+  // rule (that would be a new predicate nobody reviewed), and reversing a
+  // MERGED, DEPLOYED behaviour is not a conflict-resolution act — so the live
+  // answer stands here and the disagreement is escalated rather than settled.
+  //
+  // Note for whoever settles it: the APPROVE on #1272 was bound to a head whose
+  // base did NOT contain #1280, so no reviewer has ever adjudicated this.
+  // Nothing else in this PR depends on the outcome — the near-zero tolerance
+  // fix, the incoherent-pair refusal and the model-scale post-merge guard are
+  // all live and pinned above, and this PR's own reported defect signature
+  // (bare .85 on a 100000 frame) is still refused, by #1280's sub-1 guard.
+  it('bare 2 on a frame-only 100000 factor currently COMMITS as the raw amount 2 (see KNOWN DIVERGENCE)', async () => {
+    persisted = graphFor({ value: 0.5 }, 100000);
+    const body = await edit({ value: 2 });
+    expect(committedGraphs(), 'staging #1280 treats a capless bare >=1 as a raw amount').toHaveLength(1);
+    const observed = observedState(await loadGraphMock());
+    expectSameNumber(observed.value, 2 / 100000);
+    expect(observed.raw_value).toBe(2);
+    expect(body.assistant_text).not.toMatch(/haven't changed anything/i);
+  });
 
   for (const { name, graph, event, intended, raw } of validEdits) it(name, async () => {
     persisted = graph();

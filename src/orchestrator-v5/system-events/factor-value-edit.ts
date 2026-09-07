@@ -695,14 +695,31 @@ export async function applyFactorValueEdit(
     );
   }
 
-  // The event's value declares MODEL-scale intent. The existing writer can
-  // read a scale_frame that the cap-only input adapter cannot invert. Never
-  // commit that disagreement as user-authored knowledge: discard the isolated
-  // candidate before its graph, attribution or success facts reach the store.
-  // This checks the actual conversion without choosing a replacement scale.
+  // The existing writer can read a scale_frame that the cap-only input adapter
+  // cannot invert. Never commit that disagreement as user-authored knowledge:
+  // discard the isolated candidate before its graph, attribution or success
+  // facts reach the store. This checks the actual conversion without choosing
+  // a replacement scale.
+  //
+  // ⚠ THE DOMAIN IS EXPLICIT BECAUSE #1280 CHANGED THIS GUARD'S PREMISE.
+  // This block was written when `event.value` declared MODEL scale on every
+  // path, so it compared the committed model value against it unscoped. Since
+  // #1280 that premise holds ONLY where a model DIVISOR is known — a capped
+  // factor, or a server-verified panel belief inverted with the factor's own
+  // frame. For a capless amount editor `value` carries a RAW magnitude BY
+  // DESIGN and the handler divides it by the frame, so `modelValue` is
+  // `value / frame` and the comparison can never agree: unscoped, this refuses
+  // that entire class rather than a defect in it (measured on this merge — 11
+  // of #1280's accept cases went red, every one of them capless).
+  //
+  // Nothing is weakened by the scoping. The capless class is policed ahead of
+  // the merge by the two refusals above — an unresolvable frame, and a bare
+  // sub-1 value whose basis nothing establishes — and that second one is what
+  // closes this PR's own reported `.85`-on-frame-100000 signature.
+  const modelScaleDeclared = factorCap !== undefined || appliedProvenance !== undefined;
   const modelValue = mergedParse.data.nodes.find((n) => n.id === event.target_id)
     ?.observed_state?.value;
-  if (!scaleValuesAgree(modelValue, effectiveValue)) {
+  if (modelScaleDeclared && !scaleValuesAgree(modelValue, effectiveValue)) {
     log.warn(
       {
         event: 'v5.system_event.factor_value_edit.scale_ambiguous',
