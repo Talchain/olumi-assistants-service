@@ -1,5 +1,7 @@
 ## Draft: C2 scenario/run binding increment
 
+**CI repair update:** the initial head's required boundary-pattern gate and two fixture compatibility tests failed. The repair removes the helper's two double-casts without weakening validation, migrates only producer-faithful test hashes/freshness, and adds negative identity controls. Local verification is now 224/224 focused tests plus the unchanged boundary gate, scoped compiler and lint. Remote CI still needs its own result; the original 209 passes below were not CI clearance. See [the diagnosis and repair receipt](https://github.com/Talchain/olumi-assistants-service/blob/codex/c2-run-fact-identity-20260907/artefacts/c2-run-binding-candidate-20260907/CI-REPAIR.md).
+
 **Dependency order: #1372 → #1371 → this PR. Do not merge this candidate ahead of those PRs.** Core is the sole product integrator. Merge-forward between integrations; no rebase. This branch has merged forward already-landed staging `243287ed5865c42f780f2e9267569a9f46f65e4d` (local merge `9ba0d53557db4ab37a9e706be741bff5645b04a0`). Neither unlanded dependency has been merged into this candidate.
 
 Core granted exclusive source ownership in CCC-PRIMARY-058, programme docs `5a623edd`, 7 September 00:38Z. The previously banked integration is now applied as product source, not merely a helper or patch proposal.
@@ -25,7 +27,7 @@ Plus the new pure identity helper, its focused tests, two new C2 integration tes
 
 The earlier candidate patch and receipts remain as historical local-bank artifacts. This file supersedes their unapplied status.
 
-## Verification on this applied source
+## Original applied-source verification (before CI repair)
 
 **209/209 tests passed across eight focused suites**, Vitest 4.1.10, exit 0, duration 5.42 seconds; runner start 02:45:28. No full-suite claim.
 

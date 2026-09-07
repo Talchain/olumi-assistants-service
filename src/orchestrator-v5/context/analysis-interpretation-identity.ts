@@ -100,15 +100,27 @@ function exactNonEmptyString(value: unknown): value is string {
 export function validateAnalysisRunFactIdentity(input: unknown): AnalysisRunFactIdentityValidation {
   const value = record(input);
   if (value === null) return { status: 'unconfirmed', reason: 'missing_identity' };
-  for (const field of ['scenario_id', 'graph_hash_at_run', 'computed_at'] as const) {
-    if (value[field] == null || value[field] === '') {
-      return { status: 'unconfirmed', reason: 'missing_identity_field', field };
-    }
-    if (!exactNonEmptyString(value[field])) {
-      return { status: 'unconfirmed', reason: 'invalid_identity_field', field };
-    }
+  const scenario_id = value.scenario_id;
+  if (scenario_id == null || scenario_id === '') {
+    return { status: 'unconfirmed', reason: 'missing_identity_field', field: 'scenario_id' };
   }
-  const { scenario_id, graph_hash_at_run, computed_at } = value as unknown as AnalysisRunFactIdentity;
+  if (!exactNonEmptyString(scenario_id)) {
+    return { status: 'unconfirmed', reason: 'invalid_identity_field', field: 'scenario_id' };
+  }
+  const graph_hash_at_run = value.graph_hash_at_run;
+  if (graph_hash_at_run == null || graph_hash_at_run === '') {
+    return { status: 'unconfirmed', reason: 'missing_identity_field', field: 'graph_hash_at_run' };
+  }
+  if (!exactNonEmptyString(graph_hash_at_run)) {
+    return { status: 'unconfirmed', reason: 'invalid_identity_field', field: 'graph_hash_at_run' };
+  }
+  const computed_at = value.computed_at;
+  if (computed_at == null || computed_at === '') {
+    return { status: 'unconfirmed', reason: 'missing_identity_field', field: 'computed_at' };
+  }
+  if (!exactNonEmptyString(computed_at)) {
+    return { status: 'unconfirmed', reason: 'invalid_identity_field', field: 'computed_at' };
+  }
   if (!/^[0-9a-f]{16}$/.test(graph_hash_at_run)) {
     return { status: 'unconfirmed', reason: 'unsupported_hash_representation', field: 'graph_hash_at_run' };
   }
@@ -149,15 +161,20 @@ function validatePolicy(
   value: Record<string, unknown> | null,
   supported: readonly AnalysisInterpretationPolicy[],
 ): { readonly status: 'confirmed'; readonly policy: AnalysisInterpretationPolicy } | UnconfirmedPolicy {
-  for (const field of ['contract_version', 'policy_version'] as const) {
-    if (value?.[field] == null || value[field] === '') {
-      return { status: 'unconfirmed', reason: 'missing_policy_binding', field };
-    }
-    if (!exactNonEmptyString(value[field])) {
-      return { status: 'unconfirmed', reason: 'invalid_policy_binding', field };
-    }
+  const contract_version = value?.contract_version;
+  if (contract_version == null || contract_version === '') {
+    return { status: 'unconfirmed', reason: 'missing_policy_binding', field: 'contract_version' };
   }
-  const { contract_version, policy_version } = value as unknown as AnalysisInterpretationPolicy;
+  if (!exactNonEmptyString(contract_version)) {
+    return { status: 'unconfirmed', reason: 'invalid_policy_binding', field: 'contract_version' };
+  }
+  const policy_version = value?.policy_version;
+  if (policy_version == null || policy_version === '') {
+    return { status: 'unconfirmed', reason: 'missing_policy_binding', field: 'policy_version' };
+  }
+  if (!exactNonEmptyString(policy_version)) {
+    return { status: 'unconfirmed', reason: 'invalid_policy_binding', field: 'policy_version' };
+  }
   if (!supported.some((p) => p.contract_version === contract_version && p.policy_version === policy_version)) {
     return { status: 'unconfirmed', reason: 'unsupported_policy_binding' };
   }
