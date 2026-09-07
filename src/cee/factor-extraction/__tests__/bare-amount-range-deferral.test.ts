@@ -378,6 +378,20 @@ describe("a currency this pattern cannot CARRY is a currency it must not READ", 
     }
   });
 
+  it("⭐ TWIN: the guard blocks CURRENCY prefixes, not letters — a run-on word still reads", () => {
+    // ⚠ MEASURED, NOT ANTICIPATED. A mutant that added `\w` to the lookbehind
+    // class SURVIVED the whole suite, and a 32-string corpus run against it
+    // found exactly one difference — this string, which went from a range to
+    // nothing. The mutant was not equivalent; the corpus was short (CLAUDE.md
+    // trap 13c: a survivor is a claim either way, and only a discriminating
+    // fixture settles it). Pinned so the guard's scope is bound to CURRENCY
+    // and cannot quietly widen to "any letter".
+    const range = shapes("budget80-120k for it.").find((f) => f.extractionType === "range");
+    expect(range, "a letter-prefixed amount stopped being read").toBeDefined();
+    expect(range!.rangeMin).toBe(80_000);
+    expect(range!.rangeMax).toBe(120_000);
+  });
+
   it("⭐ the guard's currency class is DERIVED — every canonical key is covered", () => {
     // The union assertion trap 12d asks for: derivation stops the consumers
     // drifting, and this stops the LIST being short. A key added to the
