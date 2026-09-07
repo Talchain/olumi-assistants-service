@@ -323,6 +323,45 @@ const CURRENCY_MULTICHAR_ALTERNATION: string = Object.keys(CURRENCY_SYMBOL_TO_CO
   .map(escapeForPattern)
   .join("|");
 
+/**
+ * ⭐⭐ EVERY CURRENCY PREFIX THE VOCABULARY CARRIES, AS ONE ALTERNATION —
+ * LONGEST FIRST, so a multi-character prefix can never be shadowed by the
+ * single character it ends in (`A$`, `C$` and `NZ$` all end in `$`).
+ *
+ * ⚠⚠ WHAT A HAND-SPELLED CLASS COST, MEASURED ON THIS PR AT `302556d4` AND AT
+ * BASE `f4c8f501`, through `parseNumericValue`. `cee/extraction/numeric-parser`'s
+ * range grammar spelled `[£$€¥₹]` while its own POINT grammar one function
+ * below spelled `[£$€¥₹]|A\$|C\$|NZ\$|CHF|kr`. The range pattern therefore
+ * read the `$` INSIDE `A$`, and a range said in Australian dollars was
+ * published in US ones:
+ *
+ *     "A$ 80k-120k"   f4c8f501  80,000 AUD (a point)
+ *                     302556d4  100,000 **USD**   ← the currency changed
+ *     "C$ 80-120k"    f4c8f501  80 CAD
+ *                     302556d4  100,000 **USD**
+ *     "NZ$ 80-120k"   f4c8f501  80 NZD
+ *                     302556d4  100,000 **USD**
+ *     "CHF 80-120k"   f4c8f501  80 CHF
+ *                     302556d4  80 CHF (the range never matched at all)
+ *
+ * The non-range spellings were unaffected at both commits ("A$ 80k" → AUD), so
+ * the defect was specific to the pattern the shorter list belonged to — which
+ * is the signature of a mirror, not of a decision.
+ *
+ * ⚠ DERIVED, NOT SPELLED, and this file already learned that lesson once:
+ * `cee/extraction/__tests__/currency-vocabulary.union.test.ts` REDded on a
+ * hand-written copy below and said what to do instead. Note what it could NOT
+ * have caught here — by its own documented design it stays silent on a
+ * currency class that is a limb of an amount GRAMMAR rather than a whole-token
+ * membership test, and both of numeric-parser's lists are grammars. A
+ * detection guard proves a copy is REVIEWED; only derivation stops one being
+ * SHORT (CLAUDE.md trap 12d — the two are not redundant).
+ */
+export const CURRENCY_PREFIX_ALTERNATION: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
+  .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
+  .map(escapeForPattern)
+  .join("|");
+
 export const BARE_AMOUNT_RANGE_START_GUARD =
   `(?<![${CURRENCY_SYMBOL_CLASS}\\d.,+\\-–—])` +
   `(?<!\\b(?:${CURRENCY_MULTICHAR_ALTERNATION})\\s{0,3})`;

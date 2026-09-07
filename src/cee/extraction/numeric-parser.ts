@@ -50,6 +50,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import {
   amountRangePattern,
+  CURRENCY_PREFIX_ALTERNATION,
   RANGE_SEPARATOR,
   rangePointEstimate,
   resolveAmountRange,
@@ -361,10 +362,26 @@ function isFromToChangeFrame(text: string, matchIndex: number | undefined): bool
 }
 
 function parseRangeValue(text: string): RangeParse {
+  // ⭐⭐ THE PREFIX ALTERNATION IS DERIVED, NOT SPELLED — see
+  // `CURRENCY_PREFIX_ALTERNATION`. This pattern spelled `[£$€¥₹]`, which reads
+  // the `$` INSIDE `A$`/`C$`/`NZ$`, so "A$ 80k-120k" published 100,000 **USD**
+  // while the point grammar 200 lines below — carrying the longer list —
+  // answered AUD for "A$ 80k" in the same build. The two lists are now one.
+  //
+  // ⚠ THIS PATH READS THE PREFIX; THE FACTOR PATH DECLINES IT, AND THAT IS NOT
+  // AN INCONSISTENCY TO RECONCILE (CLAUDE.md trap 21 — two authorities
+  // answering different questions). `factor-extraction`'s `currencyRange`
+  // carries `[£$€]` and CANNOT emit any other unit, so for it "a currency this
+  // pattern cannot CARRY is a currency it must not READ" and
+  // `BARE_AMOUNT_RANGE_START_GUARD` declines the rest. This pattern CAN carry
+  // every key in the vocabulary — `CURRENCY_MAP[g.currency]` resolves it — so
+  // the honest answer here is to read it correctly, not to drop it. Aligning
+  // them would either delete AUD/CAD/NZD/CHF/SEK ranges from this path or mint
+  // unitless factors on that one.
   const currencyRange = new RegExp(
-    `(?<currency>[£$€¥₹])\\s*` +
+    `(?<currency>${CURRENCY_PREFIX_ALTERNATION})\\s*` +
       amountRangePattern("min", "minMag", "max", "maxMag", {
-        currencyBeforeMax: "(?:[£$€¥₹]\\s*)?",
+        currencyBeforeMax: `(?:(?:${CURRENCY_PREFIX_ALTERNATION})\\s*)?`,
       }),
     "i",
   );
@@ -593,7 +610,9 @@ function getRelativeDirection(keyword: string): "increase" | "decrease" {
 function parseCurrencyValue(text: string): ParsedValue | null {
   // Pattern: £59, $100, €45, £10k, $2.5m
   const currencyPattern = new RegExp(
-    `(?<currency>[£$€¥₹]|A\\$|C\\$|NZ\\$|CHF|kr)\\s*(?<digits>${AMOUNT_DIGITS})` +
+    // The SAME derived alternation the range grammar uses. Spelled by hand,
+    // this list and that one drifted apart and stayed apart through review.
+    `(?<currency>${CURRENCY_PREFIX_ALTERNATION})\\s*(?<digits>${AMOUNT_DIGITS})` +
       magnitudeSuffixPattern("mag") +
       `(?:\\s*(?<code>GBP|USD|EUR|JPY|INR|AUD|CAD|NZD|CHF|SEK))?`,
     "i",

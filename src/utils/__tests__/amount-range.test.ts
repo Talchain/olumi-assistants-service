@@ -34,11 +34,13 @@ import {
   SMALLEST_DROPPABLE_MAGNITUDE,
 } from "../magnitude-alphabet.js";
 import {
+  CURRENCY_PREFIX_ALTERNATION,
   RANGE_LOWER_BOUND_ABSENT_GUARD,
   rangePointEstimate,
   resolveAmountPairBothOrNeither,
   resolveAmountRange,
 } from "../amount-range.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "../currency-alphabet.js";
 import { extractFactors } from "../../cee/factor-extraction/index.js";
 import { parseNumericValue } from "../../cee/extraction/numeric-parser.js";
 
@@ -209,7 +211,26 @@ describe("shapes with no single reading are refused, and the refused set is exac
     ).toEqual({ min: 50, max: 70, magnitudeDistributed: false });
   });
 
-  it("refuses a lower-only magnitude and a descending elliptical pair, and nothing else", () => {
+  // ⚠⚠ THE NAME THIS TEST CARRIED UNTIL NOW WAS FALSE, AND IT WAS FALSE FROM
+  // THE FIRST COMMIT OF THIS PR (`git log -S` dates it to `d2847f2c`). It read
+  // *"refuses a lower-only magnitude and a descending elliptical pair, and
+  // nothing else"*, and it was wrong in BOTH halves:
+  //
+  //   - "a descending elliptical pair" OVER-CLAIMS. `80,000-120k` is a
+  //     descending elliptical pair and it MINTS — it is the headline row of
+  //     "a descending elliptical pair splits three ways, not two" directly
+  //     below. Only the AMBIGUOUS sub-class (both readings ascend) and the
+  //     genuinely-descending one (neither does) refuse.
+  //   - "and nothing else" is FALSE. The third assertion in this body refuses
+  //     `5m-2m` — a descending pair carrying a magnitude on BOTH bounds, which
+  //     is a third refusal the name never mentioned.
+  //
+  // The commit that split the branch three ways (`d95f5dee`) changed the
+  // behaviour and left the name describing the two-way version. The pinned SET
+  // was renamed for exactly this reason on the same PR; this is its twin, and
+  // it was missed. A test name is read far more often than a test body, so a
+  // false one is a false claim about the product with a green tick beside it.
+  it("refuses a lower-only magnitude, an AMBIGUOUS descending elliptical pair and a descending BOTH-magnitude pair — and reads the rest", () => {
     expect(
       resolveAmountRange({
         minDigits: "2",
@@ -1163,5 +1184,314 @@ describe("KNOWN_DASH_JOINED_DESCENDING — a recorded floor, pinned in both dire
     // floor of 2,024%, on either path.
     expect(factors.filter((f) => f.extractionType === "range")).toEqual([]);
     expect(parseNumericValue("revenue 2024-10%")).toBeNull();
+  });
+});
+
+/* ===========================================================================
+ * A CURRENCY PREFIX IS READ WHOLE — the repair of the behaviour seat's
+ * blocking finding on the RANGE grammar (#1327).
+ * ======================================================================== */
+
+describe("the range grammar reads the WHOLE currency prefix, not the `$` inside it", () => {
+  /**
+   * ⚠⚠ A REGRESSION THIS PR INTRODUCED, MEASURED at head `302556d4` and at base
+   * `f4c8f501` through `parseNumericValue` before it was believed:
+   *
+   *     "A$ 80k-120k"   f4c8f501  80,000 AUD      302556d4  100,000 **USD**
+   *     "C$ 80-120k"    f4c8f501      80 CAD      302556d4  100,000 **USD**
+   *     "NZ$ 80-120k"   f4c8f501      80 NZD      302556d4  100,000 **USD**
+   *     "CHF 80-120k"   f4c8f501      80 CHF      302556d4       80 CHF (no range)
+   *
+   * The NON-range spellings were correct at both commits ("A$ 80k" → AUD), so
+   * the defect belonged to the pattern with the shorter list, not to a
+   * decision: `parseRangeValue` spelled `[£$€¥₹]` while `parseCurrencyValue`
+   * two hundred lines below spelled the full ten. A range said in Australian
+   * dollars was published in US ones, and the amount changed with it.
+   *
+   * ⚠ WHY A GREEN SUITE DID NOT SEE IT. `currency-vocabulary.union.test.ts` is
+   * a DETECTION guard and, by its own documented design, stays silent on a
+   * currency class that is a limb of an amount GRAMMAR rather than a
+   * whole-token membership test — both of these lists are grammars. Detection
+   * proves a copy has been REVIEWED; only derivation stops one being SHORT
+   * (CLAUDE.md trap 12d — the two guards are not redundant, so both halves are
+   * asserted below: a DERIVED union over the map, and a HAND-WRITTEN corpus
+   * that survives a key going missing from the map itself).
+   */
+
+  it("DERIVED HALF: every key in the canonical vocabulary reads as ITSELF on the RANGE grammar", () => {
+    const keys = Object.keys(CURRENCY_SYMBOL_TO_CODE);
+    // Non-vacuity: an empty map would make the loop below agree with nothing.
+    expect(keys.length, "the canonical vocabulary is empty — this loop is vacuous").toBe(10);
+    for (const [symbol, code] of Object.entries(CURRENCY_SYMBOL_TO_CODE)) {
+      const parsed = parseNumericValue(`${symbol}80-120k`);
+      expect(parsed, `${symbol}80-120k read as no range at all`).not.toBeNull();
+      expect(parsed!.unit, `${symbol}80-120k`).toBe(code);
+      expect(parsed!.rangeMin, `${symbol}80-120k`).toBe(80_000);
+      expect(parsed!.rangeMax, `${symbol}80-120k`).toBe(120_000);
+    }
+  });
+
+  it("HAND-WRITTEN HALF: the discriminating pair — `A$`/`C$`/`NZ$` are themselves, a bare `$` is USD", () => {
+    // ⚠ THE DERIVED HALF ABOVE CANNOT CATCH A KEY GOING MISSING FROM THE MAP:
+    // it iterates the map, so a deleted key is simply not tested and the loop
+    // stays green (trap 12d — derivation proves agreement, never completeness).
+    // These rows are spelled out, so they RED on a short map as well as on a
+    // short pattern.
+    for (const [text, code] of [
+      ["A$ 80k-120k", "AUD"],
+      ["C$ 80-120k", "CAD"],
+      ["NZ$ 80-120k", "NZD"],
+      ["CHF 80-120k", "CHF"],
+      ["kr 80-120k", "SEK"],
+    ] as const) {
+      const parsed = parseNumericValue(text);
+      expect(parsed, `${text} read as no range at all`).not.toBeNull();
+      expect(parsed!.unit, text).toBe(code);
+      expect(parsed!.unit, `${text} read the \`$\` inside its own prefix`).not.toBe("USD");
+    }
+    // …and the OPPOSITE-DIRECTION TWIN, without which "never read a `$`" would
+    // pass every row above while deleting the commonest currency in the corpus.
+    for (const [text, code] of [
+      ["$80-120k", "USD"],
+      ["£80-120k", "GBP"],
+      ["€80-120k", "EUR"],
+      ["¥80-120k", "JPY"],
+      ["₹80-120k", "INR"],
+    ] as const) {
+      expect(parseNumericValue(text)!.unit, text).toBe(code);
+    }
+  });
+
+  it("⭐ TWIN: the POINT grammar answers the same, so the two lists cannot drift apart again", () => {
+    // The drift this closes was between two patterns in ONE file. Asserting
+    // only the range grammar would let the point grammar go short next time.
+    for (const [symbol, code] of Object.entries(CURRENCY_SYMBOL_TO_CODE)) {
+      const point = parseNumericValue(`${symbol}80k`);
+      expect(point, `${symbol}80k read as nothing`).not.toBeNull();
+      expect(point!.unit, `${symbol}80k`).toBe(code);
+      expect(point!.value, `${symbol}80k`).toBe(80_000);
+    }
+  });
+
+  it("⭐ the alternation is LONGEST-FIRST, so a longer prefix cannot be shadowed by the character it ends in", () => {
+    // `A$`, `C$` and `NZ$` all END in `$`. Ordered shortest-first, the engine
+    // would match the bare `$` and the prefix letter would be dropped — which
+    // is the defect, arriving through ordering instead of through membership.
+    const alternatives = CURRENCY_PREFIX_ALTERNATION.split("|");
+    expect(alternatives.length, "the alternation lost an alternative").toBe(
+      Object.keys(CURRENCY_SYMBOL_TO_CODE).length,
+    );
+    expect(new Set(alternatives).size, "a duplicated alternative").toBe(alternatives.length);
+    const lengths = alternatives.map((a) => a.replace(/\\/g, "").length);
+    expect(lengths, "the alternation is not longest-first").toEqual(
+      [...lengths].sort((a, b) => b - a),
+    );
+  });
+
+  it("⭐ TWIN: the headline range fix is untouched by the prefix repair", () => {
+    const parsed = parseNumericValue(WITNESSED_CLAUSE);
+    expect(parsed!.value).toBe(100_000);
+    expect(parsed!.rangeMin).toBe(80_000);
+    expect(parsed!.rangeMax).toBe(120_000);
+    expect(parsed!.unit).toBe("GBP");
+  });
+
+  it("⭐ the FACTOR path still DECLINES the prefixes it cannot carry — two questions, not one", () => {
+    // ⚠ NOT AN INCONSISTENCY TO RECONCILE (CLAUDE.md trap 21). This path's
+    // `currencyRange` carries `[£$€]` and can emit no other unit, so for it a
+    // currency it cannot CARRY is one it must not READ, and
+    // `BARE_AMOUNT_RANGE_START_GUARD` declines the rest — pinned in
+    // `factor-extraction/__tests__/bare-amount-range-deferral.test.ts`.
+    // `parseNumericValue` CAN carry every key, so it reads them. Aligning the
+    // two would either delete AUD/CAD/NZD/CHF/SEK ranges from that path or
+    // mint unitless factors on this one.
+    for (const brief of ["NZ$ 80-120k for the launch.", "CHF 80-120k for the launch."]) {
+      expect(extractFactors(brief), brief).toEqual([]);
+    }
+    // …and the twin: the three it CAN carry still mint with their unit.
+    const range = extractFactors("£80-120k for the launch.").find(
+      (f) => f.extractionType === "range",
+    );
+    expect(range!.value).toBe(100_000);
+    expect(range!.unit).toBe("£");
+  });
+});
+
+/* ===========================================================================
+ * KNOWN_LITERAL_BAND_OVER_READ — the third arm's REACH, recorded as an exact
+ * floor rather than tuned. The behaviour seat's third blocking finding.
+ * ======================================================================== */
+
+describe("KNOWN_LITERAL_BAND_OVER_READ — a recorded floor, pinned in both directions", () => {
+  /**
+   * ⚠⚠ WHAT IS WRONG, MEASURED at `302556d4` on BOTH paths — this reaches a
+   * user through `extractFactors`, which `enrichGraphWithFactorsAsync` calls:
+   *
+   *     "£20-15k"     parseNumericValue  7,510 over    20 ..  15,000   (750x)
+   *                   extractFactors     7,510 over    20 ..  15,000
+   *     "£150-100k"   parseNumericValue 50,075 over   150 .. 100,000   (667x)
+   *     "£90-80k"     parseNumericValue 40,045 over    90 ..  80,000   (889x)
+   *
+   * Each is a band derived from a stated DECREASE. The third arm asks whether
+   * a dropped-magnitude rival ASCENDS, and treats a descending rival as no
+   * rival at all — but a decrease descends by definition, which
+   * `resolveAmountPairBothOrNeither`'s own docstring argues one function away.
+   * So `20k-15k` is a live reading of "£20-15k", and the pair is ambiguous
+   * rather than settled.
+   *
+   * ⚠⚠ AND WHY THIS IS RECORDED RATHER THAN CLOSED. Every candidate
+   * discriminator is a BAND-WIDTH CONSTANT WITH A CLIFF, which is the shape
+   * this same predicate has already cost four rounds of oscillation over
+   * (CLAUDE.md trap 22f), and the shape the PR deliberately refused for
+   * "£1,200-2m". MEASURED over the grid below: the literal band's ratio runs
+   * as a CONTINUUM from 1.00 to 889 with no gap anywhere —
+   *
+   *     999-1k    1.00        950-1.2k   1.26       1,500-2k    1.33
+   *     80,000-120k  1.50     5,000-15k  3.00       90-1k      11.11
+   *     150-15k    100.00     150-100k 666.67       1,500-1m  666.67
+   *     20-15k     750.00     150-120k 800.00       90-80k    888.89
+   *
+   * — and the SAME lower bound sits on both sides of any cut you draw
+   * ("1,500-2k" reads 1,500..2,000 while "1,500-1m" reads 1,500..1,000,000).
+   * A typographic discriminator was rejected on this PR's own stated grounds;
+   * a ratio threshold is the same object wearing a number.
+   *
+   * ⚠ THE POINT-FALLBACK DIRECTION WAS MEASURED AND DOES NOT CLOSE THIS. Made
+   * to let the stated lower bound through when the resolver refuses, the rows
+   * below are BYTE-IDENTICAL — the third arm MINTS them, so the resolver never
+   * refuses and the fallback never fires. (It also reinstated
+   * `parseNumericValue("churn between 10-5%")` → **-5 at confidence "high"**,
+   * the fabrication `resolvePercentRange` was written to close.) Recorded in
+   * the PR thread with the figures.
+   *
+   * So: pinned EXACTLY, so the suite REDs if the set GROWS (something started
+   * guessing more widely) or SHRINKS (a shape that used to read now refuses).
+   * A gap the suite can see is honest; a gap it cannot see is how four rounds
+   * of oscillation happen.
+   */
+  const GRID_MIN = ["20", "150", "950", "1,500", "80,000", "5,000,000"] as const;
+  const GRID_MAX = ["1.2", "2", "15", "100"] as const;
+  const GRID_MAG = ["k", "m"] as const;
+
+  /** EXACTLY the descending-digit pairs the third arm reads literally. */
+  const LITERAL_READS: readonly string[] = [
+    "20-1.2k => 20..1200",
+    "20-2k => 20..2000",
+    "20-15k => 20..15000",
+    "150-1.2k => 150..1200",
+    "150-2k => 150..2000",
+    "150-15k => 150..15000",
+    "150-100k => 150..100000",
+    "950-1.2k => 950..1200",
+    "950-2k => 950..2000",
+    "950-15k => 950..15000",
+    "950-100k => 950..100000",
+    "1,500-2k => 1500..2000",
+    "1,500-15k => 1500..15000",
+    "1,500-100k => 1500..100000",
+    "80,000-100k => 80000..100000",
+    "1,500-1.2m => 1500..1200000",
+    "80,000-1.2m => 80000..1200000",
+    "80,000-2m => 80000..2000000",
+    "80,000-15m => 80000..15000000",
+    "5,000,000-15m => 5000000..15000000",
+    "5,000,000-100m => 5000000..100000000",
+  ];
+
+  it("the third arm reads EXACTLY these pairs literally — RED if the set GROWS or SHRINKS", () => {
+    const got: string[] = [];
+    let descending = 0;
+    for (const mag of GRID_MAG) {
+      for (const min of GRID_MIN) {
+        for (const max of GRID_MAX) {
+          if (Number(min.replace(/,/g, "")) <= Number(max)) continue;
+          descending++;
+          const resolved = resolveAmountRange({
+            minDigits: min,
+            minMagnitude: undefined,
+            maxDigits: max,
+            maxMagnitude: mag,
+          });
+          if (resolved === null) continue;
+          got.push(`${min}-${max}${mag} => ${resolved.min}..${resolved.max}`);
+        }
+      }
+    }
+    // Non-vacuity, in BOTH directions (trap 13b — a sweep that swept nothing
+    // agrees with any expectation, and a sweep that refused everything agrees
+    // with an empty one).
+    expect(descending, "the grid produced no descending pairs — the sweep is not running").toBe(46);
+    expect(got.length, "the arm read nothing at all — the sweep is measuring a refuser").toBe(21);
+    expect(got).toEqual(LITERAL_READS);
+  });
+
+  it("⚠ THE OVER-READ THIS FLOOR RECORDS, on the path a user reaches", () => {
+    // Named explicitly rather than left implicit in the set above, because the
+    // set alone reads as a list of successes.
+    for (const [text, point, low, high] of [
+      ["£20-15k", 7_510, 20, 15_000],
+      ["£150-100k", 50_075, 150, 100_000],
+      ["£90-80k", 40_045, 90, 80_000],
+    ] as const) {
+      const parsed = parseNumericValue(text);
+      expect(parsed!.value, text).toBe(point);
+      expect(parsed!.rangeMin, text).toBe(low);
+      expect(parsed!.rangeMax, text).toBe(high);
+      const range = extractFactors(text).find((f) => f.extractionType === "range");
+      expect(range, `${text}: the factor path stopped producing the recorded band`).toBeDefined();
+      expect(range!.rangeMin, text).toBe(low);
+      expect(range!.rangeMax, text).toBe(high);
+    }
+  });
+
+  it("⭐ TWIN: the narrow literal reads the three-way split was BUILT for still read", () => {
+    // Without this, closing the over-read by refusing the whole arm would pass
+    // every assertion above while deleting the class `d95f5dee` exists to read.
+    for (const [min, max, mag, lo, hi] of [
+      ["80,000", "120", "k", 80_000, 120_000],
+      ["1,500", "2", "k", 1_500, 2_000],
+      ["950", "1.2", "k", 950, 1_200],
+    ] as const) {
+      expect(
+        resolveAmountRange({
+          minDigits: min,
+          minMagnitude: undefined,
+          maxDigits: max,
+          maxMagnitude: mag,
+        }),
+        `${min}-${max}${mag}`,
+      ).toEqual({ min: lo, max: hi, magnitudeDistributed: false });
+    }
+  });
+
+  it("⭐ TWIN: the refusals on BOTH sides of the arm are still refusals", () => {
+    // The arm is bounded above and below. A widening that closed the over-read
+    // by admitting more would show here.
+    for (const [min, max, mag] of [
+      ["500", "2", "m"], // BOTH readings ascend — genuinely ambiguous
+      ["1,200", "2", "m"], // …and a separator does not settle it
+      ["5,000,000", "2", "m"], // NEITHER reading ascends — genuinely descending
+      ["5000000", "2", "m"],
+    ] as const) {
+      expect(
+        resolveAmountRange({
+          minDigits: min,
+          minMagnitude: undefined,
+          maxDigits: max,
+          maxMagnitude: mag,
+        }),
+        `${min}-${max}${mag} stopped being refused`,
+      ).toBeNull();
+    }
+    // …and the ASCENDING-digit branch still DISTRIBUTES rather than falling
+    // into the literal reading, which is the whole point of the PR.
+    expect(
+      resolveAmountRange({
+        minDigits: "80",
+        minMagnitude: undefined,
+        maxDigits: "120",
+        maxMagnitude: "k",
+      }),
+    ).toEqual({ min: 80_000, max: 120_000, magnitudeDistributed: true });
   });
 });
