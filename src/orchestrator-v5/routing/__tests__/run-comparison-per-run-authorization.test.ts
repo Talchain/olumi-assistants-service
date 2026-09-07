@@ -192,13 +192,13 @@ describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', (
   });
 
   it('makes NO cross-run claim — no "has changed", no "still", no margin shift', () => {
-    // The implication channel. "The option most likely to serve your goal has changed" plus a named
+    // The implication channel. "The option that scored highest most often in the model simulations has changed" plus a named
     // current leader determines the prior leader by elimination on a two-option
     // model; "still leads" asserts the prior leader WAS this option, which is a
     // designation of the withheld run's leader in a sentence that never names
     // it. Both are cross-run claims and both require both permissions.
     const text = textOf(ask('withheld', 'permitted'));
-    expect(text).not.toMatch(/option most likely to serve your goal has changed/i);
+    expect(text).not.toMatch(/option that scored highest most often in the model simulations has changed/i);
     expect(text).not.toMatch(/\bstill leads\b/i);
     expect(text).not.toMatch(/came out ahead before/i);
     expect(text).not.toMatch(/its lead has (?:widened|narrowed)/i);
@@ -226,15 +226,15 @@ describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', (
 // ---------------------------------------------------------------------------
 
 describe('run-comparison: the four per-run permission combinations', () => {
-  it('PERMITTED / PERMITTED — byte-identical to the pre-fix answer (POSITIVE CONTROL)', () => {
+  it('PERMITTED / PERMITTED — retains the scoped comparison and margin (POSITIVE CONTROL)', () => {
     // Pinned to the FULL string, not to fragments. This is the control that
     // makes every absence assertion in this file non-vacuous: it proves the
     // fixture produces a real, leader-naming, margin-carrying comparison, so
     // the "not.toContain" assertions elsewhere are measuring suppression rather
-    // than an empty answer. It is also the one-directionality proof at the
-    // bytes — this branch must not move at all.
+    // than an empty answer. The comparison is scoped to score frequency, not
+    // likelihood of meeting a target; the margin and band remain available.
     expect(textOf(ask('permitted', 'permitted'))).toBe(
-      'The option most likely to serve your goal has changed. Offshore scored highest before, and Onshore scores highest now.'
+      'The option that scored highest most often in the model simulations has changed. Offshore scored highest most often in the earlier run, and Onshore scored highest most often in the latest run.'
         + ' Its lead has narrowed by about 14 percentage points.'
         + ` ${BAND_SENTENCE}`
         + ` ${FOLLOW_UP}`,

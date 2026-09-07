@@ -355,9 +355,9 @@ describe('run-comparison: same-inputs mode under MIXED per-run verdicts', () => 
   const CURRENT_WITHHELD_DISTINCT = pair(runFact(ENV_B, 'h-current', T_CURRENT, false), runFact(ENV_A, 'h-prior', T_PRIOR, true));
 
   it('PRECONDITION: the two mixed fixtures reach the mixed branches (the both-permitted twin names a leader change; they do not)', () => {
-    expect(textOf(ask(SAME_INPUTS_CHANGED))).toContain('The option most likely to serve your goal has changed.');
-    expect(textOf(ask(PRIOR_WITHHELD))).not.toContain('The option most likely to serve your goal has changed.');
-    expect(textOf(ask(CURRENT_WITHHELD))).not.toContain('The option most likely to serve your goal has changed.');
+    expect(textOf(ask(SAME_INPUTS_CHANGED))).toContain('The option that scored highest most often in the model simulations has changed.');
+    expect(textOf(ask(PRIOR_WITHHELD))).not.toContain('The option that scored highest most often in the model simulations has changed.');
+    expect(textOf(ask(CURRENT_WITHHELD))).not.toContain('The option that scored highest most often in the model simulations has changed.');
   });
 
   it('prior withheld / current permitted: the withheld run stays withheld inside the same-inputs frame', () => {

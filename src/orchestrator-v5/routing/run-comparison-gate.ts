@@ -599,22 +599,12 @@ function composeComparisonParts(
   const mayCompareLeaderIdentity = mayCompareLeaders && leaderIdentityKnown;
 
   if (mayCompareLeaderIdentity) {
-    // Byte-identical to the pre-fix permitted arm.
     if (delta.leading_option_changed) {
-      // ⚠ THREE CONTEST PHRASES IN ONE SENTENCE, retired 2026-09-07 under
-      // Paul's no-winner ruling: "The leading option has changed",
-      // "came out ahead", "now leads". The FACTS are identical — the leader
-      // changed, who it was, who it is — but the frame is now the user's goal
-      // rather than a contest, matching the UI half (DecisionGuideAI #1280,
-      // "Most likely to serve your goal").
-      //
-      // `still leads` in the else-arm below is DELIBERATELY LEFT — bare "leads"
-      // is the Communication Glossary's sanctioned replacement for "winner",
-      // #1280's banned vocabulary spares it, and rewriting it from this seat
-      // would contradict the served prompt rather than comply with a ruling.
-      // The arms are mutually exclusive, so no single turn reads both frames.
+      // compareRuns selects by win_probability: frequency of scoring highest,
+      // not probability of meeting a target. Scope both the opener and named
+      // clauses to that statistic, even when probability_of_goal is present.
       parts.push(
-        `The option most likely to serve your goal has changed. ${delta.prior_leading_label} scored highest before, and ${delta.current_leading_label} scores highest now.`,
+        `The option that scored highest most often in the model simulations has changed. ${delta.prior_leading_label} scored highest most often in the earlier run, and ${delta.current_leading_label} scored highest most often in the latest run.`,
       );
     } else {
       parts.push(`${delta.current_leading_label} still leads.`);
