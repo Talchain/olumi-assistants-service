@@ -293,8 +293,9 @@ function escapeForPattern(literal: string): string {
 }
 
 /**
- * The currency prefixes, DERIVED from the one canonical vocabulary
- * (`utils/currency-alphabet.ts`, re-exported by `cee/extraction/numeric-parser`).
+ * ⭐ THE CURRENCY VOCABULARY AS ONE SET — KEYS ∪ VALUES of the canonical map,
+ * DERIVED from `utils/currency-alphabet.ts` (re-exported by
+ * `cee/extraction/numeric-parser`).
  *
  * ⚠ DERIVED RATHER THAN SPELLED, and the difference is not stylistic: a
  * hand-written copy here was written first, and
@@ -303,15 +304,14 @@ function escapeForPattern(literal: string): string {
  * It was right. A currency added to the canonical map now reaches this guard
  * with no second edit, which is the only reason the guard cannot drift short
  * again (CLAUDE.md trap 12).
- */
-const CURRENCY_SYMBOL_CLASS: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
-  .filter((prefix) => prefix.length === 1)
-  .map(escapeForPattern)
-  .join("");
-
-/**
- * The multi-character currency prefixes — KEYS ∪ VALUES of the canonical
- * vocabulary — sorted longest-first.
+ *
+ * ⚠⚠ THERE USED TO BE A SECOND DERIVATION BESIDE THIS ONE — a
+ * `CURRENCY_SYMBOL_CLASS` of the single-character keys, spliced into the guard
+ * as a one-character-wide lookbehind. It is gone, and its removal is the
+ * repair, not a tidy-up: a character class is FLUSH BY CONSTRUCTION, so the
+ * moment the vocabulary was also expressed as a separated alternation the two
+ * limbs answered the same question over different domains, and the difference
+ * between them was the hole. One vocabulary, one separation, one answer.
  *
  * ⭐⭐ THE VALUES ARE HERE BECAUSE A USER WRITES THE ISO CODE, and until they
  * were, a stated currency amount became a UNITLESS node. This alternation was
@@ -353,9 +353,13 @@ const CURRENCY_SYMBOL_CLASS: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
  * this PR touches at 328 passed / 0 failed, and no test anywhere reads this
  * one's order. It is kept as a convention shared with the alternation below.
  *
- * `A$`/`C$`/`NZ$` are also caught by the class above when they sit flush
- * against the digits — they END in `$` — but they are here too so a prefix
- * separated from its amount by a space ("NZ$ 80-120k") is refused as well.
+ * ⚠ THE SENTENCE THAT STOOD HERE IS WITHDRAWN. It read: "`A$`/`C$`/`NZ$` are
+ * also caught by the class above when they sit flush against the digits — they
+ * END in `$` — but they are here too so a prefix separated from its amount by a
+ * space is refused as well." True of the guard, and it names the exact reason
+ * the class could not be the whole answer: the class caught the FLUSH form of a
+ * symbol and nothing caught the SPACED form of one. There is no class above any
+ * more, and the separation is applied to every member.
  *
  * ⚠ AND ADDING THE CODES DOES NOT MAKE THE ORDER LOAD-BEARING — CHECKED, not
  * assumed, because it is the one thing that could have changed. A
@@ -366,14 +370,121 @@ const CURRENCY_SYMBOL_CLASS: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
  * see an overlap where one exists — and a fabricated three-word vocabulary
  * returns zero. Membership, not ordering, is still what guards currency here.
  */
-const CURRENCY_MULTICHAR_ALTERNATION: string = [...new Set([
+const CURRENCY_UNION: readonly string[] = [...new Set([
   ...Object.keys(CURRENCY_SYMBOL_TO_CODE),
   ...Object.values(CURRENCY_SYMBOL_TO_CODE),
-])]
-  .filter((prefix) => prefix.length > 1)
-  .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
+])];
+
+/** Longest-first, then lexicographic — the ordering convention this file shares. */
+function byLongestFirst(a: string, b: string): number {
+  return b.length - a.length || (a < b ? -1 : a > b ? 1 : 0);
+}
+
+/**
+ * ⭐⭐ THE ONE SPELLING OF THE GAP A CURRENCY TOKEN MAY LEAVE BEFORE ITS DIGITS.
+ *
+ * ⚠ IT IS SHARED ON PURPOSE, AND THE DIRECTION OF ANY DIVERGENCE MATTERS. The
+ * bare-range guard DECLINES on this separation and `PATTERNS.currencyRange`
+ * ADMITS on it. If the pattern ever admitted MORE than the guard declines, the
+ * two would both fire and one written range would arrive as two factors on two
+ * scales — one of them unitless. Spelling it once makes the two sets equal by
+ * construction rather than by review (CLAUDE.md trap 12).
+ *
+ * `\s` and not `[^\S\n]`: a line-wrapped brief that puts the symbol at the
+ * end of one line and the digits at the start of the next is the commonest way
+ * this arrives, and the guard must decline exactly what the pattern reads.
+ * Bounded at three so it cannot reach across a paragraph of blank lines.
+ */
+export const CURRENCY_AMOUNT_SEPARATION = "\\s{0,3}";
+
+/**
+ * The currency vocabulary split by whether `\b` can be asserted before it —
+ * KEYS ∪ VALUES, every length, sorted longest-first.
+ *
+ * ⭐⭐ THE PARTITION IS BY THE PROPERTY THAT MATTERS, NOT BY LENGTH, AND THAT
+ * IS WHAT CLOSED THE THIRD SPELLING OF THIS DEFECT. The guard below used to
+ * hold single-character symbols in a CHARACTER CLASS — one character wide, so
+ * flush only — and everything else in a `\b`-anchored alternation carrying the
+ * separation. A single-character symbol separated from its digits by a space
+ * therefore fell straight through into the bare pattern, which has no unit of
+ * its own. MEASURED at `2d46f8e2` through `extractFactors`, against base
+ * `ad44d445` which minted NOTHING for any of them:
+ *
+ *     "£ 80-120k for the hire."            ad44d445  []
+ *                                          2d46f8e2  Factor=100,000, unit ABSENT
+ *     "Budget of £ 80-120k for the hire."  2d46f8e2  Factor=100,000, unit ABSENT
+ *     "$ 400-900k on tooling"              2d46f8e2  Factor=650,000, unit ABSENT
+ *
+ * Thirty cells in all — `£ $ € ¥ ₹` × {space, non-breaking space, thin space}
+ * × two carriers. It is the same truth defect the multi-character symbols and
+ * then the ISO codes each showed in turn, in a third spelling, and closing it
+ * one spelling at a time is what produced three rounds. The separation now
+ * applies to EVERY member of the union; the only thing the partition decides is
+ * whether `\b` is assertable, and `\b` is not assertable before `£` — nothing
+ * precedes a symbol that could be a word boundary when the character before it
+ * is a space, so putting `£` behind `\b` would have left the hole open in a
+ * fourth spelling.
+ *
+ * ⚠ THE SPLIT COINCIDES WITH length===1 IN TODAY'S VOCABULARY and is NOT
+ * derived from it: `kr` is two characters and word-initial, `A$` is two
+ * characters and word-initial, and a one-character `¥` is symbol-initial. Add a
+ * multi-character symbol-initial member (`$U`, say) and it lands on the correct
+ * side with no second edit.
+ */
+const CURRENCY_WORD_INITIAL_ALTERNATION: string = CURRENCY_UNION
+  .filter((prefix) => /^\w/.test(prefix))
+  .sort(byLongestFirst)
   .map(escapeForPattern)
   .join("|");
+
+const CURRENCY_SYMBOL_INITIAL_ALTERNATION: string = CURRENCY_UNION
+  .filter((prefix) => !/^\w/.test(prefix))
+  .sort(byLongestFirst)
+  .map(escapeForPattern)
+  .join("|");
+
+/**
+ * ⭐⭐ "THIS `$` IS THE TAIL OF A DIFFERENT CURRENCY" — for the range pattern
+ * whose currency class is `[£$€]` and cannot say `A$`.
+ *
+ * DERIVED: every vocabulary KEY that ends in one of the single-character
+ * symbols, minus that symbol — `A$` → `A`, `C$` → `C`, `NZ$` → `NZ`.
+ *
+ * ⚠⚠ WITHOUT IT THE RANGE PATTERN READS THE `$` INSIDE `A$` AND PUBLISHES
+ * AUSTRALIAN DOLLARS AS AMERICAN ONES. This file's own docstring records that
+ * defect being closed for `parseNumericValue` at `302556d4`; the SAME defect
+ * was still live on the `extractFactors` side, at base and at head alike.
+ * MEASURED across a 360-cell enumeration:
+ *
+ *     "A$80-120k for the hire."   ad44d445  unit `$`, values 100 and 80
+ *                                 2d46f8e2  unit `$`, value 100,000
+ *
+ * Fourteen cells (`A$ a$ C$ c$ NZ$ nz$ Nz$` × two carriers). The repair is a
+ * REFUSAL, not a widening: `[£$€]` stays exactly as it is, so no `unit` string
+ * this module has never emitted reaches `inferFactorType`, whose currency list
+ * is a separate hand-spelled mirror (`factor-extraction/enricher.ts`) and is
+ * NOT in this PR's scope. A currency this pattern cannot carry is a currency it
+ * must not read — the rule the guard above already applies.
+ *
+ * `\b` so the assertion fires on a whole token: "Series A$80-120k" is
+ * Australian dollars and is refused; "USA$80-120k" is not a vocabulary member
+ * at that boundary and still reads as `$`.
+ */
+const CURRENCY_SYMBOL_INITIAL_SET: ReadonlySet<string> = new Set(
+  CURRENCY_UNION.filter((prefix) => prefix.length === 1),
+);
+
+export const CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD: string = (() => {
+  const prefixes = Object.keys(CURRENCY_SYMBOL_TO_CODE)
+    .filter((key) => key.length > 1 && CURRENCY_SYMBOL_INITIAL_SET.has(key.slice(-1)))
+    .map((key) => key.slice(0, -1))
+    .sort(byLongestFirst)
+    .map(escapeForPattern);
+  // A vocabulary with no such key would silently disable the guard rather than
+  // fail — so the emptiness is expressed here and asserted in the union test
+  // (CLAUDE.md trap 13: an assertion over nothing passes by testing nothing).
+  return prefixes.length === 0 ? "" : `(?<!\\b(?:${prefixes.join("|")}))`;
+})();
 
 /**
  * ⭐⭐ EVERY CURRENCY PREFIX THE VOCABULARY CARRIES, AS ONE ALTERNATION,
@@ -439,8 +550,9 @@ export const CURRENCY_PREFIX_ALTERNATION: string = Object.keys(CURRENCY_SYMBOL_T
   .join("|");
 
 export const BARE_AMOUNT_RANGE_START_GUARD =
-  `(?<![${CURRENCY_SYMBOL_CLASS}\\d.,+\\-–—])` +
-  `(?<!\\b(?:${CURRENCY_MULTICHAR_ALTERNATION})\\s{0,3})`;
+  `(?<![\\d.,+\\-–—])` +
+  `(?<!(?:${CURRENCY_SYMBOL_INITIAL_ALTERNATION})${CURRENCY_AMOUNT_SEPARATION})` +
+  `(?<!\\b(?:${CURRENCY_WORD_INITIAL_ALTERNATION})${CURRENCY_AMOUNT_SEPARATION})`;
 
 /**
  * The full range grammar: two amounts, each with an OPTIONAL magnitude, joined

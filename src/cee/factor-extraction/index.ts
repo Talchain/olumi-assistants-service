@@ -36,6 +36,8 @@ import {
 import {
   amountRangePattern,
   BARE_AMOUNT_RANGE_START_GUARD,
+  CURRENCY_AMOUNT_SEPARATION,
+  CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD,
   RANGE_LOWER_BOUND_ABSENT_GUARD,
   RANGE_LOWER_BOUND_DEFERRAL_SEPARATOR,
   RANGE_SEPARATOR,
@@ -297,11 +299,42 @@ const PATTERNS = {
    * CHARACTER class, which matches a bare "t" or "o" as a separator.
    * --------------------------------------------------------------------- */
 
-  // Range with currency: "between £50-70k", "£50k-£70k", "£80-120k"
+  // Range with currency: "between £50-70k", "£50k-£70k", "£80-120k", "£ 80-120k"
+  //
+  // ⭐⭐ THE SEPARATION AND THE TAIL GUARD ARE THE THIRD AND FOURTH SPELLINGS OF
+  // ONE DEFECT, CLOSED BY ENUMERATION RATHER THAN BY A FOURTH PATCH (PR #1327).
+  //
+  // This pattern is the only thing in `extractFactors` that can publish a range
+  // WITH a currency, so the set it admits decides the set
+  // `BARE_AMOUNT_RANGE_START_GUARD` must decline. Measured over the full
+  // cross-product — every KEY and VALUE of `CURRENCY_SYMBOL_TO_CODE` × {flush,
+  // space, non-breaking space, thin space} × {as-written, lower, upper, title}
+  // × two carriers, 360 cells — head `2d46f8e2` produced FIFTY cells that were
+  // neither a refusal nor the currency the user wrote:
+  //
+  //     "£ 80-120k for the hire."    ad44d445 []      2d46f8e2 100,000 unit ABSENT
+  //     "$ 400-900k on tooling"      ad44d445 []      2d46f8e2 650,000 unit ABSENT
+  //     "A$80-120k for the hire."    ad44d445 $ 100   2d46f8e2 $ 100,000
+  //
+  // The first class is thirty cells the guard let through because a symbol was
+  // separated from its digits; they are closed at the guard, and this pattern
+  // now READS that separation so the amount mints carrying its own symbol
+  // instead of being refused. The second is fourteen cells where this pattern
+  // read the `$` INSIDE `A$` and published Australian dollars as American ones
+  // — pre-existing at base, and the same defect `numeric-parser`'s range
+  // grammar had closed at `302556d4` while this one still carried it.
+  //
+  // ⚠ THE `$` REPAIR IS A REFUSAL, NOT A WIDENING. `[£$€]` is unchanged, so no
+  // `unit` string this module has never emitted can reach `inferFactorType`,
+  // whose currency list (`enricher.ts`) is a separate hand-spelled mirror and
+  // is out of this PR's scope. Reading `A$` correctly needs that mirror derived
+  // first; refusing it needs nothing, and refusing is the honest half of the
+  // rule the guard already applies — a currency this pattern cannot CARRY is a
+  // currency it must not READ.
   currencyRange: new RegExp(
-    `(?:between\\s+)?(?<currency>[£$€])` +
+    `(?:between\\s+)?${CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD}(?<currency>[£$€])${CURRENCY_AMOUNT_SEPARATION}` +
       amountRangePattern("min", "minMult", "max", "maxMult", {
-        currencyBeforeMax: "(?:[£$€])?",
+        currencyBeforeMax: `(?:${CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD}[£$€]${CURRENCY_AMOUNT_SEPARATION})?`,
       }),
     "gi",
   ),

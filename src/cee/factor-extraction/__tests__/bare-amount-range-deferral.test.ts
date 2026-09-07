@@ -421,14 +421,23 @@ describe("a currency this pattern cannot CARRY is a currency it must not READ", 
       ).toBe(false);
     }
     // …and SPACED, which is how an ISO code is actually written ("USD 80-120k").
-    // Scoped to the multi-character members ON PURPOSE: that is the alternation's
-    // domain. A single-character symbol separated from its digits by a space is
-    // NOT declined here — measured `true` for all five of `£ $ € ¥ ₹` — and
-    // asserting otherwise would pin a behaviour this guard does not have.
-    for (const prefix of union.filter((p) => p.length > 1)) {
+    //
+    // ⚠⚠ THIS LOOP USED TO BE SCOPED TO `p.length > 1`, and the comment beside
+    // it said so ON PURPOSE: "a single-character symbol separated from its
+    // digits by a space is NOT declined here — measured `true` for all five of
+    // `£ $ € ¥ ₹` — and asserting otherwise would pin a behaviour this guard
+    // does not have." Every word of that was accurate, and it is exactly how
+    // the third spelling of this defect stayed open: the test recorded the hole
+    // instead of REDding on it, because the scope was taken from the
+    // ALTERNATION's domain rather than from the VOCABULARY's. A guard's test
+    // must be scoped to the question ("does a currency own these digits?"), not
+    // to the shape of today's implementation — scoping it to the implementation
+    // is a guard agreeing with itself (CLAUDE.md trap 13b). The separation now
+    // applies to EVERY member, and this loop asserts EVERY member.
+    for (const prefix of union) {
       expect(
         guard.test(`${prefix} 80`),
-        `${prefix} 80: a spaced multi-character currency prefix is not declined`,
+        `${prefix} 80: a spaced currency prefix is not declined`,
       ).toBe(false);
     }
     // …and the contrast controls, in the same run: a NON-currency prefix must
@@ -615,5 +624,224 @@ describe("KNOWN_WORD_SEPARATOR_FLOOR — pinned in both directions", () => {
     )?.data as { raw_value?: number; cap?: number } | undefined;
     expect(data!.raw_value).toBe(100_000);
     expect(data!.cap, "admits the user's own upper bound, and then some").toBeGreaterThan(120_000);
+  });
+});
+
+/* ===========================================================================
+ * ⭐⭐⭐ THE COMPLETE SPELLING SPACE, CLOSED BY ENUMERATION (PR #1327).
+ *
+ * THE RULE THIS PINS, IN ONE SENTENCE: **a currency token from the canonical
+ * vocabulary owns the digits that follow it — flush or separated by whitespace,
+ * in any case — so a range written after one either mints carrying that same
+ * currency or mints nothing, and never mints unitless or under a different
+ * currency.**
+ *
+ * ⚠⚠ WHY AN ENUMERATION AND NOT A SIXTEENTH EXAMPLE. This one class has now
+ * been fixed three times on this PR, each time by naming the spelling in hand:
+ * the multi-character symbols (`A$`/`C$`/`NZ$`), then the ISO codes
+ * (`USD`/`EUR`), then single-character symbols separated from their digits by a
+ * space. Each fix closed one spelling and left another open, and every time the
+ * whole suite stayed green — 338 tests across the ten specs this PR touches
+ * passed at `2d46f8e2` with thirty unitless cells live. A hand-written corpus
+ * is what let three spellings through (CLAUDE.md trap 22: a corpus drawn from
+ * the author's head cannot see the class the author did not imagine), so the
+ * corpus here is DERIVED and the assertion is over the whole cross-product.
+ *
+ * THE SPACE, and it is the whole space this module can be handed:
+ *   token       every KEY and every VALUE of `CURRENCY_SYMBOL_TO_CODE` (19)
+ *   case        as-written · lower · upper · title, de-duplicated
+ *   separation  flush · space · NON-BREAKING space · THIN space
+ *   carrier     bare, and behind a `contextualNumber` noun ("Budget of …")
+ *
+ * ⭐ THE SEPARATION DIMENSION IS DELIBERATE ON ITS EXOTIC MEMBERS, and the
+ * reasoning is stated rather than left to the regex: `CURRENCY_AMOUNT_SEPARATION`
+ * is `\s{0,3}`, and JS `\s` includes U+00A0 and U+2009. So a non-breaking or
+ * thin space — the two a word processor, a PDF paste or a currency-formatting
+ * library actually produce — is read exactly like an ordinary one, in the
+ * pattern AND in the guard, which is what stops them becoming the fourth
+ * spelling. They are enumerated here because a dimension nobody tests is a
+ * dimension nobody knows the answer for; MEASURED at `2d46f8e2`, all three
+ * separated forms of all five symbols minted UNITLESS.
+ *
+ * ⭐ AND THE HONEST FLOOR. Of the nineteen vocabulary members, three can be
+ * CARRIED by a range — `currencyRange` publishes `unit` verbatim from `[£$€]`.
+ * The other sixteen are REFUSED, and that set is pinned EXACTLY below so it
+ * REDs if it grows (a currency stopped minting) OR shrinks (a currency started
+ * minting a `unit` string `enricher.ts`'s hand-spelled `inferFactorType` list
+ * has never seen). Widening the carried set is a real improvement and it is a
+ * DIFFERENT change: it needs that second mirror derived first.
+ * ========================================================================= */
+describe("⭐⭐⭐ every currency spelling × separation × case has a stated outcome", () => {
+  const CURRENCY_UNION = [
+    ...new Set([
+      ...Object.keys(CURRENCY_SYMBOL_TO_CODE),
+      ...Object.values(CURRENCY_SYMBOL_TO_CODE),
+    ]),
+  ];
+
+  /** The three the range path can publish a `unit` for. Derived below, not read from here. */
+  const CARRIED_BY_THE_RANGE_PATH = ["£", "$", "€"] as const;
+
+  /**
+   * ⚠ THE KNOWN SET — recorded, not silently absent (CLAUDE.md trap 22f).
+   * Every canonical currency a written range is REFUSED for rather than read.
+   * Derived as the complement so it cannot be hand-maintained short.
+   */
+  const KNOWN_REFUSED_CURRENCIES = CURRENCY_UNION.filter(
+    (member) => !(CARRIED_BY_THE_RANGE_PATH as readonly string[]).includes(member),
+  ).sort();
+
+  const caseVariants = (token: string): string[] => [
+    ...new Set([
+      token,
+      token.toLowerCase(),
+      token.toUpperCase(),
+      token.charAt(0).toUpperCase() + token.slice(1).toLowerCase(),
+    ]),
+  ];
+
+  const SEPARATIONS = [
+    ["flush", ""],
+    ["space", " "],
+    ["non-breaking space", " "],
+    ["thin space", " "],
+  ] as const;
+
+  const CARRIERS = [
+    ["bare", (prefix: string) => `${prefix}80-120k for the hire.`],
+    ["contextual", (prefix: string) => `Budget of ${prefix}80-120k for the hire.`],
+  ] as const;
+
+  interface Cell {
+    readonly canonical: string;
+    readonly token: string;
+    readonly separation: string;
+    readonly carrier: string;
+    readonly input: string;
+  }
+
+  const CELLS: Cell[] = CURRENCY_UNION.flatMap((canonical) =>
+    caseVariants(canonical).flatMap((token) =>
+      SEPARATIONS.flatMap(([separation, gap]) =>
+        CARRIERS.map(([carrier, build]) => ({
+          canonical,
+          token,
+          separation,
+          carrier,
+          input: build(`${token}${gap}`),
+        })),
+      ),
+    ),
+  );
+
+  /**
+   * ⚠ THE LOOP MUST HAVE SOMETHING TO SAY. An enumeration that silently emptied
+   * — a vocabulary that failed to import, a `flatMap` that returned nothing —
+   * would pass every assertion below by iterating zero cells (CLAUDE.md trap
+   * 13). Pinned against the derivation, not against a written number, so adding
+   * a currency grows it rather than REDding it.
+   */
+  it("the cross-product is DERIVED and non-empty", () => {
+    expect(CURRENCY_UNION.length).toBeGreaterThan(Object.keys(CURRENCY_SYMBOL_TO_CODE).length);
+    expect(CELLS.length).toBe(
+      CURRENCY_UNION.reduce((n, c) => n + caseVariants(c).length, 0) *
+        SEPARATIONS.length *
+        CARRIERS.length,
+    );
+    expect(CELLS.length).toBeGreaterThan(300);
+    expect(KNOWN_REFUSED_CURRENCIES.length).toBeGreaterThan(0);
+  });
+
+  it("⭐⭐ NO CELL MINTS A UNITLESS NODE, AND NONE MINTS UNDER ANOTHER CURRENCY", () => {
+    const unitless: string[] = [];
+    const wrongCurrency: string[] = [];
+    for (const cell of CELLS) {
+      for (const factor of extractFactors(cell.input)) {
+        if (factor.unit === undefined || factor.unit === null || factor.unit === "") {
+          unitless.push(`${JSON.stringify(cell.input)} → ${factor.value} with NO unit`);
+        } else if (factor.unit !== cell.token) {
+          wrongCurrency.push(
+            `${JSON.stringify(cell.input)} → ${factor.value} as ${factor.unit}, written ${cell.token}`,
+          );
+        }
+      }
+    }
+    // Both directions in one place on purpose: a repair that closed the
+    // unitless class by publishing everything as `$` would pass one and RED
+    // the other (CLAUDE.md trap 22b — one predicate, two opposite harms).
+    expect(unitless, "a stated currency amount reached a node with no unit").toEqual([]);
+    expect(wrongCurrency, "a stated currency amount reached a node under a DIFFERENT currency").toEqual([]);
+  });
+
+  it("⭐⭐ the currencies a range MINTS with are EXACTLY the three the pattern can carry", () => {
+    const minted = [
+      ...new Set(
+        CELLS.filter((cell) => extractFactors(cell.input).length > 0).map((cell) => cell.canonical),
+      ),
+    ].sort();
+    // Exact-set, so this REDs if a currency stops minting AND if one starts.
+    expect(minted).toEqual([...CARRIED_BY_THE_RANGE_PATH].sort());
+  });
+
+  it("⭐⭐ KNOWN: the sixteen canonical currencies a written range REFUSES, pinned exactly", () => {
+    const refused = [
+      ...new Set(
+        CELLS.filter((cell) => extractFactors(cell.input).length === 0).map((cell) => cell.canonical),
+      ),
+    ].sort();
+    // ⚠ RED ON GROWTH **AND** ON SHRINKAGE. Growth means a currency this
+    // module used to read stopped being read; shrinkage means one started
+    // minting a `unit` string `inferFactorType` cannot classify. Neither may
+    // happen quietly — a recorded floor is honest, a fourth silent spelling
+    // is not.
+    expect(refused).toEqual(KNOWN_REFUSED_CURRENCIES);
+    // …and every member of the KNOWN set refuses at EVERY separation, not just
+    // the one spelling that happened to be measured.
+    for (const canonical of KNOWN_REFUSED_CURRENCIES) {
+      for (const [separation, gap] of SEPARATIONS) {
+        expect(
+          extractFactors(`Budget of ${canonical}${gap}80-120k for the hire.`),
+          `${canonical} (${separation})`,
+        ).toEqual([]);
+      }
+    }
+  });
+
+  it("⭐ CONTRAST CONTROLS: the guard refuses CURRENCY, not everything", () => {
+    // Without these, every assertion above passes on a module that mints
+    // nothing at all (CLAUDE.md trap 13 — an absence claim needs a presence).
+    for (const [, gap] of SEPARATIONS) {
+      // A bare, genuinely unprefixed range still mints — and still unitless,
+      // which is correct: nothing in it names a currency.
+      const bare = extractFactors(`Budget of${gap || " "}80-120k for the hire.`);
+      expect(bare.length, `unprefixed, separation ${JSON.stringify(gap)}`).toBeGreaterThan(0);
+    }
+    // A three-letter token that is NOT in the vocabulary must still be read —
+    // the fabricated control. It reads unitless because it names no currency.
+    const fabricated = extractFactors("Budget of QQQ 80-120k for the hire.");
+    expect(fabricated.length, "a non-currency prefix stopped being read").toBeGreaterThan(0);
+    // …and the same string with a REAL code in place of the fabricated one is
+    // refused, in the same run: the discrimination, not just the sensitivity.
+    expect(extractFactors("Budget of USD 80-120k for the hire.")).toEqual([]);
+  });
+
+  it("⭐ the three carried currencies mint the SAME value at every separation and carrier", () => {
+    // The over-narrowing twin: a guard that refused the separated forms
+    // outright would pass the unitless assertion and delete the capability.
+    for (const symbol of CARRIED_BY_THE_RANGE_PATH) {
+      for (const [separation, gap] of SEPARATIONS) {
+        for (const [carrier, build] of CARRIERS) {
+          const range = extractFactors(build(`${symbol}${gap}`)).find(
+            (f) => f.extractionType === "range",
+          );
+          const where = `${symbol} / ${separation} / ${carrier}`;
+          expect(range, where).toBeDefined();
+          expect(range!.value, where).toBe(100_000);
+          expect(range!.rangeMin, where).toBe(80_000);
+          expect(range!.rangeMax, where).toBe(120_000);
+          expect(range!.unit, where).toBe(symbol);
+        }
+      }
+    }
   });
 });
