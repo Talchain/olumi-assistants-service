@@ -102,6 +102,7 @@
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
+import { splitIntoRedactableUnits } from './redactable-units.js';
 
 /**
  * Copy that NAMES or PRESUMES a leading option.
@@ -397,41 +398,74 @@ export function textAssertsLeadingOption(value: string): boolean {
 }
 
 /**
- * Classify each vocabulary occurrence in its own clause. A conditional or
- * negated comparison is not an asserted result. Do not exempt an entire answer:
- * "If X leads, test costs. Y leads now." still contains an assertion.
- * Clause boundaries, not a character window, bound the scope of qualifiers.
- * This remains a bounded prose reader, not a semantic judge or claim licence.
+ * Classify the comparative PREDICATE, not every word in its surrounding prose.
+ * A clause-initial conditional/negative subject or an adjacent auxiliary can
+ * qualify it. An unrelated negated noun, a word inside an option label, or an
+ * investigation later in the sentence cannot. The shared unit splitter bounds
+ * direct questions without exempting relative assertions inside a question.
  */
-function assertedLeaderMatches(value: string): Array<{
+interface AssertedLeaderMatch {
   code: string;
   before: string;
   after: string;
-}> {
+  start: number;
+  end: number;
+}
+
+function assertedLeaderMatches(value: string): AssertedLeaderMatch[] {
   const text = neutraliseEnforcementFalsePositiveSpans(value);
-  const matches: Array<{ code: string; before: string; after: string }> = [];
+  let offset = 0;
+  const units = splitIntoRedactableUnits(text).map((unit) => {
+    const located = { text: unit, start: offset, end: offset + unit.length };
+    offset = located.end;
+    return located;
+  });
+  const matches: AssertedLeaderMatch[] = [];
   for (const { code, re } of LEADER_CLAIM_PATTERNS) {
     for (const match of text.matchAll(new RegExp(re.source, 'gi'))) {
+      const end = match.index + match[0].length;
       const before =
         text
           .slice(0, match.index)
           .split(/[.!?;,]|\b(?:but|yet|however)\b/i)
           .at(-1) ?? '';
       const after = text
-        .slice(match.index + match[0].length)
+        .slice(end)
         .split(/[.!?;,]|\b(?:but|yet|however)\b/i)[0];
-      // Neither/nor and explicit denial preserve the comparison discussion;
-      // "not only" is emphatic assertion, not a denial.
-      if (/\b(?:if|unless|suppose|supposing|whether|neither)\b/i.test(before)) continue;
-      if (/\b(?:could|might|may|would)\b/i.test(before)) continue;
+
+      // Initial operators bind the comparison's subject. Do not search for
+      // "no" within that subject: e.g. Status Quo (No New Hire) is a label.
+      if (/^\s*(?:if|unless|suppose|supposing|whether|neither)\b/i.test(before)) continue;
+      // Modal/negative auxiliaries must meet the predicate, not another verb
+      // such as "the deadline may slip and X leads".
       if (
-        /\b(?:not(?!\s+only\b)|never|cannot|can['’]t|doesn['’]t|isn['’]t|no(?!\s+doubt\b))\b/i.test(
-          before,
-        )
-      )
-        continue;
-      if (/\b(?:if|unless)\b/i.test(after)) continue;
-      matches.push({ code, before, after });
+        /\b(?:could|might|may|would)\s+(?:(?:have\s+)?(?:be|been|become)\s+)?(?:the\s+)?$/i.test(before)
+      ) continue;
+      if (
+        /\b(?:not|never|cannot|can['’]t|doesn['’]t|isn['’]t|no)\s+(?:the\s+)?$/i.test(before)
+      ) continue;
+      // A denied report of a comparison is not the report's assertion. The
+      // optional complement also covers the overlapping bare "leads" match.
+      if (
+        /\b(?:(?:does?|did)\s+not|doesn['’]t|didn['’]t|cannot|can['’]t)\s+(?:show|indicate|establish|determine)(?:\s+which\s+option)?\s*$/i.test(before)
+      ) continue;
+      // Only an adjacent postfix condition binds this predicate. An "if" in
+      // "X leads now and we should check if costs rise" belongs to the check.
+      if (/^\s+(?:if|unless)\b/i.test(after)) continue;
+
+      const unit = units.find((candidate) => candidate.start <= match.index && end <= candidate.end);
+      if (unit?.text.trimEnd().endsWith('?')) {
+        const questionBefore = text.slice(unit.start, match.index);
+        const questionAfter = text.slice(end, unit.end);
+        const asksWhich =
+          (code === 'which_option_leads' && questionBefore.trim() === '') ||
+          (code === 'leads' && /^\s*which\s+option\s*$/i.test(questionBefore));
+        const asksWhether =
+          /^\s*(?:is|are|was|were)\b[^,;.!?]*\bthe\s*$/i.test(questionBefore) &&
+          /^\s*\?\s*$/.test(questionAfter);
+        if (asksWhich || asksWhether) continue;
+      }
+      matches.push({ code, before, after, start: match.index, end });
     }
   }
   return matches;
@@ -446,12 +480,29 @@ function assertedLeaderMatches(value: string): Array<{
  */
 export function textAssertsImplicitLeadingOption(value: string): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  return assertedLeaderMatches(value).some(
-    ({ code, before, after }) =>
-      ((code === 'leading_option' || code === 'the_lead') &&
-        /^['’]s\s+(?:current\s+)?(?:advantage|edge)\b/i.test(after)) ||
-      (code === 'which_option_leads' &&
-        /\b(?:analysis|results?|model)\s+(?:shows?|indicates?|establishes?)\s*$/i.test(before)),
+  return assertedLeaderMatches(value).some(isImplicitDesignation);
+}
+
+function isImplicitDesignation({ code, before, after }: AssertedLeaderMatch): boolean {
+  return (
+    ((code === 'leading_option' || code === 'the_lead') &&
+      /^['’]s\s+(?:current\s+)?(?:advantage|edge)\b/i.test(after)) ||
+    (code === 'which_option_leads' &&
+      /\b(?:analysis|results?|model)\s+(?:shows?|indicates?|establishes?)\s*$/i.test(before))
+  );
+}
+
+/**
+ * An explicit implicit designation is complete in its own unit. If EVERY
+ * assertion is such a designation, removing it cannot leave a naming half in
+ * an unrelated sentence. Overlapping vocabulary ("leads" inside "which option
+ * leads") refers to the same predicate, not a second distributed assertion.
+ */
+export function textAssertsOnlyImplicitLeadingOptions(value: string): boolean {
+  const matches = assertedLeaderMatches(value);
+  const implicit = matches.filter(isImplicitDesignation);
+  return matches.length > 0 && matches.every((match) =>
+    implicit.some((designation) => designation.start <= match.start && match.end <= designation.end),
   );
 }
 

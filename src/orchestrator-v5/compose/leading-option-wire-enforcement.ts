@@ -195,6 +195,7 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 import {
   textAssertsLeadingOption,
   textAssertsImplicitLeadingOption,
+  textAssertsOnlyImplicitLeadingOptions,
   textNamesLeadingOption,
   // The BLOCK-SURFACE readers. Imported, never copied: a private list here would
   // drift from the alarm and the first symptom would be a leak this gate is
@@ -676,7 +677,9 @@ function projectBlocksForWithheldClaim(
  * vocabulary unit is precisely what leaves a distributed claim's naming half
  * behind. So after each pass the residual must satisfy BOTH:
  *   - it asserts no leader (`textAssertsLeadingOption` — the ENFORCER reader),
- *   - for exact-name entry, it names no option (`textNamesAnOption`).
+ *   - when any assertion needs a naming half, it names no option. Explicit
+ *     implicit designations are complete locally, so an unrelated explanation
+ *     is not removed merely for naming an option.
  * Failing either escalates: first the name-bearing units go too, then, if the
  * residual STILL fails, the whole field.
  *
@@ -708,9 +711,14 @@ function projectField(
   // This is prose classification, not fuzzy matching of the scenario roster.
   const namesOption = textNamesAnOption(value, roster);
   if (!namesOption && !textAssertsImplicitLeadingOption(value)) return null;
+  // An explicit implicit designation is complete locally. A neighbouring
+  // option explanation is not its missing naming half. Keep the existing
+  // escalation for other/distributed claims, including mixed fields.
+  const needsNameEscalation = namesOption && !textAssertsOnlyImplicitLeadingOptions(value);
 
   const isClean = (candidate: string): boolean =>
-    !textAssertsLeadingOption(candidate) && (!namesOption || !textNamesAnOption(candidate, roster));
+    !textAssertsLeadingOption(candidate) &&
+    (!needsNameEscalation || !textNamesAnOption(candidate, roster));
 
   const surgical = replaceAssertingUnits(
     value,
