@@ -82,12 +82,40 @@ const HISTORIC_V5_GRAMMAR_SHA256 =
  *
  * ⚠ v5's VALUE STAYS AND IS ASSERTED DISTINCT, exactly as v3's and v4's are.
  */
-const PINNED_GRAMMAR_SHA256 =
+const HISTORIC_V6_GRAMMAR_SHA256 =
   "e6c508e0285a95c6d5dd84bfacc91921871d9c3bb7b7d3e55f8514ba6d8010a7";
 
+/**
+ * ⭐ v7 — 2026-08-31, the `cause` stated kind (#1287). ONE new value on an enum
+ * that already existed.
+ *
+ * COST against the budget that actually binds: +8 serialised bytes (1264 →
+ * 1272, against 3400), NO new object schema, NO new union and NO new optional
+ * parameter — the lowest-risk change class available at this boundary, because
+ * the compiled grammar gains one alternative in a string enum it already
+ * compiles.
+ *
+ * ⚠ THE STATIC BUDGET IS NOT EVIDENCE ABOUT THE COMPILED BOUNDARY, which is
+ * unpublished and was established empirically. What can be asserted here is the
+ * serialised size and the SHAPE of the change; a live compiled-grammar probe
+ * with a 400-producing negative control needs provider credentials and is owed
+ * separately. See the PR body.
+ *
+ * ⚠ v6's VALUE STAYS AND IS ASSERTED DISTINCT, exactly as v3/v4/v5's are: every
+ * draft between 2026-08-14 and 2026-08-31 emitted `grammar_sha256:e6c508e0…`,
+ * #1287's capture among them, and a reader of those logs must be able to tell
+ * which grammar produced them.
+ */
+const PINNED_GRAMMAR_SHA256 =
+  "87bd3212076c64773e5f62c4b3e669cc5d47be2038b3a690636f67a6bb109864";
+
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("hashes to the PRE-REGISTERED v6 grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v7 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
+  });
+
+  it("is DISTINCT from the historic v6 grammar, so #1287's capture stays attributable", () => {
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V6_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the historic v4 and v5 grammars, so their runs stay attributable", () => {

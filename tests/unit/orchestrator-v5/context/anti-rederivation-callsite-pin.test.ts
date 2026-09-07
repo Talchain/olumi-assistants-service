@@ -185,7 +185,35 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // Prior facts stay observational — a degraded read yields `unknown` and
     // never authorises or blocks the write. Same post-commit seam, third
     // instance; migrate with the frame-consumer audit, do not add more.
-    'src/orchestrator-v5/system-events/dispatch.ts': 3,
+    // 2026-09-01 structural_add writer (#1275): +1 (one call; the import was
+    // already counted above) — `dispatchStructuralAdd` is the FOURTH instance
+    // of the same post-commit seam, and it is admitted for a DERIVED reason
+    // rather than by symmetry with its siblings.
+    //
+    // WHY THIS ONE GENUINELY NEEDS THE DERIVATION. `nodes` and `options[]` are
+    // both inside the analysis-affecting hash projection, so an add ALWAYS
+    // moves that hash: any prior analysis is out of date by construction and
+    // the currency verdict has to move with it. The pre-write context frame
+    // therefore cannot represent the post-write bytes — the Train C /
+    // structural_delete reason above, in the opposite direction (a removal and
+    // an addition both move the projection).
+    //
+    // ⭐ AND THE CONTRAST THAT SHOWS THIS IS NOT A BLANKET WAIVER FOR THE
+    // FAMILY: `dispatchStructuralRename`, added to this same file by #1273,
+    // adds NO call here and issues no prior-facts read at all — a rename
+    // provably cannot move the analysis hash (`label` is outside the
+    // projection, pinned by `structural-rename.test.ts` → "the
+    // analysis-affecting hash of the persisted bytes does NOT move"), so there
+    // is no currency verdict to re-derive and the round trip would compute a
+    // value that is then discarded. Two writers landed a day apart; only the
+    // one whose bytes move the hash is admitted here. A future `structural_*`
+    // writer must make the same argument at the projection, not cite this row.
+    //
+    // Prior facts stay observational — a degraded read yields `unknown` and
+    // never authorises or blocks the write. Fourth instance of the seam and
+    // the last one that should land ad-hoc; migrate with the frame-consumer
+    // audit, do not add more.
+    'src/orchestrator-v5/system-events/dispatch.ts': 4,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`
@@ -195,7 +223,23 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // construction; reusing build-turn-context's decision-context freshness
     // would derive against a DIFFERENT hash. Deliberate, reviewed; still
     // ad-hoc debt — migrate with the frame-consumer audit, do not add more.
-    'src/orchestrator/route-v2.ts': 2,
+    // 2026-09-01 add-option TEXT leg: 2 -> 3 (one more call, no new import) —
+    // the SAME seam described immediately above, second leg. The add-option
+    // arm now has two entry paths: the typed CHIP (whose parameters a human
+    // resolved on the canvas) and TYPED TEXT (whose spec the focused
+    // `propose_add_option` call produces). Both hand the result to the SAME
+    // `dispatchAddOptionTransaction` -> `evaluateEditGraphMutations` frame
+    // gate, which requires the PRE-edit frame freshness derived against
+    // `computeAnalysisAffectingGraphHash(persistedGraph)` — the same hash the
+    // held pending's `graph_hash` precondition is checked on at confirm time.
+    // This is NOT a new KIND of derivation seam; it is the existing one
+    // reached from a second ingress, and the two legs are mutually exclusive
+    // on a turn, so no turn derives it twice. Reusing build-turn-context's
+    // decision-context freshness would derive against a different hash and
+    // reopen exactly the divergence the entry above exists to prevent.
+    // Deliberate, reviewed; still ad-hoc debt — migrate with the
+    // frame-consumer audit, do not add more.
+    'src/orchestrator/route-v2.ts': 3,
     // 2026-08-17 ROADMAP 2.1271: +2 (import + one call) — the scenario-graph
     // READ leg composes a scenario's analysis verdict OUTSIDE a turn, so the
     // guidance above ("read the value from the CanonicalContextFrame / turn

@@ -93,6 +93,13 @@ export const CeeTaskIdSchema = z.enum([
   // — the dual-draft stage refuses to call the LLM while it resolves. Paul is
   // sole author of the real content (PMS lane).
   'm2_graph_review',
+  // Draft-quality pass — the INDEPENDENT SEMANTIC-COVERAGE JUDGE that reads the
+  // brief and the freshly drafted model and answers one question: does the
+  // model cover the causal dimensions the brief states? Reject-only by
+  // construction (src/cee/draft-quality/types.ts has no content channel); the
+  // registered default in defaults.ts is real, working content so the pass is
+  // not dark on a deployment with no store row. Paul may override it in PMS.
+  'draft_quality_review',
 ]);
 export type CeeTaskId = z.infer<typeof CeeTaskIdSchema>;
 

@@ -179,6 +179,14 @@ function makeRunFact(opts: {
   band: string;
   winFreelance: number;
   drivers: readonly Driver[];
+  /**
+   * `graph_hash_at_run` override (2026-09-06). Freshness anchors on the
+   * NEWEST fact only; the gate reads BOTH runs' hashes and answers
+   * `same_inputs` when they are equal. The prior run here models a model that
+   * changed (band, margin, driver ranks all move), so `twoRuns` gives it a
+   * distinct hash and the suite keeps exercising `compared`.
+   */
+  graphHashAtRun?: string;
 }): Record<string, unknown> {
   const winHire = Math.round((1 - opts.winFreelance) * 100) / 100;
   const options = [
@@ -194,7 +202,7 @@ function makeRunFact(opts: {
       leading_option_id: 'opt_freelance',
       win_probabilities: { opt_freelance: opts.winFreelance, opt_hire: winHire },
       summary: 'Ran analysis.',
-      graph_hash_at_run: hashOf(opts.hashGraph),
+      graph_hash_at_run: opts.graphHashAtRun ?? hashOf(opts.hashGraph),
       computed_at: opts.computedAt,
       enrichment: {
         analysis_status: 'computed',
@@ -248,6 +256,7 @@ function twoRuns(hashGraph: unknown): Array<Record<string, unknown>> {
   });
   const prior = makeRunFact({
     hashGraph,
+    graphHashAtRun: 'prior-model-hash', // the model changed between the runs
     computedAt: '2026-04-30T12:00:00.000Z',
     band: 'low', // fragile
     winFreelance: 0.62, // margin 24pp → narrowed

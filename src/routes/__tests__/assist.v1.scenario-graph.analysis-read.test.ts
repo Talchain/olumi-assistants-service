@@ -113,6 +113,12 @@ const GRAPH = {
 
 /** Derived with the production function, so `fresh` is DERIVED, never asserted. */
 const GRAPH_HASH = computeAnalysisAffectingGraphHash(GRAPH as never)!;
+const PRE_EDIT_GRAPH_HASH = computeAnalysisAffectingGraphHash({
+  ...GRAPH,
+  nodes: GRAPH.nodes.map((node) => node.id === "fac_market"
+    ? { ...node, observed_state: { value: 0.3, cap: 1 } }
+    : node),
+})!;
 
 /**
  * A committed provisional run. `mayName` drives the PERSISTED claim-safety
@@ -247,8 +253,9 @@ describe("2.1271 — the committed provisional analysis reaches the wire (pin 2)
   });
 
   it("STALE — delivers `complete_stale` and NO block (a result about a different graph)", async () => {
+    expect(PRE_EDIT_GRAPH_HASH).not.toBe(GRAPH_HASH);
     readFactsFor.mockResolvedValue([
-      runAnalysisFact({ graphHash: "hash_from_a_graph_since_edited", mayName: true }),
+      runAnalysisFact({ graphHash: PRE_EDIT_GRAPH_HASH, mayName: true }),
     ]);
     const app = await buildApp();
     const body = (await read(app)).json() as Record<string, unknown>;
@@ -257,6 +264,19 @@ describe("2.1271 — the committed provisional analysis reaches the wire (pin 2)
       "complete_stale",
     );
     // The discriminating half: same fact, same route, DIFFERENT hash ⇒ no block.
+    expect(body.analysis_result).toBeNull();
+  });
+
+  it("an unsupported legacy hash is unknown identity, not proof of a valid stale run", async () => {
+    readFactsFor.mockResolvedValue([
+      runAnalysisFact({ graphHash: "hash_from_a_graph_since_edited", mayName: true }),
+    ]);
+    const app = await buildApp();
+    const body = (await read(app)).json() as Record<string, unknown>;
+    expect(body.analysis_state).toMatchObject({
+      run_state: { kind: "unknown_degraded" },
+      leader_claim: { permitted: false, withheld_reason: "analysis_run_identity_unconfirmed" },
+    });
     expect(body.analysis_result).toBeNull();
   });
 });

@@ -352,3 +352,93 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Absent analysis_status must not be reported as success on an unusable
+// envelope.
+//
+// `evaluateAnalysisStatus` accepted `status === null` unconditionally, without
+// consulting `hasUsableResultFields` — that helper was reached only on the
+// unrecognised-status branch. So a PLoT 200 carrying neither an
+// `analysis_status` nor any usable result record was classified `ok` and became
+// a successful run fact.
+//
+// The asymmetry with `completed` below is deliberate, not an oversight.
+// `analysis_status: "completed"` is PLoT AFFIRMING the run finished, so
+// "no options were compared" (the NO_RESULTS template) is a truthful report and
+// stays reachable — pinned by `run-analysis.test.ts`, "NO_RESULTS template
+// fires when results[] is empty AND status is completed". An ABSENT status is
+// PLoT saying nothing at all: with no status and no records there is no
+// evidence the analysis ran, and reporting success is a claim CEE cannot
+// support.
+//
+// Invariants below are written against the `hasUsableResultFields` contract
+// (Part C: at least one record carries a string `option_id` or `option_label`
+// AND a finite numeric `win_probability`), not against the shape of the defect.
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — absent analysis_status requires usable results', () => {
+  it('absent analysis_status WITH usable option_comparison still succeeds', async () => {
+    // Over-blocking guard, and the discriminating twin of the fatal cases
+    // below: the fix must narrow the null branch, never close it. Binds by
+    // IDENTITY to the option the records name, not to "some truthy outcome".
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus(null)),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    expect(fact.fact_type).toBe('run_analysis');
+    if (fact.fact_type === 'run_analysis') {
+      expect(fact.result.leading_option_id).toBe('opt_1');
+    }
+  });
+
+  it('absent analysis_status AND zero result records is fatal with cause_kind analysis_not_completed', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus(null, { option_comparison: [] })),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+
+  it('absent analysis_status AND records with a label but no finite win_probability is fatal', async () => {
+    // The `win_probability` limb of the usable-fields contract. Records are
+    // present and labelled, so a record-COUNT check would pass this envelope;
+    // only the field-level contract rejects it.
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(
+        withStatus(null, {
+          option_comparison: [
+            { option_id: 'opt_1', option_label: 'Raise price' },
+            { option_id: 'opt_2', option_label: 'Keep price' },
+          ],
+        }),
+      ),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+
+  it('absent analysis_status AND records with a win_probability but no label is fatal', async () => {
+    // The label limb of the same contract.
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(
+        withStatus(null, {
+          option_comparison: [{ win_probability: 0.62 }, { win_probability: 0.38 }],
+        }),
+      ),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+});

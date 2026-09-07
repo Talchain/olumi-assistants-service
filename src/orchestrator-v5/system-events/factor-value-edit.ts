@@ -18,12 +18,12 @@
  * the two lanes agree by construction rather than by two people remembering to
  * keep them in step (a hand-maintained mirror is this estate's dominant defect).
  *
- * SCALE. `value` is the MODEL scale, `raw_value` the USER-UNIT magnitude, per
- * `d1-shared/normalise-factor-value.ts`. The client's `value` is NEVER persisted
- * verbatim: the handler re-derives it from the user-unit input and the factor's
- * OWN stored cap. That is deliberate — the same probe found the live UI writing
- * a display magnitude (300000) straight into the 0–1 model field, and a server
- * that trusted it would have persisted a poisoned graph.
+ * SCALE. Capped editors send MODEL-scale `value` and optional USER-UNIT
+ * `raw_value`. Current capless amount editors also send raw magnitudes in
+ * `value`, sometimes repeated in `raw_value`; the field name alone does not
+ * establish input basis. Refuse ambiguous framed inputs before conversion.
+ * The handler owns normalisation using the factor's recorded cap/frame;
+ * server-verified MODEL beliefs may use that same divisor's existing inverse.
  */
 
 import type {
@@ -46,6 +46,8 @@ import { HANDLER_VALIDATION_REGISTRY } from '../routing/validation-registry.js';
 import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
+import { canonicaliseUnitForDisplay } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { resolveScaleFrame } from '../tools/handlers/d1-shared/scale-frame.js';
 import { buildRescaleCapPendingActions } from '../session/rescale-cap-pending.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { verifyAppliedFrom } from '../../collab/apply-verification.js';
@@ -217,8 +219,9 @@ function refuseFromValidationError(
  *
  * `raw_value` is preferred when present because it is what the user actually
  * typed, and it is exactly the input `normaliseFactorValue` consumes. When it is
- * absent we invert the model scale with the factor's OWN cap — the same
- * inversion `resolveExistingRawValue` performs, never a fabricated 0.
+ * absent we invert a known model divisor: the factor's OWN cap, or its resolved
+ * frame ONLY for a server-verified MODEL belief. Without that authority this
+ * retains the existing capless raw carrier, subject to admission below.
  */
 function resolveUserUnitInput(args: {
   readonly value: number;
@@ -247,8 +250,8 @@ function resolveUserUnitInput(args: {
     return { ok: true, rawInput: rawValue };
   }
 
-  // Model-scale only. Invert with the stored cap; an uncapped factor stores
-  // raw and model identically (normalise-factor-value.ts:14-18).
+  // Invert a known model divisor. With no divisor, retain the existing raw
+  // carrier used by capless amount editors; admission below checks ambiguity.
   return { ok: true, rawInput: cap !== undefined ? value * cap : value };
 }
 
@@ -408,10 +411,46 @@ export async function applyFactorValueEdit(
   }
 
   // ── the scale ────────────────────────────────────────────────────────────
+  const factorFrame = factorCap === undefined ? resolveScaleFrame({
+    storedFrame: targetNode.scale_frame,
+    value: observed?.value,
+    raw_value: observed?.raw_value,
+  }) : undefined;
+  if (factorCap === undefined && targetNode.scale_frame !== undefined && factorFrame === undefined) {
+    return refuse(
+      payload,
+      'scale_ambiguous',
+      `I can't verify this factor's recorded scale, so I haven't changed anything. ` +
+        `Please clarify its scale before changing the value.`,
+    );
+  }
+
+  // Capless amount editors may send value=raw_value, or just a raw amount.
+  // A bare sub-1 value also fits the model scale: neither the stored unit nor
+  // a frame establishes which basis the user supplied. Apply the existing
+  // bare-ratio refusal class BEFORE promoting a stored unit into the proposal.
+  // A verified panel belief is separately known to be MODEL-scale below.
+  if (
+    factorFrame !== undefined && appliedProvenance === undefined &&
+    effectiveRawValue === undefined && canonicaliseUnitForDisplay(effectiveUnit) === undefined &&
+    effectiveValue !== 0 && Math.abs(effectiveValue) < 1
+  ) {
+    return refuse(
+      payload,
+      'scale_ambiguous',
+      `I can't tell whether ${effectiveValue} is a model-scale proportion or an amount ` +
+        `for this factor. Please state the amount and its unit, or clarify the scale. ` +
+        `I haven't changed anything.`,
+    );
+  }
+
   const resolved = resolveUserUnitInput({
     value: effectiveValue,
     rawValue: effectiveRawValue,
-    cap: factorCap,
+    // Reuse the existing inverse ONLY for verified MODEL intent. The frame is
+    // a divisor here, never a new cap: the unchanged handler still owns the
+    // raw/frame write. Ordinary raw carriers must not be multiplied by it.
+    cap: factorCap ?? (appliedProvenance !== undefined ? factorFrame : undefined),
   });
   if (!resolved.ok) {
     log.warn(

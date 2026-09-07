@@ -392,6 +392,46 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // ROADMAP 2.1131 — INCIDENTAL, and deliberately so. `utils/amount-range.ts`
+    // is the RANGE grammar: how a magnitude written once after a coordinate
+    // pair ("£80-120k") scopes both bounds. It declares no alphabet, holds no
+    // magnitude->value map, and spells `thousand`/`million` only in the prose
+    // of its docstring; every key, alternation and multiplier it uses comes
+    // from `magnitude-alphabet.js` via `magnitudeSuffixPattern` and
+    // `resolveMagnitude`.
+    // ⚠ IT ANSWERS A DIFFERENT QUESTION FROM THE ALPHABET, which is why it is a
+    // separate module rather than a section of one (trap 21): the alphabet
+    // answers "how many thousands is this suffix?", this answers "does a
+    // suffix written once apply to both bounds?" Converging them would put a
+    // natural-language scoping rule inside the leaf every consumer imports.
+    // ⚠ If this file ever maps a magnitude word to a NUMBER, that makes it a
+    // genuine sibling lookup and it must move to SIBLING_VALUE_LOOKUPS.
+    'utils/amount-range.ts':
+      'derived — range/scoping grammar only; imports the alternation and resolveMagnitude, declares no alphabet and maps no magnitude word to a number',
+    // #1274 — DERIVED, and that is what makes this entry safe rather than an
+    // excuse. `missing-value-answer.ts` reads a SPELLED PERCENTAGE LEVEL
+    // ("thirty percent" -> 0.3). Its first cut re-typed all 27 cardinal words
+    // and the literal `hundred`, which is precisely the fifth-list defect this
+    // guard exists to red — and it DID red it. The fix was not a manifest
+    // entry: the module now imports `CARDINAL_WORD_VALUES` and
+    // `CARDINAL_HUNDRED_WORD` from `utils/cardinal-words.ts` (itself derived
+    // from `MAGNITUDE_MULTIPLIERS`), and DERIVES its tens/ones split from the
+    // values rather than re-listing them. So it declares no alphabet, holds no
+    // magnitude->value map of its own, and cannot drift from the canonical one.
+    // Its only magnitude word is `hundred`, reached through the shared
+    // constant and used as a POSITIONAL compounder inside an integer, never as
+    // a multiplier applied to an extracted figure.
+    // ⚠ It carries exactly ONE additive delta, `zero: 0`, documented at the
+    // declaration: `CARDINAL_WORD_VALUES` omits `zero` to protect the goal
+    // AMOUNT grammar's zero-pair carve-out, a hazard that does not exist for a
+    // percentage level where `0%` already binds. A delta below the alphabet's
+    // 1,000 floor cannot reach any magnitude question.
+    // ⚠ If this file ever maps a SCALE word (thousand, million, grand) to a
+    // number, that makes it a genuine sibling lookup and it must move to
+    // SIBLING_VALUE_LOOKUPS. Today no scale word appears in either map, which
+    // is why `five thousand percent` yields null and is refused.
+    'orchestrator-v5/routing/missing-value-answer.ts':
+      'derived — imports CARDINAL_WORD_VALUES/CARDINAL_HUNDRED_WORD and derives its tens/ones split; declares no alphabet and maps no scale word to a number',
     // Quantities lane (2026-08-18), goal-label conservation rule — NOT a fifth
     // magnitude list, and the distinction is the reason this entry is safe.
     // `compound-goal-label.ts` spells magnitude words (`million`, `billion`,
@@ -469,6 +509,26 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
     // decimal-split hazard ONCE in a shared place. Not done here — unrelated to
     // this lane, and "while we're here" work is prohibited.
     'orchestrator-v5/routing/strip-planning-preamble.ts':
+      'incidental — comment only; spells no alphabet and parses no numbers',
+    // ⭐ SIXTH — AND THE STANDING RECOMMENDATION DIRECTLY ABOVE IS NOW CLOSED,
+    // as a side effect of a change that was not about magnitudes at all.
+    //
+    // The 3 Sep 2026 chain-of-thought leak needed ONE narration vocabulary
+    // shared by the orientation stripper and a new egress guard, so
+    // `SENTENCE_SPLIT` — and the `£1.5 million` docstring explaining why it
+    // must not cut on a bare `[.!?]` — MOVED here, byte-identical, and
+    // `strip-planning-preamble.ts` now imports it. That is the "state the
+    // decimal-split hazard ONCE in a shared place" the entry above asked for.
+    // Its own entry is kept rather than deleted: the file still exists, the
+    // hazard still applies to it through the import, and a reader arriving at
+    // that entry needs the pointer to where the constant went.
+    //
+    // Classification is the same as its sibling's and for the same reason: this
+    // module holds no magnitude list, parses no number and multiplies nothing.
+    // It matches internal-vocabulary patterns over assistant text, splits on
+    // sentence boundaries and returns substrings. The single magnitude word is
+    // inside the docstring that exists to keep a decimal from being split.
+    'orchestrator-v5/compose/process-narration.ts':
       'incidental — comment only; spells no alphabet and parses no numbers',
     // ⭐ #928 ROUND 4 — RECOGNITION-ONLY, and the honest classification is NOT
     // "incidental". The clarify-v2 rubric's `quantities` battery DOES spell a

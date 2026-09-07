@@ -31,6 +31,7 @@ import {
   computeModelQualityFactors,
 } from "../../structure/index.js";
 import { matchesStatusQuoLabel } from "../../structure/status-quo-patterns.js";
+import { optionFramingWarnings } from "../../draft/records/option-framing-recovery.js";
 import { verificationPipeline } from "../../verification/index.js";
 import { CEEDraftGraphResponseV1Schema } from "../../../schemas/ceeResponses.js";
 import {
@@ -46,7 +47,14 @@ import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.
 import { enforceCoachingContract } from "../../../adapters/llm/coaching-contract-conformance.js";
 import { sanitiseCoachingProse } from "../../../orchestrator-v5/compose/output-safety.js";
 import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
-import { renderDirectionClarifications } from "../../compound-goal/direction-gate.js";
+// ⚠ `isDirectionClarificationId` is IMPORTED FROM THE PRODUCER, never restated.
+// The eviction below and `pickDirectionClarifications`'s trust downstream are
+// two halves of one namespace guarantee, and a second copy of the prefix here
+// would be the hand-maintained mirror that lets them drift apart (trap 12).
+import {
+  renderDirectionClarifications,
+  isDirectionClarificationId,
+} from "../../compound-goal/direction-gate.js";
 import type { DraftCoaching } from "../../../orchestrator/types.js";
 import type { GraphV3T, NodeV3T } from "../../../schemas/cee-v3.js";
 import type { GraphV1 } from "../../../contracts/plot/engine.js";
@@ -351,6 +359,78 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // coaching block accepts them, and `hasMeaningfulCoaching` then rightly
   // reports meaningful coaching, so a draft whose only coaching is these
   // questions still surfaces them.
+  //
+  // ⭐⭐ THE `direction_unresolved_*` ID SPACE IS A RESERVED NAMESPACE, AND THIS
+  // STAGE IS WHAT MAKES THAT TRUE. Downstream, `pickDirectionClarifications`
+  // (`orchestrator-v5/coaching/post-draft-narrative.ts`) identifies a
+  // producer-built limit question BY ID PREFIX. That identification is only as
+  // trustworthy as the guarantee that nothing else can carry the prefix — and
+  // until this eviction there was no such guarantee: the Stage 4.5 coaching
+  // pass writes `strengthen_items` from LLM output, so a model that happened to
+  // emit `id: "direction_unresolved_1"` occupied the reserved slot, and the old
+  // `alreadyPresent` check then treated the squatter as satisfying the append
+  // and DISCARDED the producer's genuine card. That is the wrong way round in
+  // both directions at once: unvetted copy inherits producer authority, and the
+  // producer's copy is silently dropped.
+  //
+  // The eviction therefore runs UNCONDITIONALLY — including when this draft has
+  // no unresolved bounds at all, which is precisely the case where there would
+  // be no producer card to displace a squatter.
+  //
+  // ⚠ SCOPE, STATED PRECISELY. This makes the prefix trustworthy on the output
+  // of THIS stage. It is not a claim about every coaching object in the service;
+  // it is the claim the one downstream consumer needs, and the consumer reads
+  // `result.strengthenItems` off this stage's response
+  // (`draft-graph-dispatch.ts:277`, the single call site).
+  {
+    const coachingNow = ctx.coaching as PackagedCoaching | null | undefined;
+    if (coachingNow && Array.isArray(coachingNow.strengthen_items)) {
+      const before = coachingNow.strengthen_items.length;
+      coachingNow.strengthen_items = coachingNow.strengthen_items.filter((existing) => {
+        // ⚠ THE PREDICATE ANSWERS EXACTLY ONE QUESTION: "does this item's id lie
+        // in the reserved namespace?" A `null`, `undefined` or non-object entry
+        // HAS no id, so the answer is NO and the entry is KEPT, untouched.
+        // Malformed optional coaching is not this stage's to discard — and
+        // reading `.id` off it is not this stage's to attempt.
+        //
+        // ⭐⭐ THIS SHAPE CHECK IS LOAD-BEARING, NOT DEFENSIVE PADDING. Stage 4.5
+        // hands `ctx.coaching` the RAW parsed model object
+        // (`coaching-pass.ts:479-481`), and the only thing in between is
+        // `normaliseLegacyCoachingValues`, whose loop `continue`s past
+        // non-object entries WITHOUT REMOVING THEM
+        // (`adapters/llm/normalise-legacy-coaching.ts:61`). So a null entry
+        // genuinely arrives here, and the same file's comments record an
+        // observed schema-violating model response — this is not a theoretical
+        // input class.
+        //
+        // ⚠ AND THE COST OF GETTING IT WRONG IS THE DISCLOSURE ITSELF. A throw
+        // here is not local: `unified-pipeline/index.ts` catches a Package
+        // exception and returns `{graph, rationales, confidence}` only, so ONE
+        // malformed item would discard `coaching`, `goal_constraints` and
+        // `analysis_ready` — including the limit question this eviction exists
+        // to make trustworthy. The guard would have destroyed what it guards.
+        //
+        // The old `alreadyPresent` check carried the same hazard, but only
+        // inside `if (unresolved.length > 0)`. Making the eviction
+        // UNCONDITIONAL is what widened it to every draft, so the shape check
+        // arrives in the same edit as the widening.
+        if (typeof existing !== "object" || existing === null) return true;
+        return !isDirectionClarificationId((existing as { id?: unknown }).id);
+      });
+      const evicted = before - coachingNow.strengthen_items.length;
+      if (evicted > 0) {
+        // FAIL LOUD, same contract as the gate's own logs: counts only, never
+        // the copy. A silent eviction would be indistinguishable from a model
+        // that simply stopped emitting the id.
+        log.warn({
+          event: "cee.direction_clarification.reserved_id_evicted",
+          request_id: ctx.requestId,
+          evicted_count: evicted,
+        }, `${evicted} non-producer coaching item(s) evicted from the reserved direction-clarification id space`);
+      }
+    }
+  }
+
   {
     const unresolved = ctx.directionUnresolved ?? [];
     if (unresolved.length > 0) {
@@ -369,7 +449,26 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
           coaching.strengthen_items = [];
         }
         for (const item of clarifications) {
-          const alreadyPresent = coaching.strengthen_items.some((existing) => existing.id === item.id);
+          // ⚠ SAME SHAPE CHECK, SAME REASON, AND THIS SITE IS THE OLDER OF THE
+          // TWO. `existing.id` throws on a null entry here exactly as it did in
+          // the eviction above — but this branch runs only when
+          // `unresolved.length > 0`, which is to say ONLY ON THE DRAFTS WHERE
+          // THE USER STATED A LIMIT THAT DID NOT LAND. Repairing the eviction
+          // alone would have left the crash live on precisely the turns this
+          // disclosure exists to serve, and moved it out of reach of the test
+          // that found it.
+          //
+          // ⚠ THE GUARD IS NOW PROVABLY REDUNDANT, AND STAYS ANYWAY. The
+          // eviction above removes every reserved id before this loop begins,
+          // and `renderDirectionClarifications` mints distinct ids, so
+          // `alreadyPresent` can no longer be true. It is kept as the
+          // idempotence guarantee this loop has always carried: if a later edit
+          // narrows or removes the eviction, the append must not start
+          // duplicating cards silently.
+          const alreadyPresent = coaching.strengthen_items.some(
+            (existing) =>
+              typeof existing === "object" && existing !== null && existing.id === item.id,
+          );
           if (!alreadyPresent) coaching.strengthen_items.push({ ...item });
         }
         ctx.coaching = coaching;
@@ -656,6 +755,10 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     weak_paths: (goalConn as any).weakPaths,
   };
 
+  const framingWarnings = optionFramingWarnings(ctx.recordDisclosures);
+  if (framingWarnings.length > 0) {
+    draftWarnings = [...(draftWarnings ?? []), ...framingWarnings];
+  }
   ctx.draftWarnings = draftWarnings ?? [];
 
   // ── Step 7: Intervention hints extraction (inline) ───────────────────────

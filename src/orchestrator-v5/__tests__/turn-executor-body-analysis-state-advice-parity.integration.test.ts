@@ -963,8 +963,26 @@ describe('V5 body-analysis_state advice parity — recap-stub fix', () => {
       graphReadError: null,
     },
     {
-      label: 'absent',
-      expectedStatus: 'absent',
+      // ⚠ THIS ROW'S VERDICT CHANGED FROM `absent` TO `unavailable`, AND THE
+      // CHANGE IS THE POINT OF THE FIX THAT MOVED IT.
+      //
+      // The shared body below deliberately orphans a durable run_analysis
+      // fact, and this row supplies no caller graph — which is EXACTLY the
+      // state witnessed on deployed staging, where the product told a user
+      // watching a completed analysis "I don't actually have a model started
+      // yet". A completed analysis proves a model existed (CEE reloads its own
+      // persisted graph to run one), so `absent` — whose prompt contract reads
+      // "no Living Model exists yet" — was a confident false claim about the
+      // user's own work. See `context/graph-absence-warrant.ts`.
+      //
+      // What THIS test guards is untouched: `unavailable` is strictly more
+      // conservative than `absent`, so the request analysis and the orphaned
+      // durable analysis are still not promoted, and the assertions below that
+      // check that property hold identically. Only the verdict token moved.
+      // A genuine fresh user — no analysis fact at all — still resolves
+      // `absent`, pinned in `context/__tests__/graph-absence-warrant.test.ts`.
+      label: 'absence-unwarranted (orphaned analysis, no caller graph)',
+      expectedStatus: 'unavailable',
       requestGraph: null,
       graphReadError: null,
     },

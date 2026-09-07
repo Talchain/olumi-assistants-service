@@ -99,6 +99,11 @@ describe('AI task lifecycle authority', () => {
       'critique_graph',
       'decision_review',
       'draft_graph',
+      // The draft-quality semantic-coverage judge (src/cee/draft-quality/judge.ts).
+      // It is a LIVE router call site — reached on any successful draft the
+      // deterministic pre-filter nominates — so it belongs in this derived
+      // census, and its lifecycle row must not be display_only or inert.
+      'draft_quality_review',
       'edit_graph',
       'explain_diff',
       'm2_graph_review',
