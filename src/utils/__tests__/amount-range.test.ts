@@ -1483,6 +1483,35 @@ describe("KNOWN_LITERAL_BAND_OVER_READ — a recorded floor, pinned in both dire
         `${min}-${max}${mag} stopped being refused`,
       ).toBeNull();
     }
+    // ⭐⭐ THE RIVAL TEST'S BOUNDARY IS INCLUSIVE, AND ONLY AN EQUALITY ROW CAN
+    // SHOW IT. Where the dropped-magnitude rival lands EXACTLY on the upper
+    // bound (2,000 x 1,000 === 2m), both readings are live and the pair is
+    // refused. MEASURED: a mutant weakening `<=` to `<` in that test SURVIVED
+    // the whole of this file — every grid row and every twin above — because
+    // nothing here sat on the boundary. It is the only condition in the arm
+    // whose off-by-one is invisible to a corpus of ordinary amounts.
+    expect(
+      resolveAmountRange({
+        minDigits: "2,000",
+        minMagnitude: undefined,
+        maxDigits: "2",
+        maxMagnitude: "m",
+      }),
+      "the rival landing exactly on the upper bound stopped being ambiguous",
+    ).toBeNull();
+    // …and its OPPOSITE-DIRECTION TWIN one unit past the boundary, without
+    // which tightening `<=` to `>=` would pass the row above by refusing
+    // everything.
+    expect(
+      resolveAmountRange({
+        minDigits: "2,001",
+        minMagnitude: undefined,
+        maxDigits: "2",
+        maxMagnitude: "m",
+      }),
+      "the first pair past the boundary stopped being read",
+    ).toEqual({ min: 2_001, max: 2_000_000, magnitudeDistributed: false });
+
     // …and the ASCENDING-digit branch still DISTRIBUTES rather than falling
     // into the literal reading, which is the whole point of the PR.
     expect(
