@@ -85,10 +85,17 @@ const N = 10_000;
  */
 type VerdictShape = 'permitted' | 'withheld' | 'unstamped';
 
+/**
+ * `hash` is explicit (2026-09-06): the gate now answers `same_inputs` on two
+ * EQUAL hashes. This suite's pair models a model that CHANGED between the runs
+ * (leader flip, band shift), so `ask` gives the two runs distinct hashes and
+ * every case below stays in `compared`, as it always described.
+ */
 function runFact(
   env: V2RunResponseEnvelope,
   shape: VerdictShape,
   computedAt: string,
+  hash: string,
 ): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -96,7 +103,7 @@ function runFact(
     result: {
       enrichment: env,
       computed_at: computedAt,
-      graph_hash_at_run: 'h',
+      graph_hash_at_run: hash,
       ...(shape === 'unstamped'
         ? {}
         : {
@@ -143,8 +150,8 @@ function ask(prior: VerdictShape, current: VerdictShape, turn = true) {
     message: 'What changed?',
     // Newest-first, per the loader convention the pair selector relies on.
     priorFacts: [
-      runFact(CURRENT_ENV, current, '2026-06-07T00:00:00.000Z'),
-      runFact(PRIOR_ENV, prior, '2026-06-06T00:00:00.000Z'),
+      runFact(CURRENT_ENV, current, '2026-06-07T00:00:00.000Z', 'h-current'),
+      runFact(PRIOR_ENV, prior, '2026-06-06T00:00:00.000Z', 'h-prior'),
     ],
     freshness: 'fresh',
     mayNameLeadingOption: turn,

@@ -37,7 +37,7 @@ import {
   findForbiddenPhraseHit,
   findSuccessClaimHit,
 } from '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js';
-import { tryRunComparisonGate } from '../../../src/orchestrator-v5/routing/run-comparison-gate.js';
+import { tryRunComparisonGate, SAME_INPUTS_LEAD_TEXT } from '../../../src/orchestrator-v5/routing/run-comparison-gate.js';
 import { deriveAnalysisFreshness } from '../../../src/orchestrator-v5/context/freshness.js';
 import { generateChips } from '../../../src/orchestrator-v5/compose/chip-generator.js';
 import { HANDLER_VALIDATION_REGISTRY } from '../../../src/orchestrator-v5/routing/validation-registry.js';
@@ -220,12 +220,26 @@ describe('honest distinct states carry no success claims and no forbidden phrase
       computedAt: '2026-06-06T00:00:00.000Z',
     }),
   ];
+  // Both facts take `runFact`'s DEFAULT hash, so the two runs carry EQUAL
+  // hashes: two analyses on the same analysis inputs.
   const TWO_RUNS_IDENTICAL = [
     runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], 'low'), {
       computedAt: '2026-06-07T00:00:00.000Z',
     }),
     runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], 'low'), {
       computedAt: '2026-06-06T00:00:00.000Z',
+    }),
+  ];
+  // The same identical results, but the model CHANGED between the runs
+  // (distinct hashes): a change that happened not to move the result.
+  const TWO_RUNS_IDENTICAL_AFTER_MODEL_CHANGE = [
+    runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], 'low'), {
+      computedAt: '2026-06-07T00:00:00.000Z',
+      hash: 'h-after-change',
+    }),
+    runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], 'low'), {
+      computedAt: '2026-06-06T00:00:00.000Z',
+      hash: 'h-before-change',
     }),
   ];
 
@@ -264,10 +278,25 @@ describe('honest distinct states carry no success claims and no forbidden phrase
     expect(r.suggested_actions?.[0]?.id).toBe('chip_action_rerun_analysis');
   });
 
-  it('fresh + identical runs: nothing-changed is said honestly and does not trip the egress denial-phrase guard', () => {
+  // ⚠ THIS CASE MOVED (2026-09-06). It was ratified on 5 Aug as "fresh +
+  // identical runs: nothing-changed is said honestly", and it WAS honest —
+  // about the two runs. What it was never asked is whether that answer is
+  // honest as a reply to a question about an UPDATE. On 5 Sep a user asked
+  // "How has the update changed the analysis?" after an edit that was never
+  // applied; both compared runs predated the edit attempt (equal graph
+  // hashes), and "X still leads. The size of its lead is essentially
+  // unchanged." let the user believe the update had been tested. This
+  // fixture's two facts carry EQUAL hashes, so it is exactly that state: the
+  // gate now answers in `same_inputs`, leading with the attribution limit and
+  // keeping the scoped comparison after it. The egress-guard assertions — the
+  // delicate pin — are unchanged, and the honest "unchanged / still" wording
+  // is still present, now scoped by the sentence before it.
+  it('fresh + identical runs on the SAME inputs: leads with the attribution limit, keeps the honest scoped wording, and does not trip the egress denial-phrase guard', () => {
     const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_IDENTICAL, freshness: 'fresh', mayNameLeadingOption: true });
     expect(r.matched).toBe(true);
     if (!r.matched) return;
+    expect(r.mode).toBe('same_inputs');
+    expect(r.assistant_text.startsWith(SAME_INPUTS_LEAD_TEXT)).toBe(true);
     // Grounded comparison: same leader, unchanged margin — honest wording.
     expect(r.assistant_text).toMatch(/unchanged|still/i);
     expect(findSuccessClaimHit(r.assistant_text)).toBeNull();
@@ -276,6 +305,19 @@ describe('honest distinct states carry no success claims and no forbidden phrase
     // made/applied" DENIAL class after real edits). If this fails, the
     // comparison copy and the egress denial list have drifted into
     // conflict — resolve in src, not by weakening this assertion.
+    expect(findForbiddenPhraseHit(r.assistant_text)).toBeNull();
+  });
+
+  // The 5 Aug pin, on the fixture it was really about: a model that changed
+  // and a result that did not move. `compared`, byte-for-byte as before.
+  it('fresh + identical runs after a MODEL CHANGE: nothing-changed is said honestly and does not trip the egress denial-phrase guard', () => {
+    const r = tryRunComparisonGate({ message: 'what changed?', priorFacts: TWO_RUNS_IDENTICAL_AFTER_MODEL_CHANGE, freshness: 'fresh', mayNameLeadingOption: true });
+    expect(r.matched).toBe(true);
+    if (!r.matched) return;
+    expect(r.mode).toBe('compared');
+    expect(r.assistant_text).not.toContain(SAME_INPUTS_LEAD_TEXT);
+    expect(r.assistant_text).toMatch(/unchanged|still/i);
+    expect(findSuccessClaimHit(r.assistant_text)).toBeNull();
     expect(findForbiddenPhraseHit(r.assistant_text)).toBeNull();
   });
 

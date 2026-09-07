@@ -36,8 +36,10 @@ import {
   RANK_ORDER,
   TURN_REFERENTS_CAP,
   candidatesAtTopPopulatedRank,
+  nodeIdFromRef,
   nodeRef,
   projectTurnReferents,
+  projectTurnReferentsFromWindow,
   type ReferentNode,
 } from '../turn-referents.js';
 
@@ -102,6 +104,73 @@ const TURN_4_ASSISTANT_TEXT =
   + 'set to: the low end of £80k, the high end of £120k, or a blended figure like £100k?';
 
 const LAST_ASSISTANT_CLAIM_RANK = RANK_ORDER.indexOf('last_assistant_claim');
+
+describe('projectTurnReferentsFromWindow — the one window-to-register rule both consumers use', () => {
+  it('reads the FIRST non-empty assistant message of a NEWEST-FIRST window, and the index is window-relative', () => {
+    // Newest first: an assistant-less turn, a whitespace-only one, then the
+    // founder's turn-4 reply, then an older reply naming a different node.
+    const r = projectTurnReferentsFromWindow({
+      turnsNewestFirst: [
+        { assistant_message: null },
+        { assistant_message: '   ' },
+        { assistant_message: TURN_4_ASSISTANT_TEXT },
+        { assistant_message: 'Earlier I mentioned Competitive Pressure.' },
+      ],
+      nodes: FOUNDER_RUN_NODES,
+    });
+    expect(r.source).toBe('complete');
+    // BIND BY IDENTITY: the turn-4 node, not the older reply's.
+    expect(r.referents.map((x) => x.ref)).toEqual([nodeRef('919d7f50')]);
+    // Window of 4, hit at index 2 (newest-first) → window-relative turn 1.
+    expect(r.referents[0]!.introduced_at_turn).toBe(4 - 1 - 2);
+  });
+
+  it('CONTRAST: the same rows in the OPPOSITE order bind the other node — order is load-bearing', () => {
+    const r = projectTurnReferentsFromWindow({
+      turnsNewestFirst: [
+        { assistant_message: 'Earlier I mentioned Competitive Pressure.' },
+        { assistant_message: TURN_4_ASSISTANT_TEXT },
+      ],
+      nodes: FOUNDER_RUN_NODES,
+    });
+    expect(r.referents.map((x) => x.ref)).toEqual([nodeRef('7dc44ba7')]);
+  });
+
+  it('a window with no assistant text is a COMPLETE zero; a degraded read is DEGRADED', () => {
+    const empty = projectTurnReferentsFromWindow({
+      turnsNewestFirst: [{ assistant_message: null }, {}],
+      nodes: FOUNDER_RUN_NODES,
+    });
+    expect(empty).toEqual({ referents: [], source: 'complete' });
+    const degraded = projectTurnReferentsFromWindow({
+      turnsNewestFirst: [{ assistant_message: TURN_4_ASSISTANT_TEXT }],
+      nodes: FOUNDER_RUN_NODES,
+      conversationRead: 'degraded',
+    });
+    expect(degraded.source).toBe('degraded');
+    expect(degraded.referents).toEqual([]);
+  });
+
+  it('agrees with projectTurnReferents called directly on the same message and index', () => {
+    const viaWindow = projectTurnReferentsFromWindow({
+      turnsNewestFirst: [{ assistant_message: TURN_4_ASSISTANT_TEXT }],
+      nodes: FOUNDER_RUN_NODES,
+    });
+    const direct = projectTurnReferents({
+      lastAssistantMessage: TURN_4_ASSISTANT_TEXT,
+      lastAssistantTurnIndex: 0,
+      nodes: FOUNDER_RUN_NODES,
+    });
+    expect(viaWindow).toEqual(direct);
+  });
+});
+
+describe('nodeIdFromRef', () => {
+  it('inverts nodeRef, and passes a non-node ref through unchanged', () => {
+    expect(nodeIdFromRef(nodeRef('919d7f50'))).toBe('919d7f50');
+    expect(nodeIdFromRef('edge:a->b')).toBe('edge:a->b');
+  });
+});
 
 describe('projectTurnReferents — the witnessed case (5 Sep 2026 founder run)', () => {
   it('recovers exactly one referent, and it is node 919d7f50 Sales Headcount Investment', () => {
