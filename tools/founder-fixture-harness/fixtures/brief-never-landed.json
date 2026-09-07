@@ -2,7 +2,7 @@
   "note": "SYNTHETIC, REPRODUCING A REAL STAGING RUN (sanitised; no real scenario data). A network blip dropped the brief and turns 1-5; turns 6-11 landed on a scenario that had never received the founder brief. Turn 6 below carries the SHAPE of the reply staging actually gave: \"Rerun.\" arriving as the FIRST message of an empty conversation is not a request to run anything, so CEE correctly declined \u2014 no analysis result, no refusal. Before the journey-gap rule existed the harness decided that turn and reported C5 FAIL, fabricating a product defect out of a network failure. THIS FIXTURE IS THE MUTANT-BITING CASE: delete the voiding and C5 FAILS here. C3 must also read NOT ASSESSED rather than PASS \u2014 with six of twelve sends scanned, \"no narration found\" is an absence claim over a corpus that was never assembled.",
   "brief_sha256": "30ff141866aa69f5f763961ede5ae860776f21e427a8178892c040ae724073b6",
   "expect": {
-    "exit_code": 0,
+    "exit_code": 4,
     "criteria": {
       "C1": "NOT_ASSESSED",
       "C2": "NOT_ASSESSED",

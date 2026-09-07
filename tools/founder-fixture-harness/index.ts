@@ -15,17 +15,27 @@
  *
  * ───────────────────────────────────────────────────────────────────────────
  * EXIT CODES
- *   0  no criterion FAILED.  ⚠ NOT "the fixture passed" — read the headline.
- *   1  at least one criterion FAILED (or, with --require-fully-assessed, at
- *      least one was NOT ASSESSED).
+ *   0  the journey completed and no criterion FAILED.
+ *      ⚠ NOT "the fixture passed" — read the headline.
+ *   1  at least one criterion FAILED (or, with --require-fully-assessed, the
+ *      journey completed and at least one criterion was NOT ASSESSED).
  *   2  fatal harness error.
  *   3  halted before deciding anything: brief hash mismatch, deploy gate, or
  *      the SHA of the service under test could not be established.
+ *   4  the journey did not complete, so there is no verdict: a turn did not
+ *      land, and every turn after a gap is a different conversation.
  *
  * Code 3 exists because of the fixture's own rule 8 ("pin the four deployed
  * builds before measuring") and the brief's rule 4: a run that cannot say what
  * it ran against reports that and stops. It does not guess and it does not
  * proceed.
+ *
+ * Code 4 exists because 0 and 1 were each doing two jobs. A gapped run used to
+ * exit 0 — the same number a clean run returns — and, under
+ * --require-fully-assessed, 1, the same number a genuine refutation returns.
+ * So in NEITHER mode did the number discriminate, while the exit code is the
+ * only thing a CI job or a shell script ever reads. The report was always loud
+ * about the gap; nothing pipes prose into a build gate.
  * ───────────────────────────────────────────────────────────────────────────
  */
 
@@ -40,7 +50,7 @@ import type { WireBody } from '../golden-journey-harness/observation.js';
 
 import { BriefHashMismatchError, assertSentBrief, loadBrief, sha256Of } from './brief.js';
 import { buildDetectors, loadCaptureAdapter } from './detectors.js';
-import { evaluateCriteria } from './criteria.js';
+import { evaluateCriteria, firstJourneyGap } from './criteria.js';
 import { collectMeasurements } from './measurements.js';
 import { headline, renderReport, tally } from './report.js';
 import { BRIEF_TURN_INDEX, RELOAD_SEMANTICS, SCRIPTED_TURNS } from './script.js';
@@ -255,7 +265,16 @@ async function runLive(cli: Cli): Promise<HarnessOutcome> {
 export interface ReplayFixture {
   readonly note?: string;
   readonly brief_sha256?: string;
-  readonly expect?: { readonly exit_code?: number; readonly criteria?: Record<string, string> };
+  readonly expect?: {
+    readonly exit_code?: number;
+    readonly criteria?: Record<string, string>;
+    /**
+     * Set when the fixture cannot be decided from this repo alone (today: the
+     * UI checkout's coherence gate). The sweep excludes on THIS, never on a
+     * hardcoded filename.
+     */
+    readonly requires?: string;
+  };
   readonly turns: readonly {
     readonly index: number;
     readonly probes?: string;
@@ -336,9 +355,24 @@ async function runReplay(cli: Cli): Promise<HarnessOutcome> {
 
 // ---------------------------------------------------------------------------
 
+/** "The journey did not complete, so there is no verdict." See the header. */
+export const EXIT_JOURNEY_INCOMPLETE = 4;
+
 export function exitCodeFor(outcome: HarnessOutcome, requireFullyAssessed: boolean): number {
   const t = tally(outcome);
+  // A refutation that LANDED outranks an incomplete journey. Voiding is not
+  // amnesia: a FAIL from a turn before the gap is a real finding and must keep
+  // failing the build, so this test comes first.
   if (t.fail > 0) return 1;
+  // The journey did not complete, so there is no verdict to report — neither a
+  // clean run (0) nor a refutation (1). Derived from the same predicate that
+  // voids the criteria, so the code and the report can never disagree about
+  // whether there was a gap.
+  //
+  // Deliberately NOT 1, in either mode: "a run the harness did not drive may
+  // not FAIL the product" is the original and correct reasoning, and 4 keeps
+  // it while giving a CI consumer something it can actually branch on.
+  if (firstJourneyGap(outcome.turns) !== undefined) return EXIT_JOURNEY_INCOMPLETE;
   if (requireFullyAssessed && t.notAssessed > 0) return 1;
   return 0;
 }
@@ -411,12 +445,22 @@ async function main(): Promise<number> {
     process.stderr.write(`  ${c.id} ${c.verdict}\n`);
   }
   const t = tally(outcome);
-  if (t.fail === 0 && t.notAssessed > 0) {
+  const code = exitCodeFor(outcome, cli.requireFullyAssessed);
+  // The number and the sentence that qualifies it are printed together, and
+  // the sentence is DERIVED from the number actually being returned — a
+  // hardcoded "exit 0" here went stale the moment a fourth code existed.
+  if (code === EXIT_JOURNEY_INCOMPLETE) {
     process.stderr.write(
-      `\n⚠ exit 0 means NOTHING FAILED. ${t.notAssessed} of 6 criteria were NOT ASSESSED — that is not a pass.\n`,
+      `\n⚠ exit ${EXIT_JOURNEY_INCOMPLETE}: THE JOURNEY DID NOT COMPLETE, so this run decided nothing. ` +
+        'This is not a clean run and not a product failure — a turn did not land, and every turn after ' +
+        'a gap is a different conversation. Re-run before reporting anything as product behaviour.\n',
+    );
+  } else if (t.fail === 0 && t.notAssessed > 0) {
+    process.stderr.write(
+      `\n⚠ exit ${code} means NOTHING FAILED. ${t.notAssessed} of 6 criteria were NOT ASSESSED — that is not a pass.\n`,
     );
   }
-  return exitCodeFor(outcome, cli.requireFullyAssessed);
+  return code;
 }
 
 // Only run when invoked as a script, so the module stays importable by tests.

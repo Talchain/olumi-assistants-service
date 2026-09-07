@@ -45,16 +45,27 @@ pnpm fixture:founder:typecheck
 | `--expected-build` | — | strict deploy gate: halt unless `/healthz` reports this SHA |
 | `--out` | stdout | where the evidence pack is written |
 | `--replay` | — | replay a fixture instead of driving a service |
-| `--require-fully-assessed` | off | exit 1 when anything is NOT ASSESSED |
+| `--require-fully-assessed` | off | exit 1 when the journey completed and anything is NOT ASSESSED (a gapped run is still `4`) |
 
 ### Exit codes
 
 | code | meaning |
 |---|---|
-| `0` | no criterion FAILED. **Not "the fixture passed"** — read the headline. |
-| `1` | at least one criterion FAILED (or, with `--require-fully-assessed`, anything unassessed) |
+| `0` | the journey completed and no criterion FAILED. **Not "the fixture passed"** — read the headline. |
+| `1` | at least one criterion FAILED (or, with `--require-fully-assessed`, the journey completed and anything is unassessed) |
 | `2` | fatal harness error |
 | `3` | halted before deciding anything: brief hash mismatch, deploy gate, or the SHA of the service under test could not be established |
+| `4` | **the journey did not complete, so there is no verdict** — a turn did not land, and every turn after a gap is a different conversation |
+
+`4` exists because `0` and `1` were each doing two jobs. A gapped run used to
+exit `0` — the number a clean run returns — and, under
+`--require-fully-assessed`, `1`, the number a genuine refutation returns. In
+neither mode did the number discriminate, and the exit code is the only thing a
+CI job or a shell script ever reads. `4` is deliberately **not** `1`: a run the
+harness did not drive still may not FAIL the product.
+
+A FAIL that landed **before** the gap outranks it and still exits `1`. Voiding
+is not amnesia.
 
 ## What it can decide, and what it cannot
 
@@ -103,8 +114,8 @@ brief itself. Two consequences, both deliberate:
 ## Six things worth knowing before you trust a result
 
 1. **`NOT ASSESSED` is a first-class outcome.** Exit 0 with four criteria
-   unassessed is the normal shape of a wire run, and the report says so in its
-   first line. A harness that narrowed its scope to what it can see and reported
+   unassessed is the normal shape of a **completed** wire run, and the report
+   says so in its first line. A run that did not complete exits `4`, never `0`. A harness that narrowed its scope to what it can see and reported
    the rest as PASS would be the exact failure this programme keeps paying for.
 
 2. **Every detector runs a positive and a negative control before its verdict is

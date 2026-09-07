@@ -18,14 +18,25 @@
  * the thing they mutate.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { evaluateCriteria } from '../../../tools/founder-fixture-harness/criteria.js';
 import { buildDetectors, type DetectorBundle } from '../../../tools/founder-fixture-harness/detectors.js';
-import { fixtureToCaptures, type ReplayFixture } from '../../../tools/founder-fixture-harness/index.js';
-import type { CriterionId, Verdict } from '../../../tools/founder-fixture-harness/types.js';
+import {
+  exitCodeFor,
+  fixtureToCaptures,
+  type ReplayFixture,
+} from '../../../tools/founder-fixture-harness/index.js';
+import { RELOAD_SEMANTICS } from '../../../tools/founder-fixture-harness/script.js';
+import type {
+  CriterionId,
+  CriterionResult,
+  HarnessOutcome,
+  TurnCapture,
+  Verdict,
+} from '../../../tools/founder-fixture-harness/types.js';
 
 const FIXTURES = join(process.cwd(), 'tools/founder-fixture-harness/fixtures');
 
@@ -74,6 +85,38 @@ function verdictOf(criteria: ReturnType<typeof evaluateCriteria>['criteria'], id
 function evidenceOf(criteria: ReturnType<typeof evaluateCriteria>['criteria'], id: CriterionId): string {
   const c = criteria.find((x) => x.id === id);
   return (c?.limbs ?? []).flatMap((l) => l.evidence).join('\n');
+}
+
+/**
+ * The minimal `HarnessOutcome` the exit-code rule reads: the criteria it
+ * tallies and the turns it checks for a journey gap. Everything else is run
+ * context the code never consults.
+ */
+function outcomeOf(
+  turns: readonly TurnCapture[],
+  criteria: readonly CriterionResult[],
+  caveats: readonly string[],
+): HarnessOutcome {
+  return {
+    context: {
+      startedAt: '2026-09-05T00:00:00.000Z',
+      mode: 'replay',
+      stateClass: 'replayed',
+      briefSha256: 'x',
+      briefBytes: 0,
+      briefPath: '(sweep)',
+      ceeBaseUrl: '(replay)',
+      origin: '(replay)',
+      scenarioId: '(replay)',
+      builds: [],
+      detectors: [],
+      reload_semantics: RELOAD_SEMANTICS,
+    },
+    turns,
+    criteria,
+    measurements: [],
+    caveats,
+  };
 }
 
 describe('founder fixture — every criterion has an exercised FAIL path', () => {
@@ -266,27 +309,48 @@ describe('founder fixture — every criterion has an exercised FAIL path', () =>
   });
 
   it('every fixture declares the exit code and criteria it expects, and delivers them', async () => {
-    // The fixtures' own `expect` blocks are part of the contract, not decoration.
-    const cases = [
-      'no-failures',
-      'refusal-honest',
-      'red-c1-unlicensed-leader',
-      'red-c2-silent-refusal',
-      'red-c3-narration',
-      'red-c5-noop-correction',
-      'red-c5-off-target',
-      'red-c6-misroute',
-      'transport-loss',
-      'brief-never-landed',
-    ];
+    // The fixtures' own `expect` blocks are part of the contract, not
+    // decoration — so BOTH halves are asserted here. Until this was fixed the
+    // loop checked only `criteria`, and this test's own title was false about
+    // the exit code: the declared `exit_code` was read by nothing.
+    //
+    // The list is DERIVED FROM THE DIRECTORY, not enumerated. A hand-written
+    // array is the hand-maintained mirror this harness exists to preach
+    // against: add a fixture and it would be silently skipped, and the sweep
+    // would keep reporting a clean pass over a corpus it no longer covers.
+    //
+    // ONE fixture is excluded, explicitly and by its own declaration rather
+    // than by name: `red-c4-contradiction` declares `requires: --ui-repo`,
+    // because C4's FAIL path needs the UI repo's coherence gate, which CI for
+    // THIS repo cannot install. It is covered by its own two dedicated tests
+    // above, against a stub, with that scope disclosed there.
+    const all = readdirSync(FIXTURES)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => f.replace(/\.json$/, ''))
+      .sort();
+    expect(all.length, 'no fixtures found — the sweep is pointed at nothing').toBeGreaterThan(0);
+
+    const excluded = all.filter((name) => load(name).expect?.requires !== undefined);
+    // Fail loud if the exclusion stops matching: an exclusion that silently
+    // matches nothing looks exactly like an exclusion that is no longer needed.
+    expect(excluded, 'the --ui-repo exclusion matched no fixture').toEqual(['red-c4-contradiction']);
+
+    const cases = all.filter((name) => !excluded.includes(name));
+    expect(cases.length, 'every fixture was excluded').toBeGreaterThan(0);
+
     for (const name of cases) {
       const fixture = load(name);
       expect(fixture.expect, `${name} declares no expectations`).toBeDefined();
+      expect(fixture.expect?.exit_code, `${name} declares no exit_code`).toBeDefined();
       const detectors = await buildDetectors(undefined);
-      const { criteria } = evaluateCriteria({ turns: fixtureToCaptures(fixture), detectors });
+      const turns = fixtureToCaptures(fixture);
+      const { criteria, caveats } = evaluateCriteria({ turns, detectors });
       for (const [id, expected] of Object.entries(fixture.expect?.criteria ?? {})) {
         expect(verdictOf(criteria, id as CriterionId), `${name} → ${id}`).toBe(expected);
       }
+      expect(exitCodeFor(outcomeOf(turns, criteria, caveats), false), `${name} → exit code`).toBe(
+        fixture.expect?.exit_code,
+      );
     }
   });
 });

@@ -23,8 +23,12 @@ import type { HarnessOutcome, LimbResult } from '../../../tools/founder-fixture-
 
 const FIXTURES = join(process.cwd(), 'tools/founder-fixture-harness/fixtures');
 
-async function outcomeFor(name: string): Promise<HarnessOutcome> {
-  const fixture = JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'));
+async function outcomeFor(
+  name: string,
+  transform?: (fixture: any) => any,
+): Promise<HarnessOutcome> {
+  const raw = JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf8'));
+  const fixture = transform === undefined ? raw : transform(raw);
   const turns = fixtureToCaptures(fixture);
   const detectors = await buildDetectors(undefined);
   const { criteria, caveats } = evaluateCriteria({ turns, detectors });
@@ -102,13 +106,6 @@ describe('exit codes', () => {
     expect(exitCodeFor(outcome, true)).toBe(1);
   });
 
-  it('a voided journey exits 0 — a run the harness did not drive may not fail the product', async () => {
-    const outcome = await outcomeFor('brief-never-landed');
-    expect(exitCodeFor(outcome, false)).toBe(0);
-    expect(tally(outcome).fail).toBe(0);
-    expect(renderReport(outcome)).toContain('THE BRIEF NEVER LANDED');
-  });
-
   it('the report never omits a limb without evidence, and flags it if one is', async () => {
     // An empty evidence list is a defect in the harness, not a quiet pass, and
     // the renderer says so where a reader will see it.
@@ -122,5 +119,80 @@ describe('exit codes', () => {
         }
       }
     }
+  });
+});
+
+/**
+ * EXIT 4 — "the journey did not complete, so there is no verdict".
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE UNIFORMITY TELL (trap 20): ONE ANSWER FOR TWO VERY DIFFERENT INPUTS.
+ *
+ * Before this code existed, `transport-loss` and `brief-never-landed` both
+ * exited **0** — the same number a clean run returns — and under
+ * `--require-fully-assessed` both exited **1**, the same number a genuine
+ * refutation returns. In NEITHER mode did the number discriminate, so a CI job
+ * saw green on a journey that never ran, or red without being able to tell a
+ * product defect from a network blip.
+ *
+ * The report was always loud about it (a dedicated caveat, `THE BRIEF NEVER
+ * LANDED` in caps). That is not a substitute: nothing pipes prose into a build
+ * gate, and the exit code is the only thing a CI job or a shell script ever
+ * reads.
+ *
+ * The original reasoning for exit 0 — "a run the harness did not drive may not
+ * FAIL the product" — is right and is preserved: 4 is not 1, and a broken
+ * journey still never reports a product failure. It simply stops claiming to
+ * be a clean run.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+describe('exit 4 — the journey did not complete', () => {
+  it('a transport gap exits 4, not the 0 of a clean run', async () => {
+    const outcome = await outcomeFor('transport-loss');
+    // Still not a product failure — that distinction is the whole point.
+    expect(tally(outcome).fail).toBe(0);
+    expect(exitCodeFor(outcome, false)).toBe(4);
+  });
+
+  it('the brief never landing exits 4, and the report still says so in words', async () => {
+    const outcome = await outcomeFor('brief-never-landed');
+    expect(tally(outcome).fail).toBe(0);
+    expect(exitCodeFor(outcome, false)).toBe(4);
+    expect(renderReport(outcome)).toContain('THE BRIEF NEVER LANDED');
+  });
+
+  it('--require-fully-assessed does not collapse 4 back into 1', async () => {
+    // The mode that previously destroyed the discrimination: both gapped
+    // fixtures returned 1, indistinguishable from a criterion being refuted.
+    for (const name of ['transport-loss', 'brief-never-landed']) {
+      const outcome = await outcomeFor(name);
+      expect(exitCodeFor(outcome, true), `${name} under --require-fully-assessed`).toBe(4);
+    }
+  });
+
+  it('a FAIL that landed BEFORE the gap still exits 1 — voiding is not amnesia', async () => {
+    // C3 fails on the narration at turn 7; the journey then breaks at turn 9.
+    // A refutation that landed outranks an incomplete journey, so this is 1.
+    const outcome = await outcomeFor('red-c3-narration', (f) => ({
+      ...f,
+      turns: f.turns.map((t: { index: number }) =>
+        t.index >= 9 ? { ...t, body: undefined, http_status: 0, transport_error: 'fetch failed' } : t,
+      ),
+    }));
+    expect(tally(outcome).fail).toBeGreaterThan(0);
+    expect(exitCodeFor(outcome, false)).toBe(1);
+  });
+
+  it('the three journey outcomes return three DIFFERENT numbers', async () => {
+    // The discrimination itself, asserted as a property rather than case by
+    // case: a probe that returns the same answer for every input is reporting
+    // on itself, not on the world.
+    const codes = [
+      exitCodeFor(await outcomeFor('no-failures'), false), // clean
+      exitCodeFor(await outcomeFor('red-c5-noop-correction'), false), // refuted
+      exitCodeFor(await outcomeFor('transport-loss'), false), // never ran
+    ];
+    expect(codes).toEqual([0, 1, 4]);
+    expect(new Set(codes).size).toBe(3);
   });
 });
