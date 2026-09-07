@@ -242,11 +242,27 @@ describe('2.1033 — the committed pair, the receipt and the rendered value all 
     expect(nodeById(result.appliedGraph, 'fac_spend').display_value).toBe('40%');
   });
 
-  it('CLEARS an unrecoverable raw_value rather than letting it lie, and still renders 40%', async () => {
-    // A `%` factor whose new value is OUTSIDE [0,1]: the scale genuinely
-    // cannot be recovered (5 -> 500% or legacy 5%?), so `resolveExistingRawValue`
-    // returns `ambiguous`. The stale 20 must NOT survive; the formatter's own
-    // `value` fallback then renders the honest number.
+  it('RESOLVES the stale raw_value onto the unit\'s own scale rather than letting it lie, and still renders 40%', async () => {
+    // A `%` factor whose new value is OUTSIDE [0,1]. The stale 20 must NOT
+    // survive — that half is unchanged and still asserted.
+    //
+    // ⚠⚠ WHAT CHANGED, 2026-09-02: the premise "the scale genuinely cannot be
+    // recovered (5 -> 500% or legacy 5%?)" is TRUE IN GENERAL and FALSE ON THE
+    // BOUNDED CLASS this fixture occupies. `unitPinnedScaleFrame` pins the
+    // percent family's divisor at 100 for a magnitude in `(1, 100]` — a
+    // constant fixed by the UNIT, not a laddered guess — and abstains outside
+    // it, so 150% or a currency still reaches the honest `ambiguous` and its
+    // raw_value is still cleared. Within the bound the scale IS recoverable,
+    // and the previous outcome (`{value: 40, unit: '%'}`, no pair) was measured
+    // on deployed staging as a P0: the analysis seam refuses that record with
+    // `baseline_scale_unresolved` and no user action clears it.
+    //
+    // Deleting the pair does not make the record honest — it makes it
+    // UNANALYSABLE while leaving a `value` that still claims 40 is already on
+    // the analysis scale. Writing the resolved pair is strictly more truthful
+    // than clearing it. The display assertion below is unchanged and still
+    // renders "40%", now through `synthesiseDisplayValue`'s `raw_value + %`
+    // branch rather than its `value` fallback.
     const graph = buildGraph();
     (graph.nodes[2] as Record<string, unknown>).observed_state = {
       value: 20,
@@ -258,14 +274,41 @@ describe('2.1033 — the committed pair, the receipt and the rendered value all 
     const result = await runEdit(graph, [valueOp('fac_spend', 40, 20)], 'Change it to 40');
 
     const observed = observedOf(result.appliedGraph, 'fac_spend');
-    expect(observed.value).toBe(40);
-    expect(observed.raw_value).toBeUndefined();
+    expect(observed.value).toBeCloseTo(0.4, 12);
+    // The STALE 20 is gone — the half this test has always protected.
+    expect(observed.raw_value).toBe(40);
     expect(nodeById(result.appliedGraph, 'fac_spend').display_value).toBe('40%');
   });
 
   it('THE #884 MEASURED SHAPE still works (control — no raw_value to begin with)', async () => {
     // The exact fixture `edit-graph-mutation-correctness-wiring.test.ts`
     // pins. This lane must not disturb it.
+    //
+    // ⚠⚠ EXPECTATION CHANGED 2026-09-02, DELIBERATELY, AND IT IS THE POINT OF
+    // THE P0 FIX — NOT A TEST TIDIED TO SUIT A CHANGE.
+    //
+    // This control asserted the edit persists `{value: 40, unit: '%'}` — the
+    // RAW magnitude in the LEVEL slot. That state was measured on deployed
+    // staging (CEE `3575b18`, 2026-09-02) as the cause of a P0: the analysis
+    // seam's baseline gate refuses such a factor with `baseline_scale_unresolved`
+    // ("recorded as a bare amount with no range") and NO user action clears it,
+    // so the whole model became permanently unanalysable. One live factor in
+    // this state blocked every analysis attempt; its four sibling percent
+    // factors all carried `{value: 0.x, raw_value: x0}` and were fine.
+    //
+    // SIX independent derivations say the LEVEL convention is the contract, and
+    // exactly one thing said otherwise — this assertion:
+    //   1. `compound-goal/extractor.ts:708` — `return { value: num / 100, unit }`
+    //   2. `deriveFactorScaleFrame` / projector pass 3d — percent pins frame 100
+    //   3. `normaliseFactorValue`'s unit-pinned limb — writes {0.4, raw 40}
+    //   4. `resolveExistingRawValue` — inverts ONLY `value ∈ [0,1]`, else ambiguous
+    //   5. `graph-data-integrity.ts` — for '%', recomputes `value = raw_value/100`
+    //   6. 4 of 5 percent factors in a real deployed session
+    //
+    // What this control genuinely protects is UNCHANGED and still asserted: the
+    // user's number survives the edit and the screen still reads "40%". Only the
+    // internal representation moves onto the contract, which is what makes the
+    // model analysable again.
     const graph = buildGraph();
     (graph.nodes[2] as Record<string, unknown>).observed_state = {
       value: 20,
@@ -277,7 +320,9 @@ describe('2.1033 — the committed pair, the receipt and the rendered value all 
 
     const result = await runEdit(graph, [valueOp('fac_spend', 40, 20)], 'Change it to 40');
 
-    expect(observedOf(result.appliedGraph, 'fac_spend').value).toBe(40);
+    const observed = observedOf(result.appliedGraph, 'fac_spend');
+    expect(observed.value).toBeCloseTo(0.4, 12);
+    expect(observed.raw_value).toBe(40);
     expect(nodeById(result.appliedGraph, 'fac_spend').display_value).toBe('40%');
   });
 });

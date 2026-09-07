@@ -47,6 +47,12 @@ import {
 import type { RecentChangeAction } from '../context/recent-changes.js';
 import { selectRunAnalysisFact } from '../context/freshness.js';
 import { hasUserSeenRunAnalysisResult } from '../context/run-initiator.js';
+import { deriveEditComparisonReach } from '../coaching/edit-comparison-reach.js';
+import {
+  licenceToReportMovementDirection,
+  readRunAnalysisEnrichment,
+  type MovementDirectionLicence,
+} from '../coaching/movement-direction-licence.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 import { isNoopFact } from '../tools/fact-noop.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
@@ -137,6 +143,26 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
    * branch, which is pinned by test.
    */
   readonly interveningChange?: InterveningChange | null;
+  /**
+   * ⭐ MAY A DIRECTION BE REPORTED FOR THE MOVEMENT? See
+   * `coaching/movement-direction-licence.ts` for why this is a THIRD question
+   * and not a restatement of `runDelta.margin_direction`.
+   *
+   * ⚠ ABSENT MUST NOT READ AS PERMITTED. An omitted licence degrades to
+   * `unbounded`, i.e. no direction — the same fail-closed direction
+   * `mayNameLeadingOption` takes, and for the same reason: a caller that
+   * forgets to supply the evidence must not thereby acquire the claim.
+   */
+  readonly movementLicence?: MovementDirectionLicence | null;
+  /**
+   * ⭐ THE INTERVENING EDIT COULD NOT MOVE THIS COMPARISON — every option
+   * supplies its own value for the factor the user changed.
+   *
+   * Its own flag rather than a member of {@link InterveningChange} because it
+   * answers a different question: `InterveningChange` answers "what did the
+   * user change?", this answers "could that change have moved anything?".
+   */
+  readonly interveningChangeIsInert?: boolean;
 }) => string> = {
   STALE_ANALYSIS_AFTER_EDIT: () =>
     'This change affects the model. The current analysis may not reflect it. Run the analysis to see updated results.',
@@ -144,8 +170,13 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
     `You're editing ${factorLabel ?? 'a factor'}, which was one of the strongest drivers in the last analysis. Rerunning will show how this changes the picture.`,
   FIRST_ANALYSIS_COMPLETE: () =>
     'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.',
-  RERUN_ANALYSIS_COMPLETE: ({ runDelta, interveningChange }) =>
-    composeRerunText(runDelta ?? null, interveningChange ?? null),
+  RERUN_ANALYSIS_COMPLETE: ({ runDelta, interveningChange, movementLicence, interveningChangeIsInert }) =>
+    composeRerunText(
+      runDelta ?? null,
+      interveningChange ?? null,
+      movementLicence ?? { kind: 'indeterminate', reason: 'no_identity_bound_pair' },
+      interveningChangeIsInert === true,
+    ),
 };
 
 /**
@@ -187,15 +218,107 @@ function attributionPrefix(change: InterveningChange | null): string {
  * cannot drift in vocabulary. Content-safe: labels + integer percentage
  * points only, no raw decimals, no IDs.
  */
+/**
+ * ⭐⭐ THE EDIT THE USER MADE COULD NOT MOVE THIS COMPARISON, AND SAYING SO IS
+ * THE WHOLE COACHING VALUE OF THE TURN.
+ *
+ * MEASURED, 2026-09-03. Every option in the captured decision set its own
+ * value for the edited factor, the analysis scored it
+ * `zero_reason: "intervention_override"`, and the product still opened with
+ * *"Since you changed a factor, ... its lead has widened by about 1 percentage
+ * point."* The temporal clause is honest in isolation, but placing the change
+ * immediately before a movement is how a reader infers a cause — and the very
+ * next turn proved it, elaborating the juxtaposition into *"because the higher
+ * investment value increases the modelled Runway Depletion Risk more
+ * strongly"*.
+ *
+ * So on an inert edit the attribution clause is SUPPRESSED (see `since` below)
+ * and this tail replaces it. Suppression alone would be worse than useless:
+ * the user would be left with an accepted edit, a moved number and no way to
+ * learn the two are unrelated.
+ *
+ * ⚠ IT NAMES THE MECHANISM, NOT A FAULT. The user's value is now correct and
+ * their edit was reasonable; what they need is the model fact they could not
+ * see, plus the action that WOULD move the comparison.
+ */
+export const INERT_EDIT_TAIL =
+  ' The value you changed is one every option sets for itself, so it is a'
+  + ' baseline they all replace and it could not move this comparison. To change'
+  + ' the comparison, set the value each option uses.';
+
+/**
+ * ⭐ THE TAIL IS APPLIED HERE, ONCE, RATHER THAN AT EVERY `return` BELOW.
+ * `composeRerunBody` has many exits — deliberately not counted here, because a
+ * hand-typed count is a mirror that drifts the moment an arm is added
+ * (CLAUDE.md trap #12; this file's neighbours have carried a wrong one twice).
+ * Appending at each exit is one place per exit for the next exit to be
+ * forgotten, which is exactly how the abstention arms below acquired their
+ * divergent shapes.
+ *
+ * The abstention exits ARE deliberately excluded: they are reached before the
+ * body has established any comparison, and a tail that says "it could not move
+ * this comparison" after "I have not compared the two" would assert a
+ * comparison in the act of denying one. The body therefore returns those two
+ * exits through {@link RERUN_ABSTENTION_EXITS} and this wrapper leaves them
+ * alone.
+ */
 function composeRerunText(
   delta: ContentSafeRunDelta | null,
   interveningChange: InterveningChange | null = null,
+  movementLicence: MovementDirectionLicence = {
+    kind: 'indeterminate',
+    reason: 'no_identity_bound_pair',
+  },
+  interveningChangeIsInert = false,
 ): string {
+  const body = composeRerunBody(
+    delta,
+    interveningChange,
+    movementLicence,
+    interveningChangeIsInert,
+  );
+  if (!interveningChangeIsInert) return body.text;
+  if (RERUN_ABSTENTION_EXITS.has(body.kind)) return body.text;
+  return `${body.text}${INERT_EDIT_TAIL}`;
+}
+
+/**
+ * Which body exits are ABSTENTIONS — exits that made no comparison at all.
+ * Named as a set rather than tested inline so the exclusion is enumerable and
+ * a new abstention exit is a compile-time decision, not an oversight.
+ */
+const RERUN_ABSTENTION_EXITS: ReadonlySet<RerunBodyKind> = new Set<RerunBodyKind>([
+  'uncomparable',
+  'leader_identity_unmatched',
+]);
+
+type RerunBodyKind =
+  | 'uncomparable'
+  | 'leader_identity_unmatched'
+  | 'leader_changed'
+  | 'margin_moved'
+  | 'margin_unavailable'
+  | 'unchanged';
+
+interface RerunBody {
+  readonly kind: RerunBodyKind;
+  readonly text: string;
+}
+
+function composeRerunBody(
+  delta: ContentSafeRunDelta | null,
+  interveningChange: InterveningChange | null,
+  movementLicence: MovementDirectionLicence,
+  interveningChangeIsInert: boolean,
+): RerunBody {
   if (delta === null || !delta.comparable) {
     // Prior run exists but the two runs cannot be lined up (legacy fact
     // without a projectable envelope, or missing labels). Acknowledge the
     // rerun without claiming a comparison we could not make.
-    return 'This was a re-run. It replaces the earlier result as the current analysis.';
+    return {
+      kind: 'uncomparable',
+      text: 'This was a re-run. It replaces the earlier result as the current analysis.',
+    };
   }
   // ⭐ THE SAME AMENDMENT AS `composeComparison`, and it belongs here for the
   // same reason: every arm below asserts CONTINUITY between the two runs —
@@ -215,16 +338,25 @@ function composeRerunText(
     // a reader infers a comparison — the implication the sentence then
     // explicitly disclaims. Naming the edit beside an unmade comparison is
     // worse than naming nothing, so the attribution never reaches this arm.
-    return (
-      `${delta.current_leading_label} leads after this re-run. I cannot line up `
-      + 'the earlier result with this one, so I have not compared the two.'
-    );
+    return {
+      kind: 'leader_identity_unmatched',
+      text:
+        `${delta.current_leading_label} leads after this re-run. I cannot line up `
+        + 'the earlier result with this one, so I have not compared the two.',
+    };
   }
 
   // Past every abstention. A real comparison exists, so a temporal clause about
   // what preceded it is licensed. Empty string when there is nothing to
   // attribute, which reproduces the pre-attribution copy byte-identically.
-  const since = attributionPrefix(interveningChange);
+  // ⭐⭐ AN INERT EDIT ATTRIBUTES NOTHING, ON EVERY ARM BELOW — including the
+  // leader-changed one. "Since you changed X, the result has changed" is the
+  // strongest causal reading in the file, and it is exactly the sentence a
+  // factor every option overrides cannot support. Suppressing at the SOURCE of
+  // the clause rather than per-arm means a future arm inherits the suppression
+  // instead of having to remember it. The explanation the user needs instead
+  // rides as {@link INERT_EDIT_TAIL}, applied by the wrapper.
+  const since = interveningChangeIsInert ? '' : attributionPrefix(interveningChange);
   const attributed = since.length > 0;
   // The anaphor must AGREE WITH ITS OWN OPENER. `several` deliberately names no
   // antecedent, so a singular "that change" after it is a dangling referent AND
@@ -233,27 +365,75 @@ function composeRerunText(
   const theChange = interveningChange?.kind === 'several' ? 'those changes' : 'that change';
 
   if (delta.leading_option_changed) {
-    return attributed
-      ? (
-        `${since}the result has changed: ${delta.prior_leading_label} led before, `
-        + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
-      )
-      : (
-        `This re-run changed the outcome: ${delta.prior_leading_label} led before, `
-        + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
-      );
+    return {
+      kind: 'leader_changed',
+      text: attributed
+        ? (
+          `${since}the result has changed: ${delta.prior_leading_label} led before, `
+          + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
+        )
+        : (
+          `This re-run changed the outcome: ${delta.prior_leading_label} led before, `
+          + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
+        ),
+    };
   }
-  if (delta.margin_direction === 'widened') {
-    return (
-      `${since}${delta.current_leading_label} still leads after this re-run, and its lead `
-      + `has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
-    );
-  }
-  if (delta.margin_direction === 'narrowed') {
-    return (
-      `${since}${delta.current_leading_label} still leads after this re-run, though its lead `
-      + `has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
-    );
+  // ⭐⭐ THE DIRECTION IS GATED, AND THIS IS THE P0 OF 2026-09-03.
+  //
+  // `margin_direction` is a ROUNDING verdict: `deriveMargin` calls a movement
+  // 'widened' as soon as it exceeds `MARGIN_EPSILON_PP` (0.5), which is a
+  // threshold on the DISPLAYED integer and knows nothing about how many
+  // samples produced it. On the live capture the leading option moved
+  // 62% -> 62.6% at n = 10,000; the 2-SE band on that pair is 1.37pp, so the
+  // movement was INSIDE the noise. The product said *"its lead has widened by
+  // about 1 percentage point"*, and the next model-authored turn elaborated
+  // that sentence into an invented causal mechanism. Two turns later the
+  // product contradicted itself: *"Every option's win figure moved by less
+  // than what repeated runs vary by anyway."*
+  //
+  // So the quantified claim requires evidence that the quantity moved, and the
+  // licence is REQUIRED rather than optional-defaulting-permitted.
+  if (delta.margin_direction === 'widened' || delta.margin_direction === 'narrowed') {
+    if (movementLicence.kind === 'licensed') {
+      // Byte-identical to the pre-gate copy on the arm that keeps its claim.
+      return {
+        kind: 'margin_moved',
+        text: delta.margin_direction === 'widened'
+          ? (
+            `${since}${delta.current_leading_label} still leads after this re-run, and its lead `
+            + `has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
+          )
+          : (
+            `${since}${delta.current_leading_label} still leads after this re-run, though its lead `
+            + `has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
+          ),
+      };
+    }
+    if (movementLicence.kind === 'within_noise') {
+      // WE MEASURED THE BAND AND THE MOVEMENT SAT INSIDE IT. That is a finding
+      // and it is said as one: the user asked what their change did, and "less
+      // than this model varies between runs" is the answer.
+      return {
+        kind: 'margin_moved',
+        text:
+          `${since}${delta.current_leading_label} still leads after this re-run. `
+          + 'The figures moved by less than this model varies between runs, so I '
+          + 'would not read a direction into that movement.',
+      };
+    }
+    // NEITHER CLAIM IS SUPPORTED — no band at all, or a band whose two
+    // constituents disagreed. Distinct from the arm above and deliberately so:
+    // claiming "less than the model varies" here would assert a bound we did
+    // not compute, or assert it of a figure that plainly cleared the band
+    // (CLAUDE.md trap 13 — an absence claim needs an instrument that could
+    // have seen a presence).
+    return {
+      kind: 'margin_moved',
+      text:
+        `${since}${delta.current_leading_label} still leads after this re-run. `
+        + 'I cannot tell whether the movement in the figures is real or just '
+        + 'sampling variation, so treat the size of its lead as unchanged.',
+    };
   }
   // ⭐⭐ THE MARGIN COULD NOT BE COMPUTED — ITS OWN ARM, BECAUSE IT IS NOT A
   // NULL RESULT. `deriveMargin` returns 'unavailable' when either run's
@@ -266,10 +446,12 @@ function composeRerunText(
   // not. `since` is empty when nothing is attributable, so the unattributed
   // form is the same sentence without the clause.
   if (delta.margin_direction === 'unavailable') {
-    return (
-      `${since}${delta.current_leading_label} still leads after this re-run. `
-      + 'I could not compare the size of its lead between the two runs.'
-    );
+    return {
+      kind: 'margin_unavailable',
+      text:
+        `${since}${delta.current_leading_label} still leads after this re-run. `
+        + 'I could not compare the size of its lead between the two runs.',
+    };
   }
 
   // ⭐ THE UNCHANGED ARM IS THE SCIENTIFIC ONE AND MUST READ AS A FINDING, NOT
@@ -296,13 +478,16 @@ function composeRerunText(
   // wording to "the leading option", MANUFACTURING the banned leader vocabulary
   // inside our own safety pass. All composed arms are pinned against the real
   // guard by test.
-  return attributed
-    ? (
-      `${since}the picture has stayed the same: ${delta.current_leading_label} `
-      + `still leads. That is a result in itself: the conclusion held both before `
-      + `and after ${theChange}.`
-    )
-    : `The result is unchanged: ${delta.current_leading_label} still leads.`;
+  return {
+    kind: 'unchanged',
+    text: attributed
+      ? (
+        `${since}the picture has stayed the same: ${delta.current_leading_label} `
+        + `still leads. That is a result in itself: the conclusion held both before `
+        + `and after ${theChange}.`
+      )
+      : `The result is unchanged: ${delta.current_leading_label} still leads.`,
+  };
 }
 
 /**
@@ -331,11 +516,42 @@ export function detectCoachingSignal(
     // helper's own note for why it is kept separate from the run_analysis
     // branch's predicate even though the two agree today.
     if (hasPriorRunAnalysisFactToStale(input.priorFacts)) {
-      // STALE wins over HIGH_SENSITIVITY per the authoritative priority order.
-      return {
-        signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
-        coaching_text: COACHING_TEXT.STALE_ANALYSIS_AFTER_EDIT({}),
-      };
+      // ⭐⭐ AN EDIT THE COMPARISON CANNOT FEEL DID NOT STALE IT — THIRD NOOP
+      // GATE ON THIS BRANCH, AND THE THIRD IS NOT THE FIRST TWO.
+      //
+      // `STALE_ANALYSIS_AFTER_EDIT` asserts *"This change affects the model.
+      // The current analysis may not reflect it. Run the analysis to see
+      // updated results."* On a factor every option overrides, every clause of
+      // that is false: the change does not affect the comparison, the current
+      // analysis reflects it exactly, and the re-run cannot show anything new.
+      // Measured on the 2026-09-03 capture, where the user duly re-ran and the
+      // product then narrated sampling noise as an effect of the edit.
+      //
+      // ⚠ SUPPRESSED, NOT REWORDED — and the reason is this file's own rule
+      // for the withheld arm. `set_factor_value` has ALREADY replaced its
+      // staleness narrative with the honest explanation
+      // (`BASELINE_REPLACED_BY_OPTIONS_NARRATIVE`, composed into the same
+      // `assistant_text` immediately above this slot), so a second sentence
+      // here would put a competing call-to-action on one screen.
+      //
+      // ⚠ ONE DERIVATION, TWO CALL SITES, DIFFERENT EVIDENCE AVAILABLE. The
+      // handler calls `deriveEditComparisonReach` WITH the graph; this path has
+      // none, so it passes `graph: null` and rides the producer witness alone.
+      // The type makes that difference explicit rather than leaving two
+      // predicates to drift (CLAUDE.md trap #12).
+      if (!editTargetsInertFactor(input.outcome, input.priorFacts)) {
+        // STALE wins over HIGH_SENSITIVITY per the authoritative priority order.
+        return {
+          signal_id: 'STALE_ANALYSIS_AFTER_EDIT',
+          coaching_text: COACHING_TEXT.STALE_ANALYSIS_AFTER_EDIT({}),
+        };
+      }
+      // Fall through. HIGH_SENSITIVITY_EDIT cannot fire on an inert factor
+      // either — it names the factor as "one of the strongest drivers", and a
+      // factor the analysis scored at zero is never a top driver — so the
+      // honest coaching on this turn is none, and the handler's own receipt
+      // carries the explanation.
+      return null;
     }
     const targetLabel = findEditTargetTopDriverLabel(input.outcome, input.contextPack);
     if (targetLabel !== null) {
@@ -430,13 +646,20 @@ export function detectCoachingSignal(
     // (CLAUDE.md trap 21, the #709/#737 shape this file already carries a
     // warning about).
     const rerun = leaderWithheld
-      ? { delta: null, interveningChange: null }
+      ? {
+          delta: null,
+          interveningChange: null,
+          movementLicence: null,
+          interveningChangeIsInert: false,
+        }
       : buildRerunAcknowledgement(input);
     return {
       signal_id: 'RERUN_ANALYSIS_COMPLETE',
       coaching_text: COACHING_TEXT.RERUN_ANALYSIS_COMPLETE({
         runDelta: rerun.delta,
         interveningChange: rerun.interveningChange,
+        movementLicence: rerun.movementLicence,
+        interveningChangeIsInert: rerun.interveningChangeIsInert,
       }),
     };
   }
@@ -447,6 +670,42 @@ export function detectCoachingSignal(
 // ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
+
+/**
+ * Did this turn's edit target a factor whose value the comparison cannot feel?
+ *
+ * Scoped to `set_factor_value`: the claim is that a FACTOR BASELINE is
+ * replaced by every option, and neither an edge-strength adjustment nor a
+ * constraint has a baseline for an option to replace. `adjust_edge_strength`
+ * and `add_constraint` therefore always answer `false` here, which is the
+ * honest answer and not a gap.
+ */
+function editTargetsInertFactor(
+  outcome: SuccessfulHandlerOutcome,
+  priorFacts: readonly HandlerFact[],
+): boolean {
+  const selected = selectRunAnalysisFact(priorFacts);
+  if (selected === null) return false;
+  const enrichment = readRunAnalysisEnrichment(selected.fact);
+  if (enrichment === null) return false;
+
+  const edits = outcome.handler_facts.filter(
+    (f) => f.fact_type === 'set_factor_value' && !isNoopFact(f),
+  );
+  if (edits.length !== 1) return false;
+  const only = edits[0]!;
+  if (only.fact_type !== 'set_factor_value') return false;
+  const targetId = only.result.target_id;
+  if (typeof targetId !== 'string' || targetId.trim().length === 0) return false;
+
+  return (
+    deriveEditComparisonReach({
+      graph: null,
+      priorAnalysisEnrichment: enrichment,
+      factorId: targetId,
+    }).kind === 'inert'
+  );
+}
 
 /**
  * True when this turn's edit handler reported that nothing changed.
@@ -482,8 +741,15 @@ function isNoopEditOutcome(outcome: SuccessfulHandlerOutcome): boolean {
 function buildRerunAcknowledgement(input: CoachingSignalInput): {
   readonly delta: ContentSafeRunDelta | null;
   readonly interveningChange: InterveningChange | null;
+  readonly movementLicence: MovementDirectionLicence | null;
+  readonly interveningChangeIsInert: boolean;
 } {
-  const none = { delta: null, interveningChange: null } as const;
+  const none = {
+    delta: null,
+    interveningChange: null,
+    movementLicence: null,
+    interveningChangeIsInert: false,
+  } as const;
 
   const currentFact = input.outcome.handler_facts.find(
     (f) => f.fact_type === 'run_analysis',
@@ -504,10 +770,93 @@ function buildRerunAcknowledgement(input: CoachingSignalInput): {
   const current = projectRunFact(currentFact);
   if (prior === null || current === null) return none;
 
+  const interveningChange = deriveInterveningChange(input.priorFacts, selected.index);
+
+  // ⭐ ONE SELECTION, NOW FOUR CONSUMERS. The delta, the attribution clause,
+  // the noise licence and the inertness verdict all derive from the SAME
+  // `selectRunAnalysisFact` result, so "the run we compared against" is one
+  // fact by construction. A second selection here would let the sentence bound
+  // its noise against a different pair than the one it quantifies.
+  const priorEnrichment = readRunAnalysisEnrichment(selected.fact);
+  const currentEnrichment = readRunAnalysisEnrichment(currentFact);
+
   return {
     delta: compareRuns(prior, current, input.interventionControlledFactorIds),
-    interveningChange: deriveInterveningChange(input.priorFacts, selected.index),
+    interveningChange,
+    movementLicence:
+      priorEnrichment === null || currentEnrichment === null
+        ? null
+        : licenceToReportMovementDirection({
+            priorEnrichment,
+            currentEnrichment,
+          }),
+    interveningChangeIsInert: interveningEditIsInert(
+      input.priorFacts,
+      selected.index,
+      interveningChange,
+      currentEnrichment,
+    ),
   };
+}
+
+/**
+ * Was the single authored change between the two runs an edit the comparison
+ * could not feel?
+ *
+ * ⚠ SCOPED TO A SINGLE `factor_value_updated` CHANGE, ON PURPOSE. When several
+ * changes intervened, `deriveInterveningChange` already returns `several` and
+ * names none — and declaring THAT inert would assert something about changes
+ * we deliberately did not identify. When the single change is a constraint or
+ * an edge adjustment, this module has no inertness question to ask: the claim
+ * being made is about a factor's baseline being replaced by every option, and
+ * neither of those is a factor baseline.
+ *
+ * ⚠ AND THE JOIN IS ON `target_id`, NOT ON `target_label`. The captured fact
+ * carried NO label at all, so `RecentMutation.target_label` fell back to the
+ * literal string "a factor" and the composed sentence read *"Since you changed
+ * a factor"*. A label join would therefore have missed the very case this
+ * exists for — and worse, a label join CAN match a different factor (trap 19).
+ * The structural id is read from the edit fact directly, which is the only
+ * place it survives: `projectRecentChanges` deliberately does not carry it.
+ *
+ * ⭐ THE GRAPH IS NOT AVAILABLE ON THIS PATH, so only the PRODUCER witness
+ * (`zero_reason: 'intervention_override'` in the run being narrated) can fire
+ * here — `deriveEditComparisonReach` is called with `graph: null`. That is a
+ * REAL, NAMED GAP, not an oversight: a factor absent from the current
+ * envelope's `factor_sensitivity[]` is not caught, and the residue is pinned
+ * by a KNOWN-GAP test rather than left invisible. Closing it needs a graph
+ * threaded through `applyCoachingSignal` from `turn-executor.ts` and
+ * `chip-click-dispatch.ts`, both of which are outside this lane's ownership.
+ */
+function interveningEditIsInert(
+  priorFacts: readonly HandlerFact[],
+  priorRunIndex: number,
+  interveningChange: InterveningChange | null,
+  currentEnrichment: Record<string, unknown> | null,
+): boolean {
+  if (interveningChange === null || interveningChange.kind !== 'single') return false;
+  if (interveningChange.action !== 'factor_value_updated') return false;
+  if (currentEnrichment === null) return false;
+  if (priorRunIndex <= 0) return false;
+
+  const edits = priorFacts
+    .slice(0, priorRunIndex)
+    .filter((f) => f.fact_type === 'set_factor_value' && !isNoopFact(f));
+  // Exactly one, or we cannot say which factor the projection named.
+  if (edits.length !== 1) return false;
+
+  const only = edits[0]!;
+  if (only.fact_type !== 'set_factor_value') return false;
+  const targetId = only.result.target_id;
+  if (typeof targetId !== 'string' || targetId.trim().length === 0) return false;
+
+  return (
+    deriveEditComparisonReach({
+      graph: null,
+      priorAnalysisEnrichment: currentEnrichment,
+      factorId: targetId,
+    }).kind === 'inert'
+  );
 }
 
 /**

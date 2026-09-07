@@ -43,7 +43,11 @@ import type {
   OlumiResponse,
   FailureTypeLiteral,
 } from '@talchain/schemas/boundary';
-import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+import type {
+  HandlerFact,
+  RunAnalysisHandlerFact,
+  V5ActionType,
+} from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import {
@@ -52,6 +56,14 @@ import {
   composeToolCallResponse,
   type AnswerKind,
 } from './compose.js';
+// Ship the run fact the model-facing prose was built from. See the module
+// header for why this is scoped to the substantive prose branches, why it is
+// gated on the SAME freshness rule the prior-fact lifecycle path already uses,
+// and why it deliberately does not touch any leader-naming authority.
+import {
+  asRunAnalysisFact,
+  buildProseGroundingBlocks,
+} from './compose/prose-grounding-block.js';
 // ROADMAP 2.640 §3.4 — the gate-close remedy gesture (the advice gate's
 // deterministic "open the surface the blocker is fixed on").
 import {
@@ -89,6 +101,7 @@ import { composeRecoverableValidationResponse } from './compose/recoverable-vali
 import { composeRecoverableHandlerResponse } from './compose/recoverable-handler-response.js';
 import { isRecoverableHandlerCause } from './compose/recoverable-handler-causes.js';
 import { applyEgressForbiddenPhraseGuard } from './compose/forbidden-user-facing-phrases.js';
+import { applyProcessNarrationGuard } from './compose/process-narration.js';
 import { buildAppliedGraphWireField } from './compose/applied-graph-emit.js';
 import {
   collectValidEntityLabels,
@@ -110,6 +123,7 @@ import type { ComposeContext, SuggestedAction } from './compose/types.js';
 import {
   tryDeterministicValueUpdate,
   tryDeicticValueUpdate,
+  tryAnaphoricValueUpdate,
   tryCompoundValueUpdate,
   buildClarifyAssistantText,
   buildNonFactorKindRefusalText,
@@ -120,7 +134,12 @@ import {
   deriveOperator,
   EDIT_VERB_PATTERN as CALIBRATION_EDIT_VERB_PATTERN,
 } from './routing/deterministic-value-update.js';
-import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
+import type {
+  AnaphoricValueBinding,
+  CompoundUpdatePart,
+} from './routing/deterministic-value-update.js';
+import { resolveAnaphoricReferent } from './compose/edit-clarify-response.js';
+import { nodeIdFromRef, projectTurnReferentsFromWindow } from './context/turn-referents.js';
 import {
   resolveOutstandingAskClarifyRedirect,
   buildOutstandingAskChipMessage,
@@ -493,6 +512,7 @@ import {
   evaluateAnalysisElection,
   GATED_ANALYSIS_HANDLER_ID,
 } from './routing/analysis-election-gate.js';
+import { resolveRunAnalysisTargetEntity } from './routing/run-analysis-target.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
 import {
@@ -1687,6 +1707,34 @@ export async function runTurnExecutor(
   // finalizeRun() surfaces; `routingFreshness` is internal-only.
   let routingFreshness: FreshnessDerivation | null = null;
   let promptAnalysisFreshness: FreshnessDerivation | null = null;
+  /**
+   * THE RUN FACT THE MODEL-FACING PROSE WAS BUILT FROM, or null when the prose
+   * carried no projected analysis.
+   *
+   * WHY IT IS HOISTED HERE rather than mirrored into a new variable near the
+   * compose sites: this is the house pattern already stated for
+   * `functionalAnswerText` and `handlerFactsForCommit` below — a mirror needs
+   * every assignment site to remember to update it, which is the
+   * hand-maintained-mirror defect (CLAUDE.md trap 12). There is exactly ONE
+   * assignment, co-located with `promptAnalysisSummary`'s, under the SAME
+   * guard and over the SAME array.
+   *
+   * ⭐ WHY THE TWO CANNOT DIVERGE, which is the load-bearing claim of the change
+   * that consumes it. `promptAnalysisSummary` is
+   * `buildAnalysisFromPriorFacts(scenarioAnalysisFacts, …)`, whose FIRST act is
+   * `selectRunAnalysisFact(priorFacts)` (`context/analysis-fallback.ts`). This
+   * binding is `selectRunAnalysisFact(scenarioAnalysisFacts)` — the SAME pure
+   * selector over the SAME `readonly` array, assigned inside the SAME
+   * `if (durableFallback)` block. Same input, same function, same guard: the
+   * projection and the block are statements about one fact, not two.
+   *
+   * It is deliberately NOT derived from `context.prior_facts` (the bounded hot
+   * window) nor from the post-dispatch unified array. Those are the arrays the
+   * OTHER surfaces select over, and selecting a fact from one array to
+   * corroborate prose projected from another is precisely the two-derivations
+   * defect this comment exists to rule out.
+   */
+  let promptAnalysisSourceFact: RunAnalysisHandlerFact | null = null;
   let freshness: FreshnessDerivation | null = null;
   // V5 M5 (read-only / diagnostic): unified canonical analysis state, assembled
   // post-dispatch from the SAME fact set + post-handler graph hash that
@@ -2438,6 +2486,13 @@ export async function runTurnExecutor(
       readonly notice: string;
       readonly partsUncovered: number;
     } | null = null;
+    // Spec §4.3 — the disclosure sentence ("Taking that as X.") for a
+    // `set_factor_value` the anaphoric pre-route bound from a bare pronoun.
+    // Set at the dispatch site; prepended wherever THIS turn's reply is
+    // composed for that proposal (the receipt after STEP 3.5, the
+    // validator-recovered copy, the non-factor-kind refusal). Null on every
+    // other path, so those replies are byte-identical.
+    let anaphoricBindingDisclosure: string | null = null;
     // Resumed pending action, if the short-confirm pre-route synthesised
     // a tool_call. Cleared after the commit-success consumed-telemetry
     // emit. Null on every other path.
@@ -2564,6 +2619,12 @@ export async function runTurnExecutor(
     );
     if (durableFallback) {
       promptAnalysisSummary = durableFallback;
+      // Co-assigned with the projection above, from the SAME array through the
+      // SAME selector `buildAnalysisFromPriorFacts` itself uses. See the
+      // declaration for why this is one fact rather than two derivations.
+      promptAnalysisSourceFact = asRunAnalysisFact(
+        selectRunAnalysisFact(scenarioAnalysisFacts)?.fact ?? null,
+      );
       promptAnalysisStateSource = 'fallback';
       if (
         promptAnalysisFreshness.freshness === 'stale' ||
@@ -6389,6 +6450,98 @@ export async function runTurnExecutor(
         };
       }
 
+      // ⭐ SPEC §4.3 — the VALUE-BEARING ANAPHORIC EDIT ("Set it to 100000.",
+      // "Can you update it to 100000?", "100000" after the product asked
+      // "What value would you like it set to?"). Runs only when neither the
+      // label path nor the deictic path claimed the message — and a deictic
+      // CLARIFY is a claim: `tryDeicticValueUpdate` returns `matched: true`
+      // for "Set this factor to 100000." with nothing selected, promotes
+      // nothing into `deterministicValueUpdate`, and its branch below composes
+      // the reply, so the gate reads `deicticDispatch.matched` directly rather
+      // than inferring the claim from the promotion (the pronoun pattern's
+      // trailing `\b` after `this` admits "this factor" too, so without this
+      // conjunct the block would re-claim a message the deictic path already
+      // owns and record a `set_factor_value` row that never executes). Binds ONLY
+      // under the register precondition: the referent register is projected
+      // from the same newest-first conversation window
+      // (`CONTEXT_PACK_RECENT_TURNS_CAP` turns of `context.prior_turns`) the
+      // no-op recovery layer reads, and the §4.2 decision is the composer's
+      // `resolveAnaphoricReferent` — the same function
+      // `decideNoOpRecovery` calls for "Update it." — so exactly one eligible
+      // candidate at the top populated rank binds and anything else hands in
+      // `null`, which the pre-route refuses as `no_binding`. On no match
+      // `deterministicValueUpdate` is left exactly as the label path produced
+      // it, so the telemetry and every later branch are byte-identical to a
+      // build without this block.
+      if (
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough &&
+        !deterministicValueUpdate.matched &&
+        !deicticDispatch.matched
+      ) {
+        const referentNodes = (graphStateForTurn?.nodes ?? []).flatMap((n) => {
+          const node = n as { id?: unknown; label?: unknown; kind?: unknown };
+          return typeof node.id === 'string' && typeof node.label === 'string'
+            ? [
+                {
+                  id: node.id,
+                  label: node.label,
+                  ...(typeof node.kind === 'string' ? { kind: node.kind } : {}),
+                },
+              ]
+            : [];
+        });
+        const anaphoricResolution = resolveAnaphoricReferent(
+          projectTurnReferentsFromWindow({
+            turnsNewestFirst: context.prior_turns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP),
+            nodes: referentNodes,
+          }),
+        );
+        const anaphoricBinding: AnaphoricValueBinding | null =
+          anaphoricResolution.outcome === 'bound'
+            ? {
+                id: nodeIdFromRef(anaphoricResolution.referent.ref),
+                label: anaphoricResolution.referent.label,
+                kind: anaphoricResolution.referent.kind,
+              }
+            : null;
+        const anaphoricDispatch = tryAnaphoricValueUpdate(
+          payload.message,
+          contextPack.parsed_quantities,
+          graphLookupForValidate,
+          anaphoricBinding,
+          // EVERY selected node id, deliberately not `selectedFactorIds`: a
+          // selection of any other node — factor or not — withdraws the claim.
+          options.selectedElements?.node_ids ?? [],
+          cqeSummary.degraded,
+        );
+        if (anaphoricDispatch.matched && anaphoricDispatch.dispatch === 'set_factor_value') {
+          // Promote into the label path's shape so the node-kind gate, the
+          // registry guard, the synthesised proposal and the telemetry below
+          // all run unchanged — the same promotion the deictic path makes.
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'set_factor_value',
+            candidate: anaphoricDispatch.candidate,
+            quantity: anaphoricDispatch.quantity,
+            ...(anaphoricDispatch.attribution
+              ? { attribution: anaphoricDispatch.attribution }
+              : {}),
+          };
+          anaphoricBindingDisclosure = anaphoricDispatch.disclosure;
+        } else if (anaphoricDispatch.matched) {
+          // The bare-quantity form ASKS, naming the bound factor as the sole
+          // candidate, through the ordinary clarify branch below (its chip
+          // carries the value; its pending names the factor by id).
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'clarify',
+            candidates: anaphoricDispatch.candidates,
+            quantity: anaphoricDispatch.quantity,
+          };
+        }
+      }
+
       // O-1 batch lifecycle — COMPOUND value update. When the single-edit path
       // bailed (its multi-quantity `ambiguous_quantity` guard fires on "Set A
       // to 0.6 and B to 0.8") AND the deictic path did not match, try the
@@ -6826,13 +6979,17 @@ export async function runTurnExecutor(
         downgrade_reason: downgradeReason,
         candidate_count: telemetryCandidates.length,
         top_score: telemetryCandidates[0]?.score ?? null,
-        // Per-candidate source tags ('substring' | 'dice') so routing
-        // diagnostics can distinguish exact-label hits from fuzzy hits
-        // without inferring from `score`.
+        // Per-candidate source tags — the `CandidateSource` union in
+        // `routing/deterministic-value-update.ts`, which is
+        // 'substring' | 'dice' | 'register' at this head — so routing
+        // diagnostics can tell exact-label hits from fuzzy hits, and both
+        // from a candidate the referent register bound with no label
+        // evidence at all, without inferring from `score`.
         candidate_sources: telemetryCandidates.map((c) => c.source),
         // Quantity-attribution tag — 'from_to' when the dispatch
         // originated from the row-7 from/to branch, null otherwise.
-        // Distinct from candidate.source (label-match concern); kept
+        // Distinct from candidate.source (how the candidate was selected —
+        // label evidence for 'substring'/'dice', none for 'register'); kept
         // separate so dashboards can filter rows independently.
         attribution:
           deterministicValueUpdate.matched &&
@@ -7035,6 +7192,10 @@ export async function runTurnExecutor(
             refusedCandidate.label,
             refusedKind,
             factorLabelsForRefusal,
+            // Spec §4.3 — an `option` the register bound for a bare pronoun
+            // reaches this gate; the refusal then opens with what "it" was
+            // read as. Null on the label path.
+            anaphoricBindingDisclosure,
           ),
           stage: context.stage,
           suggested_actions: refusalChips,
@@ -7324,14 +7485,14 @@ export async function runTurnExecutor(
         // valid addressable target". An OPTION is chosen (not the goal)
         // because the precondition tests for option presence, so picking one
         // makes the proposal and the precondition agree by construction.
-        const rerunTargetNode = (graphStateForTurn?.nodes ?? []).find(
-          (n): n is typeof n & { id: string } =>
-            typeof n === 'object' &&
-            n !== null &&
-            (n as { kind?: unknown }).kind === 'option' &&
-            typeof (n as { id?: unknown }).id === 'string' &&
-            ((n as { id: string }).id).length > 0,
-        );
+        //
+        // ⚠ THE RULE NOW LIVES IN `routing/run-analysis-target.ts` AND IS READ,
+        // NOT RE-IMPLEMENTED. It was inline here; the target-repair site at
+        // STEP 2 needs the identical answer, and two implementations of one
+        // rule in one file is this estate's signature defect (the two
+        // `generateGraphHash` twins). Its unit suite pins the entity shape
+        // this pre-route used to build, so the extraction cannot have moved it.
+        const rerunTargetEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
         const rerunValidationRegistry =
           options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
         const rerunHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
@@ -7339,25 +7500,10 @@ export async function runTurnExecutor(
           rerunValidationRegistry.run_analysis !== undefined &&
           resolveHandler(rerunHandlerRegistry, 'run_analysis') !== null;
 
-        if (rerunTargetNode !== undefined && rerunHandlerExecutable) {
-          const rerunLabel = (rerunTargetNode as { label?: unknown }).label;
+        if (rerunTargetEntity !== null && rerunHandlerExecutable) {
           const rerunProposal: ProposalAction = {
             handler_id: 'run_analysis',
-            entity: {
-              id: rerunTargetNode.id,
-              kind: 'option',
-              ...(typeof rerunLabel === 'string' && rerunLabel.length > 0
-                ? { label: rerunLabel }
-                : {}),
-              resolution_status: 'resolved',
-              // `context_inference`, not `label_match`: the target was not
-              // named by the user and was not matched against their text — it
-              // was inferred from the scenario, which is exactly what this
-              // method means. Declaring `label_match` would invite the
-              // validator's Dice label-suspicion check to reason about a
-              // comparison that never happened.
-              resolution_method: 'context_inference',
-            },
+            entity: rerunTargetEntity,
             parameters: [],
             cited_context_fields: ['graph.options'],
           };
@@ -7396,7 +7542,7 @@ export async function runTurnExecutor(
             scenario_id: context.session_id,
             outcome: 'fell_through',
             reason:
-              rerunTargetNode === undefined ? 'no_option_target' : 'handler_unavailable',
+              rerunTargetEntity === null ? 'no_option_target' : 'handler_unavailable',
           });
         }
       }
@@ -8256,11 +8402,21 @@ export async function runTurnExecutor(
         });
         // ⭐ TYPED COACHING-INTENT ARM (coaching/typed-intent-directive.ts).
         //
-        // Four MOUNTED sparks (`pressure_test_frame`, `define_success`,
-        // `widen_options`, `reflect_bias`) declare a typed `chip.intent` and,
-        // until this arm existed, silently degraded to generic free prose
-        // because CEE routed none of them and the UI's two-signal send gate
-        // (KNOWN_INTENTS ∧ CEE_ACCEPTED_INTENTS) correctly failed closed.
+        // MOUNTED sparks declare a typed `chip.intent`. UNROUTED, such a chip
+        // silently degrades to generic free prose: the UI's two-signal send
+        // gate (KNOWN_INTENTS ∧ CEE_ACCEPTED_INTENTS) correctly fails closed
+        // when CEE has no arm for the intent, so the click arrives as
+        // anonymous text. This arm is what routes them.
+        //
+        // ⚠ WHICH sparks, and how many, is DELIBERATELY NOT RESTATED HERE.
+        // This comment said "Four MOUNTED sparks (`pressure_test_frame`,
+        // `define_success`, `widen_options`, `reflect_bias`)" and went stale
+        // the moment the arm grew its last three members — a hand-maintained
+        // count in the first thing anyone reads at the call site (CLAUDE.md
+        // trap 12). The single authority is the members of
+        // `ROUTED_COACHING_INTENTS` and the per-member DGAI provenance block
+        // above it (`coaching/typed-intent-directive.ts`). Read that; do not
+        // re-mint a count here.
         //
         // ⚠ THE POSITION IS DELIBERATE, and it is the OPPOSITE of every
         // deterministic pre-route above. Those claim the turn and skip the LLM.
@@ -8315,7 +8471,7 @@ export async function runTurnExecutor(
         // ⭐ F2 — THE DROP IS OBSERVABLE. `resolveCoachingIntent` answers
         // `undefined` for an intent CEE does not route, and the arm above then
         // simply skipped: no telemetry, no log, nothing. THAT SILENCE IS THE
-        // MECHANISM that let four mounted sparks degrade to anonymous prose for
+        // MECHANISM that let the mounted sparks degrade to anonymous prose for
         // as long as they did — nothing anywhere could distinguish an intent
         // nobody clicked from one the product threw away.
         //
@@ -8955,6 +9111,105 @@ export async function runTurnExecutor(
         graphLookupForValidate,
         validationRegistry,
       );
+
+      // ══════════════════════════════════════════════════════════════════
+      // ⭐⭐ RUN-ANALYSIS TARGET REPAIR — the founder-loop break
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // THE DEFECT, and note that it is in the TARGET, not in any predicate.
+      // `looksLikeExplicitAnalysisRequest('Rerun.')` is already TRUE, so the
+      // election gate ADMITS the turn — that half works. What fails is what
+      // the admitted proposal CARRIES. `entity` is required on every proposal
+      // (`ProposalActionSchema`), while `run_analysis`'s target is
+      // semantically the whole scenario — the validation registry says so
+      // itself. So the router must fill a field that holds no information, it
+      // invents one, and on the measured builds it named the DECISION node
+      // about half the time. `toEntityKind('decision')` is `'node'`;
+      // `['option','goal']` rejects it; the user who asked for an analysis is
+      // answered with "I found <Decision>, but I can't make that change to
+      // it." Deployed staging, no-edit arm: `"Rerun."` failed 5 of 10 and
+      // `"Run analysis." — the product's own chip label — 1 of 2.
+      //
+      // ⭐ WHY THIS WIDENS NOTHING, which is the load-bearing argument.
+      // Same message, same build, the analysis ALREADY RUNS on the other side
+      // of that coin flip. The decision to run was taken upstream — by the
+      // election gate, which fails CLOSED and demotes anything that is not an
+      // explicit request, or by a deterministic pre-route which builds a valid
+      // target by construction. This repair makes an already-taken decision
+      // EXECUTABLE; it cannot make a run reachable that was not already
+      // reachable, and a kind mismatch that fires on a model's coin flip was
+      // never a safety mechanism. TWIN B in
+      // `__tests__/run-analysis-target-repair.integration.test.ts` pins the
+      // opposite direction: a demoted election gains nothing here, because
+      // demotion happens before validation and this line never sees it.
+      //
+      // ⚠ THE PREDICATE IS THE VALIDATOR'S OWN VERDICT, NOT A RE-DERIVATION.
+      // Whether this entity is acceptable is a question `validateToolCall`
+      // already answers — including its graph-authoritative kind repair, which
+      // is what turns a model-declared `'option'` on a decision id into the
+      // `'node'` that actually gets rejected. Asking "would this fail?" a
+      // second time here would be a second implementation of the acceptance
+      // rule and would drift from it (trap 21). So: let it fail, then repair
+      // and RE-VALIDATE, and take the result only if the second pass is
+      // genuinely valid.
+      //
+      // FALL-THROUGH CONTRACT. A substitution happens only when the graph
+      // offers an option target and the revalidated proposal is valid.
+      // Otherwise `validationResult` is left exactly as it was and today's
+      // refusal stands — substituting the goal instead would only trade
+      // ENTITY_KIND_MISMATCH for PRECONDITION_UNMET, a different refusal
+      // rather than a fix. The decline is emitted with a reason so "no option
+      // in the graph" and "the repair did not validate" are distinguishable in
+      // ops instead of both being silence.
+      if (
+        !validationResult.valid &&
+        validationResult.error.code === 'ENTITY_KIND_MISMATCH' &&
+        proposedHandlerId === 'run_analysis'
+      ) {
+        // The kind that was actually REJECTED — the graph-resolved one when
+        // the validator repaired it, else the model's own. Read off the error
+        // details the validator populated, never re-derived here.
+        const rejectedKind =
+          (validationResult.error.details as { resolved_kind?: unknown; proposed_kind?: unknown })
+            ?.resolved_kind ??
+          (validationResult.error.details as { proposed_kind?: unknown })?.proposed_kind ??
+          null;
+        const repairEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
+        const repairedValidation =
+          repairEntity === null
+            ? null
+            : validateToolCall(
+                { ...action, entity: repairEntity },
+                graphLookupForValidate,
+                validationRegistry,
+              );
+        if (repairEntity !== null && repairedValidation?.valid === true) {
+          action = { ...action, entity: repairEntity };
+          validationResult = repairedValidation;
+          // Keep the observability fields honest about what is now executing:
+          // the entity below this line is ours, inferred from the scenario.
+          resolutionStatus = repairEntity.resolution_status;
+          emit(TelemetryEvents.V5RunAnalysisTargetRepair, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: 'run_analysis',
+            outcome: 'repaired',
+            proposed_kind: rejectedKind,
+            repaired_kind: repairEntity.kind,
+            reason: null,
+          });
+        } else {
+          emit(TelemetryEvents.V5RunAnalysisTargetRepair, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: 'run_analysis',
+            outcome: 'declined',
+            proposed_kind: rejectedKind,
+            repaired_kind: null,
+            reason: repairEntity === null ? 'no_option_target' : 'revalidation_failed',
+          });
+        }
+      }
 
       // CONSUME THE REPAIRED PROPOSAL. The validator returns a copy carrying
       // the graph's kind and label; until now every caller threw it away and
@@ -9605,6 +9860,18 @@ export async function runTurnExecutor(
           recoveredResponse = recovered.response;
           recoveredTemplateId = recovered.template_id;
           recoveredChipType = recovered.chip_type;
+        }
+
+        // Spec §4.3 — when the rejected proposal was bound from a bare pronoun,
+        // the recovery copy may not name the node ("This factor uses £; the
+        // value provided is in %."), so the disclosure sentence leads it. Null
+        // on every other path, so the recovered copy is byte-identical.
+        if (anaphoricBindingDisclosure !== null) {
+          recoveredResponse = {
+            ...recoveredResponse,
+            assistant_text:
+              `${anaphoricBindingDisclosure} ${recoveredResponse.assistant_text}`.trim(),
+          };
         }
 
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The recoverable-
@@ -10376,6 +10643,16 @@ export async function runTurnExecutor(
               handlerEmittedMutatedGraph = true;
             }
           }
+        }
+
+        // Spec §4.3 — a receipt for a pronoun the register bound says what
+        // "it" was read as, in its own sentence, BEFORE the receipt. Null on
+        // every other path, so ordinary value updates are byte-identical.
+        if (anaphoricBindingDisclosure !== null && proposedHandlerId === 'set_factor_value') {
+          handlerOutcome = {
+            ...handlerOutcome,
+            assistant_text: `${anaphoricBindingDisclosure} ${handlerOutcome.assistant_text}`.trim(),
+          };
         }
 
         // Part-accounting conservation law (defence in depth) — the
@@ -11783,6 +12060,21 @@ export async function runTurnExecutor(
         stage: context.stage,
         suggested_actions: coachGuarded.suggested_actions,
         answerKind: 'substantive',
+        // Ground the coach's own figures. This prose was rendered from
+        // `display_analysis`, and the served ROUTING prompt tells the model to
+        // QUOTE that pre-computed `win_probability` rather than derive one:
+        // `Prompts/canonical/routing.txt:48` (hash-verified export of the PMS
+        // `orchestrator` task, served_version 121) fixes the wording, and
+        // `:118`/`:21` fix the no-arithmetic rail — so the turn is already
+        // making a quantified claim and shipped nothing a consumer could check
+        // it against. (NOT `src/prompts/defaults.ts`, whose win_probability
+        // quotes are all inside `DECISION_REVIEW_PROMPT` — a different
+        // channel.) Empty on every turn that projected no analysis and on every
+        // non-fresh turn (see the helper's header).
+        blocks: buildProseGroundingBlocks({
+          sourceFact: promptAnalysisSourceFact,
+          freshness: promptAnalysisFreshness,
+        }),
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The coach ANSWER prose
@@ -11954,6 +12246,13 @@ export async function runTurnExecutor(
         stage: context.stage,
         suggested_actions: converseGuarded.suggested_actions,
         answerKind: 'substantive',
+        // Same rationale as the coach branch above — one helper, one rule, so
+        // the two substantive branches cannot drift apart about when a prose
+        // turn grounds its own numbers.
+        blocks: buildProseGroundingBlocks({
+          sourceFact: promptAnalysisSourceFact,
+          freshness: promptAnalysisFreshness,
+        }),
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The converse / text_only
@@ -13100,6 +13399,234 @@ export async function runTurnExecutor(
   }
 
   /**
+   * ⭐⭐⭐ THE PROCESS-NARRATION GUARD — the chain-of-thought leak, closed at the
+   * chokepoint.
+   *
+   * Witnessed on a real user session (3 Sep 2026, bundle
+   * `olumi-debug-f2e2df1b-20260903.json`): a routing-call deliberation
+   * (*"The user's asking about specific structural values… I shouldn't invent
+   * an explanation for a number I can't ground."*) and a routing verdict
+   * (*"This is a question about existing analysis results, not a model edit
+   * request… No model changes are needed to answer this."*) both shipped
+   * verbatim as `assistant_text`, both `status: 200`, `completed: true`.
+   *
+   * ⚠ WHY A FINALISER HOOK AND NOT A FIX AT THE COMPOSE BRANCH. There already
+   * IS a stripper for this class — `stripPlanningPreamble` — and it is wired to
+   * the execute and clarify branches ONLY, by a deliberate decision its own
+   * header records: on coach / converse / text_only "the orientation IS the
+   * whole answer and emptying it would ship a blank reply". Both witnessed
+   * leaks are on exactly those branches. Fixing this by adding a third and
+   * fourth call site inside the compose branches would leave the FIFTH branch
+   * — and this executor has dozens of exits — uncovered the day it is added.
+   * A hook in `finalizeRun` covers every exit of THIS executor by
+   * construction, which an in-branch fix cannot.
+   *
+   * ⚠⚠ COVERAGE, MEASURED — AND NARROWER THAN "BY CONSTRUCTION" SUGGESTS.
+   * An earlier draft of this note claimed the three call sites made coverage
+   * structural across the route. That claim was FALSE and is withdrawn.
+   *
+   * ⚠ ITS REPLACEMENT WAS FALSE TOO, IN THE SAME DIRECTION, AND IS CORRECTED
+   * HERE. It said **four** exits and a covered chip-click "dispatch family".
+   * A second independent review resolved the chip-click delegation on the AST
+   * rather than by reading line numbers, and `:2855` does NOT reach this
+   * guard. Withdrawing a false claim is worth nothing if the replacement
+   * repeats it, so the correction is recorded rather than silently swapped.
+   *
+   * Derived at `src/orchestrator/route-v2.ts` (3 Sep 2026, re-derived at the
+   * AST 4 Sep): that file has **24 `sendFinalised200` exits**, the sole
+   * sanctioned 200-OK send site, and this guard is reachable on **three** —
+   *   · `:6860` `turn_executor`  (→ `runTurnExecutor` → `finalizeRun`, here)
+   *   · `:6387` `edit_graph`     (`eg.response` ← `dispatchEditGraph` `:6284`)
+   *   · `:2937` `chip_click` — the `ok` outcome ONLY (←
+   *     `dispatchDeterministicChipClick` `:2830`, which delegates to
+   *     `dispatchChipClickRunAnalysis` `chip-click-dispatch.ts:1167`; the
+   *     guard sits at `:1729`, in that function's OUTER try block)
+   *
+   * The structural property is per-EXIT, not per-dispatch-family. `chip_click`
+   * has two 200-OK exits and only one of them is covered — which is the
+   * withdrawn route-level claim reproduced one level down, and the reason this
+   * note now names exits rather than families.
+   *
+   * ⭐ THE COUNT IS CLOSED AGAINST THE FULL ENUMERATION, not against the one
+   * bypass the review happened to find. "A guard placed after an early return"
+   * is a CLASS, and `:2855` was one instance, so every `return` statement of
+   * both guarded dispatchers was resolved on the AST and mapped to the outcome
+   * it carries (4 Sep 2026):
+   *   · `dispatchChipClickRunAnalysis` — six returns. `outcome: 'ok'` occurs
+   *     exactly ONCE and it is AFTER the guard, so `:2937` is covered. Four
+   *     returns precede the guard: `handler_recovered` (`:1406`) is the only
+   *     one that reaches a 200; `commit_failed`, `handler_failure` and
+   *     `handler_result_invalid` are sent by route-v2 as 500s and never enter
+   *     `sendFinalised200` at all.
+   *   · `dispatchEditGraph` — three returns, one before the guard: the
+   *     claim-then-starve exit at `edit-graph-dispatch.ts:2665`
+   *     (`unresolvedClarificationFellThrough`). Route-v2 answers that flag by
+   *     DELIBERATELY NOT RETURNING (`:6336`) and falling through to
+   *     `runTurnExecutor`, where `finalizeRun` applies this guard — so it
+   *     never reaches `:6387`, whose `else` branch is the only sender of
+   *     `eg.response`. `:6387` is covered.
+   * ⚠ The negative result was not believed until the instrument was shown
+   * able to produce a positive one: pointed at the chip-click dispatcher it
+   * reports the known `:1406` bypass, and three more.
+   *
+   * ⛔ THE TWENTY-ONE UNCOVERED EXITS, named rather than left implicit.
+   *
+   * · `:2855` `chip_click` — the `handler_recovered` outcome, and the one
+   *   this docblock previously counted as covered. The response is composed
+   *   inside `tryComposeRecoverableChipOutcome`
+   *   (`chip-click-dispatch.ts:688-1130`, which contains no call to this
+   *   guard) and returned straight out of `dispatchChipClickRunAnalysis` by
+   *   `if (recovered) return recovered;` at `:1406` — a return from a CATCH
+   *   clause nested inside the outer try, so it leaves the function before
+   *   the guard at `:1729` in that same outer try's body.
+   *   ⚠⚠ THE REASSURANCE FIRST WRITTEN HERE WAS FALSE, and it came from
+   *   the review rather than from a measurement — which is this PR's own
+   *   defect class, so it is corrected in place rather than deleted. It read:
+   *   *"that exit carries `composeRecoverableHandlerResponse` →
+   *   `composeHandlerFailureBody`, whose `assistant_text` values are static
+   *   string literals with no model or error text interpolated."* Measured
+   *   instead (4 Sep 2026, every case clause mapped against
+   *   `RECOVERABLE_HANDLER_CAUSES`): **four of the nine recoverable causes
+   *   DO interpolate** — `args_validation_failed` and
+   *   `parameter_invalid_at_execute` splice
+   *   `sanitiseForUser(details.specific_issue)`, `analysis_not_ready` splices
+   *   `details.next_step` plus `unresolved_inputs[].prompt`, and
+   *   `options_not_configured` splices a `safeLabel` option label. Five are
+   *   static.
+   *   ⭐ What survives the correction, stated as what it is — a TRACED
+   *   SAMPLE, not an exact-set guarantee over an open class: every writer of
+   *   those interpolated fields that this trace reached is CEE-authored — Zod
+   *   issue messages, `ADJUST_EDGE_STRENGTH_USER_GUIDANCE`, readiness prompts
+   *   from `analysis-ready-core.readinessQuestions`, CEE template strings, and
+   *   a user-authored graph label. **No model-prose channel was found on this
+   *   path, and none was proven absent.** The unchanged, AST-proven claim is
+   *   only the first one: `:2855` does not reach this guard.
+   * · `:4519 draft_graph` — the one that matters, because it ships prose
+   *   assembled from LLM-authored coaching fields
+   *   (`coaching/post-draft-narrative.ts:6` — `coachingSummary` is used
+   *   VERBATIM when it passes the copy-quality gate).
+   * · The other nineteen are route-level intercepts that compose their own
+   *   responses without entering a guarded dispatcher: ten further
+   *   `edit_graph` exits (`:2195`, `:5117`, `:5239`, `:5293`, `:5325`,
+   *   `:5559`, `:5782`, `:5880`, `:6154`, `:6251`), plus `system_event`,
+   *   `readiness_intake`, `add_option_transaction`, the two
+   *   `explicit_generate_*`, `clarify_v2`, `process_meta_intake` and the two
+   *   `frame_no_brief_guard` exits.
+   *
+   * ⚠ NO NARRATION HAS BEEN WITNESSED ON ANY OF THOSE TWENTY-ONE. This is an
+   * enumeration of exits that CAN carry model-authored prose without this
+   * guard, not a measured leak — the distinction matters, because a row
+   * minted from it must restate that scope and not generalise it
+   * (CLAUDE.md trap 20).
+   *
+   * ⭐ THE ALTERNATIVE, DELIBERATELY NOT TAKEN HERE. The sibling leader-claim
+   * guard solved exactly this by installing at `sendFinalised200` itself and
+   * wrote down why (`route-v2.ts:1594-1601`: *"a per-exit edit is one place
+   * per exit for the next exit to be forgotten"*). That is the right shape and
+   * it is a larger change than this one: this guard can SUBSTITUTE A WHOLE
+   * REPLY, and the false-positive sweep behind its marker set was run over
+   * production string literals, not over `draft_graph`'s composed narrative.
+   * Moving it to the route chokepoint needs its own sweep of that copy and is
+   * a scope expansion, not a line move. Stopped at the boundary and reported.
+   *
+   * The guard is safe HERE precisely because it can never return nothing: on a
+   * block that was narration end to end it substitutes an honest sentence plus
+   * the clarifying question (`PROCESS_NARRATION_FALLBACK_TEXT`), which is what
+   * the branch-level stripper could not do.
+   *
+   * ⭐ RUNS FIRST, AHEAD OF `enforceWithheldLeaderClaimGuard`. It performs a
+   * whole-text substitution, so running it first means its replacement copy is
+   * itself subject to the leader-claim, forbidden-phrase and success-claim
+   * guards rather than bypassing them. (The converse is pinned in the spec:
+   * the fallback constant carries no forbidden phrase, no leader claim and no
+   * success claim, so the ordering cannot silently rot.)
+   *
+   * ⭐ THE NARRATION IS ROUTED, NOT DESTROYED. The excised text is appended to
+   * `capturedReasoning` — the ROADMAP 1.42 `_reasoning` disclosure channel,
+   * which exists for exactly this: verbatim deliberation, collapsed by
+   * default, explicitly labelled, never the first thing the user reads. Paul's
+   * standard is that reasoning stays AVAILABLE; it must not be the answer.
+   *
+   * ⚠ SCOPE, MEASURED RATHER THAN ASSUMED: that channel is gated by
+   * `CEE_REASONING_CAPTURE_ENABLED` (default false) at route-v2's re-attach,
+   * and by `VITE_FEATURE_REASONING_DISCLOSURE` (default off) in the UI. So on
+   * today's posture the narration is captured and NOT displayed. That is the
+   * honest outcome of this change and not a claim that the disclosure is live:
+   * the user stops reading the monologue now, and it appears in the right
+   * place the moment the disclosure flags are opened. Flipping either flag is
+   * a product decision and is not taken here.
+   *
+   * ⛔ WHAT THIS DOES NOT REACH — THE DURABLE COPY, AND IT IS FED BACK TO THE
+   * MODEL. Every `commitTurn` site in this executor runs BEFORE `finalizeRun`,
+   * and `commit.ts:332 durablePublicAssistantText` re-applies only the
+   * forbidden-phrase guard and the entity scrub. So `assistant_message`
+   * persists the UNGUARDED text for these turns, and that value is read back
+   * as prior-turn context by `context/context-pack-assembler.ts`,
+   * `rolling-summary/build-input.ts` and `handlers/edit-graph-dispatch.ts`
+   * (as `{ role: 'assistant', content: turn.assistant_message }`).
+   * `session/store.ts:189-193` describes that field as *"the egress-validated,
+   * user-visible prose … `assistant_text` is what the user saw"*, which stops
+   * being true on a turn this guard rewrites.
+   *
+   * ⚠ SCOPE, STATED PRECISELY. This guard WIDENS a gap the leader-claim and
+   * structural-success guards already have; it does not create one. It matters
+   * more here only because the retained content is the exact monologue this
+   * guard exists to suppress, and the model is then re-shown it as its own
+   * prior answer. NO REINFORCEMENT EFFECT HAS BEEN MEASURED — in the single
+   * available capture the model recovered on the following turn, and one data
+   * point is not a finding. The repo names the remedy in two places
+   * (`turn-executor.ts:12384`, `edit-graph-dispatch.ts:4583`: *"runs BEFORE
+   * commitTurn so the stored assistant_message equals the honest wire copy"*),
+   * and applying it belongs with the sibling guards that share the gap rather
+   * than in this change.
+   *
+   * Idempotent: neither the surviving answer sentences nor the fallback copy
+   * carries a narration marker.
+   */
+  function enforceProcessNarrationGuard(
+    dispatchPath: 'turn_executor_finalise',
+  ): void {
+    if (!response) return;
+    const assistantText = response.assistant_text;
+    if (typeof assistantText !== 'string' || assistantText.length === 0) return;
+    const guarded = applyProcessNarrationGuard(assistantText);
+    if (!guarded.rewritten) return;
+    emit(TelemetryEvents.V5EgressProcessNarrationDetected, {
+      request_id: requestId,
+      scenario_id: context.session_id,
+      marker: guarded.hit,
+      remedy: guarded.remedy,
+      dispatch_path: dispatchPath,
+      sentences_total: guarded.sentencesTotal,
+      sentences_removed: guarded.sentencesRemoved,
+      narration_length: guarded.narration.length,
+    });
+    response = {
+      ...response,
+      assistant_text: guarded.text,
+    };
+    // Route the deliberation to its own channel. Appended rather than
+    // overwritten: a turn can carry BOTH captured extended thinking and a text
+    // block that turned out to be narration, and dropping either would make
+    // the disclosure lie by omission. Both are the same fact — what the model
+    // thought on this turn, verbatim, that is not the answer — so they share
+    // the field; the telemetry event above is what records that this half came
+    // from the answer channel.
+    if (guarded.narration.length > 0) {
+      capturedReasoning = capturedReasoning
+        ? `${capturedReasoning}\n\n${guarded.narration}`
+        : guarded.narration;
+    }
+    // ROADMAP 1.132 (F1) — carry the FUNCTIONAL classification through the
+    // rewrite, exactly as the forbidden-phrase guard below does. A functional
+    // receipt that lost a narration sentence is still a functional receipt and
+    // must still ship PLAIN, not behind progressive disclosure.
+    if (functionalAnswerText === assistantText) {
+      functionalAnswerText = guarded.text;
+    }
+  }
+
+  /**
    * V5 stale-aware explain recovery — finaliser-level egress guard.
    *
    * Scans `response.assistant_text` for any forbidden phrase (per
@@ -13844,6 +14371,13 @@ export async function runTurnExecutor(
     // leader-free, so this ordering cannot silently rot.) See
     // `enforceWithheldLeaderClaimGuard` for why a finaliser hook and not
     // another in-flow gate.
+    // ⭐⭐⭐ PROCESS NARRATION — FIRST OF ALL THE PROSE GUARDS. It is the only
+    // one that can substitute the WHOLE reply with new copy of its own, so it
+    // runs ahead of the other three and its replacement is then judged by
+    // them. See `enforceProcessNarrationGuard` for the witnessed leaks, for
+    // why the branch-level `stripPlanningPreamble` could not cover them, and
+    // for where the excised deliberation goes.
+    enforceProcessNarrationGuard('turn_executor_finalise');
     enforceWithheldLeaderClaimGuard('turn_executor_finalise');
     enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
     // AI Harness capability 1 — always-on false-success neutralisation. Runs

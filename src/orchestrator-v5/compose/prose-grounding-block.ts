@@ -1,0 +1,183 @@
+/**
+ * SHIP THE FACT THE PROSE WAS BUILT FROM.
+ *
+ * THE DEFECT THIS CLOSES. On a substantive coach / converse turn the model is
+ * handed `display_analysis` — a projection of a persisted `run_analysis` fact
+ * built by `buildAnalysisFromPriorFacts` — and the SERVED ROUTING PROMPT tells
+ * it to quote that figure rather than derive one.
+ *
+ * The citation, re-derived at this tip rather than inherited. This turn class
+ * resolves the PMS `orchestrator` task (`routing/route-with-tool-use.ts:617`
+ * `ensureRoutingPromptSnapshot`; the adapter resolution at `:2144` pins the
+ * same task id), whose hash-verified canonical export is
+ * `Prompts/canonical/routing.txt` — `Prompts/canonical/manifest.json` records
+ * it as `served_version: 121`, `served_hash_verified: true`. Read at those
+ * bytes:
+ *
+ *   :48   - Win probability: "leads in 69% of simulations". Never "0.69
+ *           probability", "wins" or "win rate".
+ *   :118  ANALYSIS PRESENT AND CURRENT: use computed values exactly as
+ *           provided, preferring display-ready values.
+ *   :21   10. NO ARITHMETIC. Use values exactly as provided; deterministic
+ *           code computes.
+ *
+ * The on-disk fallback the loader drops to when PMS is empty or unreachable
+ * (`Prompts/v40.txt`, registered at `src/prompts/defaults.ts:2449-2451`, which
+ * READS that file rather than carrying its text) states the same rail at
+ * `:60-61`: "NO ARITHMETIC. Do not calculate, transform, or derive numbers.
+ * Quote figures exactly as provided in ContextPack." It carries no
+ * win-probability WORDING rule of its own — measured, zero hits — so the
+ * sentence template above is the served prompt's alone. On both authorities
+ * the number is SERVER-COMPUTED; only the wording is model-authored.
+ *
+ * ⚠ IT IS NOT `src/prompts/defaults.ts`'s win_probability quotes, and an
+ * earlier revision of this header cited them in error. All ten of that file's
+ * `win_probabilit` hits (1306–1588) sit inside `DECISION_REVIEW_PROMPT`
+ * (declared `:1293`; the next top-level declaration is `:1683`) — the
+ * ENRICHMENT / decision-review channel, which is a DIFFERENT channel from this
+ * one, answering a different question. `display_analysis` appears zero times
+ * anywhere under `src/prompts/`; contrast controls in the same sweep at the
+ * same scope read `option_comparison` 12 hits / 4 files and `win_probability`
+ * 21 hits / 2 files, so that zero is a real absence and not a blind probe.
+ *
+ * The same response then shipped `blocks: []`, because the two channels are
+ * fed by different code paths:
+ *
+ *   prose  — context-pack-assembler → formatAnalysisForContext → the prompt
+ *   blocks — `buildBlocksFromFacts`, reached ONLY from `composeToolCallResponse`
+ *
+ * `composeDirectAnswerResponse` — the composer every coach / converse turn uses
+ * — consults no facts at all; it emits whatever `blocks` its caller passes, and
+ * every caller passed nothing. So on this whole turn class the `analysis_result`
+ * block was not suppressed by a rule. It was STRUCTURALLY UNREACHABLE.
+ *
+ * The user-visible cost is not the missing block. It is that the assistant
+ * asserts a quantified comparative claim — a percentage the server computed —
+ * beside NO machine-readable statement of the same fact, so a consumer cannot
+ * check the sentence it is rendering. (A UI-side survey reported many
+ * `win_probability` consumers receiving nothing on these turns; that count was
+ * measured in the UI repo and is NOT verified here — this module claims only
+ * what is true of the CEE payload.)
+ *
+ * WHAT THIS DOES NOT DO, and each omission is deliberate.
+ *
+ * 1. IT DOES NOT ALIGN THE LEADER-NAMING AUTHORITIES. Three producers answer
+ *    three DIFFERENT questions here — does the MODEL license a claim
+ *    (`claim_safety.may_name_leading_option`), is THIS TURN entitled
+ *    (`mayNameLeadingOption`), and can a consumer of THIS PAYLOAD verify both
+ *    halves (`leader_claim.permitted`). They are correct as separate questions,
+ *    and #709/#737 reopened a live defect by reconciling their defaults. This
+ *    change touches none of them. It makes the THIRD question ANSWERABLE by
+ *    putting the evidence on the payload the third question is scoped to —
+ *    which is the opposite of making it agree with the other two.
+ *
+ * 2. IT DOES NOT MAKE `readRawRobustnessFromResponseBody` READ THE FACT. That
+ *    reader's wire-scoping is a RAIL, stated at its own docstring: when the
+ *    withheld-claim projection has redacted `near_tie`, the separation half is
+ *    genuinely unknown TO THE CONSUMER and `leader_claim` must say so rather
+ *    than assert a separation the payload no longer carries. Threading the fact
+ *    in behind it as a fallback would let the claim assert exactly that. The
+ *    honest repair is upstream: put the evidence on the wire and let the
+ *    unchanged reader find it. If the projection redacts it, the reader still
+ *    reads null and the claim still fails closed — correctly.
+ *
+ * 3. IT DOES NOT SHIP A BLOCK ON A NON-FRESH TURN. `buildLifecycleBlocksFromPrior`
+ *    already ratified this rule for the prior-fact path: FRESH emits the result
+ *    block, `stale` emits only the rerun coaching block, `unknown` / `none`
+ *    emit nothing. This helper is gated identically, so the two prior-fact
+ *    surfaces state one rule rather than two.
+ *
+ *    ⚠ NOTE THE ASYMMETRY WITH THE PROSE CHANNEL, because it is deliberate and
+ *    it is NOT a divergence to reconcile. `formatAnalysisForContext` QUALIFIES
+ *    on a non-fresh turn — it keeps the figures and attaches an in-band
+ *    staleness disclosure — and that is adjudicated ("QUALIFIES, never
+ *    withholds": the coach still needs the prior run to explain what re-running
+ *    would update). A structured `analysis_result` block has no such register.
+ *    It is rendered by the Results surface as THE result, and it carries no
+ *    slot in which "this predates your last edit" can be said. Prose can
+ *    qualify a figure; a block can only assert one. So the same verdict
+ *    correctly produces a qualified sentence and no block.
+ *
+ * 4. IT FABRICATES NOTHING WHEN THE FACT IS THIN. `enrichment.robustness` is
+ *    genuinely nullable. Reading `pickLatestRawRobustness` and the
+ *    `readRawRobustnessSignals` it delegates to, THREE of its null exits are
+ *    reachable with a selected `run_analysis` fact in hand — no enrichment
+ *    object; enrichment present but `robustness` not an object; `robustness`
+ *    present but carrying neither a non-empty `level` nor
+ *    `near_tie.is_tie === true`. (It has two further exits, for no selected
+ *    fact and a non-`run_analysis` fact, which this helper cannot reach because
+ *    its caller has already narrowed both.) This helper never synthesises it:
+ *    it ships the block the fact supports, and when the fact carries no robustness the
+ *    leader claim stays `separation_unavailable`, which is the true statement
+ *    that nothing was measured.
+ *
+ * 5. IT ADDS NO NEW PROJECTION. The block is built by the SAME
+ *    `buildAnalysisResultBlock` the tool-call and prior-fact paths use, so the
+ *    unrequested-analysis confinement (`confineUnrequestedAnalysisBlock`, which
+ *    strips the per-option win probability and the robustness verdict on a run
+ *    the user did not ask for) applies here unchanged and without being
+ *    restated. A second projection here would be the hand-maintained mirror.
+ *    CONSEQUENCE, stated rather than left to be discovered: on an UNREQUESTED
+ *    run the confinement removes exactly the fields `leader_claim` needs, so
+ *    the claim correctly remains `separation_unavailable` even though a block
+ *    shipped. This change closes the leader-claim gap on user-initiated runs;
+ *    it does not close it on unrequested ones, and must not.
+ */
+
+import type { OlumiResponse } from '@talchain/schemas/boundary';
+import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import type { FreshnessDerivation } from '../context/freshness.js';
+import { buildAnalysisResultBlock } from '../compose.js';
+
+/**
+ * The freshness verdict on which a prior analysis may be re-presented as a
+ * structured result. DERIVED as a literal comparison against the same token
+ * `buildLifecycleBlocksFromPrior` branches on, rather than a second enum.
+ */
+const FRESH: FreshnessDerivation['freshness'] = 'fresh';
+
+export interface ProseGroundingBlockInput {
+  /**
+   * The run fact the model-facing `display_analysis` projection was built from,
+   * or null when the prose carried no projected analysis. MUST be the fact the
+   * prose used — the caller co-assigns it with the projection, over one array
+   * through one selector.
+   */
+  readonly sourceFact: RunAnalysisHandlerFact | null;
+  /**
+   * The freshness derivation for the SAME array `sourceFact` was selected from
+   * (`promptAnalysisFreshness`, derived over the durable scenario fact set) —
+   * never the routing or post-dispatch derivation, which are verdicts about
+   * different arrays.
+   */
+  readonly freshness: FreshnessDerivation | null;
+}
+
+/**
+ * The blocks a substantive prose turn may ship to ground its own figures.
+ *
+ * Returns `[]` — byte-identical to today — on every turn that did not project
+ * an analysis into the prompt, and on every non-fresh turn.
+ */
+export function buildProseGroundingBlocks(
+  input: ProseGroundingBlockInput,
+): readonly OlumiResponse['blocks'][number][] {
+  const fact = input.sourceFact;
+  if (fact === null) return [];
+  // Fail closed on an absent derivation, matching the rule the flip-point
+  // licence and `classifyClaimUsable` already apply: anything but the literal
+  // 'fresh' — including absence — keeps the band.
+  if (input.freshness === null || input.freshness.freshness !== FRESH) return [];
+  return [buildAnalysisResultBlock(fact)];
+}
+
+/**
+ * Narrow a selected fact to a `run_analysis` fact. Exported so the caller does
+ * not re-implement the discriminant check at its assignment site.
+ */
+export function asRunAnalysisFact(
+  fact: HandlerFact | null | undefined,
+): RunAnalysisHandlerFact | null {
+  if (fact === null || fact === undefined) return null;
+  return fact.fact_type === 'run_analysis' ? (fact as RunAnalysisHandlerFact) : null;
+}

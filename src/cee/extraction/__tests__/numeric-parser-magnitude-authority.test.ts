@@ -179,7 +179,18 @@ const CORPUS: readonly (readonly [string, number])[] = [
   // at all — so this parsed as nothing whatever before 2.1130.
   ["5 million GBP", 5_000_000],
   ["2.5m USD", 2_500_000],
-  ["between £20,000 and £30,000", 20_000],
+  // ⚠⚠ "between £20,000 and £30,000" HAS MOVED OUT OF THIS CORPUS, and the
+  // move is the finding, not a convenience (ROADMAP 2.1131). It sat here
+  // asserting the writer "stated 20000" — but the writer stated a RANGE, and
+  // this parser had no range grammar, so it read the LOWER BOUND and returned
+  // it at `confidence: "high"`. That is the exact substitution the 3 Sep
+  // session was hurt by: "£80-120k for the first hire" resolving to 80.
+  //
+  // This corpus's own declared claim is that a magnitude is never fabricated
+  // and never dropped, and the range now satisfies it in BOTH bounds — 20,000
+  // and 30,000 both survive verbatim. What it can no longer assert is that the
+  // range collapses to one of its ends. That is asserted properly, as a range,
+  // in the block below the corpus.
   ["£20,000 (one-off)", 20_000],
 ];
 
@@ -195,6 +206,36 @@ describe("ROADMAP 2.1130 Part C — the stated magnitude survives, in both direc
       ).toBe(expected);
     });
   }
+
+  /* -------------------------------------------------------------------------
+   * ⭐ A RANGE IS NOT A POINT (ROADMAP 2.1131) — the row that used to live in
+   * the corpus above, asserted as what it actually is.
+   * ----------------------------------------------------------------------- */
+  it("a stated range keeps BOTH bounds, and does not masquerade as a stated point", () => {
+    const parsed = parseNumericValue("between £20,000 and £30,000");
+    expect(parsed, "the range did not parse at all").not.toBeNull();
+
+    // The magnitude claim this corpus exists to make, now in both bounds.
+    expect(parsed!.rangeMin, "the lower bound the writer stated").toBe(20_000);
+    expect(parsed!.rangeMax, "the upper bound the writer stated").toBe(30_000);
+    expect(parsed!.unit).toBe("GBP");
+
+    // The point the service runs on is DECLARED, not smuggled: flagged as a
+    // range, and at "medium" — a point taken from a range is an estimate this
+    // service chose, and reporting it at the same confidence as a figure the
+    // user typed is what let a midpoint be enforced as if they had.
+    expect(parsed!.isRange, "a range must announce itself").toBe(true);
+    expect(parsed!.value, "the midpoint, chosen once in rangePointEstimate").toBe(25_000);
+    expect(parsed!.confidence).toBe("medium");
+
+    // ⚠ THE OPPOSITE-DIRECTION TWIN (trap 22b): a genuine stated POINT must
+    // NOT acquire range fields or lose its confidence. Without this, "flag
+    // everything as a range" would pass the assertions above.
+    const point = parseNumericValue("a one-off cost of £20,000");
+    expect(point!.value).toBe(20_000);
+    expect(point!.isRange ?? false, "a stated point is not a range").toBe(false);
+    expect(point!.confidence).toBe("high");
+  });
 
   it("the witnessed brief's BOTH monetary values survive — neither is zeroed nor inflated", () => {
     // ROADMAP 2.1130's reproduction claim, bound by IDENTITY (the clause each

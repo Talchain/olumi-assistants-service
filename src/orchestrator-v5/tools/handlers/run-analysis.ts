@@ -2141,12 +2141,13 @@ function extractPlotFailureDetails(source: unknown): Record<string, unknown> {
 
 /**
  * Outcome kinds for the permissive status matrix:
- *   - `ok`           null | 'completed' | 'computed'
+ *   - `ok`           'completed' | 'computed'; also an ABSENT status (null)
+ *                    when the envelope carries usable result fields
  *   - `partial`      'partial' — accepted with a caveat template
  *   - `unknown`      unrecognised status string with usable result fields —
  *                    accepted with a distinct caveat template + warning log
- *   - `fatal`        'blocked' | 'failed' | unrecognised with no usable
- *                    fields → HandlerInvocationFailedError
+ *   - `fatal`        'blocked' | 'failed' | absent-or-unrecognised with no
+ *                    usable fields → HandlerInvocationFailedError
  *
  * Reference: Docs/v5/v5-resilience-contract.md Part C, grounded against the
  * real staging capture at
@@ -2190,7 +2191,30 @@ export function evaluateAnalysisStatus(
   resultRecords: ReadonlyArray<Record<string, unknown>>,
   ctx: { readonly request_id: string },
 ): AnalysisStatusOutcome {
-  if (status === null || OK_STATUSES.has(status)) {
+  if (status === null) {
+    // An ABSENT `analysis_status` is PLoT saying NOTHING about whether the run
+    // completed, so on its own it carries no success claim. Accept it only when
+    // the envelope carries usable results — the same minimum-fields contract
+    // the unrecognised-status branch below applies. With neither a status nor a
+    // usable record there is no evidence the analysis produced anything, and
+    // `{ kind: 'ok' }` here became a successful run fact that renders as a
+    // completed analysis carrying no win probabilities.
+    //
+    // `OK_STATUSES` deliberately keeps its unconditional accept: 'completed' /
+    // 'computed' are PLoT AFFIRMING the run finished, which makes an empty
+    // comparison a truthful "no options were compared" (the NO_RESULTS
+    // template) rather than an unsupported success claim.
+    if (hasUsableResultFields(resultRecords)) {
+      return { kind: 'ok' };
+    }
+    return {
+      kind: 'fatal',
+      cause_kind: 'analysis_not_completed',
+      message: 'PLoT analysis returned no analysis_status and no usable result fields',
+      retryable: true,
+    };
+  }
+  if (OK_STATUSES.has(status)) {
     return { kind: 'ok' };
   }
   if (status === 'partial') {

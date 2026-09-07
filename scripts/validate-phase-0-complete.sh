@@ -73,17 +73,62 @@ for tid in "${TASK_IDS[@]}"; do
 done
 
 # ------------------------------------------------------------
-# 3. 7 new OPERATION_TO_TASK_ID entries present in prompt-loader.ts
+# 3. 7 OPERATION_TO_TASK_ID entries present in the map the loader USES
+#
+# ⚠ This check hardcoded `src/adapters/llm/prompt-loader.ts` and stood RED on
+# pristine staging from 86b0e006 ("prompt estate derivable — one governance
+# home") until 7 Sep 2026. That commit moved the map to src/prompts/operations.ts
+# and left the loader importing it; the gate kept grepping the file the map had
+# left. All seven entries existed the whole time — the gate was reading the
+# wrong file, so it failed on a claim that was TRUE.
+#
+# The cost was not one red. The gate is wired into pre-push, so every push used
+# --no-verify, which ALSO skipped the branch guard, typecheck, lint, smoke tests
+# and stale-.js detection. A red everyone routes around disables its neighbours.
+#
+# So the location is DERIVED, exactly as section 1 derives the pinned tarball
+# rather than naming a version forever. Moving the map again cannot re-break
+# this; splitting or duplicating it fails LOUD rather than assume-good.
+#
+# ⚠ The assertion is UNCHANGED in strength: still `key: 'value'`, still all
+# seven, still fail-on-missing. Removing an entry from the map still REDs — that
+# is mutation-proven, not asserted. What changed is only where it looks.
 # ------------------------------------------------------------
 
-for tid in "${TASK_IDS[@]}"; do
-  # Match either `key: 'value'` style — expect operation key matches task_id 1:1.
-  if grep -q "${tid}: '${tid}'" "$REPO_ROOT/src/adapters/llm/prompt-loader.ts"; then
-    pass "OPERATION_TO_TASK_ID entry: $tid"
+# ⚠ BOUNDARY-MATCHED, and this was caught by a mutant rather than by reading:
+# `grep -l "export const OPERATION_TO_TASK_ID"` also matches
+# `OPERATION_TO_TASK_ID_RENAMED`, because the longer identifier CONTAINS the
+# shorter one. A rename would have sailed through the derivation and the gate
+# would have gone green on a map that no longer exists under that name.
+MAP_FILES="$(cd "$REPO_ROOT" && grep -rlE "export const OPERATION_TO_TASK_ID[^A-Za-z0-9_]" src || true)"
+MAP_FILE_COUNT="$(printf '%s' "$MAP_FILES" | grep -c . || true)"
+
+if [ "$MAP_FILE_COUNT" -eq 0 ]; then
+  fail "OPERATION_TO_TASK_ID: no file under src/ exports it — the map is gone or renamed"
+elif [ "$MAP_FILE_COUNT" -gt 1 ]; then
+  fail "OPERATION_TO_TASK_ID: exported from $MAP_FILE_COUNT files, expected exactly 1 — $(printf '%s' "$MAP_FILES" | tr '\n' ' ')"
+else
+  MAP_FILE="$MAP_FILES"
+  pass "OPERATION_TO_TASK_ID defined in: $MAP_FILE"
+
+  # The map must be the one the prompt loader actually reads. Without this, the
+  # gate would happily pass against an orphaned copy nothing imports.
+  MAP_MODULE="$(basename "$MAP_FILE" .ts)"
+  if grep -qE "import \{[^}]*OPERATION_TO_TASK_ID[^}]*\} from '[^']*${MAP_MODULE}\.js'" "$REPO_ROOT/src/adapters/llm/prompt-loader.ts"; then
+    pass "OPERATION_TO_TASK_ID: prompt-loader.ts imports the map it is checked against"
   else
-    fail "OPERATION_TO_TASK_ID entry missing: $tid"
+    fail "OPERATION_TO_TASK_ID: prompt-loader.ts does not import from ${MAP_MODULE} — the checked map is not the one in use"
   fi
-done
+
+  for tid in "${TASK_IDS[@]}"; do
+    # `key: 'value'` style — operation key matches task_id 1:1.
+    if grep -q "${tid}: '${tid}'" "$REPO_ROOT/$MAP_FILE"; then
+      pass "OPERATION_TO_TASK_ID entry: $tid"
+    else
+      fail "OPERATION_TO_TASK_ID entry missing: $tid"
+    fi
+  done
+fi
 
 # ------------------------------------------------------------
 # 4. 7 placeholder prompt fragments registered in defaults.ts

@@ -93,10 +93,14 @@ import {
   composeAnalysisStateV1,
   NO_ANALYSIS_CONTEXT_DERIVATION,
   readRawRobustnessFromResponseBody,
+  projectAnalysisBlocksForRunBinding,
+  WITHHELD_RUN_IDENTITY_UNCONFIRMED,
+  WITHHELD_RUN_IDENTITY_CONFLICT,
 } from './compose/analysis-state-v1.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta } from './coaching/build-run-delta.js';
+import { selectRunAnalysisFact } from './context/freshness.js';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -140,6 +144,8 @@ export function isFinalisedV5Response(value: unknown): value is FinalisedV5Respo
 // ─── Context ──────────────────────────────────────────────────────────────
 
 export interface FinaliserContext {
+  /** Already carried by sendFinalised200; independent of selected fact scope. */
+  readonly scenarioId?: string;
   /**
    * Pre-computed readiness from the dispatch path:
    *   - TurnExecutor      : structural readiness from the per-turn graph
@@ -353,11 +359,10 @@ export function finaliseV5Response(
       ? { ...stamped, graph_hash: ctx.freshness.current_graph_hash }
       : stamped;
   // ANALYSIS-STATE AUTHORITY, STEP 3 — ONE composed verdict per turn, beside
-  // `analysis_ready`. ADDITIVE BY CONSTRUCTION: it adds exactly one top-level
-  // key and rewrites none, so a consumer that ignores it sees byte-identical
-  // behaviour (asserted against a capture taken on the PR base, not against a
-  // fixture this lane wrote). Composed from values this turn already computed
-  // — no engine call, no model call, no store read.
+  // `analysis_ready`. On adopted fact-bearing exits it also confines the
+  // analysis block to the composed identity verdict. Other exits retain the
+  // additive behaviour. Composed from already-loaded inputs — no engine call,
+  // model call or store read.
   const withAnalysisState = attachAnalysisState(withGraphHash, ctx);
   // THE RUN-OVER-RUN CONSEQUENCE (schemas 0.39.0 `OlumiResponseSchema.run_delta`).
   // ADDITIVE BY CONSTRUCTION: adds at most one top-level key and rewrites none,
@@ -451,6 +456,9 @@ function attachAnalysisState(
       // blockers were dropped on the floor.
       ctx.analysisReady ? { readiness: ctx.analysisReady } : {},
     );
+  const selectedRun = ctx.priorFacts === undefined ? null : selectRunAnalysisFact(ctx.priorFacts);
+  const hasRunToBind = ctx.priorFacts !== undefined
+    && (selectedRun !== null || canonical.selected_fact_index !== null);
   const analysisState = composeAnalysisStateV1({
     canonical,
     freshness: ctx.freshness,
@@ -460,6 +468,12 @@ function attachAnalysisState(
     // withheld-claim projection has redacted `near_tie`, the separation half
     // is genuinely unknown to the consumer and `leader_claim` must say so.
     rawRobustness: readRawRobustnessFromResponseBody(response),
+    ...(!hasRunToBind ? {} : {
+      runFactBinding: {
+        scenarioId: ctx.scenarioId,
+        selectedResult: selectedRun?.fact.result,
+      },
+    }),
     // ROADMAP 2.1271 — passed through verbatim; the composer owns the arm's
     // precedence and its timestamp validation.
     ...(ctx.autoRunInFlight !== undefined
@@ -467,7 +481,11 @@ function attachAnalysisState(
       : {}),
   });
   if (analysisState === undefined) return response;
-  return { ...response, analysis_state: analysisState };
+  return {
+    ...response,
+    blocks: projectAnalysisBlocksForRunBinding(response.blocks, analysisState),
+    analysis_state: analysisState,
+  };
 }
 
 function sanitiseEnrichmentBlocks(
@@ -534,6 +552,13 @@ function attachRunDelta(
   response: OlumiResponse,
   ctx: FinaliserContext,
 ): OlumiResponse {
+  // Read the composer's identity verdict. An unbound pair must not add a new
+  // comparative delta after the analysis block has been confined.
+  const bindingReason = response.analysis_state?.leader_claim.withheld_reason;
+  if (bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED || bindingReason === WITHHELD_RUN_IDENTITY_CONFLICT) {
+    const { run_delta: _unboundDelta, ...withoutDelta } = response;
+    return withoutDelta;
+  }
   if (ctx.priorFacts === undefined) return response;
   const built = buildRunDelta({
     priorFacts: ctx.priorFacts,
