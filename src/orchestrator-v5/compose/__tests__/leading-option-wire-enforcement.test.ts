@@ -693,9 +693,9 @@ describe('SCOPE — stated, asserted, and not implied by which arms exist', () =
     expect([...WIRE_ENFORCED_PROSE_FIELDS]).toEqual(['assistant_text', 'framing_question']);
   });
 
-  it('block prose is NOT edited — the alarm keeps observing it', () => {
-    // The producer owns Phase-3 block prose. A wire-level edit here would mask
-    // the producer defect the Layer-3 alarm exists to measure.
+  it('block prose uses the existing producer projection when the wire licence withholds', () => {
+    // The final conjunction must bind the block surface too. The recovered
+    // founder capture proves producer fact permission is not a display licence.
     const withBlock = envelope(RECEIPT, {
       blocks: [{ type: 'analysis_result', summary: `${LEADER} leads by 18 points.` }],
     });
@@ -703,8 +703,9 @@ describe('SCOPE — stated, asserted, and not implied by which arms exist', () =
       ...OPTS,
       mayNameLeadingOption: false,
     });
-    expect(changed).toBe(false);
-    expect(response).toBe(withBlock);
+    expect(changed).toBe(true);
+    expect(response.assistant_text).toBe(RECEIPT);
+    expect(response.blocks[0].summary).not.toContain('leads by 18 points');
   });
 });
 
