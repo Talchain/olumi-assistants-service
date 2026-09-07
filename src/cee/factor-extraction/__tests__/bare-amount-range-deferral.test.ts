@@ -305,3 +305,68 @@ describe("the WIDENING this repair ships, stated rather than discovered later", 
     expect(shapes("Spend of 300-500k on tooling.")[0]!.label).toBe("Factor");
   });
 });
+
+/* ===========================================================================
+ * ⭐⭐ KNOWN_WORD_SEPARATOR_FLOOR — the 3 Sep defect, alive in the `to`/`and`
+ * spelling (PR #1327 behaviour seat, finding C: "worth a pinned gap-set entry
+ * rather than silence").
+ *
+ * `RANGE_SEPARATOR` admits `\s+(?:to|and)\s+`; `RANGE_LOWER_BOUND_ABSENT_GUARD`
+ * looks only for `[-–—]`. So on the word spelling the point pattern is NOT
+ * declined, and its confidence 0.90 beats the range's 0.80 in `mergeFactors`.
+ * MEASURED through `enrichGraphWithFactorsAsync` — the node-minting surface,
+ * not the producer — at base `f4c8f501` and at this repair:
+ *
+ *   "Budget of £80 to 120k for the hire."   BOTH  raw_value 80, cap 100
+ *   "Budget of 80 to 120k for the hire."    BOTH  raw_value 80, cap 100
+ *   "Budget of £80 and 120k for the hire."  BOTH  raw_value 80, cap 100
+ *
+ * That cap is the one that refused Paul's £100,000 on 3 Sep. It is NOT a
+ * regression — base is identically wrong — and it is NOT closed here.
+ *
+ * ── WHY NOT CLOSED (trap 22f) ──────────────────────────────────────────────
+ * Closing it means widening the guard's separator to the word forms, which by
+ * this repair's own rule then requires widening `bareAmountRange` to match, so
+ * every `X to Y` and anchored `X and Y` pair in the estate changes reading at
+ * once. `RANGE_SEPARATOR`'s own docstring records what happened the last time
+ * the `and` limb moved without an outside corpus: four measured fabrications,
+ * one of them `min > max`. This repair's mandate is the DASH class the guard
+ * deferred and nothing could read. The word axis needs its own corpus, from
+ * outside the author's head, and its own seat.
+ * ========================================================================= */
+describe("KNOWN_WORD_SEPARATOR_FLOOR — pinned in both directions", () => {
+  const WORD_SEPARATOR_STILL_UNDER_READS = [
+    "Budget of £80 to 120k for the hire.",
+    "Budget of 80 to 120k for the hire.",
+    "Budget of £80 and 120k for the hire.",
+  ] as const;
+
+  it.each(WORD_SEPARATOR_STILL_UNDER_READS)(
+    "OPEN (recorded): %s still mints raw_value 80 under a cap of 100",
+    async (brief) => {
+      const { graph } = await enrichGraphWithFactorsAsync(emptyGraph(), brief);
+      const node = graph.nodes.find(
+        (n) => n.kind === "factor" && String(n.label).toLowerCase().includes("budget"),
+      );
+      const data = node?.data as { raw_value?: number; cap?: number } | undefined;
+      expect(data, `${brief}: no budget node at all — the floor MOVED, re-derive it`).toBeDefined();
+      expect(data!.raw_value, brief).toBe(80);
+      expect(data!.cap, "the cap that refused £100,000 on 3 Sep").toBe(100);
+    },
+  );
+
+  it("⭐ TWIN: the DASH spelling of the same sentence is closed, and stays closed", async () => {
+    // Without this the block above could be "satisfied" by a change that
+    // under-reads everything, and it would read as a floor rather than a
+    // regression.
+    const { graph } = await enrichGraphWithFactorsAsync(
+      emptyGraph(),
+      "We're budgeting £80-120k for the first hire.",
+    );
+    const data = graph.nodes.find(
+      (n) => n.kind === "factor" && String(n.label).toLowerCase().includes("budget"),
+    )?.data as { raw_value?: number; cap?: number } | undefined;
+    expect(data!.raw_value).toBe(100_000);
+    expect(data!.cap, "admits the user's own upper bound, and then some").toBeGreaterThan(120_000);
+  });
+});
