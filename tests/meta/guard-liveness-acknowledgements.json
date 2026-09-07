@@ -1,5 +1,5 @@
 {
-  "$comment": "DERIVED, NOT HAND-WRITTEN. Regenerate by reading tests/meta/guard-liveness.test.ts; this file is a SHRINK-ONLY RATCHET of guards that exist but do not run in the one required check (`Lint, TypeCheck, Unit Tests`). The spec asserts this set EXACTLY equals the derived set: adding a dark guard REDs, and fixing or deleting one REDs until the entry is removed. Entries leave this file by being wired into the required check or deleted \u2014 never by being edited to match a new reality.",
+  "$comment": "DERIVED, NOT HAND-WRITTEN. Regenerate by reading tests/meta/guard-liveness.test.ts; this file is a SHRINK-ONLY RATCHET of guards that exist but do not run in the one required check (`Lint, TypeCheck, Unit Tests`). The spec asserts this set EXACTLY equals the derived set: adding a dark guard REDs, and fixing or deleting one REDs until the entry is removed. Entries leave this file by being wired into the required check or deleted — never by being edited to match a new reality.",
   "requiredCheck": "ci.yml::Lint, TypeCheck, Unit Tests",
   "orphanedGuards": [
     {
@@ -136,7 +136,7 @@
       "why": "Reachable only from the manually-installed pre-push hook (scripts/install-hooks.sh). A developer who never ran the installer never runs it, and no CI job does."
     },
     {
-      "path": "scripts/PROOF-THIS-GUARD-RUNS-IN-CI.sh",
+      "path": "scripts/validate-tarball-sha.sh",
       "via": [
         "HOOK"
       ],
