@@ -90,7 +90,7 @@ const BAND = 0.05;
 
 /** The elimination ceiling the headline module passes in — its own
  *  `ELIMINATED_WIN_PROBABILITY_CEILING`, the constant behind the user-facing
- *  "each has less than a 1% chance of winning". */
+ *  "each scored highest in less than 1% of runs". */
 const CEIL = 0.01;
 
 interface Opt {
@@ -297,7 +297,7 @@ describe('⭐ ZERO-TAIL INVARIANCE — dead options cannot buy back a winner', (
    * The product's emitted sentence was the tell, and it indicted itself:
    *
    *   "Selling to the Wrong Customers currently leads. 2 options are
-   *    effectively eliminated (each has less than a 1% chance of winning)."
+   *    effectively eliminated (each scored highest in less than 1% of runs)."
    *
    * It called the arms dead and let them restore the claim.
    */
@@ -544,7 +544,7 @@ describe('the headline withholds an unsupportable winner, end to end', () => {
   it('⭐ the padded field emits NO headline — the review counterexample, end to end', () => {
     // The reviewer measured this at the handler, where the emitted receipt was
     //   "Selling to the Wrong Customers currently leads. 2 options are
-    //    effectively eliminated (each has less than a 1% chance of winning)."
+    //    effectively eliminated (each scored highest in less than 1% of runs)."
     // Asserted here at the builder, which is where the verdict is made and
     // where a regression would originate. Two zero-win arms appended to the
     // real captured field; leader, labels and every live probability unchanged.
@@ -875,7 +875,7 @@ describe('the elimination ceiling — threaded, and honestly bounded', () => {
     // the two and NOT the one — which is only true if the sentence and the gate
     // are reading the same constant.
     expect(text as string).toContain('2 options are effectively eliminated');
-    expect(text as string).toContain('less than a 1% chance of winning');
+    expect(text as string).toContain('scored highest in less than 1% of runs');
     // DISCRIMINATOR: the 0.011 arm is genuinely live to the module too.
     expect(
       isFieldUnseparable([0.615, 0.356, 0.011, 0.009, 0.009], BAND, CEIL).separation,

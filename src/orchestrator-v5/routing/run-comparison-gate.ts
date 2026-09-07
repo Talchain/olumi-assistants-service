@@ -390,7 +390,7 @@ export const UNMATCHED_LEADER_IDENTITY_TEXT =
  * composed BOTH runs' leaders from it:
  *
  *     `The leading option has changed. ${prior_leading_label} came out ahead
- *      before, and ${current_leading_label} now leads.`
+ *      scored highest before, and ${current_leading_label} scores highest now.`
  *
  * The caller supplies the TURN's permission, which #730 reads off the
  * scenario's newest CLAIM-BEARING fact. That fact speaks for the current run
@@ -601,8 +601,20 @@ function composeComparisonParts(
   if (mayCompareLeaderIdentity) {
     // Byte-identical to the pre-fix permitted arm.
     if (delta.leading_option_changed) {
+      // ⚠ THREE CONTEST PHRASES IN ONE SENTENCE, retired 2026-09-07 under
+      // Paul's no-winner ruling: "The leading option has changed",
+      // "came out ahead", "now leads". The FACTS are identical — the leader
+      // changed, who it was, who it is — but the frame is now the user's goal
+      // rather than a contest, matching the UI half (DecisionGuideAI #1280,
+      // "Most likely to serve your goal").
+      //
+      // `still leads` in the else-arm below is DELIBERATELY LEFT — bare "leads"
+      // is the Communication Glossary's sanctioned replacement for "winner",
+      // #1280's banned vocabulary spares it, and rewriting it from this seat
+      // would contradict the served prompt rather than comply with a ruling.
+      // The arms are mutually exclusive, so no single turn reads both frames.
       parts.push(
-        `The leading option has changed. ${delta.prior_leading_label} came out ahead before, and ${delta.current_leading_label} now leads.`,
+        `The option most likely to serve your goal has changed. ${delta.prior_leading_label} scored highest before, and ${delta.current_leading_label} scores highest now.`,
       );
     } else {
       parts.push(`${delta.current_leading_label} still leads.`);
@@ -613,19 +625,19 @@ function composeComparisonParts(
     // below, because the user-visible situation is the same: one run's leader
     // is nameable and no relation between the runs is. What differs is the
     // REASON, which is why the second sentence is its own constant.
-    parts.push(`${delta.current_leading_label} leads on the latest result.`);
+    parts.push(`${delta.current_leading_label} scored highest on the latest result.`);
     parts.push(UNMATCHED_LEADER_IDENTITY_TEXT);
   } else if (mayNameCurrent) {
     // MIXED — the prior run withheld. Name what this run's own verdict
     // licenses, say plainly that the other half is unavailable, and make no
     // statement that relates the two.
-    parts.push(`${delta.current_leading_label} leads on the latest result.`);
+    parts.push(`${delta.current_leading_label} scored highest on the latest result.`);
     parts.push(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT);
   } else if (mayNamePrior) {
-    // MIXED, mirrored. "came out ahead in the earlier run" is scoped to that
+    // MIXED, mirrored. "scored highest in the earlier run" is scoped to that
     // run by construction — no "before", which only means anything relative to
     // a current leader we are declining to name.
-    parts.push(`${delta.prior_leading_label} came out ahead in the earlier run.`);
+    parts.push(`${delta.prior_leading_label} scored highest in the earlier run.`);
     parts.push(WITHHELD_CURRENT_LEADER_COMPARISON_TEXT);
   } else {
     parts.push(WITHHELD_LEADER_COMPARISON_TEXT);

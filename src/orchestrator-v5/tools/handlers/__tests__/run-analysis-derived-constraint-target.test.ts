@@ -223,7 +223,7 @@ describe('r1225 — a constraint on a DERIVED target still consumes the producer
     // The constraint is named by the LABEL the user ratified, not by an id.
     expect(v.summary).toContain(CONSTRAINT_LABEL);
     // And no leading-option language survives alongside it.
-    expect(v.summary).not.toContain('came out ahead in');
+    expect(v.summary).not.toContain('scored highest against your goal in');
   });
 
   it("ARM B (CONTROL): a target that DOES carry a quantity also reads 'unevaluated' — unchanged by this pin", async () => {
@@ -246,6 +246,6 @@ describe('r1225 — a constraint on a DERIVED target still consumes the producer
 
     expect(v.constraint_verdict_state).toBe('not_applicable');
     expect(v.may_name_leading_option).toBe(true);
-    expect(v.summary).toContain('came out ahead in');
+    expect(v.summary).toContain('scored highest against your goal in');
   });
 });

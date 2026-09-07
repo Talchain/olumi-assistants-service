@@ -111,9 +111,9 @@ describe('ARM B — goal-attainment contradiction (pure arithmetic)', () => {
     );
     expect(suffix).toBe(
       ' Two different questions have two different answers here: “Hold at £49 Per Seat (Status Quo)”' +
-        ' came out ahead most often, but “Raise to £59 Per Seat” is more likely to reach your stated' +
-        ' target (48% against 0%). Coming out ahead counts how often an option scored highest on the' +
-        ' goal, not whether your target was met.',
+        ' scored highest against your goal most often, but “Raise to £59 Per Seat” is more likely to reach your stated' +
+        ' target (48% against 0%). Scoring highest counts how often an option scored highest on' +
+        ' your goal, not whether your target was met.',
     );
   });
 
@@ -230,9 +230,9 @@ describe('ARM A — directional contradiction (arithmetic-gated)', () => {
       true,
     );
     expect(suffix).toBe(
-      ' “Hold at £49 Per Seat (Status Quo)” came out ahead most often without moving' +
+      ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
         ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-        ' “Raise to £59 Per Seat” came out ahead in 28% of runs.',
+        ' “Raise to £59 Per Seat” scored highest in 28% of runs.',
     );
   });
 

@@ -346,7 +346,7 @@ describe('turn-executor finaliser — defaulted-value disclosure guard (WIRING)'
  * A fix whose test cannot see it is not tested (CLAUDE.md trap 11).
  */
 
-const HEADLINE = 'Launch now came out ahead in 62% of runs of this model.';
+const HEADLINE = 'Launch now scored highest against your goal in 62% of runs of this model.';
 
 const GRAPH_WITH_OPTIONS: GraphStateIngress = {
   nodes: [

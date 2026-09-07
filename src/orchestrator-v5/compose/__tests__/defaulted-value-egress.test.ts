@@ -518,7 +518,7 @@ describe('F6 egress — the survivors, now discriminated', () => {
     // first version used two neutral sentences, so `applyDefaultedValueEgress`
     // returned at the gate and the join was never executed — a separator-
     // normalising mutant survived it. `leads` puts the text through the layer.
-    const twoParagraphs = 'Launch now leads.\n\nPrice matters least.';
+    const twoParagraphs = 'Launch scores highest now.\n\nPrice matters least.';
     expect(isAnalysisBearing(twoParagraphs)).toBe(true);
     // PRECONDITION: this really IS two segments with a newline separator —
     // otherwise the assertion below would pass on a single unsplit string.
@@ -526,8 +526,8 @@ describe('F6 egress — the survivors, now discriminated', () => {
     expect(segmentSentences(twoParagraphs)[0]!.sep).toBe('\n\n');
 
     const out = applyDefaultedValueEgress(twoParagraphs, SIGNAL);
-    expect(out.text).toContain('Launch now leads.\n\nPrice matters least.');
-    expect(out.text).not.toContain('Launch now leads. Price matters least.');
+    expect(out.text).toContain('Launch scores highest now.\n\nPrice matters least.');
+    expect(out.text).not.toContain('Launch scores highest now. Price matters least.');
   });
 });
 
@@ -542,7 +542,7 @@ describe('F6 egress — the survivors, now discriminated', () => {
 describe('F6 egress — the disclosure’s append point', () => {
   it('gets its own paragraph when the answer is block-structured', () => {
     const bulleted =
-      'Launch now leads.\n\n- Capacity matters most.\n- Price matters least.';
+      'Launch scores highest now.\n\n- Capacity matters most.\n- Price matters least.';
     // PRECONDITION: the answer really is block-structured AND analysis-bearing,
     // or this asserts nothing about the append point.
     expect(bulleted).toContain('\n');
@@ -557,7 +557,7 @@ describe('F6 egress — the disclosure’s append point', () => {
   });
 
   it('stays inline on a plain single-paragraph answer', () => {
-    const plain = 'Launch now leads, with a probability of 62%.';
+    const plain = 'Launch scores highest now, with a probability of 62%.';
     expect(plain).not.toContain('\n');
 
     const out = applyDefaultedValueEgress(plain, SIGNAL);

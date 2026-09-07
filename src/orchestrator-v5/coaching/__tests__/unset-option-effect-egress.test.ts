@@ -117,7 +117,7 @@ const CASE_B_INPUT: AnalysisResultHeadlineInput = {
 
 /** The Case-B headline as it ships TODAY, driver clause and all. */
 const CASE_B_HEADLINE_WITH_DRIVER =
-  'Keep what we have came out ahead in 82% of runs of this model because ' +
+  'Keep what we have scored highest against your goal in 82% of runs of this model because ' +
   'Sales Rep Adoption Rate is the strongest driver.';
 
 /** The same run with the driver clause omitted — an existing Case-E shape. */
@@ -184,7 +184,7 @@ describe('unset option-effect disclosure — registry egress', () => {
 describe('unset option-effect disclosure — the NAMED-DRIVER half', () => {
   // ───────────────────────────────────────────────────────────────────────
   // The sharper half of the defect: the headline named `Sales Rep Adoption
-  // Rate` as the reason "Keep what we have" came out ahead, while that
+  // Rate` as the reason "Keep what we have" scored highest against your goal, while that
   // factor's effect was never set for one of the options.
   //
   // ⚠ WHY OMISSION AND NOT A QUALIFIER. `influence_score` is a real measure of

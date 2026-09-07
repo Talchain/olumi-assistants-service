@@ -286,11 +286,11 @@ describe('PRODUCER CONTROL — the enforcement scanner sees the repo\'s own temp
  * `/\bcomes?\s+out\s+(?:ahead|on\s+top)\b/i` — come / comes, and NOT the past
  * tense. `composeComparison`'s #731 mixed branch emits, verbatim:
  *
- *     "${prior_leading_label} came out ahead in the earlier run."
+ *     "${prior_leading_label} scored highest in the earlier run."
  *
  * That sentence matched **NOTHING** in the list. Its sibling, the both-permitted
- * template, emits "${prior} came out ahead before, and ${current} now leads." —
- * seen today ONLY because the trailing clause says "now leads". The leader claim
+ * template, emits "${prior} came out ahead before, and ${current} scores highest now." —
+ * seen today ONLY because the trailing clause says "scores highest now". The leader claim
  * about the PRIOR run was invisible in both, and in the mixed branch there is no
  * neighbouring clause to catch it. Byte-for-byte the incidental-catch pattern
  * this file already records for `performs best`, arriving through a producer
@@ -472,7 +472,7 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
    * Split prose into INDEPENDENT CLAUSES — sentences, then coordinated halves.
    *
    * The coordination split is not cosmetic: "${prior} came out ahead before,
-   * and ${current} now leads." is ONE sentence carrying TWO claims, and the
+   * and ${current} scores highest now." is ONE sentence carrying TWO claims, and the
    * second one saturating the scan is exactly how the first stayed invisible.
    */
   function independentClauses(text: string): string[] {

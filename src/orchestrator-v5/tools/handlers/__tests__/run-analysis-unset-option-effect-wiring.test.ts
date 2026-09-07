@@ -50,7 +50,13 @@
  *             Ramp Delay is the strongest driver. […] This analysis ran without
  *             a value for how “Partial” affects “Ramp Delay”…"
  *
- *          — one sentence crowning a factor the next sentence admits was never
+ *          ⚠ QUOTED VERBATIM FROM THE STAGING CAPTURE and deliberately NOT
+          re-worded: the lead clause was retired on 2026-09-07 (Paul's
+          no-winner ruling) and the mutant now reproduces the same defect
+          reading "scored highest against your goal in 62% of runs of this
+          model". The DEFECT is unchanged; only the vocabulary moved.
+
+          — one sentence crowning a factor the next sentence admits was never
  *          set. ARM 1 alone would let that ship.
  *
  *   ARM 3  is the DISCRIMINATING TWIN (CLAUDE.md trap 19). A single biting
