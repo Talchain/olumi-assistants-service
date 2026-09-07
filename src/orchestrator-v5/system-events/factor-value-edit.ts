@@ -511,11 +511,20 @@ export async function applyFactorValueEdit(
   // value >= 1 is untouched — capped factors, verified panel beliefs, edits
   // carrying a raw_value or a unit, and every sub-1 case.
   //
-  // If no reading can be offered (the frame cannot hold even one magnitude
-  // rung), we do NOT fall through to the guess: `buildScaleAskOptions` always
-  // returns the literal reading for a value >= 1, so a single-option list means
-  // the question would have one answer and asking it would be theatre. That
-  // case keeps the honest refusal copy instead of a dead control.
+  // ⭐⭐ FEWER THAN TWO READINGS IS NOT AMBIGUITY, AND MUST NOT BE REFUSED.
+  // `buildScaleAskOptions` always returns the literal reading, so a
+  // single-option list means every magnitude rung was ruled out by the factor's
+  // own frame and the literal is the ONLY thing the number can mean. There is
+  // nothing to ask and nothing being guessed, so this falls through to the
+  // existing accept.
+  //
+  // ⚠ THIS WAS A REAL DEFECT IN THE FIRST VERSION OF THIS GUARD, caught by
+  // #1280's own suite: `100000` on a `50000` frame is an honest over-frame edit
+  // (`scale-frame.ts` documents that state explicitly), no rung fits, and the
+  // guard refused it with no question attached — a DEAD END, which is precisely
+  // the half of the ruling that says blocking is not an acceptable answer
+  // either. Four of #1280's six frame cases are in this class and keep their
+  // deployed behaviour unchanged.
   if (
     factorFrame !== undefined && appliedProvenance === undefined &&
     effectiveRawValue === undefined && canonicaliseUnitForDisplay(effectiveUnit) === undefined &&
@@ -546,12 +555,6 @@ export async function applyFactorValueEdit(
         }),
       );
     }
-    return refuse(
-      payload,
-      'scale_ambiguous',
-      `I can't tell what scale ${effectiveValue} is on for this factor. ` +
-        `Please state the amount and its unit. I haven't changed anything.`,
-    );
   }
 
   const resolved = resolveUserUnitInput({

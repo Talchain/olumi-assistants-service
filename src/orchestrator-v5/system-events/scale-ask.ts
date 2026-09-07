@@ -60,7 +60,7 @@
  */
 
 import { MAGNITUDE_WORD_LADDER } from '../../utils/magnitude-alphabet.js';
-import { thousands } from '../compose/format-factor-value.js';
+import { formatFactorValue, thousands } from '../compose/format-factor-value.js';
 import type { SuggestedAction } from '../compose/types.js';
 
 /**
@@ -80,6 +80,8 @@ export interface ScaleAskOption {
   readonly multiplier: number;
   /** The magnitude word (`thousand`), or `null` for the literal reading. */
   readonly word: string | null;
+  /** The number the user actually typed, before the multiplier. */
+  readonly typedValue: number;
   /** The resulting amount: `value * multiplier`. */
   readonly amount: number;
   /** How the option reads to a person: `8` / `8 thousand`. */
@@ -134,6 +136,7 @@ export function buildScaleAskOptions(input: {
   const literal: ScaleAskOption = {
     multiplier: 1,
     word: null,
+    typedValue: value,
     amount: value,
     optionText: renderAmount(value),
     amountText: renderAmount(value),
@@ -149,6 +152,7 @@ export function buildScaleAskOptions(input: {
     rungs.push({
       multiplier,
       word,
+      typedValue: value,
       amount,
       optionText: `${renderAmount(value)} ${word}`,
       amountText: renderAmount(amount),
@@ -207,11 +211,22 @@ export function buildScaleAskChips(input: {
   readonly unit?: string | undefined;
 }): readonly SuggestedAction[] {
   const { options, factorLabel, unit } = input;
-  const withUnit = (text: string): string =>
-    unit !== undefined && unit.length > 0 ? `${text} ${unit}` : text;
-  return options.map((option) => ({
-    id: scaleAskChipId(option),
-    label: withUnit(option.optionText),
-    message: `Set ${factorLabel} to ${withUnit(option.amountText)}.`,
-  }));
+  // ⭐ UNIT PLACEMENT IS THE ESTATE'S, NOT THIS MODULE'S. `formatFactorValue`
+  // already knows that currency PREFIXES (`£8,000`), percent SUFFIXES (`12%`),
+  // and time units pluralise — a private `${amount} ${unit}` here would render
+  // the ruled example as "8,000 £", which is not how anyone writes money. It
+  // returns null for a non-integer or a sub-1 amount, so the unitless digits
+  // remain the honest fallback rather than a rounded lie.
+  const render = (amount: number): string =>
+    formatFactorValue(amount, unit)?.display ?? renderAmount(amount);
+  return options.map((option) => {
+    const spoken = option.word === null
+      ? render(option.typedValue)
+      : `${render(option.typedValue)} ${option.word}`;
+    return {
+      id: scaleAskChipId(option),
+      label: spoken,
+      message: `Set ${factorLabel} to ${render(option.amount)}.`,
+    };
+  });
 }

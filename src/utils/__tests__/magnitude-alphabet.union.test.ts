@@ -593,6 +593,20 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
       "of `grand` alone and false of the file — the `['grand','currency']` unit-KIND row sits " +
       "beside a real multiplier map that this guard could not see.",
     "cee/factor-extraction/display-value.ts": "formats from MAGNITUDE_DISPLAY_LADDER; comment mentions 'thousand'",
+    // Paul's scale-ask ruling (2026-09-07). CLASSIFIED (b) — INCIDENTAL, and
+    // the classification was MEASURED rather than asserted: every occurrence of
+    // a magnitude word in that file was enumerated, and each one is either
+    // inside a comment/docstring or the identifier `thousands`, which is the
+    // integer FORMATTER imported from `compose/format-factor-value.js` and not
+    // a magnitude word at all. The file declares no alphabet and maps no
+    // magnitude word to a number: its rungs come from `MAGNITUDE_WORD_LADDER`,
+    // which is itself derived from `MAGNITUDE_MULTIPLIERS` in the canonical
+    // leaf (longest key per multiplier, the mirror of the display ladder).
+    // ⚠ If it ever spells a magnitude word in a declaration position or maps
+    // one to a number, it becomes a genuine sibling and must move to
+    // SIBLING_VALUE_LOOKUPS.
+    "orchestrator-v5/system-events/scale-ask.ts":
+      "derived — offers magnitude readings from MAGNITUDE_WORD_LADDER; declares no alphabet and maps no magnitude word to a number",
     // ROADMAP 2.973. ⚠ CLASSIFIED (b) — INCIDENTAL MENTION ONLY, and it earned
     // that classification the hard way: the first cut of that file DID
     // hand-write a fifth multiplier map, and THIS GUARD caught it in CI. The

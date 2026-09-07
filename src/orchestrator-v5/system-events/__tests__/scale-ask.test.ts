@@ -150,14 +150,25 @@ describe('buildScaleAskChips — the channel the answer rides back on', () => {
     expect(chips.map((c) => c.label)).toEqual(['8', '8 thousand']);
     expect(chips.map((c) => c.message)).toEqual([
       'Set Marketing budget to 8.',
-      'Set Marketing budget to 8,000.',
+      'Set Marketing budget to 8000.',
     ]);
   });
 
-  it("carries the factor's unit into both label and message when it has one", () => {
+  // Unit PLACEMENT is `formatFactorValue`'s judgement, not this module's: a
+  // private `${amount} ${unit}` renders money as "8,000 £", which is not how
+  // anyone writes it. Pinning the prefix here so a refactor cannot quietly
+  // reintroduce the suffix form.
+  it("carries the factor's unit, placed the way the estate places it", () => {
     const chips = buildScaleAskChips({ options, factorLabel: 'Marketing budget', unit: '£' });
-    expect(chips[1]?.label).toBe('8 thousand £');
-    expect(chips[1]?.message).toBe('Set Marketing budget to 8,000 £.');
+    expect(chips[1]?.label).toBe('£8 thousand');
+    expect(chips[1]?.message).toBe('Set Marketing budget to £8,000.');
+  });
+
+  it('renders a percent factor as a percent, not a bare number', () => {
+    const pct = buildScaleAskOptions({ value: 12, frame: 100 });
+    const chips = buildScaleAskChips({ options: pct, factorLabel: 'Churn', unit: '%' });
+    expect(chips[0]?.label).toBe('12%');
+    expect(chips[0]?.message).toBe('Set Churn to 12%.');
   });
 
   it('gives every reading a distinct, stable id derived from the magnitude word', () => {

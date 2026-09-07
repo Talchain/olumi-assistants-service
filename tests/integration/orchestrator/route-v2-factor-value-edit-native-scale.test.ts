@@ -233,6 +233,7 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
     expect(response.statusCode).toBe(200);
     return JSON.parse(response.body) as {
       assistant_text: string; blocks: Array<Record<string, unknown>>; graph_hash?: string;
+      suggested_actions?: Array<{ id: string; label: string; message: string }>;
     };
   }
 
@@ -303,11 +304,21 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
       intended: model, raw: input,
     })),
     ...[
+      // ⚠⚠ `1` AND `2` USED TO SIT IN THIS TABLE AND NO LONGER DO — Paul ruled
+      // that class on 2026-09-07 (REFUSE AND ASK), and the ask now claims them.
+      // They are re-pinned below rather than deleted: what this table asserts
+      // is that a raw amount on a frame is NOT rescaled, and that is still true
+      // of every row left in it. The rows that moved are the ones where a
+      // magnitude rung actually FITS the 50000 frame (1 -> 1 thousand,
+      // 2 -> 2 thousand), i.e. where the user genuinely had a choice.
+      //
+      // The four that remain are untouched by the ruling and prove the ask did
+      // NOT widen: 20000/5000/40000 admit no rung (x1000 overflows the frame),
+      // and 100000 is an honest OVER-frame edit. With one reading available
+      // there is nothing to ask, so they keep the deployed accept.
       { input: 20000, model: 0.4 },
       { input: 5000, model: 0.1 },
       { input: 40000, model: 0.8 },
-      { input: 1, model: 0.00002 },
-      { input: 2, model: 0.00004 },
       { input: 100000, model: 2 },
     ].map(({ input, model }) => ({
       name: `raw amount ${input} on the actual 50000 frame remains canonical ${model}`,
@@ -350,6 +361,31 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
       event: { value: 0 }, intended: 0, raw: 0,
     },
   ];
+
+  // ⭐ THE RULED CLASS, RE-PINNED HERE RATHER THAN DELETED FROM THE RECORD.
+  // These two rows used to assert #1280's accept in the table above ("raw
+  // amount 1 on the actual 50000 frame remains canonical 0.00002"). Paul ruled
+  // on 2026-09-07 that this class must ASK: a bare 1 or 2 on a 50000 frame has
+  // a second reading the frame can hold (1 thousand / 2 thousand), so choosing
+  // one silently is the harm he reported — a number you set becoming something
+  // you did not mean. Keeping the cases visible, with the assertion moved to
+  // the ruled answer, is what stops the class going quiet.
+  it.each([
+    { input: 1, asked: 'Did you mean 1 or 1 thousand?' },
+    { input: 2, asked: 'Did you mean 2 or 2 thousand?' },
+  ])('bare $input on a 50000 frame now ASKS instead of committing a guess', async ({ input, asked }) => {
+    persisted = graphFor({ value: 0.5, unit: '£' }, 50000);
+    const before = await loadGraphMock();
+    const body = await edit({ value: input, field: 'value' });
+    expect(committedGraphs(), 'the ask commits nothing').toEqual([]);
+    expect(await loadGraphMock()).toEqual(before);
+    expect(body.assistant_text).toContain(asked);
+    // The factor carries '£' even though the event did not, so the chips must
+    // read as money — prefix, not suffix.
+    expect(body.suggested_actions?.map((a) => a.label)).toEqual([
+      `£${input}`, `£${input} thousand`,
+    ]);
+  });
 
   for (const { name, graph, event, intended, raw, ...control } of validEdits) it(name, async () => {
     persisted = graph();

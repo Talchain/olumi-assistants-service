@@ -366,7 +366,7 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
     // amount in full digits so the magnitude is no longer in doubt.
     expect(body.suggested_actions?.map((a) => a.message)).toEqual([
       'Set Recurring platform licence cost to 2.',
-      'Set Recurring platform licence cost to 2,000.',
+      'Set Recurring platform licence cost to 2000.',
     ]);
   });
 
