@@ -93,6 +93,7 @@ import { buildAnalysisResultBlock } from '../orchestrator-v5/compose.js';
 import {
   composeAnalysisStateV1,
   readRawRobustnessFromResponseBody,
+  projectAnalysisBlocksForRunBinding,
 } from '../orchestrator-v5/compose/analysis-state-v1.js';
 import { mayPresentLeaderClaimForFact } from '../orchestrator-v5/compose/unrequested-analysis-confinement.js';
 import { canonicalStateFromFreshness } from '../orchestrator-v5/context/canonical-analysis-state.js';
@@ -112,8 +113,9 @@ export interface ScenarioAnalysisRead {
   readonly analysis_state: AnalysisStateV1 | null;
   /**
    * The `analysis_result` block for the fact the verdict selected, present ONLY
-   * on a `fresh` verdict. `null` means no CURRENT result is being delivered —
-   * never "the analysis is empty".
+   * on a fresh graph-hash verdict with no conflicting run identity. Legacy
+   * identity may remain unconfirmed; its figures then carry no designation or
+   * currentness claim. `null` never means "the analysis is empty".
    */
   readonly analysis_result: OlumiResponse['blocks'][number] | null;
 }
@@ -172,7 +174,10 @@ export async function readScenarioAnalysis(
     // against the robustness signals the consumer ACTUALLY receives — the same
     // reason `finaliseV5Response` reads them off the body rather than off the
     // fact.
-    const selected = derivation.freshness === 'fresh' ? selectRunAnalysisFact(read.facts) : null;
+    // Historical selection is independent of permission to display a CURRENT
+    // result. A changed graph must not replace the original run's hash/time.
+    const historical = selectRunAnalysisFact(read.facts);
+    const selected = derivation.freshness === 'fresh' ? historical : null;
     const fact =
       selected !== null && selected.fact.fact_type === 'run_analysis'
         ? (selected.fact as RunAnalysisHandlerFact)
@@ -183,6 +188,12 @@ export async function readScenarioAnalysis(
       composeAnalysisStateV1({
         canonical: canonicalStateFromFreshness(derivation, {}),
         freshness: derivation,
+        ...(historical === null ? {} : {
+          runFactBinding: {
+            scenarioId: params.scenarioId,
+            selectedResult: historical.fact.result,
+          },
+        }),
         // ⚠ NOT hardcoded `false`. The entitlement is read from the SELECTED
         // FACT by the canonical fail-closed reader — the same one
         // `buildAnalysisResultBlock` uses internally — so the verdict's
@@ -208,7 +219,10 @@ export async function readScenarioAnalysis(
             : null,
       }) ?? null;
 
-    return { analysis_state: analysisState, analysis_result: analysisResult };
+    const boundResult = analysisResult !== null && analysisState !== null
+      ? projectAnalysisBlocksForRunBinding([analysisResult], analysisState)[0] ?? null
+      : analysisResult;
+    return { analysis_state: analysisState, analysis_result: boundResult };
   } catch (err) {
     // ADDITIVE MEANS ADDITIVE: the graph read stands whatever happens here.
     log.warn(

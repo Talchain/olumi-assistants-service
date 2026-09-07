@@ -213,6 +213,14 @@ export const TelemetryEvents = {
   // the turn). `configured` marks whether the option lands with effect values.
   // Content-free — never user text. See
   // src/orchestrator-v5/handlers/add-option-dispatch.ts.
+  //
+  // 2026-09-01 — the TEXT leg rides this SAME event rather than minting a
+  // second one: `origin` is 'text', and the focused proposer's every outcome
+  // is already named here (`fell_through:text_rejected` with `rejection_code`,
+  // `fell_through:text_unavailable` with `unavailable_reason`,
+  // `fell_through:text_clarify`, `fell_through:text_no_grounding`,
+  // `fell_through:text_no_budget`). One event, one place to read the whole
+  // add-option funnel — and no widening of this frozen registry.
   V5AddOptionTransaction: "v5.add_option_transaction",
 
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per
@@ -1607,6 +1615,10 @@ export const TelemetryEvents = {
   // prose, graph label, raw id, brief text, or review content ever appears on
   // this event.
   V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+
+  // Stored review prose/fact corrections, emitted by decision-review-enricher.
+  // Routing keys, bounded rule codes and counts only; no user prose or values.
+  V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
 
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,

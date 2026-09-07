@@ -1,0 +1,31 @@
+C2 candidate-A run-binding increment — final validation receipt
+Branch: codex/c2-run-fact-identity-20260907
+Staging base: 78aa1efa0c7ed29da343e9c2dc04d0178d8312df
+Helper: ac60c326005725cd67a7435b9505d3179b586777
+Fixture typing correction: 41417988573d85a954c948b3aaa5b7df82c55e3f
+Candidate patch SHA-256: aa08d22945de3507154153631a461eee99f925c200e6f4a4c9df56686846c98d
+Mode: isolated sibling composition; actual production composers; strict schemas; no provider; no browser; no deploy.
+
+Final Vitest completion:
+Exit code: 0
+
+ Test Files  7 passed (7)
+      Tests  166 passed (166)
+   Start at  01:02:37
+   Duration  72.00s (transform 25.76s, setup 5.24s, import 44.82s, tests 10.83s, environment 2ms)
+
+
+Final scoped TypeScript completion:
+Command: node node_modules/typescript/bin/tsc -p .c2-tsconfig.json --pretty false
+Exit code: 0
+Diagnostics: none.
+Config: scoped-tsconfig.json copied to sibling root as .c2-tsconfig.json.
+Includes changed source and ALL new/changed tests, plus existing ambient declaration.
+
+Final ESLint (all three source files, both new integration tests, changed inventory and helper tests): exit 0, no output.
+Final git diff --check: exit 0, no output.
+Unapplied git apply --check against banked helper source: exit 0, no output.
+
+Earlier production-only full tsc passed before the final cross-input source change. That receipt is not a final full-project compile claim.
+The first scoped compiler failed on test fixture shape and union access; corrected fixtures and existing ambient declaration inclusion yielded the final exit 0 above.
+Tests alone are not C2 feature, persistence, cross-surface permission, deployment or journey closure.

@@ -26,7 +26,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import type { HandlerFact } from '@talchain/schemas/orchestrator';
+import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
+import { deriveAnalysisFreshness } from '../../../src/orchestrator-v5/context/freshness.js';
+import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 
 const configHolder = {
   cee: { timingDebugEnabled: false, turnDebugEnabled: false, contextSummaryEnabled: false },
@@ -58,6 +60,12 @@ vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
 
 const SCENARIO_ID = '77777777-7777-4777-8777-777777777777';
+const graphAtValue = (value: number) => ({
+  nodes: [{ id: 'factor', kind: 'factor', label: 'Synthetic factor', observed_state: { value } }],
+  edges: [],
+});
+const PRIOR_HASH = computeAnalysisAffectingGraphHash(graphAtValue(0.5))!;
+const CURRENT_HASH = computeAnalysisAffectingGraphHash(graphAtValue(0.6))!;
 
 /**
  * A persisted `run_analysis` fact carrying everything the producer reads off a
@@ -70,7 +78,7 @@ function runFact(opts: {
   hash: string;
   computedAt: string;
   options: ReadonlyArray<{ id: string; label: string; win: number }>;
-}): HandlerFact {
+}): RunAnalysisHandlerFact {
   return {
     fact_type: 'run_analysis',
     fact_version: 1,
@@ -95,7 +103,7 @@ function runFact(opts: {
         meta: { seed_used: opts.seed, n_samples: 10_000 },
       },
     },
-  } as unknown as HandlerFact;
+  };
 }
 
 // A FACTOR-VALUE EDIT then a re-run: PLoT derives its seed from a projection
@@ -103,7 +111,7 @@ function runFact(opts: {
 // analysis hash together. Newest-first, as the turn loader delivers them.
 const PRIOR = runFact({
   seed: '111',
-  hash: 'HASH_A',
+  hash: PRIOR_HASH,
   computedAt: '2026-08-26T01:00:00.000Z',
   options: [
     { id: 'opt_a', label: 'Offshore', win: 0.62 },
@@ -112,7 +120,7 @@ const PRIOR = runFact({
 });
 const CURRENT = runFact({
   seed: '222',
-  hash: 'HASH_B',
+  hash: CURRENT_HASH,
   computedAt: '2026-08-26T02:00:00.000Z',
   options: [
     { id: 'opt_a', label: 'Offshore', win: 0.45 },
@@ -133,6 +141,10 @@ function mkRunResult(opts: { withPriorFacts: boolean }) {
     },
     analysisReady: { status: 'ready', goal_node_id: 'goal', options: [] },
     effectiveGraph: null,
+    // The real completed-run exit returns freshness over the SAME unified
+    // fact array, and route-v2 forwards it. Preserve that carriage in the
+    // executor double; no fabricated canonical state or asserted freshness.
+    freshness: deriveAnalysisFreshness(TWO_RUNS, CURRENT_HASH),
     mayNameLeadingOption: true,
     mayNameLeadingOptionProvenance: 'fact_verdict_permitted',
     ...(opts.withPriorFacts ? { priorFacts: TWO_RUNS } : {}),
@@ -188,6 +200,10 @@ describe('route-v2 — run_delta reaches the wire (priorFacts hand-off)', () => 
 
     // THE WITNESS.
     expect(body).toHaveProperty('run_delta');
+    expect(PRIOR_HASH).not.toBe(CURRENT_HASH);
+    expect(body.analysis_state.run_state).toEqual({
+      kind: 'complete_current', computed_at: CURRENT.result.computed_at,
+    });
 
     // And it is the REAL comparison of the two persisted facts, not a stub.
     // Seed and hash both moved (a factor-value edit) and the builds echo is
@@ -230,5 +246,35 @@ describe('route-v2 — run_delta reaches the wire (priorFacts hand-off)', () => 
       (k) => JSON.stringify(withIt[k]) !== JSON.stringify(without[k]),
     );
     expect(diff).toEqual(['priorFacts']);
+  });
+
+  it('missing executor identity context cannot license a delta from otherwise valid facts', async () => {
+    runTurnExecutorMock.mockResolvedValue({
+      ...mkRunResult({ withPriorFacts: true }), freshness: undefined,
+    });
+    const { status, body } = await postTurn(app, '99999999-9999-4999-8999-999999999903');
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty('run_delta');
+    expect(body.analysis_state).toMatchObject({
+      run_state: { kind: 'unknown_degraded' },
+      leader_claim: { permitted: false, withheld_reason: 'analysis_run_identity_unconfirmed' },
+    });
+  });
+
+  it('another scenario cannot supply the same graph/time delta on this route', async () => {
+    const foreign = {
+      ...CURRENT,
+      result: { ...CURRENT.result, scenario_id: '88888888-8888-4888-8888-888888888888' },
+    };
+    runTurnExecutorMock.mockResolvedValue({
+      ...mkRunResult({ withPriorFacts: true }), priorFacts: [foreign, PRIOR],
+    });
+    const { status, body } = await postTurn(app, '99999999-9999-4999-8999-999999999904');
+    expect(status).toBe(200);
+    expect(body).not.toHaveProperty('run_delta');
+    expect(body.analysis_state).toMatchObject({
+      run_state: { kind: 'unknown_degraded' },
+      leader_claim: { permitted: false, withheld_reason: 'analysis_run_identity_conflict' },
+    });
   });
 });
