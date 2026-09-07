@@ -89,8 +89,10 @@ vi.mock('../../commit.js', async () => {
   const actual = await vi.importActual<typeof import('../../commit.js')>('../../commit.js');
   return {
     ...actual,
-    commitDirectAnswer: vi.fn(async () => ({
-      response: {},
+    // Echoes, because the real chokepoint returns the response it committed and
+    // the dispatcher now consumes that value (see the F-HELD lapse-copy fix).
+    commitDirectAnswer: vi.fn(async (r: unknown) => ({
+      response: r,
       performed: true,
       persisted_row_id: 'row-stage-1',
       graphPersisted: false,

@@ -272,6 +272,124 @@ export function formatBaselineReask(input: {
 }
 
 /**
+ * ⭐⭐ THE EFFECT-SLOT RE-ASK — {@link formatBaselineReask}'s SHAPE, applied to
+ * the option×factor effect ask.
+ *
+ * ⚠⚠ THIS COMMENT USED TO SAY "generalised … rather than re-invented beside
+ * it", AND THAT WAS FALSE OF THE CODE UNDER IT. This is a second function with
+ * a second reason vocabulary standing next to the first, and the two sets are
+ * DIFFERENTLY-NAMED TWINS — this estate's chronic defect (CLAUDE.md trap 21),
+ * asserted away by the one sentence a reader would check it against:
+ *
+ *     out_of_range      (baseline)  ≡  out_of_scale       (effect)
+ *     ambiguous_scale   (baseline)  ≡  scale_ambiguous    (effect)
+ *     unreadable        (baseline)  ≡  no_quantity        (effect)
+ *
+ * The producers diverge with them: `classifyElicitedBaselineAnswer` mints the
+ * left column, `resolveAnswerForKnownSlot` mints the right.
+ *
+ * NOT RECONCILED HERE, and the reason is scope rather than merit: the left
+ * column is the baseline-elicitation seam (R2918B), owned elsewhere, with its
+ * own suite and its own live callers, and renaming across it from this lane is
+ * exactly the "while we're here" widening the scope rule bans. Recorded as a
+ * finding for whoever owns both seams together. What this comment must not do
+ * is claim the fold already happened.
+ *
+ * THE DEFECT IT CLOSES. Measured at `915da5a3`, nine of nine unrecognised
+ * replies to the effect ask received the BYTE-IDENTICAL demand back. The cause
+ * is structural, not a copy oversight: `projectReadinessRecovery` is a pure
+ * function of `(analysisReady, nodes)` and never receives the user's message,
+ * so it composes the ask from the GRAPH — which has not changed — rather than
+ * from the EXCHANGE, which has. A second ask computed from an unchanged input
+ * is necessarily the first ask again. The founder hit exactly this: he typed
+ * `25%` and got "I couldn't tell what value to use." Twice.
+ *
+ * ⭐ SO EVERY ARM QUOTES THE USER. That is what makes the second ask provably
+ * different from the first: the first ask cannot quote a reply that did not
+ * exist yet, so a composer that always quotes cannot emit the opening demand
+ * again. The difference is structural, not a matter of remembering to vary the
+ * wording.
+ *
+ * ⚠ PERCENTAGES, NEVER RAW DECIMALS. `RAW_DECIMAL_RE`
+ * (`belief-elicitation/beta-posterior.ts`) bans leading-decimal probabilities
+ * from user-facing prose, and the estate's own instruction is "use the
+ * PERCENTAGE form ('35%', never '0.35')". It is also the ratified product
+ * ruling: a strategic user must never be asked to understand the internal
+ * normalised coefficient scale. So the internal `0.25` is rendered `25%`.
+ *
+ * Leak-safe on the same terms as its sibling: no handler ids, no parameter
+ * names, no internal tokens, no em dash.
+ */
+export function formatEffectSlotReask(input: {
+  readonly heardText: string;
+  /** The canonical 0–1 spelling. Rendered as a percentage, never emitted raw. */
+  readonly suggestedModelUnitText: string;
+  readonly reason: 'imprecise_quantity' | 'scale_ambiguous';
+  readonly optionLabel: string;
+  readonly factorLabel: string;
+  /**
+   * How many times this cell has now been asked. 1 on the first ask.
+   *
+   * ⚠ THE SECOND ASK MUST NOT BE THE FIRST ASK AGAIN, and this is what makes
+   * that structural rather than remembered: from attempt 2 the copy OPENS by
+   * acknowledging the previous exchange, which the opening ask cannot do
+   * because it has nothing to acknowledge.
+   */
+  readonly attempt?: number;
+}): string {
+  const parsed = Number(input.suggestedModelUnitText);
+  const percent = Number.isFinite(parsed) ? Math.round(parsed * 100) : null;
+  const cell = `"${input.optionLabel}" on "${input.factorLabel}"`;
+  const attempt = Math.max(1, Math.floor(input.attempt ?? 1));
+  // ⭐⭐ THIRD ATTEMPT: A DIFFERENT STRATEGY, NOT A THIRD PHRASING.
+  //
+  // Two rounds of explaining the scale have not landed, so the third stops
+  // explaining and reduces the exchange to a binary the user can close in one
+  // word. Placed BEFORE the reason switch deliberately: at this point the
+  // distinction between "I could not tell which scale" and "I will not round
+  // your approximation" has stopped being useful to the person typing.
+  //
+  // ⚠ AND IT PLATEAUS HERE, ON PURPOSE AND ON THE RECORD. Attempts 4, 5 and 6
+  // repeat this sentence for an identical reply. Endless novelty is not the
+  // goal and would be noise; what the product owes is that the SECOND ask is
+  // not the first and the THIRD is not the second, which is where the
+  // information actually is. The plateau is pinned by name in
+  // `effect-slot-reask-differs.test.ts` so it stays a decision rather than
+  // becoming an accident — and REDs if the escalation band moves.
+  if (attempt >= 3 && percent !== null) {
+    return (
+      `I do not want to keep asking you the same thing. I read "${input.heardText}" `
+      + `and my best reading of it is ${percent}%. Reply ${percent}% and I will record `
+      + `that for ${cell}, or give me any other percentage and I will use that instead.`
+    );
+  }
+  // From the second attempt the product says so, and changes strategy: it stops
+  // restating the scale and offers the single figure as something to accept.
+  const opener = attempt >= 2 ? `I am still not certain I have this right. ` : '';
+  if (percent === null) {
+    return (
+      `${opener}I read "${input.heardText}" but could not turn it into a level for ${cell}. ` +
+      `Give it to me as a percentage, for example 60%.`
+    );
+  }
+  switch (input.reason) {
+    case 'scale_ambiguous':
+      return (
+        `${opener}You wrote "${input.heardText}", and I could not tell which scale you meant. ` +
+        `Read as a percentage that is ${percent}% of the top for ${cell}. ` +
+        `Reply ${percent}% to confirm, or give me the percentage you intended.`
+      );
+    case 'imprecise_quantity':
+    default:
+      return (
+        `${opener}I read "${input.heardText}" as roughly ${percent}%, but I will not record ` +
+        `an approximation as your figure for ${cell}. ` +
+        `Reply ${percent}% to confirm, or give me the percentage you want.`
+      );
+  }
+}
+
+/**
  * Receipt for a goal-target set through the add_constraint goal-threshold
  * join (lane CEE-W5 Mission B). Names the target honestly and states only
  * what durably happened (the threshold is stamped on the goal node in the

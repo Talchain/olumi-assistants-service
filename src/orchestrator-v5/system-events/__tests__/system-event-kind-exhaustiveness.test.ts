@@ -60,7 +60,7 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     expect(unionKinds).toEqual([...SystemEventKind.options].sort());
   });
 
-  it('the declared mutating set is exactly the three server-side writers', () => {
+  it('the declared mutating set is exactly the server-side writers', () => {
     const mutating = Object.entries(SYSTEM_EVENT_HANDLING)
       .filter(([, handling]) => handling === 'mutating')
       .map(([kind]) => kind);
@@ -83,10 +83,25 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // `dispatchStructuralDelete`. Its own stale gate (`base_graph_hash`) and its
     // committed-bytes readback are what make the write safe, and both run
     // regardless of RPC mode.
+    //
+    // 2026-08-31 — `structural_add` and `structural_rename` join, and the same
+    // justification applies to both: as `'reader_only_refusal'` each told the
+    // user, truthfully, that the version could not apply a canvas gesture, and
+    // that sentence becomes false the instant a writer exists. Both carry their
+    // own stale gate plus a gate the analysis hash provably CANNOT replace —
+    // `expected_label` for the rename (the hash does not cover `label`), and the
+    // id-collision check for the add (a colliding id is already in the very
+    // graph the user was looking at). Neither is resolved back to a reader floor
+    // under CAS off/shadow, for the reason `structural_delete` records.
+    //
+    // ⚠ ORDER IS THE MAP'S INSERTION ORDER, not alphabetical, and is asserted
+    // as such — `.map()` over `Object.entries` preserves it.
     expect(mutating).toEqual([
       'factor_value_edit',
       'edge_strength_edit',
       'structural_delete',
+      'structural_add',
+      'structural_rename',
     ]);
   });
 
@@ -112,17 +127,23 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // Kept EXACT rather than widened, so it still REDs if the set GROWS (a kind
     // silently parked as reader-only instead of getting a writer) or SHRINKS (a
     // writer landed and this pin was not revisited).
-    expect(readerOnly).toEqual([
-      'structural_add',
-      'structural_add_edge',
-      'structural_rename',
-    ]);
+    // ⚠ `structural_rename` LEFT THIS SET when its writer landed. That is the
+    // exact transition the note above says must RED rather than pass silently,
+    // and it did: this assertion is the reason the dead refusal copy and the
+    // dead chat-route entry were deleted in the same change instead of being
+    // left behind to read as live.
+    // ⚠ `structural_add` LEFT THIS SET when its writer landed, exactly as
+    // `structural_rename` did before it. `structural_add_edge` is the last kind
+    // still genuinely reader-only.
+    expect(readerOnly).toEqual(['structural_add_edge']);
     // The ORIGINAL intent of this case, named so it cannot be lost by a future
     // edit to the list above: no kind that has a server-side writer may be
     // DECLARED reader-only. Train C regressing would fail here specifically.
     expect(readerOnly).not.toContain('edge_strength_edit');
     expect(readerOnly).not.toContain('structural_delete');
     expect(readerOnly).not.toContain('factor_value_edit');
+    expect(readerOnly).not.toContain('structural_rename');
+    expect(readerOnly).not.toContain('structural_add');
   });
 
   it('client-only kinds are exactly the ones that commit nothing', () => {

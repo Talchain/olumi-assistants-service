@@ -510,6 +510,21 @@ export function validateToolCall(
             message: `Parameter "${p.name}" failed schema: ${parsed.error.issues[0]?.message ?? 'invalid'}`,
             details: {
               parameter: p.name,
+              // ⭐ ATTRIBUTION (2026-08-31). This is the OTHER large
+              // PARAMETER_INVALID producer and it carried no cause token at
+              // all, so in logs it was indistinguishable from every other
+              // parameter failure — `buildSafeValidatorLogDetails` whitelists
+              // `rejection_reason`, and this site had none to whitelist.
+              // Deliberately a DISTINCT token from the structural precheck's
+              // `missing_value` so the two classes stay separable: this one
+              // means "a `value` WAS supplied and the handler's declared Zod
+              // schema refused its shape", which is a different product
+              // problem from "no value parameter was supplied at all".
+              // Composer-safe: every `rejection_reason` branch in
+              // compose/validation-failure-responses.ts is an exact-equality
+              // check, so an unrecognised token falls through to the same
+              // generic copy this site already produced.
+              rejection_reason: 'parameter_schema_mismatch',
               issue: parsed.error.issues[0]?.message,
               actual_value: p.value,
               constraint_description: describeSchema(schema),
@@ -754,6 +769,14 @@ function preexecuteSetFactorValueStructural(
         // the rejection_reason without ever rendering the "unknown"
         // sentinel from `sanitiseForUser(undefined)`. V5 row-7 fix B.
         actual_value: null,
+        // Structural discriminator for the TWO sites that both emit
+        // `missing_value`. Without it the largest validator-failure class
+        // in the estate is unattributable from logs: `actual_value` is
+        // (correctly) dropped by `buildSafeValidatorLogDetails` as possible
+        // user prose, and `actual_value: null` here is indistinguishable
+        // from a proposal that carried an explicit `value: null`. A boolean
+        // carries no user content and is safe to log.
+        value_param_present: false,
       },
     };
   }
@@ -771,6 +794,11 @@ function preexecuteSetFactorValueStructural(
         issue: 'value parameter shape is not number or { value, unit?, cap? }',
         handler_id: 'set_factor_value',
         actual_value: valueParam.value,
+        // See the sibling site above — this is the OTHER `missing_value`
+        // emitter, and the pair is what a log reader must be able to tell
+        // apart to know whether the model omitted `value` or sent a shape
+        // the acceptor refuses.
+        value_param_present: true,
       },
     };
   }

@@ -105,6 +105,27 @@ export interface RunPair {
   readonly prior: HandlerFact;
   /** The most recent run. */
   readonly current: HandlerFact;
+  /**
+   * Each run's `result.graph_hash_at_run` — the hash of the ANALYSIS-AFFECTING
+   * graph fields at the moment that run executed (`context/freshness.ts`).
+   *
+   * Read off the SAME `SelectedRunAnalysisFact` views the pair above is sliced
+   * from, so this is the freshness reader's value and not a second read of the
+   * fact (CLAUDE.md trap #12). `null` when the fact carries no string hash; an
+   * EMPTY string is also `null` — the rule `build-run-delta.ts`'s
+   * `readRunEchoes` already applies to this field in the same directory.
+   *
+   * Consumed by `routing/run-comparison-gate.ts`: two NON-NULL EQUAL hashes on
+   * a confirmed-fresh pair mean both analyses ran on the same analysis inputs,
+   * so that pair cannot attribute anything to an update.
+   */
+  readonly prior_graph_hash_at_run: string | null;
+  readonly current_graph_hash_at_run: string | null;
+}
+
+/** An empty string is no hash. */
+function nonEmptyHash(hash: string | null): string | null {
+  return hash !== null && hash.length > 0 ? hash : null;
 }
 
 /**
@@ -137,7 +158,14 @@ export function selectTwoNewestRunAnalysisFacts(
 ): RunPair | null {
   const ordered = orderSuccessfulRunAnalysisFactsNewestFirst(priorFacts);
   if (ordered.length < 2) return null;
-  return { current: ordered[0]!.fact, prior: ordered[1]!.fact };
+  const current = ordered[0]!;
+  const prior = ordered[1]!;
+  return {
+    current: current.fact,
+    prior: prior.fact,
+    current_graph_hash_at_run: nonEmptyHash(current.graph_hash_at_run),
+    prior_graph_hash_at_run: nonEmptyHash(prior.graph_hash_at_run),
+  };
 }
 
 /**

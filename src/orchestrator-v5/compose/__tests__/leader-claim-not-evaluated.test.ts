@@ -59,6 +59,8 @@ import {
   WITHHELD_CONSTRAINT_VERDICT,
   WITHHELD_NEAR_TIE,
   WITHHELD_SEPARATION_UNAVAILABLE,
+  WITHHELD_RUN_IDENTITY_UNCONFIRMED,
+  WITHHELD_RUN_IDENTITY_CONFLICT,
   composeAnalysisStateV1,
   leaderClaimReasonKind,
   readRawRobustnessFromResponseBody,
@@ -244,9 +246,12 @@ describe('S6 — separation_unavailable is NOT EVALUATED, not WITHHELD', () => {
       // assertion below vacuous (trap 13).
       expect(minted.length, 'the namespace sweep found no WITHHELD_* codes').toBeGreaterThan(0);
       expect(new Set(minted).size, 'duplicate code strings').toBe(minted.length);
-      // The three known today, so a silent SHRINK is caught as well as a growth.
+      // The known codes, so a silent SHRINK is caught as well as a growth.
       expect(new Set(minted)).toEqual(
-        new Set([WITHHELD_CONSTRAINT_VERDICT, WITHHELD_NEAR_TIE, WITHHELD_SEPARATION_UNAVAILABLE]),
+        new Set([
+          WITHHELD_CONSTRAINT_VERDICT, WITHHELD_NEAR_TIE, WITHHELD_SEPARATION_UNAVAILABLE,
+          WITHHELD_RUN_IDENTITY_UNCONFIRMED, WITHHELD_RUN_IDENTITY_CONFLICT,
+        ]),
       );
 
       for (const code of minted) {

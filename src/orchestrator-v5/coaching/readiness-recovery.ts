@@ -32,6 +32,7 @@ import { MISSING_VALUE_ASK_FORMAT_HINT } from '../routing/missing-value-answer.j
 import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+  carryForwardOptionEffectAttempt,
   type PendingAction,
 } from '../session/pending-action.js';
 
@@ -126,6 +127,21 @@ export function buildReadinessEffectPending(input: {
   readonly scenarioId: string;
   readonly graphHash: string;
   readonly emittedAtIso: string;
+  /**
+   * ⭐ The pendings read back from the PREVIOUS turn, when the caller has them.
+   *
+   * ⚠ WITHOUT THIS THE ATTEMPT COUNTER CAN NEVER EXCEED 1, and the reason is
+   * `chip_id`: it is the stable synthetic handle `chip_configure_option_clarify`
+   * precisely so key-level supersession RETIRES the previous ask instead of
+   * accumulating one row per re-ask. A counter constructed fresh at the emit
+   * site therefore resets on every turn. The prior row has to be READ before it
+   * is replaced, which is what this parameter is for.
+   *
+   * OPTIONAL: the post-draft emit site is by construction the FIRST ask about a
+   * freshly drafted graph, so attempt 1 is correct there and omitting it is not
+   * a gap.
+   */
+  readonly priorPendings?: readonly PendingAction[] | null;
 }): PendingAction | null {
   const recovery = projectReadinessRecovery(input.analysisReady, input.nodes);
   const asked = deriveAskedEffectPair(input.analysisReady);
@@ -157,6 +173,10 @@ export function buildReadinessEffectPending(input: {
       option_label: asked.optionLabel,
       factor_id: asked.factorId,
       factor_label: asked.factorLabel,
+      // Read off the superseded row before it is replaced. Binds by (option,
+      // factor) identity, so moving on to the NEXT missing cell starts at 1
+      // rather than inheriting the previous cell's frustration count.
+      attempt: carryForwardOptionEffectAttempt(input.priorPendings, asked),
     },
     preconditions: { graph_hash: input.graphHash },
     expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,

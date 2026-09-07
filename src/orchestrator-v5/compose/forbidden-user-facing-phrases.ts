@@ -279,7 +279,27 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // identifier ("context_pack") are caught. Only `assistant_text` is scanned,
   // so structured field names (`graph_hash`, `node_id`) in data payloads are
   // unaffected. False-positive-swept against user-facing fixtures.
-  /\bcontext[\s_]packs?\b/i,
+  // ⚠ SEPARATOR MADE OPTIONAL, 3 Sep 2026 — A MEASURED MISS, ONE CHARACTER
+  // WIDE. This read `context[\s_]packs?`, so a separator was MANDATORY and the
+  // CamelCase type name walked straight through: the 3 Sep capture shipped
+  // "…isn't reflected in the ContextPack's relationship labels" to a user with
+  // `findForbiddenPhraseHit` returning null (probed at f4c8f501, with
+  // `context pack` as a contrast control returning a hit in the same run, so
+  // the null was real and not a blind instrument).
+  //
+  // False-positive swept before widening, over every string literal in the 930
+  // production source files under `src/` (56,009 literals): the `?` admits 7
+  // new lines, ALL of them log messages, prompt headings and observability
+  // labels ('ContextPack failed schema validation', '## ContextPack',
+  // 'Observability only (never user-facing): the ContextPack field …'). None
+  // is reachable as `assistant_text`, so the fatal remedy cannot fire on
+  // shipped copy.
+  //
+  // This is defence in depth, not the primary fix: `process-narration.ts`
+  // catches the same token one guard EARLIER and excises the offending
+  // SENTENCE, which is proportionate. This entry is what stops the token if
+  // that sentence split ever fails.
+  /\bcontext[\s_]?packs?\b/i,
   /\bturn[\s_]class(?:es)?\b/i,
   // `direct answer` (spaced) is legitimate English ("here's a direct answer"),
   // and the egress guard REPLACES the whole response on a hit — so ONLY the

@@ -30,6 +30,7 @@ import type {
 } from '../../context/projection-summaries.js';
 import type {
   SelectedDependenciesEvidence,
+  SelectedOutgoingInfluenceEvidence,
   StructuralPairEvidence,
   StructuralPairRelationship,
 } from '../../routing/structural-pair-evidence.js';
@@ -940,19 +941,71 @@ export function composeSelectedDependenciesEvidenceAnswer(
   evidence: SelectedDependenciesEvidence,
 ): string {
   if (evidence.status === 'ambiguous') {
+    // ⭐⭐ THE REFUSAL IS RIGHT; THE WORDS WERE NOT. Captured 1 Sep 2026, deployed
+    // staging, turn 4 of four: *"I cannot establish one unique Living Model
+    // element and matching dependency question, so I will not guess its
+    // relationships."* "Living Model element" and "dependency question" are OUR
+    // words for OUR data structures. Served prompt v121 Rule 4 forbids internal
+    // vocabulary in user-facing copy — and a prompt cannot govern a string in
+    // this repo, which is why the fix is here.
+    //
+    // ⚠⚠ THE VERDICT ITSELF IS DELIBERATELY UNTOUCHED, AND THAT IS A CORRECTED
+    // PREMISE RATHER THAN CAUTION. The obvious fix — let an `ambiguous` verdict
+    // fall through to the deterministic structure projection — was implemented
+    // and MEASURED, and it turns an honest refusal into a confident answer to a
+    // DIFFERENT question: four route-level guards in
+    // `__tests__/b2-bounded-answer-routing.integration.test.ts` go RED, each one
+    // a case where the user named or selected a specific element, the identity
+    // could not be established, and the projection then described whatever
+    // relationships it could see. That is the inverse defect, and the worse one.
+    // Turn 4's root cause is upstream: the router proposed
+    // `structure_query.kind: 'dependencies'` for a whole-model question ("explain
+    // why you produced this model"), whose correct kind is `general` — and a
+    // `general` query produces no dependency evidence at all (derived over the
+    // whole StructureQuery union in `structural-pair-evidence.test.ts`).
+    //
+    // ⚠ THE SIBLING PATH STILL CARRIES THE SAME JARGON and is NOT changed here:
+    // `composeStructuralPairEvidenceAnswer`'s ambiguous branch below says "I
+    // cannot establish two unique Living Model elements from that wording", and
+    // reaches users on `direct_relationship` and `reachability` queries. Named
+    // rather than silently widened into.
     if (evidence.subject_selection === 'single_resolved') {
       // The user already has exactly one resolved element selected, so the
       // name-or-select instruction below would state a condition that is
       // already true. What is unresolved here is the question or the saved
       // model, and the copy says only that.
       return (
-        'I cannot tie this dependency question to exactly one element of the saved Living Model, so I will not guess its relationships. ' +
-        'Check that the element you mean appears once in the model, and ask again.'
+        'I could not match your question to a single part of your saved model, so I will not guess at what connects to it. ' +
+        'Check that the one you mean appears only once in the model, and ask again.'
       );
     }
+    // ⭐⭐ THE VERDICT IS RIGHT; THE DIAGNOSIS WAS FALSE. Captured 1 Sep 2026 on
+    // deployed `d545535`, reproducible 2/2: *"Why does the goal matter?"* →
+    // *"I could not tell which part of your model you are asking about."* The
+    // user was perfectly clear and asked about the whole thing; the product
+    // replied that it could not understand them. A false diagnosis inside a
+    // refusal is worse than the refusal.
+    //
+    // ⚠ THE SUBJECT IS NOT RESOLVABLE HERE, AND THAT IS WHY ONLY THE WORDS MOVE.
+    // This carrier's subject is `structure_query.element_id` and nothing else, and
+    // both query arms declare it `z.string().min(1)` under `.strict()`. A
+    // whole-model referent is therefore UNREPRESENTABLE in this carrier — no
+    // amount of subject resolution binds "the goal" or "this decision" to a node
+    // that is not in the graph. Widening the identity gate to make this class
+    // pass re-opens #1229 (fluent prose inventing an unlisted connector);
+    // discarding the verdict is #1310, rejected.
+    //
+    // So the copy states the SCOPE of the answer instead of asserting a
+    // comprehension failure — true for BOTH classes that land here, the
+    // unbindable shorthand and the whole-model question — and gives the remedy
+    // that is DERIVED to work. "Name it" was the old advice and it told the user
+    // to do the thing they believed they had just done; the full canonical label
+    // is what actually resolves, and a canvas selection bypasses the prose gate
+    // entirely. Both are pinned by contrast controls in
+    // `__tests__/whole-model-subject-refusal-copy.integration.test.ts`.
     return (
-      'I cannot establish one unique Living Model element and matching dependency question, so I will not guess its relationships. ' +
-      'Name or select one element and ask again.'
+      'That question did not pin down a single part of your model, and I answer what connects to something one part at a time, so I will not guess at what connects to it. ' +
+      'Name that part exactly as it appears in your model, or select it on the canvas, and ask again.'
     );
   }
   if (evidence.status === 'coverage_unavailable') {
@@ -982,6 +1035,99 @@ export function composeSelectedDependenciesEvidenceAnswer(
   const sentences = relationships.map(composeDependencyRelationship);
   sentences.push(
     'These are the complete direct incoming dependencies and bidirected associations recorded for this item; bidirected associations do not establish a dependency direction, and this answer does not add an indirect route or rank importance.',
+  );
+  return sentences.join(' ');
+}
+
+function composeOutgoingInfluenceRelationship(
+  relationship: StructuralPairRelationship,
+): string {
+  const confidence = relationship.coefficient_confidence === undefined
+    ? ''
+    : ` Its recorded strength-confidence band is ${relationship.coefficient_confidence}.`;
+  if (relationship.edge_type === 'bidirected') {
+    return (
+      `The saved connector between ${relationship.from_label} and ${relationship.to_label} is bidirected. ` +
+      `It is described as ${relationship.relationship ?? 'co-movement with unavailable detail'}; that does not license influence in either direction.${confidence}`
+    );
+  }
+  return (
+    `The saved Living Model has a direct, directed connector from ${relationship.from_label} to ${relationship.to_label}, ` +
+    `described as ${relationship.relationship ?? 'having unavailable relationship detail'}.${confidence}`
+  );
+}
+
+/**
+ * Render the complete direct OUTGOING influence set of one canonically
+ * identified item — what it drives, which is what "why does this matter?" asks.
+ *
+ * ⭐⭐ THIS IS A SEPARATE COMPOSER FROM
+ * {@link composeSelectedDependenciesEvidenceAnswer} AND MUST STAY ONE. The two
+ * render opposite predicates from structurally identical payloads, so a single
+ * shared composer with a direction flag would make an inversion a one-token
+ * edit that still reads perfectly. Their prose is deliberately different in the
+ * one place that matters: neither string contains the other's direction word.
+ *
+ * Its freedoms are the same as the dependencies composer's: none. It never
+ * walks one step further forward, never composes a pathway, and never says which
+ * outgoing connector matters most. "Why does X matter" invites a ranking, and a
+ * ranking is exactly the licence that let fluent prose invent structure. The
+ * honest answer is the complete direct outgoing set with its scope stated.
+ */
+export function composeSelectedOutgoingInfluenceEvidenceAnswer(
+  evidence: SelectedOutgoingInfluenceEvidence,
+): string {
+  if (evidence.status === 'ambiguous') {
+    // The verdict is the dependencies carrier's verdict, unchanged and equally
+    // load-bearing: an unestablished subject is refused, never guessed. Only the
+    // predicate wording differs, because the user asked a different question and
+    // the refusal should say what it is declining to invent.
+    if (evidence.subject_selection === 'single_resolved') {
+      return (
+        'I could not match your question to a single part of your saved model, so I will not guess at what it affects. ' +
+        'Check that the one you mean appears only once in the model, and ask again.'
+      );
+    }
+    // The outgoing twin of the dependencies branch above, and changed for the
+    // same measured reason: *"Why does this decision matter?"* was refused on
+    // deployed `d545535` with *"I could not tell which part of your model you are
+    // asking about"*. Same false diagnosis, same scope truth, opposite predicate.
+    //
+    // ⚠ The direction word is the one thing that must NOT be shared with the
+    // dependencies branch: neither string may contain the other's, so a
+    // direction inversion cannot read as correct prose. Pinned as its own test.
+    return (
+      'That question did not pin down a single part of your model, and I answer what something affects one part at a time, so I will not guess at what it affects. ' +
+      'Name that part exactly as it appears in your model, or select it on the canvas, and ask again.'
+    );
+  }
+  if (evidence.status === 'coverage_unavailable') {
+    if (evidence.reason === 'structural_semantics_unlicensed') {
+      return (
+        'The saved Living Model includes a structural connector for this item, but this response cannot safely treat that connector as causal influence. ' +
+        'I will not infer causal direction or strength from it.'
+      );
+    }
+    return (
+      'Some relationship detail needed to answer this influence question was withheld from this turn. ' +
+      'I therefore cannot safely say what this item does or does not affect, and I will not reconstruct it from conversation or caller state.'
+    );
+  }
+
+  const relationships = [
+    ...evidence.influences,
+    ...evidence.bidirected,
+  ];
+  if (relationships.length === 0) {
+    return (
+      `The saved Living Model records no direct outgoing influence from ${evidence.selected_label}. ` +
+      'That statement is limited to direct, directed connectors leading away from it; it does not prove that no indirect route or non-causal association exists.'
+    );
+  }
+
+  const sentences = relationships.map(composeOutgoingInfluenceRelationship);
+  sentences.push(
+    `These are the complete direct outgoing influences and bidirected associations recorded for ${evidence.selected_label}; bidirected associations do not establish a direction, and this answer does not add an indirect route or rank these connectors against each other.`,
   );
   return sentences.join(' ');
 }

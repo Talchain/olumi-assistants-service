@@ -198,12 +198,17 @@ describe('chip-click-dispatch — analysisReady surfacing (V5 finaliser brief)',
     vi.clearAllMocks();
     handlerFnMock.mockResolvedValue(handlerOk());
     enrichRunAnalysisMock.mockImplementation(async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts);
-    commitDirectAnswerMock.mockResolvedValue({
-      response: {},
+    // The real chokepoint RETURNS the response it committed: the SAME object on
+    // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+    // notice or suppressed competing run_analysis chips. `response: {}` misstated
+    // that contract, and the dispatcher now CONSUMES the returned value, so the
+    // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+    commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+      response: r,
       performed: true,
       persisted_row_id: 'row-1',
       graphPersisted: true,
-    });
+    }));
     // Production path builds a per-call registry — return the same mocked
     // run_analysis handler so dispatch wiring is tested end-to-end.
     createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
@@ -370,12 +375,17 @@ describe('chip-click-dispatch — freshness derivation runs against produced fac
     handlerFnMock.mockReset();
     vi.clearAllMocks();
     enrichRunAnalysisMock.mockImplementation(async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts);
-    commitDirectAnswerMock.mockResolvedValue({
-      response: {},
+    // The real chokepoint RETURNS the response it committed: the SAME object on
+    // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+    // notice or suppressed competing run_analysis chips. `response: {}` misstated
+    // that contract, and the dispatcher now CONSUMES the returned value, so the
+    // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+    commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+      response: r,
       performed: true,
       persisted_row_id: 'row-1',
       graphPersisted: true,
-    });
+    }));
     createRegistryMock.mockImplementation(() => new Map([['run_analysis', handlerFnMock]]));
   });
 

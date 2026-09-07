@@ -1,0 +1,1050 @@
+{
+ "_provenance": {
+  "source_artefact": "Talchain/olumi-programme-docs artefacts/draft-B2-raw-2026-09-03.json",
+  "captured": "2026-09-03",
+  "schema_version": "3.0",
+  "projection": "VERBATIM. nodes[] and edges[] copied unchanged from the captured CEE draft response; every other top-level key dropped."
+ },
+ "nodes": [
+  {
+   "id": "149a6ba2",
+   "kind": "option",
+   "label": "invest the same budget in a self-serve product-led motion",
+   "interventions": {
+    "f4560e5a": {
+     "value": 0.55,
+     "raw_value": 0.55,
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "f4560e5a",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge 35b8aeaa; no stated figure is cited for this option\u2192factor effect"
+    }
+   },
+   "is_baseline": false,
+   "provenance": "from_brief",
+   "source_quote": "invest the same budget in a self-serve product-led motion"
+  },
+  {
+   "id": "184b1437",
+   "kind": "option",
+   "label": "Status Quo \u2014 Hold Current GTM",
+   "interventions": {
+    "89d16343": {
+     "value": 0.1,
+     "raw_value": 0.1,
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "89d16343",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Model-chosen intervention level; this factor's scale is not recorded, so the amount could not be checked against the brief"
+    }
+   },
+   "is_baseline": true,
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "29987760",
+   "kind": "factor",
+   "label": "Channel Partner Programme Investment",
+   "category": "external",
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0.45,
+    "range_max": 1
+   },
+   "factor_type": "cost",
+   "extractionType": "inferred",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "30e55aa1",
+   "kind": "risk",
+   "label": "Time to Revenue",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "479f1f70",
+   "kind": "outcome",
+   "label": "New ARR Generated",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "53319110",
+   "kind": "decision",
+   "label": "Choose Between Three Go-to-Market Moves for Next Year",
+   "provenance": "ai_inferred",
+   "label_authored": true
+  },
+  {
+   "id": "78b41beb",
+   "kind": "goal",
+   "label": "Add \u00a33m of New ARR Within Eighteen Months",
+   "provenance": "from_brief",
+   "source_quote": "add \u00a33m of new ARR within eighteen months",
+   "label_authored": true
+  },
+  {
+   "id": "89d16343",
+   "kind": "factor",
+   "label": "Outbound Sales Headcount Investment",
+   "category": "controllable",
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "factor_type": "other",
+   "uncertainty_drivers": [
+    "Not provided"
+   ],
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "9a6c34f1",
+   "kind": "risk",
+   "label": "Budget Burn Without Pipeline",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "a1530fa2",
+   "kind": "factor",
+   "label": "Product-Led Growth Investment",
+   "category": "external",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "bc936d4c",
+   "kind": "factor",
+   "label": "Sales Cycle Length",
+   "category": "controllable",
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "factor_type": "other",
+   "uncertainty_drivers": [
+    "Not provided"
+   ],
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "c05aaf19",
+   "kind": "factor",
+   "label": "Partner Ramp Time",
+   "category": "controllable",
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "factor_type": "other",
+   "uncertainty_drivers": [
+    "Not provided"
+   ],
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "dfa75f03",
+   "kind": "option",
+   "label": "Expand the Outbound Sales Team by Six Reps",
+   "interventions": {
+    "bc936d4c": {
+     "value": 0.65,
+     "raw_value": 0.65,
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "bc936d4c",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge 9dfdd441; no stated figure is cited for this option\u2192factor effect"
+    }
+   },
+   "is_baseline": false,
+   "provenance": "from_brief",
+   "source_quote": "expand the outbound sales team by six reps",
+   "label_authored": true
+  },
+  {
+   "id": "f4560e5a",
+   "kind": "factor",
+   "label": "Self-Serve Conversion Rate",
+   "category": "controllable",
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "factor_type": "other",
+   "uncertainty_drivers": [
+    "Not provided"
+   ],
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "ff92b17d",
+   "kind": "option",
+   "label": "Partner With Two Systems Integrators to Resell",
+   "interventions": {
+    "c05aaf19": {
+     "value": 0.7,
+     "raw_value": 0.7,
+     "source": "cee_hypothesis",
+     "target_match": {
+      "node_id": "c05aaf19",
+      "match_type": "exact_id",
+      "confidence": "high"
+     },
+     "value_confidence": "low",
+     "reasoning": "Olumi estimate via edge da4b485b; no stated figure is cited for this option\u2192factor effect"
+    }
+   },
+   "is_baseline": false,
+   "provenance": "from_brief",
+   "source_quote": "partner with two systems integrators to resell",
+   "label_authored": true
+  }
+ ],
+ "edges": [
+  {
+   "from": "149a6ba2",
+   "to": "f4560e5a",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "184b1437",
+   "to": "89d16343",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "29987760",
+   "to": "479f1f70",
+   "strength": {
+    "mean": 0.24391891891891893,
+    "std": 0.05854054054054054
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.24391891891891893,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.2,
+     "strength_std": 0.2,
+     "exists_probability": 0.85,
+     "reasoning": "Channel partner investments typically yield smaller and more uncertain ARR uplifts compared to direct sales.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.16805405405405405,
+     "strength_std": 0.2,
+     "exists_probability": 0.85
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "29987760",
+   "to": "9a6c34f1",
+   "strength": {
+    "mean": 0.30400000000000005,
+    "std": 0.07296
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "contested",
+    "contested_reasons": [
+     "strength_band_change"
+    ],
+    "pass1": {
+     "strength_mean": 0.30400000000000005,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.2,
+     "strength_std": 0.15,
+     "exists_probability": 0.8,
+     "reasoning": "Partner program spending can burn budget without generating pipeline if partners don\u2019t ramp as expected.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.16805405405405405,
+     "strength_std": 0.15,
+     "exists_probability": 0.8
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "30e55aa1",
+   "to": "78b41beb",
+   "strength": {
+    "mean": -0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": -0.5,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.3,
+     "strength_std": 0.2,
+     "exists_probability": 0.9,
+     "reasoning": "Longer time to revenue directly delays or prevents hitting the ARR goal.",
+     "basis": "structural_inference",
+     "needs_user_input": true,
+     "lint_corrected": true
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.33194594594594595,
+     "strength_std": 0.2,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "edge_key": "30e55aa1->78b41beb",
+      "before": -0.6,
+      "after": -0.3
+     }
+    ]
+   }
+  },
+  {
+   "from": "479f1f70",
+   "to": "78b41beb",
+   "strength": {
+    "mean": 0.85,
+    "std": 0.20399999999999996
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "contested",
+    "contested_reasons": [
+     "strength_band_change"
+    ],
+    "pass1": {
+     "strength_mean": 0.85,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.4,
+     "strength_std": 0.1,
+     "exists_probability": 0.95,
+     "reasoning": "Generated new ARR is the primary contributor to achieving the \u00a33 m target.",
+     "basis": "structural_inference",
+     "needs_user_input": true,
+     "lint_corrected": true
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.36805405405405406,
+     "strength_std": 0.1,
+     "exists_probability": 0.95
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 1,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "edge_key": "479f1f70->78b41beb",
+      "before": 0.8,
+      "after": 0.4
+     }
+    ]
+   }
+  },
+  {
+   "from": "53319110",
+   "to": "149a6ba2",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "53319110",
+   "to": "184b1437",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "53319110",
+   "to": "dfa75f03",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "53319110",
+   "to": "ff92b17d",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "89d16343",
+   "to": "479f1f70",
+   "strength": {
+    "mean": 0.39797297297297296,
+    "std": 0.0955135135135135
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.39797297297297296,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.5,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Six additional sales reps typically drive the largest incremental ARR among these investments.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.46805405405405404,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "89d16343",
+   "to": "9a6c34f1",
+   "strength": {
+    "mean": 0.41800000000000004,
+    "std": 0.10031999999999999
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.41800000000000004,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.5,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Outbound reps represent the highest burn rate risk when not backed by pipeline.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.46805405405405404,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "9a6c34f1",
+   "to": "78b41beb",
+   "strength": {
+    "mean": -0.45,
+    "std": 0.10799999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": -0.45,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.3,
+     "strength_std": 0.2,
+     "exists_probability": 0.9,
+     "reasoning": "Higher budget burn without pipeline reduces the likelihood of meeting ARR goals.",
+     "basis": "structural_inference",
+     "needs_user_input": true,
+     "lint_corrected": true
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.33194594594594595,
+     "strength_std": 0.2,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 0,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "edge_key": "9a6c34f1->78b41beb",
+      "before": -0.6,
+      "after": -0.3
+     }
+    ]
+   }
+  },
+  {
+   "from": "a1530fa2",
+   "to": "479f1f70",
+   "strength": {
+    "mean": 0.30810810810810807,
+    "std": 0.07394594594594592
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.30810810810810807,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.3,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Product-led investment yields moderate ARR uplift but less than direct sales.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.268054054054054,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "a1530fa2",
+   "to": "9a6c34f1",
+   "strength": {
+    "mean": 0.22799999999999998,
+    "std": 0.05471999999999999
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.22799999999999998,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.3,
+     "strength_std": 0.2,
+     "exists_probability": 0.85,
+     "reasoning": "Investing in self-serve features still risks spending without immediate pipeline creation.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.268054054054054,
+     "strength_std": 0.2,
+     "exists_probability": 0.85
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "bc936d4c",
+   "to": "30e55aa1",
+   "strength": {
+    "mean": 0.30645161290322576,
+    "std": 0.07354838709677418
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.30645161290322576,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.4,
+     "strength_std": 0.1,
+     "exists_probability": 0.9,
+     "reasoning": "Longer sales cycles mechanically extend time to revenue.",
+     "basis": "structural_inference",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.36805405405405406,
+     "strength_std": 0.1,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "c05aaf19",
+   "to": "30e55aa1",
+   "strength": {
+    "mean": 0.3677419354838709,
+    "std": 0.08825806451612901
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "agreed",
+    "contested_reasons": [],
+    "pass1": {
+     "strength_mean": 0.3677419354838709,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": 0.3,
+     "strength_std": 0.15,
+     "exists_probability": 0.85,
+     "reasoning": "Partner ramp time directly adds to overall time before revenue recognition.",
+     "basis": "structural_inference",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": 0.268054054054054,
+     "strength_std": 0.15,
+     "exists_probability": 0.85
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 0.6666666666666666,
+    "distance_to_goal": 1,
+    "sign_unstable": false,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "dfa75f03",
+   "to": "bc936d4c",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "f4560e5a",
+   "to": "30e55aa1",
+   "strength": {
+    "mean": 0.2758064516129032,
+    "std": 0.06619354838709675
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "status": "contested",
+    "contested_reasons": [
+     "sign_flip"
+    ],
+    "pass1": {
+     "strength_mean": 0.2758064516129032,
+     "strength_std": 0,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "strength_mean": -0.3,
+     "strength_std": 0.15,
+     "exists_probability": 0.9,
+     "reasoning": "Higher self-serve conversion rates shorten the time needed to generate revenue.",
+     "basis": "domain_prior",
+     "needs_user_input": true,
+     "lint_corrected": false
+    },
+    "pass2_adjusted": {
+     "strength_mean": -0.33194594594594595,
+     "strength_std": 0.15,
+     "exists_probability": 0.9
+    },
+    "bias_correction": {
+     "strength_mean_offset": -0.031945945945945964,
+     "strength_std_offset": 0,
+     "exists_probability_offset": 0
+    },
+    "max_divergence": 1,
+    "distance_to_goal": 1,
+    "sign_unstable": true,
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "evoi_rank": null,
+    "evoi_impact": null,
+    "was_shown": false,
+    "user_action": "pending",
+    "resolved_value": null,
+    "resolved_by": "default",
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "ff92b17d",
+   "to": "c05aaf19",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  }
+ ]
+}
