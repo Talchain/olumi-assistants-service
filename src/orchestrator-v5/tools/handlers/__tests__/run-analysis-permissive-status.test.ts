@@ -316,14 +316,34 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    // Winner opt_3 has 35.3% probability → below MIN_LEAD_PROBABILITY
-    // (0.4) so strong cases A/B/C/D suppress. The V5 link-safe response
-    // floor (Case E) now produces the minimum non-overclaiming label-
-    // only headline instead of the locked DEFAULT template. Reference:
-    // RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT remains the fallback when
-    // no clean leading-option label exists at all.
-    expect(outcome.assistant_text).toBe('Introduce tiered pricing currently leads.');
-    expect(outcome.assistant_text).not.toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. This previously asserted
+    //     expect(outcome.assistant_text).toBe('Introduce tiered pricing currently leads.');
+    //   on the reasoning: "Winner opt_3 has 35.3% probability → below
+    //   MIN_LEAD_PROBABILITY (0.4) so strong cases A/B/C/D suppress. The V5
+    //   link-safe response floor (Case E) now produces the minimum
+    //   non-overclaiming label-only headline instead of the locked DEFAULT
+    //   template."
+    //
+    // ⭐ THE CAPTURED RESPONSE ABOVE IS UNCHANGED AND MUST STAY UNCHANGED — it
+    // is a real staging envelope from 2026-03-15, and rewriting a capture to
+    // suit a new expectation would falsify the record. What changed is only
+    // what the product SAYS about it.
+    //
+    // And what it said was not defensible. The captured field is
+    // 0.353 / 0.347 / 0.300 — a THREE-WAY RACE DECIDED BY SIX TENTHS OF ONE
+    // PERCENTAGE POINT — and the product named a winner, with the number and
+    // every hedge stripped off, which is the most confident-reading sentence in
+    // the grammar. `MIN_LEAD_PROBABILITY` correctly suppressed the enriched
+    // cases and then the floor asserted the same claim anyway, unqualified.
+    //
+    // ⚠ NOTE WHAT THIS CAPTURE IS: a pricing brief with three genuine,
+    // decision-shaped options ("Raise price to £59" / "Keep current" /
+    // "Introduce tiered pricing"). So the defect this change closes was NEVER
+    // confined to open-ended diagnostic briefs — a well-formed decision brief
+    // produced a dead heat on real staging in March and got a named winner too.
+    // This is the oldest evidence in the suite for the fix, and it is the
+    // reason the gate keys on the FIELD rather than on the brief class.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {
       // opt_3 has the highest probability — handler picks it.

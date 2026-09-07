@@ -40,11 +40,28 @@ const NO_FLIP_RUNS = Object.entries(NO_FLIP.runs as Record<string, Record<string
 
 import { assertsFlippability } from '../../__tests__/support/flip-claim-matcher.support.js';
 
-/** Option field that lets the headline resolve a winner (Case E floor). */
+/**
+ * Option field that lets the headline resolve a winner (Case E floor).
+ *
+ * ⚠ CARRIER ONLY — this spec's subject is the robustness/flip sentence, not the
+ * option field, and the field must stay incidental to it. It was
+ * `0.34 / 0.33 / 0.33`, a three-way dead heat, which the separability gate
+ * (`option-separability.ts`) now correctly declines to name a winner on — so
+ * the carrier stopped producing a headline for the tail to ride on, and all 20
+ * assertions here failed on a null.
+ *
+ * Replaced with a WEAK BUT CLEAR leader: 0.34 against three options level at
+ * 0.22. It still lands on Case E — leader below the confidence floor, no driver
+ * and no fragility in this fixture, so the enriched and soft-confidence shapes
+ * cannot fire — and Case E is number-free, which the content-defence assertion
+ * below (`not.toMatch(/\d+%/)`) depends on. Nothing about what this spec
+ * measures has changed.
+ */
 const RESULTS = [
   { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.34 },
-  { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
-  { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
+  { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.22 },
+  { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.22 },
+  { option_id: 'opt_d', option_label: 'Option D', win_probability: 0.22 },
 ];
 
 /** The witnessed robustness block, plus the run's real flip evidence. */
