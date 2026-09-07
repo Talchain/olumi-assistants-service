@@ -17,7 +17,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import { buildAddOptionTransaction } from '../../routing/add-option-transaction.js';
-import { dispatchAddOptionTransaction } from '../add-option-dispatch.js';
+import {
+  buildLinkedUnvaluedNotice, dispatchAddOptionTransaction } from '../add-option-dispatch.js';
 import {
   evaluateEditGraphMutations,
   GM_HELD_HANDLER_ID,
@@ -247,5 +248,25 @@ describe('dispatchAddOptionTransaction — held + skip classification', () => {
     expect(out.kind).toBe('held');
     if (out.kind !== 'held') return;
     expect(out.optionId).toBe(expectedOptionId());
+  });
+});
+
+
+describe('the multi-link notice counts correctly — "either" means one of two', () => {
+  it.each([
+    [['Payroll cost'], "on it —"],
+    [['Payroll cost', 'Churn'], 'on either —'],
+    [['Payroll cost', 'Churn', 'ARR'], 'on any of them —'],
+    [['Payroll cost', 'Churn', 'ARR', 'NRR'], 'on any of them —'],
+  ])('%j factors -> %j', (labels, expected) => {
+    // Read `length === 1 ? 'it' : 'either'` for twelve heads, so three and four
+    // factors — the ordinary text-leg case — were told "on EITHER". Flagged
+    // twice and pinned by no test, which is why it survived.
+    expect(buildLinkedUnvaluedNotice('Freemium tier', labels as string[])).toContain(expected);
+  });
+
+  it('...and the plural half of the sentence still agrees', () => {
+    expect(buildLinkedUnvaluedNotice('X', ['A'])).toContain('what it changes by');
+    expect(buildLinkedUnvaluedNotice('X', ['A', 'B', 'C'])).toContain('what each changes by');
   });
 });

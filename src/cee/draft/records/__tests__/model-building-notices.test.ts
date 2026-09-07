@@ -44,6 +44,7 @@ const PRODUCER_REASONS = [
   "stated_target_value_dropped",
   "parallel_intervention_conflict",
   "parallel_causal_link_conflict",
+  "claim_label_not_a_name",
 ] as const;
 
 const CONTRACT_KINDS = new Set([

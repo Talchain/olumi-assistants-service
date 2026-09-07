@@ -458,9 +458,55 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * sets NO quota of options: manufacturing alternatives to green the readiness
  * gate is the failure mode this instruction has to avoid, not its objective.
  */
-const PREREGISTERED_V13_INSTRUCTION_SHA256 =
+/**
+ * ⭐⭐ v14 — `label` NAMES THE NODE. THE SHAPE HALF, IN ITS ENTIRETY.
+ *
+ * ── THE WITNESSED DEFECT (Paul's manual test, 6 Sep 2026) ──────────────────
+ * Two canvas nodes rendered with IDENTICAL visible titles. A factor node
+ * carried the 105-character sentence "Tech lead hiring typically takes 6-10
+ * weeks; two developers may be found faster but add coordination cost", and
+ * `fixFactorGoalEdges` minted a mediating outcome labelled
+ * `${factorLabel} Impact` from it. The canvas clamps a title to two lines, so
+ * both rendered the same visible string.
+ *
+ * ── WHY THE INSTRUCTION IS THE FIX, DERIVED AT THE BYTES ───────────────────
+ * v13 said NOTHING about what a `label` is — the word does not appear in either
+ * half. What it DID say is `prior` - "what you believe about a quantity, and how
+ * sure you are", and `CLAIM_KIND_TO_NODE_KIND` (`projector.ts:853`) maps
+ * `prior -> "factor"`. So the instruction asked for a belief sentence and the
+ * projector used it as a factor node's display NAME: one field answering two
+ * questions, with one consumer reading both as a title (trap 21).
+ *
+ * Measured over the four banked fixtures in `./fixtures`, by whether the claim
+ * kind MINTS A NODE (n / min / median / max characters):
+ *   factor             33 / 16 / 26 /  60      option_refinement 8 / 14 / 39 / 59
+ *   prior              15 / 48 / 65 / 104      causal_link      82 / 36 / 53 / 103
+ * Every one of the 41 factor/option labels is a noun phrase; 15 of 15 priors are
+ * belief sentences. "Two of twelve" was not model variance — it was the two
+ * `prior` claims in that draft.
+ *
+ * ⚠ WHY NOT A `maxLength` IN THE GRAMMAR INSTEAD. `buildDraftClaimItemSchema`
+ * declares ONE `label` for ALL claim kinds. A bound tight enough to force a name
+ * would truncate legitimate `causal_link` labels (103 characters observed) at the
+ * DECODER — trading a bad node name for silently mutilated edge copy. The
+ * instruction already speaks per kind; the grammar cannot.
+ *
+ * SHAPE-HALF IN ITS ENTIRETY — the SEVENTH version to touch it. What goes in the
+ * `label` field is a statement about a field, not about how two records connect,
+ * so the connect half is byte-identical to v13 (asserted below).
+ */
+const PREREGISTERED_V14_INSTRUCTION_SHA256 =
+  "1cc4dd657eecd6a5fe6c67bd2cbf3e321b9d88a8526cc374b4accaefe4cdd1f3";
+const PREREGISTERED_V14_INSTRUCTION_BYTES = 13406;
+/**
+ * SUPERSEDED — v13's bytes. Retained and asserted DISTINCT for the same reason
+ * v11's and v12's are: v13 is the artefact the unnamed-node defect was WITNESSED
+ * under, and re-pointing this literal would let that finding read as a finding
+ * about v14, which is the version written to remove its cause.
+ */
+const SUPERSEDED_V13_INSTRUCTION_SHA256 =
   "2c9c4ae5e108156a0d0008c9c3d265730b3d66db57b95b5878ff833a3bb73a0f";
-const PREREGISTERED_V13_INSTRUCTION_BYTES = 12557;
+const SUPERSEDED_V13_INSTRUCTION_BYTES = 12557;
 /**
  * SUPERSEDED — v12's bytes. Retained and asserted DISTINCT for the same reason
  * v11's are: v12 is the artefact the SERVED-AND-IGNORED measurement belongs to.
@@ -474,10 +520,17 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v13 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V13_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v14 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V14_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V13_INSTRUCTION_BYTES,
+      PREREGISTERED_V14_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v13 bytes, so the unnamed-node witness stays its own", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V13_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V13_INSTRUCTION_BYTES,
     );
   });
 
@@ -641,10 +694,21 @@ describe("the draft records instruction is the measured artefact", () => {
     // byte-identical to v12 (asserted in the next test). The asymmetry is again
     // the point: this edit is legible as "the stated-kind list changed" without
     // reading a diff.
+    // ⚠⚠ AND AGAIN IN v14 — the SEVENTH version to touch it. What a `label` IS
+    // is a statement about what goes in a field, so v14 is shape-half in its
+    // entirety and the connect half is byte-identical to v13 (asserted in the
+    // next test). The asymmetry is again the point: this edit is legible as
+    // "the label rule was added" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "433d50d69971ed0bf42923ee823f55085346c1585f31f9c6a68b2a4ba88f3cee",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(8862);
+    // SUPERSEDED — v13's shape half, the bytes the unnamed-node defect was
+    // witnessed under.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "7d248f513405b3b0c32ac3319e70318318591cbda975224d77b97c21039b858c",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(8013);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(8013);
     // SUPERSEDED — v12's shape half, the bytes the #1287 capture was drawn under.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "aa3d7c18d26326260476ce5ae674f7dfee91fc8bf10b5eaf0ce5996625f28b3f",

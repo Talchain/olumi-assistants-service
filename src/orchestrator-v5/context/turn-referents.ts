@@ -16,18 +16,13 @@
  *   | `turn_referents` (this)   | What is available to be referred to, and  |
  *   |                           | by whom was it introduced?                |
  *
- * THE PRODUCTION CONSUMER, named so nobody has to grep for it:
- * `handlers/edit-graph-dispatch.ts` imports `projectTurnReferents` (with
- * `candidatesAtTopPopulatedRank` and the `TurnReferents` type) and calls it
- * inside `dispatchEditGraph` on the no-op path, passing the result as
- * `referents` into `decideNoOpRecovery`. That function's anaphoric branch is
- * the only reader and routes to one of `anaphoric_edit_bound`,
- * `anaphoric_edit_ask_candidates` or `anaphoric_edit_ask_unresolved`.
- * `dispatchEditGraph` is called from `orchestrator/route-v2.ts`, so this
- * register is live on the production edit route.
- *
- * The spec's sequencing constraint (§4.3) is why the register was built first
- * and the routing change landed on top of it, in that order:
+ * CONSUMERS (the sentence here used to read "no production consumer yet",
+ * which was true of the PR that added this module and false from the next PR
+ * on): `handlers/edit-graph-dispatch.ts` (the anaphoric no-op recovery) and
+ * `turn-executor.ts` (the value pre-route), both through
+ * `projectTurnReferentsFromWindow` below and the one resolver in
+ * `compose/edit-clarify-response.ts`. The spec's sequencing constraint (§4.3)
+ * is why the module landed alone first:
  *
  *   > Removing pronouns from `VAGUE_EDIT_PATTERNS` before the register exists
  *   > sends those messages to the `ambiguous` branch (`assistantText: null`,
@@ -257,6 +252,56 @@ const EMPTY_DEGRADED: TurnReferents = Object.freeze({
 /** `node:<id>` per the §3.2 address grammar. */
 export function nodeRef(id: string): string {
   return `node:${id}`;
+}
+
+/**
+ * `node:<id>` → `<id>`, the inverse of {@link nodeRef}. A ref that is not a
+ * node address is returned unchanged: both consumers use the result only to
+ * address a node the register already named, so a non-node ref degrades to a
+ * still-unique id rather than throwing.
+ */
+export function nodeIdFromRef(ref: string): string {
+  return ref.startsWith('node:') ? ref.slice('node:'.length) : ref;
+}
+
+/** The one field of a conversation-window turn the producer below reads. */
+export interface ConversationWindowTurn {
+  readonly assistant_message?: string | null;
+}
+
+/**
+ * THE PRODUCER'S ENTRY FOR A CONVERSATION WINDOW — the single place that
+ * decides which prior turn is "the last assistant claim".
+ *
+ * `turnsNewestFirst` is the session store's read order (`created_at DESC`).
+ * The first entry carrying a non-empty `assistant_message` is the product's own
+ * last claim; the current turn is never in the window because its commit
+ * happens after dispatch. The index handed to `projectTurnReferents` is
+ * WINDOW-RELATIVE (see `TurnReferent.introduced_at_turn`).
+ *
+ * Two consumers call this with the same window shape so they cannot disagree
+ * about which message the register was built from.
+ */
+export function projectTurnReferentsFromWindow(input: {
+  readonly turnsNewestFirst: readonly ConversationWindowTurn[];
+  readonly nodes: readonly ReferentNode[];
+  readonly conversationRead?: 'ok' | 'degraded';
+}): TurnReferents {
+  const lastAssistantIdx = input.turnsNewestFirst.findIndex(
+    (t) => (t.assistant_message ?? '').trim().length > 0,
+  );
+  return projectTurnReferents({
+    lastAssistantMessage:
+      lastAssistantIdx >= 0
+        ? (input.turnsNewestFirst[lastAssistantIdx]!.assistant_message ?? null)
+        : null,
+    lastAssistantTurnIndex:
+      lastAssistantIdx >= 0 ? input.turnsNewestFirst.length - 1 - lastAssistantIdx : null,
+    nodes: input.nodes,
+    ...(input.conversationRead !== undefined
+      ? { conversationRead: input.conversationRead }
+      : {}),
+  });
 }
 
 /**
