@@ -60,7 +60,7 @@ const TARGET_PHRASES: ReadonlyArray<readonly [string, AdviceClass]> = [
   ['Why is this option ahead?', 'explain_results_free_text'],
   ['Why is Option A leading?', 'explain_results_free_text'],
   ['What would need to change for another option to look better?', 'what_would_flip_free_text'],
-  ['What should I pay attention to?', 'advice'],
+  ['What is the next step?', 'next_step'],
 ];
 
 const LOOP_ITERATIONS = 100;
@@ -81,6 +81,16 @@ describe('post-analysis-advice-gate — timing + structural performance', () => 
     // matcher in older versions — use a structural check that survives.
     expect(result).not.toHaveProperty('then');
     expect(result.matched).toBe(true);
+  });
+
+  it('attention question declines synchronously; this does not measure contextual turn latency', () => {
+    const result = tryPostAnalysisAdviceGate({
+      message: 'What should I pay attention to?',
+      analysis: ENRICHED_ANALYSIS,
+      freshness: 'fresh',
+    });
+    expect(result).not.toHaveProperty('then');
+    expect(result).toEqual({ matched: false, reason: 'reasoning_request' });
   });
 
   for (const [phrase, expectedClass] of TARGET_PHRASES) {

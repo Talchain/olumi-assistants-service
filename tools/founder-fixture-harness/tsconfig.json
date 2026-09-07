@@ -1,0 +1,35 @@
+{
+  "//": [
+    "Typecheck config for the founder-fixture wire harness.",
+    "",
+    "WHY THIS EXISTS: neither of the repo's typecheck gates covers tools/.",
+    "tsconfig.build.json includes only src/**/*.ts; the root tsconfig.json includes",
+    "src, tests, scripts, *.config.ts and sdk — tools/ appears in NEITHER. Vitest",
+    "runs this code through esbuild, which strips types without checking them, so",
+    "without this config a type error in the criteria classifiers could not fail",
+    "any gate. That is a poor property for the code that decides whether the",
+    "product's primary acceptance corpus passed.",
+    "",
+    "Run:  pnpm exec tsc -p tools/founder-fixture-harness/tsconfig.json --noEmit",
+    "(also wired as the repo script `fixture:founder:typecheck`).",
+    "",
+    "Scope note: this reaches into src/ only via the detector imports the harness",
+    "deliberately makes rather than copying — process-narration,",
+    "leading-option-egress-guard, withheld-claim-projection,",
+    "unrequested-analysis-confinement, analysis-admission. Those are pulled in",
+    "transitively and checked against the real production types, which is the",
+    "point: if a producer's vocabulary changes shape, this fails here.",
+    "",
+    "src/**/*.d.ts is included because the ambient module declarations src/ relies",
+    "on are otherwise picked up only by tsconfig.build.json's src/**/*.ts glob;",
+    "transitively importing a src/ module without them resurfaces settled TS7016s",
+    "that are not this tool's to fix."
+  ],
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "../v5-journey-replay/**/*.ts", "../golden-journey-harness/**/*.ts", "../../src/**/*.d.ts"]
+}

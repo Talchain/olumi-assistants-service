@@ -253,7 +253,17 @@ const SEPARATOR_CORPUS: Readonly<Record<string, readonly SeparatorCase[]>> = {
   approximateValue: [
     {
       brief: "roughly 50,000 customers",
-      span: "roughly 50,000 ",
+      // ⚠ THE SPAN LOST ITS TRAILING SPACE (ROADMAP 2.1131), and the byte is
+      // the point rather than an incidental. 2.1131 gave this pattern the
+      // magnitude suffix it never had — `"roughly 800k users"` extracted 800
+      // at `f4c8f50` — and spelled the optional `%` tail as `(?:\s*(%))?`
+      // rather than `\s*(%)?`, which is the spelling `magnitudeSuffixPattern`
+      // itself documents: with the `\s*` OUTSIDE the optional group it is
+      // consumed even when no `%` follows, and every matchedText in the corpus
+      // gains a trailing byte. `matchedText` is quoted verbatim into
+      // `provenance.quote`, so the space was reaching a user. The VALUE is
+      // unchanged; only the quoted span is now exactly what the writer wrote.
+      span: "roughly 50,000",
       value: 50_000,
       pristine: "span `roughly 50 `, value 50",
     },
@@ -280,6 +290,21 @@ const SEPARATOR_CORPUS: Readonly<Record<string, readonly SeparatorCase[]>> = {
       span: "between 50,000 and 70,000",
       value: 60_000,
       pristine: "NO FACTORS AT ALL — silent total loss",
+    },
+  ],
+  // ⚠ THE `pristine` FIELD HERE NAMES A DIFFERENT PAIR OF COMMITS FROM THE
+  // ENTRIES ABOVE, and says so rather than borrowing their `02f7a674` label:
+  // this pattern did not exist at `02f7a674`. Both figures below were
+  // MEASURED, not inferred.
+  bareAmountRange: [
+    {
+      brief: "Budget of 1,500-2,000k for the hire.",
+      span: "1,500-2,000k",
+      value: 1_750_000,
+      pristine:
+        "at f4c8f501: one factor, span `Budget of 1,500`, value 1,500 — the separator read " +
+        "correctly and the magnitude thrown away, 1,000x short. At 8ba54157: NO FACTORS AT " +
+        "ALL — the point pattern deferred and no range pattern could take it.",
     },
   ],
 };

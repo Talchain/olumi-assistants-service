@@ -179,7 +179,8 @@ function everySite(): Site[] {
       probeSite: 'post-analysis-advice-gate.ts:1620',
       mode: 'explain',
       band,
-      text: driveGate('advice', 'What would you recommend?', band),
+      // Same composeAdvice producer; generic recommendations now delegate.
+      text: driveGate('next_step', 'What is the next step?', band),
       preFixSentence: `It sits ahead of ${RUNNER_LABEL} by ${qty}.`,
     });
     out.push({
@@ -227,6 +228,16 @@ function everySite(): Site[] {
 }
 
 const SITE_COUNT = 6;
+
+describe('generic recommendation gate handoff', () => {
+  it.each(BANDS)('declines with robustness band %s', (band) => {
+    expect(tryPostAnalysisAdviceGate({
+      message: 'What would you recommend?',
+      analysis: gateAnalysis(band),
+      freshness: 'fresh',
+    })).toEqual({ matched: false, reason: 'reasoning_request' });
+  });
+});
 
 describe('PRODUCER CONTROL — no post-analysis surface states the lead as a gap between options', () => {
   const samples = everySite();

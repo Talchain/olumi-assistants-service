@@ -223,7 +223,23 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // construction; reusing build-turn-context's decision-context freshness
     // would derive against a DIFFERENT hash. Deliberate, reviewed; still
     // ad-hoc debt — migrate with the frame-consumer audit, do not add more.
-    'src/orchestrator/route-v2.ts': 2,
+    // 2026-09-01 add-option TEXT leg: 2 -> 3 (one more call, no new import) —
+    // the SAME seam described immediately above, second leg. The add-option
+    // arm now has two entry paths: the typed CHIP (whose parameters a human
+    // resolved on the canvas) and TYPED TEXT (whose spec the focused
+    // `propose_add_option` call produces). Both hand the result to the SAME
+    // `dispatchAddOptionTransaction` -> `evaluateEditGraphMutations` frame
+    // gate, which requires the PRE-edit frame freshness derived against
+    // `computeAnalysisAffectingGraphHash(persistedGraph)` — the same hash the
+    // held pending's `graph_hash` precondition is checked on at confirm time.
+    // This is NOT a new KIND of derivation seam; it is the existing one
+    // reached from a second ingress, and the two legs are mutually exclusive
+    // on a turn, so no turn derives it twice. Reusing build-turn-context's
+    // decision-context freshness would derive against a different hash and
+    // reopen exactly the divergence the entry above exists to prevent.
+    // Deliberate, reviewed; still ad-hoc debt — migrate with the
+    // frame-consumer audit, do not add more.
+    'src/orchestrator/route-v2.ts': 3,
     // 2026-08-17 ROADMAP 2.1271: +2 (import + one call) — the scenario-graph
     // READ leg composes a scenario's analysis verdict OUTSIDE a turn, so the
     // guidance above ("read the value from the CanonicalContextFrame / turn

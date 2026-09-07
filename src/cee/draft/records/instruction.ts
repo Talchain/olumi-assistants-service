@@ -274,6 +274,19 @@ Use \`claim_kind\`:
   becomes an option to compare, and it is yours rather than theirs.
 - \`prior\` — what you believe about a quantity, and how sure you are
 
+\`label\` NAMES the thing, in a few words. Every claim except a \`causal_link\`
+becomes a node on the canvas, and \`label\` is the name the user reads on it:
+"Tech Lead Hiring Time", "LLM Serving Cost", "Engineering Attrition Risk". A
+name is not a sentence. Do not write what you believe about the thing, what it
+does, how long it takes or how sure you are — the node is a place to hang that,
+not the statement of it. A \`prior\` is named the same way as any other claim:
+name the QUANTITY you hold a belief about, not the belief.
+A \`causal_link\` is the exception, because it becomes an arrow rather than a
+node: describe the relationship there as fully as you need to.
+Two nodes must not end up reading the same. The canvas shows a title over two
+lines and clips the rest, so two long names that begin alike are one name to the
+person looking at them.
+
 Name a result an \`outcome\` and a downside a \`risk\`. Do not file either as a
 \`factor\`: a factor is something that VARIES on the way to a result, and calling
 a result a factor loses the distinction the analysis needs to compare options.

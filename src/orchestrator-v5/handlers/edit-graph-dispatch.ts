@@ -144,8 +144,19 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import {
   classifyAnalyticalIntent,
   hasMutationSignal,
+  looksLikeAnaphoricEdit,
   looksLikeVagueEdit,
 } from '../routing/analytical-intent.js';
+import {
+  buildAnaphoricBindingDisclosure,
+  buildLabelChip,
+  resolveAnaphoricReferent,
+} from '../compose/edit-clarify-response.js';
+import {
+  nodeIdFromRef,
+  projectTurnReferentsFromWindow,
+  type TurnReferents,
+} from '../context/turn-referents.js';
 import {
   buildProposalPendingAction,
   decideProposalContinuation,
@@ -266,6 +277,13 @@ type NoOpRecoveryBranch =
   // discloses that we cannot see.
   | 'analytical_indeterminate'
   | 'vague_edit'
+  // Spec §4.2 — the three outcomes for an ANAPHORIC edit ("update it").
+  // Named apart from `vague_edit` because they answer a different question:
+  // vague_edit means "no target", these mean "a target to be resolved".
+  // There is deliberately no fourth, reset-shaped outcome.
+  | 'anaphoric_edit_bound'
+  | 'anaphoric_edit_ask_candidates'
+  | 'anaphoric_edit_ask_unresolved'
   | 'explore_factor'
   | 'explore_factor_stale'
   | 'proposal_stage_one'
@@ -348,6 +366,18 @@ interface DecideNoOpRecoveryInput {
    * `label`; `kind` is optional and used only by Stage 2's ordering.
    */
   readonly nodes?: readonly { readonly label: string; readonly kind?: string }[] | null;
+  /**
+   * Spec §4 — the referent register for this turn (`turn_referents`), used ONLY
+   * by the `anaphoric_edit_*` branches to resolve `it` / `this` / `that`.
+   *
+   * Optional on the type (mirroring `most_recent_pending_actions` and
+   * `pendingProposedConcept`) so existing callers and tests that do not supply
+   * it keep compiling. ⚠ Omitting it is NOT the same as supplying an empty
+   * register: when the field is absent the anaphoric branches treat the
+   * register as UNAVAILABLE and ASK, which is the safe outcome. They never fall
+   * back to the reset.
+   */
+  readonly referents?: TurnReferents | null;
 }
 
 const NO_OP_FRESH_TEXT =
@@ -390,6 +420,73 @@ const NO_OP_INDETERMINATE_GRAPH_NOT_READY_TEXT =
 const NO_OP_VAGUE_EDIT_TEXT =
   'I have not changed the model yet. Tell me what you want to change, '
   + 'and I will help apply it.';
+
+/**
+ * Spec §4.2 — copy for the three ANAPHORIC outcomes.
+ *
+ * Copy contract, checked against `FORBIDDEN_USER_FACING_PHRASES` and the
+ * branch rules above: British English; no emoji; no em dashes; no internal
+ * terms (`validator` / `patch` / `schema` / `operation` / `node` / `edge` /
+ * `graph`); no raw ids; a POSITIVE statement of mutation status, never a
+ * denial like "nothing changed". The lead sentence is the one already shipping
+ * at `NO_OP_VAGUE_EDIT_TEXT`, so it is known to clear the egress guard.
+ *
+ * ⚠ EVERY ONE OF THESE ASKS A QUESTION. That is the contract, not a style
+ * choice: the branch these replace asserted nothing and asked nothing, which is
+ * the one state where the product holds more information than the user and
+ * volunteers less.
+ */
+const ANAPHORIC_LEAD_TEXT = 'I have not changed the model yet.';
+
+/**
+ * Chip cap for the ambiguous-candidates ask. Matches the 3 that
+ * `selectEditClarifyTargets` offers, so the two clarify surfaces do not present
+ * visibly different budgets for the same kind of question.
+ */
+const ANAPHORIC_CANDIDATE_CHIP_CAP = 3;
+
+/**
+ * Exactly one candidate: BIND, and disclose the binding in its own sentence,
+ * immediately after the mutation-status lead — sentence index 1, asserted by
+ * position in `edit-graph-anaphoric-recovery.test.ts` so this sentence cannot
+ * drift from the copy. Never silently — the user must be able to see what was
+ * assumed and correct it, which is also what makes the next turn's "no, the
+ * other one" resolvable. The disclosure sentence itself is the composer's
+ * `buildAnaphoricBindingDisclosure`, shared with the value pre-route's receipt.
+ */
+function buildAnaphoricBoundText(label: string): string {
+  return (
+    `${ANAPHORIC_LEAD_TEXT} ${buildAnaphoricBindingDisclosure(label)} `
+    + 'What value would you like it set to?'
+  );
+}
+
+/** More than one candidate: ASK, with the candidates offered as chips. */
+const ANAPHORIC_ASK_CANDIDATES_TEXT =
+  `${ANAPHORIC_LEAD_TEXT} I am not sure which one you mean. `
+  + 'Which of these would you like to change?';
+
+/**
+ * Nothing to bind to, or the register could not be read: ASK, and say what was
+ * looked at.
+ *
+ * ⚠ THE SECOND SENTENCE IS A CLAIM ABOUT THIS BUILD'S WHOLE DOMAIN, so it names
+ * ONLY what is actually consulted today. Spec §4.2's example copy also offers
+ * "I looked at what you have selected", and that would be FALSE here: the
+ * selection rank of the register has no producer yet (§3.5 needs a UI-side
+ * "selection last changed" signal). Saying it would be a notice whose truth
+ * condition the code does not meet. When that producer lands, this sentence is
+ * the thing that must change with it.
+ */
+const ANAPHORIC_ASK_UNRESOLVED_TEXT =
+  `${ANAPHORIC_LEAD_TEXT} I am not sure which part of your model you mean. `
+  + 'I looked back at what I last told you about and could not pin it down. '
+  // ⚠ THIS ENDS IN A QUESTION, and the first draft did not — it read "Tell me
+  // which one to change, and I will apply it.", which TELLS rather than ASKS.
+  // The test asserting every anaphoric reply contains a question mark caught it.
+  // That is a milder form of the exact failure this whole branch removes, and it
+  // reappeared inside the fix for it, so the assertion stays.
+  + 'Which part would you like to change?';
 
 const NO_OP_EXPLORE_FACTOR_TEXT =
   "I haven't changed the model. It looks like you would like to "
@@ -683,6 +780,69 @@ export function decideNoOpRecovery(input: DecideNoOpRecoveryInput): NoOpRecovery
       intent_class: intentClass,
       has_run_analysis_fact: hasRunAnalysisFact,
       assistantText: null,
+      suggestedActions: [],
+    };
+  }
+
+  // ⭐ SPEC §4 — ANAPHORIC EDIT. Placed BEFORE the vague-edit branch because it
+  // is the more specific class: the two predicates are disjoint on their object
+  // (`it`/`this`/`that` vs `something`/`stuff`/`the model`), but a message that
+  // somehow satisfied both should be RESOLVED rather than reset.
+  //
+  // The three outcomes are exhaustive and none of them is a reset:
+  //   exactly 1 candidate  → BIND and disclose it
+  //   more than 1          → ASK, offering the candidates
+  //   0, or no/degraded    → ASK, and say what was looked at
+  //     register
+  if (intentClass === null && !mutationSignal && looksLikeAnaphoricEdit(input.message)) {
+    // ⭐ THE DECISION IS THE COMPOSER'S `resolveAnaphoricReferent`, not a
+    // predicate of this branch: top populated rank, the composer's own
+    // eligibility set (`factor|option` — the first version of this branch left
+    // that filter behind and bound the `outcome` MRR Growth on turn 8 of the
+    // 5 Sep founder capture), and the count. The value pre-route in
+    // `turn-executor.ts` calls the same function for "Set it to 100000.", so
+    // the two surfaces cannot resolve one pronoun two ways.
+    //
+    // ⚠ ABSENCE SEMANTICS. An omitted register and a `degraded` one both mean
+    // "could not look", which is NOT the same as "looked and found nothing" —
+    // but all three ASK, so the distinction changes telemetry, not the user's
+    // outcome. An empty `complete` register is an authoritative zero.
+    //
+    // ⚠ AN INELIGIBLE CANDIDATE IS NOT A RESET. Filtering to zero resolves to
+    // `unresolved`, which still asks. The banned outcome stays unreachable —
+    // measured, not assumed.
+    const resolution = resolveAnaphoricReferent(input.referents ?? null);
+
+    if (resolution.outcome === 'bound') {
+      const bound = resolution.referent;
+      return {
+        branch: 'anaphoric_edit_bound',
+        intent_class: null,
+        has_run_analysis_fact: hasRunAnalysisFact,
+        assistantText: buildAnaphoricBoundText(bound.label),
+        // The chip carries the SAME message convention as every other
+        // label chip, via the composer's own exported builder.
+        suggestedActions: [buildLabelChip(nodeIdFromRef(bound.ref), bound.label)],
+      };
+    }
+
+    if (resolution.outcome === 'ask_candidates') {
+      return {
+        branch: 'anaphoric_edit_ask_candidates',
+        intent_class: null,
+        has_run_analysis_fact: hasRunAnalysisFact,
+        assistantText: ANAPHORIC_ASK_CANDIDATES_TEXT,
+        suggestedActions: resolution.candidates
+          .slice(0, ANAPHORIC_CANDIDATE_CHIP_CAP)
+          .map((c) => buildLabelChip(nodeIdFromRef(c.ref), c.label)),
+      };
+    }
+
+    return {
+      branch: 'anaphoric_edit_ask_unresolved',
+      intent_class: null,
+      has_run_analysis_fact: hasRunAnalysisFact,
+      assistantText: ANAPHORIC_ASK_UNRESOLVED_TEXT,
       suggestedActions: [],
     };
   }
@@ -3690,6 +3850,31 @@ export async function dispatchEditGraph(
       // internal terms or claim a change happened.
       const graphReadyForRecovery =
         parsedGraph.nodes.length > 0 && parsedGraph.edges.length > 0;
+      // ⭐ SPEC §4.1 RANK 2 — the referent register for this turn.
+      //
+      // `recentConversationSlice` is NEWEST-FIRST (`conversationSliceToMessages`
+      // reverses it to get chronological order), so the first entry carrying a
+      // non-empty `assistant_message` is the product's own last claim. The
+      // current turn is not in it: the commit happens after dispatch.
+      //
+      // ⚠ THE INDEX IS WINDOW-RELATIVE, not conversation-absolute — see
+      // `TurnReferent.introduced_at_turn`. It orders this turn's own register
+      // and nothing more, which is all rank 2 needs.
+      //
+      // ⚠ THE PROSE NEVER LEAVES THIS FUNCTION. The register carries the
+      // assistant sentence internally, but the only thing the reply shows the
+      // user is the node LABEL, which is already model-facing via
+      // `display_graph`. So this adds no new channel for assistant-authored
+      // text and does not touch the withheld-claim redaction guarantee.
+      //
+      // The window-to-register step is the producer's own
+      // `projectTurnReferentsFromWindow`, shared with the value pre-route in
+      // `turn-executor.ts`, so both consumers build the register from the same
+      // rule over the same newest-first shape.
+      const turnReferents = projectTurnReferentsFromWindow({
+        turnsNewestFirst: recentConversationSlice,
+        nodes: parsedGraph.nodes,
+      });
       const recoveryOutcome = decideNoOpRecovery({
         message: payload.message,
         priorFacts: priorFactsForRecovery,
@@ -3700,6 +3885,8 @@ export async function dispatchEditGraph(
         // known label (the symptom of any path that slips past the
         // upstream `tryPostAnalysisLabelIntercept` in route-v2.ts).
         nodes: parsedGraph.nodes,
+        // Spec §4 — consumed ONLY by the `anaphoric_edit_*` branches.
+        referents: turnReferents,
         // V5 P0 proposal-memory continuation. Null when no fresh prior
         // proposal exists or graph hash has diverged since emit. The
         // proposal_stage_one / _two branches only fire when this is
@@ -3797,6 +3984,42 @@ export async function dispatchEditGraph(
       ) {
         const before = response.suggested_actions;
         const after = before.filter((a) => a.action_type !== 'run_analysis');
+        if (after.length !== before.length) {
+          strippedActions = before.length - after.length;
+          response = { ...response, suggested_actions: after };
+        }
+      }
+      // ⭐ SECOND STRIP CASE — the anaphoric branches that OFFER A TARGET SET.
+      //
+      // ⚠ MEASURED ON THE WIRE, and it refutes what this lane first assumed.
+      // The turn-5 reset was briefed as shipping `suggested_actions: []`. True
+      // of the branch, FALSE of the response: the 5 Sep capture carries THREE
+      // chips (`edit_graph_action_0/1/2`), each naming a different node, none
+      // carrying an `action_type` — so the dedupe above, which keys on
+      // `action_type`, cannot see them and the recovery chip is APPENDED beside
+      // them. A reply reading "Taking that as Sales Headcount Investment" would
+      // have shipped under four chips, three of them naming other entities.
+      // That contradicts the disclosure in the sentence directly above it.
+      //
+      // ⛔ DELIBERATELY NARROW, in three ways:
+      //   · Only the two branches that themselves offer targets. The
+      //     `_ask_unresolved` branch offers none and says so, and there the
+      //     pre-existing target chips are the user's only affordance — a strip
+      //     would take something away and give nothing back.
+      //   · Only chips WITHOUT an `action_type`. That is exactly the class the
+      //     dedupe above documents as "message-replay only". A functional
+      //     affordance (`run_analysis`, `explain_result`) answers a different
+      //     question from "which node did you mean" and survives.
+      //   · Nothing is invented: the recovery's own chips are appended by the
+      //     existing merge below, unchanged.
+      else if (
+        (recoveryOutcome.branch === 'anaphoric_edit_bound'
+          || recoveryOutcome.branch === 'anaphoric_edit_ask_candidates')
+        && response.suggested_actions
+        && response.suggested_actions.length > 0
+      ) {
+        const before = response.suggested_actions;
+        const after = before.filter((a) => Boolean(a.action_type));
         if (after.length !== before.length) {
           strippedActions = before.length - after.length;
           response = { ...response, suggested_actions: after };

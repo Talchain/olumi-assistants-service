@@ -43,8 +43,11 @@ vi.mock('../../../src/orchestrator-v5/commit.js', () => ({
   computeRequestHash: vi.fn().mockReturnValue('sha256:testhash'),
 }));
 
-const { priorFactsOverrideRef } = vi.hoisted(() => ({
+const { priorFactsOverrideRef, conversationSliceRef } = vi.hoisted(() => ({
   priorFactsOverrideRef: { current: null as unknown[] | null },
+  // Spec §4.1 rank 2 reads the conversation window for the last assistant
+  // claim. Empty by default (as before); an anaphoric case overrides it.
+  conversationSliceRef: { current: [] as unknown[] },
 }));
 // ROADMAP 1.148 C2 — importOriginal-spread (derive, don't mirror): the old
 // hand-listed factory silently LACKED every export it didn't enumerate, so
@@ -71,7 +74,7 @@ vi.mock('../../../src/orchestrator-v5/build-turn-context.js', async (importOrigi
   // ROADMAP 1.33: dispatchEditGraph reads this unconditionally for the
   // conversation-slice feed. Empty — this suite exercises no-op recovery,
   // not conversation history.
-  loadRecentConversationTurns: vi.fn(async () => []),
+  loadRecentConversationTurns: vi.fn(async () => conversationSliceRef.current),
   // Proposal-memory continuation (PR #212): no pending actions in this suite.
   loadMostRecentPendingActions: vi.fn(async () => []),
 }));
@@ -167,6 +170,7 @@ beforeEach(() => {
   llmChatMock.mockReset();
   handleEditGraphMock.mockReset();
   priorFactsOverrideRef.current = null;
+  conversationSliceRef.current = [];
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>).mockReset();
   (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
     .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
@@ -386,4 +390,108 @@ describe('dispatchEditGraph e2e — no-op recovery layer', () => {
     expect(ev?.appended_actions).toBe(1);
     expect(ev?.stripped_actions).toBe(0);
   });
+
+  /**
+   * ⭐ THE CHIPS THE RESET ACTUALLY SHIPPED WITH — measured on the wire, and it
+   * refutes what this lane was briefed.
+   *
+   * The turn-5 reset was described as shipping `suggested_actions: []`. True of
+   * the RECOVERY BRANCH, false of the RESPONSE: the 5 Sep founder capture
+   * (`live-20260905T165205Z.captures.json`, turn 5) carries THREE chips —
+   * `edit_graph_action_0/1/2` — each naming a different node, and NONE carrying
+   * an `action_type`. The merge below dedupes on `action_type`, so it cannot see
+   * them: a bound reply would have shipped beside three chips naming other
+   * entities, contradicting the sentence directly above them.
+   *
+   * The two target-offering anaphoric branches now strip pre-existing chips that
+   * carry no `action_type` — exactly the class the dedupe documents as
+   * "message-replay only". Functional affordances survive; see the contrast.
+   */
+  it('anaphoric bind: strips the V4 target chips that name other entities', async () => {
+    priorFactsOverrideRef.current = [];
+    // Rank 2 of the register: the product's own last claim, naming ONE node
+    // label from PRICING_GRAPH ("Price", a factor — an eligible target kind).
+    conversationSliceRef.current = [
+      { assistant_message: 'What value would you like Price set to?' },
+    ];
+    handleEditGraphMock.mockResolvedValue(
+      makeNoOpEditResult({
+        suggestedActions: [
+          { label: 'Change Subscription', prompt: 'For Subscription, what value should we use?', role: 'facilitator' },
+          { label: 'Change One-off', prompt: 'For One-off, what value should we use?', role: 'facilitator' },
+          { label: 'Pre-existing run analysis', prompt: 'Run analysis.', role: 'facilitator', action_type: 'run_analysis' },
+        ],
+      }),
+    );
+
+    const result = await dispatchEditGraph({
+      payload: makePayload({
+        turn_id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+        message: 'Can you update it with the correct range?',
+      }),
+      requestId: 'req-anaphoric-strip',
+      request: STUB_REQUEST,
+      graphState: PRICING_GRAPH,
+      analysisState: null,
+    });
+
+    const ev = findRecoveryEvent();
+    expect(ev?.branch_taken).toBe('anaphoric_edit_bound');
+    expect(result.response.assistant_text).toContain('Taking that as Price');
+
+    const chips = result.response.suggested_actions ?? [];
+    // Bind by IDENTITY: the exact ids, not "some chips were removed".
+    expect(chips.map((c) => c.id)).toEqual([
+      'edit_graph_action_2',
+      'edit_clarify_fac_price',
+    ]);
+    // The two competing target chips are gone; the functional affordance stays.
+    expect(chips.some((c) => c.label === 'Change Subscription')).toBe(false);
+    expect(chips.some((c) => c.action_type === 'run_analysis')).toBe(true);
+    expect(ev?.stripped_actions).toBe(2);
+    expect(ev?.appended_actions).toBe(1);
+  });
+
+  it('CONTRAST: the unresolved ask leaves the V4 chips alone', async () => {
+    // The opposite-direction twin. `_ask_unresolved` offers no targets of its
+    // own and says so, so the pre-existing target chips are the user's only
+    // affordance — stripping them would take something away and give nothing
+    // back. Without this case the strip could have been widened to every
+    // anaphoric branch and nothing would have gone red.
+    priorFactsOverrideRef.current = [];
+    // An assistant message that names no node label at all → empty register.
+    conversationSliceRef.current = [
+      { assistant_message: 'Here is a summary of where we got to.' },
+    ];
+    handleEditGraphMock.mockResolvedValue(
+      makeNoOpEditResult({
+        suggestedActions: [
+          { label: 'Change Subscription', prompt: 'For Subscription, what value should we use?', role: 'facilitator' },
+          { label: 'Change One-off', prompt: 'For One-off, what value should we use?', role: 'facilitator' },
+        ],
+      }),
+    );
+
+    const result = await dispatchEditGraph({
+      payload: makePayload({
+        turn_id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+        message: 'Can you update it with the correct range?',
+      }),
+      requestId: 'req-anaphoric-no-strip',
+      request: STUB_REQUEST,
+      graphState: PRICING_GRAPH,
+      analysisState: null,
+    });
+
+    const ev = findRecoveryEvent();
+    expect(ev?.branch_taken).toBe('anaphoric_edit_ask_unresolved');
+    const chips = result.response.suggested_actions ?? [];
+    expect(chips.map((c) => c.id)).toEqual([
+      'edit_graph_action_0',
+      'edit_graph_action_1',
+    ]);
+    expect(ev?.stripped_actions).toBe(0);
+    expect(ev?.appended_actions).toBe(0);
+  });
+
 });

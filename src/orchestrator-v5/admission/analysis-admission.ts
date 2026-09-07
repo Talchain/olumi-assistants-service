@@ -185,7 +185,21 @@ import {
  * asks whether THIS RESULT separated the arms). Two conjuncts, two questions.
  *
  *   `none`
- *       Nothing may run and nothing may be claimed. The model has blockers.
+ *       The model has blockers, so nothing may RUN — and therefore nothing may
+ *       be claimed FROM A RUN OF IT, because there is no run to claim from.
+ *
+ *       ⚠ AMENDED, AND THE OLD SENTENCE IS KEPT VISIBLE (CLAUDE.md trap 14).
+ *       It read:
+ *
+ *         ~~"Nothing may run and nothing may be claimed."~~
+ *
+ *       Read as an unqualified *"nothing may be claimed"*, that contradicted
+ *       {@link analysisReadyPermitsLeaderNaming} IN THIS SAME FILE, which
+ *       deliberately stands down on `none`. Readiness is recomputed every turn,
+ *       so a post-analysis turn whose graph has since drifted into a blocked
+ *       state reads `none` while the COMPLETED result it is discussing is
+ *       perfectly legitimate. This rung bounds a claim about a run of the
+ *       CURRENT model; it says nothing about a result that already exists.
  *
  *   `exploratory`
  *       The model is well-formed but there is nothing to COMPARE — the
@@ -239,6 +253,159 @@ export function modePermitsAtLeast(
   atLeast: PermittedAnalysisMode,
 ): boolean {
   return ANALYSIS_MODE_RANK[mode] >= ANALYSIS_MODE_RANK[atLeast];
+}
+
+/**
+ * The admission's `permitted_analysis_mode`, read defensively off an
+ * `analysis_ready` payload of UNKNOWN shape.
+ *
+ * ⚠ `null` MEANS "COULD NOT ESTABLISH ONE", NEVER "no". That is the schema's own
+ * rule, stated at `schemas/analysis-ready.ts` on the `analysis_admission` field:
+ * *"ABSENCE means a pre-`analysis_admission` producer, never 'no' — fall back to
+ * existing behaviour, exactly as with `may_run`."* Every caller MUST fail OPEN on
+ * `null`; {@link analysisReadyPermitsLeaderNaming} is the one that does so, and
+ * callers should prefer it to re-deriving the fallback themselves.
+ *
+ * MEMBERSHIP IS TESTED AGAINST {@link ANALYSIS_MODE_RANK}, THE LATTICE ITSELF —
+ * not against a second hand-written list of the four names (CLAUDE.md trap 12).
+ * A new mode added to the lattice is parsed here by construction. `hasOwnProperty`
+ * rather than `in`, so an inherited key (`"toString"`, `"constructor"`) on a
+ * hostile payload cannot be read as a mode and then indexed to `undefined`.
+ */
+export function permittedAnalysisModeFromAnalysisReady(
+  analysisReady: unknown,
+): PermittedAnalysisMode | null {
+  const admission = (
+    analysisReady as { readonly analysis_admission?: unknown } | null | undefined
+  )?.analysis_admission;
+  if (admission === null || typeof admission !== 'object') return null;
+  const mode = (admission as { readonly permitted_analysis_mode?: unknown })
+    .permitted_analysis_mode;
+  if (typeof mode !== 'string') return null;
+  return Object.prototype.hasOwnProperty.call(ANALYSIS_MODE_RANK, mode)
+    ? (mode as PermittedAnalysisMode)
+    : null;
+}
+
+/**
+ * ⭐ THE ONE ANSWER TO "DOES THE MODEL LICENSE NAMING A LEADER?", shared by every
+ * claim-safety rail so they cannot drift into two authorities on one question.
+ *
+ * ⚠ WHAT THIS IS NOT. It is NOT `leader_claim.permitted`, NOT
+ * `mayNameLeadingOption`, and it does not replace either. Those answer
+ * *"is THIS TURN entitled?"* and *"did THIS RESULT separate the arms?"*. This
+ * answers *"does the MODEL license the claim at all?"* — the third question the
+ * schema names, and the one no rail read before. The schema's own consumer note
+ * spells out that they are CONJOINED, never reconciled:
+ *
+ *   *"gate any leading-option / 'stable' / 'robust' wording on
+ *   `permitted_analysis_mode === 'comparative_leader'` CONJOINED with the
+ *   post-run evidence they already read (`leader_claim.permitted`). The two
+ *   answer different questions."*
+ *
+ * Aligning their defaults instead of conjoining them is exactly how #709/#737
+ * was created (CLAUDE.md trap 21), which is why this is a separate predicate
+ * with a separate name rather than a new branch inside either verdict.
+ *
+ * FAIL OPEN, DELIBERATELY. Absent, malformed, or unrecognised ⇒ `true`, so a
+ * producer that predates `analysis_admission` behaves byte-identically. Over-
+ * suppression here would silence leader prose on every legitimate turn, which
+ * `leading-option-wire-enforcement.ts` records as *"a WORSE product defect than
+ * the one being fixed"*.
+ *
+ * ⭐⭐ AND `structurally_analysable: false` FAILS OPEN TOO — MEASURED, NOT
+ * ASSUMED, AND THIS IS THE NARROWING THAT MAKES THE PREDICATE HONEST.
+ *
+ * The first cut of this function tested the mode alone. It turned THREE of the
+ * estate's own PERMIT-WINS controls red — the arms whose message is *"a blanket
+ * suppression would be a WORSE defect than the leak — this arm is what catches
+ * it"* — plus the real post-analysis advice-gate answer, which lost both its
+ * option name and its `_answer_shape` sidecar. Instrumenting the reader showed
+ * why: on those turns the mode is `'none'`, not `'quantified_provisional'`.
+ *
+ * `'none'` means *"the model has blockers; nothing may RUN"*. That is a
+ * statement about whether the CURRENT model can be analysed — NOT a cap on what
+ * may be claimed about a result that already exists. Readiness is recomputed per
+ * turn, so a post-analysis explain turn whose graph has since drifted into a
+ * blocked state reads `'none'` while its completed result is perfectly
+ * legitimate prose. Conjoining that would suppress leader text on the entire
+ * post-analysis population — the exact WORSE defect, arrived at from the other
+ * side.
+ *
+ * ⚠⚠ THE ENUM IS TWO AXES, NOT ONE SCALE (CLAUDE.md trap 21) — AND THE
+ * NARROWING SPLITS IT EXACTLY ALONG THAT BOUNDARY. This is the clearest
+ * statement of the design, and unlike the red-test argument above it is
+ * PROVABLE FROM THE PRODUCER rather than only observed.
+ *
+ * `permitted_analysis_mode` and `structurally_analysable` have exactly ONE
+ * runtime writer each, side by side in {@link analysisAdmissionFrom}, off the
+ * same `admission` binding: the mode comes from `deriveMode`, the flag IS
+ * `admission.willProceed`. And `analysis_admission` has exactly ONE mint site
+ * (`orchestrator/tools/analysis-ready-helper.ts`). The joint domain is therefore
+ * total and closed:
+ *
+ *   RUN-REFUSAL AXIS — `none`, `exploratory`
+ *       ⟺ `structurally_analysable === false`. `deriveMode` returns these two
+ *       ONLY inside its `!admission.willProceed` branch, which is the same
+ *       boolean the flag is minted from. They answer *"may this model RUN?"*,
+ *       say nothing about a result that already completed, and — the correction
+ *       that matters — NEITHER CAN EVER REACH THE MODE READER BELOW: the
+ *       structural check stands down first and lets `mayNameLeadingOption`
+ *       answer alone.
+ *
+ *   CLAIM-STRENGTH AXIS — `quantified_provisional`, `comparative_leader`
+ *       ⟺ `structurally_analysable === true`. These answer *"how strong a CLAIM
+ *       does this model license?"* — the real cap, and the only axis that binds
+ *       here.
+ *
+ * ⭐ SO SUPPRESSION FIRES IFF `mode === 'quantified_provisional'` — precisely
+ * the cell the admission itself refuses in writing. Every sentence that cell can
+ * ship (`SEMANTIC_REASON`, routed by `modeReason`) denies a leader: two say
+ * verbatim *"no option can be called the leader"*, the third that there is *"no
+ * comparison to draw a leader from"*. No other legitimate population is caught.
+ *
+ * ⚠⚠ THE STAND-DOWN ON `exploratory` IS A JUDGEMENT, NOT A MEASUREMENT — SAID
+ * PLAINLY SO THE NEXT READER DOES NOT INHERIT IT AS EVIDENCE. Every red control
+ * that forced this narrowing sat in the `'none'` cell; nothing measured
+ * `exploratory`. MEASURED 5 Sep 2026, whole required suite, mutating this
+ * predicate to stand down only on `'none'` so that `exploratory` BINDS:
+ * `4 failed / 37,465 passed` over 2,115 spec files, with ALL FOUR failures
+ * inside this change's own spec and NONE of them about `exploratory`. Zero
+ * pre-existing control pins it in either direction. The extension therefore
+ * rests on the structural derivation above (`exploratory` cannot reach the mode
+ * reader on any producer-minted payload) plus the judgement that the drift
+ * argument applies to it identically — not on evidence.
+ *
+ * The founder's cell is unaffected by the narrowing and that is the test of it:
+ * her admission said *"Figures CAN be shown as provisional"* — the run
+ * proceeded, `structurally_analysable` is `true`, and the cap is
+ * `quantified_provisional`. Still suppressed, exactly as intended.
+ *
+ * RANK COMPARISON, NEVER A STRING TEST — see {@link modePermitsAtLeast}.
+ *
+ * ⚠⚠ THIS RAIL DEVIATES FROM THE SCHEMA'S PUBLISHED CONSUMER RULE, AND THE
+ * DEVIATION IS RECORDED AT THE SCHEMA RATHER THAN LEFT FOR A UI AUTHOR TO
+ * DISCOVER. `schemas/analysis-ready.ts` instructs consumers to gate leader
+ * wording on `permitted_analysis_mode === 'comparative_leader'`. This predicate
+ * is strictly NARROWER — it suppresses only on `quantified_provisional` — so on
+ * the `structurally_analysable === false` half a schema-following UI hides its
+ * structured leader display while this prose rail stands down. That divergence
+ * is real, is not closed, and is written up in full on the `analysis_admission`
+ * field in `schemas/analysis-ready.ts`. Read it before widening either side.
+ */
+export function analysisReadyPermitsLeaderNaming(analysisReady: unknown): boolean {
+  const admission = (
+    analysisReady as { readonly analysis_admission?: unknown } | null | undefined
+  )?.analysis_admission;
+  if (admission === null || typeof admission !== 'object') return true;
+  // The run itself is refused ⇒ this field is answering the OTHER question. Read
+  // `structurally_analysable` rather than testing `mode !== 'none'`: a mode added
+  // below the floor for a RUNNABLE model must still cap the claim.
+  if ((admission as { readonly structurally_analysable?: unknown }).structurally_analysable !== true)
+    return true;
+  const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
+  if (mode === null) return true;
+  return modePermitsAtLeast(mode, 'comparative_leader');
 }
 
 /** Which field of the result a reason explains. One reason always names one field. */

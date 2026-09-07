@@ -351,10 +351,17 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
   type VerdictShape = 'permitted' | 'withheld' | 'unstamped';
   const VERDICT_SHAPES = ['permitted', 'withheld', 'unstamped'] as const;
 
+  /**
+   * `hash` is explicit (2026-09-06): the gate answers `same_inputs` on two
+   * EQUAL hashes, and this matrix's collect-time check requires `compared`.
+   * The prior and current envelopes differ in band and probabilities — a
+   * model that changed between the runs — so they carry distinct hashes.
+   */
   function runFact(
     env: V2RunResponseEnvelope,
     shape: VerdictShape,
     computedAt: string,
+    hash: string,
   ): HandlerFact {
     return {
       fact_type: 'run_analysis',
@@ -362,7 +369,7 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
       result: {
         enrichment: env,
         computed_at: computedAt,
-        graph_hash_at_run: 'h',
+        graph_hash_at_run: hash,
         ...(shape === 'unstamped'
           ? {}
           : {
@@ -432,8 +439,8 @@ describe('PRODUCER CONTROL — composeComparison (run-comparison gate)', () => {
               message: 'What changed?',
               // Newest-first, per the loader convention the pair selector relies on.
               priorFacts: [
-                runFact(currentEnv, current, '2026-06-07T00:00:00.000Z'),
-                runFact(priorEnv, prior, '2026-06-06T00:00:00.000Z'),
+                runFact(currentEnv, current, '2026-06-07T00:00:00.000Z', 'h-current'),
+                runFact(priorEnv, prior, '2026-06-06T00:00:00.000Z', 'h-prior'),
               ],
               freshness: 'fresh',
               mayNameLeadingOption: true,

@@ -304,6 +304,43 @@ export const AnalysisReadyPayload = z.object({
    *     post-run evidence they already read (`leader_claim.permitted`). The two
    *     answer different questions: this one asks whether the MODEL licenses the
    *     claim, that one whether THIS RESULT separated the arms;
+   *
+   *     ⚠⚠ CEE'S OWN PROSE RAIL DEVIATES FROM THE BULLET ABOVE, DELIBERATELY.
+   *     RECORDED HERE SO A CONSUMER READING THAT INSTRUCTION IS NOT MISLED ABOUT
+   *     WHAT CEE ACTUALLY DOES TO `assistant_text`.
+   *     `orchestrator-v5/compose/leading-option-wire-enforcement.ts` and its
+   *     mirrored egress alarm suppress CEE-authored leader wording only when
+   *     `structurally_analysable === true` AND the mode is below
+   *     `comparative_leader` — which, given the producer, means ONLY on
+   *     `quantified_provisional`. `permitted_analysis_mode` and
+   *     `structurally_analysable` come from one writer off one `willProceed`, so
+   *     `{none, exploratory}` occur only with `structurally_analysable === false`
+   *     and `{quantified_provisional, comparative_leader}` only with `true`.
+   *
+   *     CONSEQUENCE, STATED PLAINLY. On the `{none, exploratory}` population a
+   *     schema-following UI suppresses its STRUCTURED leader display while CEE's
+   *     PROSE may still name a leader — structured says no, prose says yes. That
+   *     is the same shape the prose rail was added to close on
+   *     `quantified_provisional`, on a narrower population.
+   *
+   *     WHICH IS AUTHORITATIVE. This bullet stays authoritative for STRUCTURED
+   *     consumers: keep gating on `comparative_leader`. A structured display you
+   *     decline to render costs nothing false, and nothing here asks a UI to
+   *     loosen. CEE's narrower predicate is authoritative for the PROSE CEE
+   *     AUTHORS, and only there. The reason is that readiness is recomputed every
+   *     turn, so a post-analysis explain turn whose graph has since drifted reads
+   *     `none` while the completed result it is discussing is legitimate — and
+   *     prose, unlike a structured field, is written once and cannot be un-written
+   *     by a consumer. Suppressing there would silence leader text across the
+   *     entire post-analysis population, which CEE records as the WORSE defect.
+   *
+   *     ⚠ OPEN, NOT CLOSED, AND UNWITNESSED. The divergence has not been observed
+   *     on the wire in either direction. Do NOT close it by widening CEE to match
+   *     this bullet — that is exactly the blanket suppression above. Closing it
+   *     properly means deciding whether a STRUCTURED surface should also stand
+   *     down on a refused-run turn that is discussing an already-completed
+   *     result. Until that is decided, both behaviours are as described here;
+   *     (CEE PR #1355, 5 Sep 2026);
    *   · gate any claim about a PROPORTION OF SCENARIOS MEETING THE GOAL on
    *     `semantic_signals.goal_target_stated` as a THIRD conjunct — a success
    *     rate against a bar nobody set is a claim about Olumi's own bar;

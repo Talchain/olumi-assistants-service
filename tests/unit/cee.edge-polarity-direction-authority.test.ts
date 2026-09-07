@@ -1,6 +1,26 @@
 /**
- * EDGE POLARITY — WHICH FIELD IS AUTHORITATIVE WHEN `strength_mean` AND
- * `effect_direction` DISAGREE?
+ * EDGE POLARITY, PART 1 (Q_B) — WHICH FIELD IS AUTHORITATIVE WHEN AN **UNSIGNED**
+ * `strength_mean` (mean > 0) AND `effect_direction` DISAGREE?
+ *
+ * ⚠⚠ SCOPE NARROWED 5 Sep 2026, AND THIS IS THE LOAD-BEARING SENTENCE. This
+ * file was written as though there were ONE question. There are two, and they
+ * have DIFFERENT answers:
+ *
+ *   Q_B (mean > 0, THIS FILE)  the magnitude is an unsigned |mean| and carries
+ *       no polarity of its own → the LABEL is the only signal and is
+ *       authoritative. Everything below is correct, and unchanged, for Q_B.
+ *
+ *   Q_A (mean < 0, `cee.edge-direction-derives-from-mean-sign.test.ts`)
+ *       the magnitude carries its OWN sign, so it is self-describing → the MEAN
+ *       is authoritative and the LABEL is corrected. Applying Q_B's answer here
+ *       rewrote -0.53 → +0.53 and inverted the polarity of the only field the
+ *       compute engine reads: ISL's `EdgeV2` sets `extra: "ignore"` and never
+ *       sees `effect_direction` at all.
+ *
+ * Point (d) below — "direction-authoritative is LOSS-FREE" — is true for Q_B
+ * and FALSE for Q_A, and that is exactly where this file's reasoning
+ * over-reached. The measured evidence in it is untouched: all 25 observed
+ * disagreements were Q_B, which is why Q_A went unnoticed.
  *
  * Three passes in CEE answer that one question, and until this change they gave
  * TWO different answers:
@@ -93,7 +113,7 @@ function underTest(graph: GraphT) {
   return e as any;
 }
 
-describe('edge polarity: `effect_direction` is authoritative over `sign(strength_mean)`', () => {
+describe('edge polarity Q_B: `effect_direction` is authoritative over an UNSIGNED `strength_mean`', () => {
   // ── The measured class: unsigned magnitude + stated negative direction ──────
   describe('a stated NEGATIVE direction survives reconciliation', () => {
     it('keeps direction negative and moves the SIGN onto the magnitude', () => {
@@ -121,7 +141,14 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
 
     // OPPOSITE-DIRECTION TWIN. A fix that only rescued the measured class would
     // pass the case above and fail here.
-    it('keeps direction positive and moves the SIGN onto the magnitude', () => {
+    //
+    // ⚠ REVERSED 5 Sep 2026. This case is Q_A, not Q_B: the magnitude carries
+    // its OWN sign, so it is self-describing and the label is the field that
+    // moves. It previously asserted `strength_mean` becoming +0.5, which
+    // inverted the polarity of the only field the engine reads (ISL's `EdgeV2`
+    // sets `extra: "ignore"` and never sees `effect_direction`). The full Q_A
+    // pins live in `cee.edge-direction-derives-from-mean-sign.test.ts`.
+    it('corrects the LABEL from a signed negative magnitude, keeping the magnitude', () => {
       const graph = graphWithEdge({
         from: 'fac_driver', to: 'out_result',
         strength_mean: -0.5, strength_std: 0.12, belief_exists: 0.8,
@@ -131,16 +158,16 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
       const result = reconcileStructuralTruth(graph);
       const edge = underTest(graph);
 
-      expect(edge.effect_direction).toBe('positive');
-      expect(edge.strength_mean).toBe(0.5);
+      expect(edge.strength_mean, 'the engine-visible field survives untouched').toBe(-0.5);
+      expect(edge.effect_direction).toBe('negative');
 
       const mutation = result.mutations.find(
-        (m) => m.code === 'SIGN_CORRECTED' && m.edge_id === 'fac_driver::out_result',
+        (m) => m.code === 'DIRECTION_CORRECTED' && m.edge_id === 'fac_driver::out_result',
       );
       expect(mutation).toBeDefined();
-      expect(mutation!.field).toBe('strength_mean');
-      expect(mutation!.before).toBe(-0.5);
-      expect(mutation!.after).toBe(0.5);
+      expect(mutation!.field).toBe('effect_direction');
+      expect(mutation!.before).toBe('positive');
+      expect(mutation!.after).toBe('negative');
     });
   });
 
@@ -192,7 +219,7 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
       }
     }
 
-    it.each(cases)('|mean| is preserved and polarity is the stated one (mean=$mean, direction=$direction)', ({ mean, direction }) => {
+    it.each(cases)('|mean| is preserved and the authoritative field survives verbatim (mean=$mean, direction=$direction)', ({ mean, direction }) => {
       const graph = graphWithEdge({
         from: 'fac_driver', to: 'out_result',
         strength_mean: mean, strength_std: 0.15, belief_exists: 0.8,
@@ -202,12 +229,24 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
       reconcileStructuralTruth(graph);
       const edge = underTest(graph);
 
-      // Polarity: whatever the producer STATED, verbatim.
-      expect(edge.effect_direction).toBe(direction);
-      // Magnitude: never destroyed, only signed.
+      // Magnitude: never destroyed, only ever signed.
       expect(Math.abs(edge.strength_mean)).toBeCloseTo(Math.abs(mean), 10);
       // The two fields agree on exit — the property every downstream pass assumes.
-      expect(edge.strength_mean > 0).toBe(direction === 'positive');
+      expect(edge.strength_mean > 0).toBe(edge.effect_direction === 'positive');
+
+      // ⭐ And the field that is AUTHORITATIVE FOR THIS INPUT CLASS survives
+      // verbatim. Which field that is depends on whether the magnitude carries
+      // its own sign — the one invariant cannot be stated class-blind, and
+      // stating it class-blind is precisely what let Q_A ship inverted.
+      if (mean < 0) {
+        // Q_A — a negative magnitude is self-describing, and is the only field
+        // ISL reads. It must come out bit-identical.
+        expect(edge.strength_mean, 'Q_A: the signed magnitude is authoritative').toBe(mean);
+      } else {
+        // Q_B — an unsigned magnitude carries no polarity, so the producer's
+        // stated label is the only signal and survives verbatim.
+        expect(edge.effect_direction, 'Q_B: the stated label is authoritative').toBe(direction);
+      }
     });
 
     it('is idempotent — the module\'s own declared invariant', () => {
@@ -248,7 +287,7 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
   });
 
   // ── What the user actually sees, through the REAL stage order ────────────
-  describe('the polarity a user sees is the polarity the producer stated', () => {
+  describe('the polarity a user sees is the one the AUTHORITATIVE field carried', () => {
     const disagreements: Array<{ mean: number; direction: 'positive' | 'negative' }> = [
       { mean: 0.7, direction: 'negative' },
       { mean: 0.35, direction: 'negative' },
@@ -256,7 +295,7 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
       { mean: -0.2, direction: 'positive' },
     ];
 
-    it.each(disagreements)('mean=$mean direction=$direction survives Stage 2 → Stage 6 intact', ({ mean, direction }) => {
+    it.each(disagreements)('mean=$mean direction=$direction is settled before the boundary, and the two fields agree there', ({ mean, direction }) => {
       const graph = graphWithEdge({
         from: 'fac_driver', to: 'out_result',
         strength_mean: mean, strength_std: 0.15, belief_exists: 0.8,
@@ -266,9 +305,21 @@ describe('edge polarity: `effect_direction` is authoritative over `sign(strength
       reconcileStructuralTruth(graph);                       // Stage 2 Normalise
       const v3 = transformEdgeToV3(underTest(graph) as any, 0, graph.nodes as any).edge; // Stage 6 Boundary
 
-      expect(v3.effect_direction).toBe(direction);
-      expect(v3.strength.mean > 0).toBe(direction === 'positive');
+      // Q_A (mean < 0): the signed magnitude is authoritative, so the polarity
+      // on screen is the SIGN's, and the label was corrected to match it.
+      // Q_B (mean > 0): the magnitude carries no polarity, so the polarity on
+      // screen is the producer's stated LABEL, and the sign was applied to match.
+      const expectedDirection = mean < 0 ? 'negative' : direction;
+
+      expect(v3.effect_direction).toBe(expectedDirection);
+      expect(v3.strength.mean > 0, 'the two fields must agree at the boundary').toBe(
+        v3.effect_direction === 'positive',
+      );
       expect(Math.abs(v3.strength.mean)).toBeCloseTo(Math.abs(mean), 10);
+
+      if (mean < 0) {
+        expect(v3.strength.mean, 'Q_A: the engine-visible magnitude survives end to end').toBe(mean);
+      }
     });
 
     /**

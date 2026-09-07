@@ -292,18 +292,41 @@ describe("mechanism 4 — the prompt no longer permits leaving indistinguishable
     expect(prompt).toContain("leaving them as they are is not a safe");
   });
 
-  it("keeps the do-not-invent-a-number guard that the removed sentence carried", () => {
+  it("keeps the do-not-invent-a-difference guard that the removed sentence carried", () => {
     // ⭐ The removed permission also carried the anti-fabrication clause. Removing
     // one without keeping the other would trade a 500 for an invented number,
     // which is the worse failure. Bound by content, not by hash.
+    //
+    // ⚠ REBOUND, NOT WEAKENED. This guard used to be asserted through two
+    // strings that were withdrawn as part of the `sets_to` policy repair:
+    //   · "Use only levels the brief gives you the basis for" — v9's rule,
+    //     byte-identical to the clause `instruction.ts` withdrew at v10, and the
+    //     direct contradiction this prompt used to serve against the draft
+    //     instruction (`__tests__/sets-to-policy-agreement.test.ts`).
+    //   · "a number the user will read as their own" — v9's PREMISE, refuted at
+    //     `projector.ts:1712-1717`, which stamps an uncited magnitude
+    //     `cee_hypothesis` rather than presenting it as the user's.
+    // What was never in question is the HARM: a difference manufactured only to
+    // clear this check decides the ranking. That is what is asserted below, and
+    // its priority over the rejection is asserted with it.
     const records = recordsWithFactorGoalChain();
     const prompt = buildRecordsCompletionPrompt({
       brief: "b",
       records,
       ask: enumerateCompletionAsk(records, projectRecordsToGraph(records)),
     });
-    expect(prompt).toContain("Do not invent a number to tell them apart");
-    expect(prompt).toContain("number the user will read as their own");
-    expect(prompt).toContain("Use only levels the brief gives");
+    expect(prompt).toContain("What you must not do is manufacture a difference");
+    expect(prompt).toContain("the ranking is the user's to make");
+    expect(prompt).toContain("worse failure than the rejection");
+    // ⚠ THE DIRECTION, PINNED. The guard above must not be re-purchased by
+    // reinstating v9's brief-only restriction — that is the exact trade the
+    // repair undid, and an anti-fabrication assertion alone cannot see it
+    // (CLAUDE.md trap 22b: the opposite-direction twin).
+    expect(prompt).not.toContain("Use only levels the brief gives");
+    expect(prompt).not.toContain("only where the brief gives you the basis");
+    // POSITIVE CONTROL for both negatives: the probe can still find a string
+    // that IS present, so a `not.toContain` above is a discrimination rather
+    // than a dead assertion (trap 13).
+    expect(prompt).toContain("`sets_to`");
   });
 });

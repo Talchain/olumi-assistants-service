@@ -43,7 +43,11 @@ import type {
   OlumiResponse,
   FailureTypeLiteral,
 } from '@talchain/schemas/boundary';
-import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+import type {
+  HandlerFact,
+  RunAnalysisHandlerFact,
+  V5ActionType,
+} from '@talchain/schemas/orchestrator';
 
 import { emit, TelemetryEvents, log } from '../utils/telemetry.js';
 import {
@@ -52,6 +56,14 @@ import {
   composeToolCallResponse,
   type AnswerKind,
 } from './compose.js';
+// Ship the run fact the model-facing prose was built from. See the module
+// header for why this is scoped to the substantive prose branches, why it is
+// gated on the SAME freshness rule the prior-fact lifecycle path already uses,
+// and why it deliberately does not touch any leader-naming authority.
+import {
+  asRunAnalysisFact,
+  buildProseGroundingBlocks,
+} from './compose/prose-grounding-block.js';
 // ROADMAP 2.640 §3.4 — the gate-close remedy gesture (the advice gate's
 // deterministic "open the surface the blocker is fixed on").
 import {
@@ -111,6 +123,7 @@ import type { ComposeContext, SuggestedAction } from './compose/types.js';
 import {
   tryDeterministicValueUpdate,
   tryDeicticValueUpdate,
+  tryAnaphoricValueUpdate,
   tryCompoundValueUpdate,
   buildClarifyAssistantText,
   buildNonFactorKindRefusalText,
@@ -120,7 +133,12 @@ import {
   deriveOperator,
   EDIT_VERB_PATTERN as CALIBRATION_EDIT_VERB_PATTERN,
 } from './routing/deterministic-value-update.js';
-import type { CompoundUpdatePart } from './routing/deterministic-value-update.js';
+import type {
+  AnaphoricValueBinding,
+  CompoundUpdatePart,
+} from './routing/deterministic-value-update.js';
+import { resolveAnaphoricReferent } from './compose/edit-clarify-response.js';
+import { nodeIdFromRef, projectTurnReferentsFromWindow } from './context/turn-referents.js';
 import {
   resolveOutstandingAskClarifyRedirect,
   buildOutstandingAskChipMessage,
@@ -491,6 +509,7 @@ import {
   evaluateAnalysisElection,
   GATED_ANALYSIS_HANDLER_ID,
 } from './routing/analysis-election-gate.js';
+import { resolveRunAnalysisTargetEntity } from './routing/run-analysis-target.js';
 import { validateExplanationAnswer } from './routing/validator-explanation.js';
 import { EXPLANATION_HANDLER_IDS } from './routing/types.js';
 import {
@@ -1685,6 +1704,34 @@ export async function runTurnExecutor(
   // finalizeRun() surfaces; `routingFreshness` is internal-only.
   let routingFreshness: FreshnessDerivation | null = null;
   let promptAnalysisFreshness: FreshnessDerivation | null = null;
+  /**
+   * THE RUN FACT THE MODEL-FACING PROSE WAS BUILT FROM, or null when the prose
+   * carried no projected analysis.
+   *
+   * WHY IT IS HOISTED HERE rather than mirrored into a new variable near the
+   * compose sites: this is the house pattern already stated for
+   * `functionalAnswerText` and `handlerFactsForCommit` below — a mirror needs
+   * every assignment site to remember to update it, which is the
+   * hand-maintained-mirror defect (CLAUDE.md trap 12). There is exactly ONE
+   * assignment, co-located with `promptAnalysisSummary`'s, under the SAME
+   * guard and over the SAME array.
+   *
+   * ⭐ WHY THE TWO CANNOT DIVERGE, which is the load-bearing claim of the change
+   * that consumes it. `promptAnalysisSummary` is
+   * `buildAnalysisFromPriorFacts(scenarioAnalysisFacts, …)`, whose FIRST act is
+   * `selectRunAnalysisFact(priorFacts)` (`context/analysis-fallback.ts`). This
+   * binding is `selectRunAnalysisFact(scenarioAnalysisFacts)` — the SAME pure
+   * selector over the SAME `readonly` array, assigned inside the SAME
+   * `if (durableFallback)` block. Same input, same function, same guard: the
+   * projection and the block are statements about one fact, not two.
+   *
+   * It is deliberately NOT derived from `context.prior_facts` (the bounded hot
+   * window) nor from the post-dispatch unified array. Those are the arrays the
+   * OTHER surfaces select over, and selecting a fact from one array to
+   * corroborate prose projected from another is precisely the two-derivations
+   * defect this comment exists to rule out.
+   */
+  let promptAnalysisSourceFact: RunAnalysisHandlerFact | null = null;
   let freshness: FreshnessDerivation | null = null;
   // V5 M5 (read-only / diagnostic): unified canonical analysis state, assembled
   // post-dispatch from the SAME fact set + post-handler graph hash that
@@ -2436,6 +2483,13 @@ export async function runTurnExecutor(
       readonly notice: string;
       readonly partsUncovered: number;
     } | null = null;
+    // Spec §4.3 — the disclosure sentence ("Taking that as X.") for a
+    // `set_factor_value` the anaphoric pre-route bound from a bare pronoun.
+    // Set at the dispatch site; prepended wherever THIS turn's reply is
+    // composed for that proposal (the receipt after STEP 3.5, the
+    // validator-recovered copy, the non-factor-kind refusal). Null on every
+    // other path, so those replies are byte-identical.
+    let anaphoricBindingDisclosure: string | null = null;
     // Resumed pending action, if the short-confirm pre-route synthesised
     // a tool_call. Cleared after the commit-success consumed-telemetry
     // emit. Null on every other path.
@@ -2562,6 +2616,12 @@ export async function runTurnExecutor(
     );
     if (durableFallback) {
       promptAnalysisSummary = durableFallback;
+      // Co-assigned with the projection above, from the SAME array through the
+      // SAME selector `buildAnalysisFromPriorFacts` itself uses. See the
+      // declaration for why this is one fact rather than two derivations.
+      promptAnalysisSourceFact = asRunAnalysisFact(
+        selectRunAnalysisFact(scenarioAnalysisFacts)?.fact ?? null,
+      );
       promptAnalysisStateSource = 'fallback';
       if (
         promptAnalysisFreshness.freshness === 'stale' ||
@@ -6387,6 +6447,98 @@ export async function runTurnExecutor(
         };
       }
 
+      // ⭐ SPEC §4.3 — the VALUE-BEARING ANAPHORIC EDIT ("Set it to 100000.",
+      // "Can you update it to 100000?", "100000" after the product asked
+      // "What value would you like it set to?"). Runs only when neither the
+      // label path nor the deictic path claimed the message — and a deictic
+      // CLARIFY is a claim: `tryDeicticValueUpdate` returns `matched: true`
+      // for "Set this factor to 100000." with nothing selected, promotes
+      // nothing into `deterministicValueUpdate`, and its branch below composes
+      // the reply, so the gate reads `deicticDispatch.matched` directly rather
+      // than inferring the claim from the promotion (the pronoun pattern's
+      // trailing `\b` after `this` admits "this factor" too, so without this
+      // conjunct the block would re-claim a message the deictic path already
+      // owns and record a `set_factor_value` row that never executes). Binds ONLY
+      // under the register precondition: the referent register is projected
+      // from the same newest-first conversation window
+      // (`CONTEXT_PACK_RECENT_TURNS_CAP` turns of `context.prior_turns`) the
+      // no-op recovery layer reads, and the §4.2 decision is the composer's
+      // `resolveAnaphoricReferent` — the same function
+      // `decideNoOpRecovery` calls for "Update it." — so exactly one eligible
+      // candidate at the top populated rank binds and anything else hands in
+      // `null`, which the pre-route refuses as `no_binding`. On no match
+      // `deterministicValueUpdate` is left exactly as the label path produced
+      // it, so the telemetry and every later branch are byte-identical to a
+      // build without this block.
+      if (
+        routingResult === undefined &&
+        !typedChipMutationUnroutedFallThrough &&
+        !deterministicValueUpdate.matched &&
+        !deicticDispatch.matched
+      ) {
+        const referentNodes = (graphStateForTurn?.nodes ?? []).flatMap((n) => {
+          const node = n as { id?: unknown; label?: unknown; kind?: unknown };
+          return typeof node.id === 'string' && typeof node.label === 'string'
+            ? [
+                {
+                  id: node.id,
+                  label: node.label,
+                  ...(typeof node.kind === 'string' ? { kind: node.kind } : {}),
+                },
+              ]
+            : [];
+        });
+        const anaphoricResolution = resolveAnaphoricReferent(
+          projectTurnReferentsFromWindow({
+            turnsNewestFirst: context.prior_turns.slice(0, CONTEXT_PACK_RECENT_TURNS_CAP),
+            nodes: referentNodes,
+          }),
+        );
+        const anaphoricBinding: AnaphoricValueBinding | null =
+          anaphoricResolution.outcome === 'bound'
+            ? {
+                id: nodeIdFromRef(anaphoricResolution.referent.ref),
+                label: anaphoricResolution.referent.label,
+                kind: anaphoricResolution.referent.kind,
+              }
+            : null;
+        const anaphoricDispatch = tryAnaphoricValueUpdate(
+          payload.message,
+          contextPack.parsed_quantities,
+          graphLookupForValidate,
+          anaphoricBinding,
+          // EVERY selected node id, deliberately not `selectedFactorIds`: a
+          // selection of any other node — factor or not — withdraws the claim.
+          options.selectedElements?.node_ids ?? [],
+          cqeSummary.degraded,
+        );
+        if (anaphoricDispatch.matched && anaphoricDispatch.dispatch === 'set_factor_value') {
+          // Promote into the label path's shape so the node-kind gate, the
+          // registry guard, the synthesised proposal and the telemetry below
+          // all run unchanged — the same promotion the deictic path makes.
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'set_factor_value',
+            candidate: anaphoricDispatch.candidate,
+            quantity: anaphoricDispatch.quantity,
+            ...(anaphoricDispatch.attribution
+              ? { attribution: anaphoricDispatch.attribution }
+              : {}),
+          };
+          anaphoricBindingDisclosure = anaphoricDispatch.disclosure;
+        } else if (anaphoricDispatch.matched) {
+          // The bare-quantity form ASKS, naming the bound factor as the sole
+          // candidate, through the ordinary clarify branch below (its chip
+          // carries the value; its pending names the factor by id).
+          deterministicValueUpdate = {
+            matched: true,
+            dispatch: 'clarify',
+            candidates: anaphoricDispatch.candidates,
+            quantity: anaphoricDispatch.quantity,
+          };
+        }
+      }
+
       // O-1 batch lifecycle — COMPOUND value update. When the single-edit path
       // bailed (its multi-quantity `ambiguous_quantity` guard fires on "Set A
       // to 0.6 and B to 0.8") AND the deictic path did not match, try the
@@ -6824,13 +6976,17 @@ export async function runTurnExecutor(
         downgrade_reason: downgradeReason,
         candidate_count: telemetryCandidates.length,
         top_score: telemetryCandidates[0]?.score ?? null,
-        // Per-candidate source tags ('substring' | 'dice') so routing
-        // diagnostics can distinguish exact-label hits from fuzzy hits
-        // without inferring from `score`.
+        // Per-candidate source tags — the `CandidateSource` union in
+        // `routing/deterministic-value-update.ts`, which is
+        // 'substring' | 'dice' | 'register' at this head — so routing
+        // diagnostics can tell exact-label hits from fuzzy hits, and both
+        // from a candidate the referent register bound with no label
+        // evidence at all, without inferring from `score`.
         candidate_sources: telemetryCandidates.map((c) => c.source),
         // Quantity-attribution tag — 'from_to' when the dispatch
         // originated from the row-7 from/to branch, null otherwise.
-        // Distinct from candidate.source (label-match concern); kept
+        // Distinct from candidate.source (how the candidate was selected —
+        // label evidence for 'substring'/'dice', none for 'register'); kept
         // separate so dashboards can filter rows independently.
         attribution:
           deterministicValueUpdate.matched &&
@@ -7025,6 +7181,10 @@ export async function runTurnExecutor(
             refusedCandidate.label,
             refusedKind,
             factorLabelsForRefusal,
+            // Spec §4.3 — an `option` the register bound for a bare pronoun
+            // reaches this gate; the refusal then opens with what "it" was
+            // read as. Null on the label path.
+            anaphoricBindingDisclosure,
           ),
           stage: context.stage,
           suggested_actions: refusalChips,
@@ -7314,14 +7474,14 @@ export async function runTurnExecutor(
         // valid addressable target". An OPTION is chosen (not the goal)
         // because the precondition tests for option presence, so picking one
         // makes the proposal and the precondition agree by construction.
-        const rerunTargetNode = (graphStateForTurn?.nodes ?? []).find(
-          (n): n is typeof n & { id: string } =>
-            typeof n === 'object' &&
-            n !== null &&
-            (n as { kind?: unknown }).kind === 'option' &&
-            typeof (n as { id?: unknown }).id === 'string' &&
-            ((n as { id: string }).id).length > 0,
-        );
+        //
+        // ⚠ THE RULE NOW LIVES IN `routing/run-analysis-target.ts` AND IS READ,
+        // NOT RE-IMPLEMENTED. It was inline here; the target-repair site at
+        // STEP 2 needs the identical answer, and two implementations of one
+        // rule in one file is this estate's signature defect (the two
+        // `generateGraphHash` twins). Its unit suite pins the entity shape
+        // this pre-route used to build, so the extraction cannot have moved it.
+        const rerunTargetEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
         const rerunValidationRegistry =
           options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY;
         const rerunHandlerRegistry = options.handlerRegistry ?? getDefaultRegistry();
@@ -7329,25 +7489,10 @@ export async function runTurnExecutor(
           rerunValidationRegistry.run_analysis !== undefined &&
           resolveHandler(rerunHandlerRegistry, 'run_analysis') !== null;
 
-        if (rerunTargetNode !== undefined && rerunHandlerExecutable) {
-          const rerunLabel = (rerunTargetNode as { label?: unknown }).label;
+        if (rerunTargetEntity !== null && rerunHandlerExecutable) {
           const rerunProposal: ProposalAction = {
             handler_id: 'run_analysis',
-            entity: {
-              id: rerunTargetNode.id,
-              kind: 'option',
-              ...(typeof rerunLabel === 'string' && rerunLabel.length > 0
-                ? { label: rerunLabel }
-                : {}),
-              resolution_status: 'resolved',
-              // `context_inference`, not `label_match`: the target was not
-              // named by the user and was not matched against their text — it
-              // was inferred from the scenario, which is exactly what this
-              // method means. Declaring `label_match` would invite the
-              // validator's Dice label-suspicion check to reason about a
-              // comparison that never happened.
-              resolution_method: 'context_inference',
-            },
+            entity: rerunTargetEntity,
             parameters: [],
             cited_context_fields: ['graph.options'],
           };
@@ -7386,7 +7531,7 @@ export async function runTurnExecutor(
             scenario_id: context.session_id,
             outcome: 'fell_through',
             reason:
-              rerunTargetNode === undefined ? 'no_option_target' : 'handler_unavailable',
+              rerunTargetEntity === null ? 'no_option_target' : 'handler_unavailable',
           });
         }
       }
@@ -8956,6 +9101,105 @@ export async function runTurnExecutor(
         validationRegistry,
       );
 
+      // ══════════════════════════════════════════════════════════════════
+      // ⭐⭐ RUN-ANALYSIS TARGET REPAIR — the founder-loop break
+      // ══════════════════════════════════════════════════════════════════
+      //
+      // THE DEFECT, and note that it is in the TARGET, not in any predicate.
+      // `looksLikeExplicitAnalysisRequest('Rerun.')` is already TRUE, so the
+      // election gate ADMITS the turn — that half works. What fails is what
+      // the admitted proposal CARRIES. `entity` is required on every proposal
+      // (`ProposalActionSchema`), while `run_analysis`'s target is
+      // semantically the whole scenario — the validation registry says so
+      // itself. So the router must fill a field that holds no information, it
+      // invents one, and on the measured builds it named the DECISION node
+      // about half the time. `toEntityKind('decision')` is `'node'`;
+      // `['option','goal']` rejects it; the user who asked for an analysis is
+      // answered with "I found <Decision>, but I can't make that change to
+      // it." Deployed staging, no-edit arm: `"Rerun."` failed 5 of 10 and
+      // `"Run analysis." — the product's own chip label — 1 of 2.
+      //
+      // ⭐ WHY THIS WIDENS NOTHING, which is the load-bearing argument.
+      // Same message, same build, the analysis ALREADY RUNS on the other side
+      // of that coin flip. The decision to run was taken upstream — by the
+      // election gate, which fails CLOSED and demotes anything that is not an
+      // explicit request, or by a deterministic pre-route which builds a valid
+      // target by construction. This repair makes an already-taken decision
+      // EXECUTABLE; it cannot make a run reachable that was not already
+      // reachable, and a kind mismatch that fires on a model's coin flip was
+      // never a safety mechanism. TWIN B in
+      // `__tests__/run-analysis-target-repair.integration.test.ts` pins the
+      // opposite direction: a demoted election gains nothing here, because
+      // demotion happens before validation and this line never sees it.
+      //
+      // ⚠ THE PREDICATE IS THE VALIDATOR'S OWN VERDICT, NOT A RE-DERIVATION.
+      // Whether this entity is acceptable is a question `validateToolCall`
+      // already answers — including its graph-authoritative kind repair, which
+      // is what turns a model-declared `'option'` on a decision id into the
+      // `'node'` that actually gets rejected. Asking "would this fail?" a
+      // second time here would be a second implementation of the acceptance
+      // rule and would drift from it (trap 21). So: let it fail, then repair
+      // and RE-VALIDATE, and take the result only if the second pass is
+      // genuinely valid.
+      //
+      // FALL-THROUGH CONTRACT. A substitution happens only when the graph
+      // offers an option target and the revalidated proposal is valid.
+      // Otherwise `validationResult` is left exactly as it was and today's
+      // refusal stands — substituting the goal instead would only trade
+      // ENTITY_KIND_MISMATCH for PRECONDITION_UNMET, a different refusal
+      // rather than a fix. The decline is emitted with a reason so "no option
+      // in the graph" and "the repair did not validate" are distinguishable in
+      // ops instead of both being silence.
+      if (
+        !validationResult.valid &&
+        validationResult.error.code === 'ENTITY_KIND_MISMATCH' &&
+        proposedHandlerId === 'run_analysis'
+      ) {
+        // The kind that was actually REJECTED — the graph-resolved one when
+        // the validator repaired it, else the model's own. Read off the error
+        // details the validator populated, never re-derived here.
+        const rejectedKind =
+          (validationResult.error.details as { resolved_kind?: unknown; proposed_kind?: unknown })
+            ?.resolved_kind ??
+          (validationResult.error.details as { proposed_kind?: unknown })?.proposed_kind ??
+          null;
+        const repairEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
+        const repairedValidation =
+          repairEntity === null
+            ? null
+            : validateToolCall(
+                { ...action, entity: repairEntity },
+                graphLookupForValidate,
+                validationRegistry,
+              );
+        if (repairEntity !== null && repairedValidation?.valid === true) {
+          action = { ...action, entity: repairEntity };
+          validationResult = repairedValidation;
+          // Keep the observability fields honest about what is now executing:
+          // the entity below this line is ours, inferred from the scenario.
+          resolutionStatus = repairEntity.resolution_status;
+          emit(TelemetryEvents.V5RunAnalysisTargetRepair, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: 'run_analysis',
+            outcome: 'repaired',
+            proposed_kind: rejectedKind,
+            repaired_kind: repairEntity.kind,
+            reason: null,
+          });
+        } else {
+          emit(TelemetryEvents.V5RunAnalysisTargetRepair, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            handler_id: 'run_analysis',
+            outcome: 'declined',
+            proposed_kind: rejectedKind,
+            repaired_kind: null,
+            reason: repairEntity === null ? 'no_option_target' : 'revalidation_failed',
+          });
+        }
+      }
+
       // CONSUME THE REPAIRED PROPOSAL. The validator returns a copy carrying
       // the graph's kind and label; until now every caller threw it away and
       // the handler received the unrepaired object. No wrong output resulted
@@ -9605,6 +9849,18 @@ export async function runTurnExecutor(
           recoveredResponse = recovered.response;
           recoveredTemplateId = recovered.template_id;
           recoveredChipType = recovered.chip_type;
+        }
+
+        // Spec §4.3 — when the rejected proposal was bound from a bare pronoun,
+        // the recovery copy may not name the node ("This factor uses £; the
+        // value provided is in %."), so the disclosure sentence leads it. Null
+        // on every other path, so the recovered copy is byte-identical.
+        if (anaphoricBindingDisclosure !== null) {
+          recoveredResponse = {
+            ...recoveredResponse,
+            assistant_text:
+              `${anaphoricBindingDisclosure} ${recoveredResponse.assistant_text}`.trim(),
+          };
         }
 
         // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The recoverable-
@@ -10321,6 +10577,16 @@ export async function runTurnExecutor(
               handlerEmittedMutatedGraph = true;
             }
           }
+        }
+
+        // Spec §4.3 — a receipt for a pronoun the register bound says what
+        // "it" was read as, in its own sentence, BEFORE the receipt. Null on
+        // every other path, so ordinary value updates are byte-identical.
+        if (anaphoricBindingDisclosure !== null && proposedHandlerId === 'set_factor_value') {
+          handlerOutcome = {
+            ...handlerOutcome,
+            assistant_text: `${anaphoricBindingDisclosure} ${handlerOutcome.assistant_text}`.trim(),
+          };
         }
 
         // Part-accounting conservation law (defence in depth) — the
@@ -11728,6 +11994,21 @@ export async function runTurnExecutor(
         stage: context.stage,
         suggested_actions: coachGuarded.suggested_actions,
         answerKind: 'substantive',
+        // Ground the coach's own figures. This prose was rendered from
+        // `display_analysis`, and the served ROUTING prompt tells the model to
+        // QUOTE that pre-computed `win_probability` rather than derive one:
+        // `Prompts/canonical/routing.txt:48` (hash-verified export of the PMS
+        // `orchestrator` task, served_version 121) fixes the wording, and
+        // `:118`/`:21` fix the no-arithmetic rail — so the turn is already
+        // making a quantified claim and shipped nothing a consumer could check
+        // it against. (NOT `src/prompts/defaults.ts`, whose win_probability
+        // quotes are all inside `DECISION_REVIEW_PROMPT` — a different
+        // channel.) Empty on every turn that projected no analysis and on every
+        // non-fresh turn (see the helper's header).
+        blocks: buildProseGroundingBlocks({
+          sourceFact: promptAnalysisSourceFact,
+          freshness: promptAnalysisFreshness,
+        }),
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The coach ANSWER prose
@@ -11899,6 +12180,13 @@ export async function runTurnExecutor(
         stage: context.stage,
         suggested_actions: converseGuarded.suggested_actions,
         answerKind: 'substantive',
+        // Same rationale as the coach branch above — one helper, one rule, so
+        // the two substantive branches cannot drift apart about when a prose
+        // turn grounds its own numbers.
+        blocks: buildProseGroundingBlocks({
+          sourceFact: promptAnalysisSourceFact,
+          freshness: promptAnalysisFreshness,
+        }),
       });
       stagesCompleted.push('compose');
       // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION. The converse / text_only

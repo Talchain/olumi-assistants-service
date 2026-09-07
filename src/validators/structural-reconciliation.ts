@@ -743,12 +743,61 @@ function constraintDirectionHeuristicRule(
 // =============================================================================
 
 /**
- * ⭐⭐ THE ONE QUESTION THIS RULE ANSWERS: when `strength_mean` and
- * `effect_direction` disagree, WHICH FIELD IS AUTHORITATIVE?
+ * ⭐⭐ THIS RULE ANSWERS **TWO** QUESTIONS, AND THEY HAVE DIFFERENT ANSWERS.
+ * Until 5 Sep 2026 it asked only one and applied that answer to both, which
+ * made it correct on one input class and a silent polarity inverter on the
+ * other. They are named apart here rather than reconciled into one predicate,
+ * because they are genuinely different questions (CLAUDE.md trap 21).
  *
- * The answer is `effect_direction`, and this rule moves the SIGN onto the
- * MAGNITUDE. It used to do the opposite — overwrite `effect_direction` from
- * `sign(strength_mean)` — and that was a silent polarity inverter.
+ *   Q_B — `magnitudeCarriesNoSignInformation` (mean > 0)
+ *     "The magnitude is an unsigned |mean| and the label contradicts it —
+ *      what is this edge's polarity?"
+ *     → the LABEL is the only polarity signal, so it informs the mean.
+ *       `mean := -|mean|`. UNCHANGED behaviour; see the measured evidence below.
+ *
+ *   Q_A — `magnitudeCarriesItsOwnSign` (mean < 0)
+ *     "The magnitude carries its OWN sign and the label contradicts it —
+ *      what is this edge's polarity?"
+ *     → the MEAN is authoritative, so the LABEL is corrected.
+ *       `effect_direction := "negative"`. The mean is NEVER touched.
+ *
+ * The two predicates are DISJOINT by construction (`mean < 0` XOR `mean > 0`,
+ * with zero excluded), so this is two named predicates, not one widened one.
+ * A widened/symmetrised predicate is exactly the trap here — see the guard note
+ * at the foot of this comment.
+ *
+ * ⭐ WHY THE MEAN IS AUTHORITATIVE ON Q_A — derived at the bytes, and it is the
+ * fact that refutes point (d) below:
+ *
+ *   ISL — the actual compute engine — NEVER SEES `effect_direction`. `EdgeV2`
+ *   does not declare it and sets `extra: "ignore"`
+ *   (`Inference-Service-Layer/src/models/robustness_v2.py:415-419` @ 7781ca4f),
+ *   so the field is silently dropped at the engine boundary. `current_mean` is
+ *   `edge.strength.mean` verbatim (`robustness_analyzer_v2.py:6260-6262`), with
+ *   no negation or direction lookup anywhere in that repo.
+ *
+ *   So on Q_A, rewriting -0.53 → +0.53 destroys the polarity of the ONLY field
+ *   that computes, and ships a genuinely inverted sign to an engine that is
+ *   structurally incapable of detecting it. Point (d)'s "LOSS-FREE" claim holds
+ *   only where the mean's sign carried no information; on Q_A it is false and
+ *   inverted. A field the engine ignores cannot be the authority for what the
+ *   engine calculates.
+ *
+ *   The producer agrees: the live draft grammar instructs the model
+ *   "effect_direction MUST match sign of strength.mean" (`prompts/defaults-v15.ts:425`)
+ *   and the edit-graph prompt states the derivation as a rule — "mean > 0 ->
+ *   effect_direction: 'positive' / mean < 0 -> 'negative'"
+ *   (`prompts/edit-graph-v6.ts:181-182`). The canonical schema doc records
+ *   `effect_direction` as "(encoded in sign)", applying the label only to the
+ *   legacy UNSIGNED `weight` and only AFTER signed `strength.mean`
+ *   (`Olumi_Decision_Model_Schema_v2_6.md` §C.2). The label is a projection of
+ *   the sign; a Q_A disagreement is stochastic non-compliance with an explicit
+ *   instruction, not a second opinion.
+ *
+ * The rest of this comment is the ORIGINAL Q_B rationale and its measured
+ * evidence, preserved unedited because it is the record of a real measurement
+ * and it remains correct FOR Q_B. Only its implicit claim to cover Q_A too is
+ * withdrawn.
  *
  * ⚠ THREE PASSES IN CEE ANSWER THIS ONE QUESTION, AND UNTIL THIS CHANGE THEY
  * GAVE TWO DIFFERENT ANSWERS (the estate's signature defect, CLAUDE.md trap 21):
@@ -791,20 +840,59 @@ function constraintDirectionHeuristicRule(
  *       remedies for one disagreement, the one that discards information is the
  *       wrong one.
  *
- * ⚠ THE OPPOSITE-DIRECTION HARM, and where it is closed. This rule now trusts
- * the direction, so a genuine positive relationship carrying an accidentally
- * negated magnitude keeps its POSITIVE direction and loses the stray minus
- * sign. That class measured ZERO across the corpora above, but zero-observed is
- * not zero-possible, so both directions are pinned together in
- * `tests/unit/cee.edge-polarity-direction-authority.test.ts`. The one in-tree
- * producer that could create a disagreement AFTER this rule —
+ * ⚠ THE OPPOSITE-DIRECTION HARM — this is Q_A, and it is now CLOSED BY
+ * CORRECTING THE LABEL rather than by trusting it. When this comment was
+ * written the rule trusted the direction on both classes, so a genuine negative
+ * relationship carrying a correctly-signed negative magnitude had that sign
+ * stripped. That class measured ZERO across the corpora above, but zero-observed
+ * is not zero-possible, and a live witness subsequently found three at once.
+ * Both classes are pinned together, Q_B in
+ * `tests/unit/cee.edge-polarity-direction-authority.test.ts` and Q_A in
+ * `tests/unit/cee.edge-direction-derives-from-mean-sign.test.ts`.
+ *
+ * The one in-tree producer that could create a disagreement AFTER this rule —
  * `normaliseRiskCoefficients` (`cee/transforms/risk-normalisation.ts`), which
  * runs immediately after in Stage 2 and again reaches Late STRP in Stage 4 —
- * now stamps `effect_direction: "negative"` alongside the mean it negates, so
- * Late STRP has nothing to reconcile and cannot undo it.
+ * stamps `effect_direction: "negative"` alongside the mean it negates, so Late
+ * STRP has nothing to reconcile and cannot undo it. Under Q_A that edge would
+ * now be self-consistent anyway, but the stamp is kept: it makes the agreement
+ * explicit rather than incidental.
  *
- * A zero magnitude carries no polarity and is left alone, as before.
+ * ⚠⚠ DO NOT SYMMETRISE THE WIRE-BOUNDARY GUARDS. `transformEdgeToV3`
+ * (`cee/transforms/schema-v3.ts:834`) and PLoT's `graph-normaliser.ts:708` both
+ * handle only `direction === "negative" && mean > 0` — i.e. Q_B alone. That
+ * asymmetry is not an oversight: it is presently the only thing protecting a
+ * correctly-signed negative mean at the boundary. Making them symmetric would
+ * let a stale "positive" label rewrite -0.53 → +0.53 downstream of this rule
+ * and re-open the exact inversion Q_A closes.
+ *
+ * A zero magnitude carries no polarity and is left alone, as before — it
+ * belongs to neither class.
  */
+
+/**
+ * Q_A predicate. "Does this edge's magnitude carry its own sign?"
+ *
+ * A NEGATIVE mean is positive evidence that the producer used the signed
+ * convention, because an unsigned magnitude cannot be negative. That makes the
+ * mean self-describing, and the label a derivable projection of it.
+ */
+function magnitudeCarriesItsOwnSign(strengthMean: number): boolean {
+  return strengthMean < 0;
+}
+
+/**
+ * Q_B predicate. "Is the label the only polarity signal available?"
+ *
+ * A POSITIVE mean is ambiguous — it is equally consistent with a signed
+ * positive coefficient and with an unsigned |mean| whose polarity lives only in
+ * the label. Where the magnitude cannot speak for itself the label must, so the
+ * label informs the mean. This is the original, measured behaviour.
+ */
+function magnitudeCarriesNoSignInformation(strengthMean: number): boolean {
+  return strengthMean > 0;
+}
+
 function signReconciliationRule(graph: GraphT): STRPMutation[] {
   const mutations: STRPMutation[] = [];
 
@@ -817,21 +905,45 @@ function signReconciliationRule(graph: GraphT): STRPMutation[] {
       const signIsPositive = edge.strength_mean > 0;
       const directionIsPositive = edge.effect_direction === "positive";
 
-      if (signIsPositive !== directionIsPositive) {
+      if (signIsPositive === directionIsPositive) continue;
+
+      const edgeId = `${edge.from}::${edge.to}`;
+
+      if (magnitudeCarriesItsOwnSign(edge.strength_mean)) {
+        // Q_A — the mean is authoritative. Correct the LABEL, never the mean.
+        const before = edge.effect_direction;
+        edge.effect_direction = "negative";
+
+        mutations.push({
+          rule: "sign_reconciliation",
+          // Deliberately NOT `SIGN_CORRECTED`: that code maps to the
+          // user-facing `risk_coefficient_corrected`
+          // (`cee/transforms/analysis-ready.ts:1512`), and nothing about the
+          // coefficient changed here. Claiming otherwise would be a false
+          // disclosure. `DIRECTION_CORRECTED` is unmapped and therefore
+          // internal-only, by design.
+          code: "DIRECTION_CORRECTED",
+          edge_id: edgeId,
+          field: "effect_direction",
+          before,
+          after: "negative",
+          reason: `effect_direction "${before}" contradicts the sign of strength_mean (${edge.strength_mean}); the magnitude carries its own sign and is the only field the engine reads, so the label is corrected to match it`,
+          severity: "warn",
+        });
+      } else if (magnitudeCarriesNoSignInformation(edge.strength_mean)) {
+        // Q_B — the label is the only signal. Move the SIGN onto the magnitude.
         const before = edge.strength_mean;
-        const after = directionIsPositive
-          ? Math.abs(before)
-          : -Math.abs(before);
+        const after = -Math.abs(before);
         edge.strength_mean = after;
 
         mutations.push({
           rule: "sign_reconciliation",
           code: "SIGN_CORRECTED",
-          edge_id: `${edge.from}::${edge.to}`,
+          edge_id: edgeId,
           field: "strength_mean",
           before,
           after,
-          reason: `strength_mean sign (${before}) contradicts the stated effect_direction "${edge.effect_direction}"; the direction is authoritative, so the magnitude takes its sign`,
+          reason: `strength_mean sign (${before}) contradicts the stated effect_direction "${edge.effect_direction}"; an unsigned magnitude carries no polarity of its own, so the direction is authoritative and the magnitude takes its sign`,
           severity: "warn",
         });
       }
@@ -853,7 +965,11 @@ function signReconciliationRule(graph: GraphT): STRPMutation[] {
  * 2. Enum validation — correct invalid enum values to safe defaults
  * 3. Constraint target — remap/drop mismatched constraint node_ids (when provided)
  * 3b. Constraint direction heuristic — warn when operator direction looks wrong for factor_type (info, never auto-corrects)
- * 4. Sign reconciliation — align effect_direction with strength_mean sign
+ * 4. Sign reconciliation — reconcile effect_direction and strength_mean. Which
+ *    field moves depends on the input class: a signed (negative) magnitude is
+ *    authoritative and the LABEL is corrected; an unsigned (positive) magnitude
+ *    carries no polarity, so the LABEL is authoritative and the magnitude takes
+ *    its sign. See the rule's own comment for why these are two questions.
  * 5. Controllable data completeness — fill missing factor_type/uncertainty_drivers (when fillControllableData)
  *
  * Mutates the graph in place and returns mutation records for observability.

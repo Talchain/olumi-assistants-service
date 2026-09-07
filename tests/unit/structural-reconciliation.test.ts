@@ -530,17 +530,31 @@ describe('reconcileStructuralTruth', () => {
   // Rule 4: Sign Reconciliation
   // =============================================================================
 
-  // ⚠ REVERSED, DELIBERATELY. These two cases previously asserted that Rule 4
-  // overwrites `effect_direction` from `sign(strength_mean)`. That was the
-  // silent polarity inverter: the drafting model's stated NEGATIVE
-  // relationships were being turned positive, measured on 19 edges of a
-  // governed evaluator baseline. `effect_direction` is now the authority and
-  // the SIGN moves onto the magnitude — see the header comment on
-  // `signReconciliationRule` for the derivation, and
-  // `tests/unit/cee.edge-polarity-direction-authority.test.ts` for the full
-  // opposite-direction pairs and the corpus replay.
+  // ⚠ RULE 4 ANSWERS TWO QUESTIONS AND THEY HAVE DIFFERENT ANSWERS. Which
+  // field moves depends on whether the magnitude carries its own sign:
+  //
+  //   Q_B  mean > 0 (an unsigned |mean|) + a contradicting label
+  //        → the label is the only polarity signal, so the MAGNITUDE takes its
+  //          sign. `SIGN_CORRECTED`. This is the original, measured behaviour:
+  //          the drafting model's stated NEGATIVE relationships were being
+  //          turned positive, on 19 edges of a governed evaluator baseline.
+  //
+  //   Q_A  mean < 0 (a signed magnitude) + a contradicting 'positive' label
+  //        → the mean is self-describing and is the ONLY field ISL reads
+  //          (`EdgeV2` sets `extra: "ignore"`), so the LABEL is corrected.
+  //          `DIRECTION_CORRECTED`. This case previously asserted the reverse,
+  //          which inverted the polarity of the computed field.
+  //
+  // See the header comment on `signReconciliationRule` for the derivation,
+  // `tests/unit/cee.edge-polarity-direction-authority.test.ts` for Q_B's
+  // opposite-direction pairs and corpus replay, and
+  // `tests/unit/cee.edge-direction-derives-from-mean-sign.test.ts` for Q_A.
   describe('Rule 4: Sign Reconciliation', () => {
-    it('signs strength_mean from a stated POSITIVE direction, keeping the direction', () => {
+    // Q_A: a SIGNED (negative) magnitude is self-describing, so the LABEL is the
+    // field that moves. This case previously asserted the opposite — the mean
+    // being rewritten to +0.5 — which inverted the polarity of the only field
+    // ISL reads. See `cee.edge-direction-derives-from-mean-sign.test.ts`.
+    it('corrects a stated POSITIVE direction from a signed NEGATIVE magnitude, keeping the magnitude', () => {
       const graph = createValidGraph();
       // Add edge with negative strength but positive direction
       graph.edges.push({
@@ -550,15 +564,22 @@ describe('reconcileStructuralTruth', () => {
 
       const result = reconcileStructuralTruth(graph);
 
-      const fixedEdge = graph.edges.find(e => e.from === 'fac_price' && e.to === 'outcome_1' && e.effect_direction === 'positive' && e.strength_mean !== 1);
-      expect(fixedEdge!.effect_direction).toBe('positive');
-      expect(fixedEdge!.strength_mean).toBe(0.5);
-      const mutation = result.mutations.find(m => m.code === 'SIGN_CORRECTED');
+      // Bound by identity (from/to + the authored magnitude), never by the
+      // direction value this case exists to change (CLAUDE.md trap 19).
+      const fixedEdge = graph.edges.find(e => e.from === 'fac_price' && e.to === 'outcome_1' && e.strength_mean === -0.5);
+      expect(fixedEdge, 'the edge under test must exist, or every assertion below is vacuous').toBeDefined();
+      expect(fixedEdge!.strength_mean).toBe(-0.5);
+      expect(fixedEdge!.effect_direction).toBe('negative');
+      const mutation = result.mutations.find(m => m.code === 'DIRECTION_CORRECTED');
       expect(mutation).toBeDefined();
-      expect(mutation!.field).toBe('strength_mean');
-      expect(mutation!.before).toBe(-0.5);
-      expect(mutation!.after).toBe(0.5);
+      expect(mutation!.field).toBe('effect_direction');
+      expect(mutation!.before).toBe('positive');
+      expect(mutation!.after).toBe('negative');
       expect(mutation!.severity).toBe('warn');
+      expect(
+        result.mutations.filter(m => m.code === 'SIGN_CORRECTED'),
+        'the coefficient was not corrected, so no coefficient mutation may be claimed',
+      ).toHaveLength(0);
     });
 
     it('signs strength_mean from a stated NEGATIVE direction, keeping the direction', () => {
@@ -627,7 +648,10 @@ describe('reconcileStructuralTruth', () => {
       // Should have mutations from Rule 1, Rule 2, and Rule 4
       expect(result.mutations.some(m => m.code === 'CATEGORY_OVERRIDE')).toBe(true);
       expect(result.mutations.some(m => m.code === 'ENUM_VALUE_CORRECTED')).toBe(true);
-      expect(result.mutations.some(m => m.code === 'SIGN_CORRECTED')).toBe(true);
+      // Rule 4 fired. The fixture is a Q_A input (signed negative magnitude +
+      // contradicting 'positive' label), so the label is what it corrects.
+      expect(result.mutations.some(m => m.rule === 'sign_reconciliation')).toBe(true);
+      expect(result.mutations.some(m => m.code === 'DIRECTION_CORRECTED')).toBe(true);
       expect(result.mutations.length).toBeGreaterThanOrEqual(3);
     });
 
