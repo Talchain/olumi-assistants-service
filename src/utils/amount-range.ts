@@ -235,8 +235,9 @@ export const RANGE_LOWER_BOUND_DEFERRAL_SEPARATOR = "\\s*[-–—]\\s*";
  * through `extractFactors`: for a pair with **no currency symbol** no range
  * pattern could keep that promise — `currencyRange` REQUIRES `[£$€]`,
  * `genericRange` REQUIRES the literal word `between` — so nine strings in a
- * 32-string corpus lost every factor they had at base, and two of them were
- * CORRECT at base:
+ * 32-string corpus lost every factor they had at base, and two of them
+ * carried the right MAGNITUDE at base — the pair's lower bound published as a
+ * point, so the scale was right and the range was not:
  *
  *     "Budget of 80k-120k for the hire."  f4c8f501 → Budget 80,000 (0.90)
  *                                         8ba54157 → NOTHING

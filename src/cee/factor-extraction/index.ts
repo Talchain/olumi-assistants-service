@@ -345,8 +345,10 @@ const PATTERNS = {
   // 80k-120k" the point declined, no range pattern matched, and the figure the
   // user wrote reached no node at all. MEASURED at `8ba54157` against base
   // `f4c8f501`, 32-string corpus, currency-prefixed twins green in the same
-  // run: nine strings lost EVERY factor they had at base, two of which were
-  // correct there (`Budget=80,000`, `Revenue=2,000,000`).
+  // run: nine strings lost EVERY factor they had at base, two of which
+  // carried the right MAGNITUDE there (`Budget=80,000`, `Revenue=2,000,000` —
+  // each the pair's lower bound published as a point, so the scale was right
+  // and the range was not; the head deletes them outright).
   //
   // ⚠ THE REPAIR IS NOT TO NARROW THE GUARD BACK — that republishes **80** at
   // confidence 0.90 for "Budget of 80-120k", which is the 3 Sep defect in the
