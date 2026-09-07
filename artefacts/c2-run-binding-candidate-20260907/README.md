@@ -1,5 +1,7 @@
 # C2 run-binding integration candidate — 2026-09-07
 
+Historical bank receipt. Core subsequently granted source ownership; see [the applied implementation and current verification](IMPLEMENTATION.md). The unapplied status below describes the original bank only.
+
 Status: CODE EXISTS / TESTED in an isolated composition. UNAPPLIED to shared product source; no PR, push, merge, deployment, wire witness or journey witness.
 
 ## Exact identity and bank
