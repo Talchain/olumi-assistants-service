@@ -280,3 +280,91 @@ describe('ROADMAP 2.1051 — the ask reaches the user (executed through runStage
     }
   });
 });
+
+/**
+ * ⭐⭐ THE RESERVED ID NAMESPACE — the precondition the downstream consumer's
+ * trust rests on.
+ *
+ * `pickDirectionClarifications` (`orchestrator-v5/coaching/post-draft-narrative.ts`)
+ * identifies a producer-built limit question BY ID PREFIX and serves it on
+ * every turn, ready or not. That identification is sound only if nothing else
+ * can carry the prefix. This stage is what makes it sound, and these are the
+ * specs that say so — written against the PROPERTY ("only this stage's own
+ * mint occupies the namespace"), not against the shape of the squatter that
+ * happened to prompt them.
+ *
+ * The defect they close bit in BOTH directions on one line: the old
+ * `alreadyPresent` check treated an LLM item under the reserved id as
+ * satisfying the append, so unvetted copy inherited producer authority AND the
+ * producer's genuine card was silently discarded.
+ */
+describe('the direction-clarification id space is reserved to this stage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupMocks();
+  });
+
+  it('evicts an LLM item squatting the reserved id and serves the producer card instead', async () => {
+    const ctx = makeCtx({
+      coaching: {
+        summary: 'Existing summary',
+        strengthen_items: [
+          { id: 'direction_unresolved_1', label: 'Squatter label', detail: 'Squatter detail', action_type: 'add_option' },
+        ],
+        widening_log: { elements_added: [], elements_considered_but_excluded: [], brief_completeness: 'partial' },
+        bias_signals: [],
+      },
+      directionUnresolved: [unresolved('gross margin', '78%')],
+    });
+    await runStagePackage(ctx);
+
+    const reserved = cardsOn(ctx).filter((i) => String(i.id).startsWith('direction_unresolved'));
+    expect(reserved, 'exactly one item may hold the reserved id').toHaveLength(1);
+    // Bound by IDENTITY of the producer's own copy, not by "is not the squatter"
+    // — a value predicate a third item could also satisfy (trap 19).
+    expect(String(reserved[0].detail)).toContain('78%');
+    expect(String(reserved[0].label)).toContain('gross margin');
+    expect(reserved[0].action_type).toBe('add_constraint');
+    expect(cardsOn(ctx).map((i) => String(i.detail))).not.toContain('Squatter detail');
+  });
+
+  it('evicts a squatter even when this draft has NO unresolved bound to replace it with', async () => {
+    // The case the append could never cover, and the one that matters most: with
+    // nothing to displace it, a squatter would otherwise reach the narrative
+    // wearing producer authority on a turn where the producer said nothing.
+    const ctx = makeCtx({
+      coaching: {
+        summary: 'Existing summary',
+        strengthen_items: [
+          { id: 'direction_unresolved_2', label: 'Squatter label', detail: 'Squatter detail', action_type: 'add_option' },
+        ],
+        widening_log: { elements_added: [], elements_considered_but_excluded: [], brief_completeness: 'partial' },
+        bias_signals: [],
+      },
+      directionUnresolved: [],
+    });
+    await runStagePackage(ctx);
+    expect(cardsOn(ctx).filter((i) => String(i.id).startsWith('direction_unresolved'))).toEqual([]);
+  });
+
+  it('CONTRAST CONTROL: a non-reserved LLM item is untouched by the eviction', async () => {
+    // Without this the eviction could be satisfied by a stage that drops every
+    // LLM strengthen item — a different defect wearing the same green tick.
+    const ctx = makeCtx({
+      coaching: {
+        summary: 'Existing summary',
+        strengthen_items: [
+          { id: 'llm_item_1', label: 'Add an option', detail: 'Keep me', action_type: 'add_option' },
+          { id: 'direction_unresolved_1', label: 'Squatter label', detail: 'Squatter detail', action_type: 'add_option' },
+        ],
+        widening_log: { elements_added: [], elements_considered_but_excluded: [], brief_completeness: 'partial' },
+        bias_signals: [],
+      },
+      directionUnresolved: [],
+    });
+    await runStagePackage(ctx);
+    const ids = cardsOn(ctx).map((i) => String(i.id));
+    expect(ids, 'the ordinary item must survive').toContain('llm_item_1');
+    expect(ids.filter((i) => i.startsWith('direction_unresolved')), 'only the reserved id goes').toEqual([]);
+  });
+});

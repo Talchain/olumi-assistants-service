@@ -1256,7 +1256,31 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     expect(result.telemetry.additional_checks_surfaced).toBe(0);
   });
 
-  it('serves a producer-rendered direction clarification only when exact readiness is ready', () => {
+  /**
+   * ⭐⭐ REPLACES 'serves a producer-rendered direction clarification only when
+   * exact readiness is ready'.
+   *
+   * That spec pinned a policy whose own comment named its expiry condition:
+   * *"Until provenance is carried structurally, direction copy follows the same
+   * ready-only policy."* Provenance is now carried structurally —
+   * `runStagePackage` evicts every `direction_unresolved_*` item it did not mint
+   * (`cee/unified-pipeline/stages/__tests__/direction-gate-surfacing-executed.test.ts`,
+   * "the direction-clarification id space is reserved to this stage") — so the
+   * reason for the gate is gone.
+   *
+   * ⚠ AND THE GATE WAS CAUSING THE HARM IT WAS MEANT TO AVOID. Measured across
+   * 13 live draft turns on staging build `3427aea` (2026-09-07):
+   * `analysis_ready.status` was `ready` on 4 and not ready on 9; the limit
+   * question reached the user on 4 of 4 and 0 of 9. The user was told their
+   * stated limit had not landed exactly when their model was already in good
+   * shape, and told nothing when it was not.
+   *
+   * The two assertions below are a DISCRIMINATING PAIR, not one claim twice: the
+   * producer card must now cross a non-ready turn, and a freeform LLM item must
+   * still NOT — so a change that simply removed the readiness gate wholesale
+   * fails the second.
+   */
+  it('serves a producer-rendered direction clarification on a NON-ready turn, while freeform coaching stays gated', () => {
     const [directionCard] = renderDirectionClarifications([{
       metric_text: 'customer satisfaction',
       amount_text: '85%',
@@ -1276,13 +1300,19 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
 
     const nonReady = buildPostDraftNarrative({
       graph: baseGraph,
-      strengthenItems: [directionCard],
+      // The freeform item rides alongside the producer card, so ONE run decides
+      // both halves of the discrimination on the same input.
+      strengthenItems: [directionCard, { detail: actionCopy }],
       analysisReady: needsInputReadiness,
     });
-    expect(nonReady.text).not.toContain('Limit to confirm:');
-    expect(nonReady.text).not.toContain('85%');
+    expect(nonReady.text, 'the user must be told their limit did not land').toContain('Limit to confirm:');
+    expect(nonReady.text).toContain('You mentioned 85% for customer satisfaction.');
+    expect(nonReady.telemetry.direction_clarifications_surfaced).toBe(1);
+    expect(
+      nonReady.text.toLowerCase(),
+      'CONTRAST: freeform LLM coaching is still excluded on a non-ready turn',
+    ).not.toContain(actionCopy);
     expect(nonReady.text.split('\n\n').at(-1)).toBe(typedRecovery);
-    expect(nonReady.telemetry.direction_clarifications_surfaced).toBe(0);
   });
 });
 

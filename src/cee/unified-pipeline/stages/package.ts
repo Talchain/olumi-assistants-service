@@ -47,7 +47,14 @@ import { narrowCoachingForResponse } from "../../../orchestrator/draft-coaching.
 import { enforceCoachingContract } from "../../../adapters/llm/coaching-contract-conformance.js";
 import { sanitiseCoachingProse } from "../../../orchestrator-v5/compose/output-safety.js";
 import { scanCoachingForIdLeakage } from "../../validation/coaching-safety-scanner.js";
-import { renderDirectionClarifications } from "../../compound-goal/direction-gate.js";
+// ⚠ `isDirectionClarificationId` is IMPORTED FROM THE PRODUCER, never restated.
+// The eviction below and `pickDirectionClarifications`'s trust downstream are
+// two halves of one namespace guarantee, and a second copy of the prefix here
+// would be the hand-maintained mirror that lets them drift apart (trap 12).
+import {
+  renderDirectionClarifications,
+  isDirectionClarificationId,
+} from "../../compound-goal/direction-gate.js";
 import type { DraftCoaching } from "../../../orchestrator/types.js";
 import type { GraphV3T, NodeV3T } from "../../../schemas/cee-v3.js";
 import type { GraphV1 } from "../../../contracts/plot/engine.js";
@@ -352,6 +359,50 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
   // coaching block accepts them, and `hasMeaningfulCoaching` then rightly
   // reports meaningful coaching, so a draft whose only coaching is these
   // questions still surfaces them.
+  //
+  // ⭐⭐ THE `direction_unresolved_*` ID SPACE IS A RESERVED NAMESPACE, AND THIS
+  // STAGE IS WHAT MAKES THAT TRUE. Downstream, `pickDirectionClarifications`
+  // (`orchestrator-v5/coaching/post-draft-narrative.ts`) identifies a
+  // producer-built limit question BY ID PREFIX. That identification is only as
+  // trustworthy as the guarantee that nothing else can carry the prefix — and
+  // until this eviction there was no such guarantee: the Stage 4.5 coaching
+  // pass writes `strengthen_items` from LLM output, so a model that happened to
+  // emit `id: "direction_unresolved_1"` occupied the reserved slot, and the old
+  // `alreadyPresent` check then treated the squatter as satisfying the append
+  // and DISCARDED the producer's genuine card. That is the wrong way round in
+  // both directions at once: unvetted copy inherits producer authority, and the
+  // producer's copy is silently dropped.
+  //
+  // The eviction therefore runs UNCONDITIONALLY — including when this draft has
+  // no unresolved bounds at all, which is precisely the case where there would
+  // be no producer card to displace a squatter.
+  //
+  // ⚠ SCOPE, STATED PRECISELY. This makes the prefix trustworthy on the output
+  // of THIS stage. It is not a claim about every coaching object in the service;
+  // it is the claim the one downstream consumer needs, and the consumer reads
+  // `result.strengthenItems` off this stage's response
+  // (`draft-graph-dispatch.ts:277`, the single call site).
+  {
+    const coachingNow = ctx.coaching as PackagedCoaching | null | undefined;
+    if (coachingNow && Array.isArray(coachingNow.strengthen_items)) {
+      const before = coachingNow.strengthen_items.length;
+      coachingNow.strengthen_items = coachingNow.strengthen_items.filter(
+        (existing) => !isDirectionClarificationId((existing as { id?: unknown }).id),
+      );
+      const evicted = before - coachingNow.strengthen_items.length;
+      if (evicted > 0) {
+        // FAIL LOUD, same contract as the gate's own logs: counts only, never
+        // the copy. A silent eviction would be indistinguishable from a model
+        // that simply stopped emitting the id.
+        log.warn({
+          event: "cee.direction_clarification.reserved_id_evicted",
+          request_id: ctx.requestId,
+          evicted_count: evicted,
+        }, `${evicted} non-producer coaching item(s) evicted from the reserved direction-clarification id space`);
+      }
+    }
+  }
+
   {
     const unresolved = ctx.directionUnresolved ?? [];
     if (unresolved.length > 0) {
