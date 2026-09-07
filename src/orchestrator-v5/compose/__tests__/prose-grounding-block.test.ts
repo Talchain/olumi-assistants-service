@@ -4,11 +4,25 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * THE DEFECT. On a substantive coach / converse turn the model is handed
  * `display_analysis` — a projection of a persisted `run_analysis` fact built by
- * `buildAnalysisFromPriorFacts` — and the served prompt tells the model to
- * QUOTE it rather than derive one (`prompts/defaults.ts`: `pre-computed — trust
- * these, do not recalculate`; `state the winner's OWN win_probability`; only
- * decimal→percentage permitted). The number is SERVER-COMPUTED and the sentence
- * is a template the model fills. The same response then shipped `blocks: []`,
+ * `buildAnalysisFromPriorFacts` — and the SERVED ROUTING PROMPT tells the model
+ * to QUOTE it rather than derive one. This turn class resolves the PMS
+ * `orchestrator` task, whose hash-verified export is
+ * `Prompts/canonical/routing.txt` (manifest: `served_version: 121`,
+ * `served_hash_verified: true`). `:48` fixes the wording — `Win probability:
+ * "leads in 69% of simulations". Never "0.69 probability", "wins" or "win
+ * rate".` — and `:118` / `:21` fix the rail ("use computed values exactly as
+ * provided"; "NO ARITHMETIC. Use values exactly as provided"). The on-disk
+ * fallback `Prompts/v40.txt:60-61` states the same rail.
+ *
+ * ⚠ NOT `src/prompts/defaults.ts` — an earlier revision of this header cited it
+ * in error. Its ten `win_probabilit` hits all sit inside
+ * `DECISION_REVIEW_PROMPT` (`:1293`–`:1682`), the enrichment / decision-review
+ * channel, which is a different channel from this one; `display_analysis`
+ * appears zero times under `src/prompts/` (contrast controls in the same sweep:
+ * `option_comparison` 12 hits, `win_probability` 21 hits).
+ *
+ * The number is therefore SERVER-COMPUTED and the sentence is a template the
+ * model fills. The same response then shipped `blocks: []`,
  * because `composeDirectAnswerResponse` — the composer every coach / converse
  * turn uses — consults no facts and emits whatever `blocks` its caller passes,
  * and every caller passed nothing.

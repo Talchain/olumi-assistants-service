@@ -11910,12 +11910,16 @@ export async function runTurnExecutor(
         suggested_actions: coachGuarded.suggested_actions,
         answerKind: 'substantive',
         // Ground the coach's own figures. This prose was rendered from
-        // `display_analysis`, and the served prompt tells the model to QUOTE
-        // that pre-computed `win_probability` rather than derive one
-        // (`prompts/defaults.ts`) — so the turn is already making a quantified
-        // claim and shipped nothing a consumer could check it against. Empty on
-        // every turn that projected no analysis and on every non-fresh turn
-        // (see the helper's header).
+        // `display_analysis`, and the served ROUTING prompt tells the model to
+        // QUOTE that pre-computed `win_probability` rather than derive one:
+        // `Prompts/canonical/routing.txt:48` (hash-verified export of the PMS
+        // `orchestrator` task, served_version 121) fixes the wording, and
+        // `:118`/`:21` fix the no-arithmetic rail — so the turn is already
+        // making a quantified claim and shipped nothing a consumer could check
+        // it against. (NOT `src/prompts/defaults.ts`, whose win_probability
+        // quotes are all inside `DECISION_REVIEW_PROMPT` — a different
+        // channel.) Empty on every turn that projected no analysis and on every
+        // non-fresh turn (see the helper's header).
         blocks: buildProseGroundingBlocks({
           sourceFact: promptAnalysisSourceFact,
           freshness: promptAnalysisFreshness,

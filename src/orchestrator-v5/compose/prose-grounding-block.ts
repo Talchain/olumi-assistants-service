@@ -3,16 +3,45 @@
  *
  * THE DEFECT THIS CLOSES. On a substantive coach / converse turn the model is
  * handed `display_analysis` — a projection of a persisted `run_analysis` fact
- * built by `buildAnalysisFromPriorFacts` — and the served prompt tells it to
- * quote that figure rather than derive one. Read at `prompts/defaults.ts` in
- * this tree: `WINNER / RUNNER-UP (pre-computed — trust these, do not
- * recalculate)`, and `To say how well the winner did, state the winner's OWN
- * win_probability: "{winner.label} came out ahead in {N}% of runs of this
- * model"`, with the ONLY permitted transformation being decimal→percentage
- * (`0.77 → "77%"`). So the number is SERVER-COMPUTED and the sentence is a
- * template the model fills; only the wording is model-authored. The same
- * response then shipped `blocks: []`, because the two channels are fed by
- * different code paths:
+ * built by `buildAnalysisFromPriorFacts` — and the SERVED ROUTING PROMPT tells
+ * it to quote that figure rather than derive one.
+ *
+ * The citation, re-derived at this tip rather than inherited. This turn class
+ * resolves the PMS `orchestrator` task (`routing/route-with-tool-use.ts:617`
+ * `ensureRoutingPromptSnapshot`; the adapter resolution at `:2144` pins the
+ * same task id), whose hash-verified canonical export is
+ * `Prompts/canonical/routing.txt` — `Prompts/canonical/manifest.json` records
+ * it as `served_version: 121`, `served_hash_verified: true`. Read at those
+ * bytes:
+ *
+ *   :48   - Win probability: "leads in 69% of simulations". Never "0.69
+ *           probability", "wins" or "win rate".
+ *   :118  ANALYSIS PRESENT AND CURRENT: use computed values exactly as
+ *           provided, preferring display-ready values.
+ *   :21   10. NO ARITHMETIC. Use values exactly as provided; deterministic
+ *           code computes.
+ *
+ * The on-disk fallback the loader drops to when PMS is empty or unreachable
+ * (`Prompts/v40.txt`, registered at `src/prompts/defaults.ts:2449-2451`, which
+ * READS that file rather than carrying its text) states the same rail at
+ * `:60-61`: "NO ARITHMETIC. Do not calculate, transform, or derive numbers.
+ * Quote figures exactly as provided in ContextPack." It carries no
+ * win-probability WORDING rule of its own — measured, zero hits — so the
+ * sentence template above is the served prompt's alone. On both authorities
+ * the number is SERVER-COMPUTED; only the wording is model-authored.
+ *
+ * ⚠ IT IS NOT `src/prompts/defaults.ts`'s win_probability quotes, and an
+ * earlier revision of this header cited them in error. All ten of that file's
+ * `win_probabilit` hits (1306–1588) sit inside `DECISION_REVIEW_PROMPT`
+ * (declared `:1293`; the next top-level declaration is `:1683`) — the
+ * ENRICHMENT / decision-review channel, which is a DIFFERENT channel from this
+ * one, answering a different question. `display_analysis` appears zero times
+ * anywhere under `src/prompts/`; contrast controls in the same sweep at the
+ * same scope read `option_comparison` 12 hits / 4 files and `win_probability`
+ * 21 hits / 2 files, so that zero is a real absence and not a blind probe.
+ *
+ * The same response then shipped `blocks: []`, because the two channels are
+ * fed by different code paths:
  *
  *   prose  — context-pack-assembler → formatAnalysisForContext → the prompt
  *   blocks — `buildBlocksFromFacts`, reached ONLY from `composeToolCallResponse`
@@ -78,8 +107,7 @@
  *    `near_tie.is_tie === true`. (It has two further exits, for no selected
  *    fact and a non-`run_analysis` fact, which this helper cannot reach because
  *    its caller has already narrowed both.) This helper never synthesises it:
- *    it ships
- *    the block the fact supports, and when the fact carries no robustness the
+ *    it ships the block the fact supports, and when the fact carries no robustness the
  *    leader claim stays `separation_unavailable`, which is the true statement
  *    that nothing was measured.
  *
