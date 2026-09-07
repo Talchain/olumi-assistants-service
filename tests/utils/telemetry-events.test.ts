@@ -663,6 +663,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeUnifiedPipelineStageTimings: "cee.unified_pipeline.stage_timings",
         V5DecisionReviewCompleted: "v5.decision_review.completed",
         V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
+        V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
         V5EditGraphAnalyticalQuestionSuppressed: "v5.edit_graph.analytical_question_suppressed",
         V5EditGraphProposalConfirmResolved: "v5.edit_graph.proposal_confirm_resolved",
         V5EditGraphStateQuerySuppressed: "v5.edit_graph.state_query_suppressed",
@@ -710,6 +711,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // never reach the finalise guard above.
         V5WithheldLeaderClaimNeutralisedAtWire: "v5.egress.leading_option_claim_neutralised_at_wire",
         V5EgressForbiddenPhraseDetected: "v5.egress.forbidden_phrase_detected",
+        // 3 Sep 2026 — the process-narration egress guard (the chain-of-thought
+        // leak). See the enum entry for the payload and for why the
+        // `block_replaced` remedy is the number worth watching.
+        V5EgressProcessNarrationDetected: "v5.egress.process_narration_detected",
         V5FrameStageNoBriefGuard: "v5.frame_stage_no_brief_guard",
         // ROADMAP 2.63 C1 — explicit-generate wire flag received (route-v2).
         V5ExplicitGenerateReceived: "v5.explicit_generate_received",
@@ -750,6 +755,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
         V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
+        V5RunAnalysisTargetRepair: "v5.run_analysis.target_repair",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
         V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
         V5RunAnalysisConstraintIdentityUnresolved:
@@ -1206,6 +1212,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // Clarification events are diagnostic and logged locally
       // Multi-turn clarifier events are diagnostic and logged locally
       const debugOnlyEvents: string[] = [
+        // Registered live review correction event; currently structured-log only.
+        TelemetryEvents.V5DecisionReviewProseFactViolation,
         TelemetryEvents.Stage,
         // Structured-outputs fallback: diagnostic WARN companion, no Datadog metric
         TelemetryEvents.CeeStructuredOutputsFellBack,
@@ -1583,6 +1591,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5InterceptedChipClarify,
         TelemetryEvents.V5InterceptedVagueEdit,
         TelemetryEvents.V5EgressForbiddenPhraseDetected,
+        // 3 Sep 2026 — the process-narration guard, same posture as the
+        // forbidden-phrase guard directly above: a finaliser-level egress
+        // guard whose hits are diagnostic and logged locally, with no Datadog
+        // counter wired yet. ⚠ WORTH A DASHBOARD WHEN ONE IS WIRED: the
+        // `block_replaced` remedy counts turns on which the user WOULD have
+        // read a monologue instead of an answer.
+        TelemetryEvents.V5EgressProcessNarrationDetected,
         // F6 — same posture as the forbidden-phrase guard directly above: a
         // finaliser-level egress guard whose hits are diagnostic and logged
         // locally, with no Datadog counter wired yet.
@@ -1666,6 +1681,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Diagnostic-only; the structured log is the operational signal (it is
         // the only way a DECLINE is visible at all).
         TelemetryEvents.V5RunAnalysisImperativePreRoute,
+        // The run_analysis TARGET REPAIR on an admitted election. Diagnostic-
+        // only, no Datadog metric: like the pre-route above, the structured log
+        // is the operational signal, and it is the only way a DECLINE is
+        // visible at all. A rising `repaired` rate is a routing-prompt signal.
+        TelemetryEvents.V5RunAnalysisTargetRepair,
         // D-ask-1 (2.11 P0-1) — run_analysis scaffolded-placeholder disclosure
         // summary (diagnostic-only, no Datadog metric; redacted option ids +
         // factor counts). Live emit site: run-analysis.ts step 2.55.
@@ -2185,6 +2205,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
         "v5.decision_review.contract_violation",
+        "v5.decision_review.prose_fact_violation",
         "v5.decision_review.failed",
         "v5.decision_review.invoked",
         "v5.decision_review.skipped",
@@ -2324,6 +2345,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.egress.defaulted_value_applied",
         "v5.egress.blocked_slot_claim_refused",
         "v5.egress.forbidden_phrase_detected",
+        "v5.egress.process_narration_detected",
         "v5.egress.leading_option_claim_withheld_violated",
         "v5.claim_safety.fail_closed_unavailable",
         // The ENFORCING sibling of the line above: same subject, same
@@ -2359,6 +2381,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.routing.analysis_election_gate",
         "v5.routing_bounded_fallback",
         "v5.run_analysis.imperative_pre_route",
+        "v5.run_analysis.target_repair",
         "v5.run_analysis.intercept_guard",
         "v5.run_analysis.options_scaffolded",
         "v5.run_analysis.constraint_unevaluated",

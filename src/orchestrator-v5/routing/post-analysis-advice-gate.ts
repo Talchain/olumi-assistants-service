@@ -1413,7 +1413,9 @@ export function tryPostAnalysisAdviceGate(
   // attached — which is the whole point: the user asked to think, so the model
   // answers, grounded in the model state, instead of the gate reciting the
   // standings with `llm_calls_used: 0`.
-  if (isReasoningRequest(message)) {
+  // Open-ended advice needs the user's context, beyond a standings summary.
+  // Specific analysis classes and mutation precedence have already been resolved.
+  if (matchedClass === 'advice' || isReasoningRequest(message)) {
     return { matched: false, reason: 'reasoning_request' };
   }
 
