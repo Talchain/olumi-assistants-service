@@ -183,11 +183,18 @@ export type AuthoredLabelRefusal =
  * spec now carries a DISJUNCTION corpus with a contrast control asserting both
  * directions on that axis specifically.
  *
- * ⭐ SO ONE MEMBER REMAINS, and it survives on a property that was checked
- * rather than asserted: {@link DELIBERATION_FRAMES} really is a closed list of
- * 32 explicit deliberation constructions. On the governed baseline it accounts
- * for **all 4** of the real closures; `states_alternatives` fired on **0 of 13**
- * and so earned nothing on real data.
+ * ⛔ SO ONE MEMBER REMAINS — and the property it was admitted on was NOT
+ * checked, which is the fourth appearance of this file's own lesson. This
+ * paragraph used to claim the property "was checked rather than asserted".
+ * What had been checked is that {@link DELIBERATION_FRAMES} is CLOSED (32
+ * members, enumerated). What was never checked is that each member is
+ * unambiguous — and {@link FRAME_EVIDENCE} measures that 14 of them are not.
+ * **"Closed" and "classified" are different claims about a list, and only the
+ * second licenses treating a match as evidence.**
+ *
+ * On the governed baseline this member still accounts for **all 4** of the real
+ * closures; `states_alternatives` fired on **0 of 13** and so earned nothing on
+ * real data. That benefit is real and is why the member was not simply removed.
  *
  * ⭐ DERIVED, NOT MIRRORED (trap 12). `Record<AuthoredLabelRefusal, …>` is
  * EXHAUSTIVE, so a new refusal reason FAILS `tsc` until someone states which
@@ -199,11 +206,31 @@ const REFUSAL_ANSWERS: Readonly<Record<AuthoredLabelRefusal, RefusalAnswers>> = 
   /**
    * "states a DECISION, not an objective" — Q2, and the ONLY member.
    *
-   * ⭐ WHY THIS ONE SURVIVES WHERE ITS FORMER TWIN DID NOT: it is a genuinely
-   * CLOSED, EXPLICIT list of 32 deliberation constructions
-   * ({@link DELIBERATION_FRAMES}) — "should we ", "whether to ", "torn between "
-   * — each of which is unambiguous deliberation English, so a match is evidence
-   * rather than a guess. That is a different KIND of test from a single word.
+   * ⛔⛔ THE ADMISSION IS NOT DISCHARGED, AND THIS COMMENT USED TO SAY IT WAS.
+   *
+   * It read: *"it is a genuinely CLOSED, EXPLICIT list of 32 deliberation
+   * constructions … each of which is unambiguous deliberation English, so a
+   * match is evidence rather than a guess."* **The first clause is true and the
+   * second is false, and the second is the one carrying the admission.**
+   * CLOSED is a property of the LIST; UNAMBIGUOUS is a property of each MEMBER.
+   * Counting the list was done four times; classifying its members was never
+   * done at all — see {@link FRAME_EVIDENCE}, which now does it as a mechanism.
+   *
+   * **Measured: 14 of the 32 members are open-class content words with attested
+   * non-deliberative readings**, so for those a match is exactly the guess this
+   * comment denied. On an external corpus written by two independent reviewers,
+   * **14 of 14 plainly designated objectives are told the brief designates no
+   * objective** — *"Considering the runway, reach break-even by Q3."*,
+   * *"Choosing an annual billing default lifts LTV by 15%."*, *"Our options are
+   * limited, so cut burn to £120k per month."* The opposite-direction twins
+   * (same objective, frame token removed) all keep their badge, which is what
+   * proves the predicate keys on the TOKEN and not on objecthood.
+   *
+   * ⚠ THIS MEMBER THEREFORE REMAINS ADMITTED ON AN UNDISCHARGED CLAIM. It is
+   * left in place because removing it would silently restore the original
+   * defect (a CEE-chosen goal quoted back as the user's own words) and this
+   * seam is PARKED for the producer-side grammar change, not for a fifth
+   * lexical rule. The gap is pinned in the spec so it is countable.
    */
   deliberation_frame: "designation",
 
@@ -302,10 +329,19 @@ export function refusalDeniesObjecthood(reason: AuthoredLabelRefusal | undefined
 }
 
 /**
- * ⭐⭐ CLOSED IS NOT ANCHORED — the fourth and last member of this defect family.
+ * ⭐⭐ CLOSED IS NOT ANCHORED — the fourth member of this defect family.
+ *
+ * ⚠ THIS HEADING USED TO SAY "the fourth and LAST". It was not the last: a
+ * fifth followed immediately, one level in — CLOSED IS NOT CLASSIFIED (see
+ * {@link FRAME_EVIDENCE}). Every round of this family has ended with a sentence
+ * predicting it was the final one, and the prediction is itself part of the
+ * pattern: the fix that closes a member feels like the fix that closes the
+ * class. It is not, and only a measurement can tell the two apart.
  *
  * {@link DELIBERATION_FRAMES} really is a closed list of 32 explicit
- * constructions; that was checked. But {@link findDeliberationFrame} is
+ * constructions; that was checked — but "closed" is a property of the LIST, not
+ * of its MEMBERS, and 14 of them are open-class content words with ordinary
+ * non-deliberative readings. But {@link findDeliberationFrame} is
  * `lower.indexOf(frame)` — **UNANCHORED** — so a frame token appearing ANYWHERE
  * in a span carried the authorship verdict. Driven end to end, eight plainly
  * designated objectives were told *"the brief designates no objective"*:
@@ -337,13 +373,33 @@ export function refusalDeniesObjecthood(reason: AuthoredLabelRefusal | undefined
  * it withdrew the investigative frames from one of the list's two jobs rather
  * than from the list.
  *
- * ⚠ KNOWN-OPEN, pinned by name in the spec rather than chased with a fifth
- * rule: three sentence-INITIAL uses remain false positives — `considering `,
- * `work out `, `figure out ` opening a span that then names a real objective.
- * Anchoring fixes 5 of the 8 at zero cost on real data (all 4 governed
- * decisions and all 4 corpus rows are sentence-initial and keep their verdict).
- * **If a fifth instance of this family appears after this, the answer is a
- * different design, not another patch.**
+ * ⚠⚠ KNOWN-OPEN — AND THE NUMBER IN THIS COMMENT WAS WRONG BY AT LEAST 4x.
+ *
+ * It said *"three sentence-INITIAL uses remain false positives — `considering `,
+ * `work out `, `figure out `"*. **Measured: THIRTEEN of the 32 frames produce a
+ * false withdrawal sentence-initially** — the three above plus `working out `,
+ * `choosing a `, `choosing an `, `deciding `, `deciding on `, `we could `,
+ * `figuring out `, `do we `, `our options are `, `the options are `. A COMMENT
+ * WAS DOING THE WORK OF A MEASUREMENT, inside the fix whose own headline lesson
+ * is exactly that. The commit message that introduced this comment already said
+ * "at least five … MORE than the three predicted"; the correction never reached
+ * the code, which is how a stale number survives a round of review.
+ *
+ * Anchoring still fixes the mid-span cases at zero cost on real data (all 4
+ * governed decisions are sentence-initial and keep their verdict), so it is a
+ * genuine improvement on the unanchored form. It is NOT a bound on the family.
+ *
+ * ⛔ THE STOP CONDITION FIRED, AND IT FIRED CORRECTLY. *"If a fifth instance of
+ * this family appears after this, the answer is a different design, not another
+ * patch."* A fifth appeared (this one). The seam is PARKED for the producer-side
+ * grammar change in `DRAFT_RECORDS_INSTRUCTION`. Two candidate patches have been
+ * RUN rather than assumed, and both cost real closures:
+ *   · demote the open-class members  → fixes all 13, costs the `figure out `
+ *     governed closure (4 of 13 → 3 of 13);
+ *   · gate on `endsWith("?")`        → **refuted**: only 1 of the 4 governed
+ *     closures is an interrogative, so it costs three of them.
+ * **Do not add a sixth rule without running it against the governed baseline
+ * first.**
  */
 export function deliberationFrameOpensTheSpan(quote: string): boolean {
   const frame = findDeliberationFrame(canonical(quote));
@@ -365,7 +421,7 @@ export function deliberationFrameOpensTheSpan(quote: string): boolean {
  * Longest match at the earliest position wins, so `deciding whether to` is not
  * shadowed by `deciding `.
  */
-const DELIBERATION_FRAMES: readonly string[] = [
+const DELIBERATION_FRAMES = [
   "should we ",
   "do we ",
   "trying to decide whether to ",
@@ -398,7 +454,102 @@ const DELIBERATION_FRAMES: readonly string[] = [
   "work out ",
   "considering ",
   "deciding ",
-];
+] as const;
+
+type DeliberationFrame = (typeof DELIBERATION_FRAMES)[number];
+
+/**
+ * ⭐⭐ EVERY MEMBER CLASSIFIED — the task four rounds of counting left undone.
+ *
+ * ── WHY THIS EXISTS ────────────────────────────────────────────────────────
+ * {@link REFUSAL_ANSWERS} admits `deliberation_frame` to the DESIGNATION
+ * question on the claim that every member of {@link DELIBERATION_FRAMES} is
+ * "unambiguous deliberation English, so a match is evidence rather than a
+ * guess". Four rounds of review each found a different false-withdrawal member
+ * and each verified that the list is CLOSED. **Closed is not classified.** In
+ * an independent reviewer's words: *"every round counted the list; none
+ * classified its members."* This record classifies them, so the claim is a
+ * MECHANISM rather than a sentence (trap 12) — `Record<DeliberationFrame, …>`
+ * is EXHAUSTIVE, so a new frame FAILS `tsc` until someone states its class.
+ *
+ * ── THE CLASSIFICATION, AND IT IS GRAMMATICAL, NOT A CALIBRATION ───────────
+ * `closed_class` — the match is anchored on a FUNCTION WORD of alternation or
+ *   indirect question (`whether`, `between`, `either`) or on subject-auxiliary
+ *   inversion (`should we `, `do we `). Function words have no content reading,
+ *   so the construction cannot be ordinary non-deliberative English.
+ * `open_class`  — the match is carried by a CONTENT word (`considering`,
+ *   `deciding`, `choosing`, `figure out`, `work out`, `could`, `options`) which
+ *   has attested non-deliberative readings: `considering` as a preposition,
+ *   `deciding` as an adjective, `working out` as "amounting to". **For these a
+ *   match is a guess, which is precisely what the admission denies.**
+ *
+ * ── WHAT IT PREDICTS, AND WHERE THE PREDICTION FAILS ──────────────────────
+ * Of the 13 frames measured to produce a false withdrawal sentence-initially,
+ * this classification predicts **12**. It does NOT predict `do we `, which is
+ * closed-class by inversion and was still reported as a false positive by the
+ * round-4 sweep. No verbatim counter-example for `do we ` exists in any
+ * reviewer's corpus, and writing one here would be this seam's recurring
+ * defect — a self-authored corpus certifying its author's own design (trap 22).
+ * **So the classification is recorded and NOT wired into the predicate.** It
+ * explains most of the family and does not bound it, which is itself the
+ * evidence that a lexical route cannot close this and the producer-side grammar
+ * change must.
+ *
+ * ⚠ THIS RECORD CHANGES NO BEHAVIOUR. Nothing reads it but the spec, on
+ * purpose: it is the successor lane's starting point, not a fifth patch.
+ */
+export const FRAME_EVIDENCE: Readonly<
+  Record<DeliberationFrame, "closed_class" | "open_class">
+> = {
+  // ── closed-class: anchored on a function word or on inversion ────────────
+  "should we ": "closed_class",
+  "do we ": "closed_class",
+  "trying to decide whether to ": "closed_class",
+  "deciding whether to ": "closed_class",
+  "deciding between ": "closed_class",
+  "evaluating whether to ": "closed_class",
+  "considering whether to ": "closed_class",
+  "weighing whether to ": "closed_class",
+  "debating whether to ": "closed_class",
+  "choosing whether to ": "closed_class",
+  "choosing between ": "closed_class",
+  "must choose between ": "closed_class",
+  "need to choose between ": "closed_class",
+  "torn between ": "closed_class",
+  "the question is whether to ": "closed_class",
+  "the question is whether ": "closed_class",
+  "whether to ": "closed_class",
+  "we can either ": "closed_class",
+  // ── open-class: the match is carried by a content word ───────────────────
+  /** "Trying to decide the right size" — bare, no alternation marker. */
+  "trying to decide ": "open_class",
+  /** "Deciding how to allocate the £2m budget" — `deciding` is the content word. */
+  "deciding how to ": "open_class",
+  /** Measured false positive. */
+  "deciding on ": "open_class",
+  /** "Choosing a simpler default plan should lift activation to 60%." */
+  "choosing a ": "open_class",
+  /** "Choosing an annual billing default lifts LTV by 15%." */
+  "choosing an ": "open_class",
+  /** "We could see churn rising, so cut it to 3% this year." */
+  "we could ": "open_class",
+  /** "Our options are limited, so cut burn to £120k per month." */
+  "our options are ": "open_class",
+  /** "The options are already chosen; hold CAC under £400." */
+  "the options are ": "open_class",
+  /** Measured false positive. */
+  "figuring out ": "open_class",
+  /** ⚠ Also the ONE governed closure an open-class demotion would cost. */
+  "figure out ": "open_class",
+  /** "Working out at under £4 per unit is the target." (= amounting to) */
+  "working out ": "open_class",
+  /** "Work out cheaper unit economics before the Series B." */
+  "work out ": "open_class",
+  /** "Considering the runway, reach break-even by Q3." (preposition) */
+  "considering ": "open_class",
+  /** "Deciding factors are cost and speed; cut cost per seat to £9." (adjective) */
+  "deciding ": "open_class",
+};
 
 /**
  * ⭐ THE SUBSET THAT INTRODUCES ALTERNATIVES.

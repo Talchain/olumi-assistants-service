@@ -59,6 +59,7 @@ import {
   REFUSALS_DENYING_OBJECTHOOD,
   refusalDeniesObjecthood,
   deliberationFrameOpensTheSpan,
+  FRAME_EVIDENCE,
   type AuthoredLabelRefusal,
 } from "../objective-label.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
@@ -791,12 +792,74 @@ describe("a deliberation frame the span merely CONTAINS is ordinary English", ()
    * a semantic judgement about the span, and a fifth predicate tweak is sunk
    * cost wearing engineering clothes. The route is the grammar follow-on.
    */
+  /**
+   * ⚠⚠ WIDENED TO THE MEASURED SET. This table carried FOUR rows while the
+   * source comment beside it claimed "three sentence-INITIAL uses remain" — and
+   * an independent round-4 review measured THIRTEEN frames producing a false
+   * withdrawal sentence-initially. **A KNOWN-OPEN pin that understates its own
+   * class is the hand-maintained mirror this suite exists to prevent**, so every
+   * row below with a `reviewer` tag is that review's corpus VERBATIM, and the
+   * `spec` rows are this file's original four. Nothing here was written by the
+   * lane that authored the fix — which is the point (trap 22).
+   *
+   * Each row is asserted against WHAT THE CODE DOES, so the gap stays countable
+   * and a future fix REDs here rather than passing unnoticed.
+   */
   const SENTENCE_INITIAL_BUT_NOT_DELIBERATIVE: readonly (readonly [string, string])[] = [
+    // ── this spec's original four ──────────────────────────────────────────
     ["`considering` as a PREPOSITION", "Considering the runway, reach break-even by Q3"],
     ["`considering` as a PREPOSITION", "Considering our size, hold headcount flat"],
     ["`working out` = AMOUNTING TO", "Working out at under £4, hold cost per unit"],
     ["`deciding` as an ADJECTIVE", "Deciding factors aside, grow revenue 20%"],
+    // ── the round-4 reviewer's ARM A, verbatim ─────────────────────────────
+    ["reviewer `considering` PREPOSITION", "Considering the runway, reach break-even by Q3."],
+    [
+      "reviewer `considering` PREPOSITION",
+      "Considering our constraints, hold spend under £250,000.",
+    ],
+    ["reviewer `working out` = AMOUNTING TO", "Working out at under £4 per unit is the target."],
+    ["reviewer `work out` IMPERATIVE", "Work out cheaper unit economics before the Series B."],
+    [
+      "reviewer `choosing a` GERUND SUBJECT",
+      "Choosing a simpler default plan should lift activation to 60%.",
+    ],
+    ["reviewer `choosing an` GERUND SUBJECT", "Choosing an annual billing default lifts LTV by 15%."],
+    ["reviewer `deciding` ADJECTIVE", "Deciding factors are cost and speed; cut cost per seat to £9."],
+    ["reviewer `our options are` PREAMBLE", "Our options are limited, so cut burn to £120k per month."],
+    ["reviewer `the options are` PREAMBLE", "The options are already chosen; hold CAC under £400."],
+    ["reviewer `we could` PERCEPTION VERB", "We could see churn rising, so cut it to 3% this year."],
   ];
+
+  /**
+   * ⭐ THE CENSUS. Without it the table above can be quietly pruned back to the
+   * comfortable four, which is exactly how the understated pin survived a round
+   * of review. REDs if the set grows OR shrinks.
+   */
+  it("the KNOWN-OPEN pin is exactly the 14 measured rows", () => {
+    expect(SENTENCE_INITIAL_BUT_NOT_DELIBERATIVE).toHaveLength(14);
+    expect(new Set(SENTENCE_INITIAL_BUT_NOT_DELIBERATIVE.map(([, q]) => q)).size).toBe(14);
+  });
+
+  /**
+   * ⭐⭐ THE CONTRAST CONTROL, and it is what makes the table above evidence
+   * rather than a list of strings the predicate happens to dislike. Same
+   * objective, frame token removed: the badge must be KEPT. Without this arm the
+   * table is one-way and structurally incapable of showing that the predicate
+   * keys on the TOKEN rather than on objecthood (trap 22b / 13e).
+   */
+  const TWINS_WITHOUT_THE_FRAME_TOKEN: readonly string[] = [
+    "Reach break-even by Q3.",
+    "Hold spend under £250,000.",
+    "Cut cost per seat to £9.",
+  ];
+
+  it.each(TWINS_WITHOUT_THE_FRAME_TOKEN)(
+    "CONTRAST — the same objective without the frame token KEEPS its badge: %s",
+    (quote) => {
+      expect(deliberationFrameOpensTheSpan(quote), "no frame opens this span").toBe(false);
+      expect(drive(quote, `Our objective is: ${quote}`).wireProvenance).toBe("from_brief");
+    },
+  );
 
   it.each(SENTENCE_INITIAL_BUT_NOT_DELIBERATIVE)(
     "KNOWN-OPEN — still loses its badge (%s): %s",
@@ -938,5 +1001,102 @@ describe("KNOWN-OPEN: only a CHOICE construction is positive evidence of non-des
     // consequence of the class change rather than discovered later.
     const o = drive(GOVERNED_QUESTION_AS_GOAL, GOVERNED_QUESTION_BRIEF);
     expect(o.recordClass).toBe(PROJECTOR_STRUCTURAL_CLASS);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. ⭐⭐ THE FRAME CLASSIFICATION — "closed" and "classified" are different
+//    claims about a list, and only the second licenses treating a match as
+//    evidence. Four rounds verified the first and none checked the second.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("FRAME_EVIDENCE: every deliberation frame is classified, not merely counted", () => {
+  /**
+   * ⭐ DERIVED, NOT MIRRORED. The frame list is read out of the SOURCE, so this
+   * census cannot drift from it — and it REDs if a frame is added, removed or
+   * renamed without being classified. The `tsc` exhaustiveness of
+   * `Record<DeliberationFrame, …>` is the compile-time half; this is the half
+   * that notices the list itself moved.
+   */
+  const framesDeclaredInSource = (): readonly string[] => {
+    const src = fs.readFileSync(path.join(HERE, "../objective-label.ts"), "utf8");
+    const start = src.indexOf("const DELIBERATION_FRAMES");
+    const end = src.indexOf("] as const;", start);
+    // The instrument, asserted before any claim rests on it (trap 13).
+    expect(start, "DELIBERATION_FRAMES is findable in source").toBeGreaterThan(-1);
+    expect(end, "the array terminator is findable").toBeGreaterThan(start);
+    return [...src.slice(start, end).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  };
+
+  it("the classification covers exactly the declared frames — no more, no fewer", () => {
+    const declared = framesDeclaredInSource();
+    expect(declared.length, "positive control: the extractor found frames").toBeGreaterThan(0);
+    expect([...declared].sort()).toEqual(Object.keys(FRAME_EVIDENCE).sort());
+  });
+
+  /**
+   * ⛔ THE MEASUREMENT THE ADMISSION RESTS ON, PINNED. `REFUSAL_ANSWERS` admits
+   * `deliberation_frame` to the DESIGNATION question on the claim that every
+   * member is unambiguous deliberation English. That is true of the closed-class
+   * members and FALSE of the open-class ones. Pinning the split means the
+   * undischarged admission is visible in a suite rather than in a comment.
+   */
+  it("the split is 18 closed-class / 14 open-class", () => {
+    const values = Object.values(FRAME_EVIDENCE);
+    expect(values.filter((v) => v === "closed_class")).toHaveLength(18);
+    expect(values.filter((v) => v === "open_class")).toHaveLength(14);
+  });
+
+  /**
+   * ⭐ WHAT THE CLASSIFICATION EXPLAINS — and, just as important, WHAT IT DOES
+   * NOT. Of the 13 frames the round-4 review measured as producing a false
+   * withdrawal sentence-initially, 12 are open-class. `do we ` is closed-class
+   * and was still reported. **The residual is asserted, not rounded away**: a
+   * classification that explained all 13 would license wiring it into the
+   * predicate, and this one does not.
+   */
+  const MEASURED_FALSE_WITHDRAWAL_FRAMES: readonly string[] = [
+    "considering ",
+    "working out ",
+    "work out ",
+    "choosing a ",
+    "choosing an ",
+    "deciding ",
+    "deciding on ",
+    "we could ",
+    "figure out ",
+    "figuring out ",
+    "do we ",
+    "our options are ",
+    "the options are ",
+  ];
+
+  it("12 of the 13 measured false-withdrawal frames are open-class", () => {
+    const openClass = MEASURED_FALSE_WITHDRAWAL_FRAMES.filter(
+      (f) => FRAME_EVIDENCE[f as keyof typeof FRAME_EVIDENCE] === "open_class",
+    );
+    expect(MEASURED_FALSE_WITHDRAWAL_FRAMES).toHaveLength(13);
+    expect(openClass).toHaveLength(12);
+  });
+
+  it("the ONE unexplained residual is `do we ` — asserted by name, not rounded away", () => {
+    const unexplained = MEASURED_FALSE_WITHDRAWAL_FRAMES.filter(
+      (f) => FRAME_EVIDENCE[f as keyof typeof FRAME_EVIDENCE] === "closed_class",
+    );
+    expect(unexplained).toEqual(["do we "]);
+  });
+
+  /**
+   * ⚠ THE PRICE OF THE PATCH THAT WAS RUN AND REFUSED, pinned so nobody
+   * re-proposes it as free. Demoting the open-class members would fix all 13
+   * false withdrawals AND cost the one governed closure carried by `figure out `
+   * ("figure out our hiring strategy for next quarter", brief
+   * `03-vague-underspecified`). That is why this record is not wired into the
+   * predicate.
+   */
+  it("the governed closure an open-class demotion would cost is `figure out `", () => {
+    expect(FRAME_EVIDENCE["figure out "]).toBe("open_class");
+    expect(deliberationFrameOpensTheSpan("figure out our hiring strategy for next quarter")).toBe(
+      true,
+    );
   });
 });
