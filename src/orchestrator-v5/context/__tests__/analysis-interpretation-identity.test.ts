@@ -109,6 +109,31 @@ describe('scenario-scoped run-fact identity', () => {
     // resolve conflicting payloads using this tuple comparison.
   });
 
+  it.each([
+    ['unsupported timestamp', { computed_at: '2026-09-06T20:00:00Z' }],
+    ['missing timestamp', { computed_at: undefined }],
+    ['unsupported full hash', { graph_hash_at_run: FULL }],
+    ['missing hash', { graph_hash_at_run: undefined }],
+  ])('does not let %s mask a positively known foreign scenario', (_name, unsupported) => {
+    const localLegacy = { ...IDENTITY, ...unsupported };
+    const foreignLegacy = { ...localLegacy, scenario_id: 'scenario-b' };
+    // The foreign scope is known; the rest of this identity is still unknown.
+    expect(validateAnalysisRunFactIdentity(foreignLegacy).status).toBe('unconfirmed');
+    expect(compareAnalysisRunFactIdentity(foreignLegacy, IDENTITY)).toEqual({
+      status: 'mismatch', reason: 'scenario_id_conflict',
+    });
+    expect(compareAnalysisRunFactIdentity(IDENTITY, foreignLegacy)).toEqual({
+      status: 'mismatch', reason: 'scenario_id_conflict',
+    });
+    expect(compareAnalysisRunFactIdentity(localLegacy, IDENTITY).status).toBe('unconfirmed');
+  });
+
+  it.each([undefined, ' scenario-b ', 123])('does not guess a scenario conflict from an invalid scope %j', (scenario_id) => {
+    expect(compareAnalysisRunFactIdentity({
+      ...IDENTITY, scenario_id, computed_at: '2026-09-06T20:00:00Z',
+    }, IDENTITY).status).toBe('unconfirmed');
+  });
+
   it('does not treat a retry with a missing timestamp as the same fact', () => {
     expect(compareAnalysisRunFactIdentity(IDENTITY, { ...IDENTITY, computed_at: undefined })).toEqual({
       status: 'unconfirmed', reason: 'missing_identity_field', field: 'computed_at', side: 'right',

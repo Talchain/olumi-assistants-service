@@ -140,6 +140,19 @@ export function compareAnalysisRunFactIdentity(
   left: unknown,
   right: unknown,
 ): AnalysisRunFactIdentityComparison {
+  // A positively known foreign scope is already a conflict. Unsupported
+  // graph/time fields must not downgrade it to legacy same-scenario output.
+  // This checks only the existing exact-string scope rule; it confirms no
+  // other component and never repairs or normalises an unsupported identity.
+  const leftScenario = record(left)?.scenario_id;
+  const rightScenario = record(right)?.scenario_id;
+  if (
+    exactNonEmptyString(leftScenario)
+    && exactNonEmptyString(rightScenario)
+    && leftScenario !== rightScenario
+  ) {
+    return { status: 'mismatch', reason: 'scenario_id_conflict' };
+  }
   const a = validateAnalysisRunFactIdentity(left);
   if (a.status === 'unconfirmed') return { ...a, side: 'left' };
   const b = validateAnalysisRunFactIdentity(right);

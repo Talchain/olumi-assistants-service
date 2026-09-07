@@ -95,8 +95,8 @@ describe('C2 binding through the actual persisted scenario read', () => {
     expect((await read()).analysis_state?.run_state).toEqual({ kind: 'complete_current', computed_at: NEXT });
   });
 
-  it('does not adopt another scenario even with identical graph and timestamp', async () => {
-    readFactsFor.mockResolvedValue([fact(FIRST, OTHER_SCENARIO)]);
+  it.each([FIRST, '2026-09-06T17:50:03Z'])('does not adopt another scenario with the same graph and timestamp %s', async (computedAt) => {
+    readFactsFor.mockResolvedValue([fact(computedAt, OTHER_SCENARIO)]);
     const result = await read();
     expect(result.analysis_state?.run_state.kind).toBe('unknown_degraded');
     expect(result.analysis_state?.leader_claim).toEqual({ permitted: false, withheld_reason: WITHHELD_RUN_IDENTITY_CONFLICT });
@@ -109,7 +109,7 @@ describe('C2 binding through the actual persisted scenario read', () => {
     const result = await read();
     expect(result.analysis_state?.run_state.kind).toBe('unknown_degraded');
     expect(result.analysis_state?.leader_claim).toEqual({ permitted: false, withheld_reason: WITHHELD_RUN_IDENTITY_UNCONFIRMED });
-    expect(result.analysis_result).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65 } });
+    expect(result.analysis_result).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65, 'option-b': 0.35 } });
     expect(legacy.result.leading_option_id).toBe('option-a');
   });
 

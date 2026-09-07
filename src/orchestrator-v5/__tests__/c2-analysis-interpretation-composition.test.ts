@@ -121,8 +121,8 @@ describe('C2 binding at the reached finaliser/composer seam', () => {
     expect(out.blocks[0]).toMatchObject({ leading_option_id: null, win_probabilities: { 'option-a': 0.65 } });
   });
 
-  it('rejects the same graph/time from another scenario without calling it never-run or current', () => {
-    const out = finalise([fact()], { scenarioId: OTHER_SCENARIO });
+  it.each([FIRST_TIME, '2026-09-06T17:50:03Z', undefined])('rejects another scenario without hiding the conflict behind timestamp %s', (computed_at) => {
+    const out = finalise([fact({ computed_at })], { scenarioId: OTHER_SCENARIO });
     expect(out.analysis_state?.run_state.kind).toBe('unknown_degraded');
     expect(out.analysis_state?.contradictions).toContain(`${WITHHELD_RUN_IDENTITY_CONFLICT}:scenario_id_conflict`);
     expect(out.blocks).toEqual([]);
