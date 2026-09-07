@@ -27,7 +27,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AMOUNT_DIGITS, AMOUNT_RUN_END } from "../magnitude-alphabet.js";
+import {
+  AMOUNT_DIGITS,
+  AMOUNT_RUN_END,
+  MAGNITUDE_MULTIPLIERS,
+  SMALLEST_DROPPABLE_MAGNITUDE,
+} from "../magnitude-alphabet.js";
 import {
   RANGE_LOWER_BOUND_ABSENT_GUARD,
   rangePointEstimate,
@@ -315,6 +320,90 @@ describe("shapes with no single reading are refused, and the refused set is exac
     expect(range!.value).toBe(100_000);
     expect(range!.rangeMin).toBe(80_000);
     expect(range!.rangeMax).toBe(120_000);
+  });
+});
+
+/* ===========================================================================
+ * DESCENDING BARE DIGITS UNDER A TRAILING MAGNITUDE IS **ONE OBSERVATION
+ * ANSWERING TWO QUESTIONS**, and it is now two refusals plus one reading.
+ * ======================================================================== */
+
+describe("a descending elliptical pair splits three ways, not two", () => {
+  /**
+   * The repair of the behaviour seat's blocking finding on #1327.
+   *
+   * `minDigits > maxDigits` used to be a single `return null`. It collapsed two
+   * different situations (CLAUDE.md trap 21):
+   *
+   *   NEITHER reading ascends   → genuinely descending    → refuse
+   *   BOTH readings ascend      → genuinely ambiguous     → refuse
+   *   ONLY the literal ascends  → one reading standing    → READ IT
+   *
+   * The third row is the class that regressed: six strings measured at head
+   * `762245c8` yielded `[]` where base `f4c8f501` had yielded a figure, and all
+   * six were filed under "descending".
+   */
+  const cases: ReadonlyArray<
+    readonly [label: string, min: string, max: string, mag: string, expected: readonly [number, number] | null]
+  > = [
+    // ONLY the literal reading ascends — 80,000k is 80m, far above 120k.
+    ["a separated lower bound cannot take the suffix", "80,000", "120", "k", [80_000, 120_000]],
+    ["…the same, one rung down", "1,500", "2", "k", [1_500, 2_000]],
+    ["…and with a decimal upper bound", "950", "1.2", "k", [950, 1_200]],
+    // BOTH ascend — the writer may have dropped a `k`. Refuse.
+    ["a bare lower bound could have dropped a k", "500", "2", "m", null],
+    ["…and a separator does not settle it", "1,200", "2", "m", null],
+    // NEITHER ascends — descending on any reading.
+    ["a pair that descends literally too", "5,000,000", "2", "m", null],
+    ["…and unseparated", "5000000", "2", "m", null],
+  ];
+
+  it.each(cases)("%s", (_label, min, max, mag, expected) => {
+    const got = resolveAmountRange({
+      minDigits: min,
+      minMagnitude: undefined,
+      maxDigits: max,
+      maxMagnitude: mag,
+    });
+    if (expected === null) {
+      expect(got).toBeNull();
+    } else {
+      // `magnitudeDistributed` is FALSE here on purpose: the suffix was read on
+      // the upper bound alone, it was not scoped across the pair.
+      expect(got).toEqual({
+        min: expected[0],
+        max: expected[1],
+        magnitudeDistributed: false,
+      });
+    }
+  });
+
+  it("⭐ the ASCENDING-digit path still DISTRIBUTES — the two branches stay distinct", () => {
+    // The opposite-direction twin. Without it, deleting the distribution branch
+    // and letting everything fall into the literal reading would pass every
+    // row above while turning "80-120k" into 80..120,000.
+    expect(
+      resolveAmountRange({
+        minDigits: "80",
+        minMagnitude: undefined,
+        maxDigits: "120",
+        maxMagnitude: "k",
+      }),
+    ).toEqual({ min: 80_000, max: 120_000, magnitudeDistributed: true });
+  });
+
+  it("⭐ the rival-reading test is DERIVED from the alphabet, not a written 1e3", () => {
+    // The refusal of "500-2m" is the claim `500 * SMALLEST_DROPPABLE_MAGNITUDE
+    // <= 2,000,000`. If the constant ever stopped being the alphabet's smallest
+    // non-trivial rung, that claim would quietly answer for a different
+    // alphabet and the drift would read as green (trap 12).
+    const nonTrivial = Object.values(MAGNITUDE_MULTIPLIERS).filter((m) => m > 1);
+    expect(nonTrivial.length).toBeGreaterThan(0);
+    expect(SMALLEST_DROPPABLE_MAGNITUDE).toBe(Math.min(...nonTrivial));
+    // …and it is genuinely the discriminator: at the smallest rung "500-2m" has
+    // a rival, and that is exactly why it is refused while "1,500-2k" is not.
+    expect(500 * SMALLEST_DROPPABLE_MAGNITUDE <= 2_000_000).toBe(true);
+    expect(1_500 * SMALLEST_DROPPABLE_MAGNITUDE <= 2_000).toBe(false);
   });
 });
 

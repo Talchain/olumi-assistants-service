@@ -207,35 +207,55 @@ describe("the refusals and the non-ranges are unchanged", () => {
  * 22f: a gap the suite can see is honest; one it cannot is how four rounds
  * happen).
  * ========================================================================= */
-describe("the recorded floor: a DESCENDING dash-joined pair still loses its point", () => {
+describe("the recorded floor: a pair with a RIVAL reading still yields nothing", () => {
   /**
-   * ⚠ THREE MEMBERS MEASURED, base `f4c8f501` → head `8ba54157` → this repair.
-   * The range is refused because the bare digits descend and the two readings
-   * diverge by 1,000x in opposite directions; the point is declined because
-   * the upper bound carries a magnitude. Net: the sentence's figure reaches no
-   * node. `£500-2m` is already pinned as `[]` in
-   * `utils/__tests__/amount-range.test.ts`; the THOUSANDS-SEPARATOR spelling
-   * below is a member of the same class that no corpus spelled, so it is added
-   * here rather than left invisible.
+   * ⚠⚠ THIS SET AND ITS NAME WERE BOTH WRONG, AND THE NAME IS WHY THE SET WAS.
    *
-   * NOT closed by this repair, deliberately. Closing it means admitting the
-   * point on a descending pair, which reopens the N1/round-4 oscillation the
-   * PR already paid for — and this repair's mandate is the ASCENDING class the
-   * guard deferred and nothing could read.
+   * It was called `KNOWN_DESCENDING_PAIR_LOSES_ITS_POINT`, under the sentence
+   * *"the range is refused because the bare digits descend and the two readings
+   * diverge by 1,000x in opposite directions"*. For its third member,
+   * `"Budget £80,000-120k for the hire."`, NEITHER CLAUSE WAS TRUE: 80,000 to
+   * 120,000 ascends, and it has exactly one reading, because nobody writes
+   * "80,000k". A behaviour seat measured six such strings losing every factor
+   * they carried at base `f4c8f501` — the head filed them all under
+   * "descending", and a false class name is inherited by the next reader as a
+   * deliberate decision rather than a defect.
+   *
+   * WHAT ACTUALLY UNITES THE MEMBERS BELOW, and what the name now says: the
+   * bare digits descend, so the shared suffix cannot distribute — and a RIVAL
+   * reading survives in which the writer dropped a magnitude from the LOWER
+   * bound, which ascends just as coherently.
+   *
+   *     "£500-2m"     literal 500..2,000,000      dropped 500k..2m      BOTH
+   *     "£1,200-2m"   literal 1,200..2,000,000    dropped 1,200k..2m    BOTH
+   *
+   * Two coherent readings 1,000x apart is the ambiguity this module refuses to
+   * resolve by guessing (CLAUDE.md trap 22f: where direction cannot be
+   * determined, refuse and record the gap rather than tune a constant).
+   *
+   * ⚠ `"£1,200-2m"` IS NEW TO THIS SET and it is the honest cost of the rule
+   * chosen. A typographic rule — "a thousands separator in the lower bound
+   * means it cannot take the suffix" — would have published 1,200..2,000,000
+   * here, a 1,667x band over a reading ("£1,200k-£2m") that is coherent and,
+   * for a revenue sentence, likelier. It is refused rather than guessed, and
+   * pinned here rather than left invisible.
+   *
+   * NOT closed, deliberately. The twins below are what stop the set being
+   * "closed" by re-narrowing the pattern until everything yields nothing.
    */
-  const KNOWN_DESCENDING_PAIR_LOSES_ITS_POINT = [
+  const KNOWN_RIVAL_READING_YIELDS_NOTHING = [
     "Budget £500-2m for the platform.",
     "Budget of 500-2m for the platform.",
-    "Budget £80,000-120k for the hire.",
+    "Revenue of £1,200-2m next year.",
   ] as const;
 
-  it.each(KNOWN_DESCENDING_PAIR_LOSES_ITS_POINT)("OPEN (recorded): %s yields nothing", (brief) => {
+  it.each(KNOWN_RIVAL_READING_YIELDS_NOTHING)("OPEN (recorded): %s yields nothing", (brief) => {
     expect(extractFactors(brief)).toEqual([]);
   });
 
-  it("⭐ TWIN: the ASCENDING members of the same grammar all yield a range", () => {
-    // Without this the set above could be "closed" by re-narrowing the whole
-    // pattern, and every assertion in it would still pass.
+  it("⭐ TWIN A: the DISTRIBUTED ascending members of the same grammar yield a range", () => {
+    // Bare digits ascend ⇒ the suffix scopes across both bounds. Untouched by
+    // the repair, and asserted so a re-narrowing cannot pass by deleting it.
     for (const [brief, min, max] of [
       ["Budget £500-2000k for the platform.", 500_000, 2_000_000],
       ["Budget of 500-2000k for the platform.", 500_000, 2_000_000],
@@ -246,6 +266,46 @@ describe("the recorded floor: a DESCENDING dash-joined pair still loses its poin
       expect(range!.rangeMin, brief).toBe(min);
       expect(range!.rangeMax, brief).toBe(max);
     }
+  });
+
+  it("⭐ TWIN B: the LITERAL ascending class — the six strings the seat measured as lost", () => {
+    // MEASURED at head `762245c8`, all six yielded `[]`; at base `f4c8f501`
+    // five yielded a point PLUS a fabricated descending range (e.g.
+    // "£80,000-120k" → point 80,000 and range [80,000..120], midpoint 40,060 —
+    // the magnitude silently dropped). Neither is what the sentence says.
+    // Five of the six read here as the one band that ascends; the sixth
+    // ("£1,200-2m") has a rival reading and is pinned above.
+    const CASES = [
+      "Budget of £80,000-120k for the hire.",
+      "Budget of £80,000\u2013120k for the hire.", // en dash
+      "Budget of 80,000-120k for the hire.",
+      "Budget of £1,500-2k for the hire.",
+      "Budget of £950-1.2k per month.",
+    ] as const;
+    // Read EVERY member before asserting, so one RED names the whole class
+    // rather than stopping at the first — the six-row table this repair was
+    // briefed from was itself produced that way.
+    const actual = Object.fromEntries(
+      CASES.map((brief) => {
+        const r = shapes(brief).find((f) => f.extractionType === "range");
+        return [brief, r ? `${r.rangeMin}..${r.rangeMax}` : "NO RANGE"];
+      }),
+    );
+    expect(actual).toEqual({
+      "Budget of £80,000-120k for the hire.": "80000..120000",
+      "Budget of £80,000\u2013120k for the hire.": "80000..120000",
+      "Budget of 80,000-120k for the hire.": "80000..120000",
+      "Budget of £1,500-2k for the hire.": "1500..2000",
+      "Budget of £950-1.2k per month.": "950..1200",
+    });
+  });
+
+  it("⭐ TWIN C: a pair where NEITHER reading ascends is still refused", () => {
+    // The opposite-direction twin of TWIN B, and the guard against reading the
+    // repair as "admit the literal reading whenever the digits descend".
+    // 5,000,000 > 2m literally, and 5,000,000k is further away still.
+    expect(extractFactors("Budget of £5,000,000-2m for the platform.")).toEqual([]);
+    expect(extractFactors("Budget of 5,000,000-2m for the platform.")).toEqual([]);
   });
 });
 

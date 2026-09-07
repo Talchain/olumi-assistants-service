@@ -480,6 +480,34 @@ export function isMagnitudeShapedSuffix(suffix: string): boolean {
  * display convention has to be maintained by hand beside the alphabet.
  * Sub-1,000 values have no rung and are formatted plainly by the caller.
  */
+/**
+ * THE SMALLEST MAGNITUDE A WRITER COULD HAVE LEFT OFF A BOUND, DERIVED from the
+ * same map the parsers read (`1e3` today — `k`, `grand`, `thousand`).
+ *
+ * `resolveAmountRange` needs it to tell its two refusals apart. When a
+ * dash-joined pair's bare digits DESCEND, the shared-suffix reading is dead
+ * either way, and the only live question is whether the writer dropped a
+ * suffix from the LOWER bound. That question is answered against the smallest
+ * rung the alphabet carries, because if the smallest rung cannot lift the lower
+ * bound to or below the upper one, no larger rung can either.
+ *
+ * DERIVED, NOT WRITTEN, for the reason `MAGNITUDE_DISPLAY_LADDER` is: a hand-
+ * copied `1e3` here would go on answering for an alphabet that had since gained
+ * a smaller rung, and the drift would read as green (CLAUDE.md trap 12). It
+ * THROWS rather than defaulting, because a silent fallback is the assume-good
+ * mirror the same trap bans.
+ */
+export const SMALLEST_DROPPABLE_MAGNITUDE: number = (() => {
+  const nonTrivial = Object.values(MAGNITUDE_MULTIPLIERS).filter((m) => m > 1);
+  if (nonTrivial.length === 0) {
+    throw new Error(
+      "MAGNITUDE_MULTIPLIERS carries no multiplier above 1, so no magnitude could " +
+        "have been dropped from a bound and SMALLEST_DROPPABLE_MAGNITUDE has no meaning.",
+    );
+  }
+  return Math.min(...nonTrivial);
+})();
+
 export const MAGNITUDE_DISPLAY_LADDER: ReadonlyArray<readonly [number, string]> = (() => {
   const shortestByMultiplier = new Map<number, string>();
   for (const [key, multiplier] of Object.entries(MAGNITUDE_MULTIPLIERS)) {

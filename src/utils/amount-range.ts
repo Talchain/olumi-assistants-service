@@ -78,6 +78,7 @@ import {
   parseAmountDigits,
   requiredMagnitudeSuffixPattern,
   resolveMagnitude,
+  SMALLEST_DROPPABLE_MAGNITUDE,
 } from "./magnitude-alphabet.js";
 
 /**
@@ -372,17 +373,55 @@ export function resolveAmountRange(input: {
   if (hasMinMag && !hasMaxMag) return null;
 
   if (hasMaxMag && !hasMinMag) {
-    // The elliptical case — the whole point of this module. Distribute only
-    // where the pair already reads as an ascending range in its bare digits;
-    // a descending pair ("£500-2m") has two incompatible readings and gets
-    // neither.
-    if (minDigits > maxDigits) return null;
+    // The elliptical case — the whole point of this module.
     const multiplier = resolveMagnitude(input.maxMagnitude);
-    return {
-      min: minDigits * multiplier,
-      max: maxDigits * multiplier,
-      magnitudeDistributed: multiplier !== 1,
-    };
+    const maxValue = maxDigits * multiplier;
+
+    if (minDigits <= maxDigits) {
+      // The bare digits already ascend, so the shared suffix distributes across
+      // both bounds and the pair reads as one band on one scale ("80-120k").
+      return {
+        min: minDigits * multiplier,
+        max: maxValue,
+        magnitudeDistributed: multiplier !== 1,
+      };
+    }
+
+    // ⭐⭐ THE BARE DIGITS DESCEND. THAT IS ONE OBSERVATION AND IT ANSWERS TWO
+    // DIFFERENT QUESTIONS, WHICH IS WHY IT USED TO BE ONE REFUSAL AND IS NOW
+    // TWO (CLAUDE.md trap 21 — one name over two questions).
+    //
+    // Distributing is dead here by construction: `minDigits > maxDigits`
+    // multiplied through by the same suffix stays descending. What is left is
+    // the LITERAL reading — the lower bound as written, the upper bound taking
+    // the suffix alone — and the only thing that can defeat it is a rival
+    // reading in which the writer DROPPED a suffix from the lower bound.
+    //
+    //   "£80,000-120k"  literal 80,000..120,000    ascends
+    //                   dropped 80,000k..120k      descends — no rival
+    //   "£500-2m"       literal 500..2,000,000     ascends
+    //                   dropped 500k..2m           ALSO ascends — a rival
+    //
+    // So: refuse where NEITHER reading ascends (a pair that genuinely
+    // descends), refuse where BOTH do (genuinely ambiguous, and guessing is
+    // the 1,000x-wrong publication this module exists to stop), and read the
+    // literal one where it is the only one standing.
+    //
+    // ⚠ THE RIVAL IS TESTED AT THE ALPHABET'S SMALLEST RUNG and that is not an
+    // arbitrary choice: the smallest rung is the one most easily satisfied, so
+    // if it cannot lift the lower bound to or below the upper bound, no larger
+    // rung can. One comparison settles the whole alphabet.
+    //
+    // ⚠ WHAT THIS DELIBERATELY DOES NOT DO is discriminate on TYPOGRAPHY — a
+    // thousands separator in the lower bound, a decimal point in the upper. On
+    // this corpus a separator test agrees with the rule above on every member
+    // but "£1,200-2m", where it would publish a 1,667x band over a reading
+    // ("£1,200k-£2m") that is coherent and, for a revenue sentence, likelier.
+    // Typography is a proxy for the ambiguity; the rival reading IS the
+    // ambiguity, so it is what gets asked.
+    if (minDigits > maxValue) return null;
+    if (minDigits * SMALLEST_DROPPABLE_MAGNITUDE <= maxValue) return null;
+    return { min: minDigits, max: maxValue, magnitudeDistributed: false };
   }
 
   const min = minDigits * resolveMagnitude(input.minMagnitude);
