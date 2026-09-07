@@ -26,6 +26,7 @@ import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { synthesiseDisplayValue } from "./display-value.js";
+import { computeNormalisationCap } from "./normalisation-cap.js";
 import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCap,
@@ -118,24 +119,13 @@ function isTargetGoalLabel(label: string): boolean {
 }
 
 /**
- * Compute a normalisation cap for a large FACTOR-NODE value (display/model
- * normalisation for regular factor nodes — NOT goal thresholds).
- * Uses order-of-magnitude rounding: 800 → 1000, 50000 → 100000.
- *
- * NOTE (cap-doctrine unification, ROADMAP 1.18): the goal-threshold
- * redirection branch below does NOT use this function — it delegates to
- * the shared `resolveGoalThresholdCap` doctrine (../../utils/goal-threshold-cap.js)
- * so a goal target scores identically via the draft (this file) and chat
- * (add_constraint handler) registration paths. This function remains the
- * cap for plain factor nodes (enhance/create branches below), a separate,
- * unrelated concern (factor display legibility, not goal-fit scoring).
+ * `computeNormalisationCap` MOVED to `./normalisation-cap.js` (imported at the
+ * top of this file) so the edit seam can recognise this function's own output
+ * without re-spelling the rule. Behaviour is unchanged; the doc comment and
+ * the goal-threshold caveat travelled with it. Kept as ONE definition
+ * deliberately — a second copy of an order-of-magnitude rule is the
+ * hand-maintained mirror this estate keeps paying for (CLAUDE.md trap 12).
  */
-function computeNormalisationCap(rawValue: number): number {
-  if (rawValue <= 0) return 1;
-  // Round up to next order of magnitude
-  const orderOfMagnitude = Math.pow(10, Math.ceil(Math.log10(rawValue)));
-  return orderOfMagnitude;
-}
 
 /**
  * Infer factor_type from unit and value characteristics.

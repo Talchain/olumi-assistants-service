@@ -178,9 +178,11 @@ import {
 import {
   evaluateFactorValueProposal,
   resolveExistingRawValue,
+  suggestExtendedCap,
   type FactorValueOperator,
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import { isNormalisationMintedCap } from '../cee/factor-extraction/normalisation-cap.js';
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
 import {
   applyCompoundValueUpdateChain,
@@ -6791,6 +6793,73 @@ export async function runTurnExecutor(
             // Fall through to the synthesis block below — the
             // validator handles the rejection.
           }
+
+          // ── A USER-STATED VALUE OUTRANKS A NORMALISATION-MINTED CAP ──────
+          // THE DEFECT THIS CLOSES (witnessed on the wire at deployed CEE
+          // 578e809, founder brief "£80-120k on the first hire"): the brief
+          // extractor read the range as a bare 80, the enricher normalised it
+          // to `{value: 0.8, raw_value: 80, cap: 100, unit: '£'}`, and the
+          // product then correctly noticed its own error and offered the user
+          // £80,000 / £100,000 / £120,000. The user answered "Set it to
+          // £120,000." and was refused: "Value £120,000 exceeds the factor's
+          // cap of £100. I haven't changed anything." THE CAP BLOCKING THE FIX
+          // WAS THE SAME EXTRACTION DEFECT THE FIX EXISTED TO REPAIR — the
+          // user could not escape it by giving the right answer, and the
+          // correction loop could not complete (graph_hash moved on none of
+          // the 8 captured turns).
+          //
+          // THE ASYMMETRY THAT CAUSED IT. The product ALREADY offers
+          // `chip_prompt_rescale_extend_cap` ("Set to £120,000 and extend the
+          // scale") on exactly this rejection. That chip works because
+          // `buildRescaleCapPendingActions` persists a structured pending
+          // carrying `cap`, which the resume path threads in as `proposalCap`
+          // — and `cap = proposalCap ?? factorCap` in the shared predicate, so
+          // the consented cap wins. THIS path synthesised `{value, unit}` with
+          // no cap, so the same user intent, spoken instead of clicked, hit
+          // the machine-minted cap. One affordance, two routes, and only one
+          // of them could reach it.
+          //
+          // ⚠ THE GUARD IS NOT WEAKENED — NOT ONE BYTE OF THE PREDICATE
+          // CHANGES. A cap exists to catch a unit slip, and deleting it would
+          // reintroduce the class it guards. What changes is only what this
+          // path PROPOSES: it now carries the same `cap` the user's own chip
+          // would have carried, computed by the same `suggestExtendedCap`, so
+          // the validator and the handler still run every gate on it and the
+          // handler still renormalises every option's intervention on the
+          // factor.
+          //
+          // Conjuncts, and the direction each one guards:
+          //   · `value_exceeds_cap` only — every other rejection stands.
+          //   · `set` only — a delta is not a statement about scale.
+          //   · `inputHasUnit` — a BARE number outside the cap stays
+          //     `bare_number_outside_cap`. This is the unit-slip catch and it
+          //     is untouched.
+          //   · a stored factor unit — `unit_mismatch` already fired above if
+          //     the two disagree, so reaching here means they agree; requiring
+          //     the factor to HAVE one keeps a unitless factor's scale
+          //     redeclaration on the existing 2c/2d guards.
+          //   · `isNormalisationMintedCap` — the cap must be recognisable as
+          //     `computeNormalisationCap`'s own output for this factor's
+          //     stored magnitude. A percentage factor is excluded there BY THE
+          //     MINTING GATE'S OWN CONDITION, so a genuine 0–100 percent scale
+          //     still refuses "120000%" — the opposite-direction twin, pinned
+          //     in `__tests__/user-stated-value-outranks-minted-cap.test.ts`.
+          //
+          // Both directions are pinned as twins because this estate has
+          // shipped a fix and its exact inverse in consecutive rounds on this
+          // class of predicate (CLAUDE.md traps 22b / 22d).
+          const factorObservedRaw =
+            typeof obs?.raw_value === 'number' ? obs.raw_value : undefined;
+          const consentedCapExtension =
+            !evaluation.ok &&
+            evaluation.reason === 'value_exceeds_cap' &&
+            operator === 'set' &&
+            inputHasUnit &&
+            factorUnit !== undefined &&
+            isNormalisationMintedCap({ factorCap, factorObservedRawValue: factorObservedRaw, factorUnit })
+              ? suggestExtendedCap(userUnitValue)
+              : undefined;
+
           const proposal: ProposalAction = {
             handler_id: 'set_factor_value',
             entity: {
@@ -6803,7 +6872,19 @@ export async function runTurnExecutor(
             parameters: [
               {
                 name: 'value',
-                value: unit !== undefined ? { value: userUnitValue, unit } : userUnitValue,
+                // The structured `{value, unit, cap}` shape is the SAME
+                // carrier the rescale chip's pending action uses; `cap` is
+                // present only when `consentedCapExtension` resolved above.
+                value:
+                  unit !== undefined
+                    ? {
+                        value: userUnitValue,
+                        unit,
+                        ...(consentedCapExtension !== undefined
+                          ? { cap: consentedCapExtension }
+                          : {}),
+                      }
+                    : userUnitValue,
                 operator,
                 source: 'user_explicit',
                 ...(unit !== undefined ? { unit } : {}),
