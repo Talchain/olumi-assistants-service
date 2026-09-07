@@ -513,30 +513,50 @@ describe('chip-click run_analysis SUCCESS commit — a recovery that recovered n
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * ⭐⭐ THE LIMIT, PINNED AT THE REAL CARRY-FORWARD — NOT AT A MOCK.
+ * ⭐⭐ THE LIMIT, PINNED AT THE REAL DURABLE BOUNDARY — THE COLUMN ACTUALLY WRITTEN.
  * ═══════════════════════════════════════════════════════════════════════════
  * Every case above mocks `commitDirectAnswer`, so all of them are assertions
- * about what the dispatcher SUPPLIED, never about what was PERSISTED. That is
- * the same shape as the defect this PR repairs, one layer down, and it is why
- * this block exists: it drives the REAL `computeSurvivingPriorPendingsDetailed`
- * — the function `commit.ts` actually carries priors through — with no mock
- * anywhere.
+ * about what the dispatcher SUPPLIED, never about what was PERSISTED.
  *
- * WHAT IT PROVES, and it is deliberately an unflattering result: the three-state
- * distinction the dispatcher makes DIES AT THE DURABLE BOUNDARY. Complete reader
- * manifest for `CommitMetadata.priorPendingActions` in `commit.ts`: the type
- * declaration plus exactly two reads, BOTH `metadata.priorPendingActions ?? []`,
- * and no key-presence branch anywhere. So an omitted key and an explicit `[]`
- * are byte-identical downstream, and `unavailable` carries forward exactly what
- * `known_empty` does.
+ * ⚠⚠ THE PREVIOUS VERSION OF THIS BLOCK DID NOT CLOSE THAT GAP EITHER — AND
+ * CLAIMED IT DID. That is the review defect this rewrite repairs (independent
+ * exact-head review of `4deaab73`). It imported the pure
+ * `computeSurvivingPriorPendingsDetailed`, then hand-wrote
  *
- * This test therefore pins the NARROW claim the PR is entitled to — the loss is
- * ATTRIBUTABLE, not PREVENTED — and it will RED the day someone makes the
- * boundary preserve `unavailable`, which is the correct moment to re-derive
- * every claim that rests on this limit.
+ *     const omittedKey = metaKeyOmitted.priorPendingActions ?? [];
+ *
+ * IN THE TEST and fed the already-collapsed array to it. That is a REPLICA of
+ * the production read, not the production read — a hand-maintained mirror of
+ * the exact expression under test, which is this estate's dominant defect
+ * class. Its stated promise, "it will RED the day someone makes the boundary
+ * preserve `unavailable`", was FALSE: a future change that branches on key
+ * presence BEFORE the carry-forward, refuses the authority-replacing append,
+ * or persists an explicit unavailable state would leave
+ * `computeSurvivingPriorPendingsDetailed` untouched, and the block would have
+ * stayed green while still asserting the two durable outcomes are identical.
+ *
+ * WHAT IT DOES NOW: drives the REAL `commitDirectAnswer` — no commit mock —
+ * over a capturing `SessionStore`, and asserts the `pending_actions` column
+ * ACTUALLY WRITTEN through the real carry-forward and the real
+ * `appendCheckedGraphWrite`. That is the authoritative newest-row producer, so
+ * the assertion binds the whole production mapping
+ * `CommitMetadata -> carry-forward -> pending_actions: finalPendings`.
+ *
+ * WHAT IT PROVES, and it is deliberately an unflattering result: the
+ * three-state distinction the dispatcher makes DIES AT THE DURABLE BOUNDARY.
+ * Complete reader manifest for `CommitMetadata.priorPendingActions` in
+ * `commit.ts`: the type declaration plus exactly two reads, BOTH
+ * `metadata.priorPendingActions ?? []` (:1240, :1287), and no key-presence
+ * branch anywhere. So an omitted key and an explicit `[]` are byte-identical
+ * downstream, and `unavailable` carries forward exactly what `known_empty`
+ * does.
+ *
+ * This block therefore pins the NARROW claim the PR is entitled to — the loss
+ * is ATTRIBUTABLE, not PREVENTED — and it now genuinely WILL RED the day the
+ * durable boundary changes, because it reads that boundary's own output.
  */
-describe('the REAL carry-forward — what the three states actually deliver downstream', () => {
-  const NOW = Date.UTC(2026, 7, 31, 12, 0, 0);
+describe('the REAL carry-forward — driven through the REAL commit, read at the written column', () => {
+  const NOW_ISO_FAR_FUTURE = '2099-12-31T23:59:59.000Z';
   const liveHold = (id: string): PendingAction =>
     ({
       id,
@@ -551,73 +571,190 @@ describe('the REAL carry-forward — what the three states actually deliver down
       },
       preconditions: {},
       expires_at_turn_count: 3,
-      expires_at_iso: '2099-12-31T23:59:59.000Z',
+      expires_at_iso: NOW_ISO_FAR_FUTURE,
       emitted_at_iso: '2026-08-31T10:00:00.000Z',
     }) as unknown as PendingAction;
 
-  it('⭐ an OMITTED key and an explicit [] are indistinguishable at the real carry-forward', async () => {
-    const { computeSurvivingPriorPendingsDetailed } = await vi.importActual<
+  const REAL_COMMIT_META = {
+    scenario_id: SCENARIO_ID,
+    turn_id: TURN_ID,
+    turn_class: 'handler' as const,
+    handler_id: 'run_analysis' as const,
+    request_hash: 'sha256:real-boundary',
+    llm_calls_used: 0,
+    duration_ms: 1,
+    handler_facts: [] as never[],
+  };
+
+  /**
+   * Drive the REAL commit and return the `pending_actions` the REAL append
+   * received. `onAppend` fires INSIDE the append, so a case can assert
+   * ordering across the check→write window rather than assuming it.
+   *
+   * Every case pins its own precondition: the append must have happened
+   * exactly once. Without that a case could "pass" against a commit that
+   * never reached the writer at all — the vacuity this block exists to end.
+   */
+  async function writtenPendings(
+    metaOverrides: Record<string, unknown>,
+    onAppend?: () => void,
+  ): Promise<readonly PendingAction[] | undefined> {
+    const { commitDirectAnswer } = await vi.importActual<
       typeof import('../../commit.js')
     >('../../commit.js');
+    const { composeDirectAnswerResponse } = await vi.importActual<
+      typeof import('../../compose.js')
+    >('../../compose.js');
+    const { createNoopSessionStore } = await vi.importActual<
+      typeof import('../../session/__tests__/fixtures.js')
+    >('../../session/__tests__/fixtures.js');
 
-    // Reproduce the two metadata SHAPES and read them with the exact expression
-    // commit.ts uses at BOTH of its read sites (`metadata.priorPendingActions ?? []`),
-    // rather than hand-writing the resolved value — the read is the thing under test.
-    type MetaShape = { priorPendingActions?: readonly PendingAction[] };
-    const metaKeyOmitted: MetaShape = {};
-    const metaExplicitEmpty: MetaShape = { priorPendingActions: [] };
-    const omittedKey = metaKeyOmitted.priorPendingActions ?? [];
-    const explicitEmpty = metaExplicitEmpty.priorPendingActions ?? [];
+    const writes: Array<{ pending_actions?: readonly PendingAction[] }> = [];
+    const store = createNoopSessionStore({ appendId: 'row-real-boundary' });
+    vi.spyOn(store, 'append').mockImplementation(async (write) => {
+      onAppend?.();
+      writes.push(write as { pending_actions?: readonly PendingAction[] });
+      return { id: 'row-real-boundary' };
+    });
 
-    const fromOmitted = computeSurvivingPriorPendingsDetailed(omittedKey, [], [], 'gh-1', NOW);
-    const fromEmpty = computeSurvivingPriorPendingsDetailed(explicitEmpty, [], [], 'gh-1', NOW);
+    const composed = composeDirectAnswerResponse({
+      answerKind: 'functional',
+      assistant_text: 'Ran analysis on your current scenario.',
+      stage: 'frame',
+    });
 
-    expect(
-      fromOmitted.survivors,
-      'the durable outcome of `unavailable` differs from `known_empty` — if this is now true, the ' +
-        'boundary has been changed and every "attributable, not prevented" claim must be re-derived',
-    ).toEqual(fromEmpty.survivors);
-    expect(fromOmitted.survivors).toEqual([]);
-    expect(fromOmitted.lapsedConfirmationExpecting).toEqual(fromEmpty.lapsedConfirmationExpecting);
-  });
-
-  it('POSITIVE CONTROL: the same function DOES carry a real survivor through, so the comparison above is not vacuous', async () => {
-    const { computeSurvivingPriorPendingsDetailed } = await vi.importActual<
-      typeof import('../../commit.js')
-    >('../../commit.js');
-
-    const carried = computeSurvivingPriorPendingsDetailed(
-      [liveHold('pa-survivor-1')],
-      [],
-      [],
-      'gh-1',
-      NOW,
+    await commitDirectAnswer(
+      composed,
+      { ...REAL_COMMIT_META, ...metaOverrides } as never,
+      store,
     );
 
-    // Bound by IDENTITY — a count could be satisfied by another object.
     expect(
-      carried.survivors.map((p) => p.id),
-      'the instrument cannot see a survivor at all, so the equality above proved nothing',
+      writes,
+      'the real append never ran, so this case asserted nothing about the durable boundary',
+    ).toHaveLength(1);
+    // ⚠ RAW, deliberately NOT `?? []`. Coalescing here would re-introduce the
+    // exact defect this block repairs: a boundary that preserves `unavailable`
+    // by declining to publish the column would be silently rewritten to `[]`
+    // by the INSTRUMENT, and the equality case below would keep passing.
+    return writes[0].pending_actions;
+  }
+
+  it('⭐ an OMITTED key and an explicit [] produce the SAME written pending_actions column', async () => {
+    // `unavailable` -> key omitted entirely.
+    const fromOmitted = await writtenPendings({});
+    // `known_empty` -> explicit [].
+    const fromExplicitEmpty = await writtenPendings({ priorPendingActions: [] });
+
+    expect(
+      fromOmitted,
+      'the durable outcome of `unavailable` now differs from `known_empty` — if this is true, ' +
+        'the boundary HAS been changed and every "attributable, not prevented" claim in this ' +
+        'PR, in chip-click-dispatch.ts and in commit.ts must be re-derived',
+    ).toEqual(fromExplicitEmpty);
+    // Pinned as the CONCRETE published value, not merely as "equal to each
+    // other": a boundary that stopped publishing the column at all would make
+    // the two equal (both `undefined`) while genuinely having changed.
+    expect(fromOmitted).toEqual([]);
+    expect(fromExplicitEmpty).toEqual([]);
+  });
+
+  it('POSITIVE CONTROL: a real survivor IS written to the column, so the equality above is not vacuous', async () => {
+    const written = await writtenPendings({
+      priorPendingActions: [liveHold('pa-survivor-1')],
+    });
+
+    expect(written, 'the commit published no pending_actions column at all').toBeDefined();
+    // Bound by IDENTITY — a length or a truthiness check could be satisfied by
+    // any other object the commit happens to persist.
+    expect(
+      written!.map((p) => p.id),
+      'the instrument cannot see a survivor reach the written column at all, so the ' +
+        'omitted-vs-empty equality proved only that the writer is blind',
     ).toEqual(['pa-survivor-1']);
+    // The carry-forward's turn-TTL decrement is the proof this went through the
+    // REAL pass and not a pass-through of the metadata array.
+    expect(written![0].expires_at_turn_count).toBe(2);
   });
 
-  it('and THAT is the gap: a survivor list is the ONLY thing this seam can carry that an unavailable read cannot', async () => {
-    const { computeSurvivingPriorPendingsDetailed } = await vi.importActual<
-      typeof import('../../commit.js')
-    >('../../commit.js');
+  /**
+   * ═════════════════════════════════════════════════════════════════════════
+   * ⚠⚠ AFTER-CHECK INTERLEAVING — THE CHECK-THEN-WRITE WINDOW, PINNED.
+   * ═════════════════════════════════════════════════════════════════════════
+   * The dispatcher READS the prior pendings (`loadMostRecentPendingActions-
+   * IntegrityStrict`) and then WRITES via `commitDirectAnswer`. Between those
+   * two points a concurrent turn can land a row that legitimately CONSUMES a
+   * hold. This commit then becomes the newest row and writes the
+   * PRE-INTERLEAVING snapshot — resurrecting a pending the other turn consumed.
+   *
+   * There is no per-scenario serialisation on this seam. `consumedPendingRefs`
+   * is populated from THIS turn's own consumption only, so a concurrent turn's
+   * consumption has NO channel by which to reach this carry-forward.
+   *
+   * ⚠ THIS IS A PRE-EXISTING, ESTATE-WIDE PROPERTY OF EVERY THREADING SITE
+   * (route-v2, `turn-executor.ts`, all four dispatchers) — it is NOT introduced
+   * by #1286, and #1286 does NOT close it. It is pinned here, deliberately as a
+   * KNOWN window rather than left unobserved, because the estate has previously
+   * shipped a TOCTOU of exactly this shape whose tests covered only the
+   * interleaving BEFORE the check. A test that pins the window REDs when the
+   * behaviour changes in EITHER direction: if someone closes it, this case
+   * fails and the closure gets re-derived rather than landing silently.
+   *
+   * The twin below is what makes this a WINDOW claim and not a "carry-forward
+   * is broken" claim: the identical consumption, known at write time, IS
+   * honoured. Only the ordering differs.
+   */
+  it('⚠ AFTER-CHECK INTERLEAVING — a consumption landing AFTER the prior read is NOT reflected in the written column (known window)', async () => {
+    const hold = liveHold('pa-toctou-1');
+    const order: string[] = [];
 
-    const withSurvivor = computeSurvivingPriorPendingsDetailed(
-      [liveHold('pa-survivor-1')],
-      [],
-      [],
-      'gh-1',
-      NOW,
+    // 1. CHECK — the dispatcher's strict prior read. Snapshot taken here.
+    order.push('prior_read');
+    const priorSnapshot = [hold];
+
+    // 2. INTERLEAVING — a concurrent turn consumes this exact hold and appends
+    //    its own row. It happens AFTER the snapshot and BEFORE our append.
+    order.push('concurrent_turn_consumed_hold');
+
+    // 3. WRITE — our commit. `consumedPendingRefs` carries OUR turn's
+    //    consumption only, and our turn consumed nothing.
+    const written = await writtenPendings(
+      { priorPendingActions: priorSnapshot, consumedPendingRefs: [] },
+      () => order.push('our_append'),
     );
-    const withNothing = computeSurvivingPriorPendingsDetailed([], [], [], 'gh-1', NOW);
 
-    // The discrimination that IS real downstream — so the reader can see exactly
-    // where the value of this PR lives (`known_with_survivors`) and where it
-    // does not (`unavailable` vs `known_empty`).
-    expect(withSurvivor.survivors).not.toEqual(withNothing.survivors);
+    // The window is only real if the interleaving genuinely preceded our write.
+    expect(
+      order,
+      'the interleaving did not actually land between the check and the write, so this ' +
+        'case is not exercising the after-check window it claims to',
+    ).toEqual(['prior_read', 'concurrent_turn_consumed_hold', 'our_append']);
+
+    // Bound by IDENTITY. This is the resurrection, pinned as the known gap.
+    expect(written, 'the commit published no pending_actions column at all').toBeDefined();
+    expect(
+      written!.map((p) => p.id),
+      'the after-check window has CLOSED — a concurrent consumption now reaches this ' +
+        'carry-forward. That is a real improvement, and it means this pinned gap and every ' +
+        'claim resting on it must be re-derived, including the estate-wide TOCTOU row',
+    ).toEqual(['pa-toctou-1']);
+  });
+
+  it('DISCRIMINATING TWIN — the SAME consumption, known at write time, IS honoured: the gap above is the WINDOW, not a broken carry-forward', async () => {
+    const hold = liveHold('pa-toctou-1');
+
+    const written = await writtenPendings({
+      priorPendingActions: [hold],
+      // The one channel that exists: consumption known to THIS turn.
+      consumedPendingRefs: [hold.chip_id],
+    });
+
+    expect(written, 'the commit published no pending_actions column at all').toBeDefined();
+    expect(
+      written!.map((p) => p.id),
+      'the carry-forward ignores consumedPendingRefs entirely — then the case above is not ' +
+        'evidence about an ordering window, it is evidence the consumption channel is broken',
+    ).not.toContain('pa-toctou-1');
+    expect(written).toEqual([]);
   });
 });
