@@ -36,9 +36,16 @@
  * lands (CLAUDE.md trap 12 — a hand-maintained mirror drifts green).
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 import { findUnsupportedOfferTargetKind } from '../warrant-demotion.js';
-import { buildNonFactorKindRefusalText } from '../../routing/deterministic-value-update.js';
+import {
+  buildNonFactorKindRefusalText,
+  buildNonFactorKindRefusalConstraintChips,
+} from '../../routing/deterministic-value-update.js';
+import { toEntityKind } from '../../routing/graph-lookup-adapter.js';
 import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../../tools/handlers/set-factor-value.js';
 import { ALLOWED_TARGET_KINDS as ADD_CONSTRAINT_ALLOWED_TARGET_KINDS } from '../../tools/handlers/add-constraint.js';
 import { NodeKindV3 } from '../../../schemas/cee-v3.js';
@@ -235,4 +242,130 @@ describe('the refusal names only routes that exist', () => {
       expect(text).toContain('Delivery Pace');
     },
   );
+});
+
+
+/**
+ * ⭐⭐ THE CHIP AND THE PROSE ANSWER ONE QUESTION AND MUST NOT DISAGREE.
+ *
+ * Found by review at `39474c21`: the first round of this PR gated the refusal
+ * PROSE on `isConstraintableKind` and gated the chip in the NEW demotion
+ * branch — but left the SIBLING chip in the pre-existing
+ * `refuse_non_factor_kind` branch minted unconditionally, nine lines above the
+ * prose it now contradicted. On a `decision` or `action` target the assistant
+ * text WITHHELD the constraint route while the button beneath it OFFERED it,
+ * and that button's message re-enters routing and reaches `add_constraint`,
+ * which throws (`add-constraint.ts` ALLOWED_TARGET_KIND_SET). The response
+ * contradicted itself inside one turn — CLAUDE.md trap 21.
+ *
+ * ⚠ SHARPEST FORM, derived here rather than assumed: a `decision` / `action`
+ * candidate reaches that branch ONLY through the no-factor fallback
+ * (`deterministic-value-update.ts` candidate pool), and the factor-label list
+ * beside the chip is built from the SAME source and the SAME `kind === 'factor'`
+ * filter as the id set that fallback keys on. So whenever the kind is
+ * non-constraintable the factor chips are necessarily EMPTY — the constraint
+ * chip was the turn's ONLY exit, and it was the one route guaranteed to refuse.
+ *
+ * ── WHY ONE PREDICATE IS CORRECT HERE, AND WHERE THE TWO HARMS SEPARATE ────
+ * Offering a route that will refuse (a LIE) and withholding one that would
+ * have worked (a GAP) are opposite harms and must never share a tuned
+ * threshold. They do not share one here: this is exact set membership against
+ * the very constant the resumer throws on, so for every KNOWN kind both harms
+ * are zero at once — there is nothing to trade off. They separate only on
+ * IGNORANCE, which the caller spells with the sentinel `'node'`; that is not
+ * in the allowlist, so BOTH channels withhold. Pinned below as its own case.
+ *
+ * Every case has its opposite-direction twin: each kind that must NOT get the
+ * chip is matched by a kind that MUST, and the co-variance sweep runs the
+ * whole contract enum so neither channel can drift alone.
+ */
+describe('the refusal CHIP names only routes that exist', () => {
+  const CONSTRAINT_CHIP_ID = 'chip_prompt_refuse_constraint';
+
+  const constraintable = NodeKindV3.options.filter((k) =>
+    ADD_CONSTRAINT_ALLOWED_TARGET_KINDS.includes(k),
+  );
+  const notConstraintable = NodeKindV3.options.filter(
+    (k) => !ADD_CONSTRAINT_ALLOWED_TARGET_KINDS.includes(k),
+  );
+
+  it('both arms of the sweep are non-empty (neither it.each is vacuous)', () => {
+    expect(constraintable.length).toBeGreaterThan(0);
+    expect(notConstraintable.length).toBeGreaterThan(0);
+  });
+
+  // ── THE LIE: a chip for a route that would refuse ──────────────────────
+  it.each(notConstraintable)(
+    'mints NO constraint chip for a %s (add_constraint rejects that kind)',
+    (kind) => {
+      const chips = buildNonFactorKindRefusalConstraintChips('Some Node', kind);
+      expect(chips.map((c) => c.id)).not.toContain(CONSTRAINT_CHIP_ID);
+      expect(chips).toHaveLength(0);
+    },
+  );
+
+  // ── THE GAP: the opposite-direction twin of every case above ───────────
+  it.each(constraintable)(
+    'DOES mint the constraint chip for a %s (that route genuinely exists)',
+    (kind) => {
+      const chips = buildNonFactorKindRefusalConstraintChips('Engineering Overstretch', kind);
+      // Bound by chip ID, not by a substring of the label another chip could carry.
+      expect(chips.map((c) => c.id)).toEqual([CONSTRAINT_CHIP_ID]);
+      expect(chips[0]?.label).toBe('Add a constraint on Engineering Overstretch');
+      expect(chips[0]?.message).toBe('Add a constraint on Engineering Overstretch.');
+    },
+  );
+
+  // ── THE CO-VARIANCE INVARIANT, swept over the WHOLE contract enum ──────
+  it.each(NodeKindV3.options)(
+    'prose and chip agree about the constraint route for a %s',
+    (kind) => {
+      const text = buildNonFactorKindRefusalText('Some Node', kind, ['Delivery Pace']);
+      const chips = buildNonFactorKindRefusalConstraintChips('Some Node', kind);
+      const proseOffers = text.toLowerCase().includes('constraint');
+      const chipOffers = chips.some((c) => c.id === CONSTRAINT_CHIP_ID);
+      expect(chipOffers).toBe(proseOffers);
+    },
+  );
+
+  // ── the corrected domain: which kinds actually REACH this refusal ──────
+  it('the reachable non-constraintable kinds are exactly decision and action', () => {
+    // `option` and `goal` never arrive in the 'node' bucket the candidate pool
+    // scans, so they cannot reach this copy — a narrowing the PR description
+    // got wrong by citing `modelEntityLabels` instead of `toEntityKind`.
+    const reachable = NodeKindV3.options.filter((k) => toEntityKind(k) === 'node');
+    const reachableAndRefusing = reachable.filter(
+      (k) => !ADD_CONSTRAINT_ALLOWED_TARGET_KINDS.includes(k),
+    );
+    expect([...reachableAndRefusing].sort()).toEqual(['action', 'decision']);
+  });
+
+  // ── IGNORANCE: the one place the two harms separate ────────────────────
+  it('withholds in BOTH channels for the "node" ignorance sentinel', () => {
+    // turn-executor spells an unresolvable kind `'node'`. It is not in the
+    // allowlist, so both channels withhold — the GAP direction, deliberately
+    // shared so the chip cannot fail open while the prose fails closed.
+    const text = buildNonFactorKindRefusalText('Some Node', 'node', ['Delivery Pace']);
+    const chips = buildNonFactorKindRefusalConstraintChips('Some Node', 'node');
+    expect(text.toLowerCase()).not.toContain('constraint');
+    expect(chips).toHaveLength(0);
+  });
+
+  // ── the derived structural guard: no ungated copy may survive ──────────
+  it('the constraint chip id is minted in exactly one place — the gated builder', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const executorSrc = readFileSync(resolve(here, '../../turn-executor.ts'), 'utf8');
+    const builderSrc = readFileSync(
+      resolve(here, '../../routing/deterministic-value-update.ts'),
+      'utf8',
+    );
+    // Positive control: the probe can see the file, and the builder is wired
+    // into it. Without this an unreadable/empty read would pass vacuously.
+    expect(executorSrc.length).toBeGreaterThan(1000);
+    expect(executorSrc).toContain('buildNonFactorKindRefusalConstraintChips');
+    // The claim: every mint of this chip goes through the gated builder.
+    const quoted = `'${CONSTRAINT_CHIP_ID}'`;
+    expect(executorSrc.split(quoted).length - 1).toBe(0);
+    expect(builderSrc.split(quoted).length - 1).toBe(1);
+  });
 });

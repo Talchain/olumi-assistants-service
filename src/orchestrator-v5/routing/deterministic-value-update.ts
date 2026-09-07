@@ -1503,6 +1503,55 @@ export function buildNonFactorKindRefusalText(
 }
 
 /**
+ * The constraint CHIP that accompanies `buildNonFactorKindRefusalText`.
+ *
+ * ⚠ WHY THIS IS A FUNCTION AND NOT A CHIP LITERAL AT THE CALL SITE.
+ * The chip and the prose are two channels answering ONE question — "does the
+ * constraint route exist for this target?" — and until this builder existed
+ * they answered it in two places. One call site (the mutation-warrant demotion
+ * branch) gated its literal; its sibling (the `refuse_non_factor_kind` branch)
+ * did not, so on a `decision` or `action` target the assistant text WITHHELD
+ * the constraint route while the button directly beneath it OFFERED it, and
+ * clicking that button reached `add_constraint`, which throws on those kinds
+ * (`add-constraint.ts` ALLOWED_TARGET_KIND_SET). The response contradicted
+ * itself inside one turn — CLAUDE.md trap 21, two authorities under similar
+ * names — and no test could see it, because the chip array was built inline.
+ *
+ * Both channels now read `isConstraintableKind`, the recommending handler's
+ * OWN exported authority (trap 12: derived, never mirrored). Minting the chip
+ * here rather than at each call site is what makes that guarantee testable and
+ * keeps it from drifting the next time a call site is added.
+ *
+ * ⚠ THE TWO HARMS ARE NOT A THRESHOLD. Offering a route that will refuse (a
+ * lie) and withholding one that would have worked (a gap) are opposite harms,
+ * but they do not need opposite tuning here: this is exact set membership
+ * against the very constant the resumer throws on, so for any KNOWN kind both
+ * harms are zero simultaneously. They separate only on IGNORANCE — the caller
+ * spells an unresolvable kind with the sentinel `'node'`
+ * (turn-executor.ts, `typeof nodeKind?.kind === 'string' ? nodeKind.kind : 'node'`),
+ * which is not in the allowlist, so BOTH channels withhold. That is the gap
+ * direction, it is pre-existing, and it is deliberately shared: letting the
+ * chip fail open while the prose fails closed would rebuild the exact
+ * divergence this builder exists to abolish.
+ *
+ * Returns an ARRAY so both call sites spread it — an empty chip list is an
+ * established response shape in the executor, not a degenerate one.
+ */
+export function buildNonFactorKindRefusalConstraintChips(
+  label: string,
+  nodeKind: string,
+): ReadonlyArray<{ id: string; label: string; message: string }> {
+  if (!isConstraintableKind(nodeKind)) return [];
+  return [
+    {
+      id: 'chip_prompt_refuse_constraint',
+      label: `Add a constraint on ${label}`,
+      message: `Add a constraint on ${label}.`,
+    },
+  ];
+}
+
+/**
  * Build prompt-replay messages for each candidate chip, preserving the
  * user's original verb where possible.
  *

@@ -113,7 +113,7 @@ import {
   tryCompoundValueUpdate,
   buildClarifyAssistantText,
   buildNonFactorKindRefusalText,
-  isConstraintableKind,
+  buildNonFactorKindRefusalConstraintChips,
   buildClarifyChipMessage,
   buildDeicticClarifyAssistantText,
   mapCqeQuantityToProposalValue,
@@ -7015,11 +7015,19 @@ export async function runTurnExecutor(
               deterministicValueUpdate.quantity,
             ),
           })),
-          {
-            id: 'chip_prompt_refuse_constraint',
-            label: `Add a constraint on ${refusedCandidate.label}`,
-            message: `Add a constraint on ${refusedCandidate.label}.`,
-          },
+          // The constraint route is named ONLY when `add_constraint` genuinely
+          // accepts this kind — the same gate, from the same builder, as the
+          // refusal prose composed nine lines below. This chip used to be
+          // minted unconditionally, so a `decision` / `action` target got a
+          // button offering a route the prose had just withheld and the
+          // resumer would have thrown on. Where the route does not exist the
+          // refusal keeps the factor chips; when the graph has no factor
+          // nodes it is chip-less, which is the honest shape (an empty
+          // `suggested_actions` is an established response here).
+          ...buildNonFactorKindRefusalConstraintChips(
+            refusedCandidate.label,
+            refusedKind,
+          ),
         ];
         const refusalResponse = composeAnswer({
           answerKind: 'functional',
@@ -9893,15 +9901,12 @@ export async function runTurnExecutor(
           // The constraint chip is offered ONLY when `add_constraint` genuinely
           // accepts this kind — the same gate the refusal copy applies. A chip
           // for a route that also refuses is the defect one turn along.
-          demotionChips = isConstraintableKind(unsupportedTargetKind.nodeKind)
-            ? [
-                {
-                  id: 'chip_prompt_refuse_constraint',
-                  label: `Add a constraint on ${unsupportedTargetKind.label}`,
-                  message: `Add a constraint on ${unsupportedTargetKind.label}.`,
-                },
-              ]
-            : [];
+          demotionChips = [
+            ...buildNonFactorKindRefusalConstraintChips(
+              unsupportedTargetKind.label,
+              unsupportedTargetKind.nodeKind,
+            ),
+          ];
         } else if (!demotion.ok) {
           // A mutating handler outside the three proposable intents. There is
           // no chip channel for it, so the honest outcome is a refusal that
