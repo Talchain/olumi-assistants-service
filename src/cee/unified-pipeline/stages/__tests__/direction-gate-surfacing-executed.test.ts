@@ -368,3 +368,119 @@ describe('the direction-clarification id space is reserved to this stage', () =>
     expect(ids.filter((i) => i.startsWith('direction_unresolved')), 'only the reserved id goes').toEqual([]);
   });
 });
+
+/**
+ * ⭐⭐ THE EVICTION ANSWERS EXACTLY ONE QUESTION, OVER EVERY ITEM SHAPE THE
+ * UPSTREAM CAN DELIVER.
+ *
+ * ⚠ WRITTEN AGAINST THE SPEC, NOT AGAINST THE SHAPE THAT PROMPTED IT. The
+ * property is: *an item is evicted if and only if its id lies in the reserved
+ * `direction_unresolved_*` namespace.* A `null` entry has no id, so the answer
+ * is NO and it is kept — and so is every other shape that carries no reserved
+ * id. Writing this suite as "does not crash on null" would have the same
+ * asymmetry as the defect (CLAUDE.md trap 13d): null is where we came in, it is
+ * not the class.
+ *
+ * ⭐ TWO OPPOSITE HARMS, TWO MECHANISMS — they do not share a threshold, and
+ * this suite asserts BOTH DIRECTIONS on every case:
+ *
+ *   - THE GAP: an item the eviction must NOT touch is dropped, or worse, reading
+ *     it throws. A throw here is not a local failure — `unified-pipeline/index.ts`
+ *     catches a Package exception and returns `{graph, rationales, confidence}`
+ *     only, so ONE malformed optional coaching entry would discard `coaching`,
+ *     `goal_constraints` and `analysis_ready` — including the limit disclosure
+ *     this whole change exists to deliver. The disclosure would be lost by the
+ *     very guard that makes it trustworthy.
+ *   - THE LIE: an item the eviction MUST take is kept, and unvetted copy reaches
+ *     the narrative wearing producer authority.
+ *
+ * Each case below therefore carries its OPPOSITE-DIRECTION TWIN in the same run:
+ * a reserved-id impostor that must go, a legitimate sibling that must stay, and
+ * the producer's genuine card that must arrive.
+ *
+ * ⚠ THE INPUT CLASS IS DERIVED FROM THE PRODUCER, NOT IMAGINED. Stage 4.5 hands
+ * `ctx.coaching` the RAW parsed model object (`coaching-pass.ts:479-481`), and
+ * the only thing between there and here is `normaliseLegacyCoachingValues`,
+ * whose loop `continue`s past non-object entries WITHOUT REMOVING THEM
+ * (`adapters/llm/normalise-legacy-coaching.ts:61`). So every shape below is
+ * something `strengthen_items` can actually hold when this stage reads it.
+ */
+describe('the eviction predicate is total over admissible strengthen_items', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupMocks();
+  });
+
+  const MALFORMED: ReadonlyArray<readonly [string, unknown]> = [
+    ['null', null],
+    ['undefined', undefined],
+    ['a bare string', 'not an object'],
+    ['a number', 42],
+    ['an array', []],
+    ['an object with no id', { label: 'no id here', detail: 'x' }],
+    ['an object with a non-string id', { id: 123, label: 'numeric id', detail: 'x' }],
+  ];
+
+  it.each(MALFORMED)(
+    'keeps the package intact when strengthen_items contains %s, and still evicts the impostor beside it',
+    async (_name, malformed) => {
+      const ctx = makeCtx({
+        coaching: {
+          summary: 'Existing summary',
+          strengthen_items: [
+            malformed,
+            { id: 'llm_item_1', label: 'Add an option', detail: 'Keep me', action_type: 'add_option' },
+            { id: 'direction_unresolved_1', label: 'Squatter label', detail: 'Squatter detail', action_type: 'add_option' },
+          ],
+          widening_log: { elements_added: [], elements_considered_but_excluded: [], brief_completeness: 'partial' },
+          bias_signals: [],
+        },
+        directionUnresolved: [unresolved('gross margin', '78%')],
+      });
+
+      await runStagePackage(ctx);
+
+      // GAP DIRECTION — the stage completed and the package survived. If the
+      // eviction throws, `ceeResponse` is never built and the caller degrades to
+      // graph-only, taking the disclosure with it.
+      expect(ctx.ceeResponse, 'a malformed coaching entry must not discard the package').toBeDefined();
+      expect(ctx.ceeResponse?.coaching, 'coaching must still reach the user').toBeDefined();
+
+      const ids = cardsOn(ctx).map((i) => String(i.id));
+
+      // GAP DIRECTION — a well-formed neighbour is not collateral damage.
+      expect(ids, 'the ordinary item must survive alongside the malformed one').toContain('llm_item_1');
+
+      // GAP DIRECTION — the disclosure this change exists to deliver still lands.
+      expect(ids, 'the producer card must still arrive').toContain('direction_unresolved_1');
+
+      // LIE DIRECTION — the twin. Bound by the producer's own copy, never by
+      // "is not the squatter", which a third item could satisfy (trap 19).
+      const reserved = cardsOn(ctx).filter((i) => String(i.id).startsWith('direction_unresolved'));
+      expect(reserved, 'exactly one item may hold the reserved id').toHaveLength(1);
+      expect(String(reserved[0]!.detail)).toContain('78%');
+      expect(cardsOn(ctx).map((i) => String(i.detail))).not.toContain('Squatter detail');
+    },
+  );
+
+  it('a malformed entry does not cost the user the disclosure when there is no impostor at all', async () => {
+    // The reachable everyday case: the model emits one null item and nothing
+    // else unusual. Before the repair the eviction ran UNCONDITIONALLY, so this
+    // input — with no squatter anywhere and nothing for the guard to do — was
+    // exactly where the crash was newly reachable.
+    const ctx = makeCtx({
+      coaching: {
+        summary: 'Existing summary',
+        strengthen_items: [null, { id: 'llm_item_1', label: 'Add an option', detail: 'Keep me', action_type: 'add_option' }],
+        widening_log: { elements_added: [], elements_considered_but_excluded: [], brief_completeness: 'partial' },
+        bias_signals: [],
+      },
+      directionUnresolved: [],
+    });
+
+    await runStagePackage(ctx);
+
+    expect(ctx.ceeResponse, 'the package must survive a null coaching entry').toBeDefined();
+    expect(cardsOn(ctx).map((i) => String(i.id)), 'the useful item must reach the user').toContain('llm_item_1');
+  });
+});

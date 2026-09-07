@@ -386,9 +386,37 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
     const coachingNow = ctx.coaching as PackagedCoaching | null | undefined;
     if (coachingNow && Array.isArray(coachingNow.strengthen_items)) {
       const before = coachingNow.strengthen_items.length;
-      coachingNow.strengthen_items = coachingNow.strengthen_items.filter(
-        (existing) => !isDirectionClarificationId((existing as { id?: unknown }).id),
-      );
+      coachingNow.strengthen_items = coachingNow.strengthen_items.filter((existing) => {
+        // ⚠ THE PREDICATE ANSWERS EXACTLY ONE QUESTION: "does this item's id lie
+        // in the reserved namespace?" A `null`, `undefined` or non-object entry
+        // HAS no id, so the answer is NO and the entry is KEPT, untouched.
+        // Malformed optional coaching is not this stage's to discard — and
+        // reading `.id` off it is not this stage's to attempt.
+        //
+        // ⭐⭐ THIS SHAPE CHECK IS LOAD-BEARING, NOT DEFENSIVE PADDING. Stage 4.5
+        // hands `ctx.coaching` the RAW parsed model object
+        // (`coaching-pass.ts:479-481`), and the only thing in between is
+        // `normaliseLegacyCoachingValues`, whose loop `continue`s past
+        // non-object entries WITHOUT REMOVING THEM
+        // (`adapters/llm/normalise-legacy-coaching.ts:61`). So a null entry
+        // genuinely arrives here, and the same file's comments record an
+        // observed schema-violating model response — this is not a theoretical
+        // input class.
+        //
+        // ⚠ AND THE COST OF GETTING IT WRONG IS THE DISCLOSURE ITSELF. A throw
+        // here is not local: `unified-pipeline/index.ts` catches a Package
+        // exception and returns `{graph, rationales, confidence}` only, so ONE
+        // malformed item would discard `coaching`, `goal_constraints` and
+        // `analysis_ready` — including the limit question this eviction exists
+        // to make trustworthy. The guard would have destroyed what it guards.
+        //
+        // The old `alreadyPresent` check carried the same hazard, but only
+        // inside `if (unresolved.length > 0)`. Making the eviction
+        // UNCONDITIONAL is what widened it to every draft, so the shape check
+        // arrives in the same edit as the widening.
+        if (typeof existing !== "object" || existing === null) return true;
+        return !isDirectionClarificationId((existing as { id?: unknown }).id);
+      });
       const evicted = before - coachingNow.strengthen_items.length;
       if (evicted > 0) {
         // FAIL LOUD, same contract as the gate's own logs: counts only, never
@@ -421,7 +449,26 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
           coaching.strengthen_items = [];
         }
         for (const item of clarifications) {
-          const alreadyPresent = coaching.strengthen_items.some((existing) => existing.id === item.id);
+          // ⚠ SAME SHAPE CHECK, SAME REASON, AND THIS SITE IS THE OLDER OF THE
+          // TWO. `existing.id` throws on a null entry here exactly as it did in
+          // the eviction above — but this branch runs only when
+          // `unresolved.length > 0`, which is to say ONLY ON THE DRAFTS WHERE
+          // THE USER STATED A LIMIT THAT DID NOT LAND. Repairing the eviction
+          // alone would have left the crash live on precisely the turns this
+          // disclosure exists to serve, and moved it out of reach of the test
+          // that found it.
+          //
+          // ⚠ THE GUARD IS NOW PROVABLY REDUNDANT, AND STAYS ANYWAY. The
+          // eviction above removes every reserved id before this loop begins,
+          // and `renderDirectionClarifications` mints distinct ids, so
+          // `alreadyPresent` can no longer be true. It is kept as the
+          // idempotence guarantee this loop has always carried: if a later edit
+          // narrows or removes the eviction, the append must not start
+          // duplicating cards silently.
+          const alreadyPresent = coaching.strengthen_items.some(
+            (existing) =>
+              typeof existing === "object" && existing !== null && existing.id === item.id,
+          );
           if (!alreadyPresent) coaching.strengthen_items.push({ ...item });
         }
         ctx.coaching = coaching;
