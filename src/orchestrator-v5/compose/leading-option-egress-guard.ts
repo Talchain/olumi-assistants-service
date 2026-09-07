@@ -197,7 +197,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * branch where the prior run's verdict permits and the current run's
    * withholds:
    *
-   *     "${prior_leading_label} came out ahead in the earlier run."
+   *     "${prior_leading_label} scored highest in the earlier run."
    *
    * That sentence matched NOTHING in this list. Its sibling, the both-permitted
    * template, emits "${prior} came out ahead before, and ${current} now leads."
@@ -248,6 +248,47 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
     code: 'band_ahead',
     re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b/i,
   },
+  /**
+   * ⚠⚠ THE GOAL-FRAMED VOCABULARY — added 2026-09-07, IN THE SAME COMMIT that
+   * retired the contest copy, and that simultaneity is the whole point.
+   *
+   * Paul's ruling ("there's never a winner… terminology like 'winner' is
+   * wrong") moved the deterministic templates off contest phrasing and onto the
+   * user's GOAL:
+   *
+   *     "came out ahead in 99% of runs of this model."
+   *   → "scored highest against your goal in 99% of runs of this model."
+   *
+   * Every retired phrase was visible to this list — `comes_out_ahead`,
+   * `leading_option`, `leads`. NOT ONE of the replacements was. Measured at
+   * pristine before the rewrite landed: `textNamesLeadingOption` returned
+   * FALSE on all five new sentences (the RED-first signatures in
+   * `__tests__/goal-framed-outcome-vocabulary.test.ts`).
+   *
+   * ⚠ AND THIS IS NOT AN ALARM GOING QUIET, WHICH IS WHY IT SHIPS TOGETHER.
+   * `guardLeadingOptionClaimsAtEgress` is observe-only and still drops nothing.
+   * But `textNamesLeadingOption` — the string-level reading below — is consumed
+   * by REAL ENFORCEMENT:
+   *
+   *   - `context/withheld-leader-projection.ts:550` redacts a note on it;
+   *   - `context/withheld-history-redaction.ts:274` redacts history on it;
+   *   - `compose.ts`'s per-field `evidence_gap` projection gates on it.
+   *
+   * So rewording the producers WITHOUT this entry would not merely blind the
+   * alarm — it would switch REDACTION OFF for the new sentences, and a withheld
+   * turn would carry "X scored highest against your goal in 72% of runs" into
+   * history and into the projection. That is the `case1g` corridor again,
+   * arriving through a copy change rather than through a missed template.
+   *
+   * Splitting the copy change and this entry across two PRs would ship that
+   * hole in the window between them. They are one change.
+   *
+   * `most_likely_to_serve` covers the number-free comparison opener
+   * ("The option most likely to serve your goal has changed"), which names a
+   * leading option just as surely without scoring anything.
+   */
+  { code: 'scored_highest', re: /\bscor(?:e|es|ed|ing)\s+highest\b/i },
+  { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 
 /**

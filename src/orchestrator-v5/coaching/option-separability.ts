@@ -208,7 +208,7 @@ export const MIN_FIELD_SIZE = 2;
  * the leader. The product then emitted:
  *
  *   "Selling to the Wrong Customers currently leads. 2 options are effectively
- *    eliminated (each has less than a 1% chance of winning)."
+ *    eliminated (each scored highest in less than 1% of runs)."
  *
  * **It declared those arms dead and then let them buy back permission to name
  * the very winner this gate exists to suppress.** Padding a close field with

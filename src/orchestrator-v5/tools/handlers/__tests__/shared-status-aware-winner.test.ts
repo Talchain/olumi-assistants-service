@@ -237,7 +237,7 @@ describe('shared status-aware winner — site 4: run_analysis headline (resolveW
     });
     expect(out).not.toBeNull();
     expect(out!).toContain('Option A');
-    expect(out!).toContain('came out ahead in');
+    expect(out!).toContain('scored highest against your goal in');
     // Never the failed rival.
     expect(out!).not.toContain('Option B');
   });

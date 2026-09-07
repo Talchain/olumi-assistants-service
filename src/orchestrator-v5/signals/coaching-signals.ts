@@ -369,12 +369,12 @@ function composeRerunBody(
       kind: 'leader_changed',
       text: attributed
         ? (
-          `${since}the result has changed: ${delta.prior_leading_label} led before, `
-          + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
+          `${since}the result has changed: ${delta.prior_leading_label} scored highest before, `
+          + `and ${delta.current_leading_label} scores highest now. Ask what changed if you want the detail.`
         )
         : (
-          `This re-run changed the outcome: ${delta.prior_leading_label} led before, `
-          + `and ${delta.current_leading_label} now leads. Ask what changed if you want the detail.`
+          `This re-run changed the outcome: ${delta.prior_leading_label} scored highest before, `
+          + `and ${delta.current_leading_label} scores highest now. Ask what changed if you want the detail.`
         ),
     };
   }

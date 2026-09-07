@@ -311,7 +311,7 @@ describe('PR2 L2 — the attributed consequence sentence', () => {
     const text = rerunText({ priorFacts: facts, currentEnv: ONSHORE_LEADS });
     expect(text).toBe(
       'Since you adjusted a link in the decision model, the result has changed: '
-      + 'Offshore led before, and Onshore now leads. Ask what changed if you want the detail.',
+      + 'Offshore scored highest before, and Onshore scores highest now. Ask what changed if you want the detail.',
     );
   });
 
@@ -474,8 +474,8 @@ describe('PR2 L2 — where attribution must NOT appear', () => {
     expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS }))
       .toBe('The result is unchanged: Offshore still leads.');
     expect(rerunText({ priorFacts: prior, currentEnv: ONSHORE_LEADS }))
-      .toBe('This re-run changed the outcome: Offshore led before, and Onshore now '
-        + 'leads. Ask what changed if you want the detail.');
+      .toBe('This re-run changed the outcome: Offshore scored highest before, and Onshore '
+        + 'scores highest now. Ask what changed if you want the detail.');
     expect(rerunText({ priorFacts: prior, currentEnv: OFFSHORE_LEADS_WIDER }))
       .toBe('Offshore still leads after this re-run, and its lead has widened by '
         + 'about 20 percentage points.');

@@ -651,7 +651,7 @@ export function projectTransportEnrichmentForUnrequestedRun(
  * is content they are entitled to and blanking it would be over-suppression.
  * Here the whole class is the problem — the summary describes a model with no
  * user input, and the live capture's own summary carried its quantified claim
- * in prose ("came out ahead in 51% of runs of this model"). Substituting
+ * in prose ("scored highest against your goal in 51% of runs of this model"). Substituting
  * conditionally would leave every non-leader quantified sentence standing
  * ("the ordering holds in about 51% of variations") and miss the acceptance
  * criterion. The original text is not lost: it stays on the persisted fact,

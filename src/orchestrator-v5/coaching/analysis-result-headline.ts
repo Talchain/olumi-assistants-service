@@ -24,7 +24,7 @@
  *    against ID-shaped strings).
  *  - One short sentence, or one + one status-suffix sentence — never more.
  *    Maximum {@link MAX_HEADLINE_CHARS} characters including any suffix.
- *  - Uses "came out ahead in N% of runs of this model" (numbered bands),
+ *  - Uses "scored highest against your goal in N% of runs of this model" (numbered bands),
  *    "currently leads" (the number-free floor), "provisional", "sensitive to"
  *    — never "best" / "recommended" / "winner". The scope clause "of this
  *    model" is mandatory on every numbered band: the statistic is arithmetic
@@ -109,7 +109,7 @@ import {
 //
 // ⚠ THIS TAIL WAS ONCE ADMITTED WITHOUT ITS SLOT, by accident. Its directional
 // arm originally ended in this module's own `LEAD_CLAUSE_RE_SRC`
-// ("came out ahead in N% of runs of this model."), so `^.+?` swallowed the
+// ("scored highest against your goal in N% of runs of this model."), so `^.+?` swallowed the
 // whole summary and the CASE-E HEADLINE grammar matched it — measured, with a
 // control. The copy was changed to end "…in N% of runs." so the slot below is
 // genuinely load-bearing. Keep those two clauses structurally distinct.
@@ -146,7 +146,50 @@ import { passesAssistantTextContentDefences } from './assistant-text-defences.js
 // module header carries the full disclaimer list.
 import { isFieldUnseparable } from './option-separability.js';
 
-export const MAX_HEADLINE_CHARS = 220;
+/**
+ * ⚠⚠ 220 + THE COPY DELTA, AND THE DELTA IS DERIVED RATHER THAN TYPED.
+ *
+ * The cap was a flat 220 until 2026-09-07, when Paul's no-winner ruling
+ * replaced the lead clause's opening — "came out ahead in" (17 chars) became
+ * "scored highest against your goal in" (35). Every numbered headline got 18
+ * characters longer WITHOUT SAYING ANYTHING MORE.
+ *
+ * Left at 220 that is not a neutral copy change, and the tests said so:
+ * `analysis-result-headline.test.ts` measured a soft-confidence headline at
+ * 236 chars, and the "reduced suffix composes BEFORE the status suffix" case
+ * SHED from its numbered shape all the way down to Case E.
+ *
+ * ⭐ AND THE SHED'S DESTINATION IS THE POINT. Case E is `{label} currently
+ * leads.` — so holding the cap would have made the product fall back to the
+ * CONTEST vocabulary more often, on exactly the runs where the goal-framed
+ * sentence is most informative. The rewrite would have partially undone itself,
+ * silently, with a green suite and no error anywhere (a length shed is not a
+ * failure — it is a quieter sentence).
+ *
+ * So the budget absorbs the delta and the change is LENGTH-NEUTRAL BY
+ * CONSTRUCTION: no headline sheds that did not shed before, and none survives
+ * that did not survive before. Deriving the delta rather than writing `238`
+ * means a future rewording re-derives it instead of inheriting a magic number
+ * whose reason has been forgotten (CLAUDE.md trap 12: derive, don't mirror).
+ *
+ * This widens what `isAllowedRunAnalysisAssistantText` admits by the same 18
+ * characters, which is intended: the same sentence, in longer words.
+ */
+const LEAD_CLAUSE_OPENING = 'scored highest against your goal in';
+/**
+ * Length of the RETIRED opening (`came out ahead in`) — recorded as a NUMBER,
+ * not as a string constant, and deliberately so: a literal of the retired copy
+ * anywhere in this file trips
+ * `compose/__tests__/goal-framed-outcome-vocabulary.test.ts`, which scans this
+ * module's string and template literals. It is right to trip on one, so the
+ * retired wording lives in this comment where the scanner (which strips
+ * comments) can read it and the product cannot emit it.
+ */
+const RETIRED_LEAD_CLAUSE_OPENING_CHARS = 17;
+const LEAD_CLAUSE_COPY_DELTA_CHARS =
+  LEAD_CLAUSE_OPENING.length - RETIRED_LEAD_CLAUSE_OPENING_CHARS;
+
+export const MAX_HEADLINE_CHARS = 220 + LEAD_CLAUSE_COPY_DELTA_CHARS;
 
 // ============================================================================
 // Lane 3 narration-completeness tails (Mission B — provisional_doctrine_v0)
@@ -236,7 +279,26 @@ const ELIMINATED_MIN_COUNT = 2;
  * percentage (no raw decimal) so the defence-in-depth decimal rule holds.
  */
 function eliminatedSentence(count: number): string {
-  return ` ${count} options are effectively eliminated (each has less than a 1% chance of winning).`;
+  // ⚠ "CHANCE OF WINNING" IS RETIRED — Paul's ruling, 2026-09-07. This was the
+  // SECOND HALF of the sentence measured on deployed staging that day:
+  //
+  //   "Segment came out ahead in 99% of runs of this model. 3 options are
+  //    effectively eliminated (each has less than a 1% chance of winning)."
+  //
+  // The parenthesis is a definition of the elimination floor, so it inherited
+  // whatever frame the headline used — and "chance of winning" is a claim about
+  // a contest the product should never have been running. The statistic is
+  // untouched (`win_probability` < ELIMINATED_WIN_PROBABILITY_CEILING); it is
+  // now described as what it actually counts, in the same goal frame as
+  // `leadClause`.
+  //
+  // "effectively eliminated" is KEPT. It is about the field narrowing, not
+  // about designating a winner, and #1280's banned vocabulary spares it too —
+  // widening into it from this seat would be inventing a third vocabulary.
+  //
+  // Still an integer percentage ("1%", no raw decimal) so the defence-in-depth
+  // decimal rule holds, and still plural-safe (count >= ELIMINATED_MIN_COUNT).
+  return ` ${count} options are effectively eliminated (each scored highest in less than 1% of runs).`;
 }
 
 /**
@@ -852,8 +914,32 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
   // genuinely is a question about the gap. It is only the wrong thing to
   // DISPLAY. Deciding on the gap and reporting the leader's own probability is
   // the whole shape of this change.
+  // ⚠⚠ "CAME OUT AHEAD" IS RETIRED — Paul's ruling, 2026-09-07. The statistic
+  // and its scope clause are UNCHANGED; only the frame moved, from a contest
+  // between options to the user's own goal:
+  //
+  //   "There's never a winner… we should never really be saying 'winner'
+  //    anyway. This is not simply providing causal analysis results. This is
+  //    meant to be enhancing their critical and creative thinking."
+  //
+  // What the user is owed is what the most likely outcome is, how confident we
+  // can be in it, and WHICH OPTION IS MOST LIKELY TO ACHIEVE THEIR GOAL. "Came
+  // out ahead" answers a fourth question nobody asked — who won — and the
+  // sentence was measured on deployed staging on 2026-09-07 reading
+  // "Segment came out ahead in 99% of runs of this model."
+  //
+  // The wording is TAKEN FROM the UI half (DecisionGuideAI #1280, merged), not
+  // invented here: "Scored highest against your goal in 69% of simulated
+  // futures". One product, one vocabulary. This module's own gloss already
+  // agreed — `objective-contradiction.ts` explains the statistic as "how often
+  // an option scored highest on the goal", so this is the existing explanation
+  // promoted into the sentence it explains.
+  //
+  // ⚠ "OF THIS MODEL" IS STILL LOAD-BEARING and is deliberately kept over
+  // #1280's "of simulated futures" — see the note above. The scope clause and
+  // the goal frame answer different objections and neither replaces the other.
   const leadPercent = Math.round(winnerProbability * 100);
-  const leadClause = `came out ahead in ${leadPercent}% of runs of this model`;
+  const leadClause = `${LEAD_CLAUSE_OPENING} ${leadPercent}% of runs of this model`;
 
   // The number-free shed form, kept verbatim for the bands that must not carry
   // a statistic: the Case E floor (every enriching gate declined the run) and
@@ -1293,7 +1379,7 @@ function computeHeadline(input: AnalysisResultHeadlineInput): HeadlineResult {
     // turned a proof into a corpus result.
     MIN_LEAD_MARGIN,
     // ⭐ The SAME ceiling that generates "N options are effectively eliminated
-    // (each has less than a 1% chance of winning)" a few lines below. Passing
+    // (each scored highest in less than 1% of runs)" a few lines below. Passing
     // it in keeps one definition of "cannot win" in this module and closes the
     // zero-tail hole found at `9afa8699`: without it, appending two zero-win
     // options to a withheld field moved the uniform reference from 1/4 to 1/6,
@@ -2091,8 +2177,11 @@ const STATUS_SUFFIX_PATTERN = `(?:${PARTIAL_SUFFIX_RE_SRC}|${UNKNOWN_SUFFIX_RE_S
 // a variant emitted but absent from the grammar is rejected at egress and the
 // user silently receives the locked template instead.
 const NOT_ROBUST_RE_SRC = NOT_ROBUST_SENTENCES.map(escapeForRegex).join('|');
+// Moves in lockstep with `eliminatedSentence` — a variant emitted but absent
+// from the grammar is rejected at egress and the user silently receives the
+// locked template instead.
 const ELIMINATED_RE_SRC =
-  ' \\d{1,3} options are effectively eliminated \\(each has less than a 1% chance of winning\\)\\.';
+  ' \\d{1,3} options are effectively eliminated \\(each scored highest in less than 1% of runs\\)\\.';
 const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // D-ask-1 (2.11 P0-1): the scaffold disclosure composes LAST — after every
 // narration tail and status suffix — mirroring the handler's
@@ -2300,7 +2389,16 @@ const CAUTION_REASON_PATTERN =
 
 /**
  * Grammar source for the lead clause emitted by `leadClause` in
- * `computeHeadline` — "{label} came out ahead in {N}% of runs of this model".
+ * `computeHeadline` — "{label} scored highest against your goal in {N}% of runs
+ * of this model".
+ *
+ * ⚠ TWO RETIRED ALTERNATIVES NOW, AND NEITHER IS KEPT AS A TOLERATED LEGACY.
+ * "leads by {N} percentage points" went first (the category error, below).
+ * "scored highest against your goal in {N}% of runs of this model" went on 2026-09-07 under
+ * Paul's no-winner ruling — same statistic, same scope clause, goal frame
+ * instead of a contest. The rule is unchanged and is why this line moves in the
+ * SAME COMMIT as the emitter: a grammar that still admits the retired sentence
+ * leaves it one bug away from shipping again with the egress guard blessing it.
  *
  * ⚠ THE OLD ALTERNATIVE IS DELIBERATELY GONE, NOT KEPT AS A TOLERATED LEGACY.
  * This allowlist is the SECOND line of defence: anything it admits, a future
@@ -2315,7 +2413,10 @@ const CAUTION_REASON_PATTERN =
  * The percentage is `\\d{1,3}` — an integer, matching the content defences'
  * no-raw-decimals rule and the `Math.round` at the emission site.
  */
-const LEAD_CLAUSE_RE_SRC = 'came out ahead in \\d{1,3}% of runs of this model';
+// DERIVED from the emitter's own opening, so the grammar cannot drift from the
+// sentence it admits — the failure mode is silent (a rejected headline becomes
+// the locked template, with no error anywhere).
+const LEAD_CLAUSE_RE_SRC = `${LEAD_CLAUSE_OPENING} \\d{1,3}% of runs of this model`;
 
 const HEADLINE_GRAMMAR_REGEXES: ReadonlyArray<RegExp> = [
   // Case A: winner + margin + provisional caution naming the fragile reason.
