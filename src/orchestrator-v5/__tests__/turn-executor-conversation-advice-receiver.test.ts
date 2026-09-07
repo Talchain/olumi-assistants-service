@@ -399,6 +399,27 @@ describe('conversation advice reaches contextual reasoning', () => {
     'We spoke to the team; one senior developer is already acting as lead. What do you think?',
     'What would you do next?',
     'What should I pay attention to?',
+    // Original natural questions from the CI contracts remain positive
+    // contextual receivers, with one call and inspected no-write persistence.
+    "What do I change?",
+    "What do we update?",
+    "What needs to change?",
+    "What needs changing?",
+    "What needs to be updated?",
+    "Help me figure out what to change.",
+    "Help me decide what to update.",
+    "Give me a starting point to change.",
+    "Give me something to update.",
+    "What's worth changing?",
+    "What's worth updating?",
+    "What should I change?",
+    "What should we update?",
+    "What should you adjust?",
+    "What should we fix?",
+    "What should we edit?",
+    "What should I do?",
+    "What would you recommend?",
+    "What should we do next?",
   ])('forwards current and prior qualitative context and preserves the answer: %j', async message => {
     const answer = 'The informal lead may help coordination, but technical debt could still limit delivery. A useful next step is to ask which bottleneck the team sees most often.';
     const adapter = recordingRoutingAdapter(answer);
