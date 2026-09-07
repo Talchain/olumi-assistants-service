@@ -27,6 +27,8 @@ import {
   stripModelAuthoredGoalThreshold,
 } from '../normalisation.js';
 
+let RECORDS_PROJECTOR_GOAL_TARGET_FIELDS: readonly string[];
+
 const h = vi.hoisted(() => ({
   bodies: [] as Array<Record<string, unknown>>,
   payload: { text: '' },
@@ -86,7 +88,7 @@ beforeAll(async () => {
   process.env.CEE_ANTHROPIC_STRUCTURED_OUTPUTS = 'true';
   const { _resetConfigCache } = await import('../../../config/index.js');
   _resetConfigCache();
-  ({ draftGraphWithAnthropic, scrubProjectedDraftGoalTargets } = await import('../anthropic.js'));
+  ({ draftGraphWithAnthropic, scrubProjectedDraftGoalTargets, RECORDS_PROJECTOR_GOAL_TARGET_FIELDS } = await import('../anthropic.js'));
 });
 
 afterAll(async () => {
@@ -434,8 +436,9 @@ describe('4. records-projector goal targets at the legacy scrub boundary', () =>
       projection: seam.projection,
       brief,
     });
-    expect(scrubbed.ok).toBe(true);
-    if (!scrubbed.ok) return;
+    // The verified target is attestable and sound, so nothing is left
+    // unprotected on this path — the baseline fields are stripped anyway.
+    expect(scrubbed.unprotected).toEqual([]);
     expect(scrubbed.stripped.nodeIds).toEqual([goal.id]);
     expect(scrubbed.stripped.fields).toEqual(expect.arrayContaining([
       'goal_baseline',
@@ -452,38 +455,107 @@ describe('4. records-projector goal targets at the legacy scrub boundary', () =>
     expect(goal).not.toHaveProperty('goal_baseline_raw');
   });
 
+  // OPPOSITE-DIRECTION TWIN of the retention cases above. An unattestable
+  // target must degrade to EXACTLY the pre-PR behaviour — a label-only goal on
+  // a draft that SUCCEEDS — never a refusal. The existing scrub is already the
+  // fail-closed policy for this class; escalating it to a thrown draft turns a
+  // silent degradation into a non-retryable HTTP 400 whose recovery copy tells
+  // the user to "describe what success looks like", which is what they did.
   it.each([
     ['omitted', undefined],
     ['incompatible', 'days'],
     ['word alias', 'percent'],
     ['long word alias', 'percentage'],
     ['whitespace-padded alias', ' % '],
-  ])('refuses a percent target whose unit is %s', async (_caseName, unit) => {
+    ['short alias', 'pct'],
+  ])('degrades to a label-only goal for a percent target whose unit is %s', async (_caseName, unit) => {
     const changed = JSON.parse(response) as typeof responseObject;
     if (unit === undefined) delete (changed.stated_items[0] as Record<string, unknown>).unit;
     else changed.stated_items[0]!.unit = unit;
     const r = await draft(JSON.stringify(changed), brief);
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.error.message).toContain('anthropic_response_invalid_schema');
-    expect(r.error.message).toContain('0:unit_ambiguous');
+    expect(r.ok, r.ok ? '' : `draft threw instead of degrading: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    const goal = graphGoal(r.result);
+    expect(goal, 'the goal node itself must survive').toBeDefined();
+    expectNoGoalContract(goal);
+    // The number still reaches the user as prose in the label, exactly as it
+    // does on staging today — the degrade loses the typed field, not the draft.
+    expect(goal?.label).toContain('88');
   });
 
-  it('fails closed when a verified numeric target would leave projection label-only', () => {
+  // DEGENERATE DENOMINATOR. `resolveGoalThresholdCap` rule 1 returns 100 for any
+  // '%' target with 0 < raw <= 100, BEFORE the `existingCap > raw` soundness
+  // test that the same module's own comment justifies. A 100% target therefore
+  // mints cap === raw === 100 => goal_threshold 1.0, which that comment names as
+  // forbidden. At base this was always stripped; retention is what would make it
+  // reachable, so retention is where it is excluded.
+  it('leaves a degenerate denominator to the scrub rather than shipping goal_threshold 1.0', async () => {
+    const degenerateBrief = 'Renewal must reach 100%. We can open a second warehouse or stay with one warehouse.';
+    const r = await draft(
+      withGoal({ source_quote: 'Renewal must reach 100%.', value: 100, unit: '%' }),
+      degenerateBrief,
+    );
+    expect(r.ok, r.ok ? '' : `draft threw: ${r.error?.message}`).toBe(true);
+    if (!r.ok) return;
+    const goal = graphGoal(r.result);
+    expect(goal, 'the goal node itself must survive').toBeDefined();
+    expect(goal).not.toHaveProperty('goal_threshold');
+    expect(goal).not.toHaveProperty('goal_threshold_cap');
+    expectNoGoalContract(goal);
+  });
+
+  // PRECONDITION PIN for the case above: the projector really does mint the
+  // degenerate pair, so the assertion is the scrub's doing and not the
+  // fixture failing to reach the mint site.
+  it('pins that the projector mints cap === raw for a 100% target', () => {
+    const degenerateBrief = 'Renewal must reach 100%. We can open a second warehouse or stay with one warehouse.';
+    const changed = structuredClone(responseObject);
+    Object.assign(changed.stated_items[0]!, { source_quote: 'Renewal must reach 100%.', value: 100, unit: '%' });
+    const seam = projectDraftRecords(changed, degenerateBrief);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
+    expect(goal.goal_threshold_raw).toBe(100);
+    expect(goal.goal_threshold_cap).toBe(100);
+    expect(goal.goal_threshold).toBe(1);
+  });
+
+  it('degrades, rather than refusing, when a verified numeric target leaves projection label-only', () => {
     const seam = projectDraftRecords(responseObject, brief);
     expect(seam.ok).toBe(true);
     if (!seam.ok) return;
     const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
     for (const field of CEE_MINTED_GOAL_FIELDS) Reflect.deleteProperty(goal, field);
 
-    expect(scrubProjectedDraftGoalTargets({
+    const scrubbed = scrubProjectedDraftGoalTargets({
       rawJson: seam.projection.graph,
       records: seam.records,
       projection: seam.projection,
       brief,
-    })).toEqual({
-      ok: false,
-      issues: [{ statedItemIndex: 0, reason: 'target_unrepresented' }],
     });
+    // Reported for observability...
+    expect(scrubbed.unprotected).toEqual([
+      { statedItemIndex: 0, reason: 'target_unrepresented' },
+    ]);
+    // ...and NOT escalated: the caller still receives a usable strip result.
+    expect(scrubbed.stripped).toBeDefined();
+    expect(Array.isArray(scrubbed.stripped.nodeIds)).toBe(true);
+  });
+
+  // UNION ASSERTION (trap 12d). The protected set is DERIVED from the scrub's
+  // list by a `goal_threshold` prefix filter, which proves the two copies agree
+  // and can never prove the list is COMPLETE. This pins it against what the
+  // projector actually writes, so a future target field named outside that
+  // prefix REDs here instead of being silently stripped.
+  it('protects every goal field the projector actually mints for a stated target', () => {
+    const seam = projectDraftRecords(responseObject, brief);
+    expect(seam.ok).toBe(true);
+    if (!seam.ok) return;
+    const goal = seam.projection.graph.nodes.find((node) => node.kind === 'goal')!;
+    const minted = Object.keys(goal).filter((key) => key.startsWith('goal_')).sort();
+    // Precondition: the fixture must actually reach the mint site, or this
+    // assertion would pass by comparing two empty sets.
+    expect(minted.length, 'fixture minted no goal fields — it no longer exercises applyStatedGoalTarget').toBeGreaterThan(0);
+    expect(minted).toEqual([...RECORDS_PROJECTOR_GOAL_TARGET_FIELDS].sort());
   });
 });
