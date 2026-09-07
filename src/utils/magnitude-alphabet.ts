@@ -462,25 +462,6 @@ export function isMagnitudeShapedSuffix(suffix: string): boolean {
 }
 
 /**
- * THE FORMATTING SIDE OF THE SAME ALPHABET (ROADMAP 2.322).
- *
- * Descending rungs of `[multiplier, canonical short suffix]`, DERIVED from the
- * same map the parsers read, so a magnitude the service can PARSE is a
- * magnitude it can also PRINT. Two ladders were hand-written and both stopped
- * short: `cee/factor-extraction/display-value.ts` stopped at 1e6, rendering
- * `$5t` as the clumsy `"$5000000m"`, and `cee/compound-goal/node-generator.ts`
- * stopped at 1e9. Neither was untruthful — the digits were right — but a
- * formatter that cannot spell a magnitude its own parser accepts is the same
- * list-drift defect wearing a cosmetic mask, and the next rung added to the
- * parser would have silently failed to reach either of them.
- *
- * THE SUFFIX IS THE SHORTEST KEY FOR THAT MULTIPLIER, tie-broken
- * lexicographically. That is a pure function of the key set — `k`, `m`, `b`,
- * `t` today, and whatever the shortest spelling of a future rung is — so no
- * display convention has to be maintained by hand beside the alphabet.
- * Sub-1,000 values have no rung and are formatted plainly by the caller.
- */
-/**
  * THE SMALLEST MAGNITUDE A WRITER COULD HAVE LEFT OFF A BOUND, DERIVED from the
  * same map the parsers read (`1e3` today — `k`, `grand`, `thousand`).
  *
@@ -508,6 +489,25 @@ export const SMALLEST_DROPPABLE_MAGNITUDE: number = (() => {
   return Math.min(...nonTrivial);
 })();
 
+/**
+ * THE FORMATTING SIDE OF THE SAME ALPHABET (ROADMAP 2.322).
+ *
+ * Descending rungs of `[multiplier, canonical short suffix]`, DERIVED from the
+ * same map the parsers read, so a magnitude the service can PARSE is a
+ * magnitude it can also PRINT. Two ladders were hand-written and both stopped
+ * short: `cee/factor-extraction/display-value.ts` stopped at 1e6, rendering
+ * `$5t` as the clumsy `"$5000000m"`, and `cee/compound-goal/node-generator.ts`
+ * stopped at 1e9. Neither was untruthful — the digits were right — but a
+ * formatter that cannot spell a magnitude its own parser accepts is the same
+ * list-drift defect wearing a cosmetic mask, and the next rung added to the
+ * parser would have silently failed to reach either of them.
+ *
+ * THE SUFFIX IS THE SHORTEST KEY FOR THAT MULTIPLIER, tie-broken
+ * lexicographically. That is a pure function of the key set — `k`, `m`, `b`,
+ * `t` today, and whatever the shortest spelling of a future rung is — so no
+ * display convention has to be maintained by hand beside the alphabet.
+ * Sub-1,000 values have no rung and are formatted plainly by the caller.
+ */
 export const MAGNITUDE_DISPLAY_LADDER: ReadonlyArray<readonly [number, string]> = (() => {
   const shortestByMultiplier = new Map<number, string>();
   for (const [key, multiplier] of Object.entries(MAGNITUDE_MULTIPLIERS)) {
