@@ -661,17 +661,16 @@ describe("KNOWN_WORD_SEPARATOR_FLOOR — pinned in both directions", () => {
  * `$` currency is still read as `$` — "The budget is A$80k this year."
  * publishes unit `$` at this head. MEASURED over the same token × case ×
  * separation space in six carriers this block does NOT build (`A$80k` bare and
- * behind a noun, "The budget is …", "between … and …", "from … to …",
- * "up to …"), 1,080
- * cells: FORTY-TWO wrong-currency cells at `ad44d445` and the same FORTY-TWO
- * at `a56368c9` — seven flush-spelled tokens (`A$ a$ C$ c$ NZ$ nz$ Nz$`) ×
- * six carriers, at the flush separation only, unchanged by this PR.
- * `CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD` is applied in `currencyRange` and
- * nowhere else, so this PR's rule cannot reach them; closing them is a change
- * at the patterns those six carriers DO reach, and is a different PR. ⭐ That count is itself
- * a function of the carriers enumerated — which is exactly why this block no
- * longer claims a whole space. A carrier nobody enumerated is a cell nobody
- * measured.
+ * behind a noun, "The budget is …", "between … and …", "from … to …" and
+ * "up to …"), 1,080 cells: FORTY-TWO wrong-currency cells at `ad44d445`, and
+ * the same FORTY-TWO at `a56368c9` — seven flush-spelled tokens
+ * (`A$ a$ C$ c$ NZ$ nz$ Nz$`) × six carriers, at the flush separation only,
+ * unchanged by this PR. `CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD` is applied in
+ * `currencyRange` and nowhere else, so this PR's rule cannot reach them;
+ * closing them is a change at the patterns those six carriers DO reach, and is
+ * a different PR. ⭐ That count is itself a function of the carriers
+ * enumerated — which is exactly why this block no longer claims a whole space.
+ * A carrier nobody enumerated is a cell nobody measured.
  *
  * ⭐ THE SEPARATION DIMENSION IS DELIBERATE ON ITS EXOTIC MEMBERS, and the
  * reasoning is stated rather than left to the regex: `CURRENCY_AMOUNT_SEPARATION`
