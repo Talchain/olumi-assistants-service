@@ -75,6 +75,7 @@ import {
 import {
   MIN_FIELD_SEPARATION,
   contenderBandProbability,
+  effectiveFieldSize,
   fieldSeparation,
   isFieldUnseparable,
 } from '../option-separability.js';
@@ -203,7 +204,14 @@ describe('separability — the statistic and its two parameters', () => {
     const two = fieldSeparation([0.55, 0.45]) as number;
     const four = fieldSeparation([0.2875, 0.2425, 0.2400, 0.2300]) as number;
     expect(two).toBeCloseTo(0.1, 6);
-    expect(four).toBeCloseTo(0.05, 6);
+    // ⚠ 0.04751, not 0.05. The reference is the EFFECTIVE field size, and this
+    // four-option field is slightly uneven, so its effective size is 3.969 and
+    // not 4. The scale-free POINT is untouched and is the reason this test
+    // exists: 0.55-of-two and 0.2875-of-four are the same weak separation, and
+    // no single RAW PROBABILITY floor can say so — 0.55 and 0.2875 are nowhere
+    // near each other. Pinned to the measured value so a later change to the
+    // reference cannot pass by quietly re-rounding it.
+    expect(four).toBeCloseTo(0.0475076450044, 10);
     // Same statistic, different n, both far below the floor.
     expect(two).toBeLessThan(MIN_FIELD_SEPARATION);
     expect(four).toBeLessThan(MIN_FIELD_SEPARATION);
@@ -227,11 +235,30 @@ describe('the two parameters guard different populations — twins', () => {
   it('P1 TWIN — flat field withheld, lifted field kept, P2 identical in both', () => {
     // Both fields have a rival inside the band, so P2 fires on BOTH. Only P1
     // differs. This is what proves P1 is doing work of its own.
-    const flat = [0.297, 0.26, 0.25, 0.193];
-    const lifted = [0.42, 0.39, 0.1, 0.09];
+    // ⚠ THE OLD `lifted` FIXTURE WAS `[0.42, 0.39, 0.1, 0.09]` AND IT IS NOW
+    // WITHHELD. That is the repair working, not a regression: a 3pp gap between
+    // the top two is well inside this module's own contender band, so the raw-
+    // count statistic was calling an ordering "a property of the model" that
+    // the model plainly could not support. It is kept here as a pinned case in
+    // the section below rather than deleted, so the change is visible.
+    // Both fields are n = 10 with a tail of equal arms, and BOTH have exactly
+    // two options inside the band — so P2 is held constant by construction and
+    // the only thing that can move the verdict is P1.
+    const flat = [0.2, 0.19, ...Array<number>(8).fill(0.07625)];
+    const lifted = [0.362, 0.313, ...Array<number>(8).fill(0.040625)];
 
-    expect(contenderBandProbability(flat, BAND)).toBeGreaterThanOrEqual(2);
-    expect(contenderBandProbability(lifted, BAND)).toBeGreaterThanOrEqual(2);
+    // ⭐ PRECONDITION PINNED IN-TEST: P2 must return the SAME answer on both,
+    // or this proves nothing about P1. Asserted as equality, not as a bound —
+    // a twin whose two halves differ on P2 is not a P1 twin.
+    const p2Flat = contenderBandProbability(flat, BAND);
+    const p2Lifted = contenderBandProbability(lifted, BAND);
+    expect(p2Flat).toBe(2);
+    expect(p2Lifted).toBe(2);
+    expect(p2Lifted).toBe(p2Flat);
+
+    // ...and P1 must STRADDLE the floor, or the twin is not discriminating.
+    expect(fieldSeparation(flat) as number).toBeLessThan(MIN_FIELD_SEPARATION);
+    expect(fieldSeparation(lifted) as number).toBeGreaterThan(MIN_FIELD_SEPARATION);
 
     expect(isFieldUnseparable(flat, BAND, CEIL).unseparable).toBe(true);
     expect(isFieldUnseparable(lifted, BAND, CEIL).unseparable).toBe(false);
@@ -288,14 +315,30 @@ describe('⭐ ZERO-TAIL INVARIANCE — dead options cannot buy back a winner', (
     expect(after.contenders).toBe(before.contenders);
   });
 
-  it('and the raw n-dependent statistic really would have flipped it (positive control)', () => {
-    // Without this control the test above could pass on a predicate that never
-    // looked at the tail at all, and the fix would be unproven. This is the
-    // measured before-state, reproduced from the statistic itself.
-    expect(fieldSeparation(CAPTURED) as number).toBeCloseTo(0.072667, 5);
-    expect(fieldSeparation([...CAPTURED, 0, 0]) as number).toBeCloseTo(0.1654, 4);
-    expect(fieldSeparation([...CAPTURED, 0, 0]) as number).toBeGreaterThan(
+  it('and the RAW-COUNT reference really would have flipped it (positive control)', () => {
+    // Without a control the test above could pass on a predicate that never
+    // looked at the tail, and the fix would be unproven. ⚠ The control can no
+    // longer be `fieldSeparation` itself: under the effective-size reference
+    // zero arms are EXACTLY inert, so the shipped statistic does not move and
+    // could not demonstrate the historical flip. So the retired reference is
+    // reproduced here explicitly and pinned to its measured historical values.
+    // It is a HISTORICAL RECORD of what the product did, not a live path.
+    const rawCountReference = (ps: readonly number[]): number => {
+      const uniform = 1 / ps.length;
+      return (Math.max(...ps) - uniform) / (1 - uniform);
+    };
+    expect(rawCountReference(CAPTURED)).toBeCloseTo(0.072667, 5);
+    expect(rawCountReference([...CAPTURED, 0, 0])).toBeCloseTo(0.1654, 4);
+    expect(rawCountReference([...CAPTURED, 0, 0])).toBeGreaterThan(
       MIN_FIELD_SEPARATION,
+    );
+
+    // ⭐ AND THE SHIPPED STATISTIC MUST NOT MOVE AT ALL on the same input —
+    // stronger than the old assertion, and it is what makes the pair a
+    // discrimination rather than one reading taken twice.
+    expect(fieldSeparation(CAPTURED) as number).toBeCloseTo(0.0609210680596, 10);
+    expect(fieldSeparation([...CAPTURED, 0, 0]) as number).toBe(
+      fieldSeparation(CAPTURED) as number,
     );
   });
 
@@ -440,13 +483,39 @@ describe('MANDATORY CONTROL — class-a and class-c measured runs are unharmed',
     // later raises MIN_FIELD_SEPARATION past the tightest real decisive run,
     // this test says which run it broke instead of the regression shipping.
     const decisive = [...runsOfClass('a'), ...runsOfClass('c')];
-    const tightest = decisive
-      .map((r) => ({ token: r.token, sep: fieldSeparation(fieldOf(r)) as number }))
-      .sort((x, y) => x.sep - y.sep)[0] as { token: string; sep: number };
-    expect(tightest.token).toBe('20260831T001516Z-fresh-4d753d');
-    expect(tightest.sep).toBeGreaterThan(MIN_FIELD_SEPARATION);
-    // Headroom: the floor could rise by half again before touching it.
-    expect(tightest.sep).toBeGreaterThan(MIN_FIELD_SEPARATION * 1.5);
+    const ranked = decisive
+      .map((r) => ({
+        token: r.token,
+        sep: fieldSeparation(fieldOf(r)) as number,
+        contenders: isFieldUnseparable(fieldOf(r), BAND, CEIL).contenders,
+      }))
+      .sort((x, y) => x.sep - y.sep);
+    const tightest = ranked[0] as (typeof ranked)[number];
+    expect(tightest.token).toBe('20260830T235352Z-fresh-3084a2');
+
+    // ⚠⚠ THE HEADROOM CLAIM THAT USED TO SIT HERE IS WITHDRAWN, AND ITS
+    // WITHDRAWAL IS THE POINT. Under the raw-count reference the tightest
+    // decisive run sat above the floor with room to spare. Under the effective-
+    // size reference it does NOT: two class-a runs now score BELOW
+    // MIN_FIELD_SEPARATION and are kept only because P2 finds no rival level
+    // with their leader. An independent review predicted exactly this ("does
+    // not drop in at 0.15") and read it as disqualifying; measured at the
+    // CONJUNCTION rather than at P1 alone, no verdict moves. That is a real
+    // narrowing of safety margin and it is pinned here rather than described.
+    const belowFloor = ranked.filter((r) => r.sep < MIN_FIELD_SEPARATION);
+    expect(belowFloor.map((r) => r.token)).toEqual([
+      '20260830T235352Z-fresh-3084a2',
+      '20260831T001516Z-fresh-4d753d',
+    ]);
+    // Their safety now rests ENTIRELY on P2. Assert that, so a change to the
+    // contender band reddens here instead of silencing a decisive run.
+    for (const r of belowFloor) {
+      expect(r.contenders, `${r.token} is kept only by P2`).toBe(1);
+    }
+    // Every OTHER decisive run still clears the floor on P1 alone.
+    for (const r of ranked.filter((x) => !belowFloor.includes(x))) {
+      expect(r.sep, r.token).toBeGreaterThan(MIN_FIELD_SEPARATION);
+    }
   });
 });
 
@@ -598,5 +667,230 @@ describe('STRUCTURAL GUARANTEE — a confident run can never be withheld', () =>
       }
     }
     expect(withheld).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * ⭐⭐ THE LIVE-TAIL CONTAINMENT HOLE — three independent reviews, one defect.
+ *
+ * Found at `c4a8670d` by a wider review, reproduced independently by a later
+ * triage with contrast controls, and NOT by this author's corpus. The previous
+ * reference point was the RAW COUNT of live options, so an arm at exactly the
+ * elimination ceiling bought a whole option's worth of reference with one
+ * hundredth of the mass. Measured through the statistic, on the March-2026
+ * capture `0.353 / 0.347 / 0.300` — a 0.6pp three-way dead heat:
+ *
+ *     two arms at 0.9%  ⇒  separation 0.019969  ⇒  withheld
+ *     two arms at 1.0%  ⇒  separation 0.182425  ⇒  "…currently leads."
+ *
+ * ⚠ WHY THE ORIGINAL CORPUS COULD NOT SEE IT, stated because it is the
+ * transferable lesson: every measured run with a near-ceiling arm has a
+ * DECISIVE top, and every measured run with a flat top has NO near-ceiling arm.
+ * The two ingredients never co-occur in the fixture, and the tail-invariance
+ * tests all used magnitudes (0, 0.003, 0.004, 0.005, 0.05) OUTSIDE the interval
+ * `[0.01, 0.022]` where the producer actually emits. A corpus that excludes a
+ * value class the contract admits cannot certify the code over that class.
+ */
+describe('⭐⭐ LIVE-TAIL CONTAINMENT — near-dead arms cannot buy back a winner', () => {
+  /** Scale a base field so `k` arms of size `v` can be appended at mass 1.0. */
+  const padded = (
+    base: readonly number[],
+    k: number,
+    v: number,
+  ): readonly number[] => {
+    const room = 1 - k * v;
+    const scale = room / base.reduce((a, b) => a + b, 0);
+    return [...base.map((x) => x * scale), ...Array<number>(k).fill(v)];
+  };
+
+  const MARCH = [0.353, 0.347, 0.3];
+  const HEAT = [0.3045, 0.2895, 0.2177, 0.1883];
+
+  /**
+   * ⭐ THE MAGNITUDES ARE NOT INVENTED — every one is a live win probability
+   * the producer emitted in the committed 21-run fixture. Derived here rather
+   * than hardcoded so the pin cannot drift from the evidence it claims.
+   */
+  const PRODUCER_EMITTED_LIVE_TAILS = Array.from(
+    new Set(
+      (measuredRuns as readonly MeasuredRun[]).flatMap((r) =>
+        r.options.map((o) => o.win_probability).filter((x) => x >= CEIL && x < 0.05),
+      ),
+    ),
+  ).sort((a, b) => a - b);
+
+  it('the producer really does emit live arms in the untested interval (positive control)', () => {
+    // If this ever reads empty the property tests below become vacuous, so the
+    // corpus is asserted to CONTAIN the class before anything is claimed over it.
+    const inInterval = PRODUCER_EMITTED_LIVE_TAILS.filter((x) => x <= 0.022);
+    expect(inInterval.length).toBeGreaterThanOrEqual(5);
+    expect(inInterval[0]).toBeCloseTo(0.0108, 4);
+  });
+
+  it.each([
+    ['March capture + 2 arms at exactly 1.0%', MARCH, 2, 0.01],
+    ['March capture + 3 arms at exactly 1.0%', MARCH, 3, 0.01],
+    ['March capture + 3 arms at 2.1%', MARCH, 3, 0.021],
+    ['captured 4-way heat + 2 arms at exactly 1.0%', HEAT, 2, 0.01],
+    ['captured 4-way heat + 4 arms at exactly 1.0%', HEAT, 4, 0.01],
+    ['captured 4-way heat + 6 arms at 2.2%', HEAT, 6, 0.022],
+  ])('%s stays withheld', (_label, base, k, v) => {
+    const field = padded(base, k, v);
+    // PRECONDITION: the un-padded field must itself be withheld, or the case
+    // proves nothing about padding.
+    expect(isFieldUnseparable(base, BAND, CEIL).unseparable).toBe(true);
+    // ...and the added arms must really be LIVE, or this is the old zero-tail
+    // test wearing a new label.
+    expect(field.filter((x) => x >= CEIL).length).toBe(base.length + k);
+    expect(isFieldUnseparable(field, BAND, CEIL).unseparable).toBe(true);
+  });
+
+  it('CONTRAST CONTROL — the same arms one thousandth lower were already withheld', () => {
+    // The old code withheld at 0.009 and named a winner at 0.010. If a future
+    // change re-introduces a cliff, these two must still agree.
+    const dead = padded(MARCH, 2, 0.009);
+    const live = padded(MARCH, 2, 0.01);
+    expect(isFieldUnseparable(dead, BAND, CEIL).unseparable).toBe(true);
+    expect(isFieldUnseparable(live, BAND, CEIL).unseparable).toBe(true);
+    // And the statistic must not LEAP across the boundary either. The old gap
+    // was 0.0189 -> 0.1824, a nine-fold move on one thousandth of probability.
+    const sepDead = isFieldUnseparable(dead, BAND, CEIL).separation as number;
+    const sepLive = isFieldUnseparable(live, BAND, CEIL).separation as number;
+    expect(Math.abs(sepLive - sepDead)).toBeLessThan(0.02);
+  });
+
+  it('PROPERTY — no producer-emitted tail restores a winner on any measured run', () => {
+    let covered = 0;
+    for (const run of measuredRuns as readonly MeasuredRun[]) {
+      const base = fieldOf(run);
+      if (!isFieldUnseparable(base, BAND, CEIL).unseparable) continue;
+      for (const v of PRODUCER_EMITTED_LIVE_TAILS) {
+        for (const k of [1, 2, 3, 4]) {
+          covered += 1;
+          expect(
+            isFieldUnseparable(padded(base, k, v), BAND, CEIL).unseparable,
+            `${run.token} + ${k} arm(s) at ${v}`,
+          ).toBe(true);
+        }
+      }
+    }
+    // ⚠ ZERO CASES IS A HARD ERROR, not a pass — a property test over an empty
+    // population is the vacuity this file exists to avoid.
+    expect(covered).toBeGreaterThan(0);
+  });
+
+  it('the effective size is what carries it, and a live option still moves it', () => {
+    // The claim at its true width: added arms are DAMPED in proportion to their
+    // mass, never ignored. A genuinely live rival must still move the reference.
+    expect(effectiveFieldSize([0.25, 0.25, 0.25, 0.25])).toBeCloseTo(4, 10);
+    expect(effectiveFieldSize([...MARCH, 0.01, 0.01])).toBeLessThan(3.2);
+    expect(effectiveFieldSize([...MARCH, 0.3, 0.3])).toBeGreaterThan(4.5);
+    // Exactly inert at zero — the property `liveField` was introduced for.
+    expect(effectiveFieldSize([...MARCH, 0, 0])).toBe(effectiveFieldSize(MARCH));
+  });
+});
+
+/**
+ * ⭐ P2'S BOUNDARY MUST BE THE EXACT COMPLEMENT OF `hasMeaningfulLead`'s.
+ *
+ * A triage review found the comment justifying this module's structural
+ * guarantee was FALSE at the bytes: `hasMeaningfulLead` rejects on
+ * `margin < MIN_LEAD_MARGIN`, so a margin of EXACTLY the band is MEANINGFUL
+ * there, while `contenderBandProbability` counted the same rival as LEVEL. At
+ * that one point the two authorities disagreed — and it is the only input on
+ * which a run that qualifies for a confident headline could also be withheld,
+ * i.e. the exact case the structural guarantee promises cannot happen.
+ */
+describe('⭐ P2 boundary — level is STRICTLY inside the band', () => {
+  it('a rival exactly `band` below the leader is NOT level', () => {
+    // 0.25 is exactly representable, so `0.5 - 0.25 === 0.25` holds with no
+    // float slack and the boundary is genuinely exercised. (MIN_LEAD_MARGIN's
+    // 0.05 is not exactly representable, which is why the production boundary
+    // is approached rather than hit — the triage rated a live occurrence
+    // vanishingly rare, and did not demonstrate one.)
+    expect(0.5 - 0.25).toBe(0.25);
+    expect(contenderBandProbability([0.5, 0.25], 0.25)).toBe(1);
+  });
+
+  it('DISCRIMINATING TWIN — one float inside the band and it IS level', () => {
+    // Without this the test above could pass on a predicate that never counts a
+    // rival at all.
+    expect(contenderBandProbability([0.5, 0.2500001], 0.25)).toBe(2);
+  });
+
+  it('so a field whose only rival sits exactly on the band keeps its winner', () => {
+    expect(isFieldUnseparable([0.5, 0.25, 0.25], 0.25, CEIL).unseparable).toBe(false);
+  });
+});
+
+/**
+ * ⭐ THE CEILING'S WIRING — and an honest account of how much it still carries.
+ *
+ * A review found the call-site wiring of `ELIMINATED_WIN_PROBABILITY_CEILING`
+ * rested on a SINGLE assertion, because every unit test passed `0.01` as a
+ * literal: corrupting only the argument at the call site reddened exactly one
+ * test. That finding is answered here — but it is answered by DISCLOSURE as
+ * much as by a stronger pin, because the effective-size repair changed how much
+ * the ceiling can possibly matter.
+ *
+ * ⚠⚠ MEASURED, AND IT IS THE UNCOMFORTABLE HALF: across a 400,000-field search,
+ * NO field's VERDICT differs between ceiling 0.01, ceiling 0 and ceiling 0.02.
+ * Once the reference point is mass-weighted, an arm at 1% is already worth
+ * about 1% of an option, so removing it changes almost nothing. The filter is
+ * retained because it keeps arms the product publicly calls eliminated out of
+ * P2's contender count and keeps ONE definition of "cannot win" in one place —
+ * but a future lane that proposes deleting the parameter as inert is making a
+ * defensible argument, not a careless one, and should be met with measurement
+ * rather than with this paragraph.
+ */
+describe('the elimination ceiling — threaded, and honestly bounded', () => {
+  it('the ceiling IS threaded through to the module (not hardcoded inside it)', () => {
+    // Discriminating pair. A ceiling above every arm filters the whole field,
+    // which is UNANSWERABLE and therefore separable by the fail-safe; the real
+    // ceiling leaves the field intact and withheld. If the call site ever stops
+    // passing its constant, this pair stops discriminating.
+    const flat = [0.353, 0.347, 0.3];
+    expect(isFieldUnseparable(flat, BAND, 0.5).unseparable).toBe(false);
+    expect(isFieldUnseparable(flat, BAND, 0.5).separation).toBeNull();
+    expect(isFieldUnseparable(flat, BAND, CEIL).unseparable).toBe(true);
+    expect(isFieldUnseparable(flat, BAND, CEIL).separation).not.toBeNull();
+  });
+
+  it('the gate and the user-facing "effectively eliminated" sentence share one ceiling', () => {
+    // The vocabulary claim, asserted end-to-end through the real builder rather
+    // than in prose: an arm at 0.009 is dead and an arm at 0.011 is live, and
+    // the sentence the user reads must agree with the field the gate judged.
+    const text = headlineFor(
+      [
+        { id: 'a', label: 'Alpha', p: 0.615 },
+        { id: 'b', label: 'Beta', p: 0.356 },
+        { id: 'c', label: 'Gamma', p: 0.011 },
+        { id: 'd', label: 'Delta', p: 0.009 },
+        { id: 'e', label: 'Epsilon', p: 0.009 },
+      ],
+      'a',
+    );
+    expect(text).not.toBeNull();
+    // TWO arms sit below 1% and one sits just above it. The sentence must count
+    // the two and NOT the one — which is only true if the sentence and the gate
+    // are reading the same constant.
+    expect(text as string).toContain('2 options are effectively eliminated');
+    expect(text as string).toContain('less than a 1% chance of winning');
+    // DISCRIMINATOR: the 0.011 arm is genuinely live to the module too.
+    expect(
+      isFieldUnseparable([0.615, 0.356, 0.011, 0.009, 0.009], BAND, CEIL).separation,
+    ).not.toBeNull();
+  });
+
+  it('DISCLOSURE PIN — the ceiling no longer changes the verdict on the measured corpus', () => {
+    // Recorded as a passing case rather than a comment, so that if a future
+    // change makes the ceiling load-bearing again this test REDs and the
+    // paragraph above stops being true silently.
+    for (const run of measuredRuns as readonly MeasuredRun[]) {
+      const field = fieldOf(run);
+      const atReal = isFieldUnseparable(field, BAND, CEIL).unseparable;
+      const atZero = isFieldUnseparable(field, BAND, 0).unseparable;
+      expect(atZero, `${run.token} differs between ceiling 0 and ${CEIL}`).toBe(atReal);
+    }
   });
 });

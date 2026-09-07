@@ -89,6 +89,42 @@
  * They bite on different populations, and each one's opposite-direction twin is
  * pinned in the test file. Neither is a restatement of the other.
  *
+ * ⚠⚠ A MEASURED CONSEQUENCE OF THE `n_eff` REPAIR, DISCLOSED RATHER THAN BURIED,
+ * BECAUSE IT CHANGES HOW THE CONJUNCTION BEHAVES AND A REVIEWER MUST SEE IT.
+ * Over 200,000 random fields (n = 2..8), the two parameters' populations move
+ * like this:
+ *
+ *                        P1 fires alone   P2 fires alone   both fire
+ *     raw-count P1          20,274           17,977          75,817
+ *     n_eff     P1          47,058                0          93,794
+ *
+ * P2 STILL SAVES WINNERS FROM P1 — that population GREW, and it is the GAP
+ * guard, so the direction the design most cares about is strengthened. What
+ * NARROWS is the reverse: P1 saving a winner that P2 would withhold.
+ *
+ * ⚠⚠ AND THE PRECISE WIDTH OF THAT CLAIM MATTERS, BECAUSE THE FIRST DRAFT OF
+ * THIS PARAGRAPH GOT IT WRONG. The 0 above is a SAMPLING RESULT over fields of
+ * n = 2..8; it is NOT a proof of emptiness, and reading it as one is exactly
+ * the over-generalisation this estate keeps paying for. Searched directly, the
+ * population is NON-EMPTY: `[0.337, 0.288, 0.0625 x 6]` has a rival 0.049
+ * inside the band and separation 0.150054, so P1 keeps its winner. What is TRUE
+ * is that the population is drastically narrowed — the highest separation
+ * reachable with a rival inside the band falls from 0.427 under the raw count
+ * to 0.171 under the effective size, and it needs a wide field with an even
+ * tail (n >= 8), a shape the producer has never emitted (its measured fields
+ * are n in {2, 3, 4}).
+ *
+ * So: the conjunction is NOT collapsing — the verdict still requires both, both
+ * populations are non-empty, and the fail-safe is unchanged. P1 has stopped
+ * licensing the claim it exists to suppress across most of the range where it
+ * used to. Every field in the vacated part has a rival within `band` of the
+ * leader, and the refuted counterexamples were drawn FROM it.
+ * ⚠ Measured, in the same runs: the structural guarantee below is intact —
+ * 0 of 67,580 confident runs (p_max ≥ 0.4, margin ≥ band) are withheld — and
+ * 0 of the 21 committed runs change verdict. **If a later reader wants P1 to
+ * resume saving winners on a flat field, that is a PRODUCT decision about
+ * naming leaders the model cannot separate, not a tuning question.**
+ *
  * ⚠ P2 IS DERIVED, NEVER MINTED. The contender band IS the module's existing
  * `MIN_LEAD_MARGIN`, passed in by the caller rather than re-declared here. That
  * is deliberate and it buys a STRUCTURAL non-regression guarantee, not a
@@ -109,12 +145,15 @@
  *     separation = (p_max − 1/n) / (1 − 1/n)
  *
  * 0 when the leader sits exactly at uniform, 1 when it takes everything, and
- * scale-free in `n`. The induced probability floor at each field size is:
+ * scale-free in the field size. ⚠ The size in that formula is the EFFECTIVE
+ * field size (see {@link effectiveFieldSize}), not the raw count, so the
+ * induced probability floor below is indexed by `n_eff` and a field with a
+ * low-mass tail sits at a SMALLER effective size than its option count:
  *
- *     n = 2  ⇒  p_max ≥ 0.575
- *     n = 3  ⇒  p_max ≥ 0.433
- *     n = 4  ⇒  p_max ≥ 0.363
- *     n = 5  ⇒  p_max ≥ 0.320
+ *     n_eff = 2  ⇒  p_max ≥ 0.575
+ *     n_eff = 3  ⇒  p_max ≥ 0.433
+ *     n_eff = 4  ⇒  p_max ≥ 0.363
+ *     n_eff = 5  ⇒  p_max ≥ 0.320
  *
  * WHAT BOUNDS THE CHOICE. It has to sit above the measured open-brief shape
  * (a four-way field led at 0.297 scores 0.063) and below the decisive briefs
@@ -149,9 +188,17 @@ export const MIN_FIELD_SIZE = 2;
 /**
  * ⭐⭐ THE LIVE FIELD — the options still in contention.
  *
- * ⚠ THE HOLE THIS CLOSES, found by independent review at `9afa8699` and NOT by
- * this author's corpus. P1's reference point is the uniform share `1/n`, so
- * it is a function of HOW MANY OPTIONS ARE COUNTED. Take the captured field
+ * ⚠ WHAT THIS FILTER IS, AND WHAT IT IS NO LONGER CARRYING ALONE. It was
+ * introduced at `c4a8670d` to close a count-inflation hole found by independent
+ * review at `9afa8699`, and it closed that hole EXACTLY AT ZERO but only at the
+ * ceiling's edge above it — a later review refuted the general claim, and the
+ * REFERENCE POINT has since been made mass-weighted to fix the mechanism
+ * properly (see {@link effectiveFieldSize}). This filter is retained because it
+ * still does a job the reference cannot: it keeps arms the product has publicly
+ * called eliminated out of P2's CONTENDER COUNT, and it keeps one definition of
+ * "cannot win" in one place. The original finding, kept because it is the
+ * clearest statement of the mechanism: P1's reference point was the uniform
+ * share `1/n`, so it was a function of HOW MANY OPTIONS ARE COUNTED. Take the captured field
  * this gate correctly withholds — 0.3045 / 0.2895 / 0.2177 / 0.1883 — and
  * append TWO ZERO-WIN OPTIONS. Every original probability, the total mass, the
  * top-two gap, the leader id and the producer's own `near_tie.is_tie` are
@@ -182,12 +229,13 @@ export const MIN_FIELD_SIZE = 2;
  *
  * ⚠ THE PROPERTY THIS BUYS, STATED EXACTLY — it is narrower than "n-invariant"
  * and must not be quoted as more. Adding or removing any number of options that
- * the product itself classifies as effectively eliminated cannot change the
- * verdict, EXACTLY (they are filtered before either parameter is computed).
- * Adding a LIVE option still moves the reference, and that is correct: a real
- * contender is real information about how separated the field is. An option
- * straddling the ceiling therefore still shifts the statistic slightly, by
- * design — the product is telling the user it is still in play.
+ * the product itself classifies as effectively eliminated cannot change EITHER
+ * PARAMETER, exactly, because they are filtered before either is computed.
+ * ⚠ THAT IS A STATEMENT ABOUT ARMS BELOW THE CEILING AND NOTHING ELSE. It was
+ * once quoted as containment for the whole padding class and that was REFUTED:
+ * two arms at exactly 1.0% restored the winner claim on this module's own
+ * oldest evidence. What contains the class now is the mass-weighted reference,
+ * not this filter — do not let this paragraph be read as more than it says.
  *
  * @param ceiling the elimination ceiling, supplied by the caller
  *   (`ELIMINATED_WIN_PROBABILITY_CEILING`) so this file never mints a rival
@@ -202,11 +250,91 @@ export function liveField(
 }
 
 /**
+ * ⭐⭐ THE EFFECTIVE FIELD SIZE — how many options the mass actually supports.
+ *
+ * ⚠ THE HOLE THIS CLOSES, found by independent review at `c4a8670d` and
+ * confirmed twice (a wider review and an independent triage reproduction), NOT
+ * by this author's corpus. The previous reference point was the RAW COUNT of
+ * live options, so P1 was a step function of a hard magnitude threshold. Every
+ * arm at or above {@link liveField}'s ceiling counted for a whole option, no
+ * matter how little mass it carried. Measured through the real builder on the
+ * March-2026 capture `0.353 / 0.347 / 0.300` — a 0.6pp three-way dead heat:
+ *
+ *   arm at 0.00999  ⇒  separation 0.018921  ⇒  WITHHELD
+ *   arm at 0.01000  ⇒  separation 0.182425  ⇒  "…currently leads."
+ *
+ * **One thousandth of probability on a nearly-dead arm moved the statistic
+ * nine-fold and flipped the verdict.** And it was not adversarial: the producer
+ * emits live arms at 0.0108, 0.0134, 0.0163, 0.0202 and 0.0212 — five of them
+ * inside the interval the old tests never touched. The corpus could not see it
+ * because no measured run combines a near-ceiling arm with a flat top.
+ *
+ * ⭐ THE REMEDY IS A COUNT THAT WEIGHTS BY MASS, NOT A NEW THRESHOLD. The
+ * inverse-Simpson effective count (the Hill number of order 2) is the standard,
+ * parameter-free answer to "how many categories does this distribution
+ * effectively hold":
+ *
+ *     n_eff = (Σp)² / Σp²
+ *
+ * An arm carrying 1% of the mass contributes ~1% of an option to the reference
+ * instead of a whole one, and it does so CONTINUOUSLY — which is what kills the
+ * whole padding attack class rather than one instance of it. Measured on the
+ * realistic population (the 21 committed runs plus the March capture, padded
+ * with the tail magnitudes the producer actually emits): padding flipped a
+ * withheld field into a named winner in **80 of 108 cases before, 0 of 108
+ * after**.
+ *
+ * ⚠ WHAT WAS DELIBERATELY NOT DONE. `MIN_FIELD_SEPARATION` is UNCHANGED at
+ * 0.15; there is no special case for any field size; no constant is minted
+ * here. A variant that rounded the effective count back up to an integer
+ * (`min(n, ceil(n_eff))`) was measured and REJECTED: it preserves more of the
+ * old statistic but re-introduces the integer cliff one step along, and still
+ * leaked on 5 of the same 108 realistic cases, at magnitudes the producer
+ * emits (0.0202, 0.0424, 0.0425). Fitting the shape of the counterexample
+ * instead of the invariant is the oscillation pattern this estate has already
+ * paid four rounds for.
+ *
+ * ⚠ THE CLAIM AT ITS TRUE WIDTH. This is NOT exact invariance to added
+ * options, and must not be quoted as more. A LIVE option still moves the
+ * reference — by design, because a real contender is real information about how
+ * separated a field is. What changed is that its influence is now proportional
+ * to the mass it carries, so no arm can buy a whole option's worth of reference
+ * with a thousandth of probability. Options at exactly zero remain EXACTLY
+ * invariant (they add nothing to either sum), which is the property
+ * {@link liveField} was introduced for and which is unchanged.
+ */
+export function effectiveFieldSize(probabilities: readonly number[]): number {
+  const n = probabilities.length;
+  let sum = 0;
+  let sumOfSquares = 0;
+  for (const p of probabilities) {
+    sum += p;
+    sumOfSquares += p * p;
+  }
+  if (!(sumOfSquares > 0)) return n;
+  const effective = (sum * sum) / sumOfSquares;
+  if (!Number.isFinite(effective)) return n;
+  // Cauchy-Schwarz puts `effective` in [1, n] for any non-negative field, so
+  // both clamps are for IEEE-754 noise at the endpoints and for the degenerate
+  // near-certain field, where `effective` approaches 1 and would send the
+  // uniform reference to 1 (and the denominator below to 0). A field of at
+  // least MIN_FIELD_SIZE real options is never narrower than MIN_FIELD_SIZE.
+  if (effective < MIN_FIELD_SIZE) return MIN_FIELD_SIZE;
+  return effective > n ? n : effective;
+}
+
+/**
  * Normalised excess concentration of the field — P1's statistic.
+ *
+ *     separation = (p_max − 1/n_eff) / (1 − 1/n_eff)
  *
  * Returns `null` when the field is too small to have a shape, so a caller can
  * distinguish "not separated" from "not answerable". Never throws; never reads
  * anything but the numbers it is given.
+ *
+ * ⚠ The size guard is on the RAW length, not the effective one: whether a field
+ * is ANSWERABLE is a question about how many options exist, not about how much
+ * mass they carry. Only the REFERENCE POINT is mass-weighted.
  *
  * @param probabilities usable win probabilities from ONE accepted source
  *   (finite, in [0, 1]). Same-source is the caller's invariant — mixing
@@ -217,11 +345,11 @@ export function fieldSeparation(
 ): number | null {
   const n = probabilities.length;
   if (n < MIN_FIELD_SIZE) return null;
-  const uniform = 1 / n;
+  const uniform = 1 / effectiveFieldSize(probabilities);
   let max = probabilities[0] as number;
   for (const p of probabilities) if (p > max) max = p;
-  // `1 − uniform` is ≥ 0.5 for every n ≥ 2, so no division-by-zero guard is
-  // reachable; the clamp below is for IEEE-754 noise at the endpoints only.
+  // `effectiveFieldSize` is clamped at MIN_FIELD_SIZE, so `uniform` is at most
+  // 0.5 and `1 − uniform` is at least 0.5; the division below cannot blow up.
   const raw = (max - uniform) / (1 - uniform);
   if (!Number.isFinite(raw)) return null;
   return raw < 0 ? 0 : raw > 1 ? 1 : raw;
@@ -247,11 +375,18 @@ export function contenderBandProbability(
   let max = probabilities[0] as number;
   for (const p of probabilities) if (p > max) max = p;
   let count = 0;
-  // Strict `<=` against the raw difference. No epsilon: a value exactly `band`
-  // below the leader is level with it by the same definition `hasMeaningfulLead`
-  // uses to call the margin insufficient, and the two must not disagree on the
-  // boundary they share.
-  for (const p of probabilities) if (max - p <= band) count += 1;
+  // ⚠ STRICT `<`, AND THE STRICTNESS IS LOAD-BEARING — corrected after an
+  // independent triage found the previous `<=` made this comment FALSE at the
+  // bytes. `hasMeaningfulLead` rejects on `margin < MIN_LEAD_MARGIN`, so a
+  // margin of EXACTLY `band` is MEANINGFUL there. Counting that same rival as
+  // "level" here made the two authorities disagree on precisely the boundary
+  // they share — and that disagreement is not cosmetic: it is the one input on
+  // which a run that qualifies for a confident headline could also be withheld,
+  // which is exactly the structural guarantee the header claims. With `<` the
+  // two are exact complements and the guarantee holds at the boundary too.
+  // No epsilon: the guarantee is about agreeing with `hasMeaningfulLead`, and
+  // an epsilon here would re-open the same gap one float along.
+  for (const p of probabilities) if (max - p < band) count += 1;
   return count;
 }
 
