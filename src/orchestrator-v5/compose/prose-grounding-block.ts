@@ -3,10 +3,14 @@
  *
  * THE DEFECT THIS CLOSES. On a substantive coach / converse turn the model is
  * handed `display_analysis` — a projection of a persisted `run_analysis` fact
- * built by `buildAnalysisFromPriorFacts` — and the routing prompt carries an
- * explicit rendering rule for it (`Win probability: "leads in 69% of
- * simulations"`). The figure is therefore SERVER-COMPUTED and SERVER-RENDERED
- * before the model sees it; only the wording is model-authored. The same
+ * built by `buildAnalysisFromPriorFacts` — and the served prompt tells it to
+ * quote that figure rather than derive one. Read at `prompts/defaults.ts` in
+ * this tree: `WINNER / RUNNER-UP (pre-computed — trust these, do not
+ * recalculate)`, and `To say how well the winner did, state the winner's OWN
+ * win_probability: "{winner.label} came out ahead in {N}% of runs of this
+ * model"`, with the ONLY permitted transformation being decimal→percentage
+ * (`0.77 → "77%"`). So the number is SERVER-COMPUTED and the sentence is a
+ * template the model fills; only the wording is model-authored. The same
  * response then shipped `blocks: []`, because the two channels are fed by
  * different code paths:
  *
@@ -19,10 +23,12 @@
  * block was not suppressed by a rule. It was STRUCTURALLY UNREACHABLE.
  *
  * The user-visible cost is not the missing block. It is that the assistant
- * asserts a quantified comparative claim ("leads in 74% of simulated runs")
- * that arrives beside NO machine-readable statement of the same fact — so a
- * consumer cannot check the sentence it is rendering, and the 73 UI consumers
- * of `win_probability` receive nothing on the turn that talks about it most.
+ * asserts a quantified comparative claim — a percentage the server computed —
+ * beside NO machine-readable statement of the same fact, so a consumer cannot
+ * check the sentence it is rendering. (A UI-side survey reported many
+ * `win_probability` consumers receiving nothing on these turns; that count was
+ * measured in the UI repo and is NOT verified here — this module claims only
+ * what is true of the CEE payload.)
  *
  * WHAT THIS DOES NOT DO, and each omission is deliberate.
  *
@@ -64,10 +70,15 @@
  *    correctly produces a qualified sentence and no block.
  *
  * 4. IT FABRICATES NOTHING WHEN THE FACT IS THIN. `enrichment.robustness` is
- *    genuinely nullable — `pickLatestRawRobustness` has three null exits (no
- *    enrichment object; enrichment present but `robustness` not an object;
- *    `robustness` present but carrying neither a non-empty `level` nor
- *    `near_tie.is_tie === true`). This helper never synthesises it: it ships
+ *    genuinely nullable. Reading `pickLatestRawRobustness` and the
+ *    `readRawRobustnessSignals` it delegates to, THREE of its null exits are
+ *    reachable with a selected `run_analysis` fact in hand — no enrichment
+ *    object; enrichment present but `robustness` not an object; `robustness`
+ *    present but carrying neither a non-empty `level` nor
+ *    `near_tie.is_tie === true`. (It has two further exits, for no selected
+ *    fact and a non-`run_analysis` fact, which this helper cannot reach because
+ *    its caller has already narrowed both.) This helper never synthesises it:
+ *    it ships
  *    the block the fact supports, and when the fact carries no robustness the
  *    leader claim stays `separation_unavailable`, which is the true statement
  *    that nothing was measured.

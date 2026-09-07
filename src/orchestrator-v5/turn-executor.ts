@@ -11910,11 +11910,12 @@ export async function runTurnExecutor(
         suggested_actions: coachGuarded.suggested_actions,
         answerKind: 'substantive',
         // Ground the coach's own figures. This prose was rendered from
-        // `display_analysis`, which the prompt orders into sentences like
-        // "leads in 69% of simulations" — so the turn is already making a
-        // quantified claim and shipped nothing a consumer could check it
-        // against. Empty on every turn that projected no analysis and on every
-        // non-fresh turn (see the helper's header).
+        // `display_analysis`, and the served prompt tells the model to QUOTE
+        // that pre-computed `win_probability` rather than derive one
+        // (`prompts/defaults.ts`) — so the turn is already making a quantified
+        // claim and shipped nothing a consumer could check it against. Empty on
+        // every turn that projected no analysis and on every non-fresh turn
+        // (see the helper's header).
         blocks: buildProseGroundingBlocks({
           sourceFact: promptAnalysisSourceFact,
           freshness: promptAnalysisFreshness,

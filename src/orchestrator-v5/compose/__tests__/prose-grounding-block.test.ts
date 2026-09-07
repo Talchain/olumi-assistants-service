@@ -4,10 +4,11 @@
  * ═══════════════════════════════════════════════════════════════════════════
  * THE DEFECT. On a substantive coach / converse turn the model is handed
  * `display_analysis` — a projection of a persisted `run_analysis` fact built by
- * `buildAnalysisFromPriorFacts` — and the routing prompt carries an explicit
- * rendering rule for it (`Win probability: "leads in 69% of simulations"`). The
- * figure is SERVER-COMPUTED and SERVER-RENDERED before the model sees it; only
- * the wording is model-authored. The same response then shipped `blocks: []`,
+ * `buildAnalysisFromPriorFacts` — and the served prompt tells the model to
+ * QUOTE it rather than derive one (`prompts/defaults.ts`: `pre-computed — trust
+ * these, do not recalculate`; `state the winner's OWN win_probability`; only
+ * decimal→percentage permitted). The number is SERVER-COMPUTED and the sentence
+ * is a template the model fills. The same response then shipped `blocks: []`,
  * because `composeDirectAnswerResponse` — the composer every coach / converse
  * turn uses — consults no facts and emits whatever `blocks` its caller passes,
  * and every caller passed nothing.
