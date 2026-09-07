@@ -492,26 +492,71 @@ describe('V5 post-analysis advice gate — path-ownership integration', () => {
   }
 
   // -------------------------------------------------------------------------
-  // Regression: "What should I pay attention to?" continues to match the
-  // existing `advice` class. Class precedence is NOT reordered by this PR.
+  // Generic advice uses contextual reasoning. Observe the actual persistence
+  // calls so the ownership replacement still fails if the turn writes a graph.
   // -------------------------------------------------------------------------
-  it('"What should I pay attention to?" continues to match advice class (precedence regression)', async () => {
-    const adapter = throwingRoutingAdapter();
-    const result = await runTurnExecutor(
-      mkPayload('What should I pay attention to?'),
-      'req-advice-ownership-pay-attention',
-      { routingAdapter: adapter, graphState: READY_GRAPH as never },
-    );
+  it('"What should I pay attention to?" reaches contextual reasoning once without a graph write', async () => {
+    const message = 'What should I pay attention to?';
+    const answer = 'Technical debt could still limit delivery. Ask which bottleneck the team sees most often, including where they disagree.';
+    mockState.priorTurns = [{
+      ...PRIOR_RUN_ANALYSIS_TURN,
+      user_message: 'The codebase has technical debt and the team disagrees about its cost.',
+      assistant_message: 'That context is available for the next discussion.',
+    }];
+    const graphBefore = structuredClone(READY_GRAPH);
+    const session = await import('../session/index.js');
+    const store = session.getSessionStore();
+    const append = vi.spyOn(store, 'append');
+    const storeDraftGraph = vi.spyOn(store, 'storeDraftGraph');
+    const invalidateScoped = vi.spyOn(store, 'invalidateScoped');
+    const invalidateAll = vi.spyOn(store, 'invalidateAll');
+    const getSessionStore = vi.spyOn(session, 'getSessionStore').mockReturnValue(store);
+    const adapter = passthroughRoutingAdapter();
+    adapter.chatWithTools.mockResolvedValue({
+      content: [{ type: 'text', text: answer }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 5, output_tokens: 5 },
+      model: 'mock',
+      latencyMs: 0,
+    });
 
-    expect(adapter.chatWithTools).not.toHaveBeenCalled();
-    const adviceEvent = events.find(
-      (e) => e.event === 'v5.post_analysis_advice_gate',
-    );
-    expect(adviceEvent!.data.matched).toBe(true);
-    expect(adviceEvent!.data.advice_class).toBe('advice');
-    expect(adviceEvent!.data.suggested_action_count).toBe(1);
-    expect(result.response.assistant_text ?? '').not.toContain(
-      FRESH_FOLLOWUP_RECAP,
-    );
+    try {
+      const result = await runTurnExecutor(
+        mkPayload(message),
+        'req-advice-ownership-pay-attention',
+        { routingAdapter: adapter, graphState: READY_GRAPH as never },
+      );
+
+      expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+      const prompt = JSON.stringify(adapter.chatWithTools.mock.calls[0]![0].messages);
+      expect(prompt).toContain(message);
+      expect(prompt).toContain('technical debt');
+      expect(prompt).toContain('team disagrees');
+      expect(result.telemetry.llm_calls_used).toBe(1);
+      expect(result.response.assistant_text).toBe(answer);
+      const adviceEvent = events.find(
+        (e) => e.event === 'v5.post_analysis_advice_gate',
+      );
+      expect(adviceEvent?.data).toMatchObject({
+        matched: false,
+        unmatched_reason: 'reasoning_request',
+      });
+      expect(result.response.assistant_text ?? '').not.toContain(
+        FRESH_FOLLOWUP_RECAP,
+      );
+
+      expect(append, 'the answered turn is persisted and its write inspected').toHaveBeenCalledTimes(1);
+      const write = append.mock.calls[0]![0];
+      expect(write.graph, 'discussion must not persist a graph').toBeUndefined();
+      expect(write.handler_facts).toEqual([]);
+      expect(write).not.toHaveProperty('modelVersion');
+      expect(storeDraftGraph).not.toHaveBeenCalled();
+      expect(invalidateScoped).not.toHaveBeenCalled();
+      expect(invalidateAll).not.toHaveBeenCalled();
+      expect(mockState.persistedGraph).toEqual(graphBefore);
+      expect(READY_GRAPH).toEqual(graphBefore);
+    } finally {
+      getSessionStore.mockRestore();
+    }
   });
 });
