@@ -15,17 +15,51 @@
  * olumi-debug-f2e2df1b-20260903.json`, node `552bd1c0`.
  *
  * ── THE CAUSE: THE MINT'S GATE READS THE WRONG OBJECT ──────────────────────
- * `enricher.ts`'s `applyGoalTargetRedirect` is THE ONE mint of `goal_threshold`
- * on the draft path, and both routes to it are gated by `isTargetGoalLabel`,
- * which asks whether a REGEX-INFERRED FACTOR LABEL contains one of four
- * substrings — `target` / `goal` / `objective` / `threshold`. It never looks at
- * the GOAL NODE, whose label is where the drafted target actually lands.
+ * `enricher.ts`'s `applyGoalTargetRedirect` is the ENRICHER'S mint of
+ * `goal_threshold` on the draft path, and both routes to it are gated by
+ * `isTargetGoalLabel`, which asks whether a REGEX-INFERRED FACTOR LABEL
+ * contains one of four substrings — `target` / `goal` / `objective` /
+ * `threshold`. It never looks at the GOAL NODE, whose label is where the
+ * drafted target actually lands.
  *
  * MEASURED at `f4c8f501` by running `extractFactors` over the brief: 21 factors,
  * and **not one label contains any of the four words**. The £30,000 was
  * extracted — as a factor labelled `"Customer Count"`. So the gate is not
  * merely narrow for this brief, it is UNREACHABLE for it, and
  * `goalThresholdsMinted` came back `[]`.
+ *
+ * ── ⚠⚠ THE PREMISE THIS MODULE WAS BUILT ON, CORRECTED ────────────────────
+ * Earlier versions of this header, of `applyGoalTargetRedirect`'s doc and of
+ * the PR body all said that function was **THE ONE** mint of `goal_threshold`
+ * on the draft path. **It is not, and it was not on 3 Sep either.**
+ * `applyStatedGoalTarget` (`cee/draft/records/projector.ts:1312`) mints the
+ * same five fields from the model's STATED GOAL RECORD. It read as absent
+ * because `stripModelAuthoredGoalThreshold` deleted its output before the
+ * enricher saw it.
+ *
+ * **#1339 (merged 4 Sep 2026) removed that strip on the ANTHROPIC path.** So on
+ * that provider the projector now mints first and reaches the founder's exact
+ * witnessed case — `Reach £30k MRR Within 18 Months` — before this module runs,
+ * and this module correctly declines. The strip is deliberately RETAINED on the
+ * OpenAI path (`adapters/llm/openai.ts`), where the projector's mint can never
+ * survive.
+ *
+ * ⭐ HOW A WRONG UNIVERSAL SURVIVED THREE ROUNDS OF REVIEW. The load-bearing
+ * measurement — running `extractFactors` over the brief — is a SINGLE-STAGE
+ * instrument. It is true about the factor-extraction stage and structurally
+ * cannot see a mint two stages upstream. CLAUDE.md trap 16-inverse:
+ * reachability within one stage is not reachability in the system. What was
+ * re-derived each round was that `isTargetGoalLabel` gates both routes into
+ * `applyGoalTargetRedirect`, which is true; the universal beside it was never
+ * tested.
+ *
+ * ── ⭐ THE CLASS THIS MODULE ACTUALLY CATCHES, POST-#1339 ──────────────────
+ * Two residual classes, and they are the honest scope:
+ *   1. the model puts the figure in the goal LABEL but does not emit a stated
+ *      `goal` record carrying it as a numeric target — the projector branch
+ *      requires `typeof item.value === "number" && goalValueIsATarget(item.role)`;
+ *   2. the whole OPENAI path, where the strip still runs, so the projector's
+ *      mint is always deleted and this is the only route left.
  *
  * That is CLAUDE.md trap 19 at the level of the whole predicate: a guard bound
  * to its object by a VALUE PREDICATE (does this label contain a word?) that the
@@ -77,17 +111,31 @@
  * reported at the boundary rather than taken: **this module guarantees that the
  * minted figure APPEARS IN THE USER'S BRIEF, and nothing stronger.**
  *
- * ⏰ RE-SURFACE TRIGGER — written here because a parked remedy with no trigger
- * is how this estate loses work: the register almost always has the row, and
- * what dies is anything that would surface it again (CLAUDE.md, chronic failure
- * 2). The span remedy is rowed in the PR thread for the register; it must be
- * picked up at WHICHEVER COMES FIRST of
- *   (a) the goal-chip surface that renders this field reaching staging — UI
- *       #1172 at time of writing — because that is the moment an unstated
- *       figure becomes something the product tells the user they said; or
- *   (b) 2026-10-01.
- * Until then the gap is asserted, not described: see the KNOWN GAP floor in
- * `__tests__/goal-label-target.test.ts`, which REDs when an instance closes.
+ * ⏰⛔ RE-SURFACE TRIGGER — **IT HAS ALREADY FIRED. THIS IS NOT A PARKED
+ * REMEDY ANY MORE.**
+ *
+ * The trigger was written as "whichever comes first of (a) the goal-chip
+ * surface that renders this field reaching staging — UI #1172 — or
+ * (b) 2026-10-01". **Derived 7 Sep 2026: UI #1172 merged to `staging` on
+ * 2026-09-04** (`Talchain/DecisionGuideAI`, base `staging`, merge commit
+ * `a2fd0656`). Limb (a) fired three days before this was re-read, and the row
+ * had not moved — which is exactly the failure `session-start-derive.sh` exists
+ * to catch (CLAUDE.md chronic failure 2: the register almost always has the
+ * row; what dies is anything that would surface it again). A trigger nobody
+ * re-derives is a scheduler that has already stopped.
+ *
+ * CONSEQUENCE, stated plainly: the moment named as "when an unstated figure
+ * becomes something the product tells the user they said" is **now**, not
+ * later. The span remedy — bind the attestation to a span that
+ * `factor-extraction/index.ts`'s goal grammar resolved as a TARGET — is DUE.
+ *
+ * ⚠ IT IS NOT DONE HERE. Its owner is `factor-extraction/index.ts`, a file this
+ * lane does not own, and "while we're here" work is prohibited. It is reported
+ * at the boundary in the PR thread instead of being absorbed silently.
+ *
+ * Until it lands the gap is asserted, not merely described: see the KNOWN GAP
+ * floor in `__tests__/goal-label-target.test.ts`, which REDs when an instance
+ * closes.
  *
  * ── FAIL-CLOSED, EVERY BRANCH ─────────────────────────────────────────────
  *   no goal label                     -> refuse `no_goal_label`
@@ -127,6 +175,7 @@
 
 import {
   AMOUNT_DIGITS,
+  AMOUNT_RUN_END,
   MAGNITUDE_AMBIGUOUS_TRAILER_GUARD,
   magnitudeSuffixPattern,
   parseAmountDigits,
@@ -220,15 +269,13 @@ const UNIT_COUNT = "count";
  *    fixed HERE because this consumer mints THE goal threshold — the single
  *    number ISL scores every option against.
  *
- * 2. ⛔ THIS CONSTANT IS A DELIBERATE, TEMPORARY DUPLICATE. Sibling PR #1327
- *    adds exactly this anchor to `utils/magnitude-alphabet.ts` as
- *    `AMOUNT_RUN_END`, the shared home where it belongs. That PR is not merged,
- *    and adding the export here as well would put two PRs in one file for no
- *    gain. **WHEN #1327 LANDS, DELETE THIS AND IMPORT `AMOUNT_RUN_END`** — the
- *    two are character-for-character identical, which is the point and also the
- *    hazard (trap 12). Rebasing onto #1327 is the reviewer's stated merge order.
+ * 2. ✅ THE TEMPORARY DUPLICATE IS GONE. This module briefly carried its own
+ *    character-identical copy, `DIGIT_RUN_END_LOCAL`, because the shared anchor
+ *    did not yet exist. **#1327 merged on 7 Sep 2026** and added it to
+ *    `utils/magnitude-alphabet.ts` as `AMOUNT_RUN_END`, so the copy was deleted
+ *    and the survivor is imported — the estate holds ONE anchor, not two
+ *    (trap 12). The scanner below composes it.
  */
-const DIGIT_RUN_END_LOCAL = "(?!\\d)(?!,\\d{3})(?!\\.\\d)";
 
 /**
  * ⭐ A DIGIT INSIDE A WORD IS NOT A QUANTITY. The scanner had no left boundary,
@@ -274,7 +321,7 @@ function quantityScanner(): RegExp {
     NOT_INSIDE_A_WORD +
       `(?<currency>${CURRENCY_CLASS})?` +
       `(?<amount>${AMOUNT_DIGITS})` +
-      DIGIT_RUN_END_LOCAL +
+      AMOUNT_RUN_END +
       magnitudeSuffixPattern("mag") +
       MAGNITUDE_AMBIGUOUS_TRAILER_GUARD +
       `(?<pct>\\s*%|\\s*percent\\b)?` +

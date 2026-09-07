@@ -20,6 +20,10 @@ import {
 } from "../goal-label-target.js";
 import { enrichGraphWithFactorsAsync } from "../enricher.js";
 import { extractFactors } from "../index.js";
+import {
+  resolveGoalThresholdCap,
+  CEE_GOAL_THRESHOLD_FRAME,
+} from "../../../utils/goal-threshold-cap.js";
 
 /** ✓ verbatim from bundle node `552bd1c0`. */
 const GOAL_LABEL = "Reach £30k MRR Within 18 Months";
@@ -617,5 +621,123 @@ describe("round 3 — a % or a currency amount is not a duration", () => {
     if (!real.ok) return;
     expect(real.target.unit).toBe("count");
     expect(real.target.value).toBe(24);
+  });
+});
+
+/**
+ * ── ROUND 4 — THE PROJECTOR'S PARTIAL QUAD ──────────────────────────────────
+ *
+ * ⭐⭐ THIS ROUTE IS NOT THE ONLY MINT, AND THE OTHER ONE CAN LEAVE A HALF-
+ * WRITTEN CONTRACT BEHIND IT.
+ *
+ * `applyStatedGoalTarget` (`cee/draft/records/projector.ts:1312`) mints the same
+ * five fields from the model's stated `goal` record. Until #1339 merged, the
+ * strip at `adapters/llm/anthropic.ts` deleted its output before the enricher
+ * ever saw it, which is why this module's header could once read as though the
+ * enricher were the only author. It no longer is, on the Anthropic path.
+ *
+ * ⛔ AND IT WRITES ITS FIELDS UNDER DIFFERENT CONDITIONS. `goal_threshold_raw`
+ * is written UNCONDITIONALLY; `goal_threshold`, `_cap` and `_frame` are written
+ * only when `resolveGoalThresholdCap` returns non-null — and it returns `null`
+ * for any target that is not strictly positive. So a user who states a target
+ * of ZERO ("cut churn to zero", "get to zero defects", "break even") leaves a
+ * PARTIAL quad: raw and unit set, `goal_threshold` absent.
+ *
+ * `applyGoalTargetRedirect`'s deferral tested `goal_threshold` — the field the
+ * upstream mint writes CONDITIONALLY — so the partial quad sailed through it
+ * and this route overwrote the user's stated zero with the CURRENT level stated
+ * in the same brief. That is the lie direction, and by this module's own
+ * doctrine a lie outranks a gap.
+ *
+ * The invariant below is written against the SPEC — "an upstream mint is
+ * deferred to" — and therefore tests the field that mint ALWAYS writes, not the
+ * one that happened to be missing in the case that exposed it.
+ */
+describe("round 4 — this route defers to the projector's upstream mint", () => {
+  it("⭐ PRECONDITION: a stated target of ZERO really does leave the projector's quad PARTIAL", () => {
+    // Asserted against the RESOLVER ITSELF rather than against my reading of
+    // it, so the fixtures below are the producer's real output and not my model
+    // of the producer (trap 13c — a kit measures sensitivity, never whether the
+    // expectation is right).
+    expect(resolveGoalThresholdCap(undefined, 0, "%", undefined)).toBeNull();
+    // …and the DISCRIMINATING CONTRAST, so this is not a probe that returns
+    // null for everything: a strictly positive target resolves a cap, which is
+    // precisely why the full quad below is full.
+    expect(resolveGoalThresholdCap(undefined, 30000, "£", undefined)).toBe(37500);
+  });
+
+  it("⛔ THE HARM: a stated target of ZERO is not overwritten with the CURRENT level", async () => {
+    const graph = founderGraph();
+    const goalNode = graph.nodes.find((n: any) => n.id === "552bd1c0");
+    goalNode.label = "Cut Churn From 4% To Zero";
+    // EXACTLY what `applyStatedGoalTarget(node, 0, "%")` leaves — raw and unit,
+    // and nothing else, because the cap resolver returned null above.
+    goalNode.goal_threshold_raw = 0;
+    goalNode.goal_threshold_unit = "%";
+
+    const brief = "Monthly churn is 4% today. We want to cut churn to zero.";
+    const res = await enrichGraphWithFactorsAsync(graph, brief, { minConfidence: 0.6 });
+    const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+
+    // The user's stated zero survives, and the 4% CURRENT level does not become
+    // their target.
+    expect(goal.goal_threshold_raw).toBe(0);
+    expect(goal.goal_threshold).toBeUndefined();
+    expect(res.goalThresholdsMinted).toEqual([]);
+  });
+
+  it("⭐ THE INTERACTION PIN (ARM A): a FULL quad from the projector is deferred to", async () => {
+    // The guard nothing anywhere asserted. Without it a change on EITHER side —
+    // this route's deferral, or the projector's mint — re-opens a double mint
+    // with nothing going red.
+    const graph = founderGraph();
+    const goalNode = graph.nodes.find((n: any) => n.id === "552bd1c0");
+    // EXACTLY what `applyStatedGoalTarget(node, 30000, "£")` leaves.
+    goalNode.goal_threshold_raw = 30000;
+    goalNode.goal_threshold_unit = "£";
+    goalNode.goal_threshold_cap = 37500;
+    goalNode.goal_threshold = 30000 / 37500;
+    goalNode.goal_threshold_frame = CEE_GOAL_THRESHOLD_FRAME;
+
+    const res = await enrichGraphWithFactorsAsync(graph, FOUNDER_BRIEF, { minConfidence: 0.6 });
+    const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+
+    expect(goal.goal_threshold_raw).toBe(30000);
+    expect(goal.goal_threshold).toBe(0.8);
+    expect(res.goalThresholdsMinted).toEqual([]);
+  });
+
+  it("⭐ THE TWIN, opposite direction: a goal node with NO upstream mint STILL mints", async () => {
+    // Without this, both cases above pass just as well on a module that has
+    // stopped minting altogether (trap 13b — a guard agreeing with itself).
+    const res = await enrichGraphWithFactorsAsync(founderGraph(), FOUNDER_BRIEF, {
+      minConfidence: 0.6,
+    });
+    const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+
+    expect(goal.goal_threshold_raw).toBe(30000);
+    expect(goal.goal_threshold_unit).toBe("£");
+    expect(res.goalThresholdsMinted).toEqual(["552bd1c0"]);
+  });
+
+  it("⭐ THE TWIN, second direction: a PARTIAL quad blocks the FACTOR route too, not just the label route", async () => {
+    // The deferral lives in `applyGoalTargetRedirect`, the ONE point both routes
+    // pass through, rather than in the label route alone — otherwise the factor
+    // route commits the identical harm through a door nothing is watching
+    // (trap 22b). This drives the FACTOR route by giving a factor label one of
+    // the four words `isTargetGoalLabel` reads, and asserts it defers as well.
+    const graph = founderGraph();
+    const goalNode = graph.nodes.find((n: any) => n.id === "552bd1c0");
+    goalNode.label = "Reduce Churn";
+    goalNode.goal_threshold_raw = 0;
+    goalNode.goal_threshold_unit = "%";
+
+    const brief = "Our churn target is 4%. We want to cut churn to zero.";
+    const res = await enrichGraphWithFactorsAsync(graph, brief, { minConfidence: 0.6 });
+    const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+
+    expect(goal.goal_threshold_raw).toBe(0);
+    expect(goal.goal_threshold).toBeUndefined();
+    expect(res.goalThresholdsMinted).toEqual([]);
   });
 });
