@@ -102,6 +102,7 @@
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
+import { splitIntoRedactableUnits } from './redactable-units.js';
 
 /**
  * Copy that NAMES or PRESUMES a leading option.
@@ -428,9 +429,176 @@ export function neutraliseEnforcementFalsePositiveSpans(value: string): string {
  * The observe-only egress guard keeps the wider net: it is measuring residue,
  * and a slightly noisy alarm is the correct trade for one that cannot miss.
  */
-export function textAssertsLeadingOption(value: string): boolean {
+export interface LeaderProseContext {
+  /** Exact labels supplied by the caller's existing scenario roster. */
+  readonly optionLabels: readonly string[];
+}
+
+/** Shared with the wire name test; exact tokens, Unicode-safe, soft-wrap-safe. */
+export function optionLabelPattern(label: string): RegExp {
+  const pattern = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`, 'giu');
+}
+
+// An internal object-reference token, never emitted. Unlike a word sentinel it
+// cannot itself match an option label or manufacture leader-word adjacency.
+const OPTION_REFERENT = '\uFFFC';
+
+function bindOptionReferences(value: string, context: LeaderProseContext): string {
+  const references = context.optionLabels.flatMap((label) => label.trim() === '' ? [] :
+    [...value.matchAll(optionLabelPattern(label))].map((match) => ({
+      start: match.index, end: match.index + match[0].length,
+    }))).sort((a, b) => a.start - b.start || b.end - a.end);
+
+  // Bind the subject before reading its predicate. Repeated label words can
+  // also be genuine auxiliaries: in "May may be the leading option", the first
+  // May is the subject and the second is a modal. Do not mask that auxiliary.
+  // A prelude is a grammatical chain, not arbitrary preceding prose.
+  const predicatePrelude = /^(?:\s|\b(?:am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|will|would|should|must|not|never|the|a|an|[a-z]+ly)\b)*$/i;
+  const preludes: Array<{ start: number; end: number }> = [];
+  for (const { re } of LEADER_CLAIM_PATTERNS) {
+    for (const claim of value.matchAll(new RegExp(re.source, 'gi'))) {
+      const claimEnd = claim.index + claim[0].length;
+      // Vocabulary inside an actual label is a mention of the option, not a
+      // separate comparative predicate.
+      if (references.some((ref) => ref.start <= claim.index && claimEnd <= ref.end)) continue;
+      const subject = references.find((ref) => ref.end <= claim.index &&
+        predicatePrelude.test(value.slice(ref.end, claim.index)));
+      if (subject) preludes.push({ start: subject.end, end: claim.index });
+    }
+  }
+  const protectedReferences = references.filter((ref) =>
+    !preludes.some((prelude) => prelude.start <= ref.start && ref.end <= prelude.end));
+  let result = '';
+  let cursor = 0;
+  for (const ref of protectedReferences) {
+    if (ref.start < cursor) continue; // longest exact overlapping label wins
+    result += value.slice(cursor, ref.start) + OPTION_REFERENT;
+    cursor = ref.end;
+  }
+  return result + value.slice(cursor);
+}
+
+export function textAssertsLeadingOption(value: string, context?: LeaderProseContext): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  return textNamesLeadingOption(neutraliseEnforcementFalsePositiveSpans(value));
+  // Existing consumers without option identity retain the original conservative
+  // reader. Do not guess whether May/No/etc. is a qualifier inside an unknown
+  // label. Contextual grammar is restricted to the projection that owns a roster.
+  if (context === undefined) return textNamesLeadingOption(neutraliseEnforcementFalsePositiveSpans(value));
+  return assertedLeaderMatches(value, context).length > 0;
+}
+
+/**
+ * Classify the comparative PREDICATE, not every word in its surrounding prose.
+ * A clause-initial conditional/negative subject or an adjacent auxiliary can
+ * qualify it. An unrelated negated noun, a word inside an option label, or an
+ * investigation later in the sentence cannot. The shared unit splitter bounds
+ * direct questions without exempting relative assertions inside a question.
+ */
+interface AssertedLeaderMatch {
+  code: string;
+  before: string;
+  after: string;
+  start: number;
+  end: number;
+}
+
+function assertedLeaderMatches(value: string, context: LeaderProseContext): AssertedLeaderMatch[] {
+  const text = neutraliseEnforcementFalsePositiveSpans(bindOptionReferences(value, context));
+  let offset = 0;
+  const units = splitIntoRedactableUnits(text).map((unit) => {
+    const located = { text: unit, start: offset, end: offset + unit.length };
+    offset = located.end;
+    return located;
+  });
+  const matches: AssertedLeaderMatch[] = [];
+  for (const { code, re } of LEADER_CLAIM_PATTERNS) {
+    for (const match of text.matchAll(new RegExp(re.source, 'gi'))) {
+      const end = match.index + match[0].length;
+      const before =
+        text
+          .slice(0, match.index)
+          .split(/[.!?;,]|\b(?:but|yet|however)\b/i)
+          .at(-1) ?? '';
+      const after = text
+        .slice(end)
+        .split(/[.!?;,]|\b(?:but|yet|however)\b/i)[0];
+
+      // Initial operators bind the comparison's subject. Do not search for
+      // "no" within that subject: e.g. Status Quo (No New Hire) is a label.
+      if (/^\s*(?:if|unless|suppose|supposing|whether|neither)\b/i.test(before)) continue;
+      // An embedded question/condition binds its recognised option SUBJECT,
+      // not an arbitrary word somewhere in the preceding clause. Label content
+      // has already become an opaque referent, so it cannot provide operators.
+      if (new RegExp(`\\b(?:if|unless|whether|neither)\\s+${OPTION_REFERENT}(?:\\s+(?:nor|or|and)\\s+${OPTION_REFERENT})?\\s*$`, 'i').test(before)) continue;
+      // Modal/negative auxiliaries must meet the predicate, not another verb
+      // such as "the deadline may slip and X leads".
+      if (
+        /\b(?:could|might|may|would)\s+(?:(?:have\s+)?(?:be|been|become)\s+)?(?:the\s+)?$/i.test(before)
+      ) continue;
+      if (
+        /\b(?:not|never|cannot|can['’]t|doesn['’]t|isn['’]t|no)\s+(?:[a-z]+ly\s+)*(?:the\s+)?$/i.test(before)
+      ) continue;
+      // A denied report of a comparison is not the report's assertion. The
+      // optional complement also covers the overlapping bare "leads" match.
+      if (
+        /\b(?:(?:does?|did)\s+not|doesn['’]t|didn['’]t|cannot|can['’]t)\s+(?:show|indicate|establish|determine)(?:\s+which\s+option)?\s*$/i.test(before)
+      ) continue;
+      // Only an adjacent postfix condition binds this predicate. An "if" in
+      // "X leads now and we should check if costs rise" belongs to the check.
+      if (/^\s+(?:if|unless)\b/i.test(after)) continue;
+
+      const unit = units.find((candidate) => candidate.start <= match.index && end <= candidate.end);
+      if (unit?.text.trimEnd().endsWith('?')) {
+        const questionBefore = text.slice(unit.start, match.index);
+        const questionAfter = text.slice(end, unit.end);
+        const asksWhich =
+          (code === 'which_option_leads' && questionBefore.trim() === '') ||
+          (code === 'leads' && /^\s*which\s+option\s*$/i.test(questionBefore));
+        const asksWhether =
+          /^\s*(?:is|are|was|were)\b[^,;.!?]*\bthe\s*$/i.test(questionBefore) &&
+          /^\s*\?\s*$/.test(questionAfter);
+        if (asksWhich || asksWhether) continue;
+      }
+      matches.push({ code, before, after, start: match.index, end });
+    }
+  }
+  return matches;
+}
+
+/**
+ * Explicit comparative assertions can designate without spelling a roster
+ * label: a current advantage/edge presupposes a lead, and "the analysis shows
+ * which option leads" asserts a resolved comparison. Use the SAME vocabulary
+ * and assertion classifier above; never infer an option alias or a permission.
+ * A bare mention ("Explore the leading option") is deliberately insufficient.
+ */
+export function textAssertsImplicitLeadingOption(value: string, context: LeaderProseContext): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return assertedLeaderMatches(value, context).some(isImplicitDesignation);
+}
+
+function isImplicitDesignation({ code, before, after }: AssertedLeaderMatch): boolean {
+  return (
+    ((code === 'leading_option' || code === 'the_lead') &&
+      /^['’]s\s+(?:current\s+)?(?:advantage|edge)\b/i.test(after)) ||
+    (code === 'which_option_leads' &&
+      /\b(?:analysis|results?|model)\s+(?:shows?|indicates?|establishes?)\s*$/i.test(before))
+  );
+}
+
+/**
+ * An explicit implicit designation is complete in its own unit. If EVERY
+ * assertion is such a designation, removing it cannot leave a naming half in
+ * an unrelated sentence. Overlapping vocabulary ("leads" inside "which option
+ * leads") refers to the same predicate, not a second distributed assertion.
+ */
+export function textAssertsOnlyImplicitLeadingOptions(value: string, context: LeaderProseContext): boolean {
+  const matches = assertedLeaderMatches(value, context);
+  const implicit = matches.filter(isImplicitDesignation);
+  return matches.length > 0 && matches.every((match) =>
+    implicit.some((designation) => designation.start <= match.start && match.end <= designation.end),
+  );
 }
 
 /**
@@ -690,7 +858,19 @@ function scanKey(path: string, key: string, value: unknown, out: LeaderClaimHit[
  * and therefore PERMITTED. Only a historic fact takes this path, and there is no
  * migration.
  */
-const BLOCK_PROSE_FIELDS: readonly string[] = [
+/**
+ * ⭐ EXPORTED 2026-09-07 so the WIRE ENFORCER covers exactly the block prose the
+ * ALARM measures — one list, two readers, no mirror between them (CLAUDE.md
+ * trap #12). Before this, the enforcer's block coverage would have been a second
+ * hand-written copy of this list, and the first symptom of drift would have been
+ * a leak this module reports and the enforcer silently permits — the precise
+ * failure mode the `textNamesLeadingOption` / `keyDesignatesLeadingOption`
+ * exports already exist to prevent.
+ *
+ * Adding a field here therefore widens BOTH the alarm and the enforcement.
+ * That is intended: a prose field worth scanning is a prose field worth gating.
+ */
+export const BLOCK_PROSE_FIELDS: readonly string[] = [
   'title',
   'body',
   'signal',
