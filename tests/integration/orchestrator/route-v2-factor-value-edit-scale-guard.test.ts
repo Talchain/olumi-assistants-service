@@ -225,6 +225,7 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
     expect(response.statusCode).toBe(200);
     return JSON.parse(response.body) as {
       assistant_text: string; blocks: Array<Record<string, unknown>>; graph_hash?: string;
+      suggested_actions?: Array<{ id: string; label: string; message: string }>;
     };
   }
 
@@ -315,9 +316,16 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
     },
   ];
 
-  // ⚠⚠ KNOWN DIVERGENCE — ONE INPUT CLASS, TWO SHIPPED ANSWERS, PAUL'S OPEN
-  // QUESTION. Pinned rather than quietly dropped, so the suite is green for the
-  // RIGHT reason and REDs if this moves in EITHER direction.
+  // ⚠⚠ RESOLVED KNOWN DIVERGENCE — ONE INPUT CLASS, TWO SHIPPED ANSWERS,
+  // SETTLED BY PAUL ON 2026-09-07: **REFUSE AND ASK.**
+  //
+  // ⭐ THE HISTORY BELOW IS KEPT DELIBERATELY AND MUST NOT BE TIDIED AWAY. It
+  // is the record of what this product actually did and why the question
+  // reached a decision at all (CLAUDE.md trap 14b — a record of shipped
+  // behaviour is EVIDENCE, and rewriting it leaves the suite agreeing with a
+  // history that never happened). What changed is the ASSERTION, which now
+  // pins the ruled answer instead of the live one; the account of the
+  // disagreement is unchanged.
   //
   // The class: a bare value >= 1, no `raw_value`, no `unit`, on a CAPLESS
   // factor with a resolvable `scale_frame`.
@@ -327,25 +335,99 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
   //   · #1280 (merged 31 Aug 18:06, DEPLOYED) asserted ACCEPT — capless amount
   //     editors send raw magnitudes in `value`, so 2 on a 50000 frame is the
   //     raw amount 2 and canonically 0.00004. Its own suite pins exactly that.
-  // Both are defensible; they cannot both hold. The merge cannot invent a third
-  // rule (that would be a new predicate nobody reviewed), and reversing a
-  // MERGED, DEPLOYED behaviour is not a conflict-resolution act — so the live
-  // answer stands here and the disagreement is escalated rather than settled.
+  // Both were defensible; they could not both hold. The conflict lane declined
+  // to invent a third rule and escalated instead, which is how the question
+  // finally reached Paul — the APPROVE on #1272 was bound to a head whose base
+  // did NOT contain #1280, so no reviewer had ever adjudicated it.
   //
-  // Note for whoever settles it: the APPROVE on #1272 was bound to a head whose
-  // base did NOT contain #1280, so no reviewer has ever adjudicated this.
-  // Nothing else in this PR depends on the outcome — the near-zero tolerance
-  // fix, the incoherent-pair refusal and the model-scale post-merge guard are
-  // all live and pinned above, and this PR's own reported defect signature
-  // (bare .85 on a 100000 frame) is still refused, by #1280's sub-1 guard.
-  it('bare 2 on a frame-only 100000 factor currently COMMITS as the raw amount 2 (see KNOWN DIVERGENCE)', async () => {
+  // ⭐ HIS RULING WAS NEITHER: guessing produces the harm he reported (a number
+  // you set becoming something you did not mean) and blocking leaves a dead
+  // end, so the product ASKS — "8 thousand or 8 million?" — and lets the user
+  // keep hold of their own number.
+  it('bare 2 on a frame-only 100000 factor REFUSES AND ASKS which magnitude was meant', async () => {
     persisted = graphFor({ value: 0.5 }, 100000);
+    const before = await loadGraphMock();
     const body = await edit({ value: 2 });
-    expect(committedGraphs(), 'staging #1280 treats a capless bare >=1 as a raw amount').toHaveLength(1);
-    const observed = observedState(await loadGraphMock());
-    expectSameNumber(observed.value, 2 / 100000);
-    expect(observed.raw_value).toBe(2);
-    expect(body.assistant_text).not.toMatch(/haven't changed anything/i);
+
+    // REFUSE: the ask is worthless if the guess already landed.
+    expect(committedGraphs(), 'the ruled answer commits no canonical graph').toEqual([]);
+    expect(await loadGraphMock(), 'the whole prior model survives').toEqual(before);
+    expect(observedState(await loadGraphMock()).source).toBe('cee_inference');
+
+    // ASK: the question, and a chip per reading.
+    expect(body.assistant_text).toMatch(/haven't changed anything/i);
+    expect(body.assistant_text).toContain('Did you mean 2 or 2 thousand?');
+    expect(body.suggested_actions?.map((a) => a.id)).toEqual([
+      'chip_prompt_scale_ask_as_typed',
+      'chip_prompt_scale_ask_thousand',
+    ]);
+    expect(body.suggested_actions?.map((a) => a.label)).toEqual(['2', '2 thousand']);
+    // The chip names the factor, so the replay turn can find it, and states the
+    // amount in full digits so the magnitude is no longer in doubt.
+    expect(body.suggested_actions?.map((a) => a.message)).toEqual([
+      'Set Recurring platform licence cost to 2.',
+      'Set Recurring platform licence cost to 2,000.',
+    ]);
+  });
+
+  // ⭐ THE LOWER BOUNDARY OF THE ASK, and it is here because a mutant widening
+  // the predicate from `>= 1` to `>= 0` SURVIVED the first version of this
+  // suite. Zero is the only input class that widening adds — the sub-1 basis
+  // guard already claims everything else below 1 and explicitly excludes zero —
+  // so with no zero case the boundary was unpinned in exactly one direction.
+  //
+  // Setting a factor to zero is an ordinary thing to want, it is not ambiguous
+  // in scale (zero is zero on every frame), and the ask must not swallow it.
+  it('a bare zero on a frame-only factor still commits — the ask does not claim it', async () => {
+    persisted = graphFor({ value: 0.5 }, 100000);
+    const body = await edit({ value: 0 });
+    expect(committedGraphs(), 'zero is not scale-ambiguous').toHaveLength(1);
+    expectSameNumber(observedState(await loadGraphMock()).value, 0);
+    expect(body.assistant_text).not.toMatch(/Did you mean/i);
+  });
+
+  // ⭐⭐ THE ORDER PIN. Four guards share one `── the scale ──` block and their
+  // sequence is load-bearing: `resolveScaleFrame` internally calls
+  // `checkPairCoherence` and returns `undefined` on `incoherent`, so #1272's
+  // incoherent-pair predicate is a STRICT SUBSET of #1280's unresolved-frame
+  // predicate. Put the broader one first and the narrower becomes unreachable
+  // dead code UNDER A FULLY GREEN SUITE — nothing else in this file would say
+  // so, because each guard's own case still refuses, just with the wrong voice.
+  //
+  // This binds each case to the copy only ITS guard emits, from one shared
+  // fixture family, so ANY reordering turns at least one row red. The ask is
+  // included because it is the newest member and the same swap would silently
+  // hand its class to the sub-1 guard or to #1280's accept.
+  it.each([
+    {
+      what: 'incoherent stored frame vs pair — #1272 guard, must run FIRST',
+      graph: () => graphFor({ value: 0.5, raw_value: 50000, unit: '£' }, 1000000),
+      event: { value: 0.85 },
+      expected: /recorded scale is inconsistent/i,
+    },
+    {
+      what: 'stored frame present but unresolvable — #1280 unresolved-frame guard',
+      graph: () => graphFor({ value: 0.5, raw_value: 0.5 }, 0.5),
+      event: { value: 0.85 },
+      expected: /can't verify this factor's recorded scale/i,
+    },
+    {
+      what: 'bare sub-1 on a resolvable frame — #1280 basis guard',
+      graph: () => graphFor({ value: 0.5 }, 100000),
+      event: { value: 0.85 },
+      expected: /model-scale proportion or an amount/i,
+    },
+    {
+      what: 'bare >=1 on a resolvable frame — the scale ask',
+      graph: () => graphFor({ value: 0.5 }, 100000),
+      event: { value: 2 },
+      expected: /Did you mean 2 or 2 thousand\?/,
+    },
+  ])('guard order: $what', async ({ graph, event, expected }) => {
+    persisted = graph();
+    const body = await edit(event);
+    expect(committedGraphs()).toEqual([]);
+    expect(body.assistant_text).toMatch(expected);
   });
 
   for (const { name, graph, event, intended, raw } of validEdits) it(name, async () => {

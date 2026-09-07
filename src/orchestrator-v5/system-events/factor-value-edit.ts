@@ -48,6 +48,12 @@ import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../t
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { canonicaliseUnitForDisplay } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { checkPairCoherence, resolveScaleFrame } from '../tools/handlers/d1-shared/scale-frame.js';
+import {
+  buildScaleAskChips,
+  buildScaleAskOptions,
+  composeScaleAskQuestion,
+} from './scale-ask.js';
+import type { SuggestedAction } from '../compose/types.js';
 import { buildRescaleCapPendingActions } from '../session/rescale-cap-pending.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { verifyAppliedFrom } from '../../collab/apply-verification.js';
@@ -162,6 +168,11 @@ function refuse(
   payload: SystemEventTurnPayload,
   reason: string,
   assistantText: string,
+  // A refusal MAY carry chips. The default keeps every existing caller
+  // byte-identical: a refusal that offers nothing is still the right answer
+  // wherever the product genuinely has no route to offer. The scale ask below
+  // is the one class on this seam where it does.
+  suggestedActions: readonly SuggestedAction[] = [],
 ): FactorValueEditResult {
   return {
     kind: 'refused',
@@ -171,7 +182,7 @@ function refuse(
       response_version: 2,
       assistant_text: assistantText,
       blocks: [],
-      suggested_actions: [],
+      suggested_actions: [...suggestedActions],
       insights: [],
       stage_indicator: payload.stage,
     },
@@ -477,6 +488,69 @@ export async function applyFactorValueEdit(
       `I can't tell whether ${effectiveValue} is a model-scale proportion or an amount ` +
         `for this factor. Please state the amount and its unit, or clarify the scale. ` +
         `I haven't changed anything.`,
+    );
+  }
+
+  // ⭐ THE SCALE ASK — PAUL'S RULING, 2026-09-07: REFUSE **AND ASK**.
+  //
+  // The >= 1 twin of the sub-1 refusal directly above, and deliberately its
+  // exact predicate with only the magnitude test flipped: one input class, one
+  // guard prefix, so the two cannot drift into disagreeing about which edits
+  // they cover. Where that one says "I can't tell WHICH BASIS this is on" and
+  // stops, this one says "the basis is settled — WHICH MAGNITUDE did you mean?"
+  // and offers the readings. A value >= 1 cannot be a unit-interval proportion,
+  // so the only open question is the multiplier.
+  //
+  // ⚠ ORDER IS LOAD-BEARING HERE TOO, AND FOR A SECOND REASON. The sub-1 guard
+  // must keep running FIRST: the two predicates partition on |value| and a swap
+  // would be invisible to any test that only checks one side. It is pinned by a
+  // test asserting BOTH sides from one shared fixture.
+  //
+  // ⚠ THIS SUPERSEDES #1280's ACCEPT FOR THIS CLASS ONLY. Everything #1280
+  // covers outside `factorFrame !== undefined` with a bare, unitless, raw-less
+  // value >= 1 is untouched — capped factors, verified panel beliefs, edits
+  // carrying a raw_value or a unit, and every sub-1 case.
+  //
+  // If no reading can be offered (the frame cannot hold even one magnitude
+  // rung), we do NOT fall through to the guess: `buildScaleAskOptions` always
+  // returns the literal reading for a value >= 1, so a single-option list means
+  // the question would have one answer and asking it would be theatre. That
+  // case keeps the honest refusal copy instead of a dead control.
+  if (
+    factorFrame !== undefined && appliedProvenance === undefined &&
+    effectiveRawValue === undefined && canonicaliseUnitForDisplay(effectiveUnit) === undefined &&
+    Math.abs(effectiveValue) >= 1
+  ) {
+    const options = buildScaleAskOptions({ value: effectiveValue, frame: factorFrame });
+    const question = composeScaleAskQuestion(options);
+    if (question.length > 0) {
+      log.warn(
+        {
+          event: 'v5.system_event.factor_value_edit.scale_ask',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          target_id: event.target_id,
+          option_count: options.length,
+        },
+        'factor_value_edit — bare magnitude ambiguous; asking rather than guessing',
+      );
+      return refuse(
+        payload,
+        'scale_ask',
+        `I can't tell what scale ${effectiveValue} is on for this factor, so I ` +
+          `haven't changed anything. ${question}`,
+        buildScaleAskChips({
+          options,
+          factorLabel: targetNode.label,
+          unit: factorUnit,
+        }),
+      );
+    }
+    return refuse(
+      payload,
+      'scale_ambiguous',
+      `I can't tell what scale ${effectiveValue} is on for this factor. ` +
+        `Please state the amount and its unit. I haven't changed anything.`,
     );
   }
 
