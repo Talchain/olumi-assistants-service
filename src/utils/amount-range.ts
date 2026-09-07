@@ -480,9 +480,29 @@ export const CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD: string = (() => {
     .map((key) => key.slice(0, -1))
     .sort(byLongestFirst)
     .map(escapeForPattern);
-  // A vocabulary with no such key would silently disable the guard rather than
-  // fail — so the emptiness is expressed here and asserted in the union test
-  // (CLAUDE.md trap 13: an assertion over nothing passes by testing nothing).
+  // A vocabulary with no such key yields the empty string, which disables the
+  // guard — expressed here rather than left implicit, because a guard that
+  // quietly becomes a no-op is CLAUDE.md trap 13.
+  //
+  // ⚠ NO TEST NAMES THIS SYMBOL. The sentence that stood here said the
+  // emptiness was "asserted in the union test"; it is not, in either union
+  // test. MEASURED: `CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD` has FOUR CODE
+  // references repo-wide — this definition, and one import plus two uses in
+  // `factor-extraction/index.ts`, both inside `currencyRange`. No test imports
+  // it or asserts on it. (A grep returns six: the other two are prose, this
+  // sentence and one in `bare-amount-range-deferral.test.ts` bounding the
+  // guard's scope. Counting those as coverage is the mistake this note fixes.)
+  //
+  // What IS pinned is the BEHAVIOUR. Emptying this string while the vocabulary
+  // still carries such a key REDs FIVE tests in TWO files: one in
+  // `utils/__tests__/amount-range.test.ts` ("⭐ the FACTOR path still DECLINES
+  // the prefixes it cannot carry") and four in
+  // `factor-extraction/__tests__/bare-amount-range-deferral.test.ts` — three of
+  // those in the cross-product below it, one in "a currency this pattern cannot
+  // CARRY is a currency it must not READ".
+  // `cee/extraction/__tests__/currency-vocabulary.union.test.ts` stays GREEN
+  // under that mutant — so the coverage is real, and it is not where the
+  // previous sentence sent a reader to look for it.
   return prefixes.length === 0 ? "" : `(?<!\\b(?:${prefixes.join("|")}))`;
 })();
 

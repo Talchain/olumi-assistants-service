@@ -309,8 +309,9 @@ const PATTERNS = {
   // `BARE_AMOUNT_RANGE_START_GUARD` must decline. Measured over the full
   // cross-product — every KEY and VALUE of `CURRENCY_SYMBOL_TO_CODE` × {flush,
   // space, non-breaking space, thin space} × {as-written, lower, upper, title}
-  // × two carriers, 360 cells — head `2d46f8e2` produced FIFTY cells that were
-  // neither a refusal nor the currency the user wrote:
+  // × two carriers, 360 cells — head `2d46f8e2` REFUSED 310 and minted on the
+  // other FIFTY. Of those fifty, SIX carried the currency the user wrote and
+  // FORTY-FOUR did not:
   //
   //     "£ 80-120k for the hire."    ad44d445 []      2d46f8e2 100,000 unit ABSENT
   //     "$ 400-900k on tooling"      ad44d445 []      2d46f8e2 650,000 unit ABSENT

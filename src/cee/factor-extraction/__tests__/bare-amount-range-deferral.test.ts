@@ -647,11 +647,30 @@ describe("KNOWN_WORD_SEPARATOR_FLOOR — pinned in both directions", () => {
  * the author's head cannot see the class the author did not imagine), so the
  * corpus here is DERIVED and the assertion is over the whole cross-product.
  *
- * THE SPACE, and it is the whole space this module can be handed:
+ * THE SPACE THIS ENUMERATION COVERS — one written RANGE spelling,
+ * `<token>80-120k`, across four dimensions:
  *   token       every KEY and every VALUE of `CURRENCY_SYMBOL_TO_CODE` (19)
  *   case        as-written · lower · upper · title, de-duplicated
  *   separation  flush · space · NON-BREAKING space · THIN space
  *   carrier     bare, and behind a `contextualNumber` noun ("Budget of …")
+ *
+ * ⚠⚠ AND THE CARRIERS IT DOES NOT COVER — A RECORDED GAP, NOT A CLOSED SPACE.
+ * The sentence that stood here called this "the whole space this module can be
+ * handed". It is not: `extractFactors` is reachable with a POINT amount and
+ * with range spellings this block does not build, and there a multi-character
+ * `$` currency is still read as `$` — "The budget is A$80k this year."
+ * publishes unit `$` at this head. MEASURED over the same token × case ×
+ * separation space in six NON-range carriers (`A$80k` bare and behind a noun,
+ * "The budget is …", "between … and …", "from … to …", "up to …"), 1,080
+ * cells: FORTY-TWO wrong-currency cells at `ad44d445` and the same FORTY-TWO
+ * at `a56368c9` — seven flush-spelled tokens (`A$ a$ C$ c$ NZ$ nz$ Nz$`) ×
+ * six carriers, at the flush separation only, unchanged by this PR.
+ * `CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD` is applied in `currencyRange` and
+ * nowhere else, so a range-scoped rule cannot reach them; closing them is a
+ * change at the POINT patterns and is a different PR. ⭐ That count is itself
+ * a function of the carriers enumerated — which is exactly why this block no
+ * longer claims a whole space. A carrier nobody enumerated is a cell nobody
+ * measured.
  *
  * ⭐ THE SEPARATION DIMENSION IS DELIBERATE ON ITS EXOTIC MEMBERS, and the
  * reasoning is stated rather than left to the regex: `CURRENCY_AMOUNT_SEPARATION`
