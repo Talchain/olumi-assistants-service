@@ -914,6 +914,28 @@ export const TelemetryEvents = {
   //   - reason: 'mutation_signal' | 'no_option_target' | 'handler_unavailable'
   //     | null
   V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
+  // ⭐ THE TARGET REPAIR on an ADMITTED `run_analysis` election. `entity` is
+  // required on every proposal while run_analysis's target is semantically the
+  // whole scenario, so the routing model invents one — and on the measured
+  // builds it picked the DECISION node about half the time, which resolves to
+  // entity kind 'node' and is rejected by `['option','goal']`. The user asked
+  // for an analysis and was told "I can't make that change to it".
+  //
+  // This event is how the substitution is observable, INCLUDING its declines:
+  // a rising `repaired` rate is a routing-prompt signal, and `declined` with a
+  // reason distinguishes "the graph could not support a target" from silence.
+  // Without it the fix would hide the very behaviour that motivated it — the
+  // same argument the `v5.entity_kind_repaired` log makes one seam down.
+  //
+  // Payload — structural only, no user text, no labels, no graph content:
+  //   - request_id: string
+  //   - scenario_id: string
+  //   - handler_id: 'run_analysis'
+  //   - outcome: 'repaired' | 'declined'
+  //   - proposed_kind: EntityKind (what validation actually rejected)
+  //   - repaired_kind: 'option' | null
+  //   - reason: 'no_option_target' | 'revalidation_failed' | null
+  V5RunAnalysisTargetRepair: "v5.run_analysis.target_repair",
   // D-ask-1 (ROADMAP 2.11 P0-1) — run_analysis scaffolded DISCLOSED
   // placeholder interventions for unconfigured options so the analysis
   // completed instead of 422-blocking. Redacted: option ids + per-option
