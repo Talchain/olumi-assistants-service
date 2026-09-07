@@ -35,6 +35,7 @@ import {
   KNOWN_OPEN_SWALLOWED_TAIL,
   KNOWN_OPEN_RETRACTION,
   KNOWN_OPEN_TWO_QUOTED,
+  KNOWN_OPEN_COORDINATED_INSTRUCTION,
   KNOWN_OPEN_NAMING_WORD_TARGET_PRICE,
   KNOWN_OPEN_SEPARATOR_NAMING,
   KNOWN_OPEN_DEFERRAL_LABEL,
@@ -549,15 +550,24 @@ describe('⚠ the gaps this module ships OPEN, pinned exactly', () => {
   });
 
   it('...and the set has not GROWN silently', () => {
-    // 8 at 0e703c71; 10 after the independent reviewer's two rows
-    // ("said decision", "each workspace") were added so the DECLARED scope
-    // matches what is actually measured rather than what was first imagined.
+    // 8 at 0e703c71; 10 after the independent reviewer sampled two more rows
+    // ("said decision", "each workspace").
+    // ⚠ WITHDRAWN 7 Sep 2026: this comment used to say the two rows were added
+    // "so the DECLARED scope matches what is actually measured". That is a
+    // tracking mirror and it is false — declared scope is 10, while an
+    // independent corpus outside the set measured 14 of 15 rows still minting
+    // the container as the option's name. The pin below is a SHRINK/GROWTH
+    // guard on a SAMPLED FLOOR; it is not a measure of the class, and the set
+    // must not be grown toward that class. See the SAMPLED FLOOR note on
+    // KNOWN_OPEN_CONTAINER_GAP.
     expect(KNOWN_OPEN_CONTAINER_GAP.length).toBe(10);
     expect(CLOSED_COORDINATED_INSTRUCTION.length).toBe(4);
     // 11 when the screen keyed only on `and`; 15 after it was widened to
     // `but`/`while` and adverbs on 3 Sep 2026, which extended this same price
-    // class by four. The pin caught the growth on the first run, which is what
-    // it is for.
+    // class by four. Re-measured 7 Sep 2026 by replaying the pre-widening
+    // pattern from `2f89bc1c` over these members: 11 of 15 declined under it,
+    // 15 of 15 under the pattern at this head. The pin caught the growth on the
+    // first run, which is what it is for.
     expect(KNOWN_OPEN_COORDINATED_NAME.length).toBe(15);
     // Positive control: the set is not vacuous and these really are container
     // references a human would call targets.
@@ -675,7 +685,15 @@ describe('⭐⭐ THE GAPS THIS MODULE SHIPS OPEN, ASSERTED AS AN EXACT SET', () 
     }
   });
 
-  it('CLOSED: a coordinated second instruction no longer rides inside the label', () => {
+  // ⚠⚠ THIS TEST WAS NAMED "CLOSED: a coordinated second instruction no longer
+  // rides inside the label". WITHDRAWN 7 Sep 2026 — the assertions were always
+  // sound, the NAME was not. It exercises four named sentences whose
+  // conjunction AND verb stem both sit inside the screened alternations; it
+  // says nothing about the class those four are drawn from, and measured at
+  // this head 20 of 20 rows outside either alternation still mint with the
+  // instruction inside the label (see KNOWN_OPEN_COORDINATED_INSTRUCTION).
+  // A test name is the first thing the next session greps.
+  it('the four screened coordinated forms decline with compound_edit', () => {
     for (const message of CLOSED_COORDINATED_INSTRUCTION) {
       const d = detectAddOptionIntent(message);
       expect(d.matched, `"${message}" drops a user instruction and must decline`).toBe(false);
@@ -1313,7 +1331,10 @@ describe('the quoted arm and the inferring arms are not the same guard', () => {
   it('the sets are exact-length — they RED if they grow or shrink', () => {
     expect(KNOWN_OPEN_SWALLOWED_TAIL.length).toBe(4);
     expect(KNOWN_OPEN_RETRACTION.length).toBe(3);
-    expect(KNOWN_OPEN_TWO_QUOTED.length).toBe(1);
+    // 1 until 7 Sep 2026. The single pinned row was the one that does NOT drop
+    // anything; the two rows that genuinely drop the second option were pinned
+    // nowhere. Both are now in the set, so the pin covers the class it names.
+    expect(KNOWN_OPEN_TWO_QUOTED.length).toBe(3);
   });
 });
 
@@ -1327,9 +1348,87 @@ describe('⚠ RETRACTION is a different axis from label quality', () => {
   });
 });
 
-describe('⚠ two quoted options in one turn — the second is dropped', () => {
-  it.each(KNOWN_OPEN_TWO_QUOTED)('KNOWN-OPEN: %j', (message) => {
+describe('⚠ two quoted options in one turn', () => {
+  it.each(KNOWN_OPEN_TWO_QUOTED)('KNOWN-OPEN, still open: %j', (message) => {
     expect(detectAddOptionIntent(message).matched).toBe(true);
+  });
+
+  // ⚠ The docblock on this set was FALSE about the only row it pinned: it said
+  // the second option is silently dropped, and for that row nothing is dropped
+  // at all — both names survive inside one label, wearing the quote characters.
+  // Prose cannot be trusted to stay true, so each row's observed label AND
+  // remainder are pinned here. This REDs if either behaviour changes, in either
+  // direction, and that is the point: the two behaviours are DIFFERENT harms.
+  it.each([
+    // Nothing dropped — both names inside one nonsense label.
+    ['Add "Premium" and "Freemium" as an option', '"Premium" and "Freemium"', ''],
+    // The second option genuinely dropped into the remainder.
+    ['Add an option called "Premium" and one called "Basic"', 'Premium', 'and one called "Basic"'],
+    ['Add "Premium" as an option and "Basic" as another', 'Premium', 'and "Basic" as another'],
+  ])('the observed label and remainder are pinned: %j', (message, label, remainder) => {
+    const d = detectAddOptionIntent(message);
+    expect(d.matched).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe(label);
+    expect(d.remainder).toBe(remainder);
+  });
+
+  // Positive control, same run: the single-quoted form must behave differently
+  // from every row above, or the assertions above are agreeing with themselves.
+  it('control: one quoted option yields the name and an empty remainder', () => {
+    const d = detectAddOptionIntent('Add an option called "Premium"');
+    expect(d.matched).toBe(true);
+    if (!d.matched) return;
+    expect(d.label).toBe('Premium');
+    expect(d.remainder).toBe('');
+  });
+});
+
+describe('⚠ the coordinated-instruction residual — SAMPLED FLOOR, not an inventory', () => {
+  // The three sentences that called this class CLOSED are withdrawn at this
+  // head. What is measured: every row below still MINTS with the second
+  // instruction inside the option's label. The set REDs if a row starts
+  // declining (someone closed one — move it out and say so) and REDs if a row
+  // is added (the set grew — say so). Do not close these by widening a string
+  // rule; the exit is the clarify arm.
+  it.each(KNOWN_OPEN_COORDINATED_INSTRUCTION)(
+    'KNOWN-OPEN, still open — the instruction rides inside the label: %j',
+    (message) => {
+      const d = detectAddOptionIntent(message);
+      expect(
+        d.matched,
+        `"${message}" now DECLINES — the gap closed; move it out of the set`,
+      ).toBe(true);
+      if (!d.matched) return;
+      // ⭐ BOUND BY IDENTITY, not by a value predicate another label could
+      // satisfy: the label is the ENTIRE tail of the user's sentence, second
+      // instruction and all, merely capitalised. That is the lie in one
+      // assertion, and it REDs the moment any part of the tail stops riding
+      // inside the label. `remainder` empty proves nothing reached the
+      // remainder screens.
+      const tail = message.slice('Add an option to '.length);
+      expect(d.label).toBe(tail.charAt(0).toUpperCase() + tail.slice(1));
+      expect(d.remainder).toBe('');
+    },
+  );
+
+  it('the set is exact-length — it REDs if it grows or shrinks', () => {
+    expect(KNOWN_OPEN_COORDINATED_INSTRUCTION.length).toBe(20);
+  });
+
+  // ⭐ THE DISCRIMINATING CONTRAST, in the same run. Without it the block above
+  // would pass just as well against a recogniser that mints everything.
+  it('contrast: the screened forms decline in the same run', () => {
+    for (const message of CLOSED_COORDINATED_INSTRUCTION) {
+      const d = detectAddOptionIntent(message);
+      expect(d.matched, `"${message}" must still decline`).toBe(false);
+      if (d.matched) continue;
+      expect(d.reason).toBe('compound_edit');
+    }
+    // ...and the sets must not overlap, or the contrast is vacuous.
+    for (const message of KNOWN_OPEN_COORDINATED_INSTRUCTION) {
+      expect(CLOSED_COORDINATED_INSTRUCTION).not.toContain(message);
+    }
   });
 });
 

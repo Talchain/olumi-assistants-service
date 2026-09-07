@@ -71,18 +71,35 @@
  *      never in the remainder, and the screen above never sees it:
  *        `Add "Partner with a distributor" as an option and remove the old one`
  *            -> DECLINED `compound_edit`   (quoted: the label is bounded)
- *        `Add an option to partner with a distributor and remove the old one`
- *            -> CLAIMED, label "Partner with a distributor and remove the old one"
+ *        `Add an option to partner with a distributor and archive the old plan`
+ *            -> CLAIMED, label "Partner with a distributor and archive the old plan"
  *      The obvious fix — run the edit-verb screen over the label too — was
  *      written and REVERTED the same hour: `set` is both an edit verb and an
  *      ordinary verb, so it declined "add an option to SET UP a joint venture",
  *      re-opening the verb-collision class closed one commit earlier. That is
  *      the same oscillation as every other round, and a coordination-boundary
  *      predicate over `", and"` is the one this estate has already proved
- *      unwinnable. So the example is corrected rather than the code, and the
- *      class is CLOSED at 051c964d+ by `COORDINATED_EDIT_INSTRUCTION`; the sets
- *      `CLOSED_COORDINATED_INSTRUCTION` and `KNOWN_OPEN_COORDINATED_NAME`
- *      below pin the fix and the gaps it costs.
+ *      unwinnable.
+ *
+ *      ⚠⚠ WITHDRAWN 7 Sep 2026, MEASURED. This bullet said the class was
+ *      "CLOSED at 051c964d+ by `COORDINATED_EDIT_INSTRUCTION`". IT IS NOT
+ *      CLOSED. (The second example was stale too: it printed "… and remove
+ *      the old one" as CLAIMED, and that row DECLINES at this head. It has
+ *      been replaced with a row measured to mint at this head.)
+ *      `COORDINATED_EDIT_INSTRUCTION` screens ONE closed
+ *      conjunction alternation against ONE closed verb-stem alternation, both
+ *      hand-maintained; read them at `COORDINATED_EDIT_INSTRUCTION_SOURCE`
+ *      rather than from a count here. Outside those two alphabets the
+ *      instruction still rides inside the label: measured at this head,
+ *      8 of 8 rows whose CONJUNCTION sits outside the alternation and 12 of 12
+ *      rows whose VERB STEM sits outside it all mint, with the dropped
+ *      instruction inside the option's name — contrast control in the same
+ *      run, 4 of 4 screened forms declining `compound_edit`.
+ *      `KNOWN_OPEN_COORDINATED_INSTRUCTION` below is a SAMPLED FLOOR of that
+ *      residual, not an inventory, and the exit is the `clarify` arm — not a
+ *      wider alternation. The sets `CLOSED_COORDINATED_INSTRUCTION` and
+ *      `KNOWN_OPEN_COORDINATED_NAME` pin what the screen catches and the
+ *      names it costs.
  *
  * PURE + TOTAL: no I/O, never throws, never reads the graph. The label is
  * taken from the ORIGINAL message (casing preserved); detection runs on a
@@ -528,8 +545,10 @@ export function isTargetReference(rawRemainder: string): boolean {
  * ⚠⚠ AND THE COST, MEASURED RATHER THAN ASSUMED — it is NOT free, and the
  * reviewer's corpus could not see this because none of its nineteen rows
  * coordinates a SECOND VERB drawn from this list. A single option whose NAME
- * coordinates two actions now declines: 11 of 12 such names, pinned by name in
- * `KNOWN_OPEN_COORDINATED_NAME`. Those are GAPS — the generic edit lane serves
+ * coordinates two actions now declines: 11 of 12 such names when that was
+ * measured, sampled by name in `KNOWN_OPEN_COORDINATED_NAME`. ⚠ Read the SET
+ * for its length, not this sentence — the screen has been widened since, and
+ * the set is 15 at this head. Those are GAPS — the generic edit lane serves
  * them unchanged — and by this module's standing asymmetry a gap is the lesser
  * harm than a dropped instruction. That is the trade, made deliberately and
  * recorded rather than discovered later.
@@ -852,6 +871,32 @@ export function buildAddOptionClarifyChipMessage(label: string, decisionLabel: s
  * REDs if a new case is added (the set grew — say so). A gap recorded in the
  * suite is honest; a gap invisible to it is how four rounds happened.
  *
+ * ⭐⭐ THIS SET IS A SAMPLED FLOOR, NOT AN INVENTORY — the same ruling
+ * `KNOWN_OPEN_ANAPHORA` carries, applied here 7 Sep 2026 because it was
+ * withdrawn for the sibling set and not for this one, which is the larger
+ * class of the two.
+ *
+ * The sentence that used to sit against the last two members said they were
+ * added so that "declared scope must match what is actually measured, not what
+ * was first imagined". That is a TRACKING MIRROR with no fixed point, and it
+ * is FALSE AS STATED at this head: declared scope is the ten rows below, while
+ * an independent corpus of this product's own vocabulary, written outside the
+ * set, measured 14 of 15 rows minting the container as the option's name
+ * (`each risk`, `every assumption`, `any factor`, `each objective`, `every
+ * constraint`, `each branch`, `any pathway`, `each tree`, `every chart`, `each
+ * workflow`, `every dashboard`, `each column`, `every one of these`, `every
+ * milestone`; `each scenario` declines because `scenario` is already in the
+ * alphabet — the contrast control, firing in the same run alongside 3 of 3
+ * screened target references declining and 10 of 10 declared members minting).
+ * Worse than merely false: it instructs the reader to ENUMERATE an open class,
+ * which is the round the paragraph above explicitly rules out.
+ *
+ * What is true: the members below are a SAMPLE. The set exists to keep the
+ * class VISIBLE and NON-SHRINKING — `toBe(10)` stops it being quietly emptied
+ * — never to say how large the class is. Do not read its length as a cost
+ * estimate, and do not grow it toward the class it samples. The exit is the
+ * `clarify` arm named below, not a longer noun list.
+ *
  * ⭐ THE EXIT IS NOT A FIFTH ROUND. Where the label is a determiner-led phrase
  * whose head noun this list does not carry, the honest answer is neither
  * refuse nor accept but ASK. `AddOptionValidation`'s `kind: 'clarify'` arm
@@ -888,17 +933,27 @@ export const KNOWN_OPEN_CONTAINER_GAP: readonly string[] = [
   'Add an option to every driver',
   'Add an option to any lever',
   'Add an option to each outcome',
-  // Added by the independent reviewer at 0e703c71 — declared scope must match
-  // what is actually measured, not what was first imagined.
+  // Sampled by the independent reviewer at 0e703c71. See the SAMPLED FLOOR
+  // note above before adding to this list.
   'Add an option to said decision',
   'Add an option to each workspace',
 ];
 
 /**
- * ⭐ CLOSED at 051c964d+ by `COORDINATED_EDIT_INSTRUCTION`. Kept as a
- * REGRESSION set, not a known-open one: these must now DECLINE, and the spec
- * asserts that. Retiring the constant would delete the evidence that the class
- * was ever open.
+ * ⚠⚠ THE NAME OVERSTATES THIS SET, AND THE OVERSTATEMENT IS WITHDRAWN HERE
+ * (7 Sep 2026, measured). This docblock said the coordinated-instruction class
+ * was "CLOSED at 051c964d+ by `COORDINATED_EDIT_INSTRUCTION`". THE CLASS IS
+ * NOT CLOSED. What is true is narrower, and it is only this: each of the four
+ * rows below is screened by `COORDINATED_EDIT_INSTRUCTION` and DECLINES with
+ * `compound_edit`, and the spec asserts that. It is a REGRESSION set over four
+ * named sentences — not a statement about the class they are drawn from.
+ *
+ * The screen is one hand-maintained conjunction alternation against one
+ * hand-maintained verb-stem alternation; read both at
+ * `COORDINATED_EDIT_INSTRUCTION_SOURCE`. Anything outside either alphabet is
+ * unscreened, and `KNOWN_OPEN_COORDINATED_INSTRUCTION` samples that residual.
+ * The constant keeps its name so this PR's review history stays greppable;
+ * do not read the name as a verdict.
  */
 export const CLOSED_COORDINATED_INSTRUCTION: readonly string[] = [
   'Add an option to partner with a distributor and remove the old one',
@@ -925,8 +980,18 @@ export const CLOSED_COORDINATED_INSTRUCTION: readonly string[] = [
  * `then also`) and the adversative/temporal conjunctions (`but`, `while`,
  * `whilst`) closed 7 more dropped instructions — one adverb had been defeating
  * the whole screen — and it extends this same price class from `and` to those
- * conjunctions: 8 further coordinated NAMES now decline. Same shape, same
- * trade, already accepted; recorded so the extension is not discovered later.
+ * conjunctions.
+ *
+ * ⚠ THE COUNT HERE PREVIOUSLY SAID "8 further coordinated NAMES now decline".
+ * WITHDRAWN 7 Sep 2026: no artefact in this tree pins an 8, and the only
+ * figure that IS pinned says four. Measured by replaying the pre-widening
+ * pattern (taken verbatim from `2f89bc1c`) and the pattern at this head over
+ * the members below: 11 of 15 decline under the old one, 15 of 15 under the
+ * new, so the widening added EXACTLY FOUR to this set — `expand but lower
+ * prices`, `scale while lowering cost`, `rebrand while updating the website`,
+ * `hold share but drop the low-margin SKU`. How many names OUTSIDE this set it
+ * also cost is NOT MEASURED and is not claimed. Same shape, same trade,
+ * already accepted; recorded so the extension is not discovered later.
  */
 export const KNOWN_OPEN_COORDINATED_NAME: readonly string[] = [
   'Add an option to expand but lower prices',
@@ -944,6 +1009,63 @@ export const KNOWN_OPEN_COORDINATED_NAME: readonly string[] = [
   'Add an option to downsize and change the operating model',
   'Add an option to digitise and replace paper records',
   'Add an option to renegotiate and lower the lease',
+];
+
+/**
+ * ⚠⚠ THE RESIDUAL THE SCREEN DOES NOT REACH — A SAMPLED FLOOR, NOT AN
+ * INVENTORY. Added 7 Sep 2026 to replace a claim that this class was CLOSED.
+ *
+ * `COORDINATED_EDIT_INSTRUCTION` is a conjunction alternation AND a verb-stem
+ * alternation, both hand-maintained and both finite. A second instruction
+ * coordinated onto the first with ANY conjunction outside the first list, or
+ * ANY edit verb outside the second, still lands inside an inferred label and
+ * is silently dropped. By this module's own words that is a LIE, not a gap —
+ * and it is the class three sentences in this file used to call closed.
+ *
+ * Measured at this head, contrast control firing in the same run (the four
+ * rows of `CLOSED_COORDINATED_INSTRUCTION` all declining `compound_edit`):
+ *   · 8 of 8 rows whose CONJUNCTION is outside the alternation minted, with
+ *     the instruction inside the label.
+ *   · 12 of 12 rows whose VERB STEM is outside the alternation minted, the
+ *     same way.
+ * Both arms are sampled below.
+ *
+ * ⭐ DO NOT CLOSE THESE BY ADDING STRINGS. Conjunctions and edit verbs are
+ * open classes in English; every previous round of this PR that widened one
+ * alternation re-opened a defect on the other side, and Paul's standing
+ * constraint on this path is that the focused lane may claim only reliably
+ * identified add-option requests. The exit is the `clarify` arm described in
+ * `KNOWN_OPEN_CONTAINER_GAP` above — ask which of the two things the user
+ * wants — not a longer list. The set exists to keep the class VISIBLE and
+ * NON-SHRINKING; its length is a pin, never a measure of the class.
+ *
+ * Severity: a survivor here reaches the composer as a HINT, not as the final
+ * label — `route-v2.ts` ships `composed.proposal.label`. NOT WIRE-WITNESSED in
+ * either direction.
+ */
+export const KNOWN_OPEN_COORDINATED_INSTRUCTION: readonly string[] = [
+  // Arm 1 — the conjunction sits outside the screened alternation.
+  'Add an option to partner with a distributor as well as removing the old one',
+  'Add an option to partner with a distributor before removing the old one',
+  'Add an option to partner with a distributor after removing the old one',
+  'Add an option to partner with a distributor, removing the old one',
+  'Add an option to partner with a distributor or remove the old one',
+  'Add an option to partner with a distributor, plus remove the old one',
+  'Add an option to partner with a distributor and at the same time remove the old one',
+  'Add an option to partner with a distributor and in addition remove the old one',
+  // Arm 2 — the conjunction is screened, the verb stem is not.
+  'Add an option to partner with a distributor and archive the old plan',
+  'Add an option to partner with a distributor and clear the canvas',
+  'Add an option to partner with a distributor and scrap the Munich one',
+  'Add an option to partner with a distributor and get rid of the old one',
+  'Add an option to partner with a distributor and hide the legacy branch',
+  'Add an option to partner with a distributor and unlink the cost factor',
+  'Add an option to partner with a distributor and disconnect the old edge',
+  'Add an option to partner with a distributor and swap the baseline',
+  'Add an option to partner with a distributor and combine the two factors',
+  'Add an option to partner with a distributor and bin the old one',
+  'Add an option to partner with a distributor and detach the old driver',
+  'Add an option to partner with a distributor and wipe the old scenario',
 ];
 
 /**
@@ -1137,12 +1259,35 @@ export const KNOWN_OPEN_RETRACTION: readonly string[] = [
 ];
 
 /**
- * ⚠ TWO QUOTED OPTIONS IN ONE TURN: the second is silently dropped, and
- * `stripQuotedSpans` deletes its name before any screen looks at it, so the
- * plural-widening guard cannot see it either. Not fixed — the extractor returns
- * one candidate by construction, and making it return two is a shape change,
- * not a screen change. Pinned so the next reader inherits it.
+ * ⚠ TWO QUOTED OPTIONS IN ONE TURN. The extractor returns ONE candidate by
+ * construction, so the second option never becomes a proposal. Not fixed —
+ * making it return two is a shape change, not a screen change.
+ *
+ * ⚠⚠ THE DOCBLOCK HERE WAS FALSE ABOUT ITS OWN ONE PINNED ROW, WITHDRAWN AND
+ * RE-MEASURED 7 Sep 2026. It said "the second is silently dropped, and
+ * `stripQuotedSpans` deletes its name before any screen looks at it" — and the
+ * only row it pinned does NOT do that. The class has TWO distinct behaviours
+ * and the set now carries both, because the one that was pinned was the one
+ * that does not drop anything:
+ *   · `Add "Premium" and "Freemium" as an option`
+ *       -> MINTS, label `"Premium" and "Freemium"` — NOTHING is dropped; both
+ *          names survive, wearing the quote characters, as one nonsense label.
+ *   · `Add an option called "Premium" and one called "Basic"`
+ *       -> MINTS, label `Premium`, remainder `and one called "Basic"`.
+ *   · `Add "Premium" as an option and "Basic" as another`
+ *       -> MINTS, label `Premium`, remainder `and "Basic" as another`.
+ * The last two are the rows that genuinely drop the second option, and until
+ * now they were pinned NOWHERE. Control in the same run: the single-option
+ * form `Add an option called "Premium"` yields label `Premium`, remainder
+ * empty — so the probe discriminates rather than agreeing with itself.
+ *
+ * The spec pins the observed label AND remainder of each row, so this comment
+ * cannot drift away from the behaviour again.
  */
 export const KNOWN_OPEN_TWO_QUOTED: readonly string[] = [
+  // Both names survive inside one label; nothing is dropped.
   'Add "Premium" and "Freemium" as an option',
+  // The second option is genuinely dropped into the remainder.
+  'Add an option called "Premium" and one called "Basic"',
+  'Add "Premium" as an option and "Basic" as another',
 ];
