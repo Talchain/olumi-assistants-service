@@ -55,6 +55,7 @@ import {
   resolveAmountRange,
   resolvePercentRange,
 } from "../../utils/amount-range.js";
+import { CURRENCY_SYMBOL_TO_CODE as CANONICAL_CURRENCY_SYMBOL_TO_CODE } from "../../utils/currency-alphabet.js";
 
 /**
  * Relative value kind for precise classification.
@@ -107,30 +108,25 @@ export interface ParsedValue {
 }
 
 /**
- * Currency symbol to unit mapping.
+ * Currency symbol to unit mapping — RE-EXPORTED, no longer spelled here.
  *
- * EXPORTED as {@link CURRENCY_SYMBOL_TO_CODE} (ROADMAP 2.972) so the
- * provenance locator (`cee/provenance/stated-amounts.ts`) derives its currency
- * alternation from THIS list rather than re-spelling one. A second hand-written
- * currency vocabulary is exactly the mirror CLAUDE.md trap 12 describes, and a
- * symbol missing from a copy would make a stated amount invisible — i.e. would
- * silently strip a provenance claim that was in fact earned.
+ * ⚠ IT MOVED TO `utils/currency-alphabet.ts` ON PR #1327, and the reason is an
+ * import direction, not tidiness: `utils/amount-range.ts` needs this vocabulary
+ * for the bare-range start guard, and THIS module imports `amount-range`, so
+ * reading it back would close a cycle. Spelling a second list in `amount-range`
+ * was tried and correctly rejected by
+ * `__tests__/currency-vocabulary.union.test.ts` — the same guard this comment's
+ * predecessor invoked (a symbol missing from a copy makes a stated amount
+ * invisible). Same move as the multiplier alphabet (ROADMAP 2.1130).
+ *
+ * Every consumer still imports {@link CURRENCY_SYMBOL_TO_CODE} from here; the
+ * re-export keeps all of them, and this module's own uses, unchanged.
  */
-const CURRENCY_MAP: Record<string, string> = {
-  "£": "GBP",
-  "$": "USD",
-  "€": "EUR",
-  "¥": "JPY",
-  "₹": "INR",
-  "A$": "AUD",
-  "C$": "CAD",
-  "NZ$": "NZD",
-  "CHF": "CHF",
-  "kr": "SEK",
-};
+const CURRENCY_MAP: Readonly<Record<string, string>> = CANONICAL_CURRENCY_SYMBOL_TO_CODE;
 
 /** The one currency vocabulary. See the note on {@link CURRENCY_MAP}. */
-export const CURRENCY_SYMBOL_TO_CODE: Readonly<Record<string, string>> = CURRENCY_MAP;
+export const CURRENCY_SYMBOL_TO_CODE: Readonly<Record<string, string>> =
+  CANONICAL_CURRENCY_SYMBOL_TO_CODE;
 
 /**
  * Multiplier suffixes — THE CANONICAL ALPHABET ITSELF, re-exported.

@@ -80,6 +80,7 @@ import {
   resolveMagnitude,
   SMALLEST_DROPPABLE_MAGNITUDE,
 } from "./magnitude-alphabet.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "./currency-alphabet.js";
 
 /**
  * The separators that join the two bounds of a written range, for patterns
@@ -286,7 +287,45 @@ export const RANGE_LOWER_BOUND_ABSENT_GUARD =
  * rather than guess. Pinned in
  * `factor-extraction/__tests__/bare-amount-range-deferral.test.ts`.
  */
-export const BARE_AMOUNT_RANGE_START_GUARD = "(?<![£$€\\d.,+\\-–—])";
+/** Regex-escape a literal so it is safe inside a class body or an alternation. */
+function escapeForPattern(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The currency prefixes, DERIVED from the one canonical vocabulary
+ * (`utils/currency-alphabet.ts`, re-exported by `cee/extraction/numeric-parser`).
+ *
+ * ⚠ DERIVED RATHER THAN SPELLED, and the difference is not stylistic: a
+ * hand-written copy here was written first, and
+ * `cee/extraction/__tests__/currency-vocabulary.union.test.ts` REDded on it by
+ * name — "either DERIVE from CURRENCY_SYMBOL_TO_CODE, or justify the exception".
+ * It was right. A currency added to the canonical map now reaches this guard
+ * with no second edit, which is the only reason the guard cannot drift short
+ * again (CLAUDE.md trap 12).
+ */
+const CURRENCY_SYMBOL_CLASS: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
+  .filter((prefix) => prefix.length === 1)
+  .map(escapeForPattern)
+  .join("");
+
+/**
+ * The multi-character prefixes, longest-first so a longer key cannot be
+ * shadowed by a shorter one that prefixes it (`NZ$` before `C$`).
+ *
+ * `A$`/`C$`/`NZ$` are also caught by the class above when they sit flush
+ * against the digits — they END in `$` — but they are here too so a prefix
+ * separated from its amount by a space ("NZ$ 80-120k") is refused as well.
+ */
+const CURRENCY_MULTICHAR_ALTERNATION: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
+  .filter((prefix) => prefix.length > 1)
+  .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
+  .map(escapeForPattern)
+  .join("|");
+
+export const BARE_AMOUNT_RANGE_START_GUARD =
+  `(?<![${CURRENCY_SYMBOL_CLASS}\\d.,+\\-–—])` +
+  `(?<!\\b(?:${CURRENCY_MULTICHAR_ALTERNATION})\\s{0,3})`;
 
 /**
  * The full range grammar: two amounts, each with an OPTIONAL magnitude, joined

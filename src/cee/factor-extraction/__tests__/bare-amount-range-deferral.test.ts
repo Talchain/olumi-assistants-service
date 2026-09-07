@@ -42,6 +42,8 @@
 import { describe, expect, it } from "vitest";
 import { extractFactors } from "../index.js";
 import { enrichGraphWithFactorsAsync } from "../enricher.js";
+import { BARE_AMOUNT_RANGE_START_GUARD } from "../../../utils/amount-range.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "../../extraction/numeric-parser.js";
 import type { GraphT } from "../../../schemas/graph.js";
 
 function emptyGraph(): GraphT {
@@ -306,6 +308,91 @@ describe("the recorded floor: a pair with a RIVAL reading still yields nothing",
     // 5,000,000 > 2m literally, and 5,000,000k is further away still.
     expect(extractFactors("Budget of £5,000,000-2m for the platform.")).toEqual([]);
     expect(extractFactors("Budget of 5,000,000-2m for the platform.")).toEqual([]);
+  });
+});
+
+describe("a currency this pattern cannot CARRY is a currency it must not READ", () => {
+  /**
+   * ⚠⚠ A REGRESSION THIS PR INTRODUCED, found by an independent behaviour seat
+   * and MEASURED here at base before being believed.
+   *
+   * `BARE_AMOUNT_RANGE_START_GUARD` declines the digits a currency-prefixed
+   * sibling already owns, so one written range cannot arrive as two factors on
+   * two scales. It named `£$€` — the three `currencyRange` requires. Every
+   * OTHER currency in the canonical vocabulary therefore fell THROUGH it into
+   * the bare pattern, which has no unit of its own:
+   *
+   *     "¥80-120k for the launch."   f4c8f501  []
+   *                                  62b30d6e  Factor=100000, unit ABSENT
+   *
+   * A currency-bearing amount stored unitless is worse than an unread one: it
+   * is the input to `unit_redeclares_scale`, so the first correction a user
+   * types against that node ("Set it to ¥150,000") is the dead end this PR
+   * exists to open. Base minted NOTHING here, so refusing is base parity, not
+   * a new gap — that measurement is what settled the direction.
+   *
+   * The guard's class is now DERIVED from `CURRENCY_SYMBOL_TO_CODE`, so this
+   * set cannot silently regrow when a currency is added.
+   */
+  const CURRENCY_THE_BARE_PATTERN_MUST_DECLINE = [
+    "¥80-120k for the launch.",
+    "₹80-120k for the launch.",
+    "Spend ¥80k-120k on the launch.",
+    "CHF 80-120k for the launch.",
+    "NZ$ 80-120k for the launch.",
+    "kr 80-120k for the launch.",
+  ] as const;
+
+  it.each(CURRENCY_THE_BARE_PATTERN_MUST_DECLINE)(
+    "%s mints no unitless node (base parity)",
+    (brief) => {
+      expect(extractFactors(brief)).toEqual([]);
+    },
+  );
+
+  it("⭐ TWIN: the currencies the sibling DOES carry still mint, with their unit", () => {
+    // Without this, refusing every prefix would pass every row above and
+    // delete the feature. Each must keep BOTH its value and its unit.
+    for (const [brief, unit] of [
+      ["£80-120k for the launch.", "£"],
+      ["$80-120k for the launch.", "$"],
+      ["€80-120k for the launch.", "€"],
+    ] as const) {
+      const range = shapes(brief).find((f) => f.extractionType === "range");
+      expect(range, brief).toBeDefined();
+      expect(range!.value, brief).toBe(100_000);
+      expect(range!.unit, brief).toBe(unit);
+    }
+  });
+
+  it("⭐ TWIN: a genuinely UNPREFIXED bare range is untouched", () => {
+    // The guard must decline currency prefixes, not amounts. This is the class
+    // the whole PR exists to read, and it carries no symbol at all.
+    for (const brief of [
+      "Budget of 80-120k for the launch.",
+      "Budget of 80,000-120k for the hire.",
+      "roughly 800-900k users",
+    ]) {
+      const range = shapes(brief).find((f) => f.extractionType === "range");
+      expect(range, brief).toBeDefined();
+    }
+  });
+
+  it("⭐ the guard's currency class is DERIVED — every canonical key is covered", () => {
+    // The union assertion trap 12d asks for: derivation stops the consumers
+    // drifting, and this stops the LIST being short. A key added to the
+    // canonical map with no reader here would RED.
+    const guard = new RegExp(BARE_AMOUNT_RANGE_START_GUARD + "\\d");
+    for (const prefix of Object.keys(CURRENCY_SYMBOL_TO_CODE)) {
+      expect(
+        guard.test(`${prefix}80`),
+        `${prefix}80: the bare-range guard does not decline this canonical currency`,
+      ).toBe(false);
+    }
+    // …and the contrast control, in the same run: a NON-currency prefix must
+    // still be admitted, or the assertion above would pass on a guard that
+    // refuses everything.
+    expect(guard.test("of 80"), "an ordinary word prefix must still be admitted").toBe(true);
   });
 });
 
