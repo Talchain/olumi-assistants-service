@@ -497,9 +497,9 @@ export const CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD: string = (() => {
   // still carries such a key REDs FIVE tests in TWO files: one in
   // `utils/__tests__/amount-range.test.ts` ("⭐ the FACTOR path still DECLINES
   // the prefixes it cannot carry") and four in
-  // `factor-extraction/__tests__/bare-amount-range-deferral.test.ts` — three of
-  // those in the cross-product below it, one in "a currency this pattern cannot
-  // CARRY is a currency it must not READ".
+  // `factor-extraction/__tests__/bare-amount-range-deferral.test.ts` — three in
+  // its cross-product describe, one in "a currency this pattern cannot CARRY is
+  // a currency it must not READ".
   // `cee/extraction/__tests__/currency-vocabulary.union.test.ts` stays GREEN
   // under that mutant — so the coverage is real, and it is not where the
   // previous sentence sent a reader to look for it.
