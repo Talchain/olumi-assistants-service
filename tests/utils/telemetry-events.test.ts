@@ -754,6 +754,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
         V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
+        V5RunAnalysisTargetRepair: "v5.run_analysis.target_repair",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
         V5RunAnalysisConstraintUnevaluated: "v5.run_analysis.constraint_unevaluated",
         V5RunAnalysisConstraintIdentityUnresolved:
@@ -1677,6 +1678,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Diagnostic-only; the structured log is the operational signal (it is
         // the only way a DECLINE is visible at all).
         TelemetryEvents.V5RunAnalysisImperativePreRoute,
+        // The run_analysis TARGET REPAIR on an admitted election. Diagnostic-
+        // only, no Datadog metric: like the pre-route above, the structured log
+        // is the operational signal, and it is the only way a DECLINE is
+        // visible at all. A rising `repaired` rate is a routing-prompt signal.
+        TelemetryEvents.V5RunAnalysisTargetRepair,
         // D-ask-1 (2.11 P0-1) — run_analysis scaffolded-placeholder disclosure
         // summary (diagnostic-only, no Datadog metric; redacted option ids +
         // factor counts). Live emit site: run-analysis.ts step 2.55.
@@ -2371,6 +2377,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.routing.analysis_election_gate",
         "v5.routing_bounded_fallback",
         "v5.run_analysis.imperative_pre_route",
+        "v5.run_analysis.target_repair",
         "v5.run_analysis.intercept_guard",
         "v5.run_analysis.options_scaffolded",
         "v5.run_analysis.constraint_unevaluated",
