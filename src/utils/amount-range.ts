@@ -310,7 +310,37 @@ const CURRENCY_SYMBOL_CLASS: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
   .join("");
 
 /**
- * The multi-character prefixes, sorted longest-first.
+ * The multi-character currency prefixes — KEYS ∪ VALUES of the canonical
+ * vocabulary — sorted longest-first.
+ *
+ * ⭐⭐ THE VALUES ARE HERE BECAUSE A USER WRITES THE ISO CODE, and until they
+ * were, a stated currency amount became a UNITLESS node. This alternation was
+ * derived from `Object.keys` alone, so every ISO code — which is a VALUE of
+ * that map, not a key — fell through the guard into the bare pattern, which
+ * has no unit of its own. MEASURED at `dc0d837d` through `extractFactors`,
+ * against base `ad44d445` which minted NOTHING for any of them:
+ *
+ *     "USD 80-120k"   ad44d445  []
+ *                     dc0d837d  Factor=100,000, range 80,000..120,000, unit ABSENT
+ *     "EUR 2-5m"      dc0d837d  Factor=3,500,000, unit ABSENT
+ *     "usd 80-120k"   dc0d837d  Factor=100,000, unit ABSENT  (the pattern is `gi`)
+ *
+ * Twelve spellings in all — `USD GBP JPY INR AUD CAD NZD SEK` spaced, `EUR`
+ * with an `m` magnitude, `USD80-120k` flush, and the `usd`/`Usd` case variants.
+ * `CHF` was already refused because it is the one member that is BOTH a key and
+ * a value, which is exactly why a keys-only derivation looked complete.
+ *
+ * This is the same truth defect this PR fixed for `£`/`$`/`€`, one level out:
+ * a currency-bearing amount stored unitless is the input to
+ * `unit_redeclares_scale`, so "Set it to USD 150,000" is the correction-loop
+ * dead end. The union is DERIVED, and
+ * `factor-extraction/__tests__/bare-amount-range-deferral.test.ts` pins every
+ * member of it — key and value — so neither half can be dropped in silence.
+ *
+ * ⚠ THIS DOES NOT WIDEN PARSER ADMISSION. `CURRENCY_PREFIX_ALTERNATION` below
+ * is untouched, so `parseNumericValue("USD 80-120k")` still answers `null`,
+ * measured identically at `dc0d837d` and after this change. The two paths
+ * answer different questions and stay named apart (CLAUDE.md trap 21).
  *
  * ⚠ THE SORT GUARDS NOTHING ON THIS ONE, and saying so is the point. The
  * sentence that stood here — "longest-first so a longer key cannot be shadowed
@@ -326,8 +356,20 @@ const CURRENCY_SYMBOL_CLASS: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
  * `A$`/`C$`/`NZ$` are also caught by the class above when they sit flush
  * against the digits — they END in `$` — but they are here too so a prefix
  * separated from its amount by a space ("NZ$ 80-120k") is refused as well.
+ *
+ * ⚠ AND ADDING THE CODES DOES NOT MAKE THE ORDER LOAD-BEARING — CHECKED, not
+ * assumed, because it is the one thing that could have changed. A
+ * proper-prefix census over the 19-member union returns ZERO, case-sensitively
+ * and case-insensitively alike (`A$` is not a prefix of `AUD`; `NZ$` and `NZD`
+ * differ at their third character; `CHF` de-duplicates). The same census over
+ * `magnitude-alphabet.ts` returns SIX — the contrast control proving it can
+ * see an overlap where one exists — and a fabricated three-word vocabulary
+ * returns zero. Membership, not ordering, is still what guards currency here.
  */
-const CURRENCY_MULTICHAR_ALTERNATION: string = Object.keys(CURRENCY_SYMBOL_TO_CODE)
+const CURRENCY_MULTICHAR_ALTERNATION: string = [...new Set([
+  ...Object.keys(CURRENCY_SYMBOL_TO_CODE),
+  ...Object.values(CURRENCY_SYMBOL_TO_CODE),
+])]
   .filter((prefix) => prefix.length > 1)
   .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0))
   .map(escapeForPattern)

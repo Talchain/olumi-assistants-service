@@ -392,21 +392,107 @@ describe("a currency this pattern cannot CARRY is a currency it must not READ", 
     expect(range!.rangeMax).toBe(120_000);
   });
 
-  it("⭐ the guard's currency class is DERIVED — every canonical key is covered", () => {
+  it("⭐⭐ the guard's currency class is DERIVED — every canonical KEY **and VALUE** is covered", () => {
+    // ⭐⭐ THE UNION PIN, AND THE `VALUES` HALF IS THE ONE THAT WAS MISSING.
     // The union assertion trap 12d asks for: derivation stops the consumers
-    // drifting, and this stops the LIST being short. A key added to the
-    // canonical map with no reader here would RED.
+    // drifting, and this stops the LIST being short. This loop ran over
+    // `Object.keys` alone, and the alternation it checks was derived the same
+    // way — so a guard agreeing with itself (trap 13b), blind to the ISO codes
+    // that are that map's VALUES. `CHF` is the only member that is BOTH, which
+    // is precisely why a keys-only derivation looked complete.
+    //
+    // Dropping EITHER spread from `CURRENCY_MULTICHAR_ALTERNATION` REDs this:
+    // the union is rebuilt here from the canonical map, not from the
+    // alternation, so it cannot shrink with the thing it is measuring.
     const guard = new RegExp(BARE_AMOUNT_RANGE_START_GUARD + "\\d");
-    for (const prefix of Object.keys(CURRENCY_SYMBOL_TO_CODE)) {
+    const union = [
+      ...new Set([
+        ...Object.keys(CURRENCY_SYMBOL_TO_CODE),
+        ...Object.values(CURRENCY_SYMBOL_TO_CODE),
+      ]),
+    ];
+    // The loop must have something to say — a union that silently emptied
+    // would pass every assertion below by iterating nothing (trap 13).
+    expect(union.length).toBeGreaterThan(Object.keys(CURRENCY_SYMBOL_TO_CODE).length);
+    for (const prefix of union) {
       expect(
         guard.test(`${prefix}80`),
         `${prefix}80: the bare-range guard does not decline this canonical currency`,
       ).toBe(false);
     }
-    // …and the contrast control, in the same run: a NON-currency prefix must
-    // still be admitted, or the assertion above would pass on a guard that
+    // …and SPACED, which is how an ISO code is actually written ("USD 80-120k").
+    // Scoped to the multi-character members ON PURPOSE: that is the alternation's
+    // domain. A single-character symbol separated from its digits by a space is
+    // NOT declined here — measured `true` for all five of `£ $ € ¥ ₹` — and
+    // asserting otherwise would pin a behaviour this guard does not have.
+    for (const prefix of union.filter((p) => p.length > 1)) {
+      expect(
+        guard.test(`${prefix} 80`),
+        `${prefix} 80: a spaced multi-character currency prefix is not declined`,
+      ).toBe(false);
+    }
+    // …and the contrast controls, in the same run: a NON-currency prefix must
+    // still be admitted, or the assertions above would pass on a guard that
     // refuses everything.
     expect(guard.test("of 80"), "an ordinary word prefix must still be admitted").toBe(true);
+    expect(
+      guard.test("ABC80"),
+      "a three-letter NON-currency prefix must still be admitted",
+    ).toBe(true);
+  });
+
+  /**
+   * ⚠⚠ THE SAME REGRESSION ONE LEVEL OUT, MEASURED AT `dc0d837d` BEFORE BEING
+   * BELIEVED — and this half shipped past the loop above because that loop and
+   * the alternation it checks were BOTH derived from `Object.keys`.
+   *
+   * A user writes the ISO CODE, which is a VALUE of the canonical map:
+   *
+   *     "USD 80-120k"   ad44d445  []
+   *                     dc0d837d  Factor=100,000, range 80,000..120,000, unit ABSENT
+   *     "EUR 2-5m"      dc0d837d  Factor=3,500,000, unit ABSENT
+   *
+   * All eight spaced codes, `EUR` with an `m` magnitude, the flush `USD80-120k`
+   * and the `usd`/`Usd` case variants — twelve spellings, each a stated currency
+   * amount published with its currency quietly removed, where base minted
+   * nothing at all. That node is the input to `unit_redeclares_scale`, so
+   * "Set it to USD 150,000" is the correction-loop dead end this PR exists to
+   * open. Refusing is base parity, not a new gap.
+   *
+   * DERIVED from `Object.values`, so a code added to the canonical map arrives
+   * here with no second edit.
+   */
+  it.each([...new Set(Object.values(CURRENCY_SYMBOL_TO_CODE))])(
+    "an ISO code — %s — mints no unitless node (base parity)",
+    (code) => {
+      expect(extractFactors(`${code} 80-120k for the launch.`)).toEqual([]);
+    },
+  );
+
+  it("⭐ the flush and CASE-VARIANT spellings decline too — the pattern is `gi`", () => {
+    // The production pattern is compiled `gi`, so a lower- or mixed-case code
+    // reaches the same guard. Measured unitless at `dc0d837d`, all three.
+    for (const brief of [
+      "USD80-120k for the launch.",
+      "usd 80-120k for the launch.",
+      "Usd 80-120k for the launch.",
+      "EUR 2-5m for the launch.",
+    ]) {
+      expect(extractFactors(brief), brief).toEqual([]);
+    }
+  });
+
+  it("⭐ TWIN: the guard declines CURRENCY codes, not any three letters", () => {
+    // Without this, refusing every three-letter prefix would pass every ISO row
+    // above and delete the feature for ordinary prose. Measured: both still
+    // mint the full band at `dc0d837d` and after the union repair.
+    for (const brief of ["ABC 80-120k for the launch.", "XYZ 80-120k for the launch."]) {
+      const range = shapes(brief).find((f) => f.extractionType === "range");
+      expect(range, brief).toBeDefined();
+      expect(range!.value, brief).toBe(100_000);
+      expect(range!.rangeMin, brief).toBe(80_000);
+      expect(range!.rangeMax, brief).toBe(120_000);
+    }
   });
 });
 
