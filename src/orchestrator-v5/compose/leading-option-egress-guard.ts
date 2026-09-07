@@ -392,9 +392,63 @@ export function neutraliseEnforcementFalsePositiveSpans(value: string): string {
  * The observe-only egress guard keeps the wider net: it is measuring residue,
  * and a slightly noisy alarm is the correct trade for one that cannot miss.
  */
-export function textAssertsLeadingOption(value: string): boolean {
+export interface LeaderProseContext {
+  /** Exact labels supplied by the caller's existing scenario roster. */
+  readonly optionLabels: readonly string[];
+}
+
+/** Shared with the wire name test; exact tokens, Unicode-safe, soft-wrap-safe. */
+export function optionLabelPattern(label: string): RegExp {
+  const pattern = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`, 'giu');
+}
+
+// An internal object-reference token, never emitted. Unlike a word sentinel it
+// cannot itself match an option label or manufacture leader-word adjacency.
+const OPTION_REFERENT = '\uFFFC';
+
+function bindOptionReferences(value: string, context: LeaderProseContext): string {
+  const references = context.optionLabels.flatMap((label) => label.trim() === '' ? [] :
+    [...value.matchAll(optionLabelPattern(label))].map((match) => ({
+      start: match.index, end: match.index + match[0].length,
+    }))).sort((a, b) => a.start - b.start || b.end - a.end);
+
+  // Bind the subject before reading its predicate. Repeated label words can
+  // also be genuine auxiliaries: in "May may be the leading option", the first
+  // May is the subject and the second is a modal. Do not mask that auxiliary.
+  // A prelude is a grammatical chain, not arbitrary preceding prose.
+  const predicatePrelude = /^(?:\s|\b(?:am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|will|would|should|must|not|never|the|a|an|[a-z]+ly)\b)*$/i;
+  const preludes: Array<{ start: number; end: number }> = [];
+  for (const { re } of LEADER_CLAIM_PATTERNS) {
+    for (const claim of value.matchAll(new RegExp(re.source, 'gi'))) {
+      const claimEnd = claim.index + claim[0].length;
+      // Vocabulary inside an actual label is a mention of the option, not a
+      // separate comparative predicate.
+      if (references.some((ref) => ref.start <= claim.index && claimEnd <= ref.end)) continue;
+      const subject = references.find((ref) => ref.end <= claim.index &&
+        predicatePrelude.test(value.slice(ref.end, claim.index)));
+      if (subject) preludes.push({ start: subject.end, end: claim.index });
+    }
+  }
+  const protectedReferences = references.filter((ref) =>
+    !preludes.some((prelude) => prelude.start <= ref.start && ref.end <= prelude.end));
+  let result = '';
+  let cursor = 0;
+  for (const ref of protectedReferences) {
+    if (ref.start < cursor) continue; // longest exact overlapping label wins
+    result += value.slice(cursor, ref.start) + OPTION_REFERENT;
+    cursor = ref.end;
+  }
+  return result + value.slice(cursor);
+}
+
+export function textAssertsLeadingOption(value: string, context?: LeaderProseContext): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  return assertedLeaderMatches(value).length > 0;
+  // Existing consumers without option identity retain the original conservative
+  // reader. Do not guess whether May/No/etc. is a qualifier inside an unknown
+  // label. Contextual grammar is restricted to the projection that owns a roster.
+  if (context === undefined) return textNamesLeadingOption(neutraliseEnforcementFalsePositiveSpans(value));
+  return assertedLeaderMatches(value, context).length > 0;
 }
 
 /**
@@ -412,8 +466,8 @@ interface AssertedLeaderMatch {
   end: number;
 }
 
-function assertedLeaderMatches(value: string): AssertedLeaderMatch[] {
-  const text = neutraliseEnforcementFalsePositiveSpans(value);
+function assertedLeaderMatches(value: string, context: LeaderProseContext): AssertedLeaderMatch[] {
+  const text = neutraliseEnforcementFalsePositiveSpans(bindOptionReferences(value, context));
   let offset = 0;
   const units = splitIntoRedactableUnits(text).map((unit) => {
     const located = { text: unit, start: offset, end: offset + unit.length };
@@ -436,13 +490,17 @@ function assertedLeaderMatches(value: string): AssertedLeaderMatch[] {
       // Initial operators bind the comparison's subject. Do not search for
       // "no" within that subject: e.g. Status Quo (No New Hire) is a label.
       if (/^\s*(?:if|unless|suppose|supposing|whether|neither)\b/i.test(before)) continue;
+      // An embedded question/condition binds its recognised option SUBJECT,
+      // not an arbitrary word somewhere in the preceding clause. Label content
+      // has already become an opaque referent, so it cannot provide operators.
+      if (new RegExp(`\\b(?:if|unless|whether|neither)\\s+${OPTION_REFERENT}(?:\\s+(?:nor|or|and)\\s+${OPTION_REFERENT})?\\s*$`, 'i').test(before)) continue;
       // Modal/negative auxiliaries must meet the predicate, not another verb
       // such as "the deadline may slip and X leads".
       if (
         /\b(?:could|might|may|would)\s+(?:(?:have\s+)?(?:be|been|become)\s+)?(?:the\s+)?$/i.test(before)
       ) continue;
       if (
-        /\b(?:not|never|cannot|can['’]t|doesn['’]t|isn['’]t|no)\s+(?:the\s+)?$/i.test(before)
+        /\b(?:not|never|cannot|can['’]t|doesn['’]t|isn['’]t|no)\s+(?:[a-z]+ly\s+)*(?:the\s+)?$/i.test(before)
       ) continue;
       // A denied report of a comparison is not the report's assertion. The
       // optional complement also covers the overlapping bare "leads" match.
@@ -478,9 +536,9 @@ function assertedLeaderMatches(value: string): AssertedLeaderMatch[] {
  * and assertion classifier above; never infer an option alias or a permission.
  * A bare mention ("Explore the leading option") is deliberately insufficient.
  */
-export function textAssertsImplicitLeadingOption(value: string): boolean {
+export function textAssertsImplicitLeadingOption(value: string, context: LeaderProseContext): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  return assertedLeaderMatches(value).some(isImplicitDesignation);
+  return assertedLeaderMatches(value, context).some(isImplicitDesignation);
 }
 
 function isImplicitDesignation({ code, before, after }: AssertedLeaderMatch): boolean {
@@ -498,8 +556,8 @@ function isImplicitDesignation({ code, before, after }: AssertedLeaderMatch): bo
  * an unrelated sentence. Overlapping vocabulary ("leads" inside "which option
  * leads") refers to the same predicate, not a second distributed assertion.
  */
-export function textAssertsOnlyImplicitLeadingOptions(value: string): boolean {
-  const matches = assertedLeaderMatches(value);
+export function textAssertsOnlyImplicitLeadingOptions(value: string, context: LeaderProseContext): boolean {
+  const matches = assertedLeaderMatches(value, context);
   const implicit = matches.filter(isImplicitDesignation);
   return matches.length > 0 && matches.every((match) =>
     implicit.some((designation) => designation.start <= match.start && match.end <= designation.end),

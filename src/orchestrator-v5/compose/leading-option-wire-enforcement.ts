@@ -196,6 +196,7 @@ import {
   textAssertsLeadingOption,
   textAssertsImplicitLeadingOption,
   textAssertsOnlyImplicitLeadingOptions,
+  optionLabelPattern,
   textNamesLeadingOption,
   // The BLOCK-SURFACE readers. Imported, never copied: a private list here would
   // drift from the alarm and the first symptom would be a leak this gate is
@@ -275,10 +276,6 @@ export type WireEnforcementMode =
  * over-suppression finding demands.
  */
 const MIN_OPTION_LABEL_LENGTH = 3;
-
-function escapeForRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 /**
  * The scenario's OPTION ROSTER, read off the graph the exit is already shipping.
@@ -372,13 +369,7 @@ export function optionRosterFromAnalysisReady(analysisReady: unknown): readonly 
  */
 export function textNamesAnOption(value: string, roster: readonly string[]): boolean {
   if (typeof value !== 'string' || value.length === 0 || roster.length === 0) return false;
-  return roster.some((label) => {
-    // Escape metacharacters FIRST (so a label's own `.`/`(` is literal), then
-    // relax the already-escaped inter-word whitespace to `\s+`. `escapeForRegExp`
-    // does not touch space characters, so this rewrite cannot corrupt an escape.
-    const pattern = escapeForRegExp(label).replace(/\s+/g, '\\s+');
-    return new RegExp(`(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`, 'iu').test(value);
-  });
+  return roster.some((label) => optionLabelPattern(label).test(value));
 }
 
 /**
@@ -705,24 +696,26 @@ function projectField(
   roster: readonly string[],
 ): { text: string; mode: WireEnforcementMode } | null {
   if (typeof value !== 'string' || value.length === 0) return null;
+  const context = { optionLabels: roster };
+  const asserts = (text: string): boolean => textAssertsLeadingOption(text, context);
   // (1) A CLAIM IS PRESENT — field level, so a straddling match still counts.
-  if (!textAssertsLeadingOption(value)) return null;
+  if (!asserts(value)) return null;
   // A designation can be exact-name or an explicitly asserted implicit lead.
   // This is prose classification, not fuzzy matching of the scenario roster.
   const namesOption = textNamesAnOption(value, roster);
-  if (!namesOption && !textAssertsImplicitLeadingOption(value)) return null;
+  if (!namesOption && !textAssertsImplicitLeadingOption(value, context)) return null;
   // An explicit implicit designation is complete locally. A neighbouring
   // option explanation is not its missing naming half. Keep the existing
   // escalation for other/distributed claims, including mixed fields.
-  const needsNameEscalation = namesOption && !textAssertsOnlyImplicitLeadingOptions(value);
+  const needsNameEscalation = namesOption && !textAssertsOnlyImplicitLeadingOptions(value, context);
 
   const isClean = (candidate: string): boolean =>
-    !textAssertsLeadingOption(candidate) &&
+    !asserts(candidate) &&
     (!needsNameEscalation || !textNamesAnOption(candidate, roster));
 
   const surgical = replaceAssertingUnits(
     value,
-    textAssertsLeadingOption,
+    asserts,
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
   if (isClean(surgical)) return { text: surgical, mode: 'surgical' };
@@ -737,7 +730,7 @@ function projectField(
   // exactly what the collapse rule is for.
   const escalated = replaceAssertingUnits(
     value,
-    (unit) => textAssertsLeadingOption(unit) || textNamesAnOption(unit, roster),
+    (unit) => asserts(unit) || textNamesAnOption(unit, roster),
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
   if (isClean(escalated)) return { text: escalated, mode: 'surgical_escalated' };
