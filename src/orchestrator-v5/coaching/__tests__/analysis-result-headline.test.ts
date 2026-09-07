@@ -7,8 +7,40 @@ import {
   RUN_ANALYSIS_LOCKED_TEMPLATES,
   MAX_HEADLINE_CHARS,
 } from '../analysis-result-headline.js';
+
+import { attestedConsumerFixture } from '../../../../tests/fixtures/plot/attested-consumer-fixture.js';
+
+/** Each test explicitly declares the producer's selected ID. No argmax or label
+ * recovery occurs in this fixture adapter. Malformed producer rows still fail. */
+function currentHeadlineInput(input: Parameters<typeof buildAnalysisResultHeadline>[0]) {
+  const rows = input.enrichment.option_comparison ?? input.enrichment.results;
+  if (!input.leading_option_id || !Array.isArray(rows) || rows.length === 0) return input;
+  return { ...input, enrichment: attestedConsumerFixture(
+    input.enrichment, input.leading_option_id, rows as Record<string, unknown>[],
+  ) };
+}
+
+function buildAttestedHeadline(input: Parameters<typeof buildAnalysisResultHeadline>[0]) {
+  return buildAnalysisResultHeadline(currentHeadlineInput(input));
+}
+
+function describeAttestedHeadline(input: Parameters<typeof describeAnalysisHeadline>[0]) {
+  return describeAnalysisHeadline(currentHeadlineInput(input));
+}
+
 import { RUN_ANALYSIS_ASSISTANT_TEMPLATES } from '../../tools/handlers/run-analysis.js';
 import { findForbiddenPhraseHit } from '../../compose/forbidden-user-facing-phrases.js';
+
+
+/** A valid ranking beside malformed comparison rows must fail closed. */
+function buildMalformedHeadline(input: Parameters<typeof buildAnalysisResultHeadline>[0]) {
+  const authority = attestedConsumerFixture(input.enrichment, 'opt_a', [
+    { option_id: 'opt_a', win_probability: 0.62 },
+  ]);
+  return buildAnalysisResultHeadline({ ...input, enrichment: {
+    ...authority, option_comparison: input.enrichment.results,
+  } });
+}
 
 const HIRING_FULL: Record<string, unknown> = {
   results: [
@@ -37,8 +69,16 @@ const UUID_PATTERN =
 const RAW_DECIMAL_PATTERN = /\d+\.\d+/;
 
 describe('buildAnalysisResultHeadline', () => {
+  it.each(['absent', 'withheld'] as const)('%s producer authority withholds despite a declared stored ID', (state) => {
+    const input = currentHeadlineInput({ enrichment: HIRING_FULL, leading_option_id: 'opt_a', status_kind: 'ok' });
+    if (state === 'absent') delete input.enrichment.objective_ranking;
+    else input.enrichment.objective_ranking = { attested: false, status: 'withheld',
+      withheld_reason: 'goal_direction_absent', ranked_options: [] };
+    expect(buildAnalysisResultHeadline(input)).toBeNull();
+  });
+
   it('full data — Case A: winner + margin + provisional caution naming the fragile reason (no driver)', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -59,7 +99,7 @@ describe('buildAnalysisResultHeadline', () => {
       ...HIRING_FULL,
       robustness: { level: 'moderate' },  // no fragile_edges
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -74,7 +114,7 @@ describe('buildAnalysisResultHeadline', () => {
       results: HIRING_FULL.results,
       robustness: (HIRING_FULL.robustness as Record<string, unknown>),
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -93,7 +133,7 @@ describe('buildAnalysisResultHeadline', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -111,7 +151,7 @@ describe('buildAnalysisResultHeadline', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_missing',  // not present
       status_kind: 'ok',
@@ -123,7 +163,7 @@ describe('buildAnalysisResultHeadline', () => {
     const enrichment: Record<string, unknown> = {
       results: [{ option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 }],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -137,7 +177,7 @@ describe('buildAnalysisResultHeadline', () => {
       const enrichment: Record<string, unknown> = {
         results: [{ option_id: 'opt_a', option_label: idShape, win_probability: 0.62 }],
       };
-      const out = buildAnalysisResultHeadline({
+      const out = buildAttestedHeadline({
         enrichment,
         leading_option_id: 'opt_a',
         status_kind: 'ok',
@@ -156,7 +196,7 @@ describe('buildAnalysisResultHeadline', () => {
         },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -165,7 +205,7 @@ describe('buildAnalysisResultHeadline', () => {
   });
 
   it('output contains no internal IDs', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -176,7 +216,7 @@ describe('buildAnalysisResultHeadline', () => {
   });
 
   it('output contains no raw decimal numbers in Case A', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -202,7 +242,7 @@ describe('buildAnalysisResultHeadline', () => {
         },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -210,7 +250,7 @@ describe('buildAnalysisResultHeadline', () => {
     expect(out).toContain('Option A came out ahead in');
   });
 
-  it('supports enrichment.decision_brief.options shape', () => {
+  it('legacy decision_brief.options cannot license a current recommendation', () => {
     const enrichment: Record<string, unknown> = {
       decision_brief: {
         options: [
@@ -219,12 +259,12 @@ describe('buildAnalysisResultHeadline', () => {
         ],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Option A came out ahead in');
+    expect(out).toBeNull();
   });
 
   it('robustness.level === "high" omits fragility clause even when fragile_edges present', () => {
@@ -241,7 +281,7 @@ describe('buildAnalysisResultHeadline', () => {
         ],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -252,7 +292,7 @@ describe('buildAnalysisResultHeadline', () => {
   });
 
   it('status_kind === "partial" appends provisional suffix', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'partial',
@@ -270,7 +310,7 @@ describe('buildAnalysisResultHeadline', () => {
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'unknown',
@@ -291,7 +331,7 @@ describe('buildAnalysisResultHeadline', () => {
         fragile_edges: [{ from_label: 'X', switch_probability: 0.5 }],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -316,7 +356,7 @@ describe('buildAnalysisResultHeadline', () => {
         { label: 'True Driver', elasticity: 0.1, confidence: 0.1, sensitivity_score: 0.1, influence_score: 0.9 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -335,7 +375,7 @@ describe('buildAnalysisResultHeadline', () => {
         { label: 'Driver High', elasticity: -0.8, confidence: 0.9 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -358,7 +398,7 @@ describe('buildAnalysisResultHeadline', () => {
         ],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -384,7 +424,7 @@ describe('buildAnalysisResultHeadline', () => {
         ],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -394,7 +434,7 @@ describe('buildAnalysisResultHeadline', () => {
 
   it('returns null when leading_option_id is empty and no clear top probability', () => {
     const enrichment: Record<string, unknown> = {};
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: '',
       status_kind: 'ok',
@@ -417,7 +457,7 @@ describe('buildAnalysisResultHeadline', () => {
         { option_id: 'opt_c', option_label: 'Option C', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -435,7 +475,7 @@ describe('buildAnalysisResultHeadline', () => {
         { label: 'Quality Index', factor_id: 'fac_quality', elasticity: 0.4, confidence: 0.7, influence_score: 0.4 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -482,7 +522,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -498,7 +538,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
     expect(out).not.toMatch(/\d+%/);
   });
 
-  it('weak margin 0.42 / 0.40 (2pp) + driver — near-tie close-call line, not a confident lead', () => {
+  it('raw 0.42 / 0.40 shares do not create a permitted closeness claim', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
@@ -508,26 +548,16 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A came out ahead in 42% of runs of this model, but the options are close.');
-    // A near-tie never names a driver or implies a strong lead.
-    expect(out).not.toContain('because');
-    expect(out).not.toContain('strongest driver');
+    expect(out).toBe('Option A came out ahead in 42% of runs of this model because Cost is the strongest driver.');
+    expect(out).not.toContain('options are close');
   });
 
-  it('soft confidence 0.30 / 0.25 / 0.25 / 0.20 (5pp margin, below 40% floor) + driver — emits a CAUTIOUS provisional headline (Area F policy change)', () => {
-    // POLICY CHANGE (V5 deterministic-copy hardening, Area F). Previously a
-    // soft-confidence leader (< MIN_LEAD_PROBABILITY) fell back to the bare
-    // Case E floor ("Option A currently leads.") with driver/fragility
-    // intentionally dropped. New policy: when a REAL margin (>= MIN_LEAD_MARGIN)
-    // and a driver/fragility exist, soft confidence INCREASES caveating
-    // ("treat this as provisional") instead of suppressing the ingredients.
-    // Honest: states the factual plurality margin, names one driver as the
-    // sensitivity, makes no confident / recommendation claim.
+  it('a low-share recommendation does not gain enrichment from an unattested margin', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.30 },
@@ -539,18 +569,16 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A came out ahead in 30% of runs of this model, but treat this as provisional: the result is sensitive to Cost.',
+      'Option A currently leads.',
     );
-    // Cautious, not confident: no "because ... strongest driver" framing.
     expect(out).not.toContain('because');
     expect(out).not.toMatch(/\bbest\b|\bwinner\b|\brecommend/i);
-    // No raw decimals — integer percentage points only.
     expect(out).not.toMatch(RAW_DECIMAL_PATTERN);
   });
 
@@ -570,7 +598,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         fragile_edges: [{ from_label: 'Throughput', switch_probability: 0.4 }],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildMalformedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -591,7 +619,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { label: 'Strong Driver', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -610,7 +638,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -631,7 +659,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -648,7 +676,7 @@ describe('buildAnalysisResultHeadline — probability and margin guard', () => {
         { label: 'Driver', elasticity: 0.5, confidence: 0.8, influence_score: 0.5 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildMalformedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -683,7 +711,7 @@ describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', 
         },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -691,7 +719,7 @@ describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', 
     expect(out).toContain('Hire One Senior Technical Lead came out ahead in');
   });
 
-  it('ID-shaped labels in BOTH results[] and option_comparison falls through to decision_brief.options', () => {
+  it('an unsafe current label cannot be rescued from decision_brief', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
@@ -705,12 +733,12 @@ describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', 
         ],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toContain('Hire One Senior Technical Lead came out ahead in');
+    expect(out).toBeNull();
   });
 
   it('ID-shaped labels in every source — final fallback to null', () => {
@@ -722,7 +750,7 @@ describe('resolveWinnerLabel — multi-source fallthrough on ID-shaped labels', 
         { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -753,7 +781,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.62 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -777,7 +805,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.38 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -803,7 +831,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.49 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -812,17 +840,7 @@ describe('resolveWinner — same-source label + probability invariant', () => {
     expect(out!).toContain('Hire X came out ahead in 62% of runs of this model');
   });
 
-  it('first source is a near-tie — guard fires on THAT source; Case E fires on the first source, does NOT silently switch to a later source with a wider margin', () => {
-    // The first source is internally consistent (clean label, finite
-    // probability) but the margin is too narrow. The same-source
-    // resolver returns it; hasMeaningfulLead rejects it; Case E now
-    // takes over with the minimum "{label} currently leads." floor
-    // (link-safe response floor workstream). The resolver does NOT
-    // cherry-pick a later source's wider margin — that would be a
-    // different form of cross-source mixing on the maths side. Pins
-    // "first acceptable source wins" so the guards apply to a single
-    // coherent set of numbers. (First source = option_comparison since
-    // the current-first reorder in the decompose-hardening lane.)
+  it('the selected current share stays attached without borrowing a wider legacy gap', () => {
     const enrichment: Record<string, unknown> = {
       option_comparison: [
         { option_id: 'opt_a', option_label: 'Hire X', win_probability: 0.41 },
@@ -833,17 +851,15 @@ describe('resolveWinner — same-source label + probability invariant', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.20 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // Near-tie effectively-tied output (1pp). Crucially the 80% from the
-    // later legacy results source must NOT leak — the same-source invariant
-    // still holds.
-    expect(out).toBe('Hire X is currently only fractionally ahead, so the options are effectively tied.');
+    expect(out).toBe('Hire X came out ahead in 41% of runs of this model. Run the follow-up checks before treating this as final.');
     expect(out).not.toContain('80%');
-    expect(out).not.toMatch(/\d+%/);
+    expect(out).toContain('41%');
+    expect(out).not.toContain('80%');
   });
 });
 
@@ -1081,7 +1097,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_c', option_label: 'Plan C', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1089,19 +1105,19 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     expect(out).toBe('Hire X currently leads.');
   });
 
-  it('low margin (0.42 / 0.40, 2pp) + clean label → near-tie close-call line', () => {
+  it('raw closeness does not replace the selected option’s own probability', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A came out ahead in 42% of runs of this model, but the options are close.');
+    expect(out).toBe('Option A came out ahead in 42% of runs of this model. Run the follow-up checks before treating this as final.');
   });
 
   it('soft confidence + driver + fragility → still Case E (no overclaim)', () => {
@@ -1122,7 +1138,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         fragile_edges: [{ from_label: 'Throughput', switch_probability: 0.5 }],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1141,7 +1157,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'partial',
@@ -1158,7 +1174,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'unknown',
@@ -1175,7 +1191,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1191,7 +1207,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1208,7 +1224,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1224,7 +1240,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'unknown',  // longest suffix
@@ -1237,7 +1253,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
     // Regression: with Case E added, strong cases must remain the first
     // choice. A clear lead (62% vs 38%, 24pp margin) with driver +
     // fragility data must produce Case A, not Case E.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1257,7 +1273,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_b', option_label: 'opt_b', win_probability: 0.33 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1275,7 +1291,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1289,7 +1305,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_a', win_probability: 0.34 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1303,7 +1319,7 @@ describe('buildAnalysisResultHeadline — Case E link-safe floor', () => {
         { option_id: 'opt_a', option_label: 'Hire X' /* no win_probability */ },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildMalformedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1357,7 +1373,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
         { option_id: 'opt_b', option_label: 'Plan B', win_probability: 0.33 },
       ],
     };
-    const descriptor = describeAnalysisHeadline({
+    const descriptor = describeAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1370,25 +1386,25 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
     expect(descriptor.has_fragility).toBe(false);
   });
 
-  it('near-tie low margin (0.42 / 0.40) — case NT, reason: low_margin', () => {
+  it('near-tie low margin (0.42 / 0.40) — case D, reason: low_margin', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
       ],
     };
-    const descriptor = describeAnalysisHeadline({
+    const descriptor = describeAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(descriptor.case).toBe('NT');
-    expect(descriptor.reason).toBe('low_margin');
-    expect(descriptor.margin_bucket).toBe('tight');
+    expect(descriptor.case).toBe('D');
+    expect(descriptor.reason).toBe('unknown');
+    expect(descriptor.margin_bucket).toBeNull();
   });
 
   it('Case A (strong lead with driver + fragility) — reason: unknown', () => {
-    const descriptor = describeAnalysisHeadline({
+    const descriptor = describeAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1397,7 +1413,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
     expect(descriptor.reason).toBe('unknown');
     expect(descriptor.has_driver).toBe(true);
     expect(descriptor.has_fragility).toBe(true);
-    expect(descriptor.margin_bucket).toBe('comfortable');  // 62 - 38 = 24pp
+    expect(descriptor.margin_bucket).toBeNull();
   });
 
   it('Case D — reason: unknown, has_driver false, has_fragility false', () => {
@@ -1407,7 +1423,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.38 },
       ],
     };
-    const descriptor = describeAnalysisHeadline({
+    const descriptor = describeAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1424,7 +1440,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
         { option_id: 'opt_a', option_label: 'opt_a', win_probability: 0.62 },
       ],
     };
-    const descriptor = describeAnalysisHeadline({
+    const descriptor = describeAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1435,17 +1451,14 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
     expect(descriptor.has_clean_label).toBe(false);
   });
 
-  it('margin buckets reflect margin size (comfortable / moderate / tight)', () => {
-    // Comfortable (24pp)
-    const comfortable = describeAnalysisHeadline({
+  it('raw gaps of different sizes do not create permitted margin buckets', () => {
+    const comfortable = describeAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(comfortable.margin_bucket).toBe('comfortable');
-
-    // Moderate (10pp): 0.5 / 0.4
-    const moderate = describeAnalysisHeadline({
+    expect(comfortable.margin_bucket).toBeNull();
+    const moderate = describeAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.5 },
@@ -1455,10 +1468,8 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(moderate.margin_bucket).toBe('moderate');
-
-    // Tight (2pp): 0.42 / 0.40
-    const tight = describeAnalysisHeadline({
+    expect(moderate.margin_bucket).toBeNull();
+    const tight = describeAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.42 },
@@ -1468,7 +1479,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(tight.margin_bucket).toBe('tight');
+    expect(tight.margin_bucket).toBeNull();
   });
 
   it('single-option result — margin_bucket null', () => {
@@ -1477,7 +1488,7 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.62 },
       ],
     };
-    const descriptor = describeAnalysisHeadline({
+    const descriptor = describeAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1493,25 +1504,19 @@ describe('describeAnalysisHeadline — descriptor metadata for telemetry', () =>
 // ════════════════════════════════════════════════════════════════════
 
 describe('buildAnalysisResultHeadline — margin rendering (units)', () => {
-  it('renders the margin as an integer "N percentage points", never a fraction', () => {
-    // 0.70 - 0.08 = 0.62 fraction -> 62 percentage points. 62 must appear as
-    // percentage POINTS; the raw fraction (0.62 / "0.62 points") must never.
+  it('renders the selected share as an integer percentage without a raw gap', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire One Tech Lead', win_probability: 0.70 },
         { option_id: 'opt_b', option_label: 'Defer', win_probability: 0.08 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Hire One Tech Lead came out ahead in 70% of runs of this model.');
-    // Re-aimed: the headline no longer renders a margin, so the unit rule now
-    // applies to the statistic it DOES render — the leader's own win
-    // probability, as a whole integer percentage and never a raw decimal
-    // (0.70 must not reach a user as "0.7" or "70.0").
+    expect(out).toBe('Hire One Tech Lead came out ahead in 70% of runs of this model. Run the follow-up checks before treating this as final.');
     expect(out!).toContain('70% of runs of this model');
     expect(out!).not.toMatch(/\d+\.\d+/);
     expect(out!).not.toContain('0.62');
@@ -1531,7 +1536,7 @@ describe('buildAnalysisResultHeadline — margin rendering (units)', () => {
         fragile_edges: [{ from_label: 'Delivery Speed Assumption', switch_probability: 0.5 }],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1544,7 +1549,7 @@ describe('buildAnalysisResultHeadline — margin rendering (units)', () => {
 });
 
 describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
-  it('1pp lead (0.41 / 0.40) -> effectively tied, no margin number', () => {
+  it('a small raw gap does not suppress the selected option or its fragility caveat', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.41 },
@@ -1553,85 +1558,73 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
       factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Risk', switch_probability: 0.5 }] },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // provisional_doctrine_v0 (Mission B): level 'low' appends the
-    // robustness-honesty sentence; the near-tie line itself is unchanged.
     expect(out).toBe(
-      'Option A is currently only fractionally ahead, so the options are effectively tied. The result is not yet robust — small changes could flip it.',
+      'Option A came out ahead in 41% of runs of this model, but treat this as provisional: the result is sensitive to Risk. The result is not yet robust — small changes could flip it.',
     );
-    // No driver / fragility / probability / margin number at a near-tie.
     expect(out!).not.toContain('because');
-    expect(out!).not.toContain('sensitive to');
-    expect(out!).not.toMatch(/\d/);
+    expect(out!).not.toContain('effectively tied');
+    expect(out!).not.toContain('percentage points');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
-  it('3pp lead (0.45 / 0.42) -> close-call line naming the margin', () => {
+  it('raw 0.45 / 0.42 shares do not license a closeness claim', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.45 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Option A came out ahead in 45% of runs of this model, but the options are close.');
+    expect(out).toBe('Option A came out ahead in 45% of runs of this model. Run the follow-up checks before treating this as final.');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
-  it('near-tie preserves the status suffix', () => {
+  it('the selected-share headline preserves the partial status suffix', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.45 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'partial',
     });
     expect(out).toBe(
-      'Option A came out ahead in 45% of runs of this model, but the options are close. The run was flagged as partial — treat as provisional.',
+      'Option A came out ahead in 45% of runs of this model. Run the follow-up checks before treating this as final. The run was flagged as partial — treat as provisional.',
     );
   });
 
-  it('designated leader not actually ahead (margin <= 0) -> Doctrine D-W honest disambiguation, no false lead', () => {
-    // Superseded by Doctrine D-W (ROADMAP 2.52): the declared leader (opt_a,
-    // 0.40) trails the raw-odds argmax (opt_b, 0.45) by a marginal 5pp. Instead
-    // of the bland locked template (the pre-D-W null), emit the honest copy —
-    // still NO false "currently leads", now with the recommendation disclosed.
+  it('a permitted recommendation keeps its own share when a raw rival is higher', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.40 },
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.45 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A leads overall, though Option B has marginally better raw probability.',
+      'Option A came out ahead in 40% of runs of this model. Run the follow-up checks before treating this as final.',
     );
-    expect(out).not.toContain('came out ahead in');
+    expect(out).not.toContain('marginally');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
-  it('near-tie (<=1pp) with a label too long for the tied sentence returns null, not the Case E confident floor', () => {
-    // PR #223 review blocker regression: a long winner label makes the
-    // effectively-tied sentence exceed MAX_HEADLINE_CHARS while the much
-    // shorter "{label} currently leads." (Case E) still fits (~148-203 chars).
-    // The near-tie branch must return null (-> neutral locked template), NEVER
-    // fall through to the confident Case E floor.
+  it('a long selected label keeps the bounded floor without claiming a permitted tie', () => {
     const longLabel = 'A'.repeat(180);
     const enrichment: Record<string, unknown> = {
       results: [
@@ -1639,15 +1632,17 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.40 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe(`${longLabel} currently leads.`);
+    expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
+    expect(out).not.toContain('tied');
   });
 
-  it('near-tie close-call with a label too long for the close sentence returns null, not the Case E confident floor', () => {
+  it('a long selected label keeps the bounded floor without claiming permitted closeness', () => {
     const longLabel = 'A'.repeat(180);
     const enrichment: Record<string, unknown> = {
       results: [
@@ -1655,12 +1650,14 @@ describe('buildAnalysisResultHeadline — near-tie / close-call branch', () => {
         { option_id: 'opt_b', option_label: 'Option B', win_probability: 0.42 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe(`${longLabel} currently leads.`);
+    expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
+    expect(out).not.toContain('tied');
   });
 });
 
@@ -1677,7 +1674,7 @@ describe('buildAnalysisResultHeadline — driver / fragility de-duplication', ()
         fragile_edges: [{ from_label: 'Delivery Speed', switch_probability: 0.5 }],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1708,7 +1705,7 @@ describe('buildAnalysisResultHeadline — fragile reason is a single clean label
         ],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1801,7 +1798,7 @@ describe('isAllowedRunAnalysisAssistantText <-> emission lockstep (allowlist pro
   it('every emitted headline across the fixture matrix x suffixes passes the gate, and never emits the retired combined shape', () => {
     for (const { name, enrichment, id } of matrix) {
       for (const status of SUFFIXES) {
-        const out = buildAnalysisResultHeadline({
+        const out = buildAttestedHeadline({
           enrichment,
           leading_option_id: id,
           status_kind: status,
@@ -1835,7 +1832,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
   // This stops `v5.headline.fell_back reason:"soft_confidence"` from firing
   // when the enriched ingredients were actually present (the staging defect).
 
-  it('soft confidence + fragility (+ driver) + moderate margin — names the fragile reason, provisional', () => {
+  it('a low-share recommendation keeps its conservative floor without a permitted margin', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire Contractor', win_probability: 0.36 },
@@ -1851,34 +1848,27 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
         fragile_edges: [{ from_label: 'Overtime Intensity', switch_probability: 0.5 }],
       },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    // Fragility is preferred over the driver as the single named sensitivity.
-    // provisional_doctrine_v0 (Mission B): level 'low' appends the
-    // robustness-honesty sentence after the caution shape.
     expect(out).toBe(
-      'Hire Contractor came out ahead in 36% of runs of this model, but treat this as provisional: the result is sensitive to Overtime Intensity. The result is not yet robust — small changes could flip it.',
+      'Hire Contractor currently leads. The result is not yet robust — small changes could flip it.',
     );
     expect(out).not.toContain('because'); // never the confident driver framing
-    // Descriptor reports the enriched case (NOT 'E'), so the handler does not
-    // emit v5.headline.fell_back for this turn.
-    const desc = describeAnalysisHeadline({
+    const desc = describeAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(desc.case).toBe('SC');
+    expect(desc.case).toBe('E');
     expect(desc.has_driver).toBe(true);
     expect(desc.has_fragility).toBe(true);
-    // The emitted text is accepted by the registry grammar allowlist (reuses
-    // the Case A shape — no new pattern required).
     expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
   });
 
-  it('soft confidence + driver only (no fragility) — names the driver as the sensitivity, provisional', () => {
+  it('a low-share recommendation does not gain a sensitivity claim from a raw gap', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.33 },
@@ -1888,15 +1878,15 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       ],
       factor_sensitivity: [{ label: 'Launch Timing', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Option A came out ahead in 33% of runs of this model, but treat this as provisional: the result is sensitive to Launch Timing.',
+      'Option A currently leads.',
     );
-    expect(describeAnalysisHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' }).case).toBe('SC');
+    expect(describeAttestedHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' }).case).toBe('E');
   });
 
   it('soft confidence + real margin but NO driver and NO fragility — stays Case E (no fabricated reason)', () => {
@@ -1909,13 +1899,13 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       ],
       // No factor_sensitivity, no robustness → no driver, no fragility.
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
     expect(out).toBe('Option A currently leads.');
-    expect(describeAnalysisHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' }).case).toBe('E');
+    expect(describeAttestedHeadline({ enrichment, leading_option_id: 'opt_a', status_kind: 'ok' }).case).toBe('E');
   });
 
   it('soft confidence + near-tie margin (< 5pp) + driver + fragility — stays Case E (never reads a tie as a lead)', () => {
@@ -1928,7 +1918,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       factor_sensitivity: [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }] },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1952,7 +1942,7 @@ describe('soft-confidence enriched headline (Area F — deterministic-copy harde
       factor_sensitivity: [{ label: 'Overtime Intensity', elasticity: 0.7, confidence: 0.9, influence_score: 0.7 }],
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Overtime Intensity', switch_probability: 0.5 }] },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -1972,7 +1962,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
 
   const driver = [{ label: 'Cost', elasticity: 0.6, confidence: 0.8, influence_score: 0.6 }];
 
-  it('winner exactly 0.30 (boundary, inclusive) + 5pp margin + driver — qualifies for SC', () => {
+  it('a 0.30 recommendation does not qualify for enrichment using an unattested margin', () => {
     const enrichment: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Option A', win_probability: 0.30 },
@@ -1983,10 +1973,10 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       factor_sensitivity: driver,
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    expect(buildAnalysisResultHeadline(input)).toBe(
-      'Option A came out ahead in 30% of runs of this model, but treat this as provisional: the result is sensitive to Cost.',
+    expect(buildAttestedHeadline(input)).toBe(
+      'Option A currently leads.',
     );
-    expect(describeAnalysisHeadline(input).case).toBe('SC');
+    expect(describeAttestedHeadline(input).case).toBe('E');
   });
 
   it('winner 0.29 (below floor) + 5pp margin + driver — falls to conservative Case E, NOT enriched', () => {
@@ -2000,8 +1990,8 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       factor_sensitivity: driver,
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    expect(buildAnalysisResultHeadline(input)).toBe('Option A currently leads.');
-    expect(describeAnalysisHeadline(input).case).toBe('E');
+    expect(buildAttestedHeadline(input)).toBe('Option A currently leads.');
+    expect(describeAttestedHeadline(input).case).toBe('E');
   });
 
   it('winner 0.299 (a 0.29x value, below floor) + 6pp margin + driver — falls to Case E (NOT enriched), proving no pp-rounding leak', () => {
@@ -2017,12 +2007,11 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       factor_sensitivity: driver,
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    expect(buildAnalysisResultHeadline(input)).toBe('Option A currently leads.');
-    expect(describeAnalysisHeadline(input).case).toBe('E');
+    expect(buildAttestedHeadline(input)).toBe('Option A currently leads.');
+    expect(describeAttestedHeadline(input).case).toBe('E');
   });
 
-  it('floor is FP-safe: 0.30 via (0.1 + 0.2) still qualifies; a value 1e-8 below 0.30 does not', () => {
-    // 0.1 + 0.2 === 0.30000000000000004 in IEEE-754 — must qualify (>= 0.30).
+  it('rounding around 0.30 cannot manufacture a permitted margin', () => {
     const above = {
       enrichment: {
         results: [
@@ -2036,9 +2025,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       leading_option_id: 'opt_a',
       status_kind: 'ok' as const,
     };
-    expect(describeAnalysisHeadline(above).case).toBe('SC');
-
-    // 0.3 - 1e-8 === 0.29999999 — below the floor (epsilon is only 1e-9) → Case E.
+    expect(describeAttestedHeadline(above).case).toBe('E');
     const below = {
       enrichment: {
         results: [
@@ -2052,7 +2039,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       leading_option_id: 'opt_a',
       status_kind: 'ok' as const,
     };
-    expect(describeAnalysisHeadline(below).case).toBe('E');
+    expect(describeAttestedHeadline(below).case).toBe('E');
   });
 
   it('winner 0.24 in a fragmented 5-way race (the motivating case) — bare Case E, no enriched margin headline', () => {
@@ -2068,7 +2055,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
       robustness: { level: 'low', fragile_edges: [{ from_label: 'Cost', switch_probability: 0.5 }] },
     };
     const input = { enrichment, leading_option_id: 'opt_a', status_kind: 'ok' as const };
-    const out = buildAnalysisResultHeadline(input);
+    const out = buildAttestedHeadline(input);
     // provisional_doctrine_v0 (Mission B): level 'low' appends the
     // robustness-honesty sentence; the Case E floor itself is unchanged.
     expect(out).toBe(
@@ -2076,7 +2063,7 @@ describe('soft-confidence lower floor — SC_MIN_LEAD_PROBABILITY = 0.30 (inclus
     );
     expect(out).not.toContain('percentage points');
     expect(out).not.toContain('sensitive to');
-    expect(describeAnalysisHeadline(input).case).toBe('E');
+    expect(describeAttestedHeadline(input).case).toBe('E');
   });
 });
 
@@ -2099,7 +2086,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
     // fac_capacity (0.9) is the raw strongest but option-controlled; naming the
     // weaker external fac_market (0.4) as "the strongest driver" would be false,
     // so the clause is omitted entirely (headline falls to a no-driver shape).
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: ENRICH_CONTROLLED,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2123,7 +2110,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       ],
       robustness: { level: 'moderate' },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2142,7 +2129,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       ],
       robustness: { level: 'moderate' },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2166,7 +2153,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
       ],
       robustness: { level: 'moderate' },
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2178,7 +2165,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
   });
 
   it('without the controlled set, the controlled lever WOULD be named (guard is load-bearing)', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: ENRICH_CONTROLLED,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2187,7 +2174,7 @@ describe('buildAnalysisResultHeadline — Spine A option-controlled-driver suppr
   });
 
   it('omits the driver clause entirely when every driver is option-controlled', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: ENRICH_CONTROLLED.results,
         factor_sensitivity: [
@@ -2213,7 +2200,7 @@ describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY
     'Hire One Senior Technical Lead came out ahead in 62% of runs of this model, but treat this as provisional: the result is sensitive to Hiring and Salary Cost.';
 
   it('samples_reduced: true appends the reduced-samples suffix to the emitted headline', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2227,7 +2214,7 @@ describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY
   });
 
   it('reduced suffix composes BEFORE the status suffix (grammar order)', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'partial',
@@ -2240,12 +2227,12 @@ describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY
   });
 
   it('flag absent or false → headline unchanged (default posture)', () => {
-    const withoutFlag = buildAnalysisResultHeadline({
+    const withoutFlag = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    const withFalse = buildAnalysisResultHeadline({
+    const withFalse = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2265,17 +2252,11 @@ describe('samples_reduced suffix (seam item 3 — SAMPLES_REDUCED_FOR_COMPLEXITY
 });
 
 // ============================================================================
-// Doctrine D-W (ROADMAP 2.52): declared leader ≠ argmax raw win_probability.
-// PLoT can recommend an option for robustness/stability reasons even when a
-// rival edges it on RAW win probability. The honest copy must name the
-// recommended option AND disclose the runner-up's marginally-better raw odds —
-// never a false "currently leads" and never the bland locked template that
-// silently drops the disambiguation. Fires ONLY when the declared leader is
-// present + usable AND a runner-up's win_probability is STRICTLY higher (leader
-// ≠ argmax) AND the raw-odds gap is small enough that "marginally" is truthful.
-// Copy/display only — no producer number is read, changed, or emitted.
+// Historical D-W scenarios under the current producer contract. PLoT may
+// recommend a lower-share permitted option. CEE keeps that identity and its
+// own share; raw rivals do not supply a permitted runner-up, tie, or gap.
 // ============================================================================
-describe('D-W leader-trails-argmax honest disambiguation copy', () => {
+describe('producer recommendation when raw share order differs', () => {
   // opt_a is the raw-odds leader (0.55) but opt_b is the DECLARED leader (0.45)
   // — a 10 percentage-point raw-odds gap PLoT's recommendation overrides.
   const LEADER_TRAILS: Record<string, unknown> = {
@@ -2285,22 +2266,18 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     ],
   };
 
-  it('names the recommended option AND the runner-up with better raw odds (sign-correct)', () => {
-    const out = buildAnalysisResultHeadline({
+  it('names the recommended option with its own share without declaring a permitted rival', () => {
+    const out = buildAttestedHeadline({
       enrichment: LEADER_TRAILS,
       leading_option_id: 'opt_b',
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+      'Defer Hiring came out ahead in 45% of runs of this model. Run the follow-up checks before treating this as final.',
     );
-    // SIGN GUARD (anti sign-inversion, ref 77a4d577f): the runner-up — the
-    // higher raw-probability option — is the one credited with "better raw
-    // probability"; the trailing declared leader must NEVER be.
-    expect(out).toContain('Hire One Senior Technical Lead has marginally better raw probability');
+    expect(out).not.toContain('Hire One Senior Technical Lead');
     expect(out).not.toContain('Defer Hiring has marginally better raw probability');
-    // Never a false "currently leads" for a leader that trails on raw odds.
-    expect(out).not.toContain('came out ahead in');
+    expect(out).toContain('came out ahead in 45%');
     expect(isAllowedRunAnalysisAssistantText(out)).toBe(true);
     expect(out!.length).toBeLessThanOrEqual(MAX_HEADLINE_CHARS);
   });
@@ -2308,7 +2285,7 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
   it('leader == argmax → unchanged (branch does not fire; normal lead copy)', () => {
     // opt_a is BOTH the declared leader and the raw-odds argmax → the honest
     // disambiguation must NOT fire; the ordinary "currently leads" copy stands.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: LEADER_TRAILS,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -2317,80 +2294,70 @@ describe('D-W leader-trails-argmax honest disambiguation copy', () => {
     expect(out).not.toContain('leads overall');
   });
 
-  it('leader trails by a NON-marginal gap → no false "marginally"/"leads" claim (neutral floor)', () => {
+  it('a lower-share permitted recommendation is not recrowned from raw odds', () => {
     const WIDE_GAP: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.72 },
         { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.28 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: WIDE_GAP,
       leading_option_id: 'opt_b',
       status_kind: 'ok',
     });
-    // A 44pp gap is not "marginal" — never claim it is, and never assert the
-    // trailing leader "currently leads". Fall back to the neutral locked
-    // template (null from the builder).
-    expect(out).toBeNull();
+    expect(out).toBe('Defer Hiring currently leads.');
+    expect(out).not.toContain('marginally');
   });
 
   // Finding 7 (D-W unrounded gate): the marginal-gap gate must read the TRUE
   // raw-odds gap, not the gap rounded to whole percentage points. Rounding
   // admitted a sub-1pp gap that rounds UP to 1pp and a >10pp gap that rounds
   // DOWN to 10pp — both false "marginally better" claims.
-  it('leader trails by a sub-1pp gap that ROUNDS to 1pp → tie, neutral floor (no false marginal claim)', () => {
-    // 0.55 − 0.5449 = 0.51pp. The buggy gate rounds this to 1pp and emits the
-    // "marginally better" copy; the true gap is a tie, so the honest output is
-    // the neutral locked-template floor (null).
+  it('a sub-1pp raw gap does not create a permitted tie claim', () => {
     const NEAR_TIE: Record<string, unknown> = {
       results: [
-        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
-        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.5449 },
+        { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.50255 },
+        { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.49745 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: NEAR_TIE,
       leading_option_id: 'opt_b',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe('Defer Hiring came out ahead in 50% of runs of this model. Run the follow-up checks before treating this as final.');
   });
 
-  it('leader trails by a >10pp gap that ROUNDS to 10pp → not marginal, neutral floor', () => {
-    // 0.55 − 0.4451 = 10.49pp. The buggy gate rounds this to 10pp and emits the
-    // "marginally better" copy; >10pp is beyond the marginal bound, so the
-    // honest output is the neutral locked-template floor (null).
+  it('a raw gap over 10pp does not create a different permitted recommendation', () => {
     const OVER_MARGIN: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
         { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.4451 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: OVER_MARGIN,
       leading_option_id: 'opt_b',
       status_kind: 'ok',
     });
-    expect(out).toBeNull();
+    expect(out).toBe('Defer Hiring came out ahead in 45% of runs of this model. Run the follow-up checks before treating this as final.');
   });
 
-  it('leader trails by exactly 10pp → still marginal (float-noise must not exclude the bound)', () => {
-    // 0.55 − 0.45 evaluates to 0.10000000000000003 in IEEE-754; the epsilon in
-    // the gate keeps this on-bound case inside the marginal window.
+  it('a raw 10pp gap cannot attach a rival to the permitted recommendation', () => {
     const EXACT_BOUND: Record<string, unknown> = {
       results: [
         { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.55 },
         { option_id: 'opt_b', option_label: 'Defer Hiring', win_probability: 0.45 },
       ],
     };
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: EXACT_BOUND,
       leading_option_id: 'opt_b',
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Defer Hiring leads overall, though Hire One Senior Technical Lead has marginally better raw probability.',
+      'Defer Hiring came out ahead in 45% of runs of this model. Run the follow-up checks before treating this as final.',
     );
   });
 

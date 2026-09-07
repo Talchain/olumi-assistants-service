@@ -51,6 +51,23 @@ import {
   isAllowedRunAnalysisAssistantText,
 } from '../analysis-result-headline.js';
 
+import { attestedConsumerFixture } from '../../../../tests/fixtures/plot/attested-consumer-fixture.js';
+
+/** Each test explicitly declares the producer's selected ID. No argmax or label
+ * recovery occurs in this fixture adapter. Malformed producer rows still fail. */
+function currentHeadlineInput(input: Parameters<typeof buildAnalysisResultHeadline>[0]) {
+  const rows = input.enrichment.option_comparison ?? input.enrichment.results;
+  if (!input.leading_option_id || !Array.isArray(rows) || rows.length === 0) return input;
+  return { ...input, enrichment: attestedConsumerFixture(
+    input.enrichment, input.leading_option_id, rows as Record<string, unknown>[],
+  ) };
+}
+
+function buildAttestedHeadline(input: Parameters<typeof buildAnalysisResultHeadline>[0]) {
+  return buildAnalysisResultHeadline(currentHeadlineInput(input));
+}
+
+
 /** Two options, 62/38 — a clean, comfortably-leading, fragility-bearing run. */
 const HIRING_FULL: Record<string, unknown> = {
   results: [
@@ -71,7 +88,7 @@ const HIRING_FULL: Record<string, unknown> = {
 
 describe('headline states the leader’s own win probability, not the gap', () => {
   it('Case A (winner + provisional caution): states the leader’s win probability "of this model"', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: HIRING_FULL,
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -85,7 +102,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
   });
 
   it('Case B (winner + driver, robust): states the leader’s win probability "of this model"', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: { ...HIRING_FULL, robustness: { level: 'moderate' } },
       leading_option_id: 'opt_a',
       status_kind: 'ok',
@@ -97,7 +114,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
   });
 
   it('Case D (winner + number only): states the leader’s win probability "of this model"', () => {
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.62 },
@@ -109,7 +126,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead came out ahead in 62% of runs of this model.',
+      'Hire One Senior Technical Lead came out ahead in 62% of runs of this model. Run the follow-up checks before treating this as final.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
@@ -126,7 +143,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
     // because a rival fell away, not because the leader did anything.
     const leaderSteady = { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.62 };
 
-    const spreadField = buildAnalysisResultHeadline({
+    const spreadField = buildAttestedHeadline({
       enrichment: {
         results: [
           leaderSteady,
@@ -139,7 +156,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
 
-    const collapsedField = buildAnalysisResultHeadline({
+    const collapsedField = buildAttestedHeadline({
       enrichment: {
         results: [
           leaderSteady,
@@ -166,7 +183,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
     // The discriminating half of the pair above. The previous test proves the
     // number is INSENSITIVE to the rest of the field; on its own that is also
     // satisfied by a constant, so this proves it still MOVES with the leader.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.91 },
@@ -177,7 +194,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 91% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot came out ahead in 91% of runs of this model. Run the follow-up checks before treating this as final.');
   });
 
   // ==========================================================================
@@ -199,7 +216,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
     // Case D band has always used, and truncation would bias EVERY displayed
     // figure downward, understating the leader on average by half a point for
     // no reason a user could discover.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.615 },
@@ -210,7 +227,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 62% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot came out ahead in 62% of runs of this model. Run the follow-up checks before treating this as final.');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
@@ -228,7 +245,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
     // 61.4, so round → 61 while ceil → 62. With 0.615 above, the operator is
     // now pinned from BOTH sides — one case alone only ever proves the
     // rounding is not one particular wrong thing.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.614 },
@@ -239,7 +256,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 61% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot came out ahead in 61% of runs of this model. Run the follow-up checks before treating this as final.');
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
@@ -247,7 +264,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
     // The upper-boundary partner: 0.999 → 100 under round, 99 under floor. Also
     // guards the grammar's `\d{1,3}` slot at three digits and re-asserts the
     // no-raw-decimals content defence at the value most likely to leak one.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Switch to HubSpot', win_probability: 0.999 },
@@ -258,7 +275,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       leading_option_id: 'opt_a',
       status_kind: 'ok',
     });
-    expect(out).toBe('Switch to HubSpot came out ahead in 100% of runs of this model.');
+    expect(out).toBe('Switch to HubSpot came out ahead in 100% of runs of this model. Run the follow-up checks before treating this as final.');
     expect(out!).not.toMatch(/\d+\.\d+/);
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
@@ -267,12 +284,12 @@ describe('headline states the leader’s own win probability, not the gap', () =
   // Bands that must NOT acquire a number — the corpus in the other direction
   // ==========================================================================
 
-  it('near-tie (1pp < margin < 5pp) also states the leader’s win probability', () => {
+  it('nearby raw shares preserve the selected option’s own probability without a local closeness claim', () => {
     // This band DOES carry a number today ("leads by 4 percentage points"), so
     // it carries the category error and must convert with the rest. Its
     // closeness caveat is untouched — the change is to the statistic, never to
     // the honesty framing around it.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.52 },
@@ -284,7 +301,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead came out ahead in 52% of runs of this model, but the options are close.',
+      'Hire One Senior Technical Lead came out ahead in 52% of runs of this model. Run the follow-up checks before treating this as final.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
@@ -294,7 +311,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
     // gate declined this run, so the floor must NOT gain a win-probability
     // number as a side effect of the change. This is the corpus in the other
     // direction — the bands that must stay exactly as they are.
-    const out = buildAnalysisResultHeadline({
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.35 },
@@ -309,8 +326,8 @@ describe('headline states the leader’s own win probability, not the gap', () =
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });
 
-  it('near-tie (≤1pp) keeps its number-free "effectively tied" copy', () => {
-    const out = buildAnalysisResultHeadline({
+  it('a tiny raw gap does not license a permitted tie claim', () => {
+    const out = buildAttestedHeadline({
       enrichment: {
         results: [
           { option_id: 'opt_a', option_label: 'Hire One Senior Technical Lead', win_probability: 0.505 },
@@ -322,7 +339,7 @@ describe('headline states the leader’s own win probability, not the gap', () =
       status_kind: 'ok',
     });
     expect(out).toBe(
-      'Hire One Senior Technical Lead is currently only fractionally ahead, so the options are effectively tied.',
+      'Hire One Senior Technical Lead came out ahead in 51% of runs of this model. Run the follow-up checks before treating this as final.',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });

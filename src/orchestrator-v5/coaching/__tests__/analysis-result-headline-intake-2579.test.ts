@@ -26,6 +26,7 @@ import {
   RUN_ANALYSIS_LOCKED_TEMPLATES,
 } from '../analysis-result-headline.js';
 import { buildIntakeOptionDisclosure } from '../intake-option-disclosure.js';
+import { attestedConsumerFixture } from '../../../../tests/fixtures/plot/attested-consumer-fixture.js';
 import {
   applyIntakeToLeaderPermission,
   deriveIntakeOptionReconciliation,
@@ -62,7 +63,7 @@ const FIVE_OPTION_GRAPH = {
 };
 
 /** A 9-percentage-point lead for the retrofit, as in the capture. */
-const BAKERY_ENRICHMENT: Record<string, unknown> = {
+const LEGACY_BAKERY_ENRICHMENT: Record<string, unknown> = {
   results: [
     { option_id: 'opt_retro', option_label: 'Energy-Efficiency Retrofit', win_probability: 0.42 },
     { option_id: 'opt_pack', option_label: 'Automated Packing Cell', win_probability: 0.33 },
@@ -70,6 +71,13 @@ const BAKERY_ENRICHMENT: Record<string, unknown> = {
     { option_id: 'opt_vans', option_label: 'Refrigerated Delivery Vans', win_probability: 0.1 },
   ],
 };
+// The intake discriminator runs against an explicit current producer
+// recommendation. Its refusal arm must not pass merely because authority is
+// missing from an old recorded fixture.
+const BAKERY_ENRICHMENT = attestedConsumerFixture(
+  LEGACY_BAKERY_ENRICHMENT, 'opt_retro',
+  LEGACY_BAKERY_ENRICHMENT.results as Record<string, unknown>[],
+);
 
 function headlineInputFor(graph: unknown, brief: string | undefined) {
   const intake = deriveIntakeOptionReconciliation(brief, readGraphOptionLabels(graph));

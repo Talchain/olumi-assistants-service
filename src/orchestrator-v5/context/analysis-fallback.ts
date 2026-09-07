@@ -60,7 +60,6 @@ import {
   type InfluenceDirection,
 } from '../../orchestrator/context/influence-direction.js';
 import { readDriverInfluenceScore } from '../../orchestrator/context/driver-influence.js';
-import { isRecommendableTypedOption } from '../tools/handlers/recommendable-option.js';
 import type { V2RunResponseEnvelope } from '../../orchestrator/types.js';
 import {
   deriveConfidenceTierFromEnrichment,
@@ -541,7 +540,7 @@ export function buildAnalysisFromPriorFacts(
   }
   const fromEnrichment =
     enrichmentRecord !== null
-      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope)
+      ? compactAnalysis(enrichmentRecord as unknown as V2RunResponseEnvelope, undefined, { factResult: result })
       : null;
   if (enrichmentRecord !== null && fromEnrichment !== null) {
     if (fromEnrichment.options.length > 0) {
@@ -552,27 +551,11 @@ export function buildAnalysisFromPriorFacts(
           ? { ...o, option_label: labelMap.get(o.option_id)! }
           : o,
       );
-      // Status gate (shared with compactAnalysis / projectAnalysis / the direct
-      // receipt via the ONE isRecommendableOption predicate). `relabelled`
-      // deliberately retains the FULL option list (errored options kept so the
-      // coach can still disclose they ran) and is sorted by win_probability
-      // descending, so `relabelled[0]` can be a FAILED option carrying the top
-      // win_probability. Taking it as the winner here would RE-CROWN the failed
-      // option that compactAnalysis already excluded — desyncing the winner from
-      // the margin, which compactAnalysis measures over the recommendable subset
-      // only (fromEnrichment.margin / margin_pp flow through the `...fromEnrichment`
-      // spread below). Select the top RECOMMENDABLE option so winner and margin
-      // derive from the SAME subset; when none is recommendable, fall through to
-      // the honest empty winner compactAnalysis already produced. `relabelled`
-      // preserves the win_probability order, so `[0]` of the filtered list is the
-      // same option deriveWinner crowned inside compactAnalysis.
-      const topRecommendable = relabelled.filter(isRecommendableTypedOption)[0];
-      const winner = topRecommendable
-        ? {
-            option_id: topRecommendable.option_id,
-            option_label: topRecommendable.option_label,
-            win_probability: topRecommendable.win_probability,
-          }
+      // Relabelling must preserve the producer-selected identity and all flags.
+      const selectedWinner = relabelled.find((option) =>
+        option.option_id === fromEnrichment.winner.option_id);
+      const winner = selectedWinner
+        ? { ...fromEnrichment.winner, option_label: selectedWinner.option_label }
         : fromEnrichment.winner;
 
       // compactAnalysis only walks per-option `results[].factor_sensitivity`
@@ -608,32 +591,12 @@ export function buildAnalysisFromPriorFacts(
     return a[0].localeCompare(b[0]);
   });
 
-  // If the fact declared a leading_option_id, ensure it's the winner even
-  // when win_probabilities is absent or ties on probability. Otherwise fall
-  // back to the first sorted entry.
-  const leadingFromFact = result.leading_option_id;
-  let winner: AnalysisResponseSummary['winner'];
-  if (leadingFromFact) {
-    const leadingProb =
-      typeof winProbabilities[leadingFromFact] === 'number'
-        ? winProbabilities[leadingFromFact]
-        : 0;
-    winner = {
-      option_id: leadingFromFact,
-      option_label: labelFor(leadingFromFact),
-      win_probability: leadingProb,
-    };
-  } else if (sortedEntries.length > 0) {
-    const [optionId, prob] = sortedEntries[0]!;
-    winner = {
-      option_id: optionId,
-      option_label: labelFor(optionId),
-      win_probability: prob,
-    };
-  } else {
-    // No winner extractable — caller should treat this fact as unusable.
-    return null;
-  }
+  // A historical stored ID or probability map is data, not current objective
+  // authority. Preserve the figures without synthesising a recommendation.
+  if (sortedEntries.length === 0) return fromEnrichment;
+  const winner: AnalysisResponseSummary['winner'] = {
+    option_id: '', option_label: '', win_probability: 0,
+  };
 
   const options: AnalysisResponseSummary['options'] = sortedEntries.map(
     ([optionId, prob]) => ({
@@ -644,11 +607,8 @@ export function buildAnalysisFromPriorFacts(
     }),
   );
 
-  const margin =
-    sortedEntries.length >= 2
-      ? (sortedEntries[0]![1] - sortedEntries[1]![1])
-      : null;
-  const marginPp = margin === null ? null : Math.round(margin * 1000) / 10;
+  const margin = null;
+  const marginPp = null;
 
   const minimal: AnalysisResponseSummary = {
     winner,

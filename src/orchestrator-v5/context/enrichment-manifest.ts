@@ -114,6 +114,7 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   // Science payloads (:1002-1091)
   'critiques', // :1002
   'option_comparison', // :1005
+  'objective_ranking', // Science objective train: engine-v3.ts RunResponseV3 shared schema member
   'edge_sensitivity', // :1017
   'sensitivity_reference_option_id', // :1030
   'path_decomposition', // :1042
@@ -376,6 +377,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['status_reason', R_STATUS_SPINE],
   ['approximate', R_STATUS_SPINE],
   ['option_comparison_status', R_STATUS_SPINE],
+  ['objective_ranking', 'Consumed by compactAnalysis/objective-recommendation before signal reconciliation; governs recommendation availability, not a separate narrated raw ranking.'],
   ['robustness_status', R_STATUS_SPINE],
   ['drivers_status', R_STATUS_SPINE],
   ['constraints_status', R_STATUS_SPINE],
@@ -470,7 +472,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
  * inverts the direction of truth. Re-run the command against PLoT, then decide
  * what the manifest should say.
  */
-export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP = '3d13e0ac' as const;
+export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS_TIP = 'e64e440' as const;
 export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS: ReadonlySet<string> = new Set<string>([
   '_meta', 'analysis_status', 'approximate', 'auto_noise_applied',
   'auto_noise_provenance', 'ceeTrace', 'cee_status', 'conditional_probabilities',
@@ -484,7 +486,7 @@ export const PLOT_RUN_RESPONSE_V3_TOPLEVEL_KEYS: ReadonlySet<string> = new Set<s
   'flip_thresholds_status', 'flip_thresholds_status_reason', 'identifiability',
   'improvement_guidance', 'inference_warnings', 'insights',
   'isl_analysis_status', 'isl_status_reason', 'm1_coaching', 'm1_review',
-  'meta', 'option_comparison', 'option_comparison_status', 'p_win_sensitivity',
+  'meta', 'objective_ranking', 'option_comparison', 'option_comparison_status', 'p_win_sensitivity',
   'path_decomposition', 'preflight_version', 'processing_time_ms', 'rationale',
   'request_id', 'request_schema_version', 'response_hash', 'review_cards',
   'review_failure_codes', 'review_meta', 'review_skip_reason', 'review_status',

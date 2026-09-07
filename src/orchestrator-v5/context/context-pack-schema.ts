@@ -129,6 +129,7 @@ const ContextPackGraphSchema = z
 
 const ContextPackAnalysisOptionSchema = z
   .object({
+    rank: z.number().int().positive().optional(),
     label: z.string(),
     probability: z.number().min(0).max(1),
     /**

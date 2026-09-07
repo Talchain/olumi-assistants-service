@@ -47,17 +47,24 @@ import {
   type ScenarioReader,
 } from '../run-analysis.js';
 import { makeMessagePayload } from '../../../__tests__/fixtures.js';
+import { attestedConsumerFixture } from '../../../../../tests/fixtures/plot/attested-consumer-fixture.js';
 
 // Read the fixture via fs rather than a `with { type: 'json' }` import
 // attribute: the full tsconfig (module=Node16, the typecheck-drift ratchet's
 // config) rejects import attributes with TS2823, and this file must stay OUT
 // of the frozen error baseline.
-const happyFixture = JSON.parse(
+const legacyHappyFixture = JSON.parse(
   readFileSync(
     new URL('../../../../../tests/fixtures/plot/v2-run-golden-happy.json', import.meta.url),
     'utf8',
   ),
 ) as Record<string, unknown>;
+// Both constraint arms and the positive control consume the same current
+// producer authority, bound to the opt_a/opt_b request below. Constraint refusal
+// remains the only difference between the positive and negative observations.
+const happyFixture = attestedConsumerFixture(
+  legacyHappyFixture, 'opt_a', legacyHappyFixture.results as Record<string, unknown>[],
+);
 
 const TEST_SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TEST_REQUEST_ID = 'req-r1225-derived-target';
