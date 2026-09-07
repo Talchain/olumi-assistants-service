@@ -1638,6 +1638,10 @@ export const TelemetryEvents = {
   // this event.
   V5DecisionReviewContractViolation: "v5.decision_review.contract_violation",
 
+  // Stored review prose/fact corrections, emitted by decision-review-enricher.
+  // Routing keys, bounded rule codes and counts only; no user prose or values.
+  V5DecisionReviewProseFactViolation: "v5.decision_review.prose_fact_violation",
+
   // V5 Phase 2.5 Defect A — edit_graph dispatch state observability. Three
   // events cover the graphState resolution outcomes for an edit-intent turn,
   // so the routing-contract invariant (edit intent → mutation OR clarification
