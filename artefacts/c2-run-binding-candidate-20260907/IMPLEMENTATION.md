@@ -2,7 +2,7 @@
 
 **CI repair update:** the initial head's required boundary-pattern gate and two fixture compatibility tests failed. The repair removes the helper's two double-casts without weakening validation, migrates only producer-faithful test hashes/freshness, and adds negative identity controls. Local verification is now 224/224 focused tests plus the unchanged boundary gate, scoped compiler and lint. Remote CI still needs its own result; the original 209 passes below were not CI clearance. See [the diagnosis and repair receipt](https://github.com/Talchain/olumi-assistants-service/blob/codex/c2-run-fact-identity-20260907/artefacts/c2-run-binding-candidate-20260907/CI-REPAIR.md).
 
-**Dependency order: #1372 → #1371 → this PR. Do not merge this candidate ahead of those PRs.** Core is the sole product integrator. Merge-forward between integrations; no rebase. This branch has merged forward already-landed staging `243287ed5865c42f780f2e9267569a9f46f65e4d` (local merge `9ba0d53557db4ab37a9e706be741bff5645b04a0`). Neither unlanded dependency has been merged into this candidate.
+**Current integration hold:** #1371 merged at 01:41:26Z as `6ec2163fd78f005bf18387cdbc7a81ee85b88abe`; #1372 is still open. The former proposed #1372 → #1371 order is no longer a future sequence. Core remains the sole product integrator and determines the remaining order. This candidate is verified on staging `243287ed5865c42f780f2e9267569a9f46f65e4d` (local merge `9ba0d53557db4ab37a9e706be741bff5645b04a0`), not on `6ec2163f`. Its next integration must merge forward, preserving `6ec2163f` and any Core follow-up repair; no rebase.
 
 Core granted exclusive source ownership in CCC-PRIMARY-058, programme docs `5a623edd`, 7 September 00:38Z. The previously banked integration is now applied as product source, not merely a helper or patch proposal.
 
@@ -45,7 +45,7 @@ The tests exercise actual strict run-fact/response/state schemas, real composer/
 
 Read #1371 at `94906477e6f04ac8928a790fccc9296813118553`, including its source-fact co-selection and FRESH-only grounding block. Its payload-scoped robustness reader remains untouched: C2 does not replace missing payload evidence with hidden fact evidence.
 
-**This head is not a composed test of the two unlanded dependencies.** After #1372 and then #1371 land, merge staging forward and rerun their affected focused checks with C2 before requesting release clearance.
+**This head is not a composed test of landed #1371, its needed refusal/provisional follow-up, or open #1372.** Merge current staging and Core's eventual repair forward, in Core's chosen remaining integration order, then rerun affected focused checks with C2 before requesting release clearance. The independently reproduced #1371 leader leak remains open; C2's no-fact-context compatibility path does not close it.
 
 1. #1371's ordinary prose branches still omit `priorFacts` under the existing completed-run delta gate. Their newly grounded blocks therefore remain outside this C2 binding adoption. Do not remove that gate or join `promptAnalysisSourceFact` to a canonical state selected from another array/rerun. Widening adoption needs an explicit same-source caller-context change.
 2. Conditional interpretation policy is still unconsumed. The strict current run-result/state contracts have no versioned interpretation/persistence slot. This increment does not create one or hide a CEE record inside engine enrichment. Historical interpretation persistence requires a canonical contract → producer write → restore decision.

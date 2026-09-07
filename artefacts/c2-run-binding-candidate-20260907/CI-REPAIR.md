@@ -1,6 +1,6 @@
 # C2 CI repair — 7 September 2026
 
-Repair of exact PR #1373 head `89bed009d1bcfe790b73357b78bbd1fe113bbda8`. No composer, finaliser, reader, executor, schema, UI or claim-policy behavior was weakened.
+Repair of exact PR #1373 head `89bed009d1bcfe790b73357b78bbd1fe113bbda8`, committed as `6af9794cd217c69c7ccb5fe5530abcd93b055fd6`. No composer, finaliser, reader, executor, schema, UI or claim-policy behavior was weakened.
 
 ## Actual CI failures
 
@@ -49,4 +49,4 @@ node node_modules/vitest/vitest.mjs run src/orchestrator-v5/context/__tests__/an
 
 ## Remaining limits
 
-Remote CI on the repair head still needs its own result. No full local estate test, provider/browser call, merge or deployment was performed. Dependency order remains #1372 → #1371 → C2, merge-forward. #1371's independently reproduced refusal/provisional blocker is NOT closed by C2's unchanged no-fact-context compatibility path. Conditional policy consumption, historical versioned persistence and broader consumer adoption remain the boundaries documented in IMPLEMENTATION.md.
+Remote CI on the repair head still needs its own result. No full local estate test, provider/browser call, product merge or deployment was performed. During this repair #1371 was confirmed merged at 01:41:26Z as `6ec2163fd78f005bf18387cdbc7a81ee85b88abe`; #1372 remains open. The old proposed dependency order is historical, not the remaining sequence. Actual local validation base remains `243287ed`; this repair has NOT incorporated or tested `6ec2163f`. Core determines the next order, and merge-forward must preserve `6ec2163f` plus any Core follow-up repair. #1371's independently reproduced refusal/provisional blocker is NOT closed by C2's unchanged no-fact-context compatibility path. Conditional policy consumption, historical versioned persistence and broader consumer adoption remain the boundaries documented in IMPLEMENTATION.md.
