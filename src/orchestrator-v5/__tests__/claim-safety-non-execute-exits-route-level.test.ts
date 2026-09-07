@@ -1107,11 +1107,12 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
     const CHIP_LEADER_SENTENCE = `${LEADER_LABEL} leads at 72% on this run.`;
     const CHIP_ANSWER = `${CHIP_RECEIPT} ${CHIP_LEADER_SENTENCE} The gap is not stable across the runs.`;
 
-    function mockChipOk(opts: { mayName: boolean; text: string }): void {
+    function mockChipOk(opts: { mayName: boolean; text: string; analysisReady?: unknown }): void {
       dispatchDeterministicChipClickMock.mockResolvedValue({
         outcome: 'ok',
         graph: READY_GRAPH,
         mayNameLeadingOption: opts.mayName,
+        analysisReady: opts.analysisReady,
         // SUBSTANTIVE, deliberately: it is what makes the egress answer-shape
         // synthesiser attach `_answer_shape`, which is the sidecar this
         // describe exists to pin. A `functional` chip answer never shapes.
@@ -1201,6 +1202,44 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         'and no other surface may carry the removed designation either',
       ).not.toContain(LEADER_LABEL);
     });
+
+    it.each([false, true])(
+      'native C2 prose: admission licensed=%s keeps answer-shape coherence at the real wire seam',
+      async (licensed) => {
+        const capture = JSON.parse(
+          readFileSync(
+            new URL(
+              './../compose/__tests__/fixtures/c2-context-response-20260907T203538Z.json',
+              import.meta.url,
+            ),
+            'utf8',
+          ),
+        );
+        if (licensed)
+          capture.analysis_ready.analysis_admission.permitted_analysis_mode = 'comparative_leader';
+        mockChipOk({
+          mayName: true,
+          text: capture.assistant_text,
+          analysisReady: capture.analysis_ready,
+        });
+        const { status, body } = await postChip(app);
+        expect(status).toBe(200);
+        expect(dispatchDeterministicChipClickMock).toHaveBeenCalled();
+        expect(routeWithToolUseMock).not.toHaveBeenCalled();
+        expect(body.assistant_text).toContain(
+          "Your model doesn't yet capture technical debt or a launch deadline",
+        );
+        if (licensed) {
+          expect(body.assistant_text).toContain("The lead's current advantage");
+          expect(body._answer_shape).toBeDefined();
+        } else {
+          expect(body.assistant_text).not.toContain("The lead's current advantage");
+          expect(body.assistant_text).not.toContain('The analysis shows which option leads');
+          expect(body.assistant_text).not.toContain("the leading option's edge");
+          expect(body._answer_shape).toBeUndefined();
+        }
+      },
+    );
   });
 
   // ── ⭐ THE WIRE-GATE CANARY — the blindness that let this slip ────────────
@@ -1517,18 +1556,17 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       expect(provenanceOnTheWire(body)).toBe('fail_closed_no_turn_context');
       expect(unavailableEvents()).toEqual([]);
       expect(
-        events.filter(
-          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
-        ),
+        events.filter((e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire),
         'the most fail-closed verdict in the union must still not edit deterministic copy',
       ).toEqual([]);
     });
 
-    it('the turn_executor exit is BYTE-NEUTRAL — no double substitution', async () => {
+    it('the turn_executor answer is BYTE-NEUTRAL — block-only protection is not double prose substitution', async () => {
       // ⭐ IDEMPOTENCE ACROSS THE TWO GATES. The converse exit is the ONE exit
       // downstream of `finalizeRun`, whose #755 guard already substitutes for
-      // this population. The wire gate must therefore find nothing left to do:
-      // two gates that both fire would append the refusal twice, and a user
+      // this population. The wire gate must find no ANSWER edit left to do:
+      // block-only licence projection is separate. Two prose substitutions
+      // would append the refusal twice, and a user
       // being told the same thing twice is how a safety gate reads as a bug.
       routeWithToolUseMock.mockResolvedValue(
         converseTextOnly(`For context, ${LEADER_LABEL} leads at 72%.`),
@@ -1544,9 +1582,11 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       ).toBeLessThanOrEqual(1);
       expect(
         events.filter(
-          (e) => e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire,
+          (e) =>
+            e.name === TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtWire &&
+            e.data.edited_fields !== 'blocks',
         ),
-        'the executor already neutralised this answer; the wire gate must be a no-op here',
+        'the executor already neutralised this answer; only block-only projection may remain',
       ).toEqual([]);
     });
   });

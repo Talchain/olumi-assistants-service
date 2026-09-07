@@ -248,6 +248,10 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
     code: 'band_ahead',
     re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b/i,
   },
+  // Preserve PR #1389's goal-framed vocabulary: changing contest terminology
+  // must not make the same comparative claim invisible to existing readers.
+  { code: 'scored_highest', re: /\bscor(?:e|es|ed|ing)\s+highest\b/i },
+  { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 
 /**
@@ -389,7 +393,66 @@ export function neutraliseEnforcementFalsePositiveSpans(value: string): string {
  */
 export function textAssertsLeadingOption(value: string): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  return textNamesLeadingOption(neutraliseEnforcementFalsePositiveSpans(value));
+  return assertedLeaderMatches(value).length > 0;
+}
+
+/**
+ * Classify each vocabulary occurrence in its own clause. A conditional or
+ * negated comparison is not an asserted result. Do not exempt an entire answer:
+ * "If X leads, test costs. Y leads now." still contains an assertion.
+ * Clause boundaries, not a character window, bound the scope of qualifiers.
+ * This remains a bounded prose reader, not a semantic judge or claim licence.
+ */
+function assertedLeaderMatches(value: string): Array<{
+  code: string;
+  before: string;
+  after: string;
+}> {
+  const text = neutraliseEnforcementFalsePositiveSpans(value);
+  const matches: Array<{ code: string; before: string; after: string }> = [];
+  for (const { code, re } of LEADER_CLAIM_PATTERNS) {
+    for (const match of text.matchAll(new RegExp(re.source, 'gi'))) {
+      const before =
+        text
+          .slice(0, match.index)
+          .split(/[.!?;,]|\b(?:but|yet|however)\b/i)
+          .at(-1) ?? '';
+      const after = text
+        .slice(match.index + match[0].length)
+        .split(/[.!?;,]|\b(?:but|yet|however)\b/i)[0];
+      // Neither/nor and explicit denial preserve the comparison discussion;
+      // "not only" is emphatic assertion, not a denial.
+      if (/\b(?:if|unless|suppose|supposing|whether|neither)\b/i.test(before)) continue;
+      if (/\b(?:could|might|may|would)\b/i.test(before)) continue;
+      if (
+        /\b(?:not(?!\s+only\b)|never|cannot|can['’]t|doesn['’]t|isn['’]t|no(?!\s+doubt\b))\b/i.test(
+          before,
+        )
+      )
+        continue;
+      if (/\b(?:if|unless)\b/i.test(after)) continue;
+      matches.push({ code, before, after });
+    }
+  }
+  return matches;
+}
+
+/**
+ * Explicit comparative assertions can designate without spelling a roster
+ * label: a current advantage/edge presupposes a lead, and "the analysis shows
+ * which option leads" asserts a resolved comparison. Use the SAME vocabulary
+ * and assertion classifier above; never infer an option alias or a permission.
+ * A bare mention ("Explore the leading option") is deliberately insufficient.
+ */
+export function textAssertsImplicitLeadingOption(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return assertedLeaderMatches(value).some(
+    ({ code, before, after }) =>
+      ((code === 'leading_option' || code === 'the_lead') &&
+        /^['’]s\s+(?:current\s+)?(?:advantage|edge)\b/i.test(after)) ||
+      (code === 'which_option_leads' &&
+        /\b(?:analysis|results?|model)\s+(?:shows?|indicates?|establishes?)\s*$/i.test(before)),
+  );
 }
 
 /**
@@ -649,7 +712,19 @@ function scanKey(path: string, key: string, value: unknown, out: LeaderClaimHit[
  * and therefore PERMITTED. Only a historic fact takes this path, and there is no
  * migration.
  */
-const BLOCK_PROSE_FIELDS: readonly string[] = [
+/**
+ * ⭐ EXPORTED 2026-09-07 so the WIRE ENFORCER covers exactly the block prose the
+ * ALARM measures — one list, two readers, no mirror between them (CLAUDE.md
+ * trap #12). Before this, the enforcer's block coverage would have been a second
+ * hand-written copy of this list, and the first symptom of drift would have been
+ * a leak this module reports and the enforcer silently permits — the precise
+ * failure mode the `textNamesLeadingOption` / `keyDesignatesLeadingOption`
+ * exports already exist to prevent.
+ *
+ * Adding a field here therefore widens BOTH the alarm and the enforcement.
+ * That is intended: a prose field worth scanning is a prose field worth gating.
+ */
+export const BLOCK_PROSE_FIELDS: readonly string[] = [
   'title',
   'body',
   'signal',
