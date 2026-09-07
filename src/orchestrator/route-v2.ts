@@ -279,6 +279,10 @@ import { persistAskedQuestion } from '../orchestrator-v5/routing/persist-asked-q
 // whether the pre-route pays for its reads; the slot resolution belongs to the
 // resolvers below, never to this site.
 import { readMissingValueAnswer } from '../orchestrator-v5/routing/missing-value-answer.js';
+// ⭐ C5 (6 Sep 2026) — the executor's OWN definition of "this message points at
+// the canvas selection", consulted so the recorded-ask claim is withdrawn only
+// when the selection genuinely owns the referent. Imported, never re-spelled.
+import { carriesDeicticReference } from '../orchestrator-v5/routing/deterministic-value-update.js';
 import { buildCanonicalAnalysisReadyFromGraph } from './tools/analysis-ready-helper.js';
 import {
   isProcessMetaIntake,
@@ -5633,10 +5637,38 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // selection-aware paths own the turn. The witnessed trapped request
     // (a2-turn3-request.json) carries NO selected_elements key, so the
     // witnessed journey is untouched.
+    // ⚠ NARROWED 6 Sep 2026 (C5): the paragraph above now governs the
+    // READINESS-derived bare-value claim only (see `repairClaimBlocked`);
+    // the RECORDED-ask claim is gated on selection ∧ deictic — directly below.
     // ────────────────────────────────────────────────────────────────────
     const repairSelectionPresent =
       (extensions.selectedElements?.node_ids.length ?? 0) > 0 ||
       (extensions.selectedElements?.edge_ids.length ?? 0) > 0;
+    // ⭐⭐ C5 (Codex native E2E, 6 Sep 2026, deployed CEE `ed2b3b8`) — A SELECTION
+    // WITHDRAWS THE RECORDED-ASK CLAIM ONLY WHEN IT OWNS THE REFERENT.
+    //
+    // WITNESSED: the product's own chip asked for the effect value of one named
+    // option on one named factor and armed an `elicit_option_effect` pending;
+    // the user answered "Let's go for 50%"; an INCIDENTAL selection (an outcome
+    // node, already selected on the chip request and still selected) made
+    // `repairSelectionPresent` true, this whole block was skipped, the pending
+    // was never READ (the read sits inside the block), and the routing LLM
+    // asked which value the figure belonged to. Measured: with the block open,
+    // `resolveRecordedOptionEffectAnswer` binds that reply to the recorded cell
+    // (slot contract, arm 2).
+    //
+    // The B1 rationale is REAL, and it is about DEICTIC replies: "Set this one
+    // to 50%" with a selection means the SELECTED node, and the slot contract
+    // would otherwise bind it to the recorded ask (measured). So the recorded-
+    // ask claim is withdrawn on selection ∧ deictic, decided by the executor's
+    // own predicate rather than a second spelling of it (trap 12). The
+    // READINESS-derived bare-value claim (2.1261) keeps B1's wholesale
+    // withdrawal on any selection, because its antecedent is blocker order,
+    // never a question the product recorded asking. Two claims, two
+    // antecedents, two gates (trap 21). Pinned by
+    // `route-v2-recorded-ask-selection-gate.test.ts`.
+    const selectionOwnsReferent =
+      repairSelectionPresent && carriesDeicticReference(ingress.message);
     let repairValueBinding: (RepairValueBindingResolution & { kind: 'bind' }) | null = null;
     // ⭐⭐ ROADMAP 2.1266 / A2 — THE ANSWERED-ASK CLAIM, and it exists because a
     // resolver nothing routes to is dark code (CLAUDE.md trap 16).
@@ -5662,7 +5694,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       !bypassEditHandling &&
       !configureOptionIntent &&
       !structuralRestructureIntent &&
-      !repairSelectionPresent &&
+      !selectionOwnsReferent &&
       // ⭐⭐⭐ THE LOAD-ORDER INVERSION — the defect this lane closes, and it is
       // an ORDERING defect rather than a parsing one.
       //
@@ -5702,11 +5734,29 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       }
       const repairGraphParse = GraphStateIngressSchema.safeParse(persistedForRepair);
       const repairGraph = repairGraphParse.success ? persistedForRepair as GraphStateIngress : null;
-      const recorded = resolveRecordedOptionEffectAnswer({
+      const recordedRaw = resolveRecordedOptionEffectAnswer({
         message: ingress.message, pendings: repairPriorPendings, graph: repairGraph,
         readiness: repairGraph ? buildCanonicalAnalysisReadyFromGraph(repairGraph) : undefined,
         scenarioId: ingress.scenario_id, nowMs: Date.now(),
       });
+      // ⭐ C5 — under a selection the record may ADVANCE the exchange (`bind`,
+      // `confirm`, `ask` — each requires a LIVE, hash-valid recorded ask) but
+      // never REFUSE on its behalf: `stale` / `ambiguous` / `unavailable` are
+      // terminal refusals below, and before this change a selection-carrying
+      // turn never reached them. Collapsing those three to `unrelated` enforces
+      // exactly one property, and it is the only one claimed here: NO
+      // SELECTION-CARRYING TURN GAINS A REFUSAL IT DID NOT HAVE. It is NOT a
+      // claim that the change is additive for such turns — a selection-carrying
+      // turn with a LIVE ask now reaches a deterministic bind/ask/confirm it
+      // did not reach before, which is the defect this lane closes. Pinned by
+      // the expired-ask twin pair in
+      // `route-v2-recorded-ask-selection-gate.test.ts`.
+      const recorded: ReturnType<typeof resolveRecordedOptionEffectAnswer> =
+        repairSelectionPresent
+          && (recordedRaw.kind === 'stale' || recordedRaw.kind === 'ambiguous'
+            || recordedRaw.kind === 'unavailable')
+          ? { kind: 'unrelated' }
+          : recordedRaw;
       recordedQuestionOwnsAnswer = recorded.kind !== 'unrelated' && recorded.kind !== 'unrecorded';
       if (recorded.kind === 'bind') {
         recordedEffectAnswer = recorded.answer;
@@ -5793,6 +5843,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         });
       }
       const repairClaimBlocked = recordedQuestionOwnsAnswer || repairPriorPendings === null
+        // ⭐ C5 — B1's wholesale rule, kept for THIS claim: a canvas selection
+        // withdraws the readiness-derived bare-value bind whether or not the
+        // reply is deictic (its antecedent is blocker order, never a recorded
+        // question). Pinned by the no-recorded-ask twin pair.
+        || repairSelectionPresent
         || repairPriorPendings.some(pa => pa.action.kind === 'set_factor_value'
           && !isPendingActionExpired(pa, Date.now()));
       if (

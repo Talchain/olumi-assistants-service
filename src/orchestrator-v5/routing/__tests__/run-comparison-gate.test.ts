@@ -63,15 +63,25 @@ const N = 10_000;
  *
  * The `ask(false)` arm below is unaffected: a withheld TURN still suppresses
  * both runs, because the turn permission remains the outer conjunct.
+ *
+ * ⚠ `hash` IS EXPLICIT, NOT DEFAULTED (2026-09-06, the same-inputs mode). The
+ * gate now reads each compared run's `graph_hash_at_run`, and two EQUAL hashes
+ * on a fresh pair answer in `same_inputs` rather than `compared`. Every fixture
+ * here used to carry the one literal `'h'`, which never mattered while nothing
+ * read it. It matters now, and the pairs below describe two different states:
+ * a model that CHANGED between the runs (a leader flip, a band shift — distinct
+ * hashes) and a pure RENAME (labels are outside the hash — equal hashes). Each
+ * fixture states which. A defaulted hash would hand every future pair one of
+ * the two modes silently (CLAUDE.md trap #12).
  */
-function runFact(env: V2RunResponseEnvelope): HandlerFact {
+function runFact(env: V2RunResponseEnvelope, hash: string): HandlerFact {
   return {
     fact_type: 'run_analysis',
     noop: false,
     result: {
       enrichment: env,
       computed_at: '2026-06-06T00:00:00.000Z',
-      graph_hash_at_run: 'h',
+      graph_hash_at_run: hash,
       constraint_verdict: {
         may_name_leading_option: true,
         constraint_verdict_state: 'evaluated_feasible' as const,
@@ -80,8 +90,9 @@ function runFact(env: V2RunResponseEnvelope): HandlerFact {
   } as unknown as HandlerFact;
 }
 
-const PRIOR = runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], N, 'low'));
-const CURRENT = runFact(envelope([{ id: 'b', label: 'Onshore', win: 0.55 }, { id: 'a', label: 'Offshore', win: 0.45 }], N, 'high'));
+// The model changed between these two runs (leader flip, band shift): distinct hashes.
+const PRIOR = runFact(envelope([{ id: 'a', label: 'Offshore', win: 0.62 }, { id: 'b', label: 'Onshore', win: 0.38 }], N, 'low'), 'h-prior');
+const CURRENT = runFact(envelope([{ id: 'b', label: 'Onshore', win: 0.55 }, { id: 'a', label: 'Offshore', win: 0.45 }], N, 'high'), 'h-current');
 const TWO_RUNS = [CURRENT, PRIOR];
 
 // Forbidden in user-facing copy (internal vocab / IDs / raw decimals).
@@ -478,18 +489,23 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
   it('F3 RED: a pure RENAME of the same leading option is not a leader change', () => {
     // Same option_id 'a' leads both runs; only its label moved. The hash does
     // not see labels, so this reaches the both-permitted comparison arm.
+    //
+    // 2026-09-06: because the hash does not see labels, the two runs carry
+    // the SAME hash, so the mode is `same_inputs` — the identity property is
+    // asserted inside that frame. The comparison sentences are composed by
+    // the same code in both modes (`composeComparisonParts`).
     const before = runFact(envelope([
       { id: 'a', label: 'Offshore', win: 0.62 },
       { id: 'b', label: 'Onshore', win: 0.38 },
-    ], N));
+    ], N), 'h-rename');
     const after = runFact(envelope([
       { id: 'a', label: 'Offshore (EU)', win: 0.62 },
       { id: 'b', label: 'Onshore', win: 0.38 },
-    ], N));
+    ], N), 'h-rename');
     const out = ask([after, before]);
     expect(out.matched).toBe(true);
     if (!out.matched) return;
-    expect(out.mode).toBe('compared');
+    expect(out.mode).toBe('same_inputs');
     expect(out.leading_option_changed).toBe(false);
     expect(out.assistant_text).not.toContain('leading option has changed');
     expect(out.assistant_text).not.toContain('came out ahead before');
@@ -510,18 +526,20 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
   it('F3 RED: legacy label-only enrichment never asserts a leader change on a label mismatch', () => {
     // No `option_id` on either run ⇒ identity is INDETERMINATE. A false
     // "nothing changed" is cheaper than a false "your leader changed".
+    // The same rename shape as above, so the same hash on both runs and the
+    // `same_inputs` frame (2026-09-06).
     const before = runFact(labelOnlyEnvelope([
       { label: 'Offshore', win: 0.62 },
       { label: 'Onshore', win: 0.38 },
-    ]));
+    ]), 'h-rename');
     const after = runFact(labelOnlyEnvelope([
       { label: 'Offshore (EU)', win: 0.62 },
       { label: 'Onshore', win: 0.38 },
-    ]));
+    ]), 'h-rename');
     const out = ask([after, before]);
     expect(out.matched).toBe(true);
     if (!out.matched) return;
-    expect(out.mode).toBe('compared');
+    expect(out.mode).toBe('same_inputs');
     expect(out.leading_option_changed).toBe(false);
     expect(out.leader_identity_basis).toBe('indeterminate');
     expect(out.assistant_text).not.toContain('leading option has changed');
@@ -538,14 +556,15 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
   // comparator must decline — and the composer must not translate that
   // declining into a confident "nothing changed".
   it('A1 RED: a legacy prior + an identified current with DIFFERENT leaders makes no continuity claim', () => {
+    // The leader genuinely changed: the model changed between the runs.
     const before = runFact(labelOnlyEnvelope([
       { label: 'Offshore', win: 0.62 },
       { label: 'Onshore', win: 0.38 },
-    ]));
+    ]), 'h-prior');
     const after = runFact(envelope([
       { id: 'b', label: 'Onshore', win: 0.70 },
       { id: 'a', label: 'Offshore', win: 0.30 },
-    ], N));
+    ], N), 'h-current');
     const out = ask([after, before]);
     expect(out.matched).toBe(true);
     if (!out.matched) return;
@@ -567,11 +586,11 @@ describe('tryRunComparisonGate — leader identity is the option id, not the lab
     const before = runFact(labelOnlyEnvelope([
       { label: 'Offshore', win: 0.62 },
       { label: 'Onshore', win: 0.38 },
-    ]));
+    ]), 'h-prior');
     const after = runFact(envelope([
       { id: 'b', label: 'Onshore', win: 0.90 },
       { id: 'a', label: 'Offshore', win: 0.10 },
-    ], N));
+    ], N), 'h-current');
     const out = ask([after, before]);
     expect(out.matched).toBe(true);
     if (!out.matched) return;
