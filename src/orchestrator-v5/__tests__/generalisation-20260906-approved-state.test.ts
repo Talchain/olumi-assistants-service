@@ -72,6 +72,7 @@ function payload(message: string): MessageTurnPayload {
 const routing = { chatWithTools: vi.fn(async () => ({
   content: [{ type: 'text' as const, text: 'The pilot leaves uncertainty about how well coaching transfers to new teams.' }],
   stop_reason: 'end_turn' as const, usage: { input_tokens: 1, output_tokens: 1 },
+  model: 'mock', latencyMs: 0,
 })) };
 function run(message: string) {
   // No ingress graph: every call must read the saved graph through buildTurnContext.
