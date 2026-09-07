@@ -9,8 +9,21 @@
  *     prompt-replay button via the chip `message`/`prompt` field
  *     (BOUNDARY_ACTION_TYPES whitelist in edit-graph-dispatch.ts).
  *
- * Used by both the deterministic template path (apply-template.ts) and
- * the LLM path (edit-graph.ts rejection sites).
+ * ⚠ CORRECTED 2026-09-07 — this header used to say *"Used by both the
+ * deterministic template path (apply-template.ts) and the LLM path"*.
+ * **`apply-template.ts` DOES NOT EXIST** anywhere in this repo (the only
+ * occurrences of that path were this comment and a doc quoting it), and
+ * `buildEditRejectionResponse` has exactly ONE non-test caller repo-wide:
+ * `edit-graph.ts:4320`, via `mapCodeToRejectionReason`. A false "who uses this"
+ * note is worse than none — it invents a second consumer whose needs a later
+ * change will try to respect.
+ *
+ * CONSEQUENCE, stated so it is not rediscovered: because that single caller is
+ * the only producer of these reasons, `parse_failure` and `entity_not_found`
+ * have ZERO live producers — `mapCodeToRejectionReason` cannot return either.
+ * Their copy below is unreachable. Left in place rather than deleted in this
+ * change (out of scope; rowed), but do not read them as evidence that some
+ * other path reaches this module.
  */
 
 import type { SuggestedAction } from "../../orchestrator/types.js";
@@ -95,6 +108,16 @@ export function buildEditRejectionResponse(
         ],
       };
     case 'service_unavailable':
+      // ⚠ THE FIRST CLAUSE IS THE NARROW ONE. "I couldn't reach the analysis
+      // service" is only true where we can PROVE no usable answer came back, so
+      // this reason is reachable ONLY via `classifyPlotFailureCode`, which
+      // admits a `PLoTTimeoutError` or a 5xx. A 400/413/429, a malformed 200, a
+      // never-sent request or an abort take `PLOT_REQUEST_FAILED` →
+      // `unknown_failure` instead. If you widen this arm's producers, re-check
+      // this sentence against the class you are adding — it asserts something
+      // specific about the world, and it used to be shipped over a domain where
+      // PLoT had usually answered.
+      //
       // "nothing in your model has changed" is a VERIFIED claim, not a
       // reassurance: every caller of this reason returns through
       // `buildRejectionResult`, which sets `appliedGraph: null` +
