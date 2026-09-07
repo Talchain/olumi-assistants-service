@@ -139,22 +139,41 @@ export type DraftArgs = {
   attachment?: BuiltDraftAttachment;
 };
 
-const RECORDS_PROJECTOR_GOAL_TARGET_FIELDS = CEE_MINTED_GOAL_FIELDS.filter(
+/**
+ * Exported so a test can assert `{fields the projector mints} ⊆ {fields
+ * protected}`. Deriving this from the scrub's list proves the two copies agree
+ * and can NEVER prove the list is complete (trap 12d) — a future projector
+ * target field named outside the `goal_threshold` prefix would be silently
+ * stripped with no red anywhere. The union assertion in
+ * `draft-by-records-wire.test.ts` is what notices that.
+ */
+export const RECORDS_PROJECTOR_GOAL_TARGET_FIELDS = CEE_MINTED_GOAL_FIELDS.filter(
   (field) => field.startsWith('goal_threshold'),
 );
 
-type ProjectedGoalTargetScrubResult =
-  | {
-      ok: true;
-      stripped: GoalThresholdStripResult;
-    }
-  | {
-      ok: false;
-      issues: Array<{
-        statedItemIndex: number;
-        reason: 'target_unrepresented' | 'unit_ambiguous';
-      }>;
-    };
+export type ProjectedGoalTargetIssue = {
+  statedItemIndex: number;
+  reason: 'target_unrepresented' | 'unit_ambiguous' | 'denominator_degenerate';
+};
+
+type ProjectedGoalTargetScrubResult = {
+  stripped: GoalThresholdStripResult;
+  /**
+   * Targets that could not be safely attested and were therefore LEFT TO THE
+   * EXISTING SCRUB, which deletes them exactly as it does today. Observability
+   * only — never a refusal.
+   *
+   * The existing scrub IS the fail-closed policy for an unattestable target:
+   * the draft still succeeds and the goal is label-only, so the user's number
+   * survives as prose in the label. Escalating this to a thrown draft turned a
+   * silent degradation into a non-retryable HTTP 400 whose recovery copy tells
+   * the user to "describe what success looks like" — which is precisely what
+   * they did, and what triggered it. Two responses to one harm class (`cannot
+   * attest this target`) with opposite severity is trap 21; this keeps the one
+   * the rest of the function already uses.
+   */
+  unprotected: ProjectedGoalTargetIssue[];
+};
 
 /**
  * Apply the legacy draft ingress scrub without deleting a target that this
@@ -193,16 +212,13 @@ export function scrubProjectedDraftGoalTargets(args: {
       : undefined;
   if (!Array.isArray(rawNodes)) {
     return {
-      ok: false,
-      issues: [{ statedItemIndex: -1, reason: 'target_unrepresented' }],
+      stripped: stripModelAuthoredGoalThreshold(args.rawJson),
+      unprotected: [{ statedItemIndex: -1, reason: 'target_unrepresented' }],
     };
   }
 
   const trustedNodes = new Set<Record<string, unknown>>();
-  const issues: Array<{
-    statedItemIndex: number;
-    reason: 'target_unrepresented' | 'unit_ambiguous';
-  }> = [];
+  const unprotected: ProjectedGoalTargetIssue[] = [];
 
   args.records.stated_items.forEach((item, index) => {
     if (
@@ -228,7 +244,7 @@ export function scrubProjectedDraftGoalTargets(args: {
       item.unit !== '%'
       && isAmountStatedInBrief(item.value, '%', item.source_quote)
     ) {
-      issues.push({ statedItemIndex: index, reason: 'unit_ambiguous' });
+      unprotected.push({ statedItemIndex: index, reason: 'unit_ambiguous' });
       return;
     }
 
@@ -249,15 +265,35 @@ export function scrubProjectedDraftGoalTargets(args: {
     );
 
     if (matchingNodes.length === 0) {
-      issues.push({ statedItemIndex: index, reason: 'target_unrepresented' });
+      unprotected.push({ statedItemIndex: index, reason: 'target_unrepresented' });
       return;
     }
-    for (const node of matchingNodes) trustedNodes.add(node);
-  });
 
-  if (issues.length > 0) {
-    return { ok: false, issues };
-  }
+    // Only a COMPLETE and SOUND tuple is worth protecting. The soundness test is
+    // the cap module's own (`existingCap > raw`, goal-threshold-cap.ts): a cap at
+    // or below the target forces `goal_threshold >= 1.0` — "what is the
+    // probability of hitting the maximum of the scale" — which that module's
+    // rule 3 guard names as forbidden. Its rule 1 returns 100 for ANY '%' target
+    // with 0 < raw <= 100 and runs BEFORE that test, so a 100% target mints
+    // cap === raw === 100. At base every target was stripped, so retention is
+    // what makes the pair reachable, and retention is where it is excluded.
+    //
+    // Written against the module's SPEC predicate (`cap > raw`), not against the
+    // 100% case that exposed it: a cap BELOW raw is worse still and an
+    // equality-only test would miss it.
+    const soundNodes = matchingNodes.filter((node) => {
+      const cap = node.goal_threshold_cap;
+      const raw = node.goal_threshold_raw;
+      return typeof cap === 'number' && Number.isFinite(cap)
+        && typeof raw === 'number' && Number.isFinite(raw)
+        && cap > raw;
+    });
+    if (soundNodes.length === 0) {
+      unprotected.push({ statedItemIndex: index, reason: 'denominator_degenerate' });
+      return;
+    }
+    for (const node of soundNodes) trustedNodes.add(node);
+  });
 
   const protectedFields = new Map<
     Record<string, unknown>,
@@ -283,8 +319,8 @@ export function scrubProjectedDraftGoalTargets(args: {
   }
 
   return {
-    ok: true,
     stripped: stripped!,
+    unprotected,
   };
 }
 
@@ -2370,23 +2406,22 @@ export async function draftGraphWithAnthropic(
       projection: activeProjection,
       brief: args.brief,
     });
-    if (!goalTargetScrub.ok) {
-      log.error({
-        event: 'cee.draft.verified_goal_target_contract_refused',
-        issues: goalTargetScrub.issues,
-      }, '[Anthropic] refusing a verified numeric goal target whose typed carrier is unsafe or absent');
-      throw Object.assign(
-        new Error(
-          'anthropic_response_invalid_schema: ' +
-          `verified_goal_target_contract_refused:${goalTargetScrub.issues
-            .map((issue) => `${issue.statedItemIndex}:${issue.reason}`)
-            .join(',')}`,
-        ),
-        {
-          _llm_meta: failedCallLlmMeta,
-          ...(truncatedAtMaxTokens ? { truncated_at_max_tokens: true } : {}),
-        },
-      );
+    if (goalTargetScrub.unprotected.length > 0) {
+      // WARN, never a throw. The draft continues and the existing scrub deletes
+      // the unattestable tuple, which is byte-for-byte the pre-existing
+      // behaviour: a successful draft with a label-only goal, the user's number
+      // still present as prose in the label. Refusing here produced a
+      // non-retryable HTTP 400 (`CEE_LLM_VALIDATION_FAILED` →
+      // `llm_schema_invalid` → "Provide a clearer, more specific decision
+      // brief… Describe what success looks like") for output that IS
+      // schema-valid — `unit` is an unconstrained, non-required string in the
+      // records grammar and no instruction asks for one spelling over another,
+      // so the model's free choice of "percent" over "%" decided whether the
+      // user got a graph or an accusation.
+      log.warn({
+        event: 'cee.draft.verified_goal_target_left_unprotected',
+        issues: goalTargetScrub.unprotected,
+      }, '[Anthropic] a verified numeric goal target had no safe typed carrier — left to the existing scrub, draft continues');
     }
     const strippedGoal = goalTargetScrub.stripped;
     if (strippedGoal.nodeIds.length > 0) {
