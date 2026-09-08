@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import type { OlumiResponseWithDebugFields } from '../../../orchestrator/debug-fields.js';
 import {
   enforceLeadingOptionClaimsAtWire,
   optionRosterFromAnalysisReady,
@@ -65,7 +66,9 @@ describe('Codex independent C2 recovered licence patch assessment', () => {
     expect(result.editedFields).toEqual(['assistant_text']);
     expect(result.response.assistant_text).not.toBe(body.assistant_text);
     expect(result.response.analysis_state).toBe(body.analysis_state);
-    expect(result.response._diagnostic_trace).toBe(body._diagnostic_trace);
+    expect(
+      (result.response as OlumiResponseWithDebugFields)._diagnostic_trace,
+    ).toBe(body._diagnostic_trace);
   });
   it.each([
     [

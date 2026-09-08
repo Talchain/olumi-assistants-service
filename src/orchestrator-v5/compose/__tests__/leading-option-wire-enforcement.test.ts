@@ -705,7 +705,17 @@ describe('SCOPE — stated, asserted, and not implied by which arms exist', () =
     });
     expect(changed).toBe(true);
     expect(response.assistant_text).toBe(RECEIPT);
-    expect(response.blocks[0].summary).not.toContain('leads by 18 points');
+    // Bind by IDENTITY, not position alone (CLAUDE.md trap #19): narrow the
+    // block union on its discriminant so the assertion below is provably about
+    // the `analysis_result` block this envelope placed at index 0, and REDs if
+    // the projection ever returns a different block shape there.
+    const projectedBlock = response.blocks[0];
+    if (projectedBlock?.type !== 'analysis_result') {
+      throw new Error(
+        `expected the analysis_result block at index 0, got: ${projectedBlock?.type ?? 'none'}`,
+      );
+    }
+    expect(projectedBlock.summary).not.toContain('leads by 18 points');
   });
 });
 

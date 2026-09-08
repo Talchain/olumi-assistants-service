@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import type { OlumiResponseWithDebugFields } from '../../../orchestrator/debug-fields.js';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 import { tryRunComparisonGate } from '../../routing/run-comparison-gate.js';
 import { enforceLeadingOptionClaimsAtWire } from '../leading-option-wire-enforcement.js';
@@ -88,7 +89,9 @@ describe('approved #1389 producer composed with C2 final licence projection', ()
       expect(result.response.assistant_text).not.toContain(label);
       expect(result.response.assistant_text.length).toBeGreaterThan(20);
       expect(result.response.analysis_state).toBe(body.analysis_state);
-      expect(result.response._diagnostic_trace).toBe(body._diagnostic_trace);
+      expect(
+        (result.response as OlumiResponseWithDebugFields)._diagnostic_trace,
+      ).toBe(body._diagnostic_trace);
     },
   );
 
