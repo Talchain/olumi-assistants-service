@@ -651,8 +651,11 @@ describe('POST /orchestrate/v2/turn — edge_strength_edit writer', () => {
     expect(OlumiResponseSchema.safeParse(body).success).toBe(true);
     expect(body).toMatchObject({
       response_version: 2,
+      // Gesture-neutral on purpose: since 0.50.0 this ONE kind carries both a
+      // strength change and a helps/hurts direction change, and the copy table
+      // is keyed on `event.kind` alone — it cannot know which the user made.
       assistant_text:
-        "I can't apply this link-strength change in this version, so I haven't changed the model.",
+        "I can't apply this link change in this version, so I haven't changed the model.",
       blocks: [
         {
           type: 'error',

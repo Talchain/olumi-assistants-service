@@ -215,3 +215,54 @@ describe('reader-only refusal — the capability denial must be true', () => {
     }
   });
 });
+
+/**
+ * ⭐ THE KIND THE SUITE ABOVE STRUCTURALLY CANNOT SEE.
+ *
+ * `READER_ONLY_KINDS` is derived from `SYSTEM_EVENT_HANDLING` — correctly, so it
+ * cannot drift. But `edge_strength_edit` is declared `'mutating'` there and only
+ * becomes a refusal at RUNTIME, when `dispatchSystemEvent` demotes it because
+ * `config.features.graphCas.rpcEnforce !== true`. So the one kind whose copy was
+ * actually false was invisible to the one suite written to catch false copy, and
+ * nothing but a single integration assertion pinned it.
+ *
+ * That is why this block is keyed on the kind directly rather than on a derived
+ * list: a runtime-demoted kind has no declaration to derive from. It is a
+ * deliberate exception to "derive, never re-list", and the derived precondition
+ * below states the exact reason it is allowed, so it REDs if that stops being
+ * true — e.g. if the kind is ever declared `reader_only_refusal`, at which point
+ * the suite above covers it and this block should be deleted.
+ */
+describe('edge_strength_edit — a runtime-demoted kind, refused without naming a gesture', () => {
+  it('⭐ PRECONDITION — this kind is NOT declared reader-only, which is why it needs its own pin', () => {
+    expect(SYSTEM_EVENT_HANDLING.edge_strength_edit).toBe('mutating');
+    expect(READER_ONLY_KINDS).not.toContain('edge_strength_edit');
+  });
+
+  /**
+   * One kind, two gestures since 0.50.0 (`direction_intent`). The copy table
+   * reads `event.kind` alone, so ANY axis it names is a guess — and it was wrong
+   * for every direction-only edit. Naming no axis cannot be false.
+   */
+  it.each(['strength', 'direction', 'helps', 'hurts'])(
+    'does not name the "%s" axis it cannot know the user changed',
+    (axis) => {
+      expect(textFor('edge_strength_edit')).not.toContain(axis);
+    },
+  );
+
+  it('still says what happened and that nothing changed', () => {
+    const text = textFor('edge_strength_edit');
+    expect(text).toContain('link');
+    expect(text).toContain("haven't changed the model");
+  });
+
+  it('keeps the machine reason, so the rollout floor stays distinguishable from B1/422', () => {
+    const block = refusalFor('edge_strength_edit').blocks[0] as {
+      error_code?: string;
+      details?: { reason?: string };
+    };
+    expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
+    expect(block.details?.reason).toBe('edge_strength_edit_reader_only');
+  });
+});
