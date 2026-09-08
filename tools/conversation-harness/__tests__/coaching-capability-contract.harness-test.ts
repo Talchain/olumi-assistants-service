@@ -9,7 +9,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -17,9 +18,12 @@ import { describe, expect, it } from 'vitest';
 import {
   ANSWER_CEILING,
   BASE_SHA,
+  BASELINE_FIXTURE,
+  BASELINE_SHA256,
   QUESTIONS,
   assembleArms,
   baselineInstruction,
+  baselineInstructionFromGit,
   buildContract,
   commonAffixes,
 } from '../coaching-request-contract.js';
@@ -192,7 +196,34 @@ describe('#1398 request contract — one changed variable, proved without a prov
     expect(baseline).not.toBe(COACHING_CONTEXT_INSTRUCTION);
   });
 
-  it('the PR base blob is the one the reviewer verified', () => {
+  it('the fixture carries the approved bytes, and the digest is pinned', () => {
+    // The pinned digest is the whole point: a fixture edited to shift the
+    // comparison baseline fails inside baselineInstruction() rather than
+    // quietly becoming the new baseline.
+    expect(createHash('sha256').update(baseline).digest('hex')).toBe(BASELINE_SHA256);
+    expect(BASELINE_SHA256.slice(0, 16)).toBe('036161acaddf8f96');
+    expect(baseline).toHaveLength(1341);
+  });
+
+  it('the fixture READS WITHOUT GIT — the hosted-collector failure cannot recur', () => {
+    // The old `git show ${BASE_SHA}:…` ran during module COLLECTION and threw on
+    // a shallow CI checkout, taking all 37 tests in this file out of the harness
+    // job while the other 576 passed. Reading the fixture from a path proves the
+    // input no longer depends on repository history being present.
+    const path = join(REPO, 'tools', 'conversation-harness', 'fixtures', BASELINE_FIXTURE);
+    expect(existsSync(path)).toBe(true);
+    expect(readFileSync(path, 'utf8')).toBe(baseline);
+  });
+
+  it('PROVENANCE CROSS-CHECK — identical to the git object where that object exists', () => {
+    // A cross-check, never the input. `null` means a shallow checkout (hosted CI),
+    // which is exactly the condition that used to fail the whole file.
+    const fromGit = baselineInstructionFromGit(REPO);
+    if (fromGit === null) {
+      expect(baseline).toHaveLength(1341); // still assert something real
+      return;
+    }
+    expect(fromGit).toBe(baseline);
     const blob = execFileSync(
       'git',
       ['-C', REPO, 'rev-parse', `${BASE_SHA}:src/orchestrator-v5/routing/route-with-tool-use.ts`],

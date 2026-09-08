@@ -33,7 +33,7 @@
 
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -113,22 +113,66 @@ export function coachingState(freshness: 'none' | 'stale'): CoachingStatePack {
 }
 
 /**
- * The baseline instruction, read from git at the PR base — never from a mutated
- * working file. The block is plain string literals plus comments, so evaluating
- * the array literal reproduces the exact served string including its joins.
+ * The APPROVED baseline instruction bytes, from a checked-in immutable fixture.
+ *
+ * ── WHY NOT `git show` ─────────────────────────────────────────────────────────
+ * It used to read `${BASE_SHA}:route-with-tool-use.ts` out of git. That works in
+ * a full local clone and FAILS in hosted CI, which uses an ordinary shallow
+ * checkout: the object is simply not there. Because the call happens during
+ * module collection, the throw took the ENTIRE 37-test candidate file out of the
+ * Conversation Harness Gates job — zero of its tests ran, while the other 576
+ * passed and the job went red for a reason that had nothing to do with any
+ * assertion in it.
+ *
+ * ── THE BASELINE IS NOT WEAKENED, IT IS PINNED ────────────────────────────────
+ * The fixture holds the EXACT bytes the reviewer approved — extracted from that
+ * same git object, 1341 chars, sha256 prefix `036161acaddf8f96`, the value
+ * already recorded in the banked contract receipt. {@link BASELINE_SHA256}
+ * verifies the whole digest on every read, so a fixture edited to make a
+ * comparison greener fails loudly here rather than silently shifting the
+ * baseline. Provenance against the git object is still checked where the object
+ * is available; that check is a cross-check, not the input.
  */
-export function baselineInstruction(repoRoot: string): string {
-  const source = execFileSync('git', ['-C', repoRoot, 'show', `${BASE_SHA}:${SRC}`], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
+export const BASELINE_FIXTURE = 'coaching-baseline-instruction-0828a530.txt';
+export const BASELINE_SHA256 =
+  '036161acaddf8f96ff9c4a63b9fa7ffd9bfec29c2d0c3497339d073aeffb0d28';
+
+export function baselineInstruction(repoRoot?: string): string {
+  const root = repoRoot ?? join(import.meta.dirname, '..', '..');
+  const path = join(root, 'tools', 'conversation-harness', 'fixtures', BASELINE_FIXTURE);
+  const text = readFileSync(path, 'utf8');
+  const digest = createHash('sha256').update(text).digest('hex');
+  if (digest !== BASELINE_SHA256) {
+    throw new Error(
+      `baseline: ${BASELINE_FIXTURE} does not carry the approved bytes ` +
+        `(sha256 ${digest}, expected ${BASELINE_SHA256}). The comparison baseline is pinned; ` +
+        'do not edit the fixture to change it.',
+    );
+  }
+  return text;
+}
+
+/**
+ * The same bytes read out of git, or `null` where the object is unavailable
+ * (a shallow CI checkout). Provenance cross-check only — never the input.
+ */
+export function baselineInstructionFromGit(repoRoot: string): string | null {
+  let source: string;
+  try {
+    source = execFileSync('git', ['-C', repoRoot, 'show', `${BASE_SHA}:${SRC}`], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return null;
+  }
   const start = source.indexOf('export const COACHING_CONTEXT_INSTRUCTION = [');
-  if (start < 0) throw new Error('baseline: COACHING_CONTEXT_INSTRUCTION not found at ' + BASE_SHA);
+  if (start < 0) return null;
   const open = source.indexOf('[', start);
   const close = source.indexOf("].join('\\n');", open);
-  if (close < 0) throw new Error('baseline: array terminator not found at ' + BASE_SHA);
-  const literal = source.slice(open, close + 1);
-  const lines = new Function(`return ${literal};`)() as string[];
+  if (close < 0) return null;
+  const lines = new Function(`return ${source.slice(open, close + 1)};`)() as string[];
   return lines.join('\n');
 }
 
