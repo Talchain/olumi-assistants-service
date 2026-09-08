@@ -64,8 +64,19 @@ function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function makeGraph(nodes: GraphV3T['nodes']): GraphV3T {
-  return { nodes, edges: [] } as unknown as GraphV3T;
+function makeGraph(nodes: GraphV3T['nodes'], edges: unknown[] = []): GraphV3T {
+  return { nodes, edges } as unknown as GraphV3T;
+}
+
+/** An edge from a factor to the goal, pushing it one way. */
+function edgeToGoal(from: string, effect: 'positive' | 'negative') {
+  return {
+    from,
+    to: 'g1',
+    strength: { mean: effect === 'positive' ? 0.5 : -0.5, std: 0.1 },
+    exists_probability: 0.9,
+    effect_direction: effect,
+  };
 }
 
 /**
@@ -223,14 +234,58 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('frames the trade-off as a Main trade-off bullet using the first two factor labels', () => {
+  /**
+   * ⭐⭐ THIS TEST USED TO PIN THE DEFECT, AND ITS NAME SAID SO.
+   *
+   * It was called "…using the first two factor labels" and asserted
+   * `Main trade-off: … balanced against …` from `makeGraph([...])`, whose edge
+   * array was `[]`. It required the product to claim a trade-off relationship
+   * from a graph containing NO RELATIONSHIPS, and it passed for as long as it
+   * existed. Measured on a real served turn (CEE `083e0da`, request
+   * `2e5d48a8`): the user was told "Team Coordination Overhead balanced against
+   * Onboarding and Ramp Time" — both COSTS of hiring, pushing the goal the same
+   * way.
+   *
+   * A trade-off is a claim about DIRECTION, so it is now said only when two
+   * factors provably push the goal opposite ways. The pair below is the
+   * discriminator: identical nodes, edges the only difference.
+   */
+  it('claims a trade-off ONLY when two factors push the goal opposite ways', () => {
     const text = textOf({
-      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY],
+        [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative')],
+      ),
     });
     expect(text).toContain('What the model is weighing');
     expect(text).toContain('Leadership quality');
     expect(text).toContain('Delivery capacity');
     expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+    assertCleanCopy(text);
+  });
+
+  it('TWIN — same factors pushing the SAME way name both without claiming a trade-off', () => {
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY],
+        [edgeToGoal('f1', 'negative'), edgeToGoal('f2', 'negative')],
+      ),
+    });
+    // The names survive — this is not silence, it is the loss of an unearned
+    // relationship. Deleting the bullet would remove a true, useful line.
+    expect(text).toContain('Leadership quality');
+    expect(text).toContain('Delivery capacity');
+    expect(text).not.toContain('balanced against');
+    expect(text).toMatch(/^• The model weighs .+ and /m);
+    assertCleanCopy(text);
+  });
+
+  it('TWIN — a graph with NO edges cannot claim a trade-off (the served defect)', () => {
+    const text = textOf({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+    });
+    expect(text).not.toContain('balanced against');
+    expect(text).toContain('Leadership quality');
     assertCleanCopy(text);
   });
 

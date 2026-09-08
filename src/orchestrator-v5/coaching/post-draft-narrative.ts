@@ -331,6 +331,17 @@ export function validateUncertaintyDriver(driver: string): boolean {
   return true;
 }
 
+/**
+ * The edge fields this composer reads. Deliberately tiny: the only question
+ * asked of an edge here is which way a factor pushes the goal.
+ */
+interface EdgeLite {
+  readonly from?: string;
+  readonly to?: string;
+  readonly effect_direction?: 'positive' | 'negative';
+  readonly strength?: { readonly mean?: number };
+}
+
 interface NodeLite {
   readonly id?: string;
   readonly kind?: string;
@@ -664,7 +675,15 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
   const optionsBlock = buildOptionsBlock(options, provisionalDecision);
 
-  const tradeOffBullet = buildTradeOffBullet(factors, risks);
+  const edges = (graph?.edges ?? []) as readonly EdgeLite[];
+  // The goal is identified the same way `findGoalLabel` identifies it — by node
+  // kind — so the two cannot disagree about which node the goal is.
+  const goalId = nodes.find((n) => n?.kind === 'goal')?.id ?? null;
+  const tradeOffBullet = buildTradeOffBullet(
+    factors,
+    risks,
+    findOpposingFactorPair(nodes, edges, goalId),
+  );
   const mayServeFreeformCoaching = analysisReady?.status === 'ready';
 
   // A direction clarification gets its OWN slot and is therefore removed from
@@ -1176,6 +1195,79 @@ function buildOptionsBlock(
 }
 
 /**
+ * ⭐ WHICH WAY DOES THIS FACTOR PUSH THE GOAL? `null` when the model does not say.
+ *
+ * `effect_direction` is the producer's own field and is authoritative. The sign
+ * of `strength.mean` is a fallback only, and a mean of exactly 0 yields `null`
+ * rather than a guess — at zero the sign cannot recover direction, and
+ * `-0 > 0` is `false` while `-0 >= 0` is `true`, so an unguarded sign test
+ * silently calls every zero positive.
+ */
+function factorDirectionOnGoal(
+  factorId: string,
+  goalId: string | null,
+  edges: readonly EdgeLite[],
+): 'positive' | 'negative' | null {
+  if (goalId === null) return null;
+  for (const e of edges) {
+    if (e?.from !== factorId || e?.to !== goalId) continue;
+    if (e.effect_direction === 'positive' || e.effect_direction === 'negative') {
+      return e.effect_direction;
+    }
+    const mean = e.strength?.mean;
+    if (typeof mean === 'number' && mean !== 0) return mean > 0 ? 'positive' : 'negative';
+    return null;
+  }
+  return null;
+}
+
+/**
+ * ⭐⭐ THE FIRST TWO FACTOR LABELS ARE NOT A TRADE-OFF, AND THIS PRODUCT SAID THEY WERE.
+ *
+ * MEASURED ON A REAL SERVED TURN (CEE `083e0da`, request `2e5d48a8`, scenario
+ * `e309fd7e`, 8 Sep 2026). The user's first reply contained:
+ *
+ *   "Main trade-off: Team Coordination Overhead balanced against
+ *    Onboarding and Ramp Time"
+ *
+ * Both are COSTS of hiring. They push the goal the same way and are not in
+ * tension with each other. The sentence asserted a relationship the model does
+ * not contain, in the first thing the person reads — because
+ * `buildTradeOffBullet` received only `string[]` labels and emitted
+ * `factors[0] balanced against factors[1]` whenever two labels existed. Nothing
+ * consulted an edge; `graph` was in scope the whole time and `graph.edges` was
+ * never read. The suite's own case was named "…using the first two factor
+ * labels" and built its fixture with `edges: []`, so it required the claim to
+ * be made about a graph containing no relationships at all.
+ *
+ * A trade-off is a claim about DIRECTION: raising one lowers the other's
+ * contribution to the goal. It is now said only when two factors provably push
+ * the goal opposite ways, and the pair is chosen by that test rather than by
+ * array position.
+ *
+ * ⚠ WHEN NOTHING OPPOSES, THE ANSWER IS NOT SILENCE. Dropping the bullet would
+ *   delete a true and useful line (these ARE the factors the model weighs) to
+ *   avoid a false one. The caller keeps the names and loses only the unearned
+ *   relationship.
+ */
+function findOpposingFactorPair(
+  nodes: readonly NodeLite[],
+  edges: readonly EdgeLite[],
+  goalId: string | null,
+): readonly [string, string] | null {
+  const positive: string[] = [];
+  const negative: string[] = [];
+  for (const f of nodes) {
+    if (f?.kind !== 'factor' || typeof f.id !== 'string' || typeof f.label !== 'string') continue;
+    const dir = factorDirectionOnGoal(f.id, goalId, edges);
+    if (dir === 'positive') positive.push(f.label);
+    else if (dir === 'negative') negative.push(f.label);
+  }
+  if (positive.length === 0 || negative.length === 0) return null;
+  return [positive[0], negative[0]] as const;
+}
+
+/**
  * Return a single bullet-ready trade-off fragment (no leading bullet
  * glyph; no trailing full stop — the renderer adds those). Returns null
  * when no factor/risk material is available, so the caller can omit the
@@ -1184,10 +1276,18 @@ function buildOptionsBlock(
 function buildTradeOffBullet(
   factors: readonly string[],
   risks: readonly string[],
+  opposingPair: readonly [string, string] | null,
 ): string | null {
   const trimmedFactors = factors.map((l) => elideLabelAtWordBoundary(l, MAX_LABEL_CHARS));
+  if (opposingPair !== null) {
+    const a = elideLabelAtWordBoundary(opposingPair[0], MAX_LABEL_CHARS);
+    const b = elideLabelAtWordBoundary(opposingPair[1], MAX_LABEL_CHARS);
+    return `Main trade-off: ${a} balanced against ${b}`;
+  }
   if (trimmedFactors.length >= 2) {
-    return `Main trade-off: ${trimmedFactors[0]} balanced against ${trimmedFactors[1]}`;
+    // Two factors, no opposition the model can show: name them without
+    // asserting a relationship. See `findOpposingFactorPair`.
+    return `The model weighs ${trimmedFactors[0]} and ${trimmedFactors[1]}`;
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
