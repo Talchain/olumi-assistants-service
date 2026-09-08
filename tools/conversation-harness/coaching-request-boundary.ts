@@ -30,6 +30,7 @@ import type {
   ChatWithToolsArgs,
   ChatWithToolsResult,
 } from '../../src/adapters/llm/types.js';
+import { beginLiveEvalSingleAttempt } from '../../src/adapters/llm/live-eval-retry-policy.js';
 import { assembleContextPack } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
 import { ensureRoutingPromptSnapshot } from '../../src/orchestrator-v5/routing/prompt-loader.js';
 import {
@@ -59,16 +60,41 @@ export class AttemptCeilingExceeded extends Error {
   }
 }
 
+/** Thrown when a ceiling is not a usable authorised total. Never caught internally. */
+export class InvalidAttemptCeiling extends Error {
+  constructor(readonly requested: unknown) {
+    super(
+      `REFUSED: ${String(requested)} is not a valid attempt ceiling. It must be an integer ` +
+        `between 1 and the authorised total of ${ATTEMPT_CEILING}.`,
+    );
+    this.name = 'InvalidAttemptCeiling';
+  }
+}
+
 /**
  * A single shared counter for a whole comparison run.
  *
  * The charge happens BEFORE dispatch, deliberately: charging afterwards would let
  * a call that timed out or threw escape the budget, which is precisely how "18
  * answers" quietly becomes thirty.
+ *
+ * ⚠ THE CEILING IS VALIDATED IN THE CONSTRUCTOR, and that is load-bearing. The
+ * first version took any `number` and compared only against it, so
+ * `new AttemptBudget(19)` bought a nineteenth send and `new AttemptBudget(NaN)`
+ * bought unlimited ones — every `attempted > NaN` is false. The existing tests
+ * used 18, 3 and 2, so none of them could discriminate. Smaller budgets stay
+ * legal (they are what the focused tests need); anything non-integer, below 1,
+ * non-finite, or above the authorised total is refused before a single send.
  */
 export class AttemptBudget {
   private used = 0;
-  constructor(readonly ceiling: number = ATTEMPT_CEILING) {}
+  readonly ceiling: number;
+  constructor(ceiling: number = ATTEMPT_CEILING) {
+    if (!Number.isInteger(ceiling) || ceiling < 1 || ceiling > ATTEMPT_CEILING) {
+      throw new InvalidAttemptCeiling(ceiling);
+    }
+    this.ceiling = ceiling;
+  }
   get spent(): number {
     return this.used;
   }
@@ -217,6 +243,19 @@ export interface DispatchRecord {
  *     here dispatches a handler, and no handler module is even imported.
  *  3. It takes `send` as a parameter. Nothing in this repository passes it a real
  *     model client, so importing this module cannot spend money by accident.
+ *  4. Every send runs inside the EXISTING single-attempt evaluator scope
+ *     (`beginLiveEvalSingleAttempt`), released in `finally`.
+ *
+ * ⚠ WHY (4) IS NOT OPTIONAL. Charging before `send` bounds CALLER-level retries,
+ * not provider HTTP attempts: the real tool-use client wraps its request in the
+ * repository `withRetry` helper AND configures SDK retries of its own, so one
+ * charge could otherwise cover several paid HTTP attempts. The scope is the
+ * facility that already exists for exactly this (repository attempts 1, SDK
+ * retries 0) and is what the canonical-precedence live CLI uses; it is process-
+ * local and restores the production default on release, so no production retry
+ * policy is changed. Mocked senders cannot demonstrate this property, which is
+ * why the control below asserts the scope is OPEN during the send and CLOSED
+ * afterwards, including when the send throws.
  */
 export async function dispatchBounded(
   requests: readonly { readonly arm: ArmName; readonly capture: BoundaryCapture; readonly args: ChatWithToolsArgs }[],
@@ -224,6 +263,21 @@ export async function dispatchBounded(
   budget: AttemptBudget,
 ): Promise<DispatchRecord[]> {
   const out: DispatchRecord[] = [];
+  // One scope for the whole batch, released on every exit path.
+  const releaseSingleAttempt = beginLiveEvalSingleAttempt();
+  try {
+    return await dispatchAll(requests, send, budget, out);
+  } finally {
+    releaseSingleAttempt();
+  }
+}
+
+async function dispatchAll(
+  requests: readonly { readonly arm: ArmName; readonly capture: BoundaryCapture; readonly args: ChatWithToolsArgs }[],
+  send: (args: ChatWithToolsArgs) => Promise<ChatWithToolsResult>,
+  budget: AttemptBudget,
+  out: DispatchRecord[],
+): Promise<DispatchRecord[]> {
   for (const req of requests) {
     budget.charge();
     const attempt = budget.spent;

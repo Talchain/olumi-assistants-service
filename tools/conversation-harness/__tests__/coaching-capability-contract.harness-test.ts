@@ -29,6 +29,7 @@ import {
   ATTEMPT_CEILING,
   AttemptBudget,
   AttemptCeilingExceeded,
+  InvalidAttemptCeiling,
   baselineArgs,
   captureBoundary,
   dispatchBounded,
@@ -36,6 +37,7 @@ import {
   snapshotProvenance,
 } from '../coaching-request-boundary.js';
 import { CONTEXT_SURVIVAL_MARKERS } from '../coaching-recorded-context.js';
+import { isLiveEvalSingleAttempt } from '../../../src/adapters/llm/live-eval-retry-policy.js';
 
 const REPO = join(import.meta.dirname, '..', '..', '..');
 const HELPER = join(REPO, 'tools', 'conversation-harness', 'coaching-capability-ab.sh');
@@ -465,5 +467,106 @@ describe('#1398 budget — every attempt is charged BEFORE dispatch, retries and
       .filter((f) => readFileSync(join(dir, f), 'utf8').includes('dispatchBounded('));
     // Only the module that defines it. A future caller must be reviewed.
     expect(callers).toEqual(['coaching-request-boundary.ts']);
+  });
+});
+
+/**
+ * The two budget defects the `3de784a3` review found. Both are source-derived
+ * counterexamples the previous controls could not discriminate: they only ever
+ * built budgets of 18, 3 and 2, all of them valid, and their senders were mocks
+ * that make exactly one call, so nothing could reveal either hole.
+ */
+describe('#1398 budget repair — an unusable ceiling is refused before any send', () => {
+  it('rejects 19 — one above the authorised total', () => {
+    expect(() => new AttemptBudget(19)).toThrow(InvalidAttemptCeiling);
+    expect(() => new AttemptBudget(19)).toThrow(/between 1 and the authorised total of 18/);
+  });
+
+  it('rejects NaN, which made every over-ceiling comparison false', () => {
+    expect(() => new AttemptBudget(Number.NaN)).toThrow(InvalidAttemptCeiling);
+    // The exact hole: `attempted > NaN` is false, so an unvalidated NaN budget
+    // charged for ever. Prove the refusal happens at construction, so no send
+    // can be reached with one.
+    expect(() => new AttemptBudget(Number.POSITIVE_INFINITY)).toThrow(InvalidAttemptCeiling);
+  });
+
+  it('rejects non-integer, zero and negative ceilings', () => {
+    for (const bad of [2.5, 0, -1, -18]) {
+      expect(() => new AttemptBudget(bad), `ceiling ${bad}`).toThrow(InvalidAttemptCeiling);
+    }
+  });
+
+  it('THE COUNTERPARTS — 18 and the smaller focused budgets still work', () => {
+    expect(new AttemptBudget().ceiling).toBe(18);
+    expect(new AttemptBudget(18).ceiling).toBe(18);
+    expect(new AttemptBudget(3).ceiling).toBe(3);
+    expect(new AttemptBudget(1).ceiling).toBe(1);
+  });
+
+  it('a refused ceiling cannot reach a sender at all', async () => {
+    let sends = 0;
+    const send = async (): Promise<ChatWithToolsResult> => {
+      sends += 1;
+      return { content: [], stop_reason: 'end_turn' } as unknown as ChatWithToolsResult;
+    };
+    expect(() => {
+      const budget = new AttemptBudget(19);
+      void dispatchBounded([], send, budget);
+    }).toThrow(InvalidAttemptCeiling);
+    expect(sends).toBe(0);
+  });
+});
+
+describe('#1398 budget repair — one charge is one provider attempt, not one caller call', () => {
+  const capture = { question: 'q', freshness: 'none' as const, args: {} as ChatWithToolsArgs };
+  const req = () => ({
+    arm: 'candidate' as const,
+    capture,
+    args: { system: 's', messages: [], tools: [] } as unknown as ChatWithToolsArgs,
+  });
+
+  it('the single-attempt evaluator scope is OPEN during the send', async () => {
+    // Charging before `send` bounds caller retries only; the real tool-use client
+    // retries internally (repository withRetry + SDK retries), so one charge could
+    // cover several paid HTTP attempts. This asserts the existing evaluator scope
+    // is active at the exact moment a real client would issue its request.
+    expect(isLiveEvalSingleAttempt()).toBe(false);
+    let observedInside: boolean | null = null;
+    const send = async (): Promise<ChatWithToolsResult> => {
+      observedInside = isLiveEvalSingleAttempt();
+      return { content: [], stop_reason: 'end_turn' } as unknown as ChatWithToolsResult;
+    };
+    await dispatchBounded([req()], send, new AttemptBudget(1));
+    expect(observedInside).toBe(true);
+    expect(isLiveEvalSingleAttempt()).toBe(false);
+  });
+
+  it('the scope is released even when the send throws', async () => {
+    let observedInside: boolean | null = null;
+    const boom = async (): Promise<ChatWithToolsResult> => {
+      // Observed BEFORE throwing, so this case discriminates a missing scope too
+      // rather than passing trivially on the post-condition alone.
+      observedInside = isLiveEvalSingleAttempt();
+      throw new Error('provider exploded');
+    };
+    const records = await dispatchBounded([req()], boom, new AttemptBudget(1));
+    expect(records[0]!.ok).toBe(false);
+    expect(observedInside).toBe(true);
+    expect(isLiveEvalSingleAttempt()).toBe(false);
+  });
+
+  it('the scope is released even when the CEILING throws mid-batch', async () => {
+    let observedInside: boolean | null = null;
+    const send = async (): Promise<ChatWithToolsResult> => {
+      observedInside = isLiveEvalSingleAttempt();
+      return { content: [], stop_reason: 'end_turn' } as unknown as ChatWithToolsResult;
+    };
+    await expect(
+      dispatchBounded([req(), req()], send, new AttemptBudget(1)),
+    ).rejects.toBeInstanceOf(AttemptCeilingExceeded);
+    expect(observedInside).toBe(true);
+    // A leaked scope would silently disable retries for everything later in the
+    // process — the opposite failure, and just as much a defect.
+    expect(isLiveEvalSingleAttempt()).toBe(false);
   });
 });
