@@ -80,7 +80,16 @@ function readStarter(id: string): Record<string, unknown> {
  */
 function persistedFormOf(id: string): unknown {
   const normalised = normaliseGraphNodeKindField(readStarter(id));
-  expect(normalised.ok, `${id}: node-kind normalisation`).toBe(true);
+  // Narrow the discriminated union rather than assert on it: `expect(...)` does
+  // not narrow for the compiler, and `.graph` only exists on the OK member. A
+  // throw here also makes the precondition fail loudly and name the reason,
+  // instead of surfacing later as an opaque undefined.
+  if (!normalised.ok) {
+    throw new Error(
+      `precondition failed: ${id} must pass node-kind normalisation before the ` +
+        `round trip can mean anything (reason: ${normalised.reason})`,
+    );
+  }
   const ingress = GraphStateIngressSchema.safeParse(normalised.graph);
   expect(ingress.success, `${id}: register's contract gate`).toBe(true);
   return projectGraphForPersistence(ingress.success ? ingress.data : undefined);

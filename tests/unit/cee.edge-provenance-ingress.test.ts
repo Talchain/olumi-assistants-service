@@ -82,7 +82,13 @@ function readStarter(id: string): Record<string, unknown> {
 
 function persistedFormOf(id: string): unknown {
   const normalised = normaliseGraphNodeKindField(readStarter(id));
-  expect(normalised.ok).toBe(true);
+  // Narrow, don't assert: `expect(...)` does not narrow for the compiler, and
+  // `.graph` exists only on the OK member of the union.
+  if (!normalised.ok) {
+    throw new Error(
+      `precondition failed: ${id} must normalise (reason: ${normalised.reason})`,
+    );
+  }
   const ingress = GraphStateIngressSchema.safeParse(normalised.graph);
   expect(ingress.success).toBe(true);
   return projectGraphForPersistence(ingress.success ? ingress.data : undefined);
@@ -143,7 +149,11 @@ describe("the register→readiness round trip, on the real bundled starters", ()
    */
   it.each(STARTER_IDS)("%s: `register`'s own contract gate still accepts it", (id) => {
     const normalised = normaliseGraphNodeKindField(readStarter(id));
-    expect(normalised.ok).toBe(true);
+    if (!normalised.ok) {
+      throw new Error(
+        `precondition failed: ${id} must normalise (reason: ${normalised.reason})`,
+      );
+    }
     expect(GraphStateIngressSchema.safeParse(normalised.graph).success).toBe(true);
   });
 });
