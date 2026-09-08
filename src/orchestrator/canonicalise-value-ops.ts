@@ -169,6 +169,24 @@ function asRecord(v: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * Same keys, same values by `Object.is`. Used ONLY to decide whether a merge
+ * actually changed anything, so the module can keep its by-reference identity
+ * contract on a no-op. Deliberately shallow: `observed_state`'s tunable leaves
+ * are scalars, and a deep compare here would be a second, driftable opinion
+ * about a shape this module does not own.
+ */
+function shallowEqualRecords(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+): boolean {
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  return aKeys.every(
+    (k) => Object.prototype.hasOwnProperty.call(b, k) && Object.is(a[k], b[k]),
+  );
+}
+
 /** Locate a node by id on an arbitrary (possibly hostile) ingress graph. */
 function findNode(graph: unknown, nodeId: string): Record<string, unknown> | null {
   const g = asRecord(graph);
@@ -194,9 +212,11 @@ function canonicaliseUpdateNodeValue(
   let observedPatch: Record<string, unknown> | null = null;
 
   for (const [key, to] of Object.entries(value)) {
-    // A key the schema already declares (including a canonical `observed_state`
-    // whole-object write) is passed through UNTOUCHED — its existing semantics,
-    // whatever they are, are not this lane's to change.
+    // A key the schema already declares is passed through UNTOUCHED — its
+    // existing semantics are not this lane's to change. `observed_state` is
+    // declared and so lands here too; it is passed through in the SAME sense,
+    // and the merge below then applies PLoT's `deepMerge` to it exactly as it
+    // does to a translated leaf. See the merge comment for why.
     if (NODE_DECLARED_FIELDS.has(key)) {
       out[key] = to;
       continue;
@@ -239,16 +259,57 @@ function canonicaliseUpdateNodeValue(
     out[key] = to;
   }
 
-  if (observedPatch === null) return null;
+  // ⭐ THE MERGE COVERS THE LITERAL WHOLE-OBJECT WRITE TOO, AND THAT IS THE
+  // FIX. This gate used to be `if (observedPatch === null) return null;`, so
+  // the merge below ran ONLY when some alias-spelled leaf had been translated.
+  // A literal `{ observed_state: { value } }` took the declared-field branch,
+  // translated nothing, returned null here, and `applyUpdateNode`'s
+  // `Object.assign` (its `NODE_REQUIRED_NESTED_FIELDS` set is EMPTY, because
+  // every object-typed NodeV3 field is `.optional()`) then REPLACED the whole
+  // object — dropping `unit` / `cap` / `raw_value`.
+  //
+  // The op key alone decided the semantics, and the edit LLM has no way to
+  // know which vocabulary is safe:
+  //     { 'data/value': v }            → merged
+  //     { 'observed_state/value': v }  → merged
+  //     { data: { value: v } }         → merged
+  //     { observed_state: { value: v } } → REPLACED  ← the only wiping spelling
+  // The divergence is not a decision anyone took; it falls out of
+  // `NODE_DECLARED_FIELDS` (= `Object.keys(NodeV3.shape)`) happening to
+  // contain `observed_state` and not `data`. One intent must have one outcome.
+  //
+  // `reconcileObservedValuePair` USED TO record this wipe as "a real and
+  // separate defect … Recorded, not absorbed" and declined to repair it there
+  // — correctly, because the repair belongs at the writer, which is here.
+  // ⚠ PAST TENSE DELIBERATELY: that paragraph is now marked SPENT at its own
+  // site, because this change closed the wipe. A literal payload now reaches
+  // `reconcileObservedValuePair` MERGED and carrying `raw_value`, so it lands
+  // inside the breadth of that function's stale-carry-forward guard rather
+  // than short-circuiting before it.
+  const literalObserved = asRecord(value[OBSERVED_ROOT]);
+  if (observedPatch === null && literalObserved === null) return null;
 
   // PLoT's `update_node` semantics (`deepMerge`): merge onto what the node
   // already has, so a value write never wipes `unit` / `raw_value` / `cap`.
   // An explicit `observed_state` in the same op still wins over the node's
   // existing state; the translated leaves win over both (they are the write
-  // the user confirmed).
+  // the user confirmed). That precedence is UNCHANGED — only the gate moved.
   const existing = asRecord(currentNode?.observed_state) ?? {};
   const explicit = asRecord(out[OBSERVED_ROOT]) ?? {};
-  out[OBSERVED_ROOT] = { ...existing, ...explicit, ...observedPatch };
+  const merged: Record<string, unknown> = {
+    ...existing,
+    ...explicit,
+    ...(observedPatch ?? {}),
+  };
+
+  // Identity is load-bearing (the module contract: an op that needs no
+  // translation is returned BY REFERENCE, and `translatedCount` is what the
+  // pinned tests assert). A literal write onto a node with NO stored
+  // observed_state — or one the merge leaves byte-equal — changes nothing, so
+  // it must still report zero translations rather than manufacture churn.
+  if (observedPatch === null && shallowEqualRecords(merged, explicit)) return null;
+
+  out[OBSERVED_ROOT] = merged;
   return out;
 }
 
@@ -707,15 +768,37 @@ export function reconcileObservedValuePair(
     // observed_state under the write. A payload WITHOUT it cannot strand a
     // stale claim, so this lane leaves it exactly as it found it.
     //
-    // This is the boundary, and it is deliberate. A literal nested
-    // `{ observed_state: { value } }` op takes the declared-field branch, is
-    // never merged, and the applier's whole-object replace then drops
-    // `unit`/`cap`/`raw_value` outright — pinned today by
-    // `gm-held-value-canonicalisation.test.ts` ("the canonicaliser is the
-    // identity"). That sibling WIPE is a real and separate defect; it is NOT
-    // this defect (nothing stale survives a wipe), and repairing it here
-    // would be the "while we're here" scope creep this programme keeps
-    // paying for. Recorded, not absorbed.
+    // ⚠⚠⚠ THE BOUNDARY RECORDED HERE IS SPENT, AND IT WAS #1342 THAT
+    // SPENT IT. The original text — kept below in full, because a superseded
+    // reason is evidence and deleting it would hide why this guard is drawn
+    // where it is — read:
+    //
+    //   "This is the boundary, and it is deliberate. A literal nested
+    //    `{ observed_state: { value } }` op takes the declared-field branch,
+    //    is never merged, and the applier's whole-object replace then drops
+    //    `unit`/`cap`/`raw_value` outright. That sibling WIPE is a real and
+    //    separate defect; it is NOT this defect (nothing stale survives a
+    //    wipe), and repairing it here would be the 'while we're here' scope
+    //    creep this programme keeps paying for. Recorded, not absorbed."
+    //
+    // #1342 CLOSED THAT WIPE AT THE WRITER (`canonicaliseUpdateNodeValue`,
+    // this file): the literal spelling is now merged onto the node's existing
+    // `observed_state` like every other spelling, so `unit` and `cap` survive
+    // and the payload ARRIVES HERE CARRYING `raw_value`. Pinned by
+    // `gm-held-value-canonicalisation.test.ts` — the case now titled
+    // "canonical observed_state spelling: siblings survive the merge", which
+    // asserts the merge (the old title cited here, "the canonicaliser is the
+    // identity", still exists in that file on a DIFFERENT, purely structural
+    // case, so the stale citation resolved silently to the wrong test) — and
+    // by `literal-observed-state-sibling-merge.test.ts`.
+    //
+    // ⭐ WHY THIS MATTERS TO THE GUARD BELOW, not just to the record: the
+    // superseded paragraph is the stated justification for the BREADTH of the
+    // `!hasOwnProperty(observed, 'raw_value') && !storedFrameAdmits` gate, and
+    // its premise was that the literal path CANNOT REACH that gate. It now
+    // reaches it routinely, which is how a stale `raw_value` on this path gets
+    // re-derived rather than carried forward. Reason about that guard's
+    // breadth from THIS text, never from the superseded paragraph above.
     //
     // ⭐ ONE EXCEPTION, AND IT IS THE WHOLE DEFECT: a factor the brief stated no
     // value for has NO `observed_state`, so the canonicaliser has nothing to
