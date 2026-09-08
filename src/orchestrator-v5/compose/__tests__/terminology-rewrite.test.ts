@@ -5,8 +5,10 @@
  * Two deterministic, pure rewriters:
  *
  *   - `applyTerminologyRewrite` — the prescriptive-lexicon substitution map
- *     mirroring the served prompt's TERMINOLOGY rules ("recommendation" →
- *     "leading option", never "winner", …). Used rewrite-first by the
+ *     for the rewritable prescriptive-language class ("recommendation" →
+ *     "suggestion"). Rank claims ("the winner", "winning option") are NOT
+ *     rewritable — see the race-framing ruling in the module header and
+ *     `terminology-rewrite.race-framing.test.ts`. Used rewrite-first by the
  *     phase-3 prose guard and the egress forbidden-phrase guard so a
  *     REWRITABLE offence no longer costs the user the whole block/response.
  *
@@ -33,17 +35,17 @@ describe('applyTerminologyRewrite — prescriptive lexicon substitutions', () =>
   const cases: ReadonlyArray<readonly [string, string, string]> = [
     [
       'The recommendation is robust across scenarios.',
-      'The leading option is robust across scenarios.',
-      'recommendation → leading option (sentence-initial case preserved)',
+      'The suggestion is robust across scenarios.',
+      'recommendation → suggestion (sentence-initial case preserved)',
     ],
     [
       'Our recommendation is to launch immediately.',
-      'Our leading option is to launch immediately.',
+      'Our suggestion is to launch immediately.',
       'mid-sentence recommendation',
     ],
     [
       'These recommendations may shift.',
-      'These leading options may shift.',
+      'These suggestions may shift.',
       'plural recommendations',
     ],
     [
@@ -55,31 +57,6 @@ describe('applyTerminologyRewrite — prescriptive lexicon substitutions', () =>
       'The recommended option is X.',
       'The suggested option is X.',
       'mid-sentence recommended',
-    ],
-    [
-      'The winner is Option A.',
-      'The leading option is Option A.',
-      'the winner → the leading option',
-    ],
-    [
-      'These are the winners after re-analysis.',
-      'These are the leading options after re-analysis.',
-      'the winners → the leading options',
-    ],
-    [
-      'Option A has the winning probability.',
-      'Option A has the win probability.',
-      'winning probability → win probability',
-    ],
-    [
-      'The winning option leads at 72%.',
-      'The leading option leads at 72%.',
-      'winning option → leading option',
-    ],
-    [
-      'Robust analysis points to the winning side.',
-      'Robust analysis points to the leading side.',
-      'winning side → leading side',
     ],
   ];
 
@@ -102,10 +79,13 @@ describe('applyTerminologyRewrite — prescriptive lexicon substitutions', () =>
   });
 
   it('reports applied terms for telemetry', () => {
+    // "recommendation" is rewritten; "winning option" is a RANK CLAIM and is
+    // deliberately NOT rewritten (2026-09-08 race-framing ruling) — it is left
+    // for the consumer's re-scan and fatal remedy. So exactly ONE term applies.
     const result = applyTerminologyRewrite(
       'The recommendation names the winning option.',
     );
-    expect(result.applied.length).toBe(2);
+    expect(result.applied).toEqual(['recommendation']);
   });
 
   it('leaves clean text byte-identical with no allocation of applied terms', () => {
@@ -119,6 +99,16 @@ describe('applyTerminologyRewrite — prescriptive lexicon substitutions', () =>
   //    consumer's re-scan still fires the fatal remedy. Weakening this is
   //    weakening the mutation-denial / staleness / jargon guarantees.
   const fatalClassPhrases: readonly string[] = [
+    // ⚠ RECLASSIFIED 2026-09-08 (race-framing ruling). These five were
+    // REWRITE cases above until this change — the map turned "the winner" into
+    // "the leading option", i.e. one banned phrase into another. A rank claim
+    // has no content-preserving rewrite, so it is fatal-class like any other
+    // unrewritable offence and must pass through untouched for the re-scan.
+    'The winner is Option A.',
+    'These are the winners after re-analysis.',
+    'Option A has the winning probability.',
+    'The winning option leads at 72%.',
+    'Robust analysis points to the winning side.',
     "I haven't applied any changes to the model.",
     'Nothing changed on the model since the last analysis.',
     'No changes were made.',

@@ -642,6 +642,10 @@ describe('PR2 L2 — the composed sentence clears the REAL egress guard', () => 
     expect(findForbiddenPhraseHit(rejected)).toBe('recommendation');
     const rw = applyTerminologyRewrite(rejected);
     expect(rw.text).not.toBe(rejected);
-    expect(rw.text).toContain('the leading option');
+    // ⚠ TARGET CHANGED 2026-09-08 (race-framing ruling): the rewriter used to
+    // substitute "the leading option" here, MANUFACTURING banned leader
+    // vocabulary inside our own safety pass. It now lands on "the suggestion".
+    expect(rw.text).toContain('the suggestion');
+    expect(rw.text).not.toMatch(/leading\s+option/i);
   });
 });

@@ -1276,18 +1276,33 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       return postTurn(app, MESSAGE);
     }
 
-    it("⭐ the #755 receipt — production copy, trips the vocabulary, designates NOTHING", async () => {
-      // ⭐ THE EXACT SENTENCE #755's FIRST CUT DESTROYED, imported from the
-      // producer so a reword cannot silently decouple this test from it.
-      // "explore the leading option" trips the shared vocabulary and names no
-      // option, so it must reach the user untouched.
-      const receipt = COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({});
-      const { status, body } = await driveEditWith(receipt);
+    /**
+     * ⚠ PINNED TO THE HISTORICAL LITERAL, 2026-09-08 — DO NOT RE-SYNC TO
+     * `COACHING_TEXT`.
+     *
+     * This was `COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({})`, imported from the
+     * producer so a reword could not decouple the test from the copy. The
+     * race-framing ruling then CLEANED that copy: it no longer says "the
+     * leading option", so it no longer trips the vocabulary — and an imported
+     * control would have gone green while testing NOTHING, which is precisely
+     * CLAUDE.md trap 12b (a control pinned to "whatever is deployed now"
+     * decays into a tautology the first time "now" changes).
+     *
+     * The property under test is not "today's copy survives" — it is "a
+     * sentence that TRIPS the vocabulary while DESIGNATING NO OPTION must
+     * reach the user untouched". That property needs a tripping sentence, so
+     * it is pinned here, permanently, as the #755 sentence actually was.
+     */
+    const RECEIPT_755_HISTORICAL =
+      'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.';
+
+    it("⭐ the #755 receipt — trips the vocabulary, designates NOTHING", async () => {
+      const { status, body } = await driveEditWith(RECEIPT_755_HISTORICAL);
       expect(status).toBe(200);
       expect(
         body.assistant_text,
         'the wire gate destroyed an honest receipt — this is #755 rebuilt at a new address',
-      ).toBe(receipt);
+      ).toBe(RECEIPT_755_HISTORICAL);
     });
 
     it('INSTRUMENT: that receipt really does trip the deleting reader', async () => {
@@ -1296,7 +1311,22 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
       const { textAssertsLeadingOption } = await import(
         '../compose/leading-option-egress-guard.js'
       );
-      expect(textAssertsLeadingOption(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}))).toBe(true);
+      expect(textAssertsLeadingOption(RECEIPT_755_HISTORICAL)).toBe(true);
+    });
+
+    it('and the SHIPPED copy no longer carries the race framing at all', async () => {
+      // The other half of the repair: production copy is now clean, and that is
+      // pinned by identity against the producer so it cannot regress back.
+      const { textAssertsLeadingOption } = await import(
+        '../compose/leading-option-egress-guard.js'
+      );
+      const shipped = COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({});
+      expect(shipped).not.toBe(RECEIPT_755_HISTORICAL);
+      expect(textAssertsLeadingOption(shipped)).toBe(false);
+      expect(shipped).not.toMatch(/leading\s+option|winner|\bahead\b/i);
+      // ...and it still reaches the user untouched.
+      const { body } = await driveEditWith(shipped);
+      expect(body.assistant_text).toBe(shipped);
     });
 
     it.each([

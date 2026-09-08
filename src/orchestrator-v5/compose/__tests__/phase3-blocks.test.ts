@@ -2544,8 +2544,9 @@ describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
 // (`prose_guard_forbidden_phrase`, sample "recommendation") on every review
 // emission — generated coaching destroyed by its own guard. The remedy for
 // a REWRITABLE lexicon offence is now a deterministic terminology
-// substitution (prompt TERMINOLOGY map: "recommendation" → "leading
-// option"); the block SURVIVES with the term rewritten. Fatal classes
+// substitution ("recommendation" → "suggestion"); the block SURVIVES with
+// the term rewritten. Rank claims ("the winner", "winning option") are NOT
+// rewritable and keep the drop remedy — race-framing ruling, 2026-09-08. Fatal classes
 // (denial phrases, raw decimals, raw ids, lever-naming, lookup misses)
 // keep their drop remedy — pinned below.
 // ============================================================================
@@ -2555,7 +2556,7 @@ describe('RC4 rewrite-don\'t-drop — rewritable lexicon offences survive rewrit
     makeFact({ graphNodes: STANDARD_GRAPH_NODES }),
   );
 
-  it('robustness card SURVIVES with "recommendation" rewritten to "leading option" (tonight\'s live kill)', () => {
+  it('robustness card SURVIVES with "recommendation" rewritten to "suggestion" (tonight\'s live kill)', () => {
     const fact = makeFact({
       decisionReview: {
         robustness_explanation: {
@@ -2568,8 +2569,12 @@ describe('RC4 rewrite-don\'t-drop — rewritable lexicon offences survive rewrit
     const blocks = buildReviewCardBlocks(fact, cleanLookup, CTX);
     const robustness = blocks.filter((b) => b.card_kind === 'robustness');
     expect(robustness).toHaveLength(1);
+    // ⚠ TARGET CHANGED 2026-09-08 (race-framing ruling): "leading option" is
+    // itself banned race framing, so the rewrite now lands on "suggestion".
+    // The property this test exists for — the card SURVIVES rather than being
+    // nuked over one word — is unchanged.
     expect(robustness[0]!.body).toBe(
-      'The leading option is robust: it holds across most plausible scenarios, and only a large shift in delivery risk would overturn it.',
+      'The suggestion is robust: it holds across most plausible scenarios, and only a large shift in delivery risk would overturn it.',
     );
     expect(robustness[0]!.body).not.toMatch(/\brecommendations?\b/i);
   });

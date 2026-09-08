@@ -10,12 +10,40 @@
  * proportionate to the offence, and the safest CONTENT-PRESERVING remedy
  * that removes the violation wins.
  *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE RACE-FRAMING RULING (2026-09-08) — WHY THIS MAP SHRANK.
+ *
+ * Olumi must never frame options as a race. Not "the winner", not "the leading
+ * option", not "ahead", "beats", "top choice" or "wins". There are THREE
+ * DIFFERENT QUESTIONS and the product must say which one it is answering:
+ *   1. the most likely outcome;
+ *   2. the option with the best expected value;
+ *   3. the option most robust to what we do not know.
+ * Collapsing them into one ranked "winner"/"leader" IS the defect.
+ *
+ * ⚠ THIS MODULE WAS A PRODUCER OF THE DEFECT, NOT A VICTIM OF IT. Until
+ * 2026-09-08 it rewrote "the winner" → "the leading option" and
+ * "recommendation" → "leading option": a SAFETY PASS THAT SUBSTITUTED ONE
+ * BANNED PHRASE FOR ANOTHER. `compose/leading-option-egress-guard.ts` had
+ * already recorded this in its own header — "OUR OWN SAFETY PASS MANUFACTURES
+ * THE BANNED LANGUAGE" — and positioned itself downstream to measure the
+ * residue. The residue is now not manufactured here in the first place.
+ *
+ * A rank claim has NO content-preserving rewrite: preserve the sentence and you
+ * preserve the ranking. So the remedy for that class is the FATAL one (drop /
+ * replace), reached by simply not mapping it here.
+ *
+ * ⚠ NOT FIXED BY THIS MODULE, and a reader must not infer otherwise: the
+ * SERVED PROMPT (data/prompts.json) still instructs the model to "Default to
+ * 'leading option', 'performs best', 'strongest performer'" and to "name the
+ * leading option". That is the ROOT producer and it needs its own change with
+ * the served-prompt re-pin ritual. This module no longer ADDS to it.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
  * Two rewriters live here:
  *
  *   - {@link applyTerminologyRewrite} — the prescriptive-lexicon
- *     substitution map, mirroring the served routing prompt's TERMINOLOGY
- *     rules (data/prompts.json): default to "leading option"; never
- *     "winner"; "recommended" only when explicitly advising. It maps ONLY
+ *     substitution map. It maps ONLY
  *     the rewritable prescriptive-language class. It must NEVER contain a
  *     substitution for a fatal-class phrase (mutation denial, false
  *     success, staleness, internal jargon) — consumers enforce that
@@ -48,7 +76,7 @@
  * restored per match by {@link preserveLeadingCase}). `$1`-style capture
  * references are supported.
  */
-interface TerminologyRule {
+export interface TerminologyRule {
   readonly pattern: RegExp;
   readonly replacement: string;
 }
@@ -63,26 +91,43 @@ interface TerminologyRule {
  * content-preserving one, and those classes have no safe rewrite by
  * definition. The terminology-rewrite unit tests pin this invariant.
  */
-const TERMINOLOGY_RULES: readonly TerminologyRule[] = [
-  // "recommendation(s)" → "leading option(s)" — the noun names a result;
-  // the map's prescribed neutral result term is "leading option".
-  { pattern: /\brecommendations\b/gi, replacement: 'leading options' },
-  { pattern: /\brecommendation\b/gi, replacement: 'leading option' },
+export const TERMINOLOGY_RULES: readonly TerminologyRule[] = [
+  // "recommendation(s)" → "suggestion(s)". The noun names a result; the
+  // neutral non-directive term is "suggestion", matching the "recommended"
+  // → "suggested" rule directly below so the noun and the participle stay
+  // in the same register.
+  //
+  // ⚠ THIS MAPPED TO "leading option(s)" UNTIL 2026-09-08. That target is
+  // RACE FRAMING and is itself banned — see the RACE-FRAMING RULING block in
+  // this module's header.
+  { pattern: /\brecommendations\b/gi, replacement: 'suggestions' },
+  { pattern: /\brecommendation\b/gi, replacement: 'suggestion' },
   // "recommended" (adjective/participle) → "suggested" — neutral, keeps
   // both adjectival ("the suggested option") and verbal ("suggested next
-  // step") readings grammatical.
+  // step") readings grammatical. Unchanged: it was never race framing.
   { pattern: /\brecommended\b/gi, replacement: 'suggested' },
-  // "the winner(s)" → "the leading option(s)" — the map bans "winner"
-  // outright.
-  { pattern: /\bthe\s+winners\b/gi, replacement: 'the leading options' },
-  { pattern: /\bthe\s+winner\b/gi, replacement: 'the leading option' },
-  // "winning probability" → "win probability" (the neutral wire term);
-  // other "winning X" prescriptions → "leading X".
-  { pattern: /\bwinning\s+probability\b/gi, replacement: 'win probability' },
-  {
-    pattern: /\bwinning\s+(option|side|choice|outcome)(s)?\b/gi,
-    replacement: 'leading $1$2',
-  },
+  //
+  // ⛔ DELIBERATELY ABSENT — DO NOT RE-ADD (2026-09-08, ROADMAP: race-framing
+  // ruling). Four rules used to live here:
+  //
+  //     "the winner(s)"                          → "the leading option(s)"
+  //     "winning probability"                    → "win probability"
+  //     "winning option|side|choice|outcome"     → "leading <X>"
+  //
+  // Every one of them substituted a BANNED phrase for ANOTHER BANNED phrase.
+  // They are gone rather than retargeted because a RANK CLAIM HAS NO
+  // CONTENT-PRESERVING REWRITE: any substitution that preserves the sentence
+  // preserves the ranking, and the ranking is the defect. That makes them
+  // fatal-class by this module's own stated invariant ("those classes have no
+  // safe rewrite by definition"), so they now fall through the rewrite to the
+  // consumer's re-scan and fatal remedy, which is the honest outcome.
+  //
+  // The invariant is no longer maintained by this comment: it is DERIVED and
+  // FAIL-LOUD. `__tests__/terminology-rewrite.race-framing.test.ts` runs every
+  // replacement in this array through `textNamesLeadingOption` — the estate's
+  // exported leader-claim reader — and REDs on any replacement that names or
+  // presumes a leading option. Re-adding any rule above turns that test red in
+  // the same PR.
 ];
 
 /** Restore the leading capital of the matched text onto the replacement. */
