@@ -71,6 +71,7 @@ import {
   deriveTippingPointsFromTopLevel,
   type AnalysisResponseSummaryWithSignals,
 } from './analysis-signals.js';
+import { deriveFactorInvestigationFromEnrichment } from './factor-investigation-licence.js';
 import { selectRunAnalysisFact } from './freshness.js';
 import { emitUnknownEnrichmentKeyTelemetry } from './enrichment-manifest.js';
 
@@ -468,6 +469,10 @@ export function reconcileAnalysisSummaryWithEnrichment(
   // modelled-outcome means (banded downstream, never surfaced raw).
   const confidenceTier = deriveConfidenceTierFromEnrichment(enrichment);
   const optionOutcomes = deriveOptionOutcomesFromEnrichment(enrichment);
+  // THE WITNESSED HARM (2026-09-04): without this the composition site saw
+  // only an influence band for each factor and invited the user to run a pilot
+  // on one the engine scored at zero value of information.
+  const factorInvestigation = deriveFactorInvestigationFromEnrichment(enrichment);
 
   const withSignals: AnalysisResponseSummaryWithSignals = {
     ...withFragile,
@@ -477,6 +482,7 @@ export function reconcileAnalysisSummaryWithEnrichment(
     ...(optionGoalFits.length > 0 ? { option_goal_fits: optionGoalFits } : {}),
     ...(confidenceTier !== null ? { confidence_tier: confidenceTier } : {}),
     ...(optionOutcomes.length > 0 ? { option_outcomes: optionOutcomes } : {}),
+    ...(factorInvestigation.length > 0 ? { factor_investigation: factorInvestigation } : {}),
   };
 
   return {
