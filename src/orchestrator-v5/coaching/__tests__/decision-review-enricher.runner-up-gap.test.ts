@@ -18,6 +18,14 @@
  * on 10 Aug 2026, in the SAME turn response whose `assistant_text` correctly
  * said "HubSpot came out ahead in 61% of runs of this model" (PR #906's fix,
  * working). One response, two statistics, one of them the ratified-wrong one.
+ *
+ * ⚠ THAT QUOTE IS A DATED CAPTURE AND IS LEFT VERBATIM. The lead clause was
+ * retired on 2026-09-07 under Paul's no-winner ruling and now reads "scored
+ * highest against your goal in 61% of runs of this model". Rewriting the
+ * capture to match today's copy would make this file agree with a history that
+ * never happened (CLAUDE.md trap 14b) — the capture is evidence, not a fixture
+ * to keep current.
+ *
  * That is the defect: a gap between two win frequencies is not a difference in
  * outcome, and it inflates by construction whenever a third option collapses.
  *
@@ -71,7 +79,7 @@ const LIVE_ROBUSTNESS_SUMMARY = 'The lead is 14 percentage points and holds acro
 
 /** A review that states the RATIFIED-CORRECT statistic and nothing else. */
 const CORRECT_NARRATIVE =
-  'Switch to HubSpot came out ahead in 61% of runs of this model, driven by Sales Team Capacity. ' +
+  'Switch to HubSpot scored highest against your goal in 61% of runs of this model, driven by Sales Team Capacity. ' +
   'Raising conversion rate by 5 percentage points would not change that ordering.';
 
 function runAnalysisFact(enrichment: Record<string, unknown>): HandlerFact {

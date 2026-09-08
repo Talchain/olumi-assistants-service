@@ -353,10 +353,11 @@ const R_INTERNAL =
  * that "the magnitude is never compared, returned, logged, or made available
  * to prose" — and projects a four-state VERDICT. Two of the four states are
  * pure refusals. One is a refusal with a reason. The fourth carries ONE FACTOR
- * LABEL and no number, which is the same thing the deterministic composers
+ * LABEL and no EVPPI magnitude, which is the same thing the deterministic composers
  * (`phase3-blocks` evidence blocks, `post-analysis-advice-gate`) already put in
- * front of the user from this same authority. Every emitted note is asserted
- * digit-free by test.
+ * front of the user from this same authority. The optional matched evidence
+ * action uses that authority's existing safety-checked reader; ordinary counts
+ * in the action are not information-value magnitudes. Refusal notes are digit-free.
  *
  * WHY IT HAD TO MOVE, measured rather than argued. The 3 Sep 2026 founder
  * capture (`olumi-programme-docs` `artefacts/manual-test-2026-09-03/`) carried

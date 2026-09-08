@@ -84,7 +84,14 @@ import {
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
 import { boundNodeLabel } from "./label-bound.js";
-import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
+import { isNameShapedLabel } from "./claim-label-shape.js";
+import {
+  deriveGoalObjectiveLabel,
+  deriveDecisionLabel,
+  refusalDeniesObjecthood,
+  deliberationFrameOpensTheSpan,
+  type AuthoredLabel,
+} from "./objective-label.js";
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
@@ -142,6 +149,17 @@ export const PROJECTOR_STRUCTURAL_CLASS: RecordProvenanceClass = "projector_stru
 export function scaffoldingProvenance(quote: string): RecordProvenance {
   return { provenance_class: PROJECTOR_STRUCTURAL_CLASS, source: "synthetic", quote };
 }
+
+/**
+ * The disclosure for a goal whose SPAN the user wrote but never designated as
+ * the objective. Exported so guards bind to it by identity rather than by
+ * copying the string (trap 19).
+ *
+ * ⚠ 58 characters — `StructuredProvenance.quote` is `z.string().max(100)`, and
+ * it describes what the machine did. It is NEVER user text.
+ */
+export const GOAL_SPAN_CHOSEN_BY_CEE =
+  "Goal span chosen by CEE: the brief designates no objective";
 
 /**
  * ⭐ THE TWO FIELDS THE CONSUMER REQUIRES, AND WHY THESE VALUES.
@@ -573,7 +591,29 @@ export interface DroppedRecordRef {
      * One is chosen canonically; the others are named here rather than silently
      * absorbed — the same treatment 2(c) gives the intervention levels.
      */
-    | "parallel_causal_link_conflict";
+    | "parallel_causal_link_conflict"
+    /**
+     * ⭐ THE CLAIM MINTED A NODE AND NAMED IT WITH A SENTENCE.
+     *
+     * The node IS on the graph — `node_id` resolves and `withdrawn` is FALSE.
+     * Nothing was dropped, refused or shortened; what is disclosed is that the
+     * model's display string is a statement rather than a name, so a surface
+     * that clamps a title (the canvas clamps to two lines) may render it
+     * indistinguishably from its neighbours. Witnessed exactly that way on
+     * 6 Sep 2026: a 105-character `prior` label and the `"<Factor> Impact"`
+     * outcome minted from it rendered the same visible title.
+     *
+     * ⚠ THE LABEL IS SHIPPED UNCHANGED, AND THAT IS THE POINT. Truncating would
+     * move the lie rather than remove it — the node would still be named by a
+     * mutilated claim, and two nodes sharing a prefix would still collide.
+     * `label-bound.ts` may truncate only because a verbatim `source_quote` is
+     * conserved beside it; an `ai_inferred` claim node has none by construction.
+     *
+     * ⚠ SCOPED TO CLAIMS THAT MINT A NODE (trap 13d). A `causal_link` label is a
+     * relationship sentence by design, runs to 103 characters in the banked
+     * corpora, and mints an EDGE — it is never judged by this predicate.
+     */
+    | "claim_label_not_a_name";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
@@ -2227,15 +2267,121 @@ function projectOnce(
     // over the QUOTE. It is still true of the LEGACY graph path, which has no
     // typed record — which is why the authoring at the wire runs inside the
     // typed branch only.
-    const authoredLabel =
+    const authoredLabel: AuthoredLabel =
       kind === "goal" ? deriveGoalObjectiveLabel(quote) : { label: quote, authored: false };
 
-    const prov: RecordProvenance = {
-      provenance_class: "stated",
-      source_quote: quote,
-      brief_binding: briefBinding,
-      ...(authoredLabel.authored ? { label_authored: true } : {}),
-    };
+    // ⭐⭐ THE BADGE SAYS THE USER DESIGNATED THIS GOAL, SO IT MAY ONLY BE WORN
+    // BY A GOAL THE USER DESIGNATED.
+    //
+    // ── THE DEFECT, MEASURED ON A REAL GOVERNED CAPTURE ────────────────────
+    // Brief `01-simple-binary` (`run-b9389df`, real staging): the model files
+    // the user's own QUESTION — "Should we raise the price or keep it as is?" —
+    // as a `stated_item` of `kind: "goal"`. Every line below then agreed with
+    // it: `provenance_class: "stated"` + `brief_binding: "verified"` earns
+    // `from_brief` at `schema-v3.ts:1176`, and the opener quoted it back:
+    //
+    //   I've built a first decision model for "Should we raise the price or
+    //   keep it as is?".
+    //
+    // Quotation marks promise THESE ARE YOUR WORDS. They were — but the claim
+    // the badge makes is not about the WORDS, it is about the DESIGNATION, and
+    // a question designates no objective. The founder's ruling names this exact
+    // shape: *"Bad: Olumi invents a goal and records it as `from_brief`."*
+    // FOUR of the thirteen governed goal quotes are this shape.
+    //
+    // ── THE EVIDENCE WAS ALREADY IN HAND AND WAS BEING DISCARDED ───────────
+    // `deriveGoalObjectiveLabel` had already answered the question one line up,
+    // returning `{ authored: false, reason: "deliberation_frame" }` — the
+    // union's own words: *"The quote states a DECISION, not an objective."*
+    // That `reason` was dropped on the floor and `"stated"` written
+    // unconditionally. Nothing new is derived here; a verdict that was being
+    // computed and thrown away is now read.
+    //
+    // ── ⛔ WHY THIS IS A NARROW SUBSET OF "REFUSED", AND NOT "REFUSED" ─────
+    // The opposite harm is WORSE: telling a user their own designated goal was
+    // invented. Most of this deriver's refusals answer a DISPLAY question ("may
+    // I shorten this safely?"), not an authorship one — and an earlier head of
+    // this branch shipped that conflation and an independent reviewer measured
+    // it: admitting `head_disclaims` (a lexical `not|never|no|nor` test) told a
+    // user who wrote *"Our objective for this quarter is: We must never let
+    // latency exceed 200ms"* that the brief designates no objective. Three of
+    // three `head_disclaims` quotes in the external adversarial corpus are
+    // genuine objectives.
+    //
+    // ⛔⛔ AND THE SAME MISTAKE WAS THEN MADE ONE REASON ACROSS. That head kept
+    // `states_alternatives` — `/(^|\s)or(\s|$)/`, a BARE WORD TEST — on the
+    // strength of a comment calling both survivors "closed construction tests".
+    // False at the bytes for one of them. A second review drove three ordinary
+    // objectives through this seam and every one was told the brief designates
+    // no objective: "Reach 99.9% uptime or better" (a COMPARATIVE), "Increase
+    // margin, or failing that, hold it flat" (a FALLBACK), "grow in Germany or
+    // France" (a SCOPE). ⭐ The defect was a COMMENT doing the work of a
+    // MEASUREMENT — a claim about the KIND of a test is a claim about bytes.
+    //
+    // `refusalDeniesObjecthood` therefore admits exactly ONE reason:
+    // `deliberation_frame`, whose predicate is a genuinely CLOSED list of 32
+    // explicit constructions, read rather than asserted. The full table and its
+    // measurement live at `objective-label.ts:REFUSAL_ANSWERS`, and both
+    // directions — plus the DISJUNCTION axis the first corpus was structurally
+    // blind to — are pinned in `goal-designation-provenance.test.ts`.
+    //
+    // ── WHAT IS AND IS NOT SAID ───────────────────────────────────────────
+    // `source_quote` STAYS: the user's verbatim is theirs and still reaches the
+    // inspector (`schema-v3.ts:1187` carries it for every recognised class), so
+    // nothing the user wrote is lost — only the DESIGNATION is withdrawn.
+    // `label_authored` is deliberately NOT set HERE: it answers *"did we write
+    // these characters?"* and at this point we did not — the deriver refused, so
+    // the label is still the user's own text. Two signals, two questions
+    // (trap 21); `MINTED_GOAL_PROVENANCE` sets it because its label is
+    // CEE-authored prose, and this one's is not.
+    //
+    // ⚠ NOT SET HERE ≠ NEVER SET, and the distinction became reachable at the
+    // rebase onto #1180. `boundEveryNodeLabel` (this module's return) shortens
+    // any label past 200 characters and stamps `label_authored: true` on a node
+    // that carries the verbatim — which a goal re-badged here DOES. So an
+    // over-long chosen span legitimately ends up `projector_structural` +
+    // `label_authored` + a whole `source_quote`, and all three are true at once:
+    // CEE chose the span, the display string is ours, the user's words survive.
+    // #1180's reviewed world had only `stated` goals carrying `source_quote`;
+    // this branch mints the second kind, so neither review saw the combination.
+    // It is pinned in `goal-designation-provenance.test.ts` with a discriminating
+    // pair proving the flag tracks the BOUND rather than the badge. Reachable,
+    // not hypothetical: the two longest real `deliberation_frame` goal quotes in
+    // the governed baseline are 178 and 159 characters.
+    //
+    // ⚠ ONE CONSEQUENCE, DISCLOSED RATHER THAN DISCOVERED: `completion.ts:444`
+    // skips `projector_structural` nodes in its destroyed-content guard, so a
+    // goal re-badged here leaves that guard's domain. Pinned by name in the
+    // spec so it is visible in the suite rather than silent.
+    // ⭐ TWO CONDITIONS, TWO QUESTIONS. `refusalDeniesObjecthood` asks whether
+    // this KIND of refusal is a designation verdict at all;
+    // `deliberationFrameOpensTheSpan` asks whether THIS SPAN's evidence is
+    // sentence-initial. A frame token merely PRESENT in a span is ordinary
+    // English — "Considering the runway, reach break-even by Q3" is an
+    // objective, not a deliberation — and the unanchored form told eight such
+    // spans the brief designated no objective.
+    const goalWasNeverDesignated =
+      kind === "goal" &&
+      !authoredLabel.authored &&
+      refusalDeniesObjecthood(authoredLabel.reason) &&
+      deliberationFrameOpensTheSpan(quote);
+
+    const prov: RecordProvenance = goalWasNeverDesignated
+      ? {
+          // The SAME constructor and the SAME class the fallback limb already
+          // uses (`goal-inference.ts:47`). One vocabulary for "the machine put
+          // this here" — a second spelling would be two authorities for one
+          // fact, which is the estate's dominant defect.
+          ...scaffoldingProvenance(GOAL_SPAN_CHOSEN_BY_CEE),
+          source_quote: quote,
+          brief_binding: briefBinding,
+        }
+      : {
+          provenance_class: "stated",
+          source_quote: quote,
+          brief_binding: briefBinding,
+          ...(authoredLabel.authored ? { label_authored: true } : {}),
+        };
     provenance[id] = prov;
 
     const node: ProjectedNode = {
@@ -3797,11 +3943,97 @@ export function projectRecordsToGraph(
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
-  return boundEveryNodeLabel({
-    graph: projection.graph,
-    provenance: projection.provenance,
-    dropped: projection.dropped,
-  });
+  return boundEveryNodeLabel(
+    discloseNodesNamedWithASentence({
+      graph: projection.graph,
+      provenance: projection.provenance,
+      dropped: projection.dropped,
+    }),
+  );
+}
+
+/**
+ * ⭐⭐ A NODE THE MODEL NAMED WITH A SENTENCE IS DISCLOSED, NEVER SHORTENED.
+ *
+ * ── THE WITNESSED DEFECT (Paul's manual test, 6 Sep 2026) ──────────────────
+ * A `factor` node carried a 105-character belief sentence, and
+ * `fixFactorGoalEdges` minted a mediating outcome labelled
+ * `${factorLabel} Impact` from it. The canvas clamps a title to two lines, so
+ * both nodes rendered the SAME visible string. The sweep's mint is correct in
+ * intent (`deterministic-sweep.ts:1163`) and inherited a bad input — which is
+ * why the guard is here, at the source, and that file is untouched.
+ *
+ * The mechanism is `claims[].label` answering two questions at once (trap 21):
+ * for `factor`/`risk`/`outcome`/`option_refinement` the model supplies a noun
+ * phrase, while `instruction.ts` asks a `prior` for *"what you believe about a
+ * quantity, and how sure you are"* — and `CLAIM_KIND_TO_NODE_KIND` maps
+ * `prior → "factor"`. See {@link isNameShapedLabel} for the measured corpus.
+ *
+ * ── ⚠ WHY HERE AND NOT AT THE CLAIM MINT SITE ─────────────────────────────
+ * Two reasons, and the first is a defect this pass had when it was written
+ * there — caught by `shape-gate-withdrawal-is-named-honestly.test.ts`:
+ *
+ *  1. THE MINT SITE DOES NOT KNOW WHETHER THE NODE SURVIVES. The connectivity
+ *     prune runs after the claims pass, so a node disclosed at mint time can be
+ *     withdrawn afterwards — and `transformResponseToV3` derives `withdrawn`
+ *     from whether `node_id` resolves in the FINAL node list. The notice would
+ *     then read "withdrawn" on a channel whose entire purpose is telling the
+ *     truth about what was lost, while claiming the opposite in its own
+ *     docblock. Running over the FINAL nodes makes `withdrawn: false` true by
+ *     construction rather than by hope.
+ *  2. It is the same argument `boundEveryNodeLabel` states one function below:
+ *     a check installed at each mint site is a hand-maintained list that a
+ *     fourth mint site silently escapes (trap 12). One pass over the finished
+ *     node list covers every site and anything added later.
+ *
+ * ── THE SCOPE IS DERIVED FROM PROVENANCE, NOT FROM A KIND LIST ────────────
+ * `ai_inferred` is exactly "the model authored this display string". A STATED
+ * node's label is the user's own canonicalised quote (or an objective derived
+ * from it by `deriveGoalObjectiveLabel`), and judging the user's words by a
+ * predicate written for model-authored names is a different question with a
+ * different answer — the same scope discipline `label-bound.ts` states for
+ * truncation. A `causal_link` mints an EDGE and has no node to reach here at
+ * all, so its 103-character relationship sentences are out of scope by
+ * construction rather than by exclusion.
+ *
+ * ── IT RUNS BEFORE `boundEveryNodeLabel`, DELIBERATELY ────────────────────
+ * So the predicate sees the label the MODEL wrote, not one already shortened to
+ * 200 characters. A guard that is correct but pointed at the wrong bytes is
+ * trap 22's other half.
+ *
+ * ⭐ IDENTITY WHEN EVERY NODE IS NAMED. The ordinary draft returns the input
+ * object unchanged — the over-correction control expressed as code.
+ */
+function discloseNodesNamedWithASentence(projection: RecordProjection): RecordProjection {
+  const unnamed: DroppedRecordRef[] = [];
+
+  for (const node of projection.graph.nodes) {
+    // Model-authored display strings only. Derived from the provenance the
+    // projector already banked, so a new node kind cannot escape by not being
+    // on a list.
+    if (projection.provenance[node.id]?.provenance_class !== "ai_inferred") continue;
+    if (isNameShapedLabel(node.label)) continue;
+
+    unnamed.push({
+      // Named by NODE, not by claim — like `unconnected_to_goal`, which uses the
+      // same convention for the same reason: this pass runs after both node
+      // passes and holds no claim index.
+      claim_index: -1,
+      claim_kind: node.kind,
+      // ⚠ THE LABEL IS CARRIED UNCHANGED AND IS NOT REWRITTEN ANYWHERE IN THIS
+      // FUNCTION. Truncating would move the lie rather than remove it: the node
+      // would still be named by a mutilated claim, and two nodes sharing a
+      // prefix would still collide on a clamped canvas. `label-bound.ts` may
+      // shorten only because a verbatim `source_quote` is conserved beside it,
+      // and an `ai_inferred` node has none by construction.
+      label: node.label,
+      node_id: node.id,
+      reason: "claim_label_not_a_name",
+    });
+  }
+
+  if (unnamed.length === 0) return projection;
+  return { ...projection, dropped: [...projection.dropped, ...unnamed] };
 }
 
 /**

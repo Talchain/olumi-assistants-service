@@ -135,9 +135,9 @@ const INTAKE_DISCLOSURE = buildIntakeOptionDisclosure(
  * AS LEADING, which is exactly why it is excluded from the withheld branch.
  */
 const OBJECTIVE_CONTRADICTION_TAIL =
-  ' “Hold at £49 Per Seat (Status Quo)” came out ahead most often without moving' +
+  ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
   ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-  ' “Raise to £59 Per Seat” came out ahead in 28% of runs.';
+  ' “Raise to £59 Per Seat” scored highest in 28% of runs.';
 
 describe('preconditions — the fixtures are real, and the salvage path is the one under test', () => {
   it('the unset fixture is non-empty AND matches the unset grammar exactly', () => {
@@ -261,7 +261,7 @@ describe('counterpart direction — the salvage still refuses what it must', () 
       assistant_text: `${REJECTED_HEAD}${UNSET_DISCLOSURE}${OBJECTIVE_CONTRADICTION_TAIL}`,
     });
     expect(out).toBe(`${FALLBACK}${UNSET_DISCLOSURE}`);
-    expect(out).not.toContain('came out ahead');
+    expect(out).not.toContain('scored highest against your goal');
     expect(out).not.toContain('Hold at £49 Per Seat');
   });
 

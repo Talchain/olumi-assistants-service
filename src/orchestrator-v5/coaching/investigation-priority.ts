@@ -71,8 +71,9 @@
  *
  * ── THE ERROR DIRECTION, STATED ────────────────────────────────────────────
  * Every refusal reason that is not literally "the producer named a factor"
- * resolves to a state that WITHHOLDS the claim. The module under-serves by
- * construction: a missing priority, never a wrong one.
+ * resolves to a state that WITHHOLDS the claim. Before a named selection
+ * reaches the coach, projectAnalysis also checks current canonical factor
+ * membership and the existing option-control authority.
  */
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
@@ -97,11 +98,15 @@ export type InvestigationPriorityLicence =
   | {
       /** The producer ranked a factor and it cleared its own noise floor. */
       readonly kind: 'named';
+      /** Internal identity retained for current-model eligibility, not prose. */
+      readonly factorId: string;
       /** The exact same-run factor label, safety-checked upstream. */
       readonly factorLabel: string;
+      /** Existing selector's exact-factor, safety-checked action, if present. */
+      readonly specificAction: string | null;
     }
   | {
-      /** Factors were assessed; none cleared the resolution of this run. */
+      /** The assessed EVPPI rows did not clear their resolution floors. */
       readonly kind: 'below_resolution';
     }
   | {
@@ -109,7 +114,7 @@ export type InvestigationPriorityLicence =
       readonly kind: 'incomplete';
     }
   | {
-      /** No information-value estimate reached this analysis at all. */
+      /** No per-factor EVPPI estimate reached this analysis. */
       readonly kind: 'not_assessed';
     };
 
@@ -125,7 +130,7 @@ const INFLUENCE_IS_NOT_INFORMATION_VALUE =
   'Influence is how much a factor moves the result; information value is how much ' +
   'resolving it would be worth. They are different questions. You may still say which ' +
   'factors influence the result most — you may not turn that into an investigation ' +
-  'ranking, or call any check the highest-value or the most important thing to do.';
+  'ranking or a highest-value check on the basis of influence alone.';
 
 /**
  * The model-facing notes.
@@ -135,35 +140,39 @@ const INFLUENCE_IS_NOT_INFORMATION_VALUE =
  * that a constant defined for an unreachable state is a guard that cannot
  * fire — the shape this estate keeps shipping.
  *
- * Number-free by construction (the display projection admits no raw decimals),
+ * No EVPPI magnitude is emitted (the optional evidence action may use counts),
  * and each one states what the science DID, not merely what the product will
  * not say — a bare prohibition leaves the model with an unanswered question and
  * the influence ranking as the only ranking in the pack, which is precisely how
  * the 3 Sep session went wrong.
  */
 export const INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE =
-  'This analysis DID estimate what resolving each factor would be worth, and none of the ' +
-  'estimates cleared the resolution of the run. It therefore has no highest-value factor ' +
-  'to investigate: if asked what to look into first, say the run cannot separate the ' +
-  'candidates rather than picking one. ' +
+  'The per-factor EVPPI channel DID estimate information value for the assessed factors; ' +
+  'none of those estimates cleared the resolution of the run. This channel therefore ' +
+  'does not name a priority. This is not a verdict on unassessed factors or other ' +
+  'evidence-gap guidance. ' +
   INFLUENCE_IS_NOT_INFORMATION_VALUE;
 
 export const INVESTIGATION_PRIORITY_INCOMPLETE_NOTE =
-  'This analysis produced only a partial information-value ranking, so it cannot say which ' +
-  'factor is worth resolving first, and a surviving entry must not be promoted into a rank ' +
-  'the producer withheld. ' +
+  'The per-factor EVPPI channel cannot license a current investigable factor: its ' +
+  'ranking, identity, or eligibility is incomplete. Do not promote a surviving entry ' +
+  'or substitute another factor. This does not invalidate separate evidence-gap guidance. ' +
   INFLUENCE_IS_NOT_INFORMATION_VALUE;
 
 /**
  * The one state that GRANTS the claim. It is narrow on purpose: the producer
  * named exactly one factor, so the product may name exactly that one.
  */
-export function investigationPriorityNamedNote(factorLabel: string): string {
+export function investigationPriorityNamedNote(factorLabel: string, specificAction: string | null = null): string {
   return (
-    `The information-value estimate for this analysis ranks "${factorLabel}" as the factor ` +
-    'worth resolving first. If asked what to investigate or check first, name that factor ' +
+    `The per-factor EVPPI estimate ranks "${factorLabel}" first among its assessed factors. ` +
+    'When describing this channel\'s priority, name that factor ' +
     'and no other — in particular do not substitute whichever factor has the largest ' +
-    'influence on the result, which is a different question.'
+    'influence on the result, which is a different question.' +
+    // The verdict is never budget-dropped. An optional long action is omitted,
+    // not truncated into different advice, so it cannot exhaust that budget.
+    (specificAction === null || specificAction.length > 512
+      ? '' : ` Suggested evidence action for this factor: ${specificAction}`)
   );
 }
 
@@ -180,7 +189,7 @@ export function licenceFromEvppiGuidance(
   decision: FactorEvppiPriorityGuidanceDecision,
 ): InvestigationPriorityLicence {
   if (decision.outcome === 'selected') {
-    return { kind: 'named', factorLabel: decision.factorLabel };
+    return { kind: 'named', factorId: decision.factorId, factorLabel: decision.factorLabel, specificAction: decision.specificAction };
   }
   switch (decision.reason) {
     case 'absent':
@@ -211,24 +220,15 @@ export function licenceFromEvppiGuidance(
  * The model-facing sentence for a licence, or `null` when there is nothing
  * this module can honestly add.
  *
- * ⚠ `not_assessed` RETURNS NULL, AND THAT IS A DELIBERATE SCOPE DECISION, NOT
- * AN OVERSIGHT. Two reasons, both checkable:
- *
- *   1. It is already covered. The display projection's own
- *      `VOI_NOT_SCORED_NOTE` fires on exactly that state and carries the same
- *      prohibition. A second sentence saying the same thing is a mirror, and
- *      mirrors drift.
- *   2. It makes the change AUDITABLE. An analysis whose enrichment carries no
- *      `factor_evppi` produces a byte-identical ContextPack, so every existing
- *      pack fixture stays exactly as it was and any diff in this lane's tests
- *      is a diff this lane caused.
+ * No EVPPI channel adds no EVPPI note. Evidence-gap and factor-sensitivity
+ * signals retain their own, independently scoped disclosures.
  */
 export function investigationPriorityNote(
   licence: InvestigationPriorityLicence,
 ): string | null {
   switch (licence.kind) {
     case 'named':
-      return investigationPriorityNamedNote(licence.factorLabel);
+      return investigationPriorityNamedNote(licence.factorLabel, licence.specificAction);
     case 'below_resolution':
       return INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE;
     case 'incomplete':
@@ -244,20 +244,27 @@ export function investigationPriorityNote(
 }
 
 /**
- * Did this analysis assess information value AT ALL?
- *
- * The single predicate behind the one existing sentence this lane changes:
- * `VOI_NOT_SCORED_NOTE` claims "no value-of-information scores are available
- * for this analysis", and that is false whenever the EVPPI channel answered —
- * including when its answer was "below resolution". Exported so the formatter
- * READS this decision rather than re-deriving "did anything score?" a second
- * way; two predicates for one question is what put the false sentence in front
- * of a user in the first place.
+ * Has the per-factor EVPPI channel supplied a verdict? Not a statement about
+ * every information-value channel in the analysis.
  */
-export function analysisAssessedInformationValue(
+export function hasFactorEvppiAssessment(
   licence: InvestigationPriorityLicence | null | undefined,
 ): boolean {
   return licence != null && licence.kind !== 'not_assessed';
+}
+
+/** Retain the producer's first selection or withhold it; never rerank survivors. */
+export function eligibleInvestigationPriority(
+  licence: InvestigationPriorityLicence,
+  currentFactorIds: ReadonlySet<string> | undefined,
+  controlledFactorIds: ReadonlySet<string> | undefined,
+): InvestigationPriorityLicence {
+  if (licence.kind !== 'named') return licence;
+  if (currentFactorIds === undefined || controlledFactorIds === undefined ||
+      !currentFactorIds.has(licence.factorId) || controlledFactorIds.has(licence.factorId)) {
+    return { kind: 'incomplete' };
+  }
+  return licence;
 }
 
 /**

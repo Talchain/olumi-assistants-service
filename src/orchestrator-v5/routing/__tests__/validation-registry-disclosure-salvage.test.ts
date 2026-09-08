@@ -75,9 +75,9 @@ const INTAKE_DISCLOSURE = buildIntakeOptionDisclosure(
  * branch.
  */
 const OBJECTIVE_CONTRADICTION_TAIL =
-  ' “Hold at £49 Per Seat (Status Quo)” came out ahead most often without moving' +
+  ' “Hold at £49 Per Seat (Status Quo)” scored highest against your goal most often without moving' +
   ' “Seat Price Level” the way your goal asks. Among the options that do,' +
-  ' “Raise to £59 Per Seat” came out ahead in 28% of runs.';
+  ' “Raise to £59 Per Seat” scored highest in 28% of runs.';
 
 describe('salvage fixtures are the real thing (precondition pins)', () => {
   it('the scaffold fixture is a non-empty scaffold disclosure', () => {
@@ -174,7 +174,7 @@ describe('T2 — the OBJECTIVE-CONTRADICTION family is deliberately NOT salvaged
   it('a rejected summary carrying ONLY the objective-contradiction tail → BARE fallback', () => {
     const out = fwd({ assistant_text: `${REJECTED_HEAD}${OBJECTIVE_CONTRADICTION_TAIL}` });
     expect(out).toBe(FALLBACK);
-    expect(out).not.toContain('came out ahead');
+    expect(out).not.toContain('scored highest against your goal');
     expect(out).not.toContain('Hold at £49 Per Seat');
   });
 

@@ -47,11 +47,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import {
   reconcileAnalysisSummaryWithEnrichment,
 } from '../../src/orchestrator-v5/context/analysis-fallback.js';
-import { projectAnalysis } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
+import { assembleContextPack, projectAnalysis } from '../../src/orchestrator-v5/context/context-pack-assembler.js';
+import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
+import { buildUserMessage } from '../../src/orchestrator-v5/routing/route-with-tool-use.js';
 import {
   VOI_NOT_SCORED_NOTE,
   formatAnalysisForContext,
@@ -66,15 +69,138 @@ const CAPTURE = JSON.parse(
   ),
 ) as Record<string, unknown>;
 
+// Existing mechanical projection of the SAME captured scenario. Validate only
+// the assembler's structural input contract, without inventing missing data.
+const CAPTURE_GRAPH = z.object({
+  nodes: z.array(z.object({ id: z.string(), kind: z.unknown().optional(), label: z.unknown().optional() }).passthrough()),
+  edges: z.array(z.object({ from: z.string(), to: z.string() }).passthrough()),
+}).parse(JSON.parse(readFileSync(fileURLToPath(new URL(
+  '../../src/cee/graph-readiness/__tests__/fixtures/founder-2026-09-03.graph.json', import.meta.url,
+)), 'utf8')));
+
+const RESOLVED_CONTROL = {
+  ...CAPTURE,
+  factor_evppi: [{ factor_id: '16ec3d64', evppi: 0.04, status: 'resolved' }],
+};
+
+function assembledCapture(
+  enrichment: Record<string, unknown>,
+  graph = CAPTURE_GRAPH,
+  controlled: ReadonlySet<string> | null = new Set<string>(),
+  status: 'canonical' | 'provisional' = 'canonical',
+) {
+  const { summary } = reconcileAnalysisSummaryWithEnrichment(summaryFromCapture(), enrichment);
+  return assembleContextPack({
+    payload: makeMessagePayload({ scenario_id: '7826c742-2939-4584-917c-f1286a663ae4' }),
+    priorTurns: [], graph, graphContext: { status }, analysis: summary,
+    interventionControlledFactorIds: controlled ?? undefined,
+  });
+}
+
+describe('current-model eligibility and independent scoring channels', () => {
+  it('retains an earned captured-factor priority in the actual routing message', () => {
+    const pack = assembledCapture(RESOLVED_CONTROL);
+    expect(pack.display_analysis?.investigation_priority_note).toContain('"ICP Clarity"');
+    const sent = buildUserMessage(pack, 'What should we investigate next?');
+    expect(sent).toContain(JSON.stringify(pack.display_analysis!.investigation_priority_note));
+    expect(sent).not.toContain('"factorId"');
+  });
+
+  it('carries only the existing producer action joined to the selected eligible factor', () => {
+    const review = z.object({ evidence_enhancements: z.record(z.unknown()) }).parse(CAPTURE.decision_review);
+    const { specific_action: action } = z.object({ specific_action: z.string() }).parse(review.evidence_enhancements['16ec3d64']);
+    const pack = assembledCapture({ ...RESOLVED_CONTROL, decision_review: {
+      evidence_enhancements: {
+        '16ec3d64': { specific_action: action },
+        'unselected': { specific_action: 'This unrelated action must not be substituted.' },
+      },
+    } });
+    const sent = buildUserMessage(pack, 'What evidence should we collect next?');
+    expect(sent).toContain(action);
+    expect(sent).not.toContain('This unrelated action');
+    expect(assembledCapture({ ...RESOLVED_CONTROL, decision_review: {} }).display_analysis?.investigation_priority_note)
+      .not.toContain('Suggested evidence action');
+  });
+
+  it('omits an oversized optional action without losing the earned priority', () => {
+    const action = 'Read the documented evidence carefully. '.repeat(80);
+    const pack = assembledCapture({ ...RESOLVED_CONTROL, decision_review: {
+      evidence_enhancements: { '16ec3d64': { specific_action: action } },
+    } });
+    expect(pack.display_analysis?.investigation_priority_note).toContain('"ICP Clarity"');
+    expect(pack.display_analysis?.investigation_priority_note).not.toContain(action.trim());
+  });
+
+  it('does not name a resolved option-controlled factor', () => {
+    const pack = assembledCapture(RESOLVED_CONTROL, CAPTURE_GRAPH, new Set(['16ec3d64']));
+    expect(pack.analysis?.investigation_priority).toEqual({ kind: 'incomplete' });
+    expect(pack.display_analysis?.investigation_priority_note).not.toContain('"ICP Clarity"');
+  });
+
+  it('does not name a factor absent from the current canonical graph', () => {
+    const graph = { ...CAPTURE_GRAPH, nodes: CAPTURE_GRAPH.nodes.filter(n => n.id !== '16ec3d64') };
+    expect(assembledCapture(RESOLVED_CONTROL, graph).analysis?.investigation_priority)
+      .toEqual({ kind: 'incomplete' });
+  });
+
+  it('does not treat a provisional graph as current eligibility authority', () => {
+    expect(assembledCapture(RESOLVED_CONTROL, CAPTURE_GRAPH, new Set(), 'provisional').analysis?.investigation_priority)
+      .toEqual({ kind: 'incomplete' });
+  });
+
+  it('does not interpret missing lever authority as an empty controlled set', () => {
+    expect(assembledCapture(RESOLVED_CONTROL, CAPTURE_GRAPH, null).analysis?.investigation_priority)
+      .toEqual({ kind: 'incomplete' });
+  });
+
+  it('keeps useful evidence-gap guidance while limiting a below-resolution verdict to assessed EVPPI rows', () => {
+    const pack = assembledCapture({ ...CAPTURE, m1_coaching: { evidence_gaps: [
+      { factor_id: '16ec3d64', factor_label: 'ICP Clarity', voi_score: 0.4 },
+    ] } });
+    expect(pack.display_analysis?.value_of_information?.length).toBe(1);
+    expect(pack.display_analysis?.investigation_priority_note).toContain('assessed factors');
+    expect(pack.display_analysis?.investigation_priority_note).not.toContain('no highest-value factor');
+    expect(pack.display_analysis?.investigation_priority_note).not.toContain('each factor');
+  });
+
+  it('a zero evidence-gap score does not globally deny a resolved EVPPI priority', () => {
+    const pack = assembledCapture({ ...RESOLVED_CONTROL, m1_coaching: { evidence_gaps: [
+      { factor_id: '16ec3d64', factor_label: 'ICP Clarity', voi_score: 0 },
+    ] } });
+    expect(pack.display_analysis?.investigation_priority_note).toContain('"ICP Clarity"');
+    expect(pack.display_analysis?.value_of_information_note).toContain('evidence-gap');
+    expect(pack.display_analysis?.value_of_information_note).not.toContain('every factor available');
+  });
+
+  it('preserves merged #1345 guidance without claiming all channels are unscored', () => {
+    const { factor_evppi: _omitted, ...withoutEvppi } = CAPTURE;
+    const sensitivity = z.array(z.record(z.unknown())).parse(CAPTURE.factor_sensitivity);
+    const pack = assembledCapture({ ...withoutEvppi,
+      factor_sensitivity: sensitivity.map(row => row.factor_id === '16ec3d64'
+        ? { ...row, value_of_information: 0.4 } : row),
+    });
+    expect(pack.analysis?.top_drivers.find(d => d.factor_label === 'ICP Clarity')?.investigation_verdict)
+      .toBe('informative');
+    expect(pack.display_analysis?.top_drivers?.find(d => d.label === 'ICP Clarity')?.investigation)
+      .toBeDefined();
+    expect(pack.display_analysis?.value_of_information_note).toContain('evidence-gap');
+    expect(pack.display_analysis?.value_of_information_note).not.toContain('for this analysis');
+  });
+});
+
 /**
- * The compact summary shape the assembler receives, populated from the same
- * capture. Deliberately MINIMAL and deliberately carrying `top_drivers`: the
+ * Existing minimal compact-summary harness: driver rows come from the capture;
+ * its legacy option scaffold is not evidence of the captured option outcomes.
+ * The tests below assert investigation guidance, never those probabilities.
+ * Deliberately carrying `top_drivers`: the
  * influence ranking is the thing the pack must keep offering, because
  * suppressing it would be over-correction — the user is entitled to know what
  * moves the result.
  */
 function summaryFromCapture(): AnalysisResponseSummary {
-  const sensitivity = CAPTURE.factor_sensitivity as ReadonlyArray<Record<string, unknown>>;
+  const sensitivity = z.array(z.object({
+    factor_id: z.string(), factor_label: z.string(), sensitivity_score: z.number(),
+  })).parse(CAPTURE.factor_sensitivity);
   return {
     winner: {
       option_id: '94b13741',
@@ -86,12 +212,15 @@ function summaryFromCapture(): AnalysisResponseSummary {
       { option_id: '05f973ef', option_label: 'Hire a Dedicated Sales Team', win_probability: 0.38 },
     ],
     top_drivers: sensitivity.slice(0, 3).map((row) => ({
-      factor_id: row.factor_id as string,
-      factor_label: row.factor_label as string,
-      sensitivity: row.sensitivity_score as number,
+      factor_id: row.factor_id,
+      factor_label: row.factor_label,
+      sensitivity: row.sensitivity_score,
     })),
     robustness_level: 'fragile',
     fragile_edge_count: 2,
+    analysis_status: 'complete',
+    margin: null,
+    margin_pp: null,
   } as unknown as AnalysisResponseSummary;
 }
 
@@ -192,8 +321,8 @@ describe('CONTRAST CONTROL — an enrichment with no EVPPI channel is unchanged'
     const display = formatAnalysisForContext(raw, { analysisFreshness: 'fresh' })!;
     expect(display.investigation_priority_note).toBeUndefined();
     expect(raw?.investigation_priority).toBeUndefined();
-    // Unchanged from before this lane: the state really is "nothing assessed",
-    // and the existing note says so and carries its own prohibition.
+    // No evidence-gap score arrived. This does not speak for every other
+    // information-value channel (merged #1345 remains present).
     expect(display.value_of_information_note).toBe(VOI_NOT_SCORED_NOTE);
   });
 
@@ -206,7 +335,7 @@ describe('CONTRAST CONTROL — an enrichment with no EVPPI channel is unchanged'
       factor_evppi: [{ factor_id: '16ec3d64', evppi: 0.04, status: 'resolved' }],
     };
     const { summary } = reconcileAnalysisSummaryWithEnrichment(summaryFromCapture(), RESOLVED);
-    const display = formatAnalysisForContext(projectAnalysis(summary, null), {
+    const display = formatAnalysisForContext(projectAnalysis(summary, null, new Set(), new Set(['16ec3d64'])), {
       analysisFreshness: 'fresh',
     })!;
     expect(display.investigation_priority_note).toContain('"ICP Clarity"');

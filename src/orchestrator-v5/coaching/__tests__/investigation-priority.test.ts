@@ -24,7 +24,7 @@ import { describe, expect, it } from 'vitest';
 import {
   INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE,
   INVESTIGATION_PRIORITY_INCOMPLETE_NOTE,
-  analysisAssessedInformationValue,
+  hasFactorEvppiAssessment,
   investigationPriorityFromEnrichment,
   investigationPriorityNote,
   licenceFromEvppiGuidance,
@@ -99,7 +99,7 @@ describe('the 3 Sep founder enrichment — the capture this module exists for', 
     // "no value-of-information scores are available for this analysis"; on this
     // capture that sentence is false, and this is the boolean that says so.
     expect(
-      analysisAssessedInformationValue(
+      hasFactorEvppiAssessment(
         investigationPriorityFromEnrichment(FOUNDER_SESSION_ENRICHMENT),
       ),
     ).toBe(true);
@@ -116,7 +116,9 @@ describe('licenceFromEvppiGuidance — every producer verdict maps by identity',
     };
     expect(licenceFromEvppiGuidance(decision)).toEqual<InvestigationPriorityLicence>({
       kind: 'named',
+      factorId: 'f1',
       factorLabel: 'Trial-to-paid conversion',
+      specificAction: null,
     });
     const note = investigationPriorityNote(licenceFromEvppiGuidance(decision));
     expect(note).toContain('"Trial-to-paid conversion"');
@@ -137,8 +139,8 @@ describe('licenceFromEvppiGuidance — every producer verdict maps by identity',
     expect(
       licenceFromEvppiGuidance({ outcome: 'not_selected', reason: 'all_below_resolution' }),
     ).toEqual<InvestigationPriorityLicence>({ kind: 'below_resolution' });
-    expect(analysisAssessedInformationValue({ kind: 'not_assessed' })).toBe(false);
-    expect(analysisAssessedInformationValue({ kind: 'below_resolution' })).toBe(true);
+    expect(hasFactorEvppiAssessment({ kind: 'not_assessed' })).toBe(false);
+    expect(hasFactorEvppiAssessment({ kind: 'below_resolution' })).toBe(true);
   });
 
   it('every UNTRUSTWORTHY-ranking reason resolves to incomplete, and none grants', () => {
@@ -183,17 +185,13 @@ describe('licenceFromEvppiGuidance — every producer verdict maps by identity',
 });
 
 describe('investigationPriorityNote — not_assessed adds nothing, on purpose', () => {
-  it('returns null so a pack with no EVPPI channel is byte-identical', () => {
-    // Deliberate scope: `VOI_NOT_SCORED_NOTE` already covers this state with
-    // the same prohibition, and a second sentence saying it would be a mirror.
-    // The null also makes this lane auditable — no fixture without
-    // `factor_evppi` can move.
+  it('returns null rather than inventing an EVPPI verdict for other channels', () => {
     expect(investigationPriorityNote({ kind: 'not_assessed' })).toBeNull();
   });
 
   it('an ABSENT licence is not the same as a licence saying nothing was assessed', () => {
-    expect(analysisAssessedInformationValue(null)).toBe(false);
-    expect(analysisAssessedInformationValue(undefined)).toBe(false);
+    expect(hasFactorEvppiAssessment(null)).toBe(false);
+    expect(hasFactorEvppiAssessment(undefined)).toBe(false);
   });
 });
 
@@ -202,7 +200,7 @@ describe('the notes carry no digits — the display projection admits none', () 
     const notes = [
       INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE,
       INVESTIGATION_PRIORITY_INCOMPLETE_NOTE,
-      investigationPriorityNote({ kind: 'named', factorLabel: 'Churn rate' }) as string,
+      investigationPriorityNote({ kind: 'named', factorId: 'churn', factorLabel: 'Churn rate', specificAction: null }) as string,
     ];
     for (const note of notes) {
       expect(note, note.slice(0, 40)).not.toMatch(/\d/);
@@ -210,5 +208,10 @@ describe('the notes carry no digits — the display projection admits none', () 
     // POSITIVE CONTROL for the digit probe: it must be able to SEE a digit,
     // otherwise the three assertions above pass by testing nothing (trap 13).
     expect('a note carrying 0.42').toMatch(/\d/);
+  });
+
+  it('fixed refusal notes stay within their explicit character allowance', () => {
+    expect(INVESTIGATION_PRIORITY_BELOW_RESOLUTION_NOTE.length).toBeLessThanOrEqual(800);
+    expect(INVESTIGATION_PRIORITY_INCOMPLETE_NOTE.length).toBeLessThanOrEqual(800);
   });
 });

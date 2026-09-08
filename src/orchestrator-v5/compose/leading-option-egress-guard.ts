@@ -101,6 +101,8 @@
 
 import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
+import { splitIntoRedactableUnits } from './redactable-units.js';
 
 /**
  * Copy that NAMES or PRESUMES a leading option.
@@ -196,7 +198,7 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
    * branch where the prior run's verdict permits and the current run's
    * withholds:
    *
-   *     "${prior_leading_label} came out ahead in the earlier run."
+   *     "${prior_leading_label} scored highest in the earlier run."
    *
    * That sentence matched NOTHING in this list. Its sibling, the both-permitted
    * template, emits "${prior} came out ahead before, and ${current} now leads."
@@ -247,6 +249,47 @@ const LEADER_CLAIM_PATTERNS: ReadonlyArray<{ readonly code: string; readonly re:
     code: 'band_ahead',
     re: /\b(?:slightly|clearly|well|far|marginally|narrowly|comfortably)\s+ahead\b/i,
   },
+  /**
+   * ⚠⚠ THE GOAL-FRAMED VOCABULARY — added 2026-09-07, IN THE SAME COMMIT that
+   * retired the contest copy, and that simultaneity is the whole point.
+   *
+   * Paul's ruling ("there's never a winner… terminology like 'winner' is
+   * wrong") moved the deterministic templates off contest phrasing and onto the
+   * user's GOAL:
+   *
+   *     "came out ahead in 99% of runs of this model."
+   *   → "scored highest against your goal in 99% of runs of this model."
+   *
+   * Every retired phrase was visible to this list — `comes_out_ahead`,
+   * `leading_option`, `leads`. NOT ONE of the replacements was. Measured at
+   * pristine before the rewrite landed: `textNamesLeadingOption` returned
+   * FALSE on all five new sentences (the RED-first signatures in
+   * `__tests__/goal-framed-outcome-vocabulary.test.ts`).
+   *
+   * ⚠ AND THIS IS NOT AN ALARM GOING QUIET, WHICH IS WHY IT SHIPS TOGETHER.
+   * `guardLeadingOptionClaimsAtEgress` is observe-only and still drops nothing.
+   * But `textNamesLeadingOption` — the string-level reading below — is consumed
+   * by REAL ENFORCEMENT:
+   *
+   *   - `context/withheld-leader-projection.ts:550` redacts a note on it;
+   *   - `context/withheld-history-redaction.ts:274` redacts history on it;
+   *   - `compose.ts`'s per-field `evidence_gap` projection gates on it.
+   *
+   * So rewording the producers WITHOUT this entry would not merely blind the
+   * alarm — it would switch REDACTION OFF for the new sentences, and a withheld
+   * turn would carry "X scored highest against your goal in 72% of runs" into
+   * history and into the projection. That is the `case1g` corridor again,
+   * arriving through a copy change rather than through a missed template.
+   *
+   * Splitting the copy change and this entry across two PRs would ship that
+   * hole in the window between them. They are one change.
+   *
+   * `most_likely_to_serve` covers the number-free comparison opener
+   * ("The option most likely to serve your goal has changed"), which names a
+   * leading option just as surely without scoring anything.
+   */
+  { code: 'scored_highest', re: /\bscor(?:e|es|ed|ing)\s+highest\b/i },
+  { code: 'most_likely_to_serve', re: /\bmost\s+likely\s+to\s+serve\b/i },
 ];
 
 /**
@@ -386,9 +429,176 @@ export function neutraliseEnforcementFalsePositiveSpans(value: string): string {
  * The observe-only egress guard keeps the wider net: it is measuring residue,
  * and a slightly noisy alarm is the correct trade for one that cannot miss.
  */
-export function textAssertsLeadingOption(value: string): boolean {
+export interface LeaderProseContext {
+  /** Exact labels supplied by the caller's existing scenario roster. */
+  readonly optionLabels: readonly string[];
+}
+
+/** Shared with the wire name test; exact tokens, Unicode-safe, soft-wrap-safe. */
+export function optionLabelPattern(label: string): RegExp {
+  const pattern = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${pattern}(?![\\p{L}\\p{N}_])`, 'giu');
+}
+
+// An internal object-reference token, never emitted. Unlike a word sentinel it
+// cannot itself match an option label or manufacture leader-word adjacency.
+const OPTION_REFERENT = '\uFFFC';
+
+function bindOptionReferences(value: string, context: LeaderProseContext): string {
+  const references = context.optionLabels.flatMap((label) => label.trim() === '' ? [] :
+    [...value.matchAll(optionLabelPattern(label))].map((match) => ({
+      start: match.index, end: match.index + match[0].length,
+    }))).sort((a, b) => a.start - b.start || b.end - a.end);
+
+  // Bind the subject before reading its predicate. Repeated label words can
+  // also be genuine auxiliaries: in "May may be the leading option", the first
+  // May is the subject and the second is a modal. Do not mask that auxiliary.
+  // A prelude is a grammatical chain, not arbitrary preceding prose.
+  const predicatePrelude = /^(?:\s|\b(?:am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|will|would|should|must|not|never|the|a|an|[a-z]+ly)\b)*$/i;
+  const preludes: Array<{ start: number; end: number }> = [];
+  for (const { re } of LEADER_CLAIM_PATTERNS) {
+    for (const claim of value.matchAll(new RegExp(re.source, 'gi'))) {
+      const claimEnd = claim.index + claim[0].length;
+      // Vocabulary inside an actual label is a mention of the option, not a
+      // separate comparative predicate.
+      if (references.some((ref) => ref.start <= claim.index && claimEnd <= ref.end)) continue;
+      const subject = references.find((ref) => ref.end <= claim.index &&
+        predicatePrelude.test(value.slice(ref.end, claim.index)));
+      if (subject) preludes.push({ start: subject.end, end: claim.index });
+    }
+  }
+  const protectedReferences = references.filter((ref) =>
+    !preludes.some((prelude) => prelude.start <= ref.start && ref.end <= prelude.end));
+  let result = '';
+  let cursor = 0;
+  for (const ref of protectedReferences) {
+    if (ref.start < cursor) continue; // longest exact overlapping label wins
+    result += value.slice(cursor, ref.start) + OPTION_REFERENT;
+    cursor = ref.end;
+  }
+  return result + value.slice(cursor);
+}
+
+export function textAssertsLeadingOption(value: string, context?: LeaderProseContext): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  return textNamesLeadingOption(neutraliseEnforcementFalsePositiveSpans(value));
+  // Existing consumers without option identity retain the original conservative
+  // reader. Do not guess whether May/No/etc. is a qualifier inside an unknown
+  // label. Contextual grammar is restricted to the projection that owns a roster.
+  if (context === undefined) return textNamesLeadingOption(neutraliseEnforcementFalsePositiveSpans(value));
+  return assertedLeaderMatches(value, context).length > 0;
+}
+
+/**
+ * Classify the comparative PREDICATE, not every word in its surrounding prose.
+ * A clause-initial conditional/negative subject or an adjacent auxiliary can
+ * qualify it. An unrelated negated noun, a word inside an option label, or an
+ * investigation later in the sentence cannot. The shared unit splitter bounds
+ * direct questions without exempting relative assertions inside a question.
+ */
+interface AssertedLeaderMatch {
+  code: string;
+  before: string;
+  after: string;
+  start: number;
+  end: number;
+}
+
+function assertedLeaderMatches(value: string, context: LeaderProseContext): AssertedLeaderMatch[] {
+  const text = neutraliseEnforcementFalsePositiveSpans(bindOptionReferences(value, context));
+  let offset = 0;
+  const units = splitIntoRedactableUnits(text).map((unit) => {
+    const located = { text: unit, start: offset, end: offset + unit.length };
+    offset = located.end;
+    return located;
+  });
+  const matches: AssertedLeaderMatch[] = [];
+  for (const { code, re } of LEADER_CLAIM_PATTERNS) {
+    for (const match of text.matchAll(new RegExp(re.source, 'gi'))) {
+      const end = match.index + match[0].length;
+      const before =
+        text
+          .slice(0, match.index)
+          .split(/[.!?;,]|\b(?:but|yet|however)\b/i)
+          .at(-1) ?? '';
+      const after = text
+        .slice(end)
+        .split(/[.!?;,]|\b(?:but|yet|however)\b/i)[0];
+
+      // Initial operators bind the comparison's subject. Do not search for
+      // "no" within that subject: e.g. Status Quo (No New Hire) is a label.
+      if (/^\s*(?:if|unless|suppose|supposing|whether|neither)\b/i.test(before)) continue;
+      // An embedded question/condition binds its recognised option SUBJECT,
+      // not an arbitrary word somewhere in the preceding clause. Label content
+      // has already become an opaque referent, so it cannot provide operators.
+      if (new RegExp(`\\b(?:if|unless|whether|neither)\\s+${OPTION_REFERENT}(?:\\s+(?:nor|or|and)\\s+${OPTION_REFERENT})?\\s*$`, 'i').test(before)) continue;
+      // Modal/negative auxiliaries must meet the predicate, not another verb
+      // such as "the deadline may slip and X leads".
+      if (
+        /\b(?:could|might|may|would)\s+(?:(?:have\s+)?(?:be|been|become)\s+)?(?:the\s+)?$/i.test(before)
+      ) continue;
+      if (
+        /\b(?:not|never|cannot|can['’]t|doesn['’]t|isn['’]t|no)\s+(?:[a-z]+ly\s+)*(?:the\s+)?$/i.test(before)
+      ) continue;
+      // A denied report of a comparison is not the report's assertion. The
+      // optional complement also covers the overlapping bare "leads" match.
+      if (
+        /\b(?:(?:does?|did)\s+not|doesn['’]t|didn['’]t|cannot|can['’]t)\s+(?:show|indicate|establish|determine)(?:\s+which\s+option)?\s*$/i.test(before)
+      ) continue;
+      // Only an adjacent postfix condition binds this predicate. An "if" in
+      // "X leads now and we should check if costs rise" belongs to the check.
+      if (/^\s+(?:if|unless)\b/i.test(after)) continue;
+
+      const unit = units.find((candidate) => candidate.start <= match.index && end <= candidate.end);
+      if (unit?.text.trimEnd().endsWith('?')) {
+        const questionBefore = text.slice(unit.start, match.index);
+        const questionAfter = text.slice(end, unit.end);
+        const asksWhich =
+          (code === 'which_option_leads' && questionBefore.trim() === '') ||
+          (code === 'leads' && /^\s*which\s+option\s*$/i.test(questionBefore));
+        const asksWhether =
+          /^\s*(?:is|are|was|were)\b[^,;.!?]*\bthe\s*$/i.test(questionBefore) &&
+          /^\s*\?\s*$/.test(questionAfter);
+        if (asksWhich || asksWhether) continue;
+      }
+      matches.push({ code, before, after, start: match.index, end });
+    }
+  }
+  return matches;
+}
+
+/**
+ * Explicit comparative assertions can designate without spelling a roster
+ * label: a current advantage/edge presupposes a lead, and "the analysis shows
+ * which option leads" asserts a resolved comparison. Use the SAME vocabulary
+ * and assertion classifier above; never infer an option alias or a permission.
+ * A bare mention ("Explore the leading option") is deliberately insufficient.
+ */
+export function textAssertsImplicitLeadingOption(value: string, context: LeaderProseContext): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return assertedLeaderMatches(value, context).some(isImplicitDesignation);
+}
+
+function isImplicitDesignation({ code, before, after }: AssertedLeaderMatch): boolean {
+  return (
+    ((code === 'leading_option' || code === 'the_lead') &&
+      /^['’]s\s+(?:current\s+)?(?:advantage|edge)\b/i.test(after)) ||
+    (code === 'which_option_leads' &&
+      /\b(?:analysis|results?|model)\s+(?:shows?|indicates?|establishes?)\s*$/i.test(before))
+  );
+}
+
+/**
+ * An explicit implicit designation is complete in its own unit. If EVERY
+ * assertion is such a designation, removing it cannot leave a naming half in
+ * an unrelated sentence. Overlapping vocabulary ("leads" inside "which option
+ * leads") refers to the same predicate, not a second distributed assertion.
+ */
+export function textAssertsOnlyImplicitLeadingOptions(value: string, context: LeaderProseContext): boolean {
+  const matches = assertedLeaderMatches(value, context);
+  const implicit = matches.filter(isImplicitDesignation);
+  return matches.length > 0 && matches.every((match) =>
+    implicit.some((designation) => designation.start <= match.start && match.end <= designation.end),
+  );
 }
 
 /**
@@ -552,6 +762,26 @@ export interface LeadingOptionEgressGuardOpts {
    */
   readonly mayNameLeadingOption: boolean;
   /**
+   * The `analysis_ready` payload this exit is shipping (`ctx.analysisReady`),
+   * read for ONE thing: `analysis_admission.permitted_analysis_mode`, via the
+   * shared {@link analysisReadyPermitsLeaderNaming}.
+   *
+   * ⭐ WHY THE ALARM READS IT TOO — AND IT IS NOT REDUNDANCY. The enforcer
+   * (`enforceLeadingOptionClaimsAtWire`) gained this same conjunct, so without
+   * it here the two rails would disagree about which turns are even IN SCOPE:
+   * the enforcer would edit prose on a below-`comparative_leader` turn while the
+   * alarm, still short-circuiting on the entitlement alone, reported nothing.
+   * That is the failure mode this module's own docstring exists to prevent — *"a
+   * degraded enforcer cannot make the estate go quiet"* — arriving from the
+   * other direction, as a NARROWER alarm rather than a broken one. The detector
+   * must never be narrower than the thing it is measuring.
+   *
+   * ⚠ OPTIONAL, AND FAILS OPEN. Absent or unparseable ⇒ the mode reader returns
+   * `true` and this member changes nothing, so every existing caller and every
+   * pre-`analysis_admission` producer keeps its current behaviour exactly.
+   */
+  readonly analysisReady?: unknown;
+  /**
    * ⚠ THERE IS DELIBERATELY NO `enforce` MEMBER HERE (ROADMAP 2.1264). It
    * existed, it gated no byte of the response, and its only effect was to
    * mislabel the telemetry — see the module docstring. If you are reaching for
@@ -628,7 +858,19 @@ function scanKey(path: string, key: string, value: unknown, out: LeaderClaimHit[
  * and therefore PERMITTED. Only a historic fact takes this path, and there is no
  * migration.
  */
-const BLOCK_PROSE_FIELDS: readonly string[] = [
+/**
+ * ⭐ EXPORTED 2026-09-07 so the WIRE ENFORCER covers exactly the block prose the
+ * ALARM measures — one list, two readers, no mirror between them (CLAUDE.md
+ * trap #12). Before this, the enforcer's block coverage would have been a second
+ * hand-written copy of this list, and the first symptom of drift would have been
+ * a leak this module reports and the enforcer silently permits — the precise
+ * failure mode the `textNamesLeadingOption` / `keyDesignatesLeadingOption`
+ * exports already exist to prevent.
+ *
+ * Adding a field here therefore widens BOTH the alarm and the enforcement.
+ * That is intended: a prose field worth scanning is a prose field worth gating.
+ */
+export const BLOCK_PROSE_FIELDS: readonly string[] = [
   'title',
   'body',
   'signal',
@@ -898,7 +1140,14 @@ export function guardLeadingOptionClaimsAtEgress(
   response: OlumiResponse,
   opts: LeadingOptionEgressGuardOpts,
 ): OlumiResponse {
-  if (opts.mayNameLeadingOption) return response;
+  // PERMIT-WINS, BOTH HALVES — mirrored from the enforcer so the alarm cannot go
+  // quiet on the population the enforcer now acts on. See `analysisReady` on the
+  // opts for why a narrower detector than enforcer is the defect to avoid, and
+  // `compose/leading-option-wire-enforcement.ts` for the two questions being
+  // conjoined. Fail-open on an absent admission, identically.
+  if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
+    return response;
+  }
 
   let hits: LeaderClaimHit[];
   try {

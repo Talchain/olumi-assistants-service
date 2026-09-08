@@ -433,8 +433,24 @@ function buildAcknowledgementResponse(
 const READER_ONLY_REFUSAL_COPY: Partial<
   Record<SystemEventKindLiteral, { text: string; reason: string }>
 > = {
+  // ⚠ DELIBERATELY GESTURE-NEUTRAL. DO NOT "IMPROVE" THIS BY NAMING AN AXIS.
+  //
+  // `@talchain/schemas` 0.50.0 gave `edge_strength_edit` a `direction_intent`
+  // field, so ONE kind now carries TWO gestures: a strength change and a
+  // helps/hurts direction change. This table is keyed on `event.kind` alone —
+  // it never sees the payload — so any axis named here is a guess, and it was
+  // wrong for every direction-only edit: the user flipped helps/hurts and was
+  // told CEE could not apply a "link-strength" change. A refusal that names the
+  // wrong gesture tells the user something false about their own action, which
+  // is worse than saying less (see `buildReaderOnlyRefusal`'s note below).
+  //
+  // "link" is true of BOTH gestures, so this sentence cannot be false for any
+  // payload this kind admits. Naming the actual axis needs the payload, not the
+  // kind — that is a different change with a different risk, and it is not this
+  // one. The machine `reason` is unchanged, so clients still distinguish this
+  // rollout floor from a malformed payload (B1/422).
   edge_strength_edit: {
-    text: "I can't apply this link-strength change in this version, so I haven't changed the model.",
+    text: "I can't apply this link change in this version, so I haven't changed the model.",
     reason: 'edge_strength_edit_reader_only',
   },
   // 0.50.0 direct-edit vocabulary — wire members CEE can READ but has no writer

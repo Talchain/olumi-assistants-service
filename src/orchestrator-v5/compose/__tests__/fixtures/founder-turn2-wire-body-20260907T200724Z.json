@@ -1,0 +1,1529 @@
+{
+  "response_version": 2,
+  "assistant_text": "No single option can be put forward yet.\n\nYour first analysis is ready. No single option can be put forward yet.",
+  "blocks": [
+    {
+      "type": "analysis_result",
+      "summary": "ICP Validation Sprint Before Hiring came out ahead in 73% of runs of this model, but treat this as provisional: the link between ICP Clarity and New Customer Acquisition Rate is fragile.",
+      "leading_option_id": "501e2731",
+      "win_probabilities": {
+        "Hire a Dedicated Sales Team": 0.005175000000000003,
+        "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing": 0.022775000000000024,
+        "ICP Validation Sprint Before Hiring": 0.731275,
+        "Continue With Founder-Led Sales": 0.2407749999999999
+      },
+      "enrichment": {
+        "option_comparison": [
+          {
+            "option_id": "05f973ef",
+            "option_label": "Hire a Dedicated Sales Team",
+            "id": "05f973ef",
+            "label": "Hire a Dedicated Sales Team",
+            "outcome": {
+              "mean": 0.05316499352295532,
+              "std": 0.19502522115236545,
+              "p10": -0.1866062657069754,
+              "p50": 0.038567629950083546,
+              "p90": 0.3126025022514738,
+              "n_samples": 10000,
+              "n_valid_samples": 10000,
+              "validity_ratio": 1,
+              "percentiles_source": "samples"
+            },
+            "status": "computed",
+            "win_probability": 0.005175000000000003,
+            "downside": {
+              "cvar_10": -0.24773146128203122,
+              "p05": -0.23474946125831134,
+              "expected_regret": 0.33551643377870316
+            }
+          },
+          {
+            "option_id": "15f7737d",
+            "option_label": "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing",
+            "id": "15f7737d",
+            "label": "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing",
+            "outcome": {
+              "mean": 0.151971222160191,
+              "std": 0.17587112570365354,
+              "p10": -0.051405340344969304,
+              "p50": 0.1268455028599132,
+              "p90": 0.3916904796296503,
+              "n_samples": 10000,
+              "n_valid_samples": 10000,
+              "validity_ratio": 1,
+              "percentiles_source": "samples"
+            },
+            "status": "computed",
+            "win_probability": 0.022775000000000024,
+            "downside": {
+              "cvar_10": -0.10007156449733942,
+              "p05": -0.08716175688913438,
+              "expected_regret": 0.23671020514146748
+            }
+          },
+          {
+            "option_id": "501e2731",
+            "option_label": "ICP Validation Sprint Before Hiring",
+            "id": "501e2731",
+            "label": "ICP Validation Sprint Before Hiring",
+            "outcome": {
+              "mean": 0.3791014057342472,
+              "std": 0.23565694274002896,
+              "p10": 0.07151802793898523,
+              "p50": 0.36841494101102157,
+              "p90": 0.6893437130863589,
+              "n_samples": 10000,
+              "n_valid_samples": 10000,
+              "validity_ratio": 1,
+              "percentiles_source": "samples"
+            },
+            "status": "computed",
+            "win_probability": 0.731275,
+            "downside": {
+              "cvar_10": -0.008709378209409374,
+              "p05": -0.0011000749306740636,
+              "expected_regret": 0.009580021567411244
+            }
+          },
+          {
+            "option_id": "94b13741",
+            "option_label": "Continue With Founder-Led Sales",
+            "id": "94b13741",
+            "label": "Continue With Founder-Led Sales",
+            "outcome": {
+              "mean": 0.2791827692117732,
+              "std": 0.2209417889314864,
+              "p10": 0.011937799564960003,
+              "p50": 0.25283200282526974,
+              "p90": 0.5809852871902047,
+              "n_samples": 10000,
+              "n_valid_samples": 10000,
+              "validity_ratio": 1,
+              "percentiles_source": "samples"
+            },
+            "status": "computed",
+            "win_probability": 0.2407749999999999,
+            "downside": {
+              "cvar_10": -0.03450606047458768,
+              "p05": -0.026724726556416875,
+              "expected_regret": 0.10949865808988526
+            }
+          }
+        ],
+        "factor_sensitivity": [
+          {
+            "factor_id": "ab78e513",
+            "factor_label": "Monthly Churn Rate",
+            "influence_score": 0.9507420950742094,
+            "influence_rank": 2,
+            "sensitivity_score": -0.51,
+            "elasticity": 0.9507420950742094,
+            "direction": "negative",
+            "importance_rank": 1,
+            "value_of_information": 0,
+            "confidence": 0.6080000000000001,
+            "confidence_source": "plot_unified_from_graph",
+            "confidence_provenance": {
+              "computation_source": "plot_unified_from_graph",
+              "formula_version": "plot_unified_v2",
+              "is_provisional": true,
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "input_quality": "standard"
+            },
+            "confidence_components": {
+              "structural_certainty": 0.8,
+              "sampling_stability": null
+            },
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "importance_basis": "graph_structural",
+            "driver_label": "biggest",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic",
+            "evidence_hint": false
+          },
+          {
+            "factor_id": "18845c32",
+            "factor_label": "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+            "influence_score": 0.5126550512655051,
+            "influence_rank": 5,
+            "sensitivity_score": 0.275,
+            "elasticity": 0.5126550512655051,
+            "direction": "positive",
+            "importance_rank": 2,
+            "value_of_information": 0,
+            "confidence": 0.6080000000000001,
+            "confidence_source": "plot_unified_from_graph",
+            "confidence_provenance": {
+              "computation_source": "plot_unified_from_graph",
+              "formula_version": "plot_unified_v2",
+              "is_provisional": true,
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "input_quality": "standard"
+            },
+            "confidence_components": {
+              "structural_certainty": 0.8,
+              "sampling_stability": null
+            },
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "importance_basis": "graph_structural",
+            "driver_label": "strong",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic",
+            "evidence_hint": false
+          },
+          {
+            "factor_id": "64b97128",
+            "factor_label": "A competitor just raised £5m and is hiring aggressively",
+            "influence_score": 0.26098802609880256,
+            "influence_rank": 6,
+            "sensitivity_score": -0.13999999999999999,
+            "elasticity": 0.26098802609880256,
+            "direction": "negative",
+            "importance_rank": 3,
+            "value_of_information": 0,
+            "confidence": 0.44630000000000003,
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "confidence_provenance": {
+              "computation_source": "plot_unified_from_isl_bootstrap",
+              "formula_version": "plot_unified_v3",
+              "is_provisional": true,
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "input_quality": "standard"
+            },
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0.25
+            },
+            "source": "graph",
+            "flip_risk_category": "negligible",
+            "attribution_stability": "low",
+            "rank_flip_rate": 0.25,
+            "importance_basis": "graph_structural",
+            "driver_label": "moderate",
+            "evpi_percentage_points": 0,
+            "evpi_method": "heuristic",
+            "evidence_hint": false
+          },
+          {
+            "factor_id": "16ec3d64",
+            "factor_label": "ICP Clarity",
+            "influence_score": 1,
+            "influence_rank": 1,
+            "sensitivity_score": 0,
+            "elasticity": 0,
+            "direction": "positive",
+            "importance_rank": 4,
+            "value_of_information": 0,
+            "confidence": 0.45035000000000003,
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "confidence_provenance": {
+              "computation_source": "plot_unified_from_isl_bootstrap",
+              "formula_version": "plot_unified_v3",
+              "is_provisional": true,
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "input_quality": "standard"
+            },
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0.25
+            },
+            "zero_reason": "intervention_override",
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "attribution_stability": "low",
+            "rank_flip_rate": 0,
+            "importance_basis": "graph_structural",
+            "driver_label": "strong",
+            "range_derivation_source": "default"
+          },
+          {
+            "factor_id": "5c05ae61",
+            "factor_label": "Sales Headcount Cost",
+            "influence_score": 0.7270380727038072,
+            "influence_rank": 3,
+            "sensitivity_score": 0,
+            "elasticity": 0,
+            "direction": "negative",
+            "importance_rank": 5,
+            "value_of_information": 0,
+            "confidence": 0.3,
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "confidence_provenance": {
+              "computation_source": "plot_unified_from_isl_bootstrap",
+              "formula_version": "plot_unified_v3",
+              "is_provisional": true,
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "input_quality": "standard"
+            },
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "zero_reason": "intervention_override",
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "attribution_stability": "negligible",
+            "rank_flip_rate": 0,
+            "importance_basis": "graph_structural",
+            "driver_label": "strong",
+            "range_derivation_source": "default"
+          },
+          {
+            "factor_id": "3b37f66e",
+            "factor_label": "we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+            "influence_score": 0.6675270667527067,
+            "influence_rank": 4,
+            "sensitivity_score": 0,
+            "elasticity": 0,
+            "direction": "positive",
+            "importance_rank": 6,
+            "value_of_information": 0,
+            "confidence": 0.3,
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "confidence_provenance": {
+              "computation_source": "plot_unified_from_isl_bootstrap",
+              "formula_version": "plot_unified_v3",
+              "is_provisional": true,
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "input_quality": "standard"
+            },
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "zero_reason": "intervention_override",
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "attribution_stability": "negligible",
+            "rank_flip_rate": 0,
+            "importance_basis": "graph_structural",
+            "driver_label": "strong",
+            "range_derivation_source": "default"
+          },
+          {
+            "factor_id": "27c23ebb",
+            "factor_label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+            "influence_score": 0.2563275256327526,
+            "influence_rank": 7,
+            "sensitivity_score": 0,
+            "elasticity": 0,
+            "direction": "positive",
+            "importance_rank": 7,
+            "value_of_information": 0,
+            "confidence": 0.3,
+            "confidence_source": "plot_unified_from_isl_bootstrap",
+            "confidence_provenance": {
+              "computation_source": "plot_unified_from_isl_bootstrap",
+              "formula_version": "plot_unified_v3",
+              "is_provisional": true,
+              "calibration_status": "provisional_pending_pilot_calibration",
+              "input_quality": "standard"
+            },
+            "confidence_components": {
+              "structural_certainty": 0.5,
+              "sampling_stability": 0
+            },
+            "zero_reason": "intervention_override",
+            "source": "graph",
+            "flip_risk_category": "correlated",
+            "attribution_stability": "negligible",
+            "rank_flip_rate": 0,
+            "importance_basis": "graph_structural",
+            "driver_label": "moderate",
+            "range_derivation_source": "default"
+          }
+        ],
+        "robustness": {
+          "fragile_edges": [
+            {
+              "edge_id": "16ec3d64->0433de61",
+              "from_id": "16ec3d64",
+              "to_id": "0433de61",
+              "switch_probability": 0.356,
+              "alternative_winner_id": "94b13741",
+              "from_label": "ICP Clarity",
+              "to_label": "New Customer Acquisition Rate",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "0433de61->552bd1c0",
+              "from_id": "0433de61",
+              "to_id": "552bd1c0",
+              "switch_probability": 0.294,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "New Customer Acquisition Rate",
+              "to_label": "Reach £30k MRR Within 18 Months",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "aa707d43->552bd1c0",
+              "from_id": "aa707d43",
+              "to_id": "552bd1c0",
+              "switch_probability": 0.2932,
+              "alternative_winner_id": "94b13741",
+              "from_label": "Revenue Growth Trajectory",
+              "to_label": "Reach £30k MRR Within 18 Months",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "27c23ebb->18845c32",
+              "from_id": "27c23ebb",
+              "to_id": "18845c32",
+              "switch_probability": 0.2776,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+              "to_label": "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "428612e0->552bd1c0",
+              "from_id": "428612e0",
+              "to_id": "552bd1c0",
+              "switch_probability": 0.2752,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "Runway Depletion Risk",
+              "to_label": "Reach £30k MRR Within 18 Months",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "06378c0b->552bd1c0",
+              "from_id": "06378c0b",
+              "to_id": "552bd1c0",
+              "switch_probability": 0.2496,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "Competitive Displacement Risk",
+              "to_label": "Reach £30k MRR Within 18 Months",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "3b37f66e->0433de61",
+              "from_id": "3b37f66e",
+              "to_id": "0433de61",
+              "switch_probability": 0.2288,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+              "to_label": "New Customer Acquisition Rate",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "ab78e513->aa707d43",
+              "from_id": "ab78e513",
+              "to_id": "aa707d43",
+              "switch_probability": 0.2256,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "Monthly Churn Rate",
+              "to_label": "Revenue Growth Trajectory",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "16ec3d64->ab78e513",
+              "from_id": "16ec3d64",
+              "to_id": "ab78e513",
+              "switch_probability": 0.2236,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "ICP Clarity",
+              "to_label": "Monthly Churn Rate",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "192577e2->552bd1c0",
+              "from_id": "192577e2",
+              "to_id": "552bd1c0",
+              "switch_probability": 0.2156,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "Churn Acceleration Risk",
+              "to_label": "Reach £30k MRR Within 18 Months",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "18845c32->192577e2",
+              "from_id": "18845c32",
+              "to_id": "192577e2",
+              "switch_probability": 0.2132,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+              "to_label": "Churn Acceleration Risk",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            },
+            {
+              "edge_id": "5c05ae61->428612e0",
+              "from_id": "5c05ae61",
+              "to_id": "428612e0",
+              "switch_probability": 0.1672,
+              "marginal_switch_probability": 0,
+              "alternative_winner_id": "94b13741",
+              "from_label": "Sales Headcount Cost",
+              "to_label": "Runway Depletion Risk",
+              "severity": "warning",
+              "visible": true,
+              "alternative_winner_label": "Continue With Founder-Led Sales"
+            }
+          ],
+          "robust_edges": [],
+          "is_robust": true,
+          "level": "moderate",
+          "confidence": 0.731275,
+          "confidence_basis": "recommendation_stability_uncalibrated",
+          "recommended_option_id": "501e2731",
+          "recommended_option_label": "ICP Validation Sprint Before Hiring",
+          "recommended_option_compliance": "not_applicable",
+          "recommended_option_compliance_reason": "no limits were set for this decision",
+          "near_tie": {
+            "is_tie": false,
+            "top_option_id": "501e2731",
+            "second_option_id": "94b13741",
+            "tied_option_ids": [
+              "501e2731"
+            ],
+            "gap": 0.4905000000000001,
+            "threshold": 0.1
+          },
+          "display_verdict": "moderate",
+          "display_verdict_reason": "this result mostly held up, but could shift under some changes"
+        },
+        "decision_review": {
+          "narrative_summary": "The size of the lead is not reported as a gap between options — the difference between two win frequencies is not a difference in outcome. This result is not fully settled, as it depends on the relationship between ICP Clarity and New Customer Acquisition Rate.",
+          "story_headlines": {
+            "501e2731": "ICP Validation Sprint Before Hiring comes out ahead by clarifying who to target, influencing both churn and acquisition rates.",
+            "94b13741": "Continue With Founder-Led Sales could take the lead if improving ICP Clarity quickly boosts acquisition without hiring costs."
+          },
+          "robustness_explanation": {
+            "summary": "The ordering holds in about 73% of variations tested, but several links could flip the result.",
+            "primary_risk": "The link from ICP Clarity to New Customer Acquisition Rate is the biggest threat to the lead.",
+            "stability_factors": [
+              "ICP Validation Sprint Before Hiring directly targets ICP Clarity, a lever in multiple modelled relationships.",
+              "This option combines focus on understanding the customer with a runway-conscious approach."
+            ],
+            "fragility_factors": [
+              "The link from ICP Clarity to New Customer Acquisition Rate could alter the outcome.",
+              "The connection between New Customer Acquisition Rate and reaching £30k MRR within 18 months might also shift the result."
+            ]
+          },
+          "readiness_rationale": "The decision remains open because the link from ICP Clarity to acquisition rate is not firmly evidenced, which could reverse the outcome if better data emerges.",
+          "evidence_enhancements": {
+            "ab78e513": {
+              "specific_action": "Track churn monthly and conduct exit interviews with recent departures to test assumptions about drivers of churn.",
+              "rationale": "Understanding churn sharpens projections of long-term MRR, affecting the feasibility of all hiring options.",
+              "evidence_type": "customer_research",
+              "decision_hygiene": "Estimate likely churn causes before collecting fresh data."
+            },
+            "18845c32": {
+              "specific_action": "Map lost deals and churn events to specific missing product integrations through targeted surveys.",
+              "rationale": "More evidence on this link would clarify how much product decisions, not pricing or sales, shape churn.",
+              "evidence_type": "customer_research",
+              "decision_hygiene": "Invite others to review your mapping process for blind spots."
+            },
+            "64b97128": {
+              "specific_action": "Commission or review market research on your competitor’s hiring and go-to-market tactics.",
+              "rationale": "Deeper knowledge of your competitor’s approach could shift how urgent or risky hiring appears.",
+              "evidence_type": "market_research",
+              "decision_hygiene": "Write down your hypothesis about their plan before gathering new material."
+            }
+          },
+          "scenario_contexts": {
+            "16ec3d64->0433de61": {
+              "trigger_description": "If the link from ICP Clarity to New Customer Acquisition Rate turns out to run the opposite way to what the model assumes,",
+              "consequence": "the comparison may change; this run does not establish which option would overtake another under that condition."
+            },
+            "0433de61->552bd1c0": {
+              "trigger_description": "If the link from New Customer Acquisition Rate to Reach £30k MRR Within 18 Months turns out to run the opposite way to what the model assumes,",
+              "consequence": "the comparison may change; this run does not establish which option would overtake another under that condition."
+            }
+          },
+          "flip_thresholds": [
+            {
+              "factor_id": "16ec3d64",
+              "factor_label": "ICP Clarity",
+              "current_display": "50%",
+              "flip_display": "81%",
+              "narrative": "If ICP Clarity increases from 50% to 81%, hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing becomes the leading option."
+            }
+          ],
+          "bias_findings": [],
+          "key_assumptions": [
+            "The link from ICP Clarity to New Customer Acquisition Rate assumes improved understanding will directly translate into more effective acquisition.",
+            "Product gaps, particularly missing integrations, are assumed to be a primary driver of recent churn rather than price.",
+            "Hiring for sales frees enough founder time to improve product quality in ways that actually affect retention."
+          ],
+          "decision_quality_prompts": [
+            {
+              "question": "What independent benchmarks exist for how quickly ICP Clarity can reset churn and acquisition rates for companies choosing 'ICP Validation Sprint Before Hiring'?",
+              "principle": "Outside view and reference class forecasting",
+              "applies_because": "There is considerable uncertainty about how much effort on ICP validation will translate into improved growth and retention, and a base rate could calibrate expectations.",
+              "dsk_claim_id": "DSK-T-002",
+              "evidence_strength": "strong",
+              "dsk_protocol_id": "DSK-P-002",
+              "dsk_grounding": "attested"
+            }
+          ],
+          "produced_at": "2026-09-07T20:09:10.654Z"
+        },
+        "option_comparison_status": "computed",
+        "edge_e_values": [
+          {
+            "edge_id": "0433de61::552bd1c0",
+            "from_id": "0433de61",
+            "to_id": "552bd1c0",
+            "from_label": "New Customer Acquisition Rate",
+            "to_label": "Reach £30k MRR Within 18 Months",
+            "e_value": 1,
+            "flip_direction": "decrease",
+            "current_mean": 0.7,
+            "flip_mean": -0.517922,
+            "stability": {
+              "n_seeds": 10,
+              "n_seeds_flipped": 9,
+              "band_min": -0.72538,
+              "band_median": -0.295567,
+              "band_max": 0.080963,
+              "band_width": 0.806343,
+              "seed_flip_means": [
+                0.064147,
+                -0.540258,
+                -0.40867,
+                -0.54287,
+                0.030667,
+                -0.72538,
+                0.01753,
+                0.080963,
+                null,
+                -0.295567
+              ]
+            }
+          },
+          {
+            "edge_id": "16ec3d64::0433de61",
+            "from_id": "16ec3d64",
+            "to_id": "0433de61",
+            "from_label": "ICP Clarity",
+            "to_label": "New Customer Acquisition Rate",
+            "e_value": 1,
+            "flip_direction": "decrease",
+            "current_mean": 0.4384615384615385,
+            "flip_mean": -0.238817,
+            "stability": {
+              "n_seeds": 10,
+              "n_seeds_flipped": 10,
+              "band_min": -0.560704,
+              "band_median": -0.237669,
+              "band_max": 0.113685,
+              "band_width": 0.674389,
+              "seed_flip_means": [
+                0.113685,
+                -0.332872,
+                -0.23179,
+                -0.315847,
+                0.040649,
+                -0.560704,
+                0.029958,
+                0.06397,
+                -0.529728,
+                -0.243549
+              ]
+            }
+          },
+          {
+            "edge_id": "16ec3d64::ab78e513",
+            "from_id": "16ec3d64",
+            "to_id": "ab78e513",
+            "from_label": "ICP Clarity",
+            "to_label": "Monthly Churn Rate",
+            "e_value": 1.905,
+            "flip_direction": "increase",
+            "current_mean": -0.45,
+            "flip_mean": 0.857248,
+            "stability": {
+              "n_seeds": 10,
+              "n_seeds_flipped": 4,
+              "band_min": 0.369775,
+              "band_median": 0.399928,
+              "band_max": 0.767182,
+              "band_width": 0.397407,
+              "seed_flip_means": [
+                null,
+                0.767182,
+                null,
+                0.3991,
+                null,
+                0.369775,
+                null,
+                null,
+                0.400756,
+                null
+              ]
+            }
+          }
+        ],
+        "inference_warnings": [
+          {
+            "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+            "message": "10 edge E-value entries were omitted from edge_e_values: 10 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+            "severity": "info"
+          },
+          {
+            "code": "GOAL_THRESHOLD_NOT_CONVERTIBLE",
+            "message": "A 'level' frame requires goal node '552bd1c0' to carry observed_state.baseline to convert the level into the samples' frame, but it carries no observed_state at all.",
+            "severity": "warning",
+            "field": "nodes[552bd1c0].observed_state.baseline"
+          }
+        ],
+        "confidence_tier": "fair",
+        "flip_thresholds": [
+          {
+            "factor_id": "16ec3d64",
+            "factor_label": "ICP Clarity",
+            "current_value": 0.5,
+            "flip_value": 0.806759,
+            "direction": "increase",
+            "alternative_winner_id": "15f7737d",
+            "alternative_winner_label": "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing",
+            "flip_reason": "found",
+            "iterations_used": 0,
+            "probes_used": 0
+          },
+          {
+            "factor_id": "27c23ebb",
+            "factor_label": "hiring would free this up for product, which we believe indirectly affects retention through product quality improvements",
+            "current_value": 0.5,
+            "flip_value": null,
+            "alternative_winner_id": null,
+            "alternative_winner_label": null,
+            "flip_reason": "no_effect_within_bounds",
+            "iterations_used": 0,
+            "probes_used": 0,
+            "no_flip_in_range": true
+          },
+          {
+            "factor_id": "3b37f66e",
+            "factor_label": "we believe is partly driven by product quality and partly by how much attention each trial gets from the founder",
+            "current_value": 0.5,
+            "flip_value": null,
+            "alternative_winner_id": null,
+            "alternative_winner_label": null,
+            "flip_reason": "no_effect_within_bounds",
+            "iterations_used": 0,
+            "probes_used": 0,
+            "no_flip_in_range": true
+          },
+          {
+            "factor_id": "5c05ae61",
+            "factor_label": "Sales Headcount Cost",
+            "current_value": 0.5,
+            "flip_value": null,
+            "alternative_winner_id": null,
+            "alternative_winner_label": null,
+            "flip_reason": "structurally_invariant",
+            "iterations_used": 0,
+            "probes_used": 0,
+            "no_flip_in_range": true
+          },
+          {
+            "factor_id": "64b97128",
+            "factor_label": "A competitor just raised £5m and is hiring aggressively",
+            "current_value": 0.5,
+            "flip_value": null,
+            "alternative_winner_id": null,
+            "alternative_winner_label": null,
+            "flip_reason": "structurally_invariant",
+            "iterations_used": 0,
+            "probes_used": 0,
+            "no_flip_in_range": true
+          }
+        ],
+        "decision_brief": {
+          "brief_id": "a4aeaf7b-667b-4cc2-813a-da78aaff20fb",
+          "version": "1",
+          "created_at": "2026-09-07T20:08:57.911Z",
+          "headline": "ICP Validation Sprint Before Hiring currently leads, but the outcome is highly uncertain. However, the outcome is within model uncertainty, so the ranking could shift with new information. Define tie-breaker criteria or gather additional evidence.",
+          "options": [
+            {
+              "option_id": "501e2731",
+              "label": "ICP Validation Sprint Before Hiring",
+              "win_probability": 0.731275,
+              "rank": 1
+            },
+            {
+              "option_id": "94b13741",
+              "label": "Continue With Founder-Led Sales",
+              "win_probability": 0.2407749999999999,
+              "rank": 2
+            },
+            {
+              "option_id": "15f7737d",
+              "label": "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing",
+              "win_probability": 0.022775000000000024,
+              "rank": 3
+            },
+            {
+              "option_id": "05f973ef",
+              "label": "Hire a Dedicated Sales Team",
+              "win_probability": 0.005175000000000003,
+              "rank": 4
+            }
+          ],
+          "top_drivers": [
+            {
+              "factor_label": "Monthly Churn Rate",
+              "sensitivity": 0.9507420950742094,
+              "direction": "negative"
+            },
+            {
+              "factor_label": "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+              "sensitivity": 0.5126550512655051,
+              "direction": "positive"
+            },
+            {
+              "factor_label": "A competitor just raised £5m and is hiring aggressively",
+              "sensitivity": 0.26098802609880256,
+              "direction": "negative"
+            }
+          ],
+          "key_assumptions": [
+            "Monthly Churn Rate",
+            "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+            "A competitor just raised £5m and is hiring aggressively"
+          ],
+          "what_would_change": [
+            "New Customer Acquisition Rate → Reach £30k MRR Within 18 Months",
+            "Revenue Growth Trajectory → Reach £30k MRR Within 18 Months",
+            "Runway Depletion Risk → Reach £30k MRR Within 18 Months",
+            "Competitive Displacement Risk → Reach £30k MRR Within 18 Months",
+            "Monthly Churn Rate → Revenue Growth Trajectory",
+            "Churn Acceleration Risk → Reach £30k MRR Within 18 Months",
+            "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn → Churn Acceleration Risk"
+          ],
+          "robustness": "moderate",
+          "warnings": [
+            {
+              "code": "DOMINANT_FACTOR",
+              "message": "One factor dominates. What would change if Monthly Churn Rate had less influence?",
+              "severity": "warning"
+            },
+            {
+              "code": "INFLUENTIAL_EXTERNALS",
+              "message": "External factors Monthly Churn Rate, three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn significantly affect your outcome but are inherently uncertain. How might you bound these?",
+              "severity": "warning"
+            },
+            {
+              "code": "M2_UNAVAILABLE",
+              "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+              "severity": "warning"
+            },
+            {
+              "code": "MARGINAL_SWITCH_TRUNCATED",
+              "message": "Marginal switch probability was computed for the 10 most elastic fragile edge(s) of 12; the remaining 2 carry marginal_switch_probability=null. Each edge's sweep costs 100 isolated re-evaluations per option, so the set is bounded to keep the analysis inside its compute-admission budget. Retained values are unaffected — each is computed independently of the others",
+              "severity": "warning"
+            }
+          ],
+          "headline_banded": {
+            "text": "ICP Validation Sprint Before Hiring is clearly ahead.",
+            "band": "clearly_ahead",
+            "leader_option_id": "501e2731",
+            "leader_label": "ICP Validation Sprint Before Hiring",
+            "runner_up_option_id": "94b13741",
+            "runner_up_label": "Continue With Founder-Led Sales",
+            "win_probability_gap": 0.4905000000000001,
+            "robustness_gated": false,
+            "doctrine": "provisional_doctrine_v0"
+          },
+          "defaulted_assumptions": [],
+          "robustness_caveat": {
+            "text": "This ranking held up under the perturbations tested. That is not a guarantee — defaulted or uncertain inputs can still change the result.",
+            "basis": "is_robust",
+            "flip_evidence": {
+              "status": "partial_no_effect",
+              "text": "Changing at least one tested factor on its own could change which option leads; the other factors we could test could not."
+            },
+            "doctrine": "provisional_doctrine_v0"
+          },
+          "warning_codes": [
+            "GOAL_THRESHOLD_NOT_CONVERTIBLE"
+          ],
+          "analysis_summary": {
+            "leading_option": "ICP Validation Sprint Before Hiring",
+            "win_probability": 0.731275,
+            "robustness_band": "moderate"
+          }
+        },
+        "factor_evppi": [
+          {
+            "factor_id": "64b97128",
+            "evppi": 0,
+            "evppi_raw": 0,
+            "baseline_max_expected_utility": 0.379101,
+            "conditional_max_expected_utility": 0.379101,
+            "units": "outcome",
+            "method": "regression_evppi_v1",
+            "regression_degree": 4,
+            "n_samples": 10000,
+            "clamped_low": false,
+            "clamped_high": false,
+            "noise_floor": 0,
+            "status": "below_resolution",
+            "correlation_active": false
+          }
+        ],
+        "decision_evpi": 0.009580021567411244,
+        "p_win_sensitivity": [
+          {
+            "factor_id": "16ec3d64",
+            "p_win_delta": 0.195,
+            "p_win_delta_percentage_points": 19.5,
+            "current_metric": 0.72125,
+            "perfect_metric": 0.91625,
+            "metric_type": "p_win_recommended",
+            "method": "p_win_delta_at_mean_v1",
+            "n_samples": 2000,
+            "status": "resolved",
+            "clamped": false,
+            "noise_floor": 0.03099,
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "labelling_doctrine": "provisional_doctrine_v0"
+          },
+          {
+            "factor_id": "27c23ebb",
+            "p_win_delta": 0.092125,
+            "p_win_delta_percentage_points": 9.21,
+            "current_metric": 0.72125,
+            "perfect_metric": 0.813375,
+            "metric_type": "p_win_recommended",
+            "method": "p_win_delta_at_mean_v1",
+            "n_samples": 2000,
+            "status": "resolved",
+            "clamped": false,
+            "noise_floor": 0.03099,
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "labelling_doctrine": "provisional_doctrine_v0"
+          },
+          {
+            "factor_id": "3b37f66e",
+            "p_win_delta": 0,
+            "p_win_delta_percentage_points": 0,
+            "current_metric": 0.72125,
+            "perfect_metric": 0.6445,
+            "metric_type": "p_win_recommended",
+            "method": "p_win_delta_at_mean_v1",
+            "n_samples": 2000,
+            "status": "below_resolution",
+            "clamped": true,
+            "noise_floor": 0.03099,
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "labelling_doctrine": "provisional_doctrine_v0"
+          },
+          {
+            "factor_id": "5c05ae61",
+            "p_win_delta": 0,
+            "p_win_delta_percentage_points": 0,
+            "current_metric": 0.72125,
+            "perfect_metric": 0.7105,
+            "metric_type": "p_win_recommended",
+            "method": "p_win_delta_at_mean_v1",
+            "n_samples": 2000,
+            "status": "below_resolution",
+            "clamped": true,
+            "noise_floor": 0.03099,
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "labelling_doctrine": "provisional_doctrine_v0"
+          },
+          {
+            "factor_id": "64b97128",
+            "p_win_delta": 0,
+            "p_win_delta_percentage_points": 0,
+            "current_metric": 0.72125,
+            "perfect_metric": 0.707,
+            "metric_type": "p_win_recommended",
+            "method": "p_win_delta_at_mean_v1",
+            "n_samples": 2000,
+            "status": "below_resolution",
+            "clamped": true,
+            "noise_floor": 0.03099,
+            "noise_floor_method": "z95_worst_case_bernoulli_diff",
+            "labelling_doctrine": "provisional_doctrine_v0"
+          }
+        ],
+        "conditional_winners": []
+      },
+      "computed_against_hash": "92e8eba87dc5c072"
+    },
+    {
+      "block_id": "a50b055a-b907-5265-8dfd-c7275a52a4eb",
+      "signal_id": "review:flip:16ec3d64:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "review_card",
+      "card_kind": "flip_threshold",
+      "title": "What would flip the result on ICP Clarity",
+      "body": "If ICP Clarity increases from 50% to 81%, hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing becomes the leading option.",
+      "severity": "warning",
+      "target_refs": [
+        {
+          "id": "16ec3d64",
+          "label": "ICP Clarity",
+          "kind": "factor"
+        }
+      ],
+      "priority_rank": 31,
+      "category": "should_fix",
+      "priority": 70,
+      "signal_code": "FLIP_THRESHOLD",
+      "action_intent": "what_would_flip",
+      "action_label": "Explore what flips this"
+    },
+    {
+      "block_id": "0d7ac58a-fb21-5c4a-9d8d-78a6128feb8f",
+      "signal_id": "review:robustness:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "review_card",
+      "card_kind": "robustness",
+      "title": "How robust is this?",
+      "body": "The ordering holds in about 73% of variations tested, but several links could flip the result.",
+      "severity": "warning",
+      "target_refs": [],
+      "priority_rank": 50,
+      "category": "should_fix",
+      "priority": 70,
+      "signal_code": "FRAGILE_RESULT"
+    },
+    {
+      "block_id": "33f552fc-6447-5c5f-ad5b-82605a26a806",
+      "signal_id": "review:assumption:1:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "review_card",
+      "card_kind": "assumption",
+      "title": "A load-bearing assumption",
+      "body": "Product gaps, particularly missing integrations, are assumed to be a primary driver of recent churn rather than price.",
+      "severity": "info",
+      "target_refs": [],
+      "priority_rank": 71,
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "ASSUMPTION_CHECK"
+    },
+    {
+      "block_id": "d4891e35-0e33-5dee-a605-058e30f634e6",
+      "signal_id": "review:assumption:2:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "review_card",
+      "card_kind": "assumption",
+      "title": "A load-bearing assumption",
+      "body": "Hiring for sales frees enough founder time to improve product quality in ways that actually affect retention.",
+      "severity": "info",
+      "target_refs": [],
+      "priority_rank": 72,
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "ASSUMPTION_CHECK"
+    },
+    {
+      "block_id": "b763bb48-c823-50db-bf24-1300687fdd4d",
+      "signal_id": "coach:assumption:1:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "coaching",
+      "coaching_kind": "assumption_check",
+      "title": "An assumption to check",
+      "body": "Product gaps, particularly missing integrations, are assumed to be a primary driver of recent churn rather than price.",
+      "source": "decision_review",
+      "target_refs": [],
+      "priority_rank": 101,
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "ASSUMPTION_CHECK",
+      "action_intent": "confirm_factor",
+      "action_label": "Confirm this assumption",
+      "action_prompt": "Help me pressure-test this assumption before I rely on it."
+    },
+    {
+      "block_id": "d1736490-d418-5195-bb10-38e310aa075c",
+      "signal_id": "coach:assumption:2:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "coaching",
+      "coaching_kind": "assumption_check",
+      "title": "An assumption to check",
+      "body": "Hiring for sales frees enough founder time to improve product quality in ways that actually affect retention.",
+      "source": "decision_review",
+      "target_refs": [],
+      "priority_rank": 102,
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "ASSUMPTION_CHECK",
+      "action_intent": "confirm_factor",
+      "action_label": "Confirm this assumption",
+      "action_prompt": "Help me pressure-test this assumption before I rely on it."
+    },
+    {
+      "block_id": "8290d31b-bc95-5eba-94ee-3fda542d7648",
+      "signal_id": "evidence:ab78e513:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "evidence",
+      "factor_label": "Monthly Churn Rate",
+      "factor_ref": {
+        "id": "ab78e513",
+        "label": "Monthly Churn Rate",
+        "kind": "factor"
+      },
+      "target_refs": [
+        {
+          "id": "ab78e513",
+          "label": "Monthly Churn Rate",
+          "kind": "factor"
+        }
+      ],
+      "current_confidence": "medium",
+      "evidence_gap": "Understanding churn sharpens projections of long-term MRR, affecting the feasibility of all hiring options.",
+      "suggested_technique": "Customer research: Track churn monthly and conduct exit interviews with recent departures to test assumptions about drivers of churn.",
+      "impact_if_gathered": "Estimate likely churn causes before collecting fresh data.",
+      "priority_rank": 1,
+      "severity": "info",
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "EVIDENCE_GAP",
+      "action_intent": "gather_evidence",
+      "action_label": "Strengthen this evidence"
+    },
+    {
+      "block_id": "291b2902-e496-5e2b-b135-c9c18bfdb223",
+      "signal_id": "evidence:18845c32:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "evidence",
+      "factor_label": "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+      "factor_ref": {
+        "id": "18845c32",
+        "label": "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+        "kind": "factor"
+      },
+      "target_refs": [
+        {
+          "id": "18845c32",
+          "label": "three churned customers that they left because of missing integrations, not price - so we think product gaps mediate the relationship between customer satisfaction and churn",
+          "kind": "factor"
+        }
+      ],
+      "current_confidence": "medium",
+      "evidence_gap": "More evidence on this link would clarify how much product decisions, not pricing or sales, shape churn.",
+      "suggested_technique": "Customer research: Map lost deals and churn events to specific missing product integrations through targeted surveys.",
+      "impact_if_gathered": "Invite others to review your mapping process for blind spots.",
+      "priority_rank": 2,
+      "severity": "info",
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "EVIDENCE_GAP",
+      "action_intent": "gather_evidence",
+      "action_label": "Strengthen this evidence"
+    },
+    {
+      "block_id": "c5844352-65cd-562b-8625-c14baaa7b7a5",
+      "signal_id": "evidence:64b97128:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "evidence",
+      "factor_label": "A competitor just raised £5m and is hiring aggressively",
+      "factor_ref": {
+        "id": "64b97128",
+        "label": "A competitor just raised £5m and is hiring aggressively",
+        "kind": "factor"
+      },
+      "target_refs": [
+        {
+          "id": "64b97128",
+          "label": "A competitor just raised £5m and is hiring aggressively",
+          "kind": "factor"
+        }
+      ],
+      "current_confidence": "medium",
+      "evidence_gap": "Deeper knowledge of your competitor’s approach could shift how urgent or risky hiring appears.",
+      "suggested_technique": "Market research: Commission or review market research on your competitor’s hiring and go-to-market tactics.",
+      "impact_if_gathered": "Write down your hypothesis about their plan before gathering new material.",
+      "priority_rank": 3,
+      "severity": "info",
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "EVIDENCE_GAP",
+      "action_intent": "gather_evidence",
+      "action_label": "Strengthen this evidence"
+    },
+    {
+      "block_id": "eb77639a-68a0-5ea5-b6ee-59ef2986e22f",
+      "signal_id": "coach:lens:disagreement_resolution:disagreement_resolution:92e8eba87dc5c072",
+      "created_at": "2026-09-07T20:09:10.679Z",
+      "source_handler": "decision_review_enricher",
+      "graph_hash_at_generation": "92e8eba87dc5c072",
+      "freshness": "fresh",
+      "type": "coaching",
+      "coaching_kind": "strengthen",
+      "title": "Strengthen your model: resolve this disagreement",
+      "body": "The two drafting passes disagreed about the link from New Customer Acquisition Rate to Reach £30k MRR Within 18 Months, and it hasn't been settled. Resolving that disagreement is worth more than refining numbers computed through it.",
+      "source": "deterministic_signal",
+      "target_refs": [
+        {
+          "id": "0433de61→552bd1c0",
+          "label": "New Customer Acquisition Rate → Reach £30k MRR Within 18 Months",
+          "kind": "edge"
+        }
+      ],
+      "priority_rank": 15,
+      "category": "could_fix",
+      "priority": 50,
+      "signal_code": "UNRESOLVED_DISAGREEMENT",
+      "action_label": "Adjust this relationship",
+      "action_prompt": "Adjust the strength of the link from New Customer Acquisition Rate to Reach £30k MRR Within 18 Months in my model."
+    },
+    {
+      "type": "ui_directive",
+      "verb": "open_inspector",
+      "targets": [
+        {
+          "id": "0433de61→552bd1c0",
+          "label": "New Customer Acquisition Rate → Reach £30k MRR Within 18 Months",
+          "kind": "edge"
+        }
+      ],
+      "source": "ladder"
+    }
+  ],
+  "suggested_actions": [
+    {
+      "id": "chip_action_explain_results",
+      "label": "Explain the result",
+      "message": "Please explain the analysis result in plain language.",
+      "action_type": "explain_results"
+    },
+    {
+      "id": "chip_action_what_would_flip",
+      "label": "What could change the outcome?",
+      "message": "What could change the outcome of this analysis?",
+      "action_type": "what_would_flip"
+    }
+  ],
+  "insights": [],
+  "stage_indicator": "analyse",
+  "analysis_ready": {
+    "options": [
+      {
+        "option_id": "05f973ef",
+        "label": "Hire a Dedicated Sales Team",
+        "status": "ready",
+        "interventions": {
+          "27c23ebb": 0.4,
+          "3b37f66e": 0.12,
+          "5c05ae61": 0.5
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "27c23ebb": {
+            "display_value": "Moderate (0.4)",
+            "normalised_value": 0.4
+          },
+          "3b37f66e": {
+            "display_value": "Low (0.12)",
+            "normalised_value": 0.12
+          },
+          "5c05ae61": {
+            "display_value": "Moderate (0.5)",
+            "normalised_value": 0.5
+          }
+        },
+        "raw_interventions": {
+          "27c23ebb": 0.4,
+          "3b37f66e": 0.12,
+          "5c05ae61": 0.5
+        },
+        "status_reason": "3 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "15f7737d",
+        "label": "hiring a part-time SDR (£40k) to handle top-of-funnel while the founder stays on closing",
+        "status": "ready",
+        "interventions": {
+          "27c23ebb": 0.65,
+          "3b37f66e": 0.15,
+          "5c05ae61": 0.2
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "27c23ebb": {
+            "display_value": "High (0.65)",
+            "normalised_value": 0.65
+          },
+          "3b37f66e": {
+            "display_value": "Low (0.15)",
+            "normalised_value": 0.15
+          },
+          "5c05ae61": {
+            "display_value": "Low (0.2)",
+            "normalised_value": 0.2
+          }
+        },
+        "raw_interventions": {
+          "27c23ebb": 0.65,
+          "3b37f66e": 0.15,
+          "5c05ae61": 0.2
+        },
+        "status_reason": "3 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "501e2731",
+        "label": "ICP Validation Sprint Before Hiring",
+        "status": "ready",
+        "interventions": {
+          "16ec3d64": 0.8,
+          "27c23ebb": 0.7,
+          "5c05ae61": 0.05
+        },
+        "is_baseline": false,
+        "intervention_details": {
+          "16ec3d64": {
+            "display_value": "Very high (0.8)",
+            "normalised_value": 0.8
+          },
+          "27c23ebb": {
+            "display_value": "High (0.7)",
+            "normalised_value": 0.7
+          },
+          "5c05ae61": {
+            "display_value": "Low (0.05)",
+            "normalised_value": 0.05
+          }
+        },
+        "raw_interventions": {
+          "16ec3d64": 0.8,
+          "27c23ebb": 0.7,
+          "5c05ae61": 0.05
+        },
+        "status_reason": "3 intervention(s) ready for analysis"
+      },
+      {
+        "option_id": "94b13741",
+        "label": "Continue With Founder-Led Sales",
+        "status": "ready",
+        "interventions": {
+          "5c05ae61": 0
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "5c05ae61": {
+            "display_value": "Low (0)",
+            "normalised_value": 0
+          }
+        },
+        "raw_interventions": {
+          "5c05ae61": 0
+        },
+        "status_reason": "1 intervention(s) ready for analysis"
+      }
+    ],
+    "goal_node_id": "552bd1c0",
+    "status": "ready",
+    "goal_threshold": 0.8,
+    "goal_threshold_raw": 30000,
+    "goal_threshold_unit": "£",
+    "goal_threshold_cap": 37500,
+    "bias_findings": [],
+    "may_run": true,
+    "analysis_admission": {
+      "structurally_analysable": true,
+      "missing_important_inputs": [],
+      "semantic_quality_sufficient": false,
+      "permitted_analysis_mode": "quantified_provisional",
+      "reasons": [
+        {
+          "field": "structurally_analysable",
+          "code": "READY_TO_COMPARE",
+          "message": "Analysis can run on this model as it stands."
+        },
+        {
+          "field": "semantic_quality_sufficient",
+          "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+          "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+        },
+        {
+          "field": "permitted_analysis_mode",
+          "code": "CONFIDENCE_PARAMETERS_ALL_MACHINE_AUTHORED",
+          "message": "Every estimate this comparison rests on is Olumi’s, not yours. Figures can be shown as provisional, but no option can be called the leader and no result can be called stable or robust until you have set at least one of them."
+        }
+      ],
+      "graph_hash": "92e8eba87dc5c072714076392b7e5576fe82f6c2217ff4344f11ad1779562826",
+      "semantic_signals": {
+        "confidence_parameters_total": 26,
+        "confidence_parameters_user_stated": 0,
+        "confidence_parameters_machine_authored": 13,
+        "confidence_parameters_unattributed": 13,
+        "material_parameters_total": 22,
+        "material_parameters_user_stated": 0,
+        "intervened_factor_baselines_total": 4,
+        "intervened_factor_baselines_user_stated": 0,
+        "goal_target_stated": true
+      }
+    },
+    "computed_at": "2026-09-07T20:08:52.066Z",
+    "freshness": "fresh",
+    "freshness_reason": "graph_hash_match",
+    "graph_hash_at_run": "92e8eba87dc5c072",
+    "current_graph_hash": "92e8eba87dc5c072"
+  },
+  "graph_hash": "92e8eba87dc5c072",
+  "analysis_state": {
+    "run_state": {
+      "kind": "complete_current",
+      "computed_at": "2026-09-07T20:08:52.066Z"
+    },
+    "readiness": {
+      "status": "ready",
+      "blockers": []
+    },
+    "leader_claim": {
+      "permitted": true,
+      "separation": "separated"
+    },
+    "robustness": {
+      "aggregate_level": "moderate"
+    },
+    "usable_for_prose": true,
+    "usable_for_chips": true,
+    "usable_for_followup": true,
+    "requires_rerun": false,
+    "blocked_unusable": false,
+    "contradictions": []
+  },
+  "_diagnostic_trace": {
+    "llm_calls": [
+      {
+        "role": "routing",
+        "provider": "anthropic",
+        "model": "claude-sonnet-5",
+        "input_tokens": 13897,
+        "output_tokens": 190,
+        "cache_read_tokens": 15061,
+        "cache_creation_tokens": 0,
+        "latency_ms": 3093,
+        "stop_reason": null,
+        "thinking_enabled": false,
+        "error": null
+      },
+      {
+        "role": "decision_review",
+        "provider": "openai",
+        "model": "gpt-4.1",
+        "input_tokens": 11435,
+        "output_tokens": 1039,
+        "cache_read_tokens": null,
+        "cache_creation_tokens": null,
+        "latency_ms": 12720,
+        "stop_reason": null,
+        "thinking_enabled": false,
+        "error": null
+      }
+    ],
+    "prompt_identity": [
+      {
+        "task_id": "routing",
+        "prompt_id": "121",
+        "version": "121",
+        "hash": "bec840a648800928",
+        "source": "pms",
+        "is_staging": true
+      },
+      {
+        "task_id": "decision_review",
+        "prompt_id": "decision_review_default@v15 (staging)",
+        "version": "decision_review_default@v15 (staging)",
+        "hash": "ba4879dd0a714b8f830d9d0b21353b428d78dd2e1c11b4ad3afe1ed033cd16fd",
+        "source": "store",
+        "is_staging": true
+      }
+    ],
+    "zone2_assembly": null,
+    "tool_policy": null,
+    "provider_resolution": [],
+    "structured_output_config": null,
+    "streaming_metrics": null,
+    "fallback_trace": [],
+    "benchmarking": {
+      "total_duration_ms": 24160,
+      "substage_timings": {
+        "route_classification_ms": 3093,
+        "prompt_assembly_ms": 164,
+        "persistence_ms": 436,
+        "total_handler_duration_ms": 6109,
+        "finalisation_ms": 4
+      }
+    },
+    "correlation_ids": {
+      "request_id": "3affbec5-d7eb-491d-b3fa-ac6837446b29",
+      "scenario_id": "6753309f-b6da-480c-be93-351d3182cf36",
+      "turn_id": "bcc66655-7a1f-4bd3-8511-c2ccaf5f79b9",
+      "graph_hash": "c1b9a6567f4a4b3d",
+      "prompt_hash": "bec840a648800928",
+      "response_hash": "34cfb6a17f9d"
+    },
+    "environment": {
+      "build_sha": "9de184f",
+      "environment": "staging"
+    },
+    "exit_path": "turn_executor",
+    "trace_version": 1,
+    "claim_safety": {
+      "may_name_leading_option": true,
+      "verdict_provenance": "scenario_fact",
+      "withheld_projection_reason": null
+    }
+  }
+}

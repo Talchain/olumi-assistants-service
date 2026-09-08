@@ -72,6 +72,7 @@ import {
   type AnalysisResponseSummaryWithSignals,
 } from './analysis-signals.js';
 import { investigationPriorityFromEnrichment } from '../coaching/investigation-priority.js';
+import { deriveFactorInvestigationFromEnrichment } from './factor-investigation-licence.js';
 import { selectRunAnalysisFact } from './freshness.js';
 import { emitUnknownEnrichmentKeyTelemetry } from './enrichment-manifest.js';
 
@@ -476,10 +477,13 @@ export function reconcileAnalysisSummaryWithEnrichment(
   // and a hot-window fact disagree, and a licence about the wrong run is worse
   // than no licence at all.
   //
-  // `not_assessed` is deliberately NOT attached: that state is already
-  // disclosed by the display projection's `VOI_NOT_SCORED_NOTE`, and omitting
-  // it keeps an enrichment with no `factor_evppi` byte-identical to before.
+  // No EVPPI channel adds no EVPPI signal; the other information-value
+  // channels retain their independently scoped disclosures.
   const investigationPriority = investigationPriorityFromEnrichment(enrichment);
+  // THE WITNESSED HARM (2026-09-04): without this the composition site saw
+  // only an influence band for each factor and invited the user to run a pilot
+  // on one the engine scored at zero value of information.
+  const factorInvestigation = deriveFactorInvestigationFromEnrichment(enrichment);
 
   const withSignals: AnalysisResponseSummaryWithSignals = {
     ...withFragile,
@@ -492,6 +496,7 @@ export function reconcileAnalysisSummaryWithEnrichment(
     ...(investigationPriority.kind !== 'not_assessed'
       ? { investigation_priority: investigationPriority }
       : {}),
+    ...(factorInvestigation.length > 0 ? { factor_investigation: factorInvestigation } : {}),
   };
 
   return {

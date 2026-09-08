@@ -116,19 +116,30 @@ describe('post-analysis contract — row 4: "Tell me what to change" family', ()
   ];
 
   for (const { message, label } of adviceCases) {
-    it(`routes to advice (deterministic, no LLM): ${label}`, () => {
+    it(`declines generic change-advice; specific composition remains available: ${label}`, () => {
       const out = tryPostAnalysisAdviceGate({
         message,
         analysis: FIXTURE_ANALYSIS,
         analysisReady: READY_PAYLOAD_OPEN,
         freshness: 'fresh',
       });
-      expect(out.matched).toBe(true);
-      if (out.matched) {
-        expect(out.advice_class).toBe<AdviceClass>('advice');
-        expect(out.assistant_text.length).toBeGreaterThan(0);
-        expect(out.suggested_actions).toHaveLength(1);
-        expect(out.suggested_actions[0]!.action_type).toBe('what_would_flip');
+      expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+      // This predicate check does not prove downstream mutation consent.
+      expect(hasMutationSignal(message)).toBe(false);
+      // Keep the original nonempty-copy/chip checks on the same composeAdvice
+      // implementation, which remains reachable via a specific next-step ask.
+      const specific = tryPostAnalysisAdviceGate({
+        message: 'What is the next step?',
+        analysis: FIXTURE_ANALYSIS,
+        analysisReady: READY_PAYLOAD_OPEN,
+        freshness: 'fresh',
+      });
+      expect(specific.matched).toBe(true);
+      if (specific.matched) {
+        expect(specific.advice_class).toBe<AdviceClass>('next_step');
+        expect(specific.assistant_text.length).toBeGreaterThan(0);
+        expect(specific.suggested_actions).toHaveLength(1);
+        expect(specific.suggested_actions[0]!.action_type).toBe('what_would_flip');
       }
     });
   }
@@ -260,17 +271,25 @@ describe('post-analysis contract — freshness gating', () => {
 // Row 5 regression — "What should I change?" continues to work
 // =========================================================================
 describe('post-analysis contract — row 5 regression: "What should I change?"', () => {
-  it('continues to match advice class via the existing broad "what should I" pattern', () => {
+  it('declines the generic question while specific advice retains its chip', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should I change?',
       analysis: FIXTURE_ANALYSIS,
       analysisReady: READY_PAYLOAD_OPEN,
       freshness: 'fresh',
     });
-    expect(out.matched).toBe(true);
-    if (out.matched) {
-      expect(out.advice_class).toBe<AdviceClass>('advice');
-      expect(out.suggested_actions[0]?.action_type).toBe('what_would_flip');
+    expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+    expect(hasMutationSignal('What should I change?')).toBe(false);
+    const specific = tryPostAnalysisAdviceGate({
+      message: 'What is the next step?',
+      analysis: FIXTURE_ANALYSIS,
+      analysisReady: READY_PAYLOAD_OPEN,
+      freshness: 'fresh',
+    });
+    expect(specific.matched).toBe(true);
+    if (specific.matched) {
+      expect(specific.advice_class).toBe<AdviceClass>('next_step');
+      expect(specific.suggested_actions[0]?.action_type).toBe('what_would_flip');
     }
   });
 });
@@ -889,18 +908,18 @@ describe('Review round-4 — stale "What should I change?" coverage', () => {
     { message: 'What should we edit?', label: 'what should we edit' },
   ];
 
-  // Fresh path — already worked via advice gate's broad `advice` class,
-  // regression-locked here.
+  // Fresh generic questions delegate to contextual reasoning. The classifier,
+  // stale-rerun and concrete-mutation controls below retain their contracts.
   for (const { message, label } of shouldChangePhrases) {
-    it(`fresh + ${label} → advice gate matches advice class`, () => {
+    it(`fresh + ${label} → generic advice declines for reasoning`, () => {
       const out = tryPostAnalysisAdviceGate({
         message,
         analysis: FIXTURE_ANALYSIS,
         analysisReady: READY_PAYLOAD_OPEN,
         freshness: 'fresh',
       });
-      expect(out.matched).toBe(true);
-      if (out.matched) expect(out.advice_class).toBe<AdviceClass>('advice');
+      expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+      expect(hasMutationSignal(message)).toBe(false);
     });
   }
 

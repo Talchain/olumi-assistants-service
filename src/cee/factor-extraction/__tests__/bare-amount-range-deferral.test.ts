@@ -1,0 +1,866 @@
+/**
+ * ⭐⭐ THE DEFERRAL AND THE PATTERN IT DEFERS TO MUST AGREE ON THEIR DOMAIN
+ * (ROADMAP 2.1131, repair of the behaviour seat's finding B on PR #1327).
+ *
+ * `RANGE_LOWER_BOUND_ABSENT_GUARD` makes three POINT patterns decline an amount
+ * that is the first half of a written range, **on the promise that a range
+ * pattern will read the pair instead**. Two of the three — `contextualNumber`
+ * and `approximateValue` — make the currency symbol OPTIONAL. Every range
+ * pattern that could keep the promise did not: `currencyRange` REQUIRES a
+ * `[£$€]` and `genericRange` REQUIRES the literal word `between`. For a bare,
+ * dash-joined pair no range pattern existed, so the guard declined on a promise
+ * nothing could keep and the figure vanished.
+ *
+ * MEASURED at `8ba54157` against base `f4c8f501`, through `extractFactors`,
+ * 32-string corpus, currency-prefixed twins as contrast controls in the same
+ * run — nine strings lost every factor they had at base:
+ *
+ *   "Budget of 80k-120k for the hire."   f4c8f501  Budget=80,000 explicit/0.90
+ *                                        8ba54157  []
+ *   "Revenue of 2m-5m is the target."    f4c8f501  Revenue=2,000,000
+ *                                        8ba54157  []
+ *   "roughly 800-900k users"             f4c8f501  Factor=800 inferred/0.70
+ *                                        8ba54157  []
+ *
+ * ⚠ THE REPAIR IS NOT TO NARROW THE GUARD BACK. Admitting `contextualNumber`
+ * on "Budget of 80-120k" republishes **80** at confidence 0.90 — the 3 Sep
+ * defect verbatim, in the spelling with no currency symbol. The repair is the
+ * other half of the seat's own fix direction: give the range grammar the bare
+ * dash-joined spelling, so the domain the guard DECLINES and the domain a range
+ * pattern READS are the same domain, derived from one constant
+ * (`RANGE_LOWER_BOUND_DEFERRAL_TAIL`) rather than written twice.
+ *
+ * ⚠⚠ AND THE OPPOSITE HARM IS THE ONE UNDER GUARD HERE. Widening the range
+ * grammar until any dash-joined pair mints a node is how this estate ships a
+ * fix and its exact inverse in consecutive rounds (CLAUDE.md trap 22b). The
+ * new pattern therefore REQUIRES a magnitude on the upper bound — the same
+ * `MAGNITUDE_SUFFIX_ANON_REQUIRED` the guard's own tail requires — so
+ * "3-5 people", "2024-2025" and "£50,000 - 3 months" are outside it by
+ * construction, and every one of those carries an assertion below.
+ */
+
+import { describe, expect, it } from "vitest";
+import { extractFactors } from "../index.js";
+import { enrichGraphWithFactorsAsync } from "../enricher.js";
+import { BARE_AMOUNT_RANGE_START_GUARD } from "../../../utils/amount-range.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "../../extraction/numeric-parser.js";
+import type { GraphT } from "../../../schemas/graph.js";
+
+function emptyGraph(): GraphT {
+  return {
+    nodes: [{ id: "goal-1", kind: "outcome", label: "Reach £30k MRR", data: {} }],
+    edges: [],
+  } as unknown as GraphT;
+}
+
+/** The whole factor, so an over-narrowing and an over-widening both RED. */
+function shapes(brief: string) {
+  return extractFactors(brief).map((f) => ({
+    label: f.label,
+    value: f.value,
+    unit: f.unit ?? null,
+    extractionType: f.extractionType,
+    rangeMin: f.rangeMin ?? null,
+    rangeMax: f.rangeMax ?? null,
+  }));
+}
+
+/* ===========================================================================
+ * DIRECTION 1 — THE REGRESSION. A stated figure with NO currency symbol must
+ * not vanish. RED at `8ba54157`: each of these returns `[]`.
+ * ========================================================================= */
+describe("a dash-joined pair with no currency symbol still reaches the model", () => {
+  it("'Budget of 80k-120k' yields a factor node, and it is the RANGE the user wrote", async () => {
+    const found = shapes("Budget of 80k-120k for the hire.");
+    // Bound by IDENTITY — the label the sentence states and the extraction
+    // type — never by "some factor whose value is 100000", which a different
+    // extractor could satisfy (CLAUDE.md trap 19).
+    const range = found.find((f) => f.label === "Budget" && f.extractionType === "range");
+    expect(range, `no Budget range factor; extractFactors returned ${JSON.stringify(found)}`)
+      .toBeDefined();
+    expect(range!.rangeMin).toBe(80_000);
+    expect(range!.rangeMax).toBe(120_000);
+    // And no 1,000x-short twin taken from the pair's own first half.
+    expect(found.some((f) => f.value === 80)).toBe(false);
+
+    // The seat's finding was NODE LOSS, so the claim is settled at the surface
+    // that mints nodes, not only at the producer.
+    const { graph } = await enrichGraphWithFactorsAsync(
+      emptyGraph(),
+      "Budget of 80k-120k for the hire.",
+    );
+    const node = graph.nodes.find(
+      (n) => n.kind === "factor" && String(n.label).toLowerCase().includes("budget"),
+    );
+    expect(node, "the enricher minted NO factor node for a stated budget").toBeDefined();
+  });
+
+  it("the elliptical spelling too — 'Budget of 80-120k' scopes the k across both bounds", () => {
+    const found = shapes("Budget of 80-120k for the hire.");
+    const range = found.find((f) => f.label === "Budget" && f.extractionType === "range");
+    expect(range, `returned ${JSON.stringify(found)}`).toBeDefined();
+    expect(range!.rangeMin).toBe(80_000);
+    expect(range!.rangeMax).toBe(120_000);
+    expect(found.some((f) => f.value === 80), "the 3 Sep defect, currency-free").toBe(false);
+  });
+
+  it("and the approximate spelling — 'roughly 800-900k users'", () => {
+    const found = shapes("roughly 800-900k users");
+    const range = found.find((f) => f.extractionType === "range");
+    expect(range, `returned ${JSON.stringify(found)}`).toBeDefined();
+    expect(range!.rangeMin).toBe(800_000);
+    expect(range!.rangeMax).toBe(900_000);
+    expect(found.some((f) => f.value === 800)).toBe(false);
+  });
+});
+
+/* ===========================================================================
+ * DIRECTION 2 — THE PR'S PURPOSE SURVIVES. The currency-prefixed twins are the
+ * contrast control: they were CORRECT at `8ba54157` and must not move.
+ * ========================================================================= */
+describe("the currency-prefixed twins are untouched (contrast control)", () => {
+  it("Paul's 3 Sep brief still reads as a range, with no scale from its lower bound", () => {
+    const found = shapes("We're budgeting £80-120k for the first hire.");
+    expect(found).toEqual([
+      {
+        label: "Budget",
+        value: 100_000,
+        unit: "£",
+        extractionType: "range",
+        rangeMin: 80_000,
+        rangeMax: 120_000,
+      },
+    ]);
+  });
+
+  it("…and exactly ONE range factor, not a bare duplicate beside the currency one", () => {
+    // The bare pattern must decline an amount a currency symbol already owns,
+    // or one written range arrives as two factors on two units.
+    for (const brief of [
+      "Budget between £2-5m for the platform.",
+      "Budget of £400-900k for the hire.",
+      "roughly £800-900k in revenue",
+    ]) {
+      const ranges = shapes(brief).filter((f) => f.extractionType === "range");
+      expect(ranges.length, `${brief} → ${JSON.stringify(ranges)}`).toBe(1);
+      expect(ranges[0]!.unit).toBe("£");
+    }
+  });
+});
+
+/* ===========================================================================
+ * DIRECTION 3 — THE GUARD SURVIVES. A genuine unit slip is still caught, and
+ * the pairs that are not ranges still mint nothing. One direction alone proves
+ * nothing (CLAUDE.md trap 22b).
+ * ========================================================================= */
+describe("the refusals and the non-ranges are unchanged", () => {
+  it("a DESCENDING pair is still refused, bare as well as currency-prefixed", () => {
+    // "£500-2m" has no single reading — 500m..2m or £500..£2,000,000 — and the
+    // doctrine is to refuse rather than publish a confident wrong magnitude.
+    // The bare spelling must refuse identically, or the new pattern has become
+    // a second opinion about what a range is.
+    expect(shapes("Budget £500-2m for the platform.").filter((f) => f.extractionType === "range"))
+      .toEqual([]);
+    expect(shapes("Budget of 500-2m for the platform.").filter((f) => f.extractionType === "range"))
+      .toEqual([]);
+  });
+
+  it("a magnitude on the LOWER bound only is still refused ('£2m-5')", () => {
+    const found = shapes("Budget £2m-5 for the platform.");
+    expect(found.some((f) => f.extractionType === "range")).toBe(false);
+    // …and the correctly-read point survives, so the refusal is not deletion.
+    expect(found.some((f) => f.value === 2_000_000)).toBe(true);
+  });
+
+  it("N1 survives: '£50,000 - 3 months of runway' still yields the honest £50,000 point", () => {
+    // The guard's own narrowing. No magnitude on the upper bound ⇒ the point
+    // reading loses nothing ⇒ the point is admitted. The new pattern must not
+    // reach this string either: `3` carries no magnitude.
+    const found = shapes("The budget is £50,000 - 3 months of runway.");
+    expect(found.some((f) => f.value === 50_000 && f.extractionType === "explicit")).toBe(true);
+  });
+
+  it("a bare dash pair with NO magnitude mints nothing new", () => {
+    // The over-widening this repair must not commit: any two numbers joined by
+    // a hyphen becoming a band.
+    expect(shapes("We hired 3-5 people this year.")).toEqual([]);
+    expect(shapes("Revenue 2024-2025 was flat.").some((f) => f.extractionType === "range"))
+      .toBe(false);
+    expect(shapes("Budget of 80,000-120,000 for the hire.").some((f) => f.extractionType === "range"))
+      .toBe(false);
+    expect(shapes("Budget of 80-120 for the hire.").some((f) => f.extractionType === "range"))
+      .toBe(false);
+  });
+
+  it("a percentage band is still ONE percent range, not a unitless twin", () => {
+    // `percentRange` owns "5-10%"; a unitless 5..10 beside it is one written
+    // range arriving as two factors on two scales.
+    const ranges = shapes("Churn between 5-10% this year.").filter(
+      (f) => f.extractionType === "range",
+    );
+    expect(ranges.length).toBe(1);
+    expect(ranges[0]!.unit).toBe("%");
+  });
+});
+
+/* ===========================================================================
+ * WHAT THIS REPAIR DOES **NOT** CLOSE, AND WHAT IT WIDENS — pinned in both
+ * directions so the suite REDs if either set grows OR shrinks (CLAUDE.md trap
+ * 22f: a gap the suite can see is honest; one it cannot is how four rounds
+ * happen).
+ * ========================================================================= */
+describe("the recorded floor: a pair with a RIVAL reading still yields nothing", () => {
+  /**
+   * ⚠⚠ THIS SET AND ITS NAME WERE BOTH WRONG, AND THE NAME IS WHY THE SET WAS.
+   *
+   * It was called `KNOWN_DESCENDING_PAIR_LOSES_ITS_POINT`, under the sentence
+   * *"the range is refused because the bare digits descend and the two readings
+   * diverge by 1,000x in opposite directions"*. For its third member,
+   * `"Budget £80,000-120k for the hire."`, NEITHER CLAUSE WAS TRUE: 80,000 to
+   * 120,000 ascends, and it has exactly one reading, because nobody writes
+   * "80,000k". A behaviour seat measured six such strings losing every factor
+   * they carried at base `f4c8f501` — the head filed them all under
+   * "descending", and a false class name is inherited by the next reader as a
+   * deliberate decision rather than a defect.
+   *
+   * WHAT ACTUALLY UNITES THE MEMBERS BELOW, and what the name now says: the
+   * bare digits descend, so the shared suffix cannot distribute — and a RIVAL
+   * reading survives in which the writer dropped a magnitude from the LOWER
+   * bound, which ascends just as coherently.
+   *
+   *     "£500-2m"     literal 500..2,000,000      dropped 500k..2m      BOTH
+   *     "£1,200-2m"   literal 1,200..2,000,000    dropped 1,200k..2m    BOTH
+   *
+   * Two coherent readings 1,000x apart is the ambiguity this module refuses to
+   * resolve by guessing (CLAUDE.md trap 22f: where direction cannot be
+   * determined, refuse and record the gap rather than tune a constant).
+   *
+   * ⚠ `"£1,200-2m"` IS NEW TO THIS SET and it is the honest cost of the rule
+   * chosen. A typographic rule — "a thousands separator in the lower bound
+   * means it cannot take the suffix" — would have published 1,200..2,000,000
+   * here, a 1,667x band over a reading ("£1,200k-£2m") that is coherent and,
+   * for a revenue sentence, likelier. It is refused rather than guessed, and
+   * pinned here rather than left invisible.
+   *
+   * NOT closed, deliberately. The twins below are what stop the set being
+   * "closed" by re-narrowing the pattern until everything yields nothing.
+   */
+  const KNOWN_RIVAL_READING_YIELDS_NOTHING = [
+    "Budget £500-2m for the platform.",
+    "Budget of 500-2m for the platform.",
+    "Revenue of £1,200-2m next year.",
+  ] as const;
+
+  it.each(KNOWN_RIVAL_READING_YIELDS_NOTHING)("OPEN (recorded): %s yields nothing", (brief) => {
+    expect(extractFactors(brief)).toEqual([]);
+  });
+
+  it("⭐ TWIN A: the DISTRIBUTED ascending members of the same grammar yield a range", () => {
+    // Bare digits ascend ⇒ the suffix scopes across both bounds. Untouched by
+    // the repair, and asserted so a re-narrowing cannot pass by deleting it.
+    for (const [brief, min, max] of [
+      ["Budget £500-2000k for the platform.", 500_000, 2_000_000],
+      ["Budget of 500-2000k for the platform.", 500_000, 2_000_000],
+      ["Budget of 80-120k for the hire.", 80_000, 120_000],
+    ] as const) {
+      const range = shapes(brief).find((f) => f.extractionType === "range");
+      expect(range, brief).toBeDefined();
+      expect(range!.rangeMin, brief).toBe(min);
+      expect(range!.rangeMax, brief).toBe(max);
+    }
+  });
+
+  it("⭐ TWIN B: the LITERAL ascending class — the six strings the seat measured as lost", () => {
+    // MEASURED at head `762245c8`, all six yielded `[]`; at base `f4c8f501`
+    // five yielded a point PLUS a fabricated descending range (e.g.
+    // "£80,000-120k" → point 80,000 and range [80,000..120], midpoint 40,060 —
+    // the magnitude silently dropped). Neither is what the sentence says.
+    // Five of the six read here as the one band that ascends; the sixth
+    // ("£1,200-2m") has a rival reading and is pinned above.
+    const CASES = [
+      "Budget of £80,000-120k for the hire.",
+      "Budget of £80,000\u2013120k for the hire.", // en dash
+      "Budget of 80,000-120k for the hire.",
+      "Budget of £1,500-2k for the hire.",
+      "Budget of £950-1.2k per month.",
+    ] as const;
+    // Read EVERY member before asserting, so one RED names the whole class
+    // rather than stopping at the first — the six-row table this repair was
+    // briefed from was itself produced that way.
+    const actual = Object.fromEntries(
+      CASES.map((brief) => {
+        const r = shapes(brief).find((f) => f.extractionType === "range");
+        return [brief, r ? `${r.rangeMin}..${r.rangeMax}` : "NO RANGE"];
+      }),
+    );
+    expect(actual).toEqual({
+      "Budget of £80,000-120k for the hire.": "80000..120000",
+      "Budget of £80,000\u2013120k for the hire.": "80000..120000",
+      "Budget of 80,000-120k for the hire.": "80000..120000",
+      "Budget of £1,500-2k for the hire.": "1500..2000",
+      "Budget of £950-1.2k per month.": "950..1200",
+    });
+  });
+
+  it("⭐ TWIN C: a pair where NEITHER reading ascends is still refused", () => {
+    // The opposite-direction twin of TWIN B, and the guard against reading the
+    // repair as "admit the literal reading whenever the digits descend".
+    // 5,000,000 > 2m literally, and 5,000,000k is further away still.
+    expect(extractFactors("Budget of £5,000,000-2m for the platform.")).toEqual([]);
+    expect(extractFactors("Budget of 5,000,000-2m for the platform.")).toEqual([]);
+  });
+});
+
+describe("a currency this pattern cannot CARRY is a currency it must not READ", () => {
+  /**
+   * ⚠⚠ A REGRESSION THIS PR INTRODUCED, found by an independent behaviour seat
+   * and MEASURED here at base before being believed.
+   *
+   * `BARE_AMOUNT_RANGE_START_GUARD` declines the digits a currency-prefixed
+   * sibling already owns, so one written range cannot arrive as two factors on
+   * two scales. It named `£$€` — the three `currencyRange` requires. Every
+   * OTHER currency in the canonical vocabulary therefore fell THROUGH it into
+   * the bare pattern, which has no unit of its own:
+   *
+   *     "¥80-120k for the launch."   f4c8f501  []
+   *                                  62b30d6e  Factor=100000, unit ABSENT
+   *
+   * A currency-bearing amount stored unitless is worse than an unread one: it
+   * is the input to `unit_redeclares_scale`, so the first correction a user
+   * types against that node ("Set it to ¥150,000") is the dead end this PR
+   * exists to open. Base minted NOTHING here, so refusing is base parity, not
+   * a new gap — that measurement is what settled the direction.
+   *
+   * The guard's class is now DERIVED from `CURRENCY_SYMBOL_TO_CODE`, so this
+   * set cannot silently regrow when a currency is added.
+   */
+  const CURRENCY_THE_BARE_PATTERN_MUST_DECLINE = [
+    "¥80-120k for the launch.",
+    "₹80-120k for the launch.",
+    "Spend ¥80k-120k on the launch.",
+    "CHF 80-120k for the launch.",
+    "NZ$ 80-120k for the launch.",
+    "kr 80-120k for the launch.",
+  ] as const;
+
+  it.each(CURRENCY_THE_BARE_PATTERN_MUST_DECLINE)(
+    "%s mints no unitless node (base parity)",
+    (brief) => {
+      expect(extractFactors(brief)).toEqual([]);
+    },
+  );
+
+  it("⭐ TWIN: the currencies the sibling DOES carry still mint, with their unit", () => {
+    // Without this, refusing every prefix would pass every row above and
+    // delete the feature. Each must keep BOTH its value and its unit.
+    for (const [brief, unit] of [
+      ["£80-120k for the launch.", "£"],
+      ["$80-120k for the launch.", "$"],
+      ["€80-120k for the launch.", "€"],
+    ] as const) {
+      const range = shapes(brief).find((f) => f.extractionType === "range");
+      expect(range, brief).toBeDefined();
+      expect(range!.value, brief).toBe(100_000);
+      expect(range!.unit, brief).toBe(unit);
+    }
+  });
+
+  it("⭐ TWIN: a genuinely UNPREFIXED bare range is untouched", () => {
+    // The guard must decline currency prefixes, not amounts. This is the class
+    // the whole PR exists to read, and it carries no symbol at all.
+    for (const brief of [
+      "Budget of 80-120k for the launch.",
+      "Budget of 80,000-120k for the hire.",
+      "roughly 800-900k users",
+    ]) {
+      const range = shapes(brief).find((f) => f.extractionType === "range");
+      expect(range, brief).toBeDefined();
+    }
+  });
+
+  it("⭐ TWIN: the guard blocks CURRENCY prefixes, not letters — a run-on word still reads", () => {
+    // ⚠ MEASURED, NOT ANTICIPATED. A mutant that added `\w` to the lookbehind
+    // class SURVIVED the whole suite, and a 32-string corpus run against it
+    // found exactly one difference — this string, which went from a range to
+    // nothing. The mutant was not equivalent; the corpus was short (CLAUDE.md
+    // trap 13c: a survivor is a claim either way, and only a discriminating
+    // fixture settles it). Pinned so the guard's scope is bound to CURRENCY
+    // and cannot quietly widen to "any letter".
+    const range = shapes("budget80-120k for it.").find((f) => f.extractionType === "range");
+    expect(range, "a letter-prefixed amount stopped being read").toBeDefined();
+    expect(range!.rangeMin).toBe(80_000);
+    expect(range!.rangeMax).toBe(120_000);
+  });
+
+  it("⭐⭐ the guard's currency class is DERIVED — every canonical KEY **and VALUE** is covered", () => {
+    // ⭐⭐ THE UNION PIN, AND THE `VALUES` HALF IS THE ONE THAT WAS MISSING.
+    // The union assertion trap 12d asks for: derivation stops the consumers
+    // drifting, and this stops the LIST being short. This loop ran over
+    // `Object.keys` alone, and the alternation it checks was derived the same
+    // way — so a guard agreeing with itself (trap 13b), blind to the ISO codes
+    // that are that map's VALUES. `CHF` is the only member that is BOTH, which
+    // is precisely why a keys-only derivation looked complete.
+    //
+    // Dropping EITHER spread from `CURRENCY_MULTICHAR_ALTERNATION` REDs this:
+    // the union is rebuilt here from the canonical map, not from the
+    // alternation, so it cannot shrink with the thing it is measuring.
+    const guard = new RegExp(BARE_AMOUNT_RANGE_START_GUARD + "\\d");
+    const union = [
+      ...new Set([
+        ...Object.keys(CURRENCY_SYMBOL_TO_CODE),
+        ...Object.values(CURRENCY_SYMBOL_TO_CODE),
+      ]),
+    ];
+    // The loop must have something to say — a union that silently emptied
+    // would pass every assertion below by iterating nothing (trap 13).
+    expect(union.length).toBeGreaterThan(Object.keys(CURRENCY_SYMBOL_TO_CODE).length);
+    for (const prefix of union) {
+      expect(
+        guard.test(`${prefix}80`),
+        `${prefix}80: the bare-range guard does not decline this canonical currency`,
+      ).toBe(false);
+    }
+    // …and SPACED, which is how an ISO code is actually written ("USD 80-120k").
+    //
+    // ⚠⚠ THIS LOOP USED TO BE SCOPED TO `p.length > 1`, and the comment beside
+    // it said so ON PURPOSE: "a single-character symbol separated from its
+    // digits by a space is NOT declined here — measured `true` for all five of
+    // `£ $ € ¥ ₹` — and asserting otherwise would pin a behaviour this guard
+    // does not have." Every word of that was accurate, and it is exactly how
+    // the third spelling of this defect stayed open: the test recorded the hole
+    // instead of REDding on it, because the scope was taken from the
+    // ALTERNATION's domain rather than from the VOCABULARY's. A guard's test
+    // must be scoped to the question ("does a currency own these digits?"), not
+    // to the shape of today's implementation — scoping it to the implementation
+    // is a guard agreeing with itself (CLAUDE.md trap 13b). The separation now
+    // applies to EVERY member, and this loop asserts EVERY member.
+    for (const prefix of union) {
+      expect(
+        guard.test(`${prefix} 80`),
+        `${prefix} 80: a spaced currency prefix is not declined`,
+      ).toBe(false);
+    }
+    // …and the contrast controls, in the same run: a NON-currency prefix must
+    // still be admitted, or the assertions above would pass on a guard that
+    // refuses everything.
+    expect(guard.test("of 80"), "an ordinary word prefix must still be admitted").toBe(true);
+    expect(
+      guard.test("ABC80"),
+      "a three-letter NON-currency prefix must still be admitted",
+    ).toBe(true);
+  });
+
+  /**
+   * ⚠⚠ THE SAME REGRESSION ONE LEVEL OUT, MEASURED AT `dc0d837d` BEFORE BEING
+   * BELIEVED — and this half shipped past the loop above because that loop and
+   * the alternation it checks were BOTH derived from `Object.keys`.
+   *
+   * A user writes the ISO CODE, which is a VALUE of the canonical map:
+   *
+   *     "USD 80-120k"   ad44d445  []
+   *                     dc0d837d  Factor=100,000, range 80,000..120,000, unit ABSENT
+   *     "EUR 2-5m"      dc0d837d  Factor=3,500,000, unit ABSENT
+   *
+   * All eight spaced codes, `EUR` with an `m` magnitude, the flush `USD80-120k`
+   * and the `usd`/`Usd` case variants — twelve spellings, each a stated currency
+   * amount published with its currency quietly removed, where base minted
+   * nothing at all. That node is the input to `unit_redeclares_scale`, so
+   * "Set it to USD 150,000" is the correction-loop dead end this PR exists to
+   * open. Refusing is base parity, not a new gap.
+   *
+   * DERIVED from `Object.values`, so a code added to the canonical map arrives
+   * here with no second edit.
+   */
+  it.each([...new Set(Object.values(CURRENCY_SYMBOL_TO_CODE))])(
+    "an ISO code — %s — mints no unitless node (base parity)",
+    (code) => {
+      expect(extractFactors(`${code} 80-120k for the launch.`)).toEqual([]);
+    },
+  );
+
+  it("⭐ the flush and CASE-VARIANT spellings decline too — the pattern is `gi`", () => {
+    // The production pattern is compiled `gi`, so a lower- or mixed-case code
+    // reaches the same guard. Measured unitless at `dc0d837d`, all three.
+    for (const brief of [
+      "USD80-120k for the launch.",
+      "usd 80-120k for the launch.",
+      "Usd 80-120k for the launch.",
+      "EUR 2-5m for the launch.",
+    ]) {
+      expect(extractFactors(brief), brief).toEqual([]);
+    }
+  });
+
+  it("⭐ TWIN: the guard declines CURRENCY codes, not any three letters", () => {
+    // Without this, refusing every three-letter prefix would pass every ISO row
+    // above and delete the feature for ordinary prose. Measured: both still
+    // mint the full band at `dc0d837d` and after the union repair.
+    for (const brief of ["ABC 80-120k for the launch.", "XYZ 80-120k for the launch."]) {
+      const range = shapes(brief).find((f) => f.extractionType === "range");
+      expect(range, brief).toBeDefined();
+      expect(range!.value, brief).toBe(100_000);
+      expect(range!.rangeMin, brief).toBe(80_000);
+      expect(range!.rangeMax, brief).toBe(120_000);
+    }
+  });
+});
+
+describe("a SIGNED lower bound is refused, not silently unsigned", () => {
+  it("'-5-10k' and '+5-10k' mint nothing", () => {
+    // ⚠ MEASURED, NOT ANTICIPATED. Before `BARE_AMOUNT_RANGE_START_GUARD`
+    // carried its sign limb, "Growth of -5-10k users." matched from its **5**
+    // and published 5,000..10,000 — the writer's minus sign dropped in
+    // silence. That is the OVER-read direction, and base and head both return
+    // nothing here, so no differential against them could have shown it: the
+    // only instrument that could was a corpus that included the sign axis.
+    expect(extractFactors("Growth of -5-10k users.")).toEqual([]);
+    expect(extractFactors("Uplift of +5-10k users.")).toEqual([]);
+  });
+
+  it("⭐ TWIN: the same sentence UNSIGNED does mint the range", () => {
+    // Or the assertion above would pass under a pattern that reads nothing.
+    const range = shapes("Growth of 5-10k users.").find((f) => f.extractionType === "range");
+    expect(range).toBeDefined();
+    expect(range!.rangeMin).toBe(5_000);
+    expect(range!.rangeMax).toBe(10_000);
+  });
+});
+
+describe("the WIDENING this repair ships, stated rather than discovered later", () => {
+  it("a dash-joined magnitude-scoped pair that reached NOTHING at base now reads", () => {
+    // These are not restorations — base `f4c8f501` and head `8ba54157` both
+    // returned `[]`. They are inside the new pattern's declared domain (a
+    // dash, and a magnitude on the upper bound), and each is a correct reading
+    // of a stated range, so they are disclosed here rather than left for a
+    // later seat to find.
+    const signups = shapes("between 5-10 thousand signups").find(
+      (f) => f.extractionType === "range",
+    );
+    expect(signups).toBeDefined();
+    expect([signups!.rangeMin, signups!.rangeMax]).toEqual([5_000, 10_000]);
+  });
+
+  it("⚠ and the label is `inferLabel`'s, which is a CLOSED LIST checked in order", () => {
+    // ⚠ A PRE-EXISTING LIMITATION, SURFACED IN A NEW PLACE — recorded, not
+    // repaired, because `inferLabel` is shared by every range extractor and
+    // widening its vocabulary would move labels estate-wide (the scope rule).
+    // Two consequences, both measured:
+    //   · a context word outside the list ("target", "spend") yields "Factor",
+    //     where the POINT patterns used their own `context` capture and did
+    //     not;
+    //   · with two metrics in one sentence, the FIRST list entry to match the
+    //     50-character look-back wins, so the second range borrows the first
+    //     one's label.
+    const two = shapes("Cost 1-2m, revenue 3-4m this year.").filter(
+      (f) => f.extractionType === "range",
+    );
+    expect(two.map((f) => [f.label, f.rangeMin, f.rangeMax])).toEqual([
+      ["Cost", 1_000_000, 2_000_000],
+      ["Cost", 3_000_000, 4_000_000], // ← `inferLabel` list order, not the sentence
+    ]);
+    expect(shapes("Spend of 300-500k on tooling.")[0]!.label).toBe("Factor");
+  });
+});
+
+/* ===========================================================================
+ * ⭐⭐ KNOWN_WORD_SEPARATOR_FLOOR — the 3 Sep defect, alive in the `to`/`and`
+ * spelling (PR #1327 behaviour seat, finding C: "worth a pinned gap-set entry
+ * rather than silence").
+ *
+ * `RANGE_SEPARATOR` admits `\s+(?:to|and)\s+`; `RANGE_LOWER_BOUND_ABSENT_GUARD`
+ * looks only for `[-–—]`. So on the word spelling the point pattern is NOT
+ * declined, and its confidence 0.90 beats the range's 0.80 in `mergeFactors`.
+ * MEASURED through `enrichGraphWithFactorsAsync` — the node-minting surface,
+ * not the producer — at base `f4c8f501` and at this repair:
+ *
+ *   "Budget of £80 to 120k for the hire."   BOTH  raw_value 80, cap 100
+ *   "Budget of 80 to 120k for the hire."    BOTH  raw_value 80, cap 100
+ *   "Budget of £80 and 120k for the hire."  BOTH  raw_value 80, cap 100
+ *
+ * That cap is the one that refused Paul's £100,000 on 3 Sep. It is NOT a
+ * regression — base is identically wrong — and it is NOT closed here.
+ *
+ * ── WHY NOT CLOSED (trap 22f) ──────────────────────────────────────────────
+ * Closing it means widening the guard's separator to the word forms, which by
+ * this repair's own rule then requires widening `bareAmountRange` to match, so
+ * every `X to Y` and anchored `X and Y` pair in the estate changes reading at
+ * once. `RANGE_SEPARATOR`'s own docstring records what happened the last time
+ * the `and` limb moved without an outside corpus: four measured fabrications,
+ * one of them `min > max`. This repair's mandate is the DASH class the guard
+ * deferred and nothing could read. The word axis needs its own corpus, from
+ * outside the author's head, and its own seat.
+ * ========================================================================= */
+describe("KNOWN_WORD_SEPARATOR_FLOOR — pinned in both directions", () => {
+  const WORD_SEPARATOR_STILL_UNDER_READS = [
+    "Budget of £80 to 120k for the hire.",
+    "Budget of 80 to 120k for the hire.",
+    "Budget of £80 and 120k for the hire.",
+  ] as const;
+
+  it.each(WORD_SEPARATOR_STILL_UNDER_READS)(
+    "OPEN (recorded): %s still mints raw_value 80 under a cap of 100",
+    async (brief) => {
+      const { graph } = await enrichGraphWithFactorsAsync(emptyGraph(), brief);
+      const node = graph.nodes.find(
+        (n) => n.kind === "factor" && String(n.label).toLowerCase().includes("budget"),
+      );
+      const data = node?.data as { raw_value?: number; cap?: number } | undefined;
+      expect(data, `${brief}: no budget node at all — the floor MOVED, re-derive it`).toBeDefined();
+      expect(data!.raw_value, brief).toBe(80);
+      expect(data!.cap, "the cap that refused £100,000 on 3 Sep").toBe(100);
+    },
+  );
+
+  it("⭐ TWIN: the DASH spelling of the same sentence is closed, and stays closed", async () => {
+    // Without this the block above could be "satisfied" by a change that
+    // under-reads everything, and it would read as a floor rather than a
+    // regression.
+    const { graph } = await enrichGraphWithFactorsAsync(
+      emptyGraph(),
+      "We're budgeting £80-120k for the first hire.",
+    );
+    const data = graph.nodes.find(
+      (n) => n.kind === "factor" && String(n.label).toLowerCase().includes("budget"),
+    )?.data as { raw_value?: number; cap?: number } | undefined;
+    expect(data!.raw_value).toBe(100_000);
+    expect(data!.cap, "admits the user's own upper bound, and then some").toBeGreaterThan(120_000);
+  });
+});
+
+/* ===========================================================================
+ * ⭐⭐⭐ THE COMPLETE SPELLING SPACE, CLOSED BY ENUMERATION (PR #1327).
+ *
+ * THE RULE THIS PINS, IN ONE SENTENCE: **a currency token from the canonical
+ * vocabulary owns the digits that follow it — flush or separated by whitespace,
+ * in any case — so a range written after one either mints carrying that same
+ * currency or mints nothing, and never mints unitless or under a different
+ * currency.**
+ *
+ * ⚠⚠ WHY AN ENUMERATION AND NOT A SIXTEENTH EXAMPLE. This one class has now
+ * been fixed three times on this PR, each time by naming the spelling in hand:
+ * the multi-character symbols (`A$`/`C$`/`NZ$`), then the ISO codes
+ * (`USD`/`EUR`), then single-character symbols separated from their digits by a
+ * space. Each fix closed one spelling and left another open, and every time the
+ * whole suite stayed green — 338 tests across the ten specs this PR touches
+ * passed at `2d46f8e2` with thirty unitless cells live. A hand-written corpus
+ * is what let three spellings through (CLAUDE.md trap 22: a corpus drawn from
+ * the author's head cannot see the class the author did not imagine), so the
+ * corpus here is DERIVED and the assertion is over the whole cross-product.
+ *
+ * THE SPACE THIS ENUMERATION COVERS — one written RANGE spelling,
+ * `<token>80-120k`, across four dimensions:
+ *   token       every KEY and every VALUE of `CURRENCY_SYMBOL_TO_CODE` (19)
+ *   case        as-written · lower · upper · title, de-duplicated
+ *   separation  flush · space · NON-BREAKING space · THIN space
+ *   carrier     bare, and behind a `contextualNumber` noun ("Budget of …")
+ *
+ * ⚠⚠ AND THE CARRIERS IT DOES NOT COVER — A RECORDED GAP, NOT A CLOSED SPACE.
+ * The sentence that stood here called this "the whole space this module can be
+ * handed". It is not: `extractFactors` is reachable with a POINT amount and
+ * with range spellings this block does not build, and there a multi-character
+ * `$` currency is still read as `$` — "The budget is A$80k this year."
+ * publishes unit `$` at this head. MEASURED over the same token × case ×
+ * separation space in six carriers this block does NOT build (`A$80k` bare and
+ * behind a noun, "The budget is …", "between … and …", "from … to …" and
+ * "up to …"), 1,080 cells: FORTY-TWO wrong-currency cells at `ad44d445`, and
+ * the same FORTY-TWO at `a56368c9` — seven flush-spelled tokens
+ * (`A$ a$ C$ c$ NZ$ nz$ Nz$`) × six carriers, at the flush separation only,
+ * unchanged by this PR. `CURRENCY_SYMBOL_TAIL_OF_LONGER_GUARD` is applied in
+ * `currencyRange` and nowhere else, so this PR's rule cannot reach them;
+ * closing them is a change at the patterns those six carriers DO reach, and is
+ * a different PR. ⭐ That count is itself a function of the carriers
+ * enumerated — which is exactly why this block no longer claims a whole space.
+ * A carrier nobody enumerated is a cell nobody measured.
+ *
+ * ⭐ THE SEPARATION DIMENSION IS DELIBERATE ON ITS EXOTIC MEMBERS, and the
+ * reasoning is stated rather than left to the regex: `CURRENCY_AMOUNT_SEPARATION`
+ * is `\s{0,3}`, and JS `\s` includes U+00A0 and U+2009. So a non-breaking or
+ * thin space — the two a word processor, a PDF paste or a currency-formatting
+ * library actually produce — is read exactly like an ordinary one, in the
+ * pattern AND in the guard, which is what stops them becoming the fourth
+ * spelling. They are enumerated here because a dimension nobody tests is a
+ * dimension nobody knows the answer for; MEASURED at `2d46f8e2`, all three
+ * separated forms of all five symbols minted UNITLESS.
+ *
+ * ⭐ AND THE HONEST FLOOR. Of the nineteen vocabulary members, three can be
+ * CARRIED by a range — `currencyRange` publishes `unit` verbatim from `[£$€]`.
+ * The other sixteen are REFUSED, and that set is pinned EXACTLY below so it
+ * REDs if it grows (a currency stopped minting) OR shrinks (a currency started
+ * minting a `unit` string `enricher.ts`'s hand-spelled `inferFactorType` list
+ * has never seen). Widening the carried set is a real improvement and it is a
+ * DIFFERENT change: it needs that second mirror derived first.
+ * ========================================================================= */
+describe("⭐⭐⭐ every currency spelling × separation × case has a stated outcome", () => {
+  const CURRENCY_UNION = [
+    ...new Set([
+      ...Object.keys(CURRENCY_SYMBOL_TO_CODE),
+      ...Object.values(CURRENCY_SYMBOL_TO_CODE),
+    ]),
+  ];
+
+  /** The three the range path can publish a `unit` for. Derived below, not read from here. */
+  const CARRIED_BY_THE_RANGE_PATH = ["£", "$", "€"] as const;
+
+  /**
+   * ⚠ THE KNOWN SET — recorded, not silently absent (CLAUDE.md trap 22f).
+   * Every canonical currency a written range is REFUSED for rather than read.
+   * Derived as the complement so it cannot be hand-maintained short.
+   */
+  const KNOWN_REFUSED_CURRENCIES = CURRENCY_UNION.filter(
+    (member) => !(CARRIED_BY_THE_RANGE_PATH as readonly string[]).includes(member),
+  ).sort();
+
+  const caseVariants = (token: string): string[] => [
+    ...new Set([
+      token,
+      token.toLowerCase(),
+      token.toUpperCase(),
+      token.charAt(0).toUpperCase() + token.slice(1).toLowerCase(),
+    ]),
+  ];
+
+  const SEPARATIONS = [
+    ["flush", ""],
+    ["space", " "],
+    ["non-breaking space", " "],
+    ["thin space", " "],
+  ] as const;
+
+  const CARRIERS = [
+    ["bare", (prefix: string) => `${prefix}80-120k for the hire.`],
+    ["contextual", (prefix: string) => `Budget of ${prefix}80-120k for the hire.`],
+  ] as const;
+
+  interface Cell {
+    readonly canonical: string;
+    readonly token: string;
+    readonly separation: string;
+    readonly carrier: string;
+    readonly input: string;
+  }
+
+  const CELLS: Cell[] = CURRENCY_UNION.flatMap((canonical) =>
+    caseVariants(canonical).flatMap((token) =>
+      SEPARATIONS.flatMap(([separation, gap]) =>
+        CARRIERS.map(([carrier, build]) => ({
+          canonical,
+          token,
+          separation,
+          carrier,
+          input: build(`${token}${gap}`),
+        })),
+      ),
+    ),
+  );
+
+  /**
+   * ⚠ THE LOOP MUST HAVE SOMETHING TO SAY. An enumeration that silently emptied
+   * — a vocabulary that failed to import, a `flatMap` that returned nothing —
+   * would pass every assertion below by iterating zero cells (CLAUDE.md trap
+   * 13). Pinned against the derivation, not against a written number, so adding
+   * a currency grows it rather than REDding it.
+   */
+  it("the cross-product is DERIVED and non-empty", () => {
+    expect(CURRENCY_UNION.length).toBeGreaterThan(Object.keys(CURRENCY_SYMBOL_TO_CODE).length);
+    expect(CELLS.length).toBe(
+      CURRENCY_UNION.reduce((n, c) => n + caseVariants(c).length, 0) *
+        SEPARATIONS.length *
+        CARRIERS.length,
+    );
+    expect(CELLS.length).toBeGreaterThan(300);
+    expect(KNOWN_REFUSED_CURRENCIES.length).toBeGreaterThan(0);
+  });
+
+  it("⭐⭐ NO CELL MINTS A UNITLESS NODE, AND NONE MINTS UNDER ANOTHER CURRENCY", () => {
+    const unitless: string[] = [];
+    const wrongCurrency: string[] = [];
+    for (const cell of CELLS) {
+      for (const factor of extractFactors(cell.input)) {
+        if (factor.unit === undefined || factor.unit === null || factor.unit === "") {
+          unitless.push(`${JSON.stringify(cell.input)} → ${factor.value} with NO unit`);
+        } else if (factor.unit !== cell.token) {
+          wrongCurrency.push(
+            `${JSON.stringify(cell.input)} → ${factor.value} as ${factor.unit}, written ${cell.token}`,
+          );
+        }
+      }
+    }
+    // Both directions in one place on purpose: a repair that closed the
+    // unitless class by publishing everything as `$` would pass one and RED
+    // the other (CLAUDE.md trap 22b — one predicate, two opposite harms).
+    expect(unitless, "a stated currency amount reached a node with no unit").toEqual([]);
+    expect(wrongCurrency, "a stated currency amount reached a node under a DIFFERENT currency").toEqual([]);
+  });
+
+  it("⭐⭐ the currencies a range MINTS with are EXACTLY the three the pattern can carry", () => {
+    const minted = [
+      ...new Set(
+        CELLS.filter((cell) => extractFactors(cell.input).length > 0).map((cell) => cell.canonical),
+      ),
+    ].sort();
+    // Exact-set, so this REDs if a currency stops minting AND if one starts.
+    expect(minted).toEqual([...CARRIED_BY_THE_RANGE_PATH].sort());
+  });
+
+  it("⭐⭐ KNOWN: the sixteen canonical currencies a written range REFUSES, pinned exactly", () => {
+    const refused = [
+      ...new Set(
+        CELLS.filter((cell) => extractFactors(cell.input).length === 0).map((cell) => cell.canonical),
+      ),
+    ].sort();
+    // ⚠ RED ON GROWTH **AND** ON SHRINKAGE. Growth means a currency this
+    // module used to read stopped being read; shrinkage means one started
+    // minting a `unit` string `inferFactorType` cannot classify. Neither may
+    // happen quietly — a recorded floor is honest, a fourth silent spelling
+    // is not.
+    expect(refused).toEqual(KNOWN_REFUSED_CURRENCIES);
+    // …and every member of the KNOWN set refuses at EVERY separation, not just
+    // the one spelling that happened to be measured.
+    for (const canonical of KNOWN_REFUSED_CURRENCIES) {
+      for (const [separation, gap] of SEPARATIONS) {
+        expect(
+          extractFactors(`Budget of ${canonical}${gap}80-120k for the hire.`),
+          `${canonical} (${separation})`,
+        ).toEqual([]);
+      }
+    }
+  });
+
+  it("⭐ CONTRAST CONTROLS: the guard refuses CURRENCY, not everything", () => {
+    // Without these, every assertion above passes on a module that mints
+    // nothing at all (CLAUDE.md trap 13 — an absence claim needs a presence).
+    for (const [, gap] of SEPARATIONS) {
+      // A bare, genuinely unprefixed range still mints — and still unitless,
+      // which is correct: nothing in it names a currency.
+      const bare = extractFactors(`Budget of${gap || " "}80-120k for the hire.`);
+      expect(bare.length, `unprefixed, separation ${JSON.stringify(gap)}`).toBeGreaterThan(0);
+    }
+    // A three-letter token that is NOT in the vocabulary must still be read —
+    // the fabricated control. It reads unitless because it names no currency.
+    const fabricated = extractFactors("Budget of QQQ 80-120k for the hire.");
+    expect(fabricated.length, "a non-currency prefix stopped being read").toBeGreaterThan(0);
+    // …and the same string with a REAL code in place of the fabricated one is
+    // refused, in the same run: the discrimination, not just the sensitivity.
+    expect(extractFactors("Budget of USD 80-120k for the hire.")).toEqual([]);
+  });
+
+  it("⭐ the three carried currencies mint the SAME value at every separation and carrier", () => {
+    // The over-narrowing twin: a guard that refused the separated forms
+    // outright would pass the unitless assertion and delete the capability.
+    for (const symbol of CARRIED_BY_THE_RANGE_PATH) {
+      for (const [separation, gap] of SEPARATIONS) {
+        for (const [carrier, build] of CARRIERS) {
+          const range = extractFactors(build(`${symbol}${gap}`)).find(
+            (f) => f.extractionType === "range",
+          );
+          const where = `${symbol} / ${separation} / ${carrier}`;
+          expect(range, where).toBeDefined();
+          expect(range!.value, where).toBe(100_000);
+          expect(range!.rangeMin, where).toBe(80_000);
+          expect(range!.rangeMax, where).toBe(120_000);
+          expect(range!.unit, where).toBe(symbol);
+        }
+      }
+    }
+  });
+});

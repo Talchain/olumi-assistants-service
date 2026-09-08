@@ -332,7 +332,7 @@ describe('Mission B — eliminated-options clause', () => {
     });
     expect(out).not.toBeNull();
     expect(out!).toContain(
-      '2 options are effectively eliminated (each has less than a 1% chance of winning)',
+      '2 options are effectively eliminated (each scored highest in less than 1% of runs)',
     );
     expect(isAllowedRunAnalysisAssistantText(out!)).toBe(true);
   });

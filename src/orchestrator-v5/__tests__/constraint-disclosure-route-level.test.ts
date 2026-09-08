@@ -796,6 +796,14 @@ const LEADING_OPTION_LANGUAGE: readonly RegExp[] = [
   /\bstill leads\b/i,
   /\bnow leads\b/i,
   /\bled before\b/i,
+  // ⚠ THE GOAL-FRAMED REPLACEMENTS (2026-09-07, Paul's no-winner ruling). The
+  // list above is an ABSENCE assertion: it proves a withheld turn carries no
+  // leader language. Retiring the copy without adding its replacement would
+  // leave every pattern here matching a sentence the product no longer emits —
+  // the suite would stay green by testing nothing (CLAUDE.md trap 13).
+  /\bscored? highest\b/i,
+  /\bscores highest\b/i,
+  /most likely to serve your goal/i,
   /its lead has (?:widened|narrowed)/i,
   /the result is unchanged/i,
 ];

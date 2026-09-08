@@ -226,7 +226,6 @@ describe('buildAddOptionTransaction — STRICT VALUES (no silent coercion)', () 
     ['Infinity', Number.POSITIVE_INFINITY],
     ['-Infinity', Number.NEGATIVE_INFINITY],
     ['boolean', true],
-    ['null', null],
   ])('a %s intervention value is rejected (parameters_invalid), never coerced', (_label, value) => {
     const r = buildAddOptionTransaction(
       {
@@ -270,5 +269,116 @@ describe('buildAddOptionTransaction — STRICT VALUES (no silent coercion)', () 
     for (const hostile of [undefined, 42, 'str', [], { interventions: 'nope' }]) {
       expect(() => buildAddOptionTransaction(hostile, GRAPH)).not.toThrow();
     }
+  });
+});
+
+/**
+ * ⭐ CONTRACT CHANGE, DISCLOSED (add-option text leg, 1 Sep 2026).
+ *
+ * `value: null` USED TO SIT IN THE COERCION TABLE ABOVE, rejected alongside
+ * `'0.55'` and `NaN`. It has been moved out because it now MEANS something:
+ * "this option changes this factor, and the size is not stated". The
+ * anti-coercion property that table exists to protect is untouched and is
+ * re-asserted below — a null becomes an EXPLICIT UNKNOWN, never a zero.
+ *
+ * ⚠ WHY THIS CANNOT CHANGE THE CHIP PATH. The UI's own producer
+ * (`DecisionGuideAI/src/v5/chipParameters.ts:274`) refuses any intervention
+ * whose value is not `Number.isFinite`, so a chip CANNOT carry a null. The
+ * widened branch is reachable only from the focused text proposer, whose tool
+ * schema has no value field at all.
+ */
+describe('buildAddOptionTransaction — UNVALUED LINKS (explicit unknown magnitude)', () => {
+  it('a null value links the factor and writes NO intervention entry', () => {
+    const r = buildAddOptionTransaction(
+      {
+        parent_decision_id: 'dec_choice',
+        label: 'Partner locally',
+        interventions: [{ factor_id: 'fac_effort', value: null }],
+      },
+      GRAPH,
+    );
+    expect(r.matched).toBe(true);
+    if (!r.matched) return;
+    const added = findAddNode(r.proposal.operations)!;
+    // The edge exists — the option IS linked into the model...
+    expect(r.proposal.operations.some((o) => o.op === 'add_edge' && o.path === 'opt_partner_locally::fac_effort')).toBe(true);
+    // ...and the bundle is EMPTY, which is what makes the persisted option read
+    // back as awaiting a value rather than as configured.
+    expect((added.value as { interventions: Record<string, unknown> }).interventions).toEqual({});
+    expect(r.proposal.configured).toBe(false);
+    expect(r.proposal.configuredFactorIds).toEqual([]);
+    expect(r.proposal.linkedUnvaluedFactorIds).toEqual(['fac_effort']);
+  });
+
+  it('⭐ NEVER A ZERO: no fabricated numeric value appears anywhere in the batch', () => {
+    const r = buildAddOptionTransaction(
+      {
+        parent_decision_id: 'dec_choice',
+        label: 'Partner locally',
+        interventions: [{ factor_id: 'fac_effort', value: null }],
+      },
+      GRAPH,
+    );
+    expect(r.matched).toBe(true);
+    if (!r.matched) return;
+    const added = findAddNode(r.proposal.operations)!;
+    const bundle = (added.value as { interventions: Record<string, unknown> }).interventions;
+    expect(Object.keys(bundle)).toHaveLength(0);
+    // The discriminating twin: the SAME call with a real value DOES write one,
+    // so the empty bundle above is the null's doing and not a broken builder.
+    const valued = buildAddOptionTransaction(
+      {
+        parent_decision_id: 'dec_choice',
+        label: 'Partner locally',
+        interventions: [{ factor_id: 'fac_effort', value: 0.4 }],
+      },
+      GRAPH,
+    );
+    expect(valued.matched).toBe(true);
+    if (!valued.matched) return;
+    const valuedBundle = (findAddNode(valued.proposal.operations)!.value as {
+      interventions: Record<string, { value: number }>;
+    }).interventions;
+    expect(valuedBundle.fac_effort!.value).toBe(0.4);
+    expect(valued.proposal.linkedUnvaluedFactorIds).toEqual([]);
+  });
+
+  it('MIXED: a valued and an unvalued link in one batch keep their own sides', () => {
+    const r = buildAddOptionTransaction(
+      {
+        parent_decision_id: 'dec_choice',
+        label: 'Partner locally',
+        interventions: [
+          { factor_id: 'fac_effort', value: 0.4 },
+          { factor_id: 'fac_uplift', value: null },
+        ],
+      },
+      GRAPH,
+    );
+    expect(r.matched).toBe(true);
+    if (!r.matched) return;
+    const bundle = (findAddNode(r.proposal.operations)!.value as {
+      interventions: Record<string, unknown>;
+    }).interventions;
+    expect(Object.keys(bundle)).toEqual(['fac_effort']);
+    expect(r.proposal.configured).toBe(true);
+    expect(r.proposal.configuredFactorIds).toEqual(['fac_effort']);
+    expect(r.proposal.linkedUnvaluedFactorIds).toEqual(['fac_uplift']);
+    // BOTH factors are linked structurally — an unvalued link is still a link.
+    const edgePaths = r.proposal.operations.filter((o) => o.op === 'add_edge').map((o) => o.path);
+    expect(edgePaths).toContain('opt_partner_locally::fac_effort');
+    expect(edgePaths).toContain('opt_partner_locally::fac_uplift');
+  });
+
+  it('an unvalued link to a NON-factor is still rejected — the widening is about values, not grounding', () => {
+    const r = buildAddOptionTransaction(
+      {
+        parent_decision_id: 'dec_choice',
+        label: 'Partner locally',
+        interventions: [{ factor_id: 'g_profit', value: null }],
+      },
+      GRAPH,
+    );
+    expect(r).toEqual({ matched: false, reason: 'factor_not_factor' });
   });
 });

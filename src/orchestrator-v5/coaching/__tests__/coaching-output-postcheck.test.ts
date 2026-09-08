@@ -338,7 +338,7 @@ describe('checkCoachingOutput — pre-analysis fabricated-result reference (revi
 
   it('NONE + invented run degrades ("I ran the analysis …")', () => {
     expectViolation(
-      checkCoachingOutput('I ran the analysis and Enterprise came out ahead.', NONE),
+      checkCoachingOutput('I ran the analysis and Enterprise scored highest against your goal.', NONE),
       'fabricated_result_reference',
     );
     expectViolation(

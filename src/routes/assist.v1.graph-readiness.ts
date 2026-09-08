@@ -42,11 +42,30 @@ interface CEETraceMeta {
  */
 interface CEEGraphReadinessResponseV1 {
   // ── Coaching: "how good is this model?" (legacy quality assessor) ──
+  // ⭐ EVERY FIELD IN THIS GROUP IS SCOPED TO THE REQUEST GRAPH, ALWAYS — see
+  //    `coaching_assessed_from`. Membership of the group is what declares the
+  //    scope, so a field must not be added here unless it reads `input.graph`.
   readiness_score: number;
   readiness_level: "ready" | "fair" | "needs_work";
   confidence_level: "high" | "medium" | "low";
   confidence_explanation: string;
   quality_factors: GraphReadinessAssessment["quality_factors"];
+  /**
+   * WHICH MODEL THE COACHING HALF ABOVE DESCRIBES. Constant `"request_graph"`,
+   * and declared rather than left implicit for one measured reason: `assessed_from`
+   * scopes the ADMISSION half only, and a consumer reading `assessed_from:
+   * "persisted"` off a flat envelope will take the score and the factor count to
+   * be persisted-scoped too. They are not, and that is deliberate — coaching
+   * answers "how good is the model you are LOOKING AT?", a question about the
+   * canvas, so it must follow the caller's bytes even when a scenario is named.
+   *
+   * ⚠ NOT REDUNDANT WITH `assessed_from`, AND NOT TO BE ALIGNED WITH IT. The two
+   * stamps answer different questions (CLAUDE.md trap 21) and are REQUIRED to
+   * differ whenever a caller supplies a `scenario_id` whose persisted graph is
+   * not the one it posted. Re-pointing either half at the other's graph to make
+   * them agree destroys the distinction rather than fixing it.
+   */
+  coaching_assessed_from: "request_graph";
 
   // ── Admission: "may analysis run?" (canonical assessor, sole authority) ──
   can_run_analysis: boolean;
@@ -58,8 +77,12 @@ interface CEEGraphReadinessResponseV1 {
   may_run: MayRun;
   blocker_reason?: string;
   /**
-   * WHICH MODEL WAS ASSESSED. `persisted` = the same read the run path performs;
-   * `request_graph` = the caller's own bytes.
+   * WHICH MODEL THE ADMISSION HALF WAS ASSESSED FROM — **this group only**, not
+   * the envelope. `persisted` = the same read the run path performs;
+   * `request_graph` = the caller's own bytes. The coaching half carries its own
+   * stamp (`coaching_assessed_from`) and is always the caller's bytes; reading
+   * this field as if it scoped the whole response is the mistake that stamp exists
+   * to foreclose.
    *
    * ⭐ DECLARED RATHER THAN ASSUMED. A readiness verdict over the request graph is
    * a verdict about the CLIENT'S copy of the model, and the run assesses the
@@ -82,6 +105,11 @@ interface CEEGraphReadinessResponseV1 {
    * the option and the field instead of rendering a count.
    */
   readiness_issues: RouteReadinessBlocker[];
+
+  // ── Coaching (continued): three more REQUEST-GRAPH-scoped fields ──────────
+  // They sit below the admission block for wire-order reasons only. They are
+  // computed from `input.graph`, so `coaching_assessed_from` — not
+  // `assessed_from` — is the stamp that describes them.
   evidence_quality?: {
     /** Count of edges with strong evidence */
     strong: number;
@@ -94,9 +122,30 @@ interface CEEGraphReadinessResponseV1 {
     /** Human-readable summary */
     summary: string;
   };
-  /** Count of nodes with kind === "factor" (all categories) */
+  /**
+   * Count of nodes with kind === "factor" (all categories) **in the REQUEST
+   * graph** — the canvas the caller is looking at, never the persisted model.
+   *
+   * ⚠ MEASURED, AND THE REASON THIS SENTENCE EXISTS (2026-09-08, discriminating
+   * pair on one scenario with the persisted graph held constant): a request graph
+   * of 0 nodes returned `total_factor_count: 0` and a request graph of 19 nodes
+   * returned `8`, while every admission field — `may_run`, `options_total`,
+   * `goal_node_valid` — stayed put. The count was already request-scoped and
+   * simply did not say so, under an `assessed_from: "persisted"` stamp that read
+   * as if it covered the envelope.
+   *
+   * ⚠ AND WHY IT WAS NOT RE-POINTED AT THE PERSISTED GRAPH: `readiness_score`,
+   * `quality_factors` and `evidence_quality` are request-scoped by the same
+   * deliberate design (the coaching half describes the canvas). Moving this one
+   * field alone would half-align the envelope and leave a subtler split than the
+   * one it set out to close; moving them all would repeal the coaching/admission
+   * distinction the route is built on. The concepts are named apart instead.
+   */
   total_factor_count: number;
-  /** Count of quality assessment dimensions (legacy quality_factors.length) */
+  /**
+   * Count of quality assessment dimensions (legacy `quality_factors.length`).
+   * Request-graph-scoped, being a property of the coaching assessment itself.
+   */
   user_question_count: number;
   trace?: CEETraceMeta;
 }
@@ -337,6 +386,21 @@ export default async function route(app: FastifyInstance) {
         confidence_level: coaching.confidence_level,
         confidence_explanation: coaching.confidence_explanation,
         quality_factors: coaching.quality_factors,
+        // ⚠ THIS STAMP IS A CLAIM ABOUT THE LINE ABOVE IT — `coaching` is
+        // computed from `graph`, i.e. `input.graph`. It is held true from two
+        // directions, and neither alone is sufficient:
+        //   · the TYPE. The field is declared `"request_graph"` and nothing
+        //     else, so a literal saying otherwise does not compile. Widening
+        //     the declared union is therefore the only way to move this stamp,
+        //     which makes the move a visible interface change rather than a
+        //     one-word edit.
+        //   · the discriminating pair in
+        //     `tests/integration/cee.graph-readiness.starter-roundtrip.test.ts`,
+        //     which posts a request graph that DIFFERS from the persisted one
+        //     and pins two coaching-group members (`total_factor_count`,
+        //     `evidence_quality`) to the request graph's numbers. Re-point
+        //     either at `assessedGraph` and it REDs.
+        coaching_assessed_from: "request_graph",
 
         can_run_analysis: admission.can_run_analysis,
         may_run: admission.may_run satisfies MayRun,

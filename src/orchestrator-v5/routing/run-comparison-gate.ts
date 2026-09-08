@@ -8,6 +8,10 @@
  *
  *   - freshness === 'fresh' AND >= 2 successful runs: deterministic
  *     prior/current comparison. This is the ONLY verdict that grounds one.
+ *     When the two compared runs carry EQUAL `graph_hash_at_run` values the
+ *     mode is `same_inputs` rather than `compared`: the same comparison is
+ *     given, led by a sentence saying the pair cannot show the effect of an
+ *     update — see {@link SAME_INPUTS_LEAD_TEXT}.
  *   - freshness === 'stale' (the model was edited after the latest run):
  *     lead with re-run guidance. An old comparison is NEVER presented as
  *     the current edited model.
@@ -48,6 +52,11 @@ import {
   type LeaderIdentityBasis,
   type ContentSafeRunDelta,
 } from '../coaching/compare-runs.js';
+import {
+  licenceToReportMovementDirection,
+  readRunAnalysisEnrichment,
+  type MovementDirectionLicence,
+} from '../coaching/movement-direction-licence.js';
 import { formatPercentagePoints } from '../format/format-analysis-value.js';
 // T1 claim safety (ROADMAP 1.233) — the ALARM's reader, for the module-load
 // probe on this file's withheld copy. Imported rather than re-implemented so the
@@ -66,6 +75,13 @@ export type RunComparisonMode =
   | 'stale'
   | 'unconfirmed'
   | 'compared'
+  /**
+   * A confirmed-fresh pair whose two runs carry EQUAL, non-empty
+   * `graph_hash_at_run` values: both analyses ran on the same analysis
+   * inputs. The comparison is still given (scoped to those two runs), but it
+   * is led by the attribution limit in {@link SAME_INPUTS_LEAD_TEXT}.
+   */
+  | 'same_inputs'
   | 'insufficient_runs'
   | 'incomparable';
 
@@ -181,6 +197,79 @@ const INSUFFICIENT_RUNS_TEXT =
 const INCOMPARABLE_TEXT =
   'I could not line up the last two runs cleanly enough to compare them. '
   + 'Re-running the analysis is the most reliable way to see the current result.';
+
+/**
+ * The invitation that closes a `compared` answer. Extracted from the composer
+ * so the `same_inputs` mode can REPLACE it with {@link SAME_INPUTS_OFFER_TEXT}
+ * while the `compared` bytes stay exactly as they were.
+ */
+export const COMPARED_FOLLOW_UP_TEXT =
+  'If you want to test this further, ask what would change the result.';
+
+/**
+ * ⭐ THE SAME-INPUTS LEAD (turn 7 of the 5 Sep 2026 founder journey, CEE
+ * 1af54f6c). Opens a `same_inputs` answer: both compared runs carry the same
+ * `graph_hash_at_run`, so whatever the user was asking about, THIS PAIR cannot
+ * attribute a movement, or its absence, to it.
+ *
+ * WHAT THE DEFECT WAS. The user asked "How has the update changed the
+ * analysis?" after an edit that was never applied. The two newest successful
+ * runs both predated the edit attempt, so the gate answered "X still leads. The
+ * size of its lead is essentially unchanged." — true of the two runs, silent
+ * about the fact that neither run could have seen the update.
+ *
+ * WHAT THIS SENTENCE MAY AND MAY NOT CLAIM. Equal hashes mean equal analysis
+ * inputs at both runs. They do NOT mean a requested change never reached the
+ * model: apply A→H, then run H twice, and the hashes are equal while the edit
+ * succeeded (Codex CCC-DIALOGUE-038). So this copy only LIMITS ATTRIBUTION. It
+ * never says "not applied", "not reached", or any variant — a `same_inputs`
+ * answer must be equally true after a refused edit and after a successful one.
+ * `run-comparison-same-inputs.test.ts` pins the emitted answer of every arm
+ * (permitted, withheld, and both mixed per-run verdicts), plus the lead, offer
+ * and `WITHHELD_*` constants, against that denial class, with a positive
+ * control per arm shape; a denial injected into any `WITHHELD_*` constant
+ * REDs its arm.
+ *
+ * WHY NOT THE OBVIOUS WORDING. "Nothing changed" / "no changes were applied"
+ * are banned at egress (`compose/forbidden-user-facing-phrases.ts`) because
+ * they were lies after a real edit landed; the same sentence would be true
+ * here, which is one vocabulary answering two questions (CLAUDE.md trap #21).
+ * This copy is measured against `findForbiddenPhraseHit`,
+ * `findSuccessClaimHit` and the leader alarm in the same test file, each with a
+ * positive control.
+ *
+ * "analytical inputs" is the hash's scope — the analysis-affecting fields
+ * (`context/graph-hash.ts` excludes labels, descriptions and display fields)
+ * — and no wider: after a label-only rename and a re-run the hashes are equal
+ * (`run-comparison-gate.test.ts`, the F3 rename cases), so "the same inputs"
+ * would be false to that user while "the same analytical inputs" is not.
+ *
+ * "an update", not "that update": the lead is message-independent (the same
+ * bytes on a bare "What changed between the last two runs?", which names no
+ * update — `run-comparison-same-inputs.test.ts`).
+ */
+export const SAME_INPUTS_LEAD_TEXT =
+  'These two analyses used the same analytical inputs. I can\'t use this pair '
+  + 'to show the effect of an update to the model.';
+
+/**
+ * The offer that closes a `same_inputs` answer, replacing
+ * {@link COMPARED_FOLLOW_UP_TEXT}.
+ *
+ * Written to be true in every state that reaches this mode: after a refused
+ * edit ("check that it was saved" finds it was not), after a successful edit
+ * whose pre-edit run does not exist ("check" finds it was; the second sentence
+ * says what is missing), and on an explicit two-rerun comparison (the
+ * conditional does not apply). It does not ask the user to repeat anything
+ * and does not run an analysis.
+ *
+ * ⚠ Deliberately NO re-run chip on this mode: re-running the same inputs
+ * produces the same pair again.
+ */
+export const SAME_INPUTS_OFFER_TEXT =
+  'If you were expecting an update to show here, check that it was saved to '
+  + 'the model. To show what an update changed, I need one analysis from '
+  + 'before it and one from after it.';
 
 /**
  * T1 claim safety (ROADMAP 1.233) — the sentence that replaces the
@@ -301,7 +390,7 @@ export const UNMATCHED_LEADER_IDENTITY_TEXT =
  * composed BOTH runs' leaders from it:
  *
  *     `The leading option has changed. ${prior_leading_label} came out ahead
- *      before, and ${current_leading_label} now leads.`
+ *      scored highest before, and ${current_leading_label} scores highest now.`
  *
  * The caller supplies the TURN's permission, which #730 reads off the
  * scenario's newest CLAIM-BEARING fact. That fact speaks for the current run
@@ -397,6 +486,10 @@ function assertWithheldCopyIsLeaderFree(): void {
     ['UNCONFIRMED_TEXT', UNCONFIRMED_TEXT],
     ['INSUFFICIENT_RUNS_TEXT', INSUFFICIENT_RUNS_TEXT],
     ['INCOMPARABLE_TEXT', INCOMPARABLE_TEXT],
+    // The `same_inputs` frame ships around a withheld comparison too.
+    ['COMPARED_FOLLOW_UP_TEXT', COMPARED_FOLLOW_UP_TEXT],
+    ['SAME_INPUTS_LEAD_TEXT', SAME_INPUTS_LEAD_TEXT],
+    ['SAME_INPUTS_OFFER_TEXT', SAME_INPUTS_OFFER_TEXT],
   ];
   for (const [name, copy] of probes) {
     if (textNamesLeadingOption(copy)) {
@@ -469,7 +562,22 @@ function bandPhrase(level: string): string | null {
 function composeComparison(
   delta: ContentSafeRunDelta,
   authority: RunComparisonLeaderAuthority,
+  movementLicence: MovementDirectionLicence,
 ): string {
+  return [...composeComparisonParts(delta, authority, movementLicence), COMPARED_FOLLOW_UP_TEXT].join(' ');
+}
+
+/**
+ * The comparison sentences WITHOUT the closing invitation, so the two modes
+ * that carry a comparison (`compared`, `same_inputs`) share one composer and
+ * differ only in the frame around it. All of the doc on
+ * {@link composeComparison} applies here.
+ */
+function composeComparisonParts(
+  delta: ContentSafeRunDelta,
+  authority: RunComparisonLeaderAuthority,
+  movementLicence: MovementDirectionLicence,
+): readonly string[] {
   const parts: string[] = [];
   const mayNamePrior = authority.prior;
   const mayNameCurrent = authority.current;
@@ -491,10 +599,12 @@ function composeComparison(
   const mayCompareLeaderIdentity = mayCompareLeaders && leaderIdentityKnown;
 
   if (mayCompareLeaderIdentity) {
-    // Byte-identical to the pre-fix permitted arm.
     if (delta.leading_option_changed) {
+      // compareRuns selects by win_probability: frequency of scoring highest,
+      // not probability of meeting a target. Scope both the opener and named
+      // clauses to that statistic, even when probability_of_goal is present.
       parts.push(
-        `The leading option has changed. ${delta.prior_leading_label} came out ahead before, and ${delta.current_leading_label} now leads.`,
+        `The option that scored highest most often in the model simulations has changed. ${delta.prior_leading_label} scored highest most often in the earlier run, and ${delta.current_leading_label} scored highest most often in the latest run.`,
       );
     } else {
       parts.push(`${delta.current_leading_label} still leads.`);
@@ -505,19 +615,19 @@ function composeComparison(
     // below, because the user-visible situation is the same: one run's leader
     // is nameable and no relation between the runs is. What differs is the
     // REASON, which is why the second sentence is its own constant.
-    parts.push(`${delta.current_leading_label} leads on the latest result.`);
+    parts.push(`${delta.current_leading_label} scored highest on the latest result.`);
     parts.push(UNMATCHED_LEADER_IDENTITY_TEXT);
   } else if (mayNameCurrent) {
     // MIXED — the prior run withheld. Name what this run's own verdict
     // licenses, say plainly that the other half is unavailable, and make no
     // statement that relates the two.
-    parts.push(`${delta.current_leading_label} leads on the latest result.`);
+    parts.push(`${delta.current_leading_label} scored highest on the latest result.`);
     parts.push(WITHHELD_PRIOR_LEADER_COMPARISON_TEXT);
   } else if (mayNamePrior) {
-    // MIXED, mirrored. "came out ahead in the earlier run" is scoped to that
+    // MIXED, mirrored. "scored highest in the earlier run" is scoped to that
     // run by construction — no "before", which only means anything relative to
     // a current leader we are declining to name.
-    parts.push(`${delta.prior_leading_label} came out ahead in the earlier run.`);
+    parts.push(`${delta.prior_leading_label} scored highest in the earlier run.`);
     parts.push(WITHHELD_CURRENT_LEADER_COMPARISON_TEXT);
   } else {
     parts.push(WITHHELD_LEADER_COMPARISON_TEXT);
@@ -535,16 +645,41 @@ function composeComparison(
   // cannot show that, "its lead has widened by about 20 percentage points"
   // silently attributes one option's lead to another — and the pronoun makes
   // it a continuity claim in the very branch that just declined to make one.
+  //
+  // ⭐⭐ AND A THIRD PRECONDITION, ADDED AFTER THE 2026-09-03 CAPTURE: THE
+  // MOVEMENT MUST BE DISTINGUISHABLE FROM SAMPLING NOISE.
+  //
+  // `margin_direction` is a ROUNDING verdict on the displayed integer
+  // (`MARGIN_EPSILON_PP` = 0.5) and knows nothing about how many samples
+  // produced it. On the live capture that threshold turned a 62% -> 62.6%
+  // movement at n = 10,000 into *"its lead has widened by about 1 percentage
+  // point"*, against a 2-SE band of 1.37pp. The sibling surface
+  // (`signals/coaching-signals.ts`) shipped the same sentence from the same
+  // field, so the gate is applied at BOTH — a fix on one surface only is how
+  // this file's own register-parity note says the two drift.
   if (!mayCompareLeaderIdentity) {
     // no margin sentence
-  } else if (delta.margin_direction === 'widened') {
-    parts.push(
-      `Its lead has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`,
-    );
-  } else if (delta.margin_direction === 'narrowed') {
-    parts.push(
-      `Its lead has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`,
-    );
+  } else if (
+    delta.margin_direction === 'widened'
+    || delta.margin_direction === 'narrowed'
+  ) {
+    if (movementLicence.kind === 'licensed') {
+      parts.push(
+        delta.margin_direction === 'widened'
+          ? `Its lead has widened by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`
+          : `Its lead has narrowed by about ${formatPercentagePoints(Math.abs(delta.margin_shift_pp))}.`,
+      );
+    } else if (movementLicence.kind === 'within_noise') {
+      parts.push(
+        'The size of its lead moved by less than this model varies between '
+        + 'runs, so I would not read a direction into that movement.',
+      );
+    } else {
+      parts.push(
+        'I cannot tell whether the movement in the size of its lead is real '
+        + 'or just sampling variation, so treat it as unchanged.',
+      );
+    }
   } else if (delta.margin_direction === 'unchanged') {
     parts.push('The size of its lead is essentially unchanged.');
   }
@@ -578,8 +713,7 @@ function composeComparison(
     parts[0] = WITHHELD_NOTHING_ELSE_CHANGED_TEXT;
   }
 
-  parts.push('If you want to test this further, ask what would change the result.');
-  return parts.join(' ');
+  return parts;
 }
 
 export function tryRunComparisonGate(
@@ -726,10 +860,47 @@ export function tryRunComparisonGate(
       && readMayNameLeadingOptionVerdictForFact(pair.current).may_name_leading_option,
   };
 
+  // ⭐ THE SAME TWO FACTS THE DELTA WAS PROJECTED FROM. `pair` is this gate's
+  // own selection, so the band is computed over the pair the sentence
+  // quantifies — not over a second selection that could name a different
+  // "previous run".
+  const movementLicence = licenceForPair(pair.prior, pair.current);
+
+  // ⭐ SAME ANALYSIS INPUTS AT BOTH RUNS (turn 7, 5 Sep 2026). The hashes are
+  // the freshness reader's, carried on `pair` by the selector above — not a
+  // second read. Two NON-NULL equal hashes: the null side is `compared`, as
+  // today (a legacy fact with no hash proves nothing either way), and the
+  // selector already reads an empty string as null.
+  //
+  // Placed AFTER the comparability checks on purpose: an incomparable pair is
+  // `incomparable` whatever its hashes say, exactly as before.
+  if (
+    pair.current_graph_hash_at_run !== null
+    && pair.current_graph_hash_at_run === pair.prior_graph_hash_at_run
+  ) {
+    return {
+      matched: true,
+      mode: 'same_inputs',
+      // The scoped comparison is the SAME sentences `compared` would give —
+      // per-run leader authority, identity basis and movement licence all
+      // apply unchanged — framed by the attribution limit and the offer.
+      assistant_text: [
+        SAME_INPUTS_LEAD_TEXT,
+        ...composeComparisonParts(delta, authority, movementLicence),
+        SAME_INPUTS_OFFER_TEXT,
+      ].join(' '),
+      // No chip: re-running the same inputs produces the same pair again.
+      suggested_actions: [],
+      // As for `compared` below: the factual delta, for telemetry only.
+      leading_option_changed: delta.leading_option_changed,
+      leader_identity_basis: delta.leader_identity_basis,
+    };
+  }
+
   return {
     matched: true,
     mode: 'compared',
-    assistant_text: composeComparison(delta, authority),
+    assistant_text: composeComparison(delta, authority, movementLicence),
     suggested_actions: [],
     // Deliberately NOT gated on `authority`. This field has exactly one
     // consumer — the `v5.run_comparison_gate` telemetry event in
@@ -741,4 +912,23 @@ export function tryRunComparisonGate(
     leading_option_changed: delta.leading_option_changed,
     leader_identity_basis: delta.leader_identity_basis,
   };
+}
+
+/**
+ * The movement-direction licence for a compared pair of run facts.
+ *
+ * FAILS CLOSED to `indeterminate`: a fact with no readable PLoT envelope
+ * yields no band, and an absent band must never read as a granted direction
+ * (the same construction as the REQUIRED `mayNameLeadingOption` above).
+ */
+function licenceForPair(
+  prior: HandlerFact,
+  current: HandlerFact,
+): MovementDirectionLicence {
+  const priorEnrichment = readRunAnalysisEnrichment(prior);
+  const currentEnrichment = readRunAnalysisEnrichment(current);
+  if (priorEnrichment === null || currentEnrichment === null) {
+    return { kind: 'indeterminate', reason: 'no_identity_bound_pair' };
+  }
+  return licenceToReportMovementDirection({ priorEnrichment, currentEnrichment });
 }
