@@ -641,17 +641,62 @@ export function textAssertsOnlyImplicitLeadingOptions(value: string, context: Le
  *   the product asserts a leader it may not name. A gap is recoverable, a lie
  *   is not — so an assertion counts as self-naming ONLY when a named subject
  *   is bound to it, never merely because a roster label appears somewhere.
+ *
+ * ⭐⭐ AND THE QUANTIFIER IS PART OF THE QUESTION. The first cut of this helper
+ *   asked whether SOME asserted predicate names itself. The caller asks whether
+ *   ANY assertion BORROWS its name — the negation of "every predicate names
+ *   itself", which is a different sentence. One unit can carry both kinds, and
+ *   the independent reviewer found the pair that proves it at `15984f06`:
+ *
+ *     "Hire a Hands-on Technical Lead is strong. It leads in 54% of simulations
+ *      against Two Developers, while Two Developers leads on cost."
+ *
+ *   The splitter yields two units; the SECOND holds an anaphoric predicate
+ *   ("It leads") and a self-named one ("Two Developers leads on cost"). Under
+ *   `.some` the self-named predicate vouched for the whole unit, so the
+ *   borrowed one was concealed and the same forbidden naming half survived —
+ *   the exact leak the previous cut had just closed, re-entered through the
+ *   quantifier rather than through the subject test.
+ *
+ *   So EVERY asserted predicate must name its own subject, not merely some one
+ *   of them.
+ *
+ * ⚠ AND WHY THIS IS `every(...)` RATHER THAN A CONTAINMENT TEST, which is what
+ *   the reviewer's wording suggested and what I wrote first. Containment —
+ *   "every match is covered by a NAMED match" — exists to treat overlapping
+ *   vocabulary as one predicate seen twice, the idiom
+ *   {@link textAssertsOnlyImplicitLeadingOptions} uses. Its mutant SURVIVED the
+ *   whole corpus, so rather than ship an unexercised branch I derived why:
+ *   {@link LEADER_CLAIM_PATTERNS} contains exactly ONE overlapping pair,
+ *   `which_option_leads` ⊃ `leads`, and the inner match's `before` always ends
+ *   in "which option ", which {@link PREDICATE_PRELUDE} cannot match — so the
+ *   inner match is never named, and the two forms can differ only when the
+ *   OUTER is named, i.e. when prelude-only text separates an option label from
+ *   "which". The two forms are therefore equivalent over today's vocabulary.
+ *
+ *   Given equivalence, the tie is broken by DIRECTION: if that vocabulary ever
+ *   gains an overlapping pair, `every` over-escalates (a gap) while containment
+ *   under-escalates (a leak). This helper's whole cost function says take the
+ *   gap. Implicit-designation semantics are untouched either way — they live in
+ *   `textAssertsOnlyImplicitLeadingOptions`, a separate conjunct in the caller,
+ *   which keeps its own containment test.
  */
 export function assertedLeaderNamesItsOwnSubject(
   value: string,
   context: LeaderProseContext,
 ): boolean {
   if (typeof value !== 'string' || value.length === 0) return false;
-  return assertedLeaderMatches(value, context).some(({ before }) => {
-    const subject = before.lastIndexOf(OPTION_REFERENT);
-    if (subject === -1) return false;
-    return PREDICATE_PRELUDE.test(before.slice(subject + OPTION_REFERENT.length));
-  });
+  const matches = assertedLeaderMatches(value, context);
+  return matches.length > 0 && matches.every(predicateNamesItsOwnSubject);
+}
+
+/** One predicate's own subject: the nearest option referent that reaches it
+ *  through {@link PREDICATE_PRELUDE}. A comparator sits after the predicate and
+ *  is never in `before`; an anaphor leaves `before` without a referent. */
+function predicateNamesItsOwnSubject({ before }: AssertedLeaderMatch): boolean {
+  const subject = before.lastIndexOf(OPTION_REFERENT);
+  if (subject === -1) return false;
+  return PREDICATE_PRELUDE.test(before.slice(subject + OPTION_REFERENT.length));
 }
 
 /**

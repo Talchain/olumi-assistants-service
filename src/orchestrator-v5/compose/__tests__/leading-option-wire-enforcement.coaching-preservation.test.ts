@@ -486,6 +486,74 @@ describe('controlled preservation of qualitative coaching at the real wire guard
     expect(result.response.assistant_text).toContain(BUDGET);
   });
 
+  /**
+   * ⭐⭐ ONE UNIT, TWO PREDICATES, AND THE SELF-NAMED ONE VOUCHED FOR THE OTHER.
+   *
+   * Found by the independent reviewer at `15984f06` — the head that had just
+   * closed the comparator-only leak. The subject test was right; the QUANTIFIER
+   * was not. `assertedLeaderNamesItsOwnSubject` asked whether SOME asserted
+   * predicate names itself, while the caller asks whether ANY assertion BORROWS
+   * its name. Those are different sentences, and a single unit can carry both
+   * kinds of predicate:
+   *
+   *   "…It leads in 54% of simulations against Two Developers, while Two
+   *    Developers leads on cost."
+   *
+   * `It leads` is anaphoric; `Two Developers leads on cost` names its own
+   * subject. Under `.some` the second vouched for the unit, the first was
+   * concealed, and the forbidden naming half survived again.
+   *
+   * These three cases are a SET. The first proves the concealment is closed;
+   * the second proves it was closed without re-escalating prose whose every
+   * predicate is self-named; the third proves permission identity is untouched.
+   * A repair that simply escalated any multi-predicate unit passes the first
+   * and fails the second.
+   */
+  const MIXED_BORROWED = `${LEAD} is strong. It leads in 54% of simulations against ${DEVELOPERS}, while ${DEVELOPERS} leads on cost.`;
+  const MIXED_SELF_NAMED = `${LEAD} leads in 54% of simulations against ${DEVELOPERS}, while ${DEVELOPERS} leads on cost.`;
+
+  it('one self-named predicate cannot vouch for a borrowed one in the same unit', () => {
+    const result = enforceLeadingOptionClaimsAtWire(envelope(MIXED_BORROWED), OPTS);
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain(LEAD);
+    expect(result.response.assistant_text).not.toContain('54%');
+    expect(textAssertsLeadingOption(result.response.assistant_text, CONTEXT)).toBe(false);
+  });
+
+  it('a mixed unit whose predicates ALL name their own subjects keeps its conditional neighbour', () => {
+    const field = [QUALITATIVE_LEAD, MIXED_SELF_NAMED, QUALITATIVE_DEVELOPERS].join('\n\n');
+    const result = enforceLeadingOptionClaimsAtWire(envelope(field), OPTS);
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('54%');
+    expect(result.response.assistant_text).toContain(QUALITATIVE_LEAD);
+    expect(result.response.assistant_text).toContain(QUALITATIVE_DEVELOPERS);
+  });
+
+  it('the one overlapping predicate pair keeps its implicit-designation route', () => {
+    // `which_option_leads` ⊃ `leads` is the only overlap in the shared
+    // vocabulary, and it is handled by the implicit-designation conjunct, not
+    // by the bound-subject helper. Pinned so a later change to either cannot
+    // silently move this case between the two.
+    const text = `The analysis shows which option leads. ${QUALITATIVE_LEAD}`;
+    const result = enforceLeadingOptionClaimsAtWire(envelope(text), OPTS);
+    expect(result.changed).toBe(true);
+    expect(textAssertsLeadingOption(result.response.assistant_text, CONTEXT)).toBe(false);
+    // An implicit designation is complete in its own unit, so the neighbouring
+    // conditional prose is NOT collateral.
+    expect(result.response.assistant_text).toContain(QUALITATIVE_LEAD);
+  });
+
+  it('permission identity holds for the mixed borrowed/named input', () => {
+    const input = envelope(MIXED_BORROWED);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: true,
+      analysisReady: undefined,
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+  });
+
   it('permission identity is unchanged for the borrowed-subject input', () => {
     // ⚠ `OPTS.mayNameLeadingOption` is ALREADY true here — the permit is a
     //   CONJUNCTION with admission, and this fixture's captured admission
