@@ -213,7 +213,37 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // never authorises or blocks the write. Fourth instance of the seam and
     // the last one that should land ad-hoc; migrate with the frame-consumer
     // audit, do not add more.
-    'src/orchestrator-v5/system-events/dispatch.ts': 4,
+    //
+    // ⭐⭐ 4 → 6 (schemas 0.54.0, `option_intervention_edit`). Two, not one, and
+    // the SECOND one is the finding — recorded here as the guard's own header
+    // requires, not widened to hide growth.
+    //
+    // This family cannot read a frame: `buildTurnContext` is never called for a
+    // system event (`SystemEventTurnPayload` has no `message`, and the route
+    // dispatches before the TurnExecutor), which is the same reason the four
+    // rows above exist. So the migration note stands and this is not precedent
+    // for a call site that DOES hold a frame.
+    //
+    // Why this writer needs TWO where its siblings need one:
+    //
+    //   · PRE-write — the referee consumes `freshness` as an INPUT, and the
+    //     writer refuses on `'unknown'`. It must therefore be derived before
+    //     the transaction, against the hash under edit.
+    //   · POST-commit — the finaliser needs the currency of the model the user
+    //     NOW has. An independent review found the first cut returning neither,
+    //     so the finaliser fell back to `NO_ANALYSIS_CONTEXT_DERIVATION` and
+    //     emitted unknown-degraded on a model-CHANGING route.
+    //
+    // ⚠ AND THEY CANNOT BE ONE DERIVATION REUSED. Forwarding the pre-write
+    // value as the post-edit verdict would describe the model as it was before
+    // the edit — the exact thing the review said not to do. There is no extra
+    // I/O: the same prior facts are re-projected against the committed hash.
+    //
+    // The healthy-empty/degraded distinction is preserved in BOTH: a read that
+    // succeeded and found nothing is `none`, a read that degraded is `unknown`,
+    // and collapsing them would let a transport failure read as "never
+    // analysed".
+    'src/orchestrator-v5/system-events/dispatch.ts': 6,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`

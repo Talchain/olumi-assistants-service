@@ -47,6 +47,21 @@ const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const HASH = '9f2c1b0ae4d37c5a';
 
+/** A minimal graph that genuinely parses as GraphV3 — the presentation view. */
+const COMMITTED_GRAPH = {
+  nodes: [
+    { id: 'goal', kind: 'goal', label: 'Service quality' },
+    { id: 'option_open_leeds', kind: 'option', label: 'Open Leeds', interventions: { factor_capex: 0.6 } },
+    { id: 'factor_capex', kind: 'factor', label: 'Capital expenditure' },
+  ],
+  edges: [
+    {
+      from: 'factor_capex', to: 'goal',
+      strength: { mean: 0.5, std: 0.1 }, exists_probability: 1, effect_direction: 'positive',
+    },
+  ],
+};
+
 function payload(): SystemEventTurnPayload {
   return {
     turn_id: TURN_ID,
@@ -149,20 +164,48 @@ describe('C — freshness is server-derived and FAILS CLOSED', () => {
 
 describe('D — the four outcomes, reported honestly', () => {
   it('committed: reports the commit, stamps the persisted hash, hands over the applied graph', async () => {
-    const graph = { nodes: [], edges: [] };
     mocks.executeOptionInterventionEdit.mockResolvedValue({
       kind: 'committed',
       response: { response_version: 2, assistant_text: 'ok', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse' },
-      graph,
+      graph: COMMITTED_GRAPH,
       analysisGraphHash: 'committed-hash',
       persistedRowId: 'row-1',
     });
     const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-7' });
     expect(result.commitPerformed).toBe(true);
-    expect(result.graph).toBe(graph);
+    expect(result.graph).toEqual(COMMITTED_GRAPH);
     // The hash is the COMMITTED one, not the client's asserted base.
     expect((result.response as { graph_hash?: string }).graph_hash).toBe('committed-hash');
     expect((result.response as { graph_hash?: string }).graph_hash).not.toBe(HASH);
+    // Readiness comes from the committed bytes — its absence is what made the
+    // finaliser fall back to unknown-degraded on a model-changing route.
+    expect(result.analysisReady).toBeDefined();
+    // Freshness is re-derived POST-commit. This fixture's history read is
+    // healthy and empty, which is a real verdict — `none`, never `unknown`.
+    expect(result.freshness?.freshness).toBe('none');
+  });
+
+  /**
+   * ⚠ THE PARSE IS FOR PRESENTATION, AND ITS FAILURE MUST NOT DEGRADE THE
+   * RECEIPT. `graph` feeds the egress sanitiser's id→label scrub; the hash is
+   * the writer's, computed over the raw persisted bytes. A postimage this
+   * process cannot parse means a graph-free scrub — never a lost commit, and
+   * never a hash the client cannot trust.
+   */
+  it('committed with an unparseable postimage: no graph for the scrub, receipt intact', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue({
+      kind: 'committed',
+      response: { response_version: 2, assistant_text: 'ok', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse' },
+      graph: { nodes: 'not-a-graph' },
+      analysisGraphHash: 'committed-hash',
+      persistedRowId: 'row-2',
+    });
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-7b' });
+    expect(result.commitPerformed).toBe(true);
+    expect(result.graph).toBeNull();
+    expect((result.response as { graph_hash?: string }).graph_hash).toBe('committed-hash');
+    // No readiness is INVENTED from a graph that could not be read.
+    expect(result.analysisReady).toBeUndefined();
   });
 
   it.each([
