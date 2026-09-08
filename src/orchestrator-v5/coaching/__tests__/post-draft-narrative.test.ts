@@ -69,15 +69,36 @@ function makeGraph(nodes: GraphV3T['nodes'], edges: unknown[] = []): GraphV3T {
 }
 
 /** An edge from a factor to the goal, pushing it one way. */
-function edgeToGoal(from: string, effect: 'positive' | 'negative') {
+function edgeToGoal(from: string, effect: 'positive' | 'negative', existsProbability = 0.9) {
+  return anEdge(from, 'g1', effect, existsProbability);
+}
+
+/** Any edge, so an INDIRECT path can be built. */
+function anEdge(
+  from: string,
+  to: string,
+  effect: 'positive' | 'negative',
+  existsProbability = 0.9,
+) {
   return {
     from,
-    to: 'g1',
+    to,
     strength: { mean: effect === 'positive' ? 0.5 : -0.5, std: 0.1 },
-    exists_probability: 0.9,
+    exists_probability: existsProbability,
     effect_direction: effect,
   };
 }
+
+/**
+ * An intermediate node, so a factor can reach the goal by more than one route.
+ *
+ * ⚠ `outcome`, NOT `factor`, and that is load-bearing for these cases. My first
+ *   fixture made it a factor, which gave it a direct goal edge of its own — so
+ *   it became a legitimate trade-off candidate and the "indirect-only" case
+ *   failed for the right reason. The composer collects `option`, `factor` and
+ *   `risk`; an `outcome` can carry a path without competing to be named.
+ */
+const VIA_NODE = { id: 'v1', kind: 'outcome' as const, label: 'Delivery throughput' };
 
 /**
  * Helper: most tests only care about the rendered `text` field of the
@@ -2975,5 +2996,82 @@ describe('every draft says the model is one of several the system could build', 
     });
     expect(text).toContain(NOTE);
     expect(wordCount(text)).toBeLessThanOrEqual(140);
+  });
+});
+
+
+/**
+ * ⭐⭐ WHAT A DIRECT EDGE MAY AND MAY NOT ESTABLISH.
+ *
+ * The first version of the opposition check read ONLY the direct factor→goal
+ * edge. That was my own defect repeated one level in: I had replaced "two
+ * labels exist" with "one direct edge exists" and again claimed more than the
+ * model supports. Two independently reproduced counterexamples:
+ *
+ *   · a factor whose direct edge is +0.2 but whose fuller path runs
+ *     +1 → −1 is not proven positive, so the pair is unearned;
+ *   · a direct edge with `exists_probability: 0` establishes nothing at all.
+ *
+ * ⚠ THESE CASES EXIST BECAUSE MY OWN SUITE COULD NOT SEE EITHER DEFECT. Both
+ *   mutations — deleting the existence check, deleting the indirect veto —
+ *   SURVIVED 183/183 until these were added. A corpus that shares the code's
+ *   blind spot cannot see the code's defect, and the fix would have been
+ *   unguarded in this repo while passing everything in it.
+ */
+describe('a direct edge establishes a sign; an indirect path may only veto it', () => {
+  const NODES = [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, VIA_NODE];
+
+  it('POSITIVE CONTROL — genuine direct opposition still claims the trade-off', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative')]),
+    });
+    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+  });
+
+  it('a MIXED-PATH factor is not proven by its direct edge alone', () => {
+    // f1 direct +, but f1 → v1 (+) → goal (−) contradicts it.
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        edgeToGoal('f1', 'positive'),
+        anEdge('f1', 'v1', 'positive'),
+        anEdge('v1', 'g1', 'negative'),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).not.toContain('balanced against');
+    expect(text).toContain('Leadership quality');
+  });
+
+  it('a ZERO-EXISTENCE direct edge establishes nothing', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        edgeToGoal('f1', 'positive', 0),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).not.toContain('balanced against');
+  });
+
+  it('an INDIRECT-ONLY factor stays unknown rather than being given a global sign', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        anEdge('f1', 'v1', 'positive'),
+        anEdge('v1', 'g1', 'positive'),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).not.toContain('balanced against');
+  });
+
+  it('an indirect path that AGREES with the direct edge does not veto it', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        edgeToGoal('f1', 'positive'),
+        anEdge('f1', 'v1', 'positive'),
+        anEdge('v1', 'g1', 'positive'),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
   });
 });

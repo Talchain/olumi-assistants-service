@@ -340,6 +340,12 @@ interface EdgeLite {
   readonly to?: string;
   readonly effect_direction?: 'positive' | 'negative';
   readonly strength?: { readonly mean?: number };
+  /**
+   * ⚠ READ, NOT IGNORED. An edge the model says does not exist establishes no
+   *   effect however large its mean — omitting this field let a zero-existence
+   *   edge license a trade-off claim.
+   */
+  readonly exists_probability?: number;
 }
 
 interface NodeLite {
@@ -1195,13 +1201,83 @@ function buildOptionsBlock(
 }
 
 /**
- * ⭐ WHICH WAY DOES THIS FACTOR PUSH THE GOAL? `null` when the model does not say.
+ * The sign this edge carries, or `null` when it carries none.
+ *
+ * ⚠ `exists_probability: 0` YIELDS NULL. An edge the model says does not exist
+ *   cannot establish an effect, however large its mean. Reading the sign alone
+ *   let a zero-existence edge license a trade-off claim.
  *
  * `effect_direction` is the producer's own field and is authoritative. The sign
  * of `strength.mean` is a fallback only, and a mean of exactly 0 yields `null`
  * rather than a guess — at zero the sign cannot recover direction, and
- * `-0 > 0` is `false` while `-0 >= 0` is `true`, so an unguarded sign test
- * silently calls every zero positive.
+ * `-0 >= 0` is `true`, so an unguarded test calls every zero positive.
+ */
+function edgeSign(e: EdgeLite): 1 | -1 | null {
+  if (e?.exists_probability === 0) return null;
+  if (e?.effect_direction === 'positive') return 1;
+  if (e?.effect_direction === 'negative') return -1;
+  const mean = e?.strength?.mean;
+  if (typeof mean === 'number' && mean !== 0) return mean > 0 ? 1 : -1;
+  return null;
+}
+
+/** Bounded so a cyclic or densely connected graph cannot make this walk the cost. */
+const MAX_PATH_DEPTH = 4;
+
+/**
+ * Signs of every INDIRECT path from `fromId` to the goal, composed multiplicatively.
+ * Direct edges are excluded — they are the establishing evidence, handled by the
+ * caller; these paths exist only to contradict it.
+ */
+function indirectPathSigns(
+  fromId: string,
+  goalId: string,
+  edges: readonly EdgeLite[],
+  depth = 0,
+  seen: ReadonlySet<string> = new Set(),
+): ReadonlySet<number> {
+  if (depth >= MAX_PATH_DEPTH) return new Set();
+  const out = new Set<number>();
+  for (const e of edges) {
+    if (e?.from !== fromId || typeof e.to !== 'string' || seen.has(e.to)) continue;
+    const sign = edgeSign(e);
+    if (sign === null) continue;
+    if (e.to === goalId) {
+      if (depth > 0) out.add(sign);
+      continue;
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(fromId);
+    for (const rest of indirectPathSigns(e.to, goalId, edges, depth + 1, nextSeen)) {
+      out.add(sign * rest);
+    }
+    // A one-hop continuation that lands on the goal is indirect from the origin.
+    for (const e2 of edges) {
+      if (e2?.from !== e.to || e2.to !== goalId) continue;
+      const s2 = edgeSign(e2);
+      if (s2 !== null) out.add(sign * s2);
+    }
+  }
+  return out;
+}
+
+/**
+ * ⭐ WHICH WAY DOES THIS FACTOR PUSH THE GOAL? `null` unless the model settles it.
+ *
+ * ⚠ A DIRECT EDGE ESTABLISHES; AN INDIRECT PATH MAY ONLY VETO. Two independently
+ *   reproduced counterexamples forced this shape, and both were my own defect
+ *   repeated one level in — I had replaced "two labels exist" with "one direct
+ *   edge exists" and again claimed more than the model supports:
+ *
+ *     · A→goal +0.2 was promoted to a global positive sign while
+ *       A→outcome +1 → goal −1 makes A's fuller path negative. A mixed model
+ *       does not establish unqualified opposition, so "A balanced against B"
+ *       remained unearned.
+ *     · A→goal +0.2 with `exists_probability: 0` still licensed the pair.
+ *
+ *   Indirect paths are deliberately NOT allowed to establish a sign on their
+ *   own either: an indirect-only factor stays unknown rather than having a
+ *   global sign invented for it from a chain the person never sees summarised.
  */
 function factorDirectionOnGoal(
   factorId: string,
@@ -1209,16 +1285,19 @@ function factorDirectionOnGoal(
   edges: readonly EdgeLite[],
 ): 'positive' | 'negative' | null {
   if (goalId === null) return null;
+  let direct: 1 | -1 | null = null;
   for (const e of edges) {
     if (e?.from !== factorId || e?.to !== goalId) continue;
-    if (e.effect_direction === 'positive' || e.effect_direction === 'negative') {
-      return e.effect_direction;
-    }
-    const mean = e.strength?.mean;
-    if (typeof mean === 'number' && mean !== 0) return mean > 0 ? 'positive' : 'negative';
-    return null;
+    const sign = edgeSign(e);
+    if (sign === null) return null;
+    if (direct !== null && direct !== sign) return null;
+    direct = sign;
   }
-  return null;
+  if (direct === null) return null;
+  for (const indirect of indirectPathSigns(factorId, goalId, edges)) {
+    if (indirect !== direct) return null;
+  }
+  return direct > 0 ? 'positive' : 'negative';
 }
 
 /**
