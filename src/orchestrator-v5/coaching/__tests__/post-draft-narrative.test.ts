@@ -3075,3 +3075,75 @@ describe('a direct edge establishes a sign; an indirect path may only veto it', 
     expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
   });
 });
+
+
+/**
+ * ⭐⭐ A TRUNCATED WALK IS NOT A NEGATIVE RESULT.
+ *
+ * The depth bound existed to stop a cyclic or dense graph making the walk the
+ * cost. But hitting it returned an empty set of contradicting paths, and the
+ * caller read that as "no contradiction exists" when it meant "none was LOOKED
+ * FOR beyond here". Reproduced by review: a chain positive at every hop except
+ * a final negative one, lying past the lookahead, left a direct +0.2 standing
+ * as an unqualified sign — so the product claimed a trade-off the fuller model
+ * refutes.
+ *
+ * ⚠ THIS CASE EXISTS BECAUSE MY OWN SUITE COULD NOT SEE IT. Deleting the
+ *   truncation guard SURVIVED 188/188. It is the third time today a reviewer's
+ *   corpus caught what mine could not, and it is the same class as the two
+ *   before it: an incomplete search reported as an absence.
+ */
+describe('a truncated path search withholds rather than confirming', () => {
+  /** A chain far longer than the traversal bound, contradicting at the far end. */
+  function longChain(finalEffect: 'positive' | 'negative') {
+    const hops: ReturnType<typeof anEdge>[] = [];
+    const ids = Array.from({ length: 12 }, (_, i) => `chain${i}`);
+    hops.push(anEdge('f1', ids[0], 'positive'));
+    for (let i = 0; i < ids.length - 1; i += 1) {
+      hops.push(anEdge(ids[i], ids[i + 1], 'positive'));
+    }
+    hops.push(anEdge(ids[ids.length - 1], 'g1', finalEffect));
+    return { hops, nodes: ids.map((id) => ({ id, kind: 'outcome' as const, label: id })) };
+  }
+
+  it('withholds when a contradiction could lie beyond the depth bound', () => {
+    const { hops, nodes: chainNodes } = longChain('negative');
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, ...chainNodes],
+        [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative'), ...hops],
+      ),
+    });
+    expect(text).not.toContain('balanced against');
+    // Not silence: the names still reach the person.
+    expect(text).toContain('Leadership quality');
+  });
+
+  it('withholds even when the far end AGREES — unexamined is unknown either way', () => {
+    // The guard must not peek at the answer it cannot afford to compute. An
+    // agreeing far end is still unexamined, so the claim stays unearned.
+    const { hops, nodes: chainNodes } = longChain('positive');
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, ...chainNodes],
+        [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative'), ...hops],
+      ),
+    });
+    expect(text).not.toContain('balanced against');
+  });
+
+  it('CONTRAST — a short agreeing path is fully examined and keeps the claim', () => {
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, VIA_NODE],
+        [
+          edgeToGoal('f1', 'positive'),
+          anEdge('f1', 'v1', 'positive'),
+          anEdge('v1', 'g1', 'positive'),
+          edgeToGoal('f2', 'negative'),
+        ],
+      ),
+    });
+    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+  });
+});

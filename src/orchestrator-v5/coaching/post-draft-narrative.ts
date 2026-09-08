@@ -1221,44 +1221,69 @@ function edgeSign(e: EdgeLite): 1 | -1 | null {
   return null;
 }
 
-/** Bounded so a cyclic or densely connected graph cannot make this walk the cost. */
-const MAX_PATH_DEPTH = 4;
+/**
+ * Depth bound, so a cyclic or densely connected graph cannot make this walk the
+ * cost. Chosen to traverse the indirect chains real drafted models contain; a
+ * path longer than this is not silently ignored — see `truncated` below.
+ */
+const MAX_PATH_DEPTH = 8;
+
+interface PathScan {
+  /** Composed signs of every INDIRECT path fully traversed to the goal. */
+  readonly signs: ReadonlySet<number>;
+  /**
+   * ⚠ TRUE WHEN THE WALK STOPPED SHORT — and this field is the whole point.
+   *
+   * A previous cut returned an empty set at the depth cap, and the caller read
+   * that as "no contradictory path exists". It meant "no contradictory path was
+   * LOOKED FOR beyond here". Reproduced: a six-edge chain positive at every hop
+   * except a final negative one lies past a four-deep lookahead, so the direct
+   * +0.2 survived as an unqualified sign and the product claimed a trade-off
+   * the fuller model refutes. An incomplete check is not a negative result.
+   */
+  readonly truncated: boolean;
+}
 
 /**
- * Signs of every INDIRECT path from `fromId` to the goal, composed multiplicatively.
- * Direct edges are excluded — they are the establishing evidence, handled by the
- * caller; these paths exist only to contradict it.
+ * Composed signs of every indirect path from `fromId` to the goal.
+ *
+ * Direct edges are excluded — they are the establishing evidence, handled by
+ * the caller; these paths exist only to contradict it.
  */
-function indirectPathSigns(
+function scanIndirectPaths(
   fromId: string,
   goalId: string,
   edges: readonly EdgeLite[],
   depth = 0,
   seen: ReadonlySet<string> = new Set(),
-): ReadonlySet<number> {
-  if (depth >= MAX_PATH_DEPTH) return new Set();
-  const out = new Set<number>();
+  carried: 1 | -1 | null = null,
+): PathScan {
+  const signs = new Set<number>();
+  let truncated = false;
   for (const e of edges) {
-    if (e?.from !== fromId || typeof e.to !== 'string' || seen.has(e.to)) continue;
+    if (e?.from !== fromId || typeof e.to !== 'string') continue;
+    if (seen.has(e.to)) continue;
     const sign = edgeSign(e);
     if (sign === null) continue;
+    const composed = carried === null ? sign : ((carried * sign) as 1 | -1);
     if (e.to === goalId) {
-      if (depth > 0) out.add(sign);
+      // A single hop straight to the goal is the DIRECT edge, not an indirect
+      // path; it only counts once something has been carried into it.
+      if (carried !== null) signs.add(composed);
+      continue;
+    }
+    if (depth + 1 >= MAX_PATH_DEPTH) {
+      // There is more graph beyond here that this walk will not look at.
+      truncated = true;
       continue;
     }
     const nextSeen = new Set(seen);
     nextSeen.add(fromId);
-    for (const rest of indirectPathSigns(e.to, goalId, edges, depth + 1, nextSeen)) {
-      out.add(sign * rest);
-    }
-    // A one-hop continuation that lands on the goal is indirect from the origin.
-    for (const e2 of edges) {
-      if (e2?.from !== e.to || e2.to !== goalId) continue;
-      const s2 = edgeSign(e2);
-      if (s2 !== null) out.add(sign * s2);
-    }
+    const deeper = scanIndirectPaths(e.to, goalId, edges, depth + 1, nextSeen, composed);
+    for (const d of deeper.signs) signs.add(d);
+    if (deeper.truncated) truncated = true;
   }
-  return out;
+  return { signs, truncated };
 }
 
 /**
@@ -1294,7 +1319,12 @@ function factorDirectionOnGoal(
     direct = sign;
   }
   if (direct === null) return null;
-  for (const indirect of indirectPathSigns(factorId, goalId, edges)) {
+  const scan = scanIndirectPaths(factorId, goalId, edges);
+  // ⚠ A TRUNCATED WALK CANNOT REPORT "NO CONTRADICTION". Unknown is not
+  //   permission: if the search stopped short, the direct sign is not an
+  //   unqualified claim and no trade-off is asserted.
+  if (scan.truncated) return null;
+  for (const indirect of scan.signs) {
     if (indirect !== direct) return null;
   }
   return direct > 0 ? 'positive' : 'negative';
