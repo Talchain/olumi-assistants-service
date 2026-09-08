@@ -7,6 +7,7 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
+import { PROVISIONAL_FIGURES_INSTRUCTION } from '../routing/route-with-tool-use.js';
 import nativeResearch from './fixtures/contextual-research-native-2026-09-08.json';
 vi.mock('../coaching/draft-coaching-log.js', async () => {
   const actual = await vi.importActual<
@@ -554,5 +555,125 @@ describe('conversation advice reaches contextual reasoning', () => {
     expect(graph.nodes.find(node => node.id === 'fac_data_team_capacity')).toEqual(expect.objectContaining({
       observed_state: expect.objectContaining({ value: 0.7 }),
     }));
+  });
+
+  /**
+   * ⭐⭐ THE RECEIVING COUNTERPARTS, ON THE REAL PATH AND THE REAL ADMISSION.
+   *
+   * The independent review of #1401 asked for these three and was right that
+   * nothing weaker settles it: a control that re-states the producer's own
+   * expression cannot see the gate change or the wrong fact collection, and a
+   * control that INJECTS the desired admission proves only that the injection
+   * worked.
+   *
+   * So: `useCapturedResearchScenario()` supplies the actual 19-node/39-edge
+   * persisted graph, the 491-character brief and the captured run fact from
+   * `fixtures/contextual-research-native-2026-09-08.json`. NOTHING here injects
+   * `analysis_ready`, mocks the mode reader, or passes a
+   * `modelFacingClaimSafety` — the real executor derives readiness from that
+   * persisted graph, and the first assertion reads the ACTUAL derived mode back
+   * off the result.
+   *
+   * ⚠ IF DERIVATION HAS MOVED SINCE THE CAPTURE, THAT ASSERTION FAILS LOUDLY AND
+   *   REPORTS THE ACTUAL VALUE. It is deliberately not softened to a range or a
+   *   truthy check: a fake green here would certify the whole population on an
+   *   admission the product no longer produces.
+   *
+   * The three cases vary ONLY the selected fact's separation signal, which is
+   * what the corrected receiving decision reads.
+   */
+  const CAPTURED_MODE = 'quantified_provisional';
+
+  /** The captured fact, with only `near_tie` varied — or robustness removed. */
+  function researchFact(separation: 'separated' | 'near_tie' | 'unavailable'): Record<string, unknown> {
+    const enrichment = JSON.parse(
+      JSON.stringify(nativeResearch.analysis_result.enrichment),
+    ) as Record<string, unknown>;
+    if (separation === 'unavailable') delete enrichment['robustness'];
+    else {
+      const robustness = enrichment['robustness'] as { near_tie: { is_tie: boolean } };
+      robustness.near_tie.is_tie = separation === 'near_tie';
+    }
+    return {
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        ...nativeResearch.analysis_result,
+        enrichment,
+        scenario_id: nativeResearch.source.scenario_id,
+        graph_hash_at_run: nativeResearch.analysis_result.computed_against_hash,
+        computed_at: nativeResearch.analysis_state.run_state.computed_at,
+      },
+    };
+  }
+
+  async function receiveWith(
+    separation: 'separated' | 'near_tie' | 'unavailable',
+    options: { readonly emptyHotWindow?: boolean } = {},
+  ): Promise<{ prompt: string; mode: unknown }> {
+    const state = useCapturedResearchScenario();
+    const fact = researchFact(separation);
+    // The DURABLE selected fact is the one the prompt's analysis comes from.
+    mockState.newestAnalysisFact = fact;
+    mockState.scenarioAnalysisFactsOverride = [fact];
+    // The bounded hot window is a DIFFERENT collection; emptying it is the
+    // eviction case the corrected read has to survive.
+    mockState.priorFacts = options.emptyHotWindow === true ? [] : [fact];
+    const adapter = recordingRoutingAdapter('Discussion from the receiving adapter.');
+    const result = await runTurnExecutor(
+      { ...mkPayload(nativeResearch.message), scenario_id: nativeResearch.source.scenario_id },
+      `captured-research-receiving-${separation}${options.emptyHotWindow === true ? '-evicted' : ''}`,
+      { routingAdapter: adapter, ...state },
+    );
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expectNoCanonicalAuthorityWrite();
+    return {
+      prompt: capturedRoutingPrompt(adapter),
+      mode: result.analysisReady?.analysis_admission?.permitted_analysis_mode,
+    };
+  }
+
+  it('(receiving 1) separated + the ACTUAL captured provisional admission is qualified, figures kept', async () => {
+    const { prompt, mode } = await receiveWith('separated');
+    // Read back, never injected. Loud on disagreement, with the actual value.
+    expect(
+      mode,
+      `the executor derived a different admission from the captured persisted graph than the ` +
+        `historical capture; actual=${JSON.stringify(mode)}. Report this rather than relaxing it.`,
+    ).toBe(CAPTURED_MODE);
+    // Caveat, not withhold: the comparative material survives for the coach…
+    expect(prompt).toContain('"leading_option"');
+    // …and the qualification travels with it, from the one condition that
+    // emits both.
+    expect(prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    // The qualitative context this whole capability is about is still there.
+    expect(prompt).toContain('two-person data team');
+    expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
+  });
+
+  it.each([
+    ['near_tie' as const, 'a near tie'],
+    ['unavailable' as const, 'no computed separation'],
+  ])('(receiving 2) %s: no ordering and no false qualifier reach the coach', async separation => {
+    const { prompt, mode } = await receiveWith(separation);
+    expect(mode).toBe(CAPTURED_MODE);
+    // #1254's population: the ordering is removed, not merely unmentioned.
+    expect(prompt).not.toContain('"leading_option"');
+    // And the model is NOT told the options are separable.
+    expect(prompt).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    // Ordinary discussion is untouched — this is not a blanket suppression.
+    expect(prompt).toContain('two-person data team');
+    expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
+  });
+
+  it('(receiving 3) an EMPTY hot window with the same durable fact keeps the same interpretation', async () => {
+    // The collection defect: separation used to be read from the bounded hot
+    // window while the prompt's analysis comes from the durable selected fact.
+    // After eviction the two disagreed. Same fact, no hot window, same answer.
+    const evicted = await receiveWith('separated', { emptyHotWindow: true });
+    expect(evicted.mode).toBe(CAPTURED_MODE);
+    expect(evicted.prompt).toContain('"leading_option"');
+    expect(evicted.prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
   });
 });
