@@ -2767,16 +2767,45 @@ export async function runTurnExecutor(
       // ⚠ ABSENCE IS NOT PERMISSION. Unknown separation (`null` signals) is NOT
       //   separated: it falls through to today's behaviour rather than
       //   asserting separability the model never established.
+      //
+      // ⛔ AND THE COLLECTION MATTERED TOO. My first read used
+      //    `context.prior_facts` — a BOUNDED HOT WINDOW — while the analysis the
+      //    model is actually shown comes from `promptAnalysisSourceFact`,
+      //    selected out of the durable `scenarioAnalysisFacts` above. After a
+      //    hot-window eviction those disagree: the model still receives the
+      //    durable result while this interpretation would read no analysis at
+      //    all and fall through. Bind to the SAME selected fact the prompt uses,
+      //    through the SAME reader — one selection, not two populations.
+      const admissionPermitsLeaderNaming =
+        analysisReadyPermitsLeaderNaming(analysisReadyForTurn);
       const separationEstablishedForRun = separationEstablishedFromRobustness(
-        pickLatestRawRobustness(context.prior_facts),
+        pickLatestRawRobustness(
+          promptAnalysisSourceFact === null ? [] : [promptAnalysisSourceFact],
+        ),
       );
       const provisionalAdmissionModeForRun: PermittedAnalysisMode | null =
-        !analysisReadyPermitsLeaderNaming(analysisReadyForTurn) &&
+        !admissionPermitsLeaderNaming &&
         separationEstablishedForRun &&
         permittedAnalysisModeFromAnalysisReady(analysisReadyForTurn) ===
           'quantified_provisional'
           ? 'quantified_provisional'
           : null;
+      // ⛔ THE FALL-THROUGH WAS THE OTHER HALF OF THE SAME DEFECT. Not
+      //    qualifying is not the same as being permitted: an admission that
+      //    actively caps below `comparative_leader` on a run this population
+      //    test rejects (near tie, unknown separation, a lower mode) was still
+      //    reaching `{ status: 'permitted' }`, and the assembler only removes
+      //    leader-bearing display fields for `withheld`
+      //    (`context-pack-assembler.ts:1873-1900`). So the coach kept an
+      //    ordering the FINAL arm withholds — the same two-surface disagreement
+      //    this work exists to remove, moved one population over.
+      //
+      // ⚠ FAIL-OPEN IS PRESERVED EXACTLY. `analysisReadyPermitsLeaderNaming`
+      //   returns `true` for an absent or unparseable admission, so this is
+      //   `false` there and every pre-`analysis_admission` producer keeps its
+      //   behaviour. It fires only on an admission that actively caps.
+      const admissionWithholdsLeaderNaming =
+        !admissionPermitsLeaderNaming && provisionalAdmissionModeForRun === null;
       // Context v2 S4-INJECT (ROADMAP 1.73; 01 §2/§4, 05 §S4 inject row):
       // read the stored rolling summary for injection — UNCONDITIONAL since
       // the O-2 activation (CEE_ROLLING_SUMMARY deleted per the
@@ -3020,15 +3049,26 @@ export async function runTurnExecutor(
         // its comparative material and gains the qualification — it is not
         // pushed into `withheld`, which would apply #1254's rule to Paul's
         // population and delete the material the person asked about.
-        modelFacingClaimSafety: mayNameLeadingOptionForRun
-          ? provisionalAdmissionModeForRun !== null
-            ? { status: 'qualified', mode: provisionalAdmissionModeForRun }
-            : { status: 'permitted' }
-          : {
+        modelFacingClaimSafety: !mayNameLeadingOptionForRun
+          ? {
               status: 'withheld',
               constraintVerdictState: constraintVerdictStateForRun,
               provenance: mayNameLeadingOptionVerdictForRun.provenance,
-            },
+            }
+          : provisionalAdmissionModeForRun !== null
+            ? { status: 'qualified', mode: provisionalAdmissionModeForRun }
+            : admissionWithholdsLeaderNaming
+              ? {
+                  // The turn IS entitled; the ADMISSION is what withholds. The
+                  // run's real verdict state is passed unchanged, so
+                  // `withheldLeaderInputNoteForState` selects the NO-CAUSE note
+                  // rather than asserting a constraint failure that did not
+                  // happen — one withheld shape, no invented cause.
+                  status: 'withheld',
+                  constraintVerdictState: constraintVerdictStateForRun,
+                  provenance: mayNameLeadingOptionVerdictForRun.provenance,
+                }
+              : { status: 'permitted' },
         // Spine A backstop: option-controlled levers must not be surfaced as
         // tunable sensitivity drivers. Computed from the RAW, unparsed graph —
         // NOT the compacted projection (strips intervention bundles) and NOT a

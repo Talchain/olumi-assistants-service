@@ -850,10 +850,28 @@ function projectField(
  *   a simulation share is how often an option scored highest against the goal,
  *   never the probability the goal is achieved and never evidence confidence.
  */
+/**
+ * ⛔ THE FIRST WORDING FAILED HOSTED INTEGRATION `102261951683` AT 22:32:56Z, at
+ *    the probe below, and the failure was correct. It read "…an option **scored
+ *    highest** against your goal…", and `LEADER_CLAIM_PATTERNS` carries
+ *    `scored_highest: /\bscor(?:e|es|ed|ing)\s+highest\b/i` — added by #1389's
+ *    vocabulary change. Importing `route-v2.ts` therefore threw at module load.
+ *
+ *    I HAD CHECKED THAT LIST AND MY CHECK WAS SHORT: a `grep` capped with `head`
+ *    showed only the array's first arm, and I treated a truncated enumeration as
+ *    licence to claim the constant was inert. An absence claim from a partial
+ *    read is not an absence claim (CLAUDE.md trap 13e). The probe is the only
+ *    reason this surfaced instead of shipping, so the probe stays and the
+ *    CONSTANT changes — no reader is weakened and no check is deleted.
+ *
+ * The meaning is unchanged: provisional, machine-authored, and a simulation
+ * share is not the chance the goal is achieved. It is now said with none of the
+ * claim vocabulary, and with goal-fit rather than contest framing.
+ */
 export const PROVISIONAL_FIGURES_CAVEAT =
-  'These figures are provisional: every estimate behind them is machine-authored and unconfirmed, ' +
-  'and a simulation share is how often an option scored highest against your goal, not the chance ' +
-  'the goal is achieved.';
+  'These figures are provisional: every estimate behind them is machine-authored and unconfirmed. ' +
+  'Treat each percentage as how often that option fitted your goal better than the alternatives ' +
+  'across the simulated runs, not as the chance the goal is achieved.';
 
 /** Append the caveat once. Identity on the constant, never a language test. */
 function withProvisionalCaveat(text: string): string {

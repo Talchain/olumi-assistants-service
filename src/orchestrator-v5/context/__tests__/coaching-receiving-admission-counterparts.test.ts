@@ -27,6 +27,7 @@ import { describe, expect, it } from 'vitest';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
 import { assembleContextPack } from '../context-pack-assembler.js';
+import { withheldLeaderInputNoteForState } from '../withheld-leader-projection.js';
 import { analysisSummaryFixture } from './context-budget-fixtures.js';
 import { underBudgetCompactGraph } from './context-budget-fixtures.js';
 import {
@@ -122,6 +123,53 @@ describe('receiving counterparts for the coaching claim authorities', () => {
     const message = buildUserMessage(pack, BASE_PAYLOAD.message);
     expect(message).toContain(ANALYSIS_CONTEXT_INSTRUCTION);
     expect(message).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+  });
+
+  /**
+   * ⭐⭐ THE FALL-THROUGH THE REVIEWER NAMED, pinned at the receiving OUTPUT.
+   *
+   * ⛔ Under `bd1002d2` the producer's ternary mapped entitled + not-qualified to
+   *    `{ status: 'permitted' }`, and the assembler only strips leader-bearing
+   *    display fields for `withheld` (below). So a near-tie or unknown-separation
+   *    run whose admission actively caps BELOW `comparative_leader` still handed
+   *    the coach an ordering, while the final wire arm withheld that same
+   *    population — the two-surface disagreement moved one population over.
+   *
+   * The derivation control that used to sit beside this file could not see it:
+   * it re-stated the producer's own expression, so it could not detect the
+   * ternary changing OR the wrong fact collection being read. It is deleted
+   * rather than defended. THIS case binds the receiving OUTPUT instead — what
+   * the coach actually gets for each of the three states.
+   */
+  it('(3b) an admission-driven withhold removes ordering exactly as a constraint withhold does', () => {
+    const admissionWithheld = assembleContextPack({
+      ...COMMON,
+      modelFacingClaimSafety: {
+        status: 'withheld',
+        constraintVerdictState: 'evaluated_feasible',
+        provenance: 'scenario_fact',
+      },
+    });
+    const fields = leaderFields(admissionWithheld);
+    expect(fields.leading).toBeUndefined();
+    expect(fields.runnerUp).toBeUndefined();
+    expect(fields.margin).toBeUndefined();
+    // ⚠ AND THE NOTE MUST NOT INVENT A CAUSE. The turn IS entitled here — only
+    //   the admission withholds — so the projection selects the NO-CAUSE note
+    //   rather than asserting a constraint failure that did not happen. Bound to
+    //   the shared constant by identity, not to wording.
+    expect(admissionWithheld.display_analysis).not.toBeNull();
+    expect(
+      (admissionWithheld.display_analysis as { leading_option_note?: unknown } | null)
+        ?.leading_option_note,
+    ).toBe(withheldLeaderInputNoteForState('evaluated_feasible'));
+    // Positive control: the same pack PERMITTED carries the ordering, so the
+    // absence above is the projection's doing and not an empty fixture.
+    const permitted = assembleContextPack({
+      ...COMMON,
+      modelFacingClaimSafety: { status: 'permitted' },
+    });
+    expect(leaderFields(permitted).leading).toBeDefined();
   });
 
   it('(4) missing admission compatibility — legacy behaviour retained, no new policy', () => {
