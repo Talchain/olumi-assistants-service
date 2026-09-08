@@ -204,3 +204,137 @@ describe('Coaching Context Pack v1 — flag-off byte-identity', () => {
     expect(msg).not.toContain('graph_hash_at_run');
   });
 });
+
+/**
+ * CONDITIONAL COACHING CAPABILITY — the wire-level proof for the change made to
+ * `COACHING_CONTEXT_INSTRUCTION` on 2026-09-08.
+ *
+ * ⚠ READ THIS BEFORE TREATING ANY TEST BELOW AS A QUALITY RESULT. Every
+ * assertion here is about the bytes the model is GIVEN. A captured adapter can
+ * prove the assembled instruction and the assembled context, and it can prove
+ * the safety floors that are stated as text. It CANNOT prove that a generated
+ * answer is useful, and no test in this file may be cited as evidence that the
+ * witnessed staging failure (2026-09-08 16:47Z, routing prompt v121, stale
+ * analysis, £200,000 hiring question answered with model-maintenance advice)
+ * is repaired. Generated quality belongs to the separate local baseline vs.
+ * candidate comparison recorded with this change.
+ *
+ * What these DO establish: the positive obligation actually reaches the wire on
+ * the same message as the coaching state; the prohibitions are scoped to
+ * computed results rather than to advice in general; and the currentness,
+ * invention, no-mutation and identifier floors survived the rewrite.
+ */
+describe('Coaching Context Pack v1 — conditional coaching capability (assembled wire)', () => {
+  const lines = COACHING_CONTEXT_INSTRUCTION.split('\n');
+  const noneLine = lines.find((l) => /`freshness`\s+is\s+"none"/i.test(l))!;
+  const unsafeLine = lines.find((l) => /^- Otherwise,/i.test(l))!;
+  const refusalLine = lines.find((l) => /`latest_run_attempt_refused`/i.test(l))!;
+
+  it('the positive obligation reaches the model on the same message as the stale coaching state', async () => {
+    const msg = await userMessageFor(stalePack());
+    // The state the answer must be honest about, and the obligation to coach
+    // anyway, are on ONE message — not two independently-shipped things.
+    expect(msg).toContain('"freshness": "stale"');
+    expect(msg).toContain('It never suspends coaching');
+    expect(msg).toContain(
+      'still help the person think about the problem they actually raised',
+    );
+    // Conditional reasoning from the supplied material, an implication or
+    // trade-off, the decisive unknown, and a next question — the four things
+    // the witnessed answer omitted.
+    expect(msg).toMatch(/Reason conditionally from the supplied material/);
+    expect(msg).toMatch(/practical implication or trade-off/);
+    expect(msg).toMatch(/unknown that would most change the answer/);
+    expect(msg).toMatch(/ask one question/);
+    // Model maintenance is permitted alongside, never instead of.
+    expect(msg).toMatch(/may accompany that; it must never replace it/);
+  });
+
+  it('grounded facts and hypotheses must be distinguishable, and that reaches the wire', async () => {
+    const msg = await userMessageFor(stalePack());
+    expect(msg).toMatch(/Keep grounded facts and hypotheses distinguishable/);
+    expect(msg).toMatch(
+      /never asserted as a fact about the model, the analysis or the world/,
+    );
+  });
+
+  /**
+   * THE DISCRIMINATOR. Without this the two tests above would pass just as well
+   * against the OLD block with the new sentences bolted on — the defect was the
+   * blanket prohibition, so its ABSENCE is the load-bearing assertion, and it is
+   * made against the assembled message, not the constant.
+   */
+  it('the blanket advice prohibition is gone from the assembled message', async () => {
+    const msg = await userMessageFor(stalePack());
+    expect(msg).not.toContain('before giving confident advice');
+    expect(msg).not.toContain('do not recommend one option over another');
+  });
+
+  it('UNSAFE-CURRENT-RESULT CONTROL — the narrowed ban still forbids every current-result claim', () => {
+    // Currentness honesty, unchanged.
+    expect(unsafeLine).toContain('do not present the results as current');
+    expect(unsafeLine).toMatch(/out of date/i);
+    expect(unsafeLine).toMatch(/re-?run/i);
+    // A leader/winner may still not be named off stale figures...
+    expect(unsafeLine).toMatch(/leading, winning or recommended option/i);
+    expect(unsafeLine).toMatch(/as though the figures settled it/i);
+    // ...but the qualitative work is explicitly still required.
+    expect(unsafeLine).toMatch(/still give the qualitative reasoning/i);
+
+    // Pre-analysis: qualitative reasoning licensed, computed results banned.
+    expect(noneLine).toMatch(/no analysis has been run/i);
+    expect(noneLine).toMatch(/reason qualitatively/i);
+    expect(noneLine).toMatch(/no computed result, ranking, probability or score/i);
+    // ...and the r2 honesty property is not lost by the rewrite.
+    expect(noneLine).not.toMatch(/out of date/i);
+    expect(noneLine).not.toMatch(/re-?run/i);
+
+    // The invention floor, now explicit that figures have a single source.
+    const inventionLine = lines.find((l) => /^- Never invent freshness/.test(l))!;
+    expect(inventionLine).toMatch(
+      /Computed results, rankings and figures may come only from the supplied analysis/,
+    );
+  });
+
+  it('REFUSAL BULLET — untouched by this change (byte identity)', () => {
+    expect(refusalLine).toBe(
+      '- If `latest_run_attempt_refused` is true: the latest attempt was refused before computation. ' +
+        'Do not say running is safe, that the current model can produce a result, or that a run would ' +
+        'show probabilities unless a newer successful run is present. Answer the user’s question ' +
+        'directly, preserve the refusal caveat, and give one useful next fact or remedy.',
+    );
+  });
+
+  it('NO-EDIT / CONSENT CONTROL — the mutation and identifier floors survive, and assembly proposes nothing', async () => {
+    const msg = await userMessageFor(stalePack());
+    expect(msg).toMatch(/Never claim a change was applied, saved, confirmed or re-run/);
+    expect(msg).toMatch(/propose it and ask/);
+    expect(msg).toContain('Never quote hashes, identifiers, or internal field names.');
+
+    // And the turn itself mutates nothing: a text-only completion routes to
+    // `text_only` with no proposal. ⚠ This is a control on THIS path only —
+    // it is not proof that the downstream executor cannot mutate.
+    const adapter = mockAdapter();
+    const result = await routeWithToolUse(packWith(stalePack()), 'hi', {
+      requestId: 'req-consent',
+      adapter,
+    });
+    expect(result.type).toBe('text_only');
+    expect(result).not.toHaveProperty('proposal');
+  });
+
+  it('every coaching_context field the pack carries is still named by the instruction', async () => {
+    // The prompt-pack sanction gate reads the same property estate-wide; keeping
+    // it local too means a field dropped from the wording fails HERE, in the
+    // file that owns the wording, rather than only in the estate gate.
+    for (const field of [
+      'freshness',
+      'latest_run_attempt_refused',
+      'rerun_required',
+      'usable_for_chips',
+      'blocked',
+    ]) {
+      expect(COACHING_CONTEXT_INSTRUCTION).toContain(`\`${field}\``);
+    }
+  });
+});
