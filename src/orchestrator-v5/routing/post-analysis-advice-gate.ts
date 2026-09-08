@@ -1340,6 +1340,24 @@ function isReasoningRequest(message: string): boolean {
   return false;
 }
 
+/** The evidence composer answers a scoped question, not arbitrary surrounding
+ * reasoning. Reuse the existing matched request span; only its ordinary polite
+ * preamble and generic analysis qualifiers may sit outside it. Anything else
+ * needs the existing contextual router (including reasons, constraints and a
+ * discussion instruction). This does not classify or discard that context. */
+function hasContextOutsideEvidenceRequest(message: string): boolean {
+  const requestPreamble = /^\s*(?:(?:please|do\s+you\s+have(?:\s+any)?)\s*)?$/i;
+  const requestQualifiers = /^(?:[\s?.!]|\b(?:first|next|here|further|this|in\s+this|in\s+our\s+decision|to\s+confirm\s+this|to\s+build\s+confidence\s+in\s+(?:our|this)\s+decision|or\s+research)\b)*$/i;
+  // The longer existing recommendation pattern may cover a whole request
+  // where an earlier short pattern covers only its inner question.
+  return !CLASS_PATTERNS.some(({ advice_class, pattern }) => {
+    if (advice_class !== 'evidence_gap') return false;
+    const hit = pattern.exec(message);
+    return hit !== null && requestPreamble.test(message.slice(0, hit.index))
+      && requestQualifiers.test(message.slice(hit.index + hit[0].length));
+  });
+}
+
 export function tryPostAnalysisAdviceGate(
   input: AdviceGateInput,
 ): AdviceGateResult {
@@ -1415,7 +1433,8 @@ export function tryPostAnalysisAdviceGate(
   // standings with `llm_calls_used: 0`.
   // Open-ended advice needs the user's context, beyond a standings summary.
   // Specific analysis classes and mutation precedence have already been resolved.
-  if (matchedClass === 'advice' || isReasoningRequest(message)) {
+  if (matchedClass === 'advice' || isReasoningRequest(message)
+    || (matchedClass === 'evidence_gap' && hasContextOutsideEvidenceRequest(message))) {
     return { matched: false, reason: 'reasoning_request' };
   }
 
@@ -2228,42 +2247,22 @@ function composeEvidenceGap(
       );
     }
   }
-  // DGAI #341: superlative fallback ("the strongest sensitivity is on …")
-  // may only name materially-influential drivers — a near-zero driver would
-  // be billed as where "more evidence would change the analysis the most"
-  // while its own band reads "has little effect on the lead".
+  // Influence is not the value of obtaining more evidence. Preserve the
+  // useful, material sensitivity labels without inventing a research ranking
+  // when neither scoped EVPPI guidance nor an actual gap is available.
   const evidenceDrivers = nameableTopDrivers(analysis);
   if (gaps.length === 0 && hasNonEmptyLabel(evidenceDrivers[0]?.factor_label)) {
-    // Fallback: name where evidence matters most. The first sentence is
-    // byte-identical to the historical single-driver copy (gated on
-    // `hasRenderableTopDriver` so a whitespace-only label can't emit
-    // "sensitivity is on   "). When a renderable SECOND driver exists, add it
-    // as a second gap so the two highest-leverage factors both surface — this
-    // is the deterministic stand-in for "evidence priorities" when the
-    // decision_review enrichment is unavailable (the by-design phase3 path).
-    // It makes NO direction claim, so it is direction-honest by construction
-    // and never re-derives a driver's sign.
-    // Trim at extraction so rendered copy never carries incidental upstream
-    // whitespace, and the dedup compare below operates on clean labels.
-    // `hasRenderable*Driver` already rejects whitespace-only labels, so the
-    // trimmed value is always non-empty here.
     const top = evidenceDrivers[0]!.factor_label.trim();
-    gaps.push(
-      `the strongest sensitivity is on ${top}, so that's where more evidence would change the analysis the most`,
-    );
+    const labels = [top];
     if (hasNonEmptyLabel(evidenceDrivers[1]?.factor_label)) {
       const second = evidenceDrivers[1]!.factor_label.trim();
-      // Defensive: skip the second-driver line when it would name the same
-      // factor twice. Compare case-folded (labels already trimmed) so
-      // whitespace / case variants of the same display label are caught. The
-      // projection sorts distinct factors by |sensitivity|; this only guards
-      // the rare shared-label edge case.
       if (second.toLowerCase() !== top.toLowerCase()) {
-        gaps.push(
-          `${second} is the next most sensitive factor, so it's the second place where more evidence would help`,
-        );
+        labels.push(second);
       }
     }
+    return `The analysis is sensitive to ${labels.join(' and ')}. ` +
+      'Sensitivity alone does not establish where research would be most valuable. ' +
+      'We can examine the evidence behind these assumptions alongside the practical cost of checking them.';
   }
   if (gaps.length === 0) {
     return "Looking at the analysis, there aren't obvious structural gaps right now. If you have a specific factor you're uncertain about, let me know and we can look at it together.";
