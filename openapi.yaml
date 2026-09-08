@@ -4156,6 +4156,29 @@ components:
         blocker_reason:
           type: string
           description: Reason analysis is blocked (if can_run_analysis is false)
+        assessed_from:
+          type: string
+          enum: [persisted, request_graph]
+          description: >-
+            Which model the ADMISSION fields were assessed from — can_run_analysis,
+            may_run, blocker_reason, options_ready, options_total, goal_node_valid,
+            issues, critiques, scaffold_plan, readiness_issues. "persisted" is the
+            same read the run path performs (returned when scenario_id names a
+            scenario with a stored graph); "request_graph" is the caller's own bytes.
+            This does NOT scope the whole response — see coaching_assessed_from.
+          example: persisted
+        coaching_assessed_from:
+          type: string
+          enum: [request_graph]
+          description: >-
+            Which model the COACHING fields describe — readiness_score,
+            readiness_level, confidence_level, confidence_explanation,
+            quality_factors, evidence_quality, total_factor_count,
+            user_question_count. Always "request_graph": coaching answers "how good
+            is the model you are looking at?", a question about the canvas, so it
+            follows the caller's bytes even when assessed_from is "persisted".
+            The two stamps answer different questions and may legitimately differ.
+          example: request_graph
         scaffold_plan:
           type: object
           description: >-
