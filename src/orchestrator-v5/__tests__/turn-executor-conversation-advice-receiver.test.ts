@@ -5,6 +5,9 @@ import { randomUUID } from 'node:crypto';
 import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
+import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
+import nativeResearch from './fixtures/contextual-research-native-2026-09-08.json';
 vi.mock('../coaching/draft-coaching-log.js', async () => {
   const actual = await vi.importActual<
     typeof import('../coaching/draft-coaching-log.js')
@@ -35,6 +38,7 @@ const mockState: {
   scenarioAnalysisFactsOverride: Array<Record<string, unknown>> | null;
   scenarioAnalysisTotalCountOverride: number | null;
   persistedGraph: unknown | null;
+  persistedBriefText: string | null;
   persistedGraphReadError: Error | null;
   appendWrites: Array<Record<string, unknown>>;
   invalidationCalls: number;
@@ -48,6 +52,7 @@ const mockState: {
   scenarioAnalysisFactsOverride: null,
   scenarioAnalysisTotalCountOverride: null,
   persistedGraph: null,
+  persistedBriefText: null,
   persistedGraphReadError: null,
   appendWrites: [],
   invalidationCalls: 0,
@@ -140,7 +145,7 @@ vi.mock('../session/index.js', () => ({
         throw mockState.persistedGraphReadError;
       return {
         graph: mockState.persistedGraph,
-        briefText: null,
+        briefText: mockState.persistedBriefText,
       };
     },
     ensureScenarioExists: async () => ({ user_id: null }),
@@ -389,6 +394,7 @@ describe('conversation advice reaches contextual reasoning', () => {
     mockState.scenarioAnalysisFactsOverride = null;
     mockState.scenarioAnalysisTotalCountOverride = null;
     mockState.persistedGraph = READY_GRAPH;
+    mockState.persistedBriefText = null;
     mockState.persistedGraphReadError = null;
     mockState.appendWrites = [];
     mockState.invalidationCalls = 0;
@@ -450,5 +456,103 @@ describe('conversation advice reaches contextual reasoning', () => {
       expect.objectContaining({ action_type: 'what_would_flip' }),
     ]));
     expectNoCanonicalAuthorityWrite();
+  });
+
+  function useCapturedResearchScenario() {
+    const graph = GraphStateIngressSchema.parse(nativeResearch.graph);
+    expect(computeAnalysisAffectingGraphHash(graph)).toBe(nativeResearch.analysis_result.computed_against_hash);
+    mockState.persistedGraph = nativeResearch.graph;
+    mockState.persistedBriefText = nativeResearch.brief_text;
+    const fact = {
+      fact_type: 'run_analysis', fact_version: 1, noop: false,
+      result: {
+        ...nativeResearch.analysis_result,
+        scenario_id: nativeResearch.source.scenario_id,
+        graph_hash_at_run: nativeResearch.analysis_result.computed_against_hash,
+        computed_at: nativeResearch.analysis_state.run_state.computed_at,
+      },
+    };
+    mockState.priorFacts = [fact];
+    mockState.newestAnalysisFact = fact;
+    mockState.priorTurns = [{ ...PRIOR_RUN_ANALYSIS_TURN,
+      scenario_id: nativeResearch.source.scenario_id,
+      user_message: 'Run analysis', assistant_message: nativeResearch.analysis_result.summary,
+    }];
+    // The captured native request supplied neither graph_state nor analysis_state.
+    // Exercise the real persisted-graph and selected-fact fallback, not UI ingress.
+    return {};
+  }
+
+  it.each([
+    nativeResearch.message,
+    'Given our limited data-team capacity, what evidence should we gather first? I want to weigh the practical options before deciding on a change.',
+    'Do you have recommendations on how our two-person team should investigate?',
+  ])('receives captured scientific state and qualitative research context: %j', async message => {
+    const state = useCapturedResearchScenario();
+    const answer = 'Research discussion from the receiving adapter, not a sensitivity template.';
+    const adapter = recordingRoutingAdapter(answer);
+    const result = await runTurnExecutor({ ...mkPayload(message), scenario_id: nativeResearch.source.scenario_id }, 'captured-contextual-research', {
+      routingAdapter: adapter, ...state,
+    });
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    const prompt = capturedRoutingPrompt(adapter);
+    expect(prompt).toContain(message);
+    expect(prompt).toContain('two-person data team');
+    expect(prompt).toContain('Saved example: Customer Data Platform Selection');
+    expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
+    expect(prompt).toContain('Migration and Integration Effort');
+    expect(prompt).toContain('Data Team Capacity');
+    expect(result.response.assistant_text).toBe(answer);
+    expect(result.telemetry.llm_calls_used).toBe(1);
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('keeps the captured discussion read-only even if the receiving model proposes an explicit factor write', async () => {
+    const state = useCapturedResearchScenario();
+    const adapter = recordingRoutingAdapter();
+    adapter.chatWithTools.mockResolvedValue({
+      content: [{ type: 'tool_use', id: 'unrequested-research-edit', name: OLUMI_ACTION_TOOL_NAME, input: {
+        intent_class: 'execute', action: {
+          handler_id: 'set_factor_value',
+          entity: { id: 'fac_data_team_capacity', kind: 'node', label: 'Data Team Capacity', resolution_status: 'resolved', resolution_method: 'label_match' },
+          parameters: [{ name: 'value', value: { value: 0.7 }, source: 'user_explicit' }],
+          cited_context_fields: [],
+        },
+      } }],
+      stop_reason: 'tool_use', usage: { input_tokens: 5, output_tokens: 5 }, model: 'mock-routing', latencyMs: 0,
+    });
+    const result = await runTurnExecutor({ ...mkPayload(nativeResearch.message), scenario_id: nativeResearch.source.scenario_id }, 'captured-research-no-consent', {
+      routingAdapter: adapter, ...state,
+    });
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(result.response.blocks.some(block => block.type === 'graph_patch')).toBe(false);
+    expect(result.response.assistant_text).toContain('Nothing has been changed.');
+    expect(result.response.assistant_text).toContain('confirm this with you before I edit the model');
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('keeps a narrow captured-model research query useful without promoting sensitivity to evidence value', async () => {
+    useCapturedResearchScenario();
+    const adapter = recordingRoutingAdapter();
+    const result = await runTurnExecutor({ ...mkPayload('What should we investigate?'), scenario_id: nativeResearch.source.scenario_id }, 'captured-narrow-research', {
+      routingAdapter: adapter,
+    });
+    expect(adapter.chatWithTools).not.toHaveBeenCalled();
+    expect(result.response.assistant_text).toContain('Migration and Integration Effort');
+    expect(result.response.assistant_text).toContain('Sensitivity alone does not establish where research would be most valuable');
+    expectNoCanonicalAuthorityWrite();
+  });
+
+  it('positive control: the same captured factor can be changed by an explicit numeric instruction', async () => {
+    const state = useCapturedResearchScenario();
+    await runTurnExecutor({ ...mkPayload('Set Data Team Capacity to 0.7.'), scenario_id: nativeResearch.source.scenario_id }, 'captured-research-explicit-edit', {
+      routingAdapter: recordingRoutingAdapter(), ...state,
+    });
+    const graphWrites = mockState.appendWrites.filter(write => write.graph !== undefined);
+    expect(graphWrites).toHaveLength(1);
+    const graph = GraphStateIngressSchema.parse(graphWrites[0]!.graph);
+    expect(graph.nodes.find(node => node.id === 'fac_data_team_capacity')).toEqual(expect.objectContaining({
+      observed_state: expect.objectContaining({ value: 0.7 }),
+    }));
   });
 });

@@ -410,7 +410,8 @@ describe('DGAI #341 — advice gate does not superlativise a near-zero driver', 
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('the strongest sensitivity is on Delivery risk');
+      expect(out.assistant_text).toContain('The analysis is sensitive to Delivery risk');
+      expect(out.assistant_text).toContain('Sensitivity alone does not establish where research would be most valuable');
     }
   });
 });

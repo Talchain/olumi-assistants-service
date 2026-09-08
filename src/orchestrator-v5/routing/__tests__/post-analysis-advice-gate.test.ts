@@ -2713,12 +2713,12 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
 });
 
 // ===========================================================================
-// Scope B — two-driver evidence-gap fallback + by-design phase3 grounding
+// Scope B — qualified sensitivity fallback + by-design phase3 grounding
 // ===========================================================================
 
-describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
+describe('composeEvidenceGap — qualified sensitivity fallback', () => {
   // Pure top-driver fallback: no readiness gaps (no analysisReady), no fragile
-  // edges, no decision_review → the composer names where evidence matters most.
+  // edges, no decision_review → influence does not establish evidence priority.
   const TWO_DRIVERS_NO_EDGES: AdviceGateAnalysis = {
     ...FIXTURE_ANALYSIS,
     fragile_edges: [],
@@ -2728,7 +2728,19 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     ],
   };
 
-  it('names BOTH highest-leverage drivers when the projection carries a second one', () => {
+  it('does not infer a research ranking from influence-only drivers', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?', analysis: TWO_DRIVERS_NO_EDGES, freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) throw new Error('Expected the scoped evidence answer');
+    expect(out.assistant_text).toContain('Delivery risk');
+    expect(out.assistant_text).toContain('Cost overrun risk');
+    expect(out.assistant_text).not.toMatch(/biggest open gap|evidence would change the analysis the most|second place where more evidence would help/);
+    expect(out.assistant_text).toContain('Sensitivity alone does not establish where research would be most valuable');
+  });
+
+  it('names both material drivers without ranking evidence value', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: TWO_DRIVERS_NO_EDGES,
@@ -2740,9 +2752,8 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
       expect(out.advice_class).toBe('evidence_gap');
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('Cost overrun risk');
-      expect(out.assistant_text).toMatch(/next most sensitive factor/);
-      // Both surface as bullets under the plural header.
-      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
+      expect(out.assistant_text).toContain('sensitive to Delivery risk and Cost overrun risk');
+      expect(out.assistant_text).not.toMatch(/biggest open gaps|next most|evidence.*the most/i);
       // Direction-honest by construction: makes no increases/decreases claim.
       expect(out.assistant_text).not.toMatch(/increase|decrease|raises|lowers/i);
       // No raw IDs / decimals / readiness percentage.
@@ -2750,7 +2761,7 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     }
   });
 
-  it('keeps single-driver wording intact when only one driver is renderable', () => {
+  it('qualifies a single material driver without inventing another factor', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: { ...TWO_DRIVERS_NO_EDGES, top_drivers: [{ factor_label: 'Delivery risk' }] },
@@ -2758,10 +2769,9 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      // Singular header, original sentence, no second-driver line.
-      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toMatch(/^The analysis is sensitive to Delivery risk\./);
       expect(out.assistant_text).toContain(
-        'the strongest sensitivity is on Delivery risk, so that',
+        'Sensitivity alone does not establish where research would be most valuable',
       );
       expect(out.assistant_text).not.toContain('Cost overrun risk');
       expect(out.assistant_text).not.toMatch(/next most sensitive/);
@@ -2778,8 +2788,8 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     if (out.matched) {
       // Confirm we exercised the two-driver branch (not single-driver / DR / readiness).
       expect(out.advice_class).toBe('evidence_gap');
-      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
-      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+      expect(out.assistant_text).toContain('sensitive to Delivery risk and Cost overrun risk');
+      expect(out.assistant_text).toContain('Sensitivity alone does not establish');
 
       const text = out.assistant_text;
       // Real egress guards run against the matched assistant_text.
@@ -2822,7 +2832,7 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
       const occurrences = out.assistant_text.split('Delivery risk').length - 1;
       expect(occurrences).toBe(1);
       expect(out.assistant_text).not.toMatch(/next most sensitive/);
-      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toMatch(/^The analysis is sensitive to Delivery risk\./);
     }
   });
 
@@ -2840,7 +2850,7 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     if (out.matched) {
       // Normalised compare → treated as one factor → single-driver wording.
       expect(out.assistant_text).not.toMatch(/next most sensitive/);
-      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toMatch(/^The analysis is sensitive to Delivery risk\./);
       // The variant second label must not appear as its own named driver.
       expect(out.assistant_text).not.toContain('delivery risk ');
     }
@@ -2859,9 +2869,8 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       // Both named (distinct), and the second renders trimmed — no double space.
-      expect(out.assistant_text).toMatch(/next most sensitive factor/);
-      expect(out.assistant_text).toContain('Cost risk is the next most sensitive factor');
-      expect(out.assistant_text).not.toContain('Cost risk  is');
+      expect(out.assistant_text).toContain('sensitive to Delivery risk and Cost risk.');
+      expect(out.assistant_text).not.toContain('Cost risk .');
     }
   });
 });
