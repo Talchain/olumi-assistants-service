@@ -800,13 +800,21 @@ const ContextPackObjectSchema = z
       .strict()
       .optional(),
     /**
-     * Exact marker for an unavailable persisted-analysis read. It is optional
-     * because healthy absence and every established state carry no marker;
-     * omission is never interpreted as permission or as proof of no analysis.
+     * Exact marker for a persisted-analysis read that the model must interpret
+     * rather than take at face value. Optional because healthy, settled states
+     * carry no marker; omission is never interpreted as permission or as proof
+     * of no analysis.
+     *
+     * `unavailable` — the read failed; the invariants below apply to it ALONE.
+     * `provisional_figures` — the read SUCCEEDED and the options are separable,
+     * but the admission caps the mode below `comparative_leader`. That is the
+     * population Paul ruled is **caveat, not withhold**, so this state
+     * deliberately carries a full `display_analysis`; the `unavailable`
+     * invariants below are keyed on the exact literal and do not reach it.
      */
     analysis_context: z
       .object({
-        status: z.literal('unavailable'),
+        status: z.enum(['unavailable', 'provisional_figures']),
       })
       .strict()
       .optional(),

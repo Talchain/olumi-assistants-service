@@ -60,6 +60,7 @@ import {
   GRAPH_CONTEXT_INSTRUCTION,
   DISPLAY_GRAPH_INSTRUCTION,
   ANALYSIS_CONTEXT_INSTRUCTION,
+  PROVISIONAL_FIGURES_INSTRUCTION,
   CONTEXT_BUDGET_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
@@ -141,6 +142,7 @@ const CODE_OWNED_INSTRUCTIONS = [
   // operator-managed prompt.
   ['DISPLAY_GRAPH_INSTRUCTION', DISPLAY_GRAPH_INSTRUCTION],
   ['ANALYSIS_CONTEXT_INSTRUCTION', ANALYSIS_CONTEXT_INSTRUCTION],
+  ['PROVISIONAL_FIGURES_INSTRUCTION', PROVISIONAL_FIGURES_INSTRUCTION],
   // Prompt coverage. Emitted by the SAME condition that serialises
   // `context_budget`, so a reduced graph/analysis projection cannot be read as
   // proof of absence. The maximal fixture reaches this through real graph
@@ -645,6 +647,17 @@ const UNAVAILABLE_PACK = assembleMaximalPack({
   },
 });
 /**
+ * `analysis_context.status` is ONE field with mutually exclusive values, so a
+ * single maximal pack can never render both its instructions — which is exactly
+ * why the corpus below is a set of packs rather than one. This is the
+ * `provisional_figures` sibling: the analysis IS established and separable, and
+ * the admission merely caps the mode, so the pack keeps its full
+ * `display_analysis` and gains the qualification instruction.
+ */
+const PROVISIONAL_PACK = assembleMaximalPack({
+  modelFacingClaimSafety: { status: 'qualified', mode: 'quantified_provisional' },
+});
+/**
  * The message `buildUserMessage` ACTUALLY renders — kept, not discarded. The
  * gate previously parsed the pack out of this and threw the prompt away, which
  * is why it could certify a field as sanctioned by an instruction the prompt
@@ -652,6 +665,7 @@ const UNAVAILABLE_PACK = assembleMaximalPack({
  */
 const RENDERED = buildUserMessage(PACK, USER_MESSAGE);
 const UNAVAILABLE_RENDERED = buildUserMessage(UNAVAILABLE_PACK, USER_MESSAGE);
+const PROVISIONAL_RENDERED = buildUserMessage(PROVISIONAL_PACK, USER_MESSAGE);
 const SERIALISED = observeSerialisedPack(RENDERED);
 const UNAVAILABLE_SERIALISED = observeSerialisedPack(UNAVAILABLE_RENDERED);
 const LIVE_SHA = shortSha256(SERVED_PROMPT);
@@ -664,7 +678,7 @@ describe('prompt ↔ pack sanction gate', () => {
   });
 
   it('FIXTURE_COMPLETENESS — the fixture populates every schema-declared key (this gate can never be blind)', () => {
-    const unpopulated = findUnpopulatedFieldsAcross([PACK, UNAVAILABLE_PACK]);
+    const unpopulated = findUnpopulatedFieldsAcross([PACK, UNAVAILABLE_PACK, PROVISIONAL_PACK]);
     expect(
       unpopulated,
       `The gate's fixture does not populate ${unpopulated.join(', ')}. A field the fixture ` +
@@ -719,7 +733,7 @@ describe('prompt ↔ pack sanction gate', () => {
     ).toBeGreaterThan(0);
     expect(RENDERED).toContain('## ContextPack');
 
-    const renderedCorpus = `${RENDERED}\n${UNAVAILABLE_RENDERED}`;
+    const renderedCorpus = `${RENDERED}\n${UNAVAILABLE_RENDERED}\n${PROVISIONAL_RENDERED}`;
     const missing = CODE_OWNED_INSTRUCTIONS.filter(
       ([, text]) => !renderedCorpus.includes(text),
     ).map(([name]) => name);

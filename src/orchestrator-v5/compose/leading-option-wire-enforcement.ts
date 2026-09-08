@@ -206,7 +206,10 @@ import {
   BLOCK_PROSE_FIELDS,
 } from './leading-option-egress-guard.js';
 import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
-import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
+import {
+  analysisReadyPermitsLeaderNaming,
+  permittedAnalysisModeFromAnalysisReady,
+} from '../admission/analysis-admission.js';
 import { WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL } from './withheld-explanation-answer.js';
 // The PRODUCER's own withheld projections, reused at the chokepoint rather than
 // re-derived beside it. These already encode the anti-over-suppression policy
@@ -410,6 +413,31 @@ export interface WireLeaderClaimEnforcementOpts {
    * by-reference no-op.
    */
   readonly mayNameLeadingOption: boolean;
+  /**
+   * ⭐⭐ SEPARABLE-PROVISIONAL: the third answer this gate could not express.
+   *
+   * Threaded from the ALREADY-COMPOSED `analysis_state.leader_claim.separation`
+   * at the single call site — read, never re-derived here (the same rule
+   * `mayNameLeadingOption` follows, CLAUDE.md trap #12). `composeLeaderClaim`
+   * stays the sole author of the separation question.
+   *
+   * Paul ruled that `quantified_provisional` is **caveat, not withhold**
+   * (relayed, `olumi-programme-docs#38` comment `5576895511`) for runs
+   * confident enough to state a percentage. #1254's withhold governs the
+   * DIFFERENT population where the options cannot be separated. Without this
+   * operand the conjunction above could only ask "does the admission license a
+   * leader at all", so a separable provisional run was pushed down the withhold
+   * path and its structured summary was replaced with
+   * `WIRE_WITHHELD_LEADER_REPLACEMENT` — while the coach's own caveated prose
+   * survived. That is the witnessed incoherence on native request `23ab579d`:
+   * a comparative assessment beside "No single option can be put forward yet."
+   *
+   * ⚠ ABSENCE IS NOT PERMISSION. `undefined`/`false` leaves this gate exactly as
+   * it was, so every caller that does not thread it — and every run whose
+   * separation was never computed — keeps today's behaviour byte-for-byte. It
+   * widens the permit for ONE named population and nothing else.
+   */
+  readonly separationEstablished?: boolean;
   /**
    * The graph this exit is shipping (`ctx.graph`), read ONLY for the option
    * ROSTER — see {@link optionRosterFromGraph} for why that is not a second
@@ -845,7 +873,26 @@ export function enforceLeadingOptionClaimsAtWire(
   // admission returns `true` from the mode reader, so this line collapses back to
   // the single operand it was, and every pre-`analysis_admission` producer is
   // byte-identical. Over-suppression is the WORSE defect (module docstring).
-  if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
+  //
+  // ⭐ AND THE THIRD ARM, added for the population Paul ruled on: entitled, the
+  // result SEPARATES the arms, and the admission's only objection is that every
+  // estimate is still machine-authored (`quantified_provisional`). Withholding
+  // there applies #1254's non-separation rule to a separable run and deletes
+  // the comparison the person asked about. The qualification is carried
+  // elsewhere — `PROVISIONAL_FIGURES_INSTRUCTION` to the coach — so this arm
+  // permits a QUALIFIED claim, never an unqualified one, and the two consumers
+  // now read the same derived interpretation instead of contradicting.
+  //
+  // ⚠ Narrow by construction: it requires the mode to be EXACTLY the provisional
+  //   cap. A lower mode, an unknown separation, a near tie, an unentitled turn
+  //   or an absent admission all still withhold, unchanged.
+  const separableProvisional =
+    opts.separationEstablished === true &&
+    permittedAnalysisModeFromAnalysisReady(opts.analysisReady) === 'quantified_provisional';
+  if (
+    opts.mayNameLeadingOption &&
+    (analysisReadyPermitsLeaderNaming(opts.analysisReady) || separableProvisional)
+  ) {
     return unchanged(response);
   }
 

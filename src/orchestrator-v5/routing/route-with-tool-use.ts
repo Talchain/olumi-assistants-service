@@ -1231,6 +1231,12 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.analysis_context?.status === 'unavailable') {
     parts.push('', ANALYSIS_CONTEXT_INSTRUCTION);
   }
+  // Established, separable, NOT settled. Emitted by the same single condition
+  // that carries the figures, so the coach can never receive the comparison
+  // without the sentence that qualifies it.
+  if (contextPack.analysis_context?.status === 'provisional_figures') {
+    parts.push('', PROVISIONAL_FIGURES_INSTRUCTION);
+  }
   // CONTEXT COVERAGE — CODE-OWNED and co-located with the exact model-facing
   // disclosure. A budget cut removes graph/analysis detail from these prompt
   // bytes; without an interpretation rule the model can mistake the reduced
@@ -1705,6 +1711,33 @@ export const DISPLAY_GRAPH_INSTRUCTION = [
  * Exact persisted-analysis read-failure contract. Conditional on the matching
  * ContextPack marker; healthy absence carries neither the marker nor this text.
  */
+/**
+ * ⭐⭐ CAVEAT, NOT WITHHOLD — Paul's ruling for `quantified_provisional`, relayed
+ * at `olumi-programme-docs#38` comment `5576895511`. It governs runs confident
+ * enough to state a percentage. #1254's withhold governs the DIFFERENT
+ * population where the options cannot be separated; applying #1254's rule here
+ * would delete the comparative material the person asked about.
+ *
+ * So this instruction does NOT tell the model to withhold. It tells it what the
+ * figures ARE — provisional, machine-authored, not a settled ranking — which is
+ * the only thing that makes "caveat" a contract rather than a hope.
+ *
+ * ⚠ NO RACE FRAMING. The product's terminology direction is goal fit and
+ * uncertainty; "winner", "contest" and "beats" are not this system's words, and
+ * a simulation share is not a probability of the goal being achieved.
+ */
+export const PROVISIONAL_FIGURES_INSTRUCTION = [
+  '## Saved analysis figures are provisional (deterministic authority)',
+  'The analysis ran and its options are separable, but every estimate is still machine-authored, so the comparison is provisional rather than settled.',
+  '- You MAY discuss the comparison, including the figures, and you SHOULD, when the person is asking about it. Do not refuse to engage.',
+  '- Qualify it every time: say plainly that the figures are provisional and rest on estimates nobody has confirmed yet.',
+  '- Do not present the comparison as a settled ranking, a recommendation, or a result the person can act on without reviewing the inputs.',
+  '- A simulation share is how often an option scored highest against the goal, not the probability that the goal is achieved. Do not restate it as a chance of success.',
+  '- No winner or contest framing. Discuss goal fit and what is still uncertain.',
+  '- Say what would firm it up — which estimates matter most and what evidence would settle them.',
+  '- Do not expose status tokens, internal fields or admission modes.',
+].join('\n');
+
 export const ANALYSIS_CONTEXT_INSTRUCTION = [
   '## Saved analysis context (deterministic authority)',
   'The `analysis_context` block says the saved analysis state could not be established for this turn.',

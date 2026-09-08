@@ -76,6 +76,11 @@ import {
 // persisted graph — the same lookup the wave-4 directive rows use for the
 // mutation / what_would_flip branches, which likewise have no enrichment graph
 // to read. Labels come from here, never from the id (Phase-3 §0.1).
+import {
+  analysisReadyPermitsLeaderNaming,
+  permittedAnalysisModeFromAnalysisReady,
+  type PermittedAnalysisMode,
+} from './admission/analysis-admission.js';
 import { buildGraphNodeLookupFromGraph } from './compose/phase3-blocks.js';
 import {
   commitDirectAnswer,
@@ -2728,6 +2733,15 @@ export async function runTurnExecutor(
       // unknown readiness stays UNKNOWN rather than reading as "unblocked".
       const readinessForPack =
         projectContextPackReadiness(analysisReadyForTurn) ?? undefined;
+      // Non-null ONLY when the run is separable/entitled (that is the caller's
+      // condition) yet the admission caps the mode below `comparative_leader`.
+      // Read from the SAME existing admission reader the wire enforcer uses —
+      // no second policy, no new authority, and `null` whenever the admission
+      // is absent, so legacy packs keep their exact behaviour.
+      const provisionalAdmissionModeForRun: PermittedAnalysisMode | null =
+        analysisReadyPermitsLeaderNaming(analysisReadyForTurn)
+          ? null
+          : permittedAnalysisModeFromAnalysisReady(analysisReadyForTurn);
       // Context v2 S4-INJECT (ROADMAP 1.73; 01 §2/§4, 05 §S4 inject row):
       // read the stored rolling summary for injection — UNCONDITIONAL since
       // the O-2 activation (CEE_ROLLING_SUMMARY deleted per the
@@ -2957,8 +2971,24 @@ export async function runTurnExecutor(
         // analysis channel. The assembler applies this before its single
         // whole-pack ceiling, so withheld bytes cannot displace authorised
         // conversation and then disappear in a later projection.
+        //
+        // ⭐⭐ THREE STATES. `mayNameLeadingOptionForRun` answers entitlement x
+        // separation; the admission answers semantic MODE. Composing them as a
+        // single boolean is what produced the witnessed incoherence on native
+        // request `23ab579d`: caveated comparative prose beside a block reading
+        // "No single option can be put forward yet".
+        //
+        // Paul ruled `quantified_provisional` is **caveat, not withhold**
+        // (relayed, `olumi-programme-docs#38` comment `5576895511`); #1254's
+        // withhold governs the different population where options CANNOT be
+        // separated. So a separable run whose mode is merely provisional keeps
+        // its comparative material and gains the qualification — it is not
+        // pushed into `withheld`, which would apply #1254's rule to Paul's
+        // population and delete the material the person asked about.
         modelFacingClaimSafety: mayNameLeadingOptionForRun
-          ? { status: 'permitted' }
+          ? provisionalAdmissionModeForRun !== null
+            ? { status: 'qualified', mode: provisionalAdmissionModeForRun }
+            : { status: 'permitted' }
           : {
               status: 'withheld',
               constraintVerdictState: constraintVerdictStateForRun,

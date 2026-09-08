@@ -67,6 +67,7 @@ import type { MayNameLeadingOptionProvenance } from './claim-safety-read.js';
 import { isCanonicalStrictContextGraphCompaction } from './compact-graph-for-contextpack.js';
 import { measureModelFacingContextPackChars } from './model-facing-context-pack.js';
 import type { ConstraintVerdictState } from '../../orchestrator/context/constraint-feasibility.js';
+import type { PermittedAnalysisMode } from '../admission/analysis-admission.js';
 import {
   projectCoachingForUnavailableAnalysis,
   projectCoachingForWithheldClaim,
@@ -484,7 +485,17 @@ export interface ContextPackConversation {
 
 /** Model-facing marker for the one persisted-analysis read failure arm. */
 export interface ContextPackAnalysisContext {
-  readonly status: 'unavailable';
+  /**
+   * `unavailable` — the saved analysis state could NOT be established.
+   *
+   * `provisional_figures` — it was established and is genuinely separable, but
+   * the admission caps the mode below `comparative_leader`. Paul's ruling for
+   * that population is **caveat, not withhold** (relayed at
+   * `olumi-programme-docs#38` comment `5576895511`); #1254's withhold governs
+   * the DIFFERENT population where options cannot be separated. The two must
+   * not be collapsed — see `SCOPE-DISPOSITION-f361-20260908.md`.
+   */
+  readonly status: 'unavailable' | 'provisional_figures';
 }
 
 export interface ContextPack {
@@ -856,8 +867,24 @@ export interface AssembleContextPackInput {
    * whole-pack ceiling so bytes the model is forbidden to receive cannot evict
    * authorised conversation or other context.
    */
+  /**
+   * ⭐⭐ THREE STATES, NOT TWO — and the third exists because two was the defect.
+   *
+   * `permitted` / `withheld` answer entitlement x separation. They cannot
+   * express the population Paul ruled on: a run that IS separable and DOES
+   * carry a percentage, but whose admission mode is `quantified_provisional`.
+   * Forcing that run into `withheld` strips the comparative material the person
+   * asked about — #1254's rule applied to the wrong population. Forcing it into
+   * `permitted` hands the coach leader fields with no signal to qualify them,
+   * which is the witnessed incoherence: caveated prose beside a block saying no
+   * option can be put forward.
+   *
+   * `qualified` keeps the material AND says it is provisional. It is not a new
+   * policy authority: the mode it carries is read from the existing admission.
+   */
   readonly modelFacingClaimSafety?:
     | { readonly status: 'permitted' }
+    | { readonly status: 'qualified'; readonly mode: PermittedAnalysisMode }
     | {
         readonly status: 'withheld';
         readonly constraintVerdictState: ConstraintVerdictState | null;
@@ -1849,7 +1876,12 @@ export function assembleContextPackWithSummary(
     input.modelFacingClaimSafety?.status === 'withheld' &&
     input.modelFacingClaimSafety.provenance === 'fail_closed_unavailable'
       ? { status: 'unavailable' }
-      : undefined;
+      : // Established, separable, not settled. The marker and its instruction
+        // are emitted by ONE condition, so a qualified pack can never carry the
+        // figures without the sentence that qualifies them.
+        input.modelFacingClaimSafety?.status === 'qualified'
+        ? { status: 'provisional_figures' }
+        : undefined;
   const constraintVerdictState =
     input.modelFacingClaimSafety?.status === 'withheld'
       ? input.modelFacingClaimSafety.constraintVerdictState
