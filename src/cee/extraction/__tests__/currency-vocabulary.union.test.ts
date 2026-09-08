@@ -133,9 +133,16 @@ export function carriesCurrencyVocabulary(source: string): boolean {
  */
 const REVIEWED: Readonly<Record<string, string>> = {
   // ── THE CANONICAL VOCABULARY ─────────────────────────────────────────────
+  "utils/currency-alphabet.ts":
+    "THE canonical map (`CURRENCY_MAP` / `CURRENCY_SYMBOL_TO_CODE`, 10 entries). It lives in " +
+    "utils/ as of PR #1327 so that `utils/amount-range.ts` can DERIVE its bare-range currency " +
+    "guard from it: `numeric-parser` imports `amount-range`, so keeping the map there and " +
+    "reading it back would close an import cycle. `numeric-parser` re-exports it, so every " +
+    "consumer is unchanged. Same relocation the multiplier alphabet already had (2.1130).",
   "cee/extraction/numeric-parser.ts":
-    "THE canonical map (`CURRENCY_MAP` / `CURRENCY_SYMBOL_TO_CODE`, 10 entries), exported " +
-    "under 2.972 as the one currency vocabulary. ⚠ It also holds a PRIVATE 5-entry inverse " +
+    "RE-EXPORTS the canonical map from `utils/currency-alphabet.ts` (moved there on #1327; " +
+    "see that file). It spells no vocabulary of its own any more, and remains the import site " +
+    "every consumer uses. ⚠ It still holds a PRIVATE 5-entry inverse " +
     "(`getCurrencySymbol`'s `reverseMap`: GBP/USD/EUR/JPY/INR) that is NOT derived from it and " +
     "is short by five — a real finding from this scan, rowed rather than changed here because " +
     "inverting the map alters what that formatter emits for A$/C$/NZ$/CHF/kr.",

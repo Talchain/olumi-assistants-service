@@ -28,6 +28,9 @@ import { randomUUID } from 'node:crypto';
 
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
+import { EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT } from '../compose/forbidden-user-facing-phrases.js';
+// The gate module is mocked below with `...actual`, so these constants are the real ones.
+import { SAME_INPUTS_LEAD_TEXT, SAME_INPUTS_OFFER_TEXT } from '../routing/run-comparison-gate.js';
 import { createNoopSessionStore } from '../session/__tests__/fixtures.js';
 import { makeMessagePayload } from './fixtures.js';
 
@@ -102,6 +105,13 @@ function makeRunFact(opts: {
   computedAt: string;
   band: string;
   winFreelance: number;
+  /**
+   * `graph_hash_at_run` override (2026-09-06). Freshness anchors on the
+   * NEWEST fact only, so a prior run may carry any hash without moving the
+   * verdict; the gate reads BOTH and answers `same_inputs` when they are
+   * equal. Defaults to the READY_GRAPH hash.
+   */
+  graphHashAtRun?: string;
 }): Record<string, unknown> {
   const winHire = Math.round((1 - opts.winFreelance) * 100) / 100;
   const options = [
@@ -140,7 +150,7 @@ function makeRunFact(opts: {
       },
       win_probabilities: { opt_freelance: opts.winFreelance, opt_hire: winHire },
       summary: 'Ran analysis.',
-      graph_hash_at_run: hashOf(READY_GRAPH),
+      graph_hash_at_run: opts.graphHashAtRun ?? hashOf(READY_GRAPH),
       computed_at: opts.computedAt,
       enrichment: {
         analysis_status: 'computed',
@@ -153,10 +163,25 @@ function makeRunFact(opts: {
 }
 
 // Leading option FLIPS between the two runs (freelance ahead → hire ahead), so a
-// genuine "the leading option has changed" comparison is produced.
+// genuine "the option that scored highest most often in the model simulations has changed" comparison is produced. The model
+// changed between the runs, so the prior run carries a different hash
+// (2026-09-06: with equal hashes the gate answers `same_inputs` instead).
 function twoRuns(): Array<Record<string, unknown>> {
   const current = makeRunFact({ computedAt: '2026-05-01T12:00:00.000Z', band: 'high', winFreelance: 0.45 });
-  const prior = makeRunFact({ computedAt: '2026-04-30T12:00:00.000Z', band: 'low', winFreelance: 0.62 });
+  const prior = makeRunFact({
+    computedAt: '2026-04-30T12:00:00.000Z',
+    band: 'low',
+    winFreelance: 0.62,
+    graphHashAtRun: 'prior-model-hash',
+  });
+  return [current, prior]; // newest-first
+}
+
+// Two runs on the SAME analysis inputs (both hashed on READY_GRAPH), identical
+// results — the turn-7 state of the 5 Sep founder journey.
+function sameInputsRuns(): Array<Record<string, unknown>> {
+  const current = makeRunFact({ computedAt: '2026-05-01T12:00:00.000Z', band: 'high', winFreelance: 0.62 });
+  const prior = makeRunFact({ computedAt: '2026-04-30T12:00:00.000Z', band: 'high', winFreelance: 0.62 });
   return [current, prior]; // newest-first
 }
 
@@ -219,10 +244,66 @@ describe('F2 CHANGE B — typed what_changed pill dispatch', () => {
 
     const text = assistantTextOf(result);
     // A genuine two-run comparison naming both options and the leading-option flip.
-    expect(text).toContain('leading option has changed');
+    expect(text).toContain('option that scored highest most often in the model simulations has changed');
     expect(text).toContain('Freelance + Moderate Ad Spend');
     expect(text).toContain('Hire Marketing Manager');
+    // The distinct-hash pair is `compared`, not `same_inputs`.
+    expect(text).not.toContain(SAME_INPUTS_LEAD_TEXT);
     // The LLM adapter was never used — this deterministic answer is 0-LLM.
+  });
+
+  it('SAME INPUTS at both runs: the wire text leads with the attribution limit and survives egress unchanged', async () => {
+    // Turn 7 of the 5 Sep 2026 founder journey, at the route level: two
+    // successful runs on the same graph hash, a fresh verdict, a what_changed
+    // turn. The gate answers `same_inputs`; this asserts the composed text
+    // reaches the response through the real egress guards (forbidden-phrase,
+    // success-claim, leader alarm) without being replaced by the fallback.
+    mockState.priorFacts = sameInputsRuns();
+
+    const result = await runTurnExecutor(typedWhatChangedPill(), 'req-wc-same-inputs', {
+      routingAdapter: { chatWithTools: vi.fn() } as never,
+      graphState: READY_GRAPH as never,
+      chipClickForcedIntent: 'what_changed',
+    });
+
+    expect(gateSpy.forceIntents).toContain(true);
+    const text = assistantTextOf(result);
+    expect(text.startsWith(SAME_INPUTS_LEAD_TEXT)).toBe(true);
+    expect(text).toContain('Freelance + Moderate Ad Spend still leads.');
+    expect(text.endsWith(SAME_INPUTS_OFFER_TEXT)).toBe(true);
+    expect(text).not.toContain(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+  });
+
+  it("FREE-TEXT DOOR: the founder's verbatim turn-7 sentence reaches the gate by the regex, not the typed door, and gets the same-inputs answer", async () => {
+    // "How has the update changed the analysis?" typed as ordinary chat — no
+    // chip, no `chipClickForcedIntent` — on the two same-input runs. The spy
+    // records the executor passing `forceIntent: false`, so the free-text
+    // classifier is what admitted the turn.
+    mockState.priorFacts = sameInputsRuns();
+
+    const result = await runTurnExecutor(
+      makeMessagePayload({
+        scenario_id: SCENARIO_ID,
+        turn_id: `t-${randomUUID()}`,
+        message: 'How has the update changed the analysis?',
+        turn_class: 'decide',
+        stage: 'analyse',
+      }),
+      'req-wc-same-inputs-free-text',
+      {
+        routingAdapter: { chatWithTools: vi.fn() } as never,
+        graphState: READY_GRAPH as never,
+      },
+    );
+
+    expect(gateSpy.calls).toBeGreaterThanOrEqual(1);
+    expect(gateSpy.forceIntents).toContain(false);
+    expect(gateSpy.forceIntents).not.toContain(true);
+    const text = assistantTextOf(result);
+    expect(text.startsWith(SAME_INPUTS_LEAD_TEXT)).toBe(true);
+    expect(text).toContain('Freelance + Moderate Ad Spend still leads.');
+    expect(text.endsWith(SAME_INPUTS_OFFER_TEXT)).toBe(true);
+    expect(text).not.toContain(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
   });
 
   it('FAIL-CLOSED untouched: the same typed pill on a STALE model gets the honest re-run answer, never a comparison', async () => {
@@ -245,6 +326,6 @@ describe('F2 CHANGE B — typed what_changed pill dispatch', () => {
     expect(gateSpy.forceIntents).toContain(true);
     const text = assistantTextOf(result).toLowerCase();
     expect(text).toContain('re-run');
-    expect(text).not.toContain('leading option has changed');
+    expect(text).not.toContain('option that scored highest most often in the model simulations has changed');
   });
 });

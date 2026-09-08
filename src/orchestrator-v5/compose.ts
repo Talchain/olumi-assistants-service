@@ -51,15 +51,22 @@ import type { LensId } from './compose/lens-selector.js';
 // T1 claim safety — the SINGLE owner of "may a leading option be named" is
 // `deriveConstraintVerdict`, called ONCE in the run_analysis handler and
 // persisted on the fact there. This funnel READS that verdict; it does not
-// re-derive (CLAUDE.md trap #12). `mayNameLeadingOptionForFact` is the one
-// per-fact accessor, so the block funnel and the transport projection cannot
-// read it two different ways.
+// re-derive (CLAUDE.md trap #12).
+//
+// ⚠ THE ACCESSOR THIS FILE READS IS NOW `mayPresentLeaderClaimForFact`, NOT
+// `mayNameLeadingOptionForFact`. The leaf answers only the constraint-verdict
+// question and is unchanged; since the post-draft auto-run there is a SECOND,
+// independent reason a leader must not be shown — nobody asked for the analysis
+// — and the shared admission is where the two compose. Every surface that
+// decides what to SHOW about a leader reads the admission, so the block funnel,
+// the transport projection, the UI directives and the scenario read leg still
+// cannot read it two different ways. See
+// `compose/unrequested-analysis-confinement.ts`.
 import {
   buildDiscussedEntityUiDirective,
   buildFocusInspectorDirective,
 } from './compose/ui-directive.js';
 import {
-  mayNameLeadingOptionForFact,
   projectAnalysisSummaryForWithheldClaim,
   projectTransportEnrichmentForWithheldClaim,
   // E2 — imported so the clone-skip is DERIVED from the projection's own frozen
@@ -68,6 +75,10 @@ import {
   // free; a local literal here would silently keep cloning it.
   WITHHELD_DROPPED_ENRICHMENT_BLOBS,
 } from './compose/withheld-claim-projection.js';
+import {
+  confineUnrequestedAnalysisBlock,
+  mayPresentLeaderClaimForFact,
+} from './compose/unrequested-analysis-confinement.js';
 import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ordering.js';
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
@@ -680,7 +691,7 @@ function buildBlocksFromFacts(
     const mayNameLeadingOption =
       runAnalysisFact === undefined
         ? true
-        : mayNameLeadingOptionForFact(runAnalysisFact as RunAnalysisHandlerFact);
+        : mayPresentLeaderClaimForFact(runAnalysisFact as RunAnalysisHandlerFact);
     const directive = buildDiscussedEntityUiDirective(blocks, mayNameLeadingOption);
     if (directive !== null) {
       blocks.push(directive);
@@ -1166,17 +1177,27 @@ export function toSafeTransportEnrichment(
  *     toSafeTransportEnrichment) — transport-only, NOT the coaching contract.
  */
 /**
- * ⭐ EXPORTED for ROADMAP 2.1271 (the scenario-graph read leg's additive
- * analysis payload). Exported rather than reimplemented BECAUSE of what it does
- * internally: it reads the fact's own persisted claim-safety verdict
- * fail-closed and applies all three withheld projections. A second builder at
- * the read surface would be the leader-claim harm re-opened at a new seam.
- * See `routes/scenario-graph-analysis-read.ts` for the caller and for what that
+ * The UNCONFINED half. Private: {@link buildAnalysisResultBlock} is the only
+ * caller and the only export, so no seam can reach a block that has skipped the
+ * unrequested-run confinement.
+ *
+ * ⚠ THIS DOCSTRING PREVIOUSLY READ "⭐ EXPORTED for ROADMAP 2.1271 (the
+ * scenario-graph read leg's additive analysis payload)". That sentence is now
+ * about {@link buildAnalysisResultBlock} instead, and it is kept rather than
+ * deleted because its REASON is still load-bearing and is the reason this split
+ * is shaped the way it is: the read leg imports the one builder rather than
+ * reimplementing it, BECAUSE of what it does internally — it reads the fact's
+ * own persisted claim-safety verdict fail-closed and applies the withheld
+ * projections. A second builder at the read surface would be the leader-claim
+ * harm re-opened at a new seam. That argument now covers the confinement too,
+ * which is exactly why the confinement wraps THIS function rather than being
+ * applied at each of the three call sites.
+ * See `routes/scenario-graph-analysis-read.ts` for that caller and for what the
  * leg deliberately does NOT emit.
  */
-export function buildAnalysisResultBlock(
+function buildAnalysisResultBlockUnconfined(
   fact: RunAnalysisHandlerFact,
-): OlumiResponse['blocks'][number] {
+): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
   const { leading_option_id, summary, win_probabilities, enrichment, graph_hash_at_run } =
     fact.result;
   // T1 CLAIM SAFETY — THE STRUCTURED HALF (ROADMAP 1.218).
@@ -1189,7 +1210,31 @@ export function buildAnalysisResultBlock(
   // read — see compose/withheld-claim-projection.ts for what is dropped, why
   // `decision_review` goes whole while `decision_brief` does not, and why the
   // honest variant is ABSENCE rather than synthesised copy.
-  const mayNameLeadingOption = mayNameLeadingOptionForFact(fact);
+  //
+  // ⭐ TWO QUESTIONS, NAMED APART — never one widened predicate (CLAUDE.md
+  // trap 21, this estate's signature defect). Since R2
+  // (`handlers/auto-run-after-draft.ts`) a `run_analysis` fact can exist with
+  // no user click at all, and on 2026-09-03 a fresh guest was handed "Leading
+  // option · Ahead in 100% of simulated futures · Stable" on the first turn
+  // over a model with no user input. So there are now two independent reasons
+  // a leader must not be shown:
+  //
+  //   "does this run's PERSISTED CONSTRAINT VERDICT permit a leader claim?"
+  //       — `mayNameLeadingOptionForFact`, unchanged, still the sole reader of
+  //         `result.constraint_verdict`.
+  //   "did anybody ASK for this analysis?"
+  //       — `wasAnalysisRequestedByUser`, read from the one run-initiator
+  //         authority.
+  //
+  // Either closing is sufficient, so the withheld projection below serves both.
+  // ⚠ THEY ARE COMPOSED IN ONE PLACE, NOT CONJOINED HERE. An inline `&&` at
+  // this line is what the first cut did, and it left the six OTHER readers of
+  // the leaf on the narrower question — including the scenario read leg, whose
+  // `leader_claim.permitted` would then have granted the UI permission to name
+  // a leader this very block had just nulled. `mayPresentLeaderClaimForFact` is
+  // the one shared admission; see
+  // `compose/unrequested-analysis-confinement.ts` for that history.
+  const mayNameLeadingOption = mayPresentLeaderClaimForFact(fact);
   // E2 (ROADMAP 1.272) — the permission is read BEFORE the clone and the
   // drop-set is a frozen module constant, so on a withheld turn the blobs that
   // `projectTransportEnrichmentForWithheldClaim` discards whole are never
@@ -1281,6 +1326,29 @@ export function buildAnalysisResultBlock(
       ? { computed_against_hash: graph_hash_at_run }
       : {}),
   };
+}
+
+/**
+ * CONTAINMENT — an analysis nobody asked for makes no quantified claim.
+ *
+ * Wraps the builder above rather than being folded into it, so the two
+ * projections stay separable and the requested path stays byte-exact. The
+ * withheld projection inside `buildAnalysisResultBlockUnconfined` removes the
+ * LEADER claim (and, since this change, removes it on an unrequested run too);
+ * this removes the two things that ruling deliberately leaves standing — the
+ * per-option win probability and the robustness verdict — which are exactly
+ * what rendered "Ahead in 100% of simulated futures" and "Stable" on the
+ * witnessed fresh-guest screen.
+ *
+ * ⭐ IDENTITY ON EVERY USER-INITIATED RUN: `confineUnrequestedAnalysisBlock`
+ * returns its input object unchanged, by reference, whenever the user asked
+ * for the analysis. See `compose/unrequested-analysis-confinement.ts` for the
+ * full derivation, the two-questions argument, and what deliberately survives.
+ */
+export function buildAnalysisResultBlock(
+  fact: RunAnalysisHandlerFact,
+): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
+  return confineUnrequestedAnalysisBlock(buildAnalysisResultBlockUnconfined(fact), fact);
 }
 
 /**
@@ -1484,7 +1552,7 @@ function rebuildPhase3BlocksFresh(
   // withheld turn the suggestion is dropped by the filter below. A companion
   // that survived would be a structured decision-science artefact standing alone
   // on exactly the turn whose disclosure says no option can be put forward.
-  if (mayNameLeadingOptionForFact(fact)) {
+  if (mayPresentLeaderClaimForFact(fact)) {
     // Observability at the WIRE decision, not at construction: a companion that
     // survived its builder but was dropped here would otherwise be reported as
     // emitted on precisely the turns where it was suppressed.

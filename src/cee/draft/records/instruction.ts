@@ -220,10 +220,11 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   what people believe is behind a problem — "some think the product has fallen
   behind", "the CFO believes we raised prices too aggressively" — each of those
   spans answers WHY, and an answer is true or false rather than something the
-  user carries out. It is not a stated_item of any kind: the four above are the
-  only values \`kind\` takes, and there is no fifth. Put the span in
-  \`claims\` instead, with \`claim_kind\` \`factor\` for what it says varies
-  and \`risk\` for what it says threatens the goal.
+  user carries out. Quote it as a stated_item with \`kind\` \`cause\`. It is
+  their words, so it belongs in stated_items; it is an explanation, so it is not
+  an \`option\`. Filing one as an \`option\` puts it on the graph to be scored
+  and ranked, and the product then computes a win probability for something
+  nobody can decide to do.
   Keep every one of them. A disagreement about causes IS the reasoning the user
   arrived with, and a hypothesis dropped to tidy the graph removes the thing
   they are arguing about.
@@ -242,6 +243,9 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
   they must stay below.
+- \`cause\` — an explanation the user offered for why something is happening: a
+  hypothesis, whoever holds it. Keep every one the brief carries. See the
+  \`option\` entry above for why a cause is never an option.
 - \`figure\` — a quantity the user stated
 Set \`value\` and \`unit\` when the user gave a number. Do not invent a number the
 user did not state, and do not round or rescale one they did.
@@ -269,6 +273,19 @@ Use \`claim_kind\`:
   course of action and the option is one you are proposing. Either way it
   becomes an option to compare, and it is yours rather than theirs.
 - \`prior\` — what you believe about a quantity, and how sure you are
+
+\`label\` NAMES the thing, in a few words. Every claim except a \`causal_link\`
+becomes a node on the canvas, and \`label\` is the name the user reads on it:
+"Tech Lead Hiring Time", "LLM Serving Cost", "Engineering Attrition Risk". A
+name is not a sentence. Do not write what you believe about the thing, what it
+does, how long it takes or how sure you are — the node is a place to hang that,
+not the statement of it. A \`prior\` is named the same way as any other claim:
+name the QUANTITY you hold a belief about, not the belief.
+A \`causal_link\` is the exception, because it becomes an arrow rather than a
+node: describe the relationship there as fully as you need to.
+Two nodes must not end up reading the same. The canvas shows a title over two
+lines and clips the rest, so two long names that begin alike are one name to the
+person looking at them.
 
 Name a result an \`outcome\` and a downside a \`risk\`. Do not file either as a
 \`factor\`: a factor is something that VARIES on the way to a result, and calling

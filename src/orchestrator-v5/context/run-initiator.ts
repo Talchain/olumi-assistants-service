@@ -6,6 +6,33 @@
  * asking for one: `scheduleAutoRunAfterFreshDraft` dispatches a server-initiated
  * provisional run after every admissible fresh draft
  * (`handlers/auto-run-after-draft.ts`, single call site `orchestrator/route-v2.ts`).
+ *
+ * ⚠⚠ DELETED BY #1298 AND RESTORED THE SAME DAY (2026-09-01) — HISTORY KEPT
+ * RATHER THAN OVERWRITTEN (trap 14), BECAUSE THE DELETION'S RATIONALE READS AS
+ * SETTLED AND IS NOT. #1298 removed this writer, reasoning from the founder's
+ * verdict ("far too focused on the analysis rather than enhancing reasoning")
+ * that the auto-run was the mechanism. **The founder corrected that directly:**
+ * the initial analysis is deliberate — it exists to give richer material for
+ * critical and creative thinking — and the real defect was that we never made
+ * clear the pass is AI-ONLY and UNCONFIRMED. The behaviour is restored verbatim
+ * from `cb36b1ea^`; the labelling is the part that changed
+ * (`AUTO_RUN_PROVISIONAL_DISCLOSURE` in `handlers/chip-click-dispatch.ts`).
+ * ⭐ Do not re-derive #1298's conclusion from this module's shape.
+ *
+ * ── ⭐ ONE PRODUCER, MEASURED — NOT ASSUMED ────────────────────────────────
+ * The hazard #1298 flagged is that a restored writer would give
+ * `enrichment.run_provenance` TWO producers (this estate's chronic defect).
+ * MEASURED at the restore commit with `rg -a` over `src/` + `tests/`, with the
+ * contrast control in the same sweep: while the writer was deleted there were
+ * ZERO production callers of {@link buildAutoRunProvenance} (only two spec
+ * files, `coaching-auto-run-delivered` and `coaching-phantom-prior-run`), so
+ * restoring `stampAutoRunProvenance` returns the count to EXACTLY ONE, which is
+ * the pre-#1298 shape. Same result for the wire signal it carries: `running`
+ * had ZERO producers of `run_state.kind === 'running'` while the contrast
+ * control `kind: 'never_run'` read one (`compose/analysis-state-v1.ts`), so the
+ * restored `autoRunInFlight` thread is again the single producer named in L-A.
+ * ⚠ If you add a second writer of either, you have reopened the defect —
+ * this module is the one owner and both ends import from here.
  * That fact is real, it is persisted, and it is the CURRENT analysis for the
  * graph — freshness and the analysis projection are right to read it.
  *

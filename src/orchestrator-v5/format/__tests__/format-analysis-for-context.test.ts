@@ -903,10 +903,11 @@ describe('ROADMAP 2.54b VOI never-silent disclosure', () => {
     expect(out!).not.toHaveProperty('value_of_information');
     const note = out!.value_of_information_note!;
     expect(note).toBeDefined();
-    // The operative instruction: no VOI superlatives, use influence instead.
-    expect(note).toContain('highest');
-    expect(note.toLowerCase()).toContain('value of information');
-    expect(note.toLowerCase()).toContain('influence');
+    // This channel cannot license a priority, but must not veto independent
+    // EVPPI guidance or promote influence into information value.
+    expect(note).toContain('evidence-gap');
+    expect(note).toContain('do not infer an information-value priority');
+    expect(note).toContain('influence alone');
     assertNoNumbersAnywhere(out);
   });
 
@@ -915,9 +916,9 @@ describe('ROADMAP 2.54b VOI never-silent disclosure', () => {
     expect(out!).not.toHaveProperty('value_of_information');
     const note = out!.value_of_information_note!;
     expect(note).toBeDefined();
-    expect(note.toLowerCase()).toContain('no value-of-information scores are available');
-    expect(note).toContain('highest');
-    expect(note.toLowerCase()).toContain('influence');
+    expect(note).toContain('no evidence-gap coaching scores are available in this channel');
+    expect(note).toContain('do not infer an information-value priority');
+    expect(note).toContain('influence alone');
   });
 
   it('discloses lever-only VOI when the D-U suppression emptied the section (reuses the allowlisted lever signal)', () => {
@@ -933,8 +934,8 @@ describe('ROADMAP 2.54b VOI never-silent disclosure', () => {
     // Coherent with the zeroed-lever doctrine: options-set factors are not
     // independent uncertainties to investigate.
     expect(note.toLowerCase()).toContain('option');
-    expect(note).toContain('highest');
-    expect(note.toLowerCase()).toContain('influence');
+    expect(note).toContain('do not infer an information-value priority');
+    expect(note).toContain('influence alone');
   });
 
   it('prefers the all-zero disclosure when survivors exist alongside lever suppression', () => {
@@ -944,7 +945,7 @@ describe('ROADMAP 2.54b VOI never-silent disclosure', () => {
         evidence_gaps_lever_suppressed: true,
       }),
     );
-    expect(out!.value_of_information_note!.toLowerCase()).toContain('near zero');
+    expect(out!.value_of_information_note!).toContain('evidence-gap coaching scores are all below the display threshold');
   });
 
   it('does NOT emit a false zero-VOI note when the list was dropped by the char budget', () => {

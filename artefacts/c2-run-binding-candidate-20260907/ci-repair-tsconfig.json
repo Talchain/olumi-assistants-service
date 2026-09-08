@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "src/orchestrator-v5/context/cqe/compromise-numbers.d.ts",
+    "src/orchestrator-v5/context/analysis-interpretation-identity.ts",
+    "src/orchestrator-v5/context/__tests__/analysis-interpretation-identity.test.ts",
+    "src/orchestrator-v5/compose/analysis-state-v1.ts",
+    "src/orchestrator-v5/response-finaliser.ts",
+    "src/routes/scenario-graph-analysis-read.ts",
+    "src/orchestrator-v5/__tests__/c2-analysis-interpretation-composition.test.ts",
+    "src/routes/__tests__/c2-analysis-interpretation-restore.test.ts",
+    "src/orchestrator-v5/compose/__tests__/leader-claim-not-evaluated.test.ts",
+    "src/routes/__tests__/assist.v1.scenario-graph.analysis-read.test.ts",
+    "tests/integration/orchestrator/route-v2-run-delta-threading.test.ts"
+  ]
+}

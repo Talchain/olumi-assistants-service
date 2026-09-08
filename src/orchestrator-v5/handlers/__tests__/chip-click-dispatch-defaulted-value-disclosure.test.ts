@@ -9,7 +9,7 @@
  * detects the chip shape and calls `dispatchDeterministicChipClick` instead.
  * That turn is the one that ships
  *
- *   "… came out ahead in NN% of runs of this model."
+ *   "… scored highest against your goal in NN% of runs of this model."
  *
  * (`coaching/analysis-result-headline.ts`, reaching the user through the
  * validation registry's confirmation template), which is the single most
@@ -181,10 +181,10 @@ function snapshot(): RunAnalysisScenarioSnapshot {
 
 /**
  * THE LIVE HEADLINE SHAPE. `analysis-result-headline.ts` mints
- * `came out ahead in ${leadPercent}% of runs of this model` — the sentence the
+ * `scored highest against your goal in ${leadPercent}% of runs of this model` — the sentence the
  * user reads on an analysis-completion chip turn.
  */
-const HEADLINE = 'Launch now came out ahead in 62% of runs of this model.';
+const HEADLINE = 'Launch now scored highest against your goal in 62% of runs of this model.';
 
 function handlerOutcome(enrichment: Record<string, unknown>) {
   return {
@@ -248,12 +248,17 @@ beforeEach(() => {
   enrichRunAnalysisMock.mockImplementation(
     async ({ handlerFacts }: { handlerFacts: unknown[] }) => handlerFacts,
   );
-  commitDirectAnswerMock.mockResolvedValue({
-    response: {},
+  // The real chokepoint RETURNS the response it committed: the SAME object on
+  // the untouched fast path, an AMENDED copy when it attached the F-HELD lapse
+  // notice or suppressed competing run_analysis chips. `response: {}` misstated
+  // that contract, and the dispatcher now CONSUMES the returned value, so the
+  // stub has to echo (CLAUDE.md trap 12 — a stub is a hand-maintained mirror).
+  commitDirectAnswerMock.mockImplementation(async (r: unknown) => ({
+    response: r,
     performed: true,
     persisted_row_id: 'row-1',
     graphPersisted: false,
-  });
+  }));
 });
 
 describe('chip-click run_analysis — F6 defaulted-value disclosure (WIRING)', () => {
@@ -276,7 +281,7 @@ describe('chip-click run_analysis — F6 defaulted-value disclosure (WIRING)', (
     const text = out.response.assistant_text ?? '';
     expect(occurrences(text, DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
     // The headline SURVIVES — this layer qualifies, it never withholds.
-    expect(text).toContain('came out ahead in 62% of runs');
+    expect(text).toContain('scored highest against your goal in 62% of runs');
   });
 
   it('emits the guard telemetry tagged to the chip dispatch path', async () => {
@@ -312,7 +317,7 @@ describe('chip-click run_analysis — F6 defaulted-value disclosure (WIRING)', (
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
     const text = out.response.assistant_text ?? '';
     expect(text).not.toContain(DEFAULTED_DISCLOSURE_TAIL);
-    expect(text).toContain('came out ahead in 62% of runs');
+    expect(text).toContain('scored highest against your goal in 62% of runs');
     expect(egressEvent()).toBeUndefined();
   });
 

@@ -5,8 +5,8 @@
  * THE DEFECT. `composeComparison` received ONE permission and composed BOTH
  * runs' leaders from it:
  *
- *     "The leading option has changed. ${prior} came out ahead before,
- *      and ${current} now leads."
+ *     "The option most likely to serve your goal has changed. ${prior} came out ahead before,
+ *      and ${current} scores highest now."
  *
  * The caller supplies the TURN's permission, which #730 reads off the
  * scenario's newest CLAIM-BEARING fact — a fact that speaks for the current run
@@ -50,9 +50,15 @@ import type { V2RunResponseEnvelope } from '../../../orchestrator/types.js';
 // Fixtures. Self-contained; no shared integration mocks.
 // ---------------------------------------------------------------------------
 
+/**
+ * ⚠ `nSamples` IS REQUIRED, NOT DEFAULTED — see the sibling note in
+ * `run-comparison-gate.test.ts`. The margin sentence this suite's
+ * PERMITTED/PERMITTED control asserts needs evidence the quantity moved.
+ */
 function envelope(
   options: Array<{ id: string; label: string; win: number }>,
   band: string,
+  nSamples: number | null,
 ): V2RunResponseEnvelope {
   return {
     analysis_status: 'completed',
@@ -60,10 +66,14 @@ function envelope(
       option_id: o.id,
       option_label: o.label,
       win_probability: o.win,
+      ...(nSamples === null ? {} : { outcome: { n_samples: nSamples } }),
     })),
     robustness_synthesis: { overall_assessment: band },
   } as unknown as V2RunResponseEnvelope;
 }
+
+/** The capture's real Monte-Carlo budget (2026-09-03, all three options). */
+const N = 10_000;
 
 /**
  * How a run's claim-safety verdict is recorded on the persisted fact.
@@ -75,10 +85,17 @@ function envelope(
  */
 type VerdictShape = 'permitted' | 'withheld' | 'unstamped';
 
+/**
+ * `hash` is explicit (2026-09-06): the gate now answers `same_inputs` on two
+ * EQUAL hashes. This suite's pair models a model that CHANGED between the runs
+ * (leader flip, band shift), so `ask` gives the two runs distinct hashes and
+ * every case below stays in `compared`, as it always described.
+ */
 function runFact(
   env: V2RunResponseEnvelope,
   shape: VerdictShape,
   computedAt: string,
+  hash: string,
 ): HandlerFact {
   return {
     fact_type: 'run_analysis',
@@ -86,7 +103,7 @@ function runFact(
     result: {
       enrichment: env,
       computed_at: computedAt,
-      graph_hash_at_run: 'h',
+      graph_hash_at_run: hash,
       ...(shape === 'unstamped'
         ? {}
         : {
@@ -106,6 +123,7 @@ const PRIOR_ENV = envelope(
     { id: 'b', label: 'Onshore', win: 0.38 },
   ],
   'low',
+  N,
 );
 const CURRENT_ENV = envelope(
   [
@@ -113,6 +131,7 @@ const CURRENT_ENV = envelope(
     { id: 'a', label: 'Offshore', win: 0.45 },
   ],
   'high',
+  N,
 );
 
 const PRIOR_LEADER = 'Offshore';
@@ -131,8 +150,8 @@ function ask(prior: VerdictShape, current: VerdictShape, turn = true) {
     message: 'What changed?',
     // Newest-first, per the loader convention the pair selector relies on.
     priorFacts: [
-      runFact(CURRENT_ENV, current, '2026-06-07T00:00:00.000Z'),
-      runFact(PRIOR_ENV, prior, '2026-06-06T00:00:00.000Z'),
+      runFact(CURRENT_ENV, current, '2026-06-07T00:00:00.000Z', 'h-current'),
+      runFact(PRIOR_ENV, prior, '2026-06-06T00:00:00.000Z', 'h-prior'),
     ],
     freshness: 'fresh',
     mayNameLeadingOption: turn,
@@ -157,8 +176,8 @@ const FOLLOW_UP = 'If you want to test this further, ask what would change the r
 describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', () => {
   it('does NOT name the prior run\'s leading option', () => {
     // ⭐ THE DEFECT, in one assertion. Before the fix this text read
-    // "The leading option has changed. Offshore came out ahead before, and
-    // Onshore now leads." — the prior run's withheld leader, named verbatim
+    // "The option most likely to serve your goal has changed. Offshore came out ahead before, and
+    // Onshore scores highest now." — the prior run's withheld leader, named verbatim
     // under the current run's permission.
     const text = textOf(ask('withheld', 'permitted'));
     expect(text).not.toContain(PRIOR_LEADER);
@@ -173,13 +192,13 @@ describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', (
   });
 
   it('makes NO cross-run claim — no "has changed", no "still", no margin shift', () => {
-    // The implication channel. "The leading option has changed" plus a named
+    // The implication channel. "The option that scored highest most often in the model simulations has changed" plus a named
     // current leader determines the prior leader by elimination on a two-option
     // model; "still leads" asserts the prior leader WAS this option, which is a
     // designation of the withheld run's leader in a sentence that never names
     // it. Both are cross-run claims and both require both permissions.
     const text = textOf(ask('withheld', 'permitted'));
-    expect(text).not.toMatch(/leading option has changed/i);
+    expect(text).not.toMatch(/option that scored highest most often in the model simulations has changed/i);
     expect(text).not.toMatch(/\bstill leads\b/i);
     expect(text).not.toMatch(/came out ahead before/i);
     expect(text).not.toMatch(/its lead has (?:widened|narrowed)/i);
@@ -207,15 +226,15 @@ describe('run-comparison: a WITHHELD prior run under a PERMITTED current run', (
 // ---------------------------------------------------------------------------
 
 describe('run-comparison: the four per-run permission combinations', () => {
-  it('PERMITTED / PERMITTED — byte-identical to the pre-fix answer (POSITIVE CONTROL)', () => {
+  it('PERMITTED / PERMITTED — retains the scoped comparison and margin (POSITIVE CONTROL)', () => {
     // Pinned to the FULL string, not to fragments. This is the control that
     // makes every absence assertion in this file non-vacuous: it proves the
     // fixture produces a real, leader-naming, margin-carrying comparison, so
     // the "not.toContain" assertions elsewhere are measuring suppression rather
-    // than an empty answer. It is also the one-directionality proof at the
-    // bytes — this branch must not move at all.
+    // than an empty answer. The comparison is scoped to score frequency, not
+    // likelihood of meeting a target; the margin and band remain available.
     expect(textOf(ask('permitted', 'permitted'))).toBe(
-      'The leading option has changed. Offshore came out ahead before, and Onshore now leads.'
+      'The option that scored highest most often in the model simulations has changed. Offshore scored highest most often in the earlier run, and Onshore scored highest most often in the latest run.'
         + ' Its lead has narrowed by about 14 percentage points.'
         + ` ${BAND_SENTENCE}`
         + ` ${FOLLOW_UP}`,
@@ -230,7 +249,7 @@ describe('run-comparison: the four per-run permission combinations', () => {
 
   it('WITHHELD / PERMITTED — the current leader, and an honest gap where the prior one was', () => {
     expect(textOf(ask('withheld', 'permitted'))).toBe(
-      'Onshore leads on the latest result.'
+      'Onshore scored highest on the latest result.'
         + ` ${WITHHELD_PRIOR_LEADER_COMPARISON_TEXT}`
         + ` ${BAND_SENTENCE}`
         + ` ${FOLLOW_UP}`,
@@ -245,7 +264,7 @@ describe('run-comparison: the four per-run permission combinations', () => {
     // through to a neighbouring branch degrades however the last `else` was
     // written, which is not "degrades honestly".
     expect(textOf(ask('permitted', 'withheld'))).toBe(
-      'Offshore came out ahead in the earlier run.'
+      'Offshore scored highest in the earlier run.'
         + ` ${WITHHELD_CURRENT_LEADER_COMPARISON_TEXT}`
         + ` ${BAND_SENTENCE}`
         + ` ${FOLLOW_UP}`,

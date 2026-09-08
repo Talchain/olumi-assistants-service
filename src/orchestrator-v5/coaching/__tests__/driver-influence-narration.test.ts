@@ -169,7 +169,7 @@ describe('DGAI #341 — headline driver claim derives from influence_score', () 
       status_kind: 'ok',
     });
     expect(text).not.toBeNull();
-    expect(text).toContain('came out ahead in 86% of runs of this model');
+    expect(text).toContain('scored highest against your goal in 86% of runs of this model');
     expect(text).not.toContain('strongest driver');
     expect(text).not.toContain('Market Timing Pressure');
     // Wiring check: the composed text passes the registry allowlist so the
@@ -410,7 +410,8 @@ describe('DGAI #341 — advice gate does not superlativise a near-zero driver', 
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.assistant_text).toContain('the strongest sensitivity is on Delivery risk');
+      expect(out.assistant_text).toContain('The analysis is sensitive to Delivery risk');
+      expect(out.assistant_text).toContain('Sensitivity alone does not establish where research would be most valuable');
     }
   });
 });

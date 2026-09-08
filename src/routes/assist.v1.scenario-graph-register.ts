@@ -144,6 +144,7 @@ import { appendCheckedGraphWrite } from "../orchestrator-v5/persist-graph-write.
 import { PersistedGraphInvariantError } from "../orchestrator-v5/persisted-graph-invariants.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { GraphStaleWriteError } from "../orchestrator-v5/session/store.js";
+import { normaliseBriefText } from "../orchestrator-v5/session/normalise-brief-text.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
 import { getRequestId } from "../utils/request-id.js";
@@ -271,6 +272,17 @@ export default async function route(app: FastifyInstance) {
       }
 
       const body = (req.body ?? {}) as Record<string, unknown>;
+      // Additive initial-context contract: string or absent/null. Reuse the
+      // canonical brief bound, but reject truncation instead of losing words.
+      // This is outside the graph/hash and uses the SAME atomic append below:
+      // the RPC seeds only an empty brief_text, preserving existing user text.
+      if (body.brief_text != null && typeof body.brief_text !== "string") {
+        return invalid("BRIEF_INVALID", "`brief_text` must be a string when supplied.");
+      }
+      const brief = normaliseBriefText(body.brief_text);
+      if (brief.truncated) {
+        return invalid("BRIEF_INVALID", "`brief_text` exceeds the supported brief length.");
+      }
       const submitted = body.graph;
       if (submitted === null || typeof submitted !== "object" || Array.isArray(submitted)) {
         return invalid("GRAPH_MISSING", "A `graph` object is required.");
@@ -470,6 +482,7 @@ export default async function route(app: FastifyInstance) {
             duration_ms: Date.now() - startedAt,
             handler_facts: [],
             graph: graphForStore,
+            ...(brief.value === undefined ? {} : { briefText: brief.value }),
             expectedGraphIdentityHash,
             expectedGraphAnalysisHash,
           },

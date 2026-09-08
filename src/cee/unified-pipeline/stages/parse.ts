@@ -46,6 +46,7 @@ import { log, emit, calculateCost, TelemetryEvents } from "../../../utils/teleme
 import { detectStrengthDefaultsV1 } from "../../validation/integrity-sentinel.js";
 import { STRENGTH_DEFAULT_RETRY_NUDGE, DRAFT_LEAN_RETRY_DIRECTIVE } from "../../constants.js";
 import { DRAFT_SOFT_NODE_CAP, DRAFT_SOFT_EDGE_CAP } from "../../draft/anthropic-graph-schema.js";
+import { optionFramingRecovery } from "../../draft/records/option-framing-recovery.js";
 
 /**
  * Stage 1: Parse — LLM draft + adapter normalisation.
@@ -873,6 +874,14 @@ export async function runStageParse(ctx: StageContext): Promise<void> {
   }
 
   ctx.graph = graph as any;
+
+  // The adapter already excluded invalid question-options. Refuse an incomplete
+  // choice set before repair or GRAPH_READY; preserve useful alternatives.
+  const framingRecovery = optionFramingRecovery(graph.nodes, ctx.recordDisclosures, ctx.requestId);
+  if (framingRecovery) {
+    ctx.earlyReturn = framingRecovery;
+    return;
+  }
 
   // ── Cardinality drift alarm (v12 — 2026-07-23, lean-draft contract) ──────
   // Anthropic structured outputs cannot cap array length (maxItems → HTTP 400),

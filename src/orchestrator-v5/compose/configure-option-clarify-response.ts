@@ -144,8 +144,50 @@ export const QUALITATIVE_VALUE_KNOWN_DROPPED: readonly string[] = [
  * only requires a digit after `to`, so a decimal is accepted exactly as the
  * placeholder form was. The 0-to-1 meaning is still glossed in the next
  * sentence — the gloss was never the problem; the placeholder was.
+ *
+ * ⭐⭐⭐ IT IS NOW A PERCENTAGE, AND THAT MAKES THE PRODUCT SAY ONE THING.
+ *
+ * ⛔ THE DEFECT, and it is a Monday-tester defect rather than a subtle one:
+ * this branch taught `… to 0.6` while the IDENTIFIED branches — and the
+ * on-screen readiness ask — taught {@link MISSING_VALUE_ASK_FORMAT_HINT},
+ * *"Just the percentage is enough"*. **One product, two different instructions
+ * about what to type, reachable in one session.** And `0.6` is Olumi's internal
+ * normalised coefficient, which the founder ruling (30 Aug 2026) says a
+ * strategic user must never be asked to understand. This was the last
+ * user-facing copy branch still leaking it.
+ *
+ * ⚠⚠ THE REASON IT COULD NOT BE FIXED BEFORE HAS GONE FALSE, AND THE WITHDRAWN
+ * TEXT IS QUOTED RATHER THAN DELETED (trap 14). The `⛔⛔` note further down
+ * this file said the two forms could not be paired because:
+ *
+ *   "the obvious combination — `Set the X option's effect on Y to 60%` — is
+ *    refused by BOTH readers. Measured at the head:
+ *      resolveOptionEffectWrite("…to 60%") → { matched: false,
+ *                                              reason: 'no_single_unit_scale_value' }"
+ *
+ * **That was true when written and is false at this tip.** The percent
+ * conversion landed in `option-effect-write.ts` on 30 Aug 2026
+ * (`VALUE_ASSIGNMENT`'s `(\s*%)?` capture, `readValueAssignments`), and that
+ * file's own header already records a pinned reason going false for exactly the
+ * same cause. RE-MEASURED here against the WIRE-WITNESSED graph fixture
+ * (`__tests__/fixtures/witness-2026-08-17/j4-wrong-entity-write.json`), both
+ * controls firing — the witnessed advised sentence MATCHES, `hello there`
+ * declines:
+ *
+ *   "…to 60%"        readOptionEffectValue 0.6   resolveOptionEffectWrite MATCHED
+ *   "…to 12%"        readOptionEffectValue 0.12  resolveOptionEffectWrite MATCHED
+ *   "…to 0.6"        readOptionEffectValue 0.6   resolveOptionEffectWrite MATCHED
+ *   "…to 150%"       readOptionEffectValue null  declined(no_single_unit_scale_value)
+ *   "…to £40000"     readOptionEffectValue null  declined(no_single_unit_scale_value)
+ *   "…to 60 percent" readOptionEffectValue null  declined(no_single_unit_scale_value)
+ *
+ * ⚠ SO THE GLYPH, NEVER THE WORD. `60 percent` is refused by THIS writer (the
+ * effect-value binder accepts it; this one does not), and advertising it would
+ * be the same P8 violation one notation over. The pairing is pinned by
+ * `configure-option-copy-detector-contract.test.ts`, which drives the advised
+ * sentence built from THIS constant through the real detector.
  */
-export const CONFIGURE_OPTION_EXAMPLE_VALUE = '0.6';
+export const CONFIGURE_OPTION_EXAMPLE_VALUE = '60%';
 
 /**
  * Reply shapes this module KNOWINGLY CANNOT READ, pinned as data so the suite
@@ -508,33 +550,43 @@ export function composeConfigureOptionClarifyResponse(
         // must stay a bare decimal because `readOptionEffectValue`
         // (`option-effect-write.ts:365`) declines a percent sign.
         //
-        // ⚠ STATED RESIDUAL: this is the one branch where the internal
-        // representation is still shown, and it is unavoidable HERE today.
-        // Closing it means teaching the routing form to read a percent, which
-        // lives in `option-effect-write.ts` — a shared writer this lane does not
-        // own. The IDENTIFIED branches, which are the common path, now carry the
-        // human anchors instead.
+        // ⚠⚠ THE TWO NOTES THAT USED TO SIT HERE ARE WITHDRAWN AS OF THIS
+        // CHANGE, AND ARE QUOTED RATHER THAN DELETED, because the estate's
+        // record of how a false reason got here is what stops it returning
+        // (trap 14 — a confession must not be tidied into an excuse):
         //
-        // ⛔⛔ AND THAT IS EXACTLY WHY THE HINT IS NOT APPENDED HERE. This lane
-        // shipped `MISSING_VALUE_ASK_FORMAT_HINT` on this branch and, in doing
-        // so, made a previously SELF-CONSISTENT branch contradictory: it
-        // advertised the bare-decimal sentence AND the percentage anchors in one
-        // breath, so the obvious combination —
-        //   `Set the X option's effect on Y to 60%`
-        // — is refused by BOTH readers. Measured at the head:
-        //   resolveOptionEffectWrite("…to 60%") → { matched: false,
-        //                                          reason: 'no_single_unit_scale_value' }
+        //   "⚠ STATED RESIDUAL: this is the one branch where the internal
+        //    representation is still shown, and it is unavoidable HERE today.
+        //    Closing it means teaching the routing form to read a percent, which
+        //    lives in `option-effect-write.ts` — a shared writer this lane does
+        //    not own."
         //
-        // That is a P8 violation authored by the very PR whose headline
-        // invariant is P8 — the ask and the acceptance share one owner so they
-        // cannot drift. The two forms have DIFFERENT owners and different
-        // readers, and pairing them in one sentence is what broke it.
+        //   "⛔⛔ AND THAT IS EXACTLY WHY THE HINT IS NOT APPENDED HERE … the
+        //    obvious combination — `Set the X option's effect on Y to 60%` — is
+        //    refused by BOTH readers. Measured at the head:
+        //      resolveOptionEffectWrite("…to 60%") → { matched: false,
+        //                                             reason: 'no_single_unit_scale_value' }"
         //
-        // ⭐ SO THIS BRANCH ADVERTISES EXACTLY ONE FORM, the one its own reader
-        // accepts, and is pinned that way by
-        // `__tests__/repair-chip-identification-complete.test.ts`. The percentage
-        // anchors belong to the IDENTIFIED branches, where the binder that reads
-        // them is the one that runs.
+        // ⭐⭐ BOTH WERE TRUE WHEN WRITTEN AND ARE FALSE AT THIS TIP. The
+        // percent conversion the first note called out-of-reach LANDED on
+        // 30 Aug 2026 inside `option-effect-write.ts` itself, so the second
+        // note's measurement is stale by the same event. RE-MEASURED against the
+        // wire-witnessed graph fixture with both controls firing:
+        // `"…to 60%"` reads 0.6 and MATCHES. The full table, and the reason the
+        // GLYPH is advertised and the WORD (`60 percent`) is not, are on
+        // `CONFIGURE_OPTION_EXAMPLE_VALUE`.
+        //
+        // ⭐ SO THIS BRANCH NOW ADVERTISES A PERCENTAGE — the same notation the
+        // identified branches and the on-screen readiness ask teach. The product
+        // said two different things about what to type; it now says one. The
+        // sentence still names the PAIR, because this branch is reached exactly
+        // when the product does not know which pair is meant, and that is a
+        // different question from which NOTATION the value uses.
+        //
+        // ⚠ The hint itself is still NOT appended here: this branch needs the
+        // user to NAME the pair, and the hint's "just the percentage is enough"
+        // is true of the identified ask and false of this one. Pinned by
+        // `__tests__/repair-chip-identification-complete.test.ts`.
         `Tell me what it changes, like this: ${example}`,
       ].join(' ');
 

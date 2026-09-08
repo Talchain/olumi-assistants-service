@@ -84,10 +84,18 @@ import {
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
 import { boundNodeLabel } from "./label-bound.js";
-import { deriveGoalObjectiveLabel, deriveDecisionLabel } from "./objective-label.js";
+import { isNameShapedLabel } from "./claim-label-shape.js";
+import {
+  deriveGoalObjectiveLabel,
+  deriveDecisionLabel,
+  refusalDeniesObjecthood,
+  deliberationFrameOpensTheSpan,
+  type AuthoredLabel,
+} from "./objective-label.js";
 import type {
   DraftInferenceClaim,
   DraftRecordRole,
+  DraftRecordStatedKind,
   DraftRecordSet,
   DraftStatedItem,
 } from "./grammar.js";
@@ -141,6 +149,17 @@ export const PROJECTOR_STRUCTURAL_CLASS: RecordProvenanceClass = "projector_stru
 export function scaffoldingProvenance(quote: string): RecordProvenance {
   return { provenance_class: PROJECTOR_STRUCTURAL_CLASS, source: "synthetic", quote };
 }
+
+/**
+ * The disclosure for a goal whose SPAN the user wrote but never designated as
+ * the objective. Exported so guards bind to it by identity rather than by
+ * copying the string (trap 19).
+ *
+ * ⚠ 58 characters — `StructuredProvenance.quote` is `z.string().max(100)`, and
+ * it describes what the machine did. It is NEVER user text.
+ */
+export const GOAL_SPAN_CHOSEN_BY_CEE =
+  "Goal span chosen by CEE: the brief designates no objective";
 
 /**
  * ⭐ THE TWO FIELDS THE CONSUMER REQUIRES, AND WHY THESE VALUES.
@@ -241,6 +260,35 @@ export interface RecordProvenance {
    */
   readonly merged_refinements?: readonly string[];
   /**
+   * Labels of `factor` claims merged into this STATED cause. The cause-side twin
+   * of `merged_refinements`, kept apart from it for the same reason the
+   * disclosure reasons are: a restatement of an explanation is not a refinement
+   * of an alternative. APPEND-ONLY and additive.
+   *
+   * ⭐ THE COMPLETE READER MANIFEST for the twin field `merged_refinements`,
+   * swept with `rg -a` across the whole repo (contrast control:
+   * `undeveloped_duplicates`, its same-family sibling, present in 3 files). FOUR
+   * sites in `src/`, and each is named with its verdict rather than left to be
+   * inferred from a count — an absence claim needs the manifest, not a number:
+   *
+   *   · `completion.ts` content accounting  — TWIN ADDED. Without it a
+   *     legitimately-absorbed label reads as lost content and a FALSE completion
+   *     gap is manufactured.
+   *   · `completion.ts` reclassification guard — TWIN ADDED. It watched only the
+   *     option-side receipt, so a completion pass could silently drop a label
+   *     the cause-side merge had absorbed. An asymmetric guard is a guard
+   *     watching one door.
+   *   · `projector.ts` the write site — this file.
+   *   · `option-framing.ts` the recovery receipt — **DELIBERATELY NOT TWINNED,
+   *     and listed here so the absence is a decision rather than an omission.**
+   *     `recoverableRefinement` runs only on a node carrying a
+   *     `decision_framing_not_an_option` disclosure, which is raised on OPTION
+   *     nodes. A merged cause is a FACTOR node and can never reach it, so a
+   *     cause-side branch there would be unreachable code pretending to be
+   *     coverage.
+   */
+  readonly merged_restatements?: readonly string[];
+  /**
    * Labels of MODEL options withdrawn because their intervention signature was
    * identical to this one's (`undeveloped_duplicate_of_*`). APPEND-ONLY, and
    * DELIBERATELY NOT `merged_refinements`: a demote is not a merge. Nothing of
@@ -290,6 +338,13 @@ export interface RecordProvenance {
    * — `deriveGoalObjectiveLabel` returns the two together from one computation.
    */
   readonly label_authored?: boolean;
+  /**
+   * TRUE when the label is the generic mint rather than a derived or
+   * user-chosen name — see `NodeV3.label_placeholder` for the two questions
+   * this keeps apart. DERIVED from the producer's own refusal
+   * (`authored === false`), never from a string comparison.
+   */
+  readonly label_placeholder?: boolean;
 }
 
 /** A reference the model emitted that the projector could not resolve. */
@@ -408,6 +463,18 @@ export interface DroppedRecordRef {
      */
     | "refinement_merged_into_stated_option"
     /**
+     * ⭐ THE CAUSE-SIDE TWIN, NAMED APART ON PURPOSE (trap 21).
+     *
+     * A `factor` claim restating a stated `cause` is folded into it. It is NOT
+     * `refinement_merged_into_stated_option`: nothing about the user's
+     * ALTERNATIVES was consolidated, and reusing that name would tell a reader
+     * their choice set had been combined when their choice set was never touched.
+     * Same absorption direction as its twin — MODEL-origin content into a
+     * USER-stated node — which is what keeps `completion.ts`'s accounting
+     * invariant true.
+     */
+    | "factor_merged_into_stated_cause"
+    /**
      * ⭐⭐ THE DEMOTE. A MODEL-emitted option whose intervention signature is
      * IDENTICAL to a USER-STATED option's: the model proposed an alternative and
      * never quantified how it differs, so the analysis cannot tell the two apart
@@ -524,7 +591,29 @@ export interface DroppedRecordRef {
      * One is chosen canonically; the others are named here rather than silently
      * absorbed — the same treatment 2(c) gives the intervention levels.
      */
-    | "parallel_causal_link_conflict";
+    | "parallel_causal_link_conflict"
+    /**
+     * ⭐ THE CLAIM MINTED A NODE AND NAMED IT WITH A SENTENCE.
+     *
+     * The node IS on the graph — `node_id` resolves and `withdrawn` is FALSE.
+     * Nothing was dropped, refused or shortened; what is disclosed is that the
+     * model's display string is a statement rather than a name, so a surface
+     * that clamps a title (the canvas clamps to two lines) may render it
+     * indistinguishably from its neighbours. Witnessed exactly that way on
+     * 6 Sep 2026: a 105-character `prior` label and the `"<Factor> Impact"`
+     * outcome minted from it rendered the same visible title.
+     *
+     * ⚠ THE LABEL IS SHIPPED UNCHANGED, AND THAT IS THE POINT. Truncating would
+     * move the lie rather than remove it — the node would still be named by a
+     * mutilated claim, and two nodes sharing a prefix would still collide.
+     * `label-bound.ts` may truncate only because a verbatim `source_quote` is
+     * conserved beside it; an `ai_inferred` claim node has none by construction.
+     *
+     * ⚠ SCOPED TO CLAIMS THAT MINT A NODE (trap 13d). A `causal_link` label is a
+     * relationship sentence by design, runs to 103 characters in the banked
+     * corpora, and mints an EDGE — it is never judged by this predicate.
+     */
+    | "claim_label_not_a_name";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
   readonly to_ref?: string;
@@ -769,6 +858,33 @@ const STATED_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"]>> 
   constraint: "constraint",
   // A stated figure is a quantity the user asserted: a factor node carrying it.
   figure: "factor",
+  // ⭐ A stated cause is an EXPLANATION the user offered — an answer to "why",
+  // which is true or false rather than something they carry out. It is a factor,
+  // and it is emphatically NOT an option: projecting it as one is #1287, where
+  // the product prepared to compute a win probability for "The Price Rise We
+  // Pushed Through in January".
+  cause: "factor",
+};
+
+/**
+ * ⭐⭐ WHICH STATED KIND MAY PARENT WHICH CLAIM KIND, IN PASS 1b.
+ *
+ * `basis` is an EVIDENCE field ("what did you build on?") that this projector
+ * REPURPOSED as a parent pointer ("which stated item is this a restatement of?").
+ * One field, two questions — so something must tell them apart, and that
+ * something is the PARENT'S STATED KIND. This table is that discriminator, and
+ * reading it as a safety gate about optionhood is a misreading: it is
+ * parent-ELIGIBILITY, which is why widening it is coherent.
+ *
+ *   · an `option_refinement` refines a stated `option`   — an alternative
+ *   · a `factor` restates a stated `cause`               — an explanation
+ *
+ * A claim kind absent from this table never merges, which is the default and the
+ * safe direction: it mints its own node and keeps its own identity.
+ */
+const MERGE_PARENT_STATED_KIND: Readonly<Record<string, DraftRecordStatedKind | undefined>> = {
+  option_refinement: "option",
+  factor: "cause",
 };
 
 const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | null>> = {
@@ -1378,8 +1494,46 @@ function causalTargetKey(claim: DraftInferenceClaim): string | null {
  * A refinement is not the same alternative when it assigns a different value
  * to a factor the stated option already assigns. Compare the raw record values,
  * before either route aliases to a minted option id.
+ *
+ * ⚠⚠ KNOWN GAP, MEASURED AND DELIBERATELY LEFT OPEN — READ BEFORE "FIXING" IT.
+ *
+ * This is the right question for an `option_refinement`, where BOTH sides are
+ * options and both carry option→factor magnitudes. **On the cause side it is
+ * STRUCTURALLY INERT**: a `factor` carries no `sets_to` on its outgoing links —
+ * the instruction asks for one only FROM an option — so both magnitude maps come
+ * back empty, no conflict can ever be found, and every single `factor` citing a
+ * stated `cause` merges. A factor that cites the cause as EVIDENCE rather than
+ * restating it is therefore absorbed and its own identity deleted. `factor` is
+ * the general-purpose claim kind, so this net is far wider than
+ * `option_refinement`'s.
+ *
+ * ── WHY NO GUARD IS SHIPPED HERE, AND THE MEASUREMENT THAT SETTLED IT ───────
+ * The obvious fix — require POSITIVE evidence of restatement, i.e. the cause's
+ * own outgoing links all land on that factor — was implemented and **refuted by
+ * this repo's own suite**: in the mixed-brief case (`cause-stated-kind.test.ts`
+ * A2) a stated cause draws NO outgoing link at all. The factor expresses the
+ * cause and the OPTION acts on that factor, which is the correct modelling shape
+ * and the one the model actually produces. The guard would have blocked the
+ * merge the feature exists to perform.
+ *
+ * The deeper reason is the one `misfiled-explanation.test.ts` measures over
+ * three rounds: **a restatement and a distinct claim are isomorphic in the
+ * record set.** Nothing here can tell them apart, and a guard that guesses would
+ * trade a silent over-merge for a silent under-merge — the exact oscillation
+ * this estate has paid for. A wrong guard is worse than a recorded gap.
+ *
+ * ── WHAT BOUNDS THE HARM TODAY ──────────────────────────────────────────────
+ * `cause` spans occur ZERO times across the complete corpus of raw record sets
+ * in this repo (one deployed-wire capture, six fixtures, 18 stated options;
+ * pinned with a contrast control by `misfiled-explanation.test.ts` C1). The gap
+ * is unreachable until a producer emits `cause` at all — and closing it is a
+ * precondition for that producer landing, not a follow-up to it.
+ *
+ * ⚠ Note the one shape that is already safe: two factors citing the same cause
+ * make `claimIndices.length === 2`, and NEITHER merges. The gap is exactly the
+ * single-candidate case.
  */
-function refinementConflictsWithStatedOption(
+function claimConflictsWithStatedParent(
   claims: readonly DraftInferenceClaim[],
   parentStatedIndex: number,
   refinementClaimIndex: number,
@@ -2113,15 +2267,121 @@ function projectOnce(
     // over the QUOTE. It is still true of the LEGACY graph path, which has no
     // typed record — which is why the authoring at the wire runs inside the
     // typed branch only.
-    const authoredLabel =
+    const authoredLabel: AuthoredLabel =
       kind === "goal" ? deriveGoalObjectiveLabel(quote) : { label: quote, authored: false };
 
-    const prov: RecordProvenance = {
-      provenance_class: "stated",
-      source_quote: quote,
-      brief_binding: briefBinding,
-      ...(authoredLabel.authored ? { label_authored: true } : {}),
-    };
+    // ⭐⭐ THE BADGE SAYS THE USER DESIGNATED THIS GOAL, SO IT MAY ONLY BE WORN
+    // BY A GOAL THE USER DESIGNATED.
+    //
+    // ── THE DEFECT, MEASURED ON A REAL GOVERNED CAPTURE ────────────────────
+    // Brief `01-simple-binary` (`run-b9389df`, real staging): the model files
+    // the user's own QUESTION — "Should we raise the price or keep it as is?" —
+    // as a `stated_item` of `kind: "goal"`. Every line below then agreed with
+    // it: `provenance_class: "stated"` + `brief_binding: "verified"` earns
+    // `from_brief` at `schema-v3.ts:1176`, and the opener quoted it back:
+    //
+    //   I've built a first decision model for "Should we raise the price or
+    //   keep it as is?".
+    //
+    // Quotation marks promise THESE ARE YOUR WORDS. They were — but the claim
+    // the badge makes is not about the WORDS, it is about the DESIGNATION, and
+    // a question designates no objective. The founder's ruling names this exact
+    // shape: *"Bad: Olumi invents a goal and records it as `from_brief`."*
+    // FOUR of the thirteen governed goal quotes are this shape.
+    //
+    // ── THE EVIDENCE WAS ALREADY IN HAND AND WAS BEING DISCARDED ───────────
+    // `deriveGoalObjectiveLabel` had already answered the question one line up,
+    // returning `{ authored: false, reason: "deliberation_frame" }` — the
+    // union's own words: *"The quote states a DECISION, not an objective."*
+    // That `reason` was dropped on the floor and `"stated"` written
+    // unconditionally. Nothing new is derived here; a verdict that was being
+    // computed and thrown away is now read.
+    //
+    // ── ⛔ WHY THIS IS A NARROW SUBSET OF "REFUSED", AND NOT "REFUSED" ─────
+    // The opposite harm is WORSE: telling a user their own designated goal was
+    // invented. Most of this deriver's refusals answer a DISPLAY question ("may
+    // I shorten this safely?"), not an authorship one — and an earlier head of
+    // this branch shipped that conflation and an independent reviewer measured
+    // it: admitting `head_disclaims` (a lexical `not|never|no|nor` test) told a
+    // user who wrote *"Our objective for this quarter is: We must never let
+    // latency exceed 200ms"* that the brief designates no objective. Three of
+    // three `head_disclaims` quotes in the external adversarial corpus are
+    // genuine objectives.
+    //
+    // ⛔⛔ AND THE SAME MISTAKE WAS THEN MADE ONE REASON ACROSS. That head kept
+    // `states_alternatives` — `/(^|\s)or(\s|$)/`, a BARE WORD TEST — on the
+    // strength of a comment calling both survivors "closed construction tests".
+    // False at the bytes for one of them. A second review drove three ordinary
+    // objectives through this seam and every one was told the brief designates
+    // no objective: "Reach 99.9% uptime or better" (a COMPARATIVE), "Increase
+    // margin, or failing that, hold it flat" (a FALLBACK), "grow in Germany or
+    // France" (a SCOPE). ⭐ The defect was a COMMENT doing the work of a
+    // MEASUREMENT — a claim about the KIND of a test is a claim about bytes.
+    //
+    // `refusalDeniesObjecthood` therefore admits exactly ONE reason:
+    // `deliberation_frame`, whose predicate is a genuinely CLOSED list of 32
+    // explicit constructions, read rather than asserted. The full table and its
+    // measurement live at `objective-label.ts:REFUSAL_ANSWERS`, and both
+    // directions — plus the DISJUNCTION axis the first corpus was structurally
+    // blind to — are pinned in `goal-designation-provenance.test.ts`.
+    //
+    // ── WHAT IS AND IS NOT SAID ───────────────────────────────────────────
+    // `source_quote` STAYS: the user's verbatim is theirs and still reaches the
+    // inspector (`schema-v3.ts:1187` carries it for every recognised class), so
+    // nothing the user wrote is lost — only the DESIGNATION is withdrawn.
+    // `label_authored` is deliberately NOT set HERE: it answers *"did we write
+    // these characters?"* and at this point we did not — the deriver refused, so
+    // the label is still the user's own text. Two signals, two questions
+    // (trap 21); `MINTED_GOAL_PROVENANCE` sets it because its label is
+    // CEE-authored prose, and this one's is not.
+    //
+    // ⚠ NOT SET HERE ≠ NEVER SET, and the distinction became reachable at the
+    // rebase onto #1180. `boundEveryNodeLabel` (this module's return) shortens
+    // any label past 200 characters and stamps `label_authored: true` on a node
+    // that carries the verbatim — which a goal re-badged here DOES. So an
+    // over-long chosen span legitimately ends up `projector_structural` +
+    // `label_authored` + a whole `source_quote`, and all three are true at once:
+    // CEE chose the span, the display string is ours, the user's words survive.
+    // #1180's reviewed world had only `stated` goals carrying `source_quote`;
+    // this branch mints the second kind, so neither review saw the combination.
+    // It is pinned in `goal-designation-provenance.test.ts` with a discriminating
+    // pair proving the flag tracks the BOUND rather than the badge. Reachable,
+    // not hypothetical: the two longest real `deliberation_frame` goal quotes in
+    // the governed baseline are 178 and 159 characters.
+    //
+    // ⚠ ONE CONSEQUENCE, DISCLOSED RATHER THAN DISCOVERED: `completion.ts:444`
+    // skips `projector_structural` nodes in its destroyed-content guard, so a
+    // goal re-badged here leaves that guard's domain. Pinned by name in the
+    // spec so it is visible in the suite rather than silent.
+    // ⭐ TWO CONDITIONS, TWO QUESTIONS. `refusalDeniesObjecthood` asks whether
+    // this KIND of refusal is a designation verdict at all;
+    // `deliberationFrameOpensTheSpan` asks whether THIS SPAN's evidence is
+    // sentence-initial. A frame token merely PRESENT in a span is ordinary
+    // English — "Considering the runway, reach break-even by Q3" is an
+    // objective, not a deliberation — and the unanchored form told eight such
+    // spans the brief designated no objective.
+    const goalWasNeverDesignated =
+      kind === "goal" &&
+      !authoredLabel.authored &&
+      refusalDeniesObjecthood(authoredLabel.reason) &&
+      deliberationFrameOpensTheSpan(quote);
+
+    const prov: RecordProvenance = goalWasNeverDesignated
+      ? {
+          // The SAME constructor and the SAME class the fallback limb already
+          // uses (`goal-inference.ts:47`). One vocabulary for "the machine put
+          // this here" — a second spelling would be two authorities for one
+          // fact, which is the estate's dominant defect.
+          ...scaffoldingProvenance(GOAL_SPAN_CHOSEN_BY_CEE),
+          source_quote: quote,
+          brief_binding: briefBinding,
+        }
+      : {
+          provenance_class: "stated",
+          source_quote: quote,
+          brief_binding: briefBinding,
+          ...(authoredLabel.authored ? { label_authored: true } : {}),
+        };
     provenance[id] = prov;
 
     const node: ProjectedNode = {
@@ -2428,7 +2688,17 @@ function projectOnce(
   {
     const candidates = new Map<number, number[]>();
     claims.forEach((claim, index) => {
-      if (claim.claim_kind !== "option_refinement") return;
+      // ⭐⭐ TWO CLAIM KINDS MERGE, AND THE PARENT'S STATED KIND IS WHAT TELLS
+      // THEM APART. Derived from one table rather than two hand-written branches,
+      // so a third pairing cannot be added to one half and forgotten in the other
+      // (trap 12 — the hand-maintained mirror).
+      //
+      // ⚠ BOTH HALVES ARE LOAD-BEARING, measured by a discriminating mutant pair:
+      // revert the parent filter alone and this OVER-MERGES a genuine factor into
+      // a stated option; revert the candidate widening alone and the cause merge
+      // goes inert. Neither mutant alone shows the binding — the pair does.
+      const parentStatedKind = MERGE_PARENT_STATED_KIND[claim.claim_kind];
+      if (parentStatedKind === undefined) return;
       // ⭐ A DEMOTED REFINEMENT IS NOT A CANDIDATE, AND THIS IS WHY THE PASS MUST
       // ITERATE. Two refinements naming one parent trip the choice-set guard and
       // NEITHER merges. Withdraw one and the other becomes the parent's only
@@ -2441,7 +2711,9 @@ function projectOnce(
       // option twice still names one option.
       const namedOptions = [
         ...new Set(
-          basis.filter((b) => Number.isInteger(b) && statedItems[b]?.kind === "option"),
+          basis.filter(
+            (b) => Number.isInteger(b) && statedItems[b]?.kind === parentStatedKind,
+          ),
         ),
       ];
       if (namedOptions.length !== 1) return;
@@ -2457,12 +2729,16 @@ function projectOnce(
       // alternatives; leave them standing.
       if (
         claimIndices.length === 1 &&
-        !refinementConflictsWithStatedOption(claims, parent, claimIndices[0]!)
+        !claimConflictsWithStatedParent(claims, parent, claimIndices[0]!)
       ) {
         refinementParentStatedIndex.set(claimIndices[0]!, parent);
       }
     }
   }
+
+  /** The stated kind of a merge parent, by its record index. */
+  const parentStatedKindOf = (statedIndex: number): string | undefined =>
+    statedItems[statedIndex]?.kind;
 
   // ── Pass 2: claims → nodes. Badge is `ai_inferred`, again taken from the loop.
   claims.forEach((claim, index) => {
@@ -2489,10 +2765,20 @@ function projectOnce(
           // refinement is added alongside them so the record shows what the
           // model contributed without the model's words ever being attributed to
           // the user.
-          provenance[parentId] = {
-            ...parentProv,
-            merged_refinements: [...(parentProv.merged_refinements ?? []), label],
-          };
+          // The absorbed label lands on the field that names what it IS. Both
+          // are append-only, both consume MODEL-origin content into a
+          // USER-stated node, and `completion.ts` accounts for both — see the
+          // invariant stated there.
+          provenance[parentId] =
+            parentStatedKindOf(mergedParent) === "cause"
+              ? {
+                  ...parentProv,
+                  merged_restatements: [...(parentProv.merged_restatements ?? []), label],
+                }
+              : {
+                  ...parentProv,
+                  merged_refinements: [...(parentProv.merged_refinements ?? []), label],
+                };
           const parentNode = nodes.find((n) => n.id === parentId);
           if (parentNode) parentNode.provenance = provenance[parentId];
         }
@@ -2512,7 +2798,10 @@ function projectOnce(
           claim_index: index,
           claim_kind: claim.claim_kind,
           label,
-          reason: "refinement_merged_into_stated_option",
+          reason:
+            parentStatedKindOf(mergedParent) === "cause"
+              ? "factor_merged_into_stated_cause"
+              : "refinement_merged_into_stated_option",
         });
         return;
       }
@@ -3201,7 +3490,11 @@ function projectOnce(
     // they do not have.
     const decisionProv: RecordProvenance = {
       ...structuralProv,
-      ...(authoredDecision.authored ? { label_authored: true } : {}),
+      ...(authoredDecision.authored
+        ? { label_authored: true }
+        : // The producer REFUSED, so this label is our generic mint. Marked from
+          // the refusal itself — never by comparing the label to a known word.
+          { label_placeholder: true }),
     };
     provenance[decisionId] = decisionProv;
     // Unshifted so the decision precedes its options in emission order.
@@ -3650,11 +3943,97 @@ export function projectRecordsToGraph(
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
-  return boundEveryNodeLabel({
-    graph: projection.graph,
-    provenance: projection.provenance,
-    dropped: projection.dropped,
-  });
+  return boundEveryNodeLabel(
+    discloseNodesNamedWithASentence({
+      graph: projection.graph,
+      provenance: projection.provenance,
+      dropped: projection.dropped,
+    }),
+  );
+}
+
+/**
+ * ⭐⭐ A NODE THE MODEL NAMED WITH A SENTENCE IS DISCLOSED, NEVER SHORTENED.
+ *
+ * ── THE WITNESSED DEFECT (Paul's manual test, 6 Sep 2026) ──────────────────
+ * A `factor` node carried a 105-character belief sentence, and
+ * `fixFactorGoalEdges` minted a mediating outcome labelled
+ * `${factorLabel} Impact` from it. The canvas clamps a title to two lines, so
+ * both nodes rendered the SAME visible string. The sweep's mint is correct in
+ * intent (`deterministic-sweep.ts:1163`) and inherited a bad input — which is
+ * why the guard is here, at the source, and that file is untouched.
+ *
+ * The mechanism is `claims[].label` answering two questions at once (trap 21):
+ * for `factor`/`risk`/`outcome`/`option_refinement` the model supplies a noun
+ * phrase, while `instruction.ts` asks a `prior` for *"what you believe about a
+ * quantity, and how sure you are"* — and `CLAIM_KIND_TO_NODE_KIND` maps
+ * `prior → "factor"`. See {@link isNameShapedLabel} for the measured corpus.
+ *
+ * ── ⚠ WHY HERE AND NOT AT THE CLAIM MINT SITE ─────────────────────────────
+ * Two reasons, and the first is a defect this pass had when it was written
+ * there — caught by `shape-gate-withdrawal-is-named-honestly.test.ts`:
+ *
+ *  1. THE MINT SITE DOES NOT KNOW WHETHER THE NODE SURVIVES. The connectivity
+ *     prune runs after the claims pass, so a node disclosed at mint time can be
+ *     withdrawn afterwards — and `transformResponseToV3` derives `withdrawn`
+ *     from whether `node_id` resolves in the FINAL node list. The notice would
+ *     then read "withdrawn" on a channel whose entire purpose is telling the
+ *     truth about what was lost, while claiming the opposite in its own
+ *     docblock. Running over the FINAL nodes makes `withdrawn: false` true by
+ *     construction rather than by hope.
+ *  2. It is the same argument `boundEveryNodeLabel` states one function below:
+ *     a check installed at each mint site is a hand-maintained list that a
+ *     fourth mint site silently escapes (trap 12). One pass over the finished
+ *     node list covers every site and anything added later.
+ *
+ * ── THE SCOPE IS DERIVED FROM PROVENANCE, NOT FROM A KIND LIST ────────────
+ * `ai_inferred` is exactly "the model authored this display string". A STATED
+ * node's label is the user's own canonicalised quote (or an objective derived
+ * from it by `deriveGoalObjectiveLabel`), and judging the user's words by a
+ * predicate written for model-authored names is a different question with a
+ * different answer — the same scope discipline `label-bound.ts` states for
+ * truncation. A `causal_link` mints an EDGE and has no node to reach here at
+ * all, so its 103-character relationship sentences are out of scope by
+ * construction rather than by exclusion.
+ *
+ * ── IT RUNS BEFORE `boundEveryNodeLabel`, DELIBERATELY ────────────────────
+ * So the predicate sees the label the MODEL wrote, not one already shortened to
+ * 200 characters. A guard that is correct but pointed at the wrong bytes is
+ * trap 22's other half.
+ *
+ * ⭐ IDENTITY WHEN EVERY NODE IS NAMED. The ordinary draft returns the input
+ * object unchanged — the over-correction control expressed as code.
+ */
+function discloseNodesNamedWithASentence(projection: RecordProjection): RecordProjection {
+  const unnamed: DroppedRecordRef[] = [];
+
+  for (const node of projection.graph.nodes) {
+    // Model-authored display strings only. Derived from the provenance the
+    // projector already banked, so a new node kind cannot escape by not being
+    // on a list.
+    if (projection.provenance[node.id]?.provenance_class !== "ai_inferred") continue;
+    if (isNameShapedLabel(node.label)) continue;
+
+    unnamed.push({
+      // Named by NODE, not by claim — like `unconnected_to_goal`, which uses the
+      // same convention for the same reason: this pass runs after both node
+      // passes and holds no claim index.
+      claim_index: -1,
+      claim_kind: node.kind,
+      // ⚠ THE LABEL IS CARRIED UNCHANGED AND IS NOT REWRITTEN ANYWHERE IN THIS
+      // FUNCTION. Truncating would move the lie rather than remove it: the node
+      // would still be named by a mutilated claim, and two nodes sharing a
+      // prefix would still collide on a clamped canvas. `label-bound.ts` may
+      // shorten only because a verbatim `source_quote` is conserved beside it,
+      // and an `ai_inferred` node has none by construction.
+      label: node.label,
+      node_id: node.id,
+      reason: "claim_label_not_a_name",
+    });
+  }
+
+  if (unnamed.length === 0) return projection;
+  return { ...projection, dropped: [...projection.dropped, ...unnamed] };
 }
 
 /**

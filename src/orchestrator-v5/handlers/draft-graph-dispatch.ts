@@ -63,6 +63,7 @@ import type { MessageTurnPayload, OlumiResponse } from '@talchain/schemas/bounda
 import { handleDraftGraph, type DraftGraphResult } from '../../orchestrator/tools/draft-graph.js';
 import type { GraphV3T } from '../../orchestrator/types.js';
 import { config } from '../../config/index.js';
+import { OPTION_FRAMING_WARNING_ID } from '../../cee/draft/records/option-framing-recovery.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
 import { loadMostRecentPendingActions } from '../build-turn-context.js';
 import {
@@ -91,6 +92,8 @@ import {
 } from '../model-management/mutation-receipt.js';
 import { sanitiseCoachingProse } from '../compose/output-safety.js';
 import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
+import { buildDraftFramingBlocks } from './draft-framing-blocks.js';
+import { buildDraftCalibrationBlocks } from './draft-calibration-blocks.js';
 import { buildDraftOptionWideningBlocks } from './draft-option-widening-blocks.js';
 import {
   buildV5DiagnosticTrace,
@@ -173,6 +176,16 @@ export interface DispatchDraftGraphResult {
    * never sees it.
    */
   readonly diagnosticTrace?: V5DiagnosticTrace;
+}
+
+/** The exact producer-owned gap, shared by the immediate and durable receipts. */
+function draftOptionFramingNotice(result: DraftGraphResult): string {
+  const text = (result.draftWarnings ?? [])
+    .filter(warning => warning.id === OPTION_FRAMING_WARNING_ID)
+    .map(warning => [warning.explanation, warning.fix_hint].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('\n\n');
+  return text ? sanitiseCoachingProse(text, result.graphOutput).text : '';
 }
 
 /**
@@ -312,7 +325,10 @@ export function draftResultToOlumiResponse(
     // `risk_adjusted` / `goal_setting` / `out_of_scope` are preserved
     // (rule 3). The scrub is idempotent — running it again before the
     // central egress is a no-op.
-    assistantText = sanitiseCoachingProse(narrative.text, result.graphOutput).text;
+    // Preserve the producer's unresolved framing disclosure on the native V5
+    // receipt. The detailed record carrier is otherwise reduced to a count.
+    const narrativeWithFraming = [draftOptionFramingNotice(result), narrative.text].filter(Boolean).join('\n\n');
+    assistantText = sanitiseCoachingProse(narrativeWithFraming, result.graphOutput).text;
     emit(TelemetryEvents.V5PostDraftCoachingSourceSelected, {
       request_id: requestId,
       scenario_id: payload.scenario_id,
@@ -427,6 +443,36 @@ export function draftResultToOlumiResponse(
           graph: result.graphOutput,
           createdAt: blocksCreatedAt,
         }),
+        // FRAME/IDEATE visibility (draft-framing-blocks): the COMPLEMENT of the
+        // two projectors above. Both of them, and the post-draft narrative's
+        // freeform coaching, are gated on `analysisReady.status === 'ready'`, so
+        // a team whose model is not yet analysis-ready — which is precisely the
+        // team still framing the problem or still generating possibilities —
+        // receives no coaching at all, only an instruction to go and finish
+        // their option set. This emitter serves that half and ONLY that half:
+        // its gate is the exact inverse (`=== 'ready'` returns []), so it can
+        // never double-emit with the widening card, the bias card, or the
+        // narrative. The gates are MUTUALLY EXCLUSIVE (verified across all 8
+        // `analysisReady` states) — but not jointly exhaustive: states remain
+        // where nothing emits, so this adds a producer for one uncovered half,
+        // it does not partition the space. It reads `strengthen_items.action_type` — a
+        // contract-typed field the drafter has always written and nothing on
+        // either side of the wire has ever read — and surfaces only the two
+        // members that do work before a complete option set exists:
+        // `reframe_goal` (FRAME) and `add_option` (IDEATE).
+        ...buildDraftFramingBlocks({
+          analysisReady: result.analysisReady ?? null,
+          // `result.strengthenItems` — the SAME field `buildPostDraftNarrative`
+          // is handed at :261. There is no `coachingStrengthenItems` on this
+          // result (the widening sibling's `coachingWideningLogObject` is a
+          // differently-named field, and reaching for the parallel name here
+          // yields `undefined`, which gate 2 turns into a permanently silent
+          // card — a dark ship with a green suite).
+          strengthenItems: result.strengthenItems ?? null,
+          graph: result.graphOutput,
+          briefText: typeof effectiveBrief === 'string' ? effectiveBrief : null,
+          createdAt: blocksCreatedAt,
+        }),
         ...buildDraftOptionWideningBlocks({
           analysisReady: result.analysisReady ?? null,
           wideningLog: result.coachingWideningLogObject ?? null,
@@ -436,6 +482,27 @@ export function draftResultToOlumiResponse(
           // is. NOT `payload.message` — on the clarify-v2 intake path that is
           // the user's one-line answer (the 2.972 defect, see above).
           briefText: typeof effectiveBrief === 'string' ? effectiveBrief : null,
+          createdAt: blocksCreatedAt,
+        }),
+        // ROOT-ASSUMPTION CALIBRATION (draft-calibration-blocks): at most ONE
+        // card naming the single ROOT factor whose missing level would most
+        // change what this model can say, with the model still runnable.
+        //
+        // ⚠ IT TAKES NO `analysisReady`, AND THAT IS THE POINT rather than an
+        // omission. The three emitters above all gate on readiness — two on
+        // `=== 'ready'`, one on its inverse — and the founder's 3 Sep model was
+        // READY while three of its root assumptions were engine-defaulted to
+        // zero. A readiness gate in either direction is orthogonal to "is this
+        // model standing in for information the user never gave?", so binding
+        // to one would be two questions under one name (CLAUDE.md trap 21).
+        // Its own gates are the ranking's: no unquantified root that can reach
+        // the goal, no card.
+        //
+        // Reads `result.graphOutput` — the SAME drafted graph the widening and
+        // framing emitters are handed, so no two of them can be describing
+        // different models.
+        ...buildDraftCalibrationBlocks({
+          graph: result.graphOutput,
           createdAt: blocksCreatedAt,
         }),
       ]
@@ -882,6 +949,7 @@ export async function dispatchDraftGraph(
     // only surfaced when the trace is built (flag-on); flag-off path
     // discards the value at the build site without allocating the trace.
     const commitStartedAt = Date.now();
+    const framingNotice = draftOptionFramingNotice(draftResult);
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
@@ -897,16 +965,18 @@ export async function dispatchDraftGraph(
       // building it has a telemetry side-effect — V5PostDraftCoachingSource
       // Selected — that must only fire once persistence has SUCCEEDED; see the
       // "does NOT emit … when graph persistence fails" regression test). We
-      // therefore do NOT capture assistant_message on the draft turn (it stays
-      // null); the draft narrative is reconstructable from the persisted graph,
-      // which IS projected into the next turn's ContextPack. We DO capture the
+      // therefore do NOT capture the full narrative on the draft turn. The
+      // producer-owned framing gap is different: graph compaction drops its
+      // record disclosure, so it cannot be reconstructed next turn. Persist
+      // that exact, side-effect-free notice here through the existing
+      // assistant_message carrier, atomically with the graph. We DO capture the
       // user brief (userMessage) — it is graphPersisted-independent and
       // side-effect-free. Capturing the draft narrative without a second write
       // or breaking the telemetry-after-persistence invariant is a follow-up.
       // The code-owned missing-effect referent DOES persist below, atomically
       // with this graph: no prose parsing or second write is needed to retain
       // the exact question that the successful response will render.
-      { response_version: 2, assistant_text: holdThread.notice ?? '', blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
+      { response_version: 2, assistant_text: [framingNotice, holdThread.notice].filter(Boolean).join('\n\n'), blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
@@ -951,6 +1021,7 @@ export async function dispatchDraftGraph(
         coaching_state: null,
         // V5 Conversation Context Reliability: persist the user's brief.
         userMessage: payload.message,
+        contentGraph: draftResult.graphOutput,
       },
     );
     const persistenceMs = Date.now() - commitStartedAt;
@@ -1035,10 +1106,18 @@ export async function dispatchDraftGraph(
     // has no assistant_text and appends nothing.
     const committedText = commitResult.response?.assistant_text;
     if (typeof committedText === 'string' && committedText.trim().length > 0) {
-      response = {
-        ...response,
-        assistant_text: appendLapseNotice(response.assistant_text, committedText.trim()),
-      };
+      // The exact framing notice already heads the native narrative. Reattach
+      // only the remaining committed notices, including any commit-time TTL
+      // lapse. Do not duplicate the framing gap or discard a different notice.
+      const remainingNotice = framingNotice && committedText.startsWith(framingNotice)
+        ? committedText.slice(framingNotice.length).trim()
+        : committedText.trim();
+      if (remainingNotice) {
+        response = {
+          ...response,
+          assistant_text: appendLapseNotice(response.assistant_text, remainingNotice),
+        };
+      }
     }
     // V5 finaliser contract: surface the rich pipeline payload on the
     // dispatch result so route-v2.ts can stamp it via finaliseV5Response.

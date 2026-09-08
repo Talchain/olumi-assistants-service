@@ -3,7 +3,7 @@
  * analysis router. Pure-function tests, no I/O.
  *
  * Classification matrix coverage:
- *   - advice / next_step / update_advice / improvement / meaning
+ *   - open advice delegates; next_step / update_advice / improvement / meaning compose
  *   - readiness / evidence_gap
  *   - explain_results_free_text / what_would_flip_free_text
  *
@@ -151,13 +151,17 @@ describe('tryPostAnalysisAdviceGate — classification matrix', () => {
   ];
 
   for (const { message, expectedClass, label } of matrix) {
-    it(`classifies as ${expectedClass}: ${label}`, () => {
+    it(`${expectedClass === 'advice' ? 'delegates open advice' : `classifies as ${expectedClass}`}: ${label}`, () => {
       const out = tryPostAnalysisAdviceGate({
         message,
         analysis: FIXTURE_ANALYSIS,
         analysisReady: READY_PAYLOAD_OPEN,
         freshness: 'fresh',
       });
+      if (expectedClass === 'advice') {
+        expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+        return;
+      }
       expect(out.matched).toBe(true);
       if (out.matched) {
         expect(out.advice_class).toBe(expectedClass);
@@ -327,21 +331,24 @@ describe('tryPostAnalysisAdviceGate — data-availability fallback', () => {
     if (out.matched) expect(out.advice_class).toBe('evidence_gap');
   });
 
-  it('advice without leading option → data_unavailable_for_class (uniform contract)', () => {
+  it('next_step without leading option → data_unavailable_for_class (uniform contract)', () => {
     // Post-Codex review: the special-case `no_leading_option` reason was
     // retired in favour of the per-class data-availability fallback.
     // Missing leading_option now surfaces through the same path as every
     // other missing input, so dashboards see WHICH class fell through.
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should we do?',
+    const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
+      message: 'What is the next step?',
       analysis: { ...FIXTURE_ANALYSIS, leading_option: null },
       analysisReady: READY_PAYLOAD_OPEN,
       freshness: 'fresh',
-    });
+    };
+    expect(tryPostAnalysisAdviceGate({ ...input, message: 'What should we do?' }))
+      .toEqual({ matched: false, reason: 'reasoning_request' });
+    const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(false);
     if (!out.matched) {
       expect(out.reason).toBe('data_unavailable_for_class');
-      expect(out.advice_class).toBe('advice');
+      expect(out.advice_class).toBe('next_step');
       expect(out.missing_inputs).toEqual(['leading_option']);
     }
   });
@@ -386,21 +393,24 @@ describe('tryPostAnalysisAdviceGate — data-availability fallback', () => {
     }
   });
 
-  it('advice with whitespace-only leading_option label → data_unavailable_for_class (defence-in-depth)', () => {
+  it('next_step with whitespace-only leading_option label → data_unavailable_for_class (defence-in-depth)', () => {
     // The composer interpolates leading_option.label directly into
     // prose without a length guard. An empty / whitespace-only label
     // would yield "Based on the analysis,  is currently ahead." with
     // awkward double-spacing — fall through cleanly instead.
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should we do?',
+    const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
+      message: 'What is the next step?',
       analysis: { ...FIXTURE_ANALYSIS, leading_option: { label: '   ' } },
       analysisReady: READY_PAYLOAD_OPEN,
       freshness: 'fresh',
-    });
+    };
+    expect(tryPostAnalysisAdviceGate({ ...input, message: 'What should we do?' }))
+      .toEqual({ matched: false, reason: 'reasoning_request' });
+    const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(false);
     if (!out.matched) {
       expect(out.reason).toBe('data_unavailable_for_class');
-      expect(out.advice_class).toBe('advice');
+      expect(out.advice_class).toBe('next_step');
       expect(out.missing_inputs).toContain('leading_option');
     }
   });
@@ -503,18 +513,21 @@ describe('tryPostAnalysisAdviceGate — pre-condition failures', () => {
 // Composer copy contract — class-by-class verification of the prose.
 // =========================================================================
 describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
-  it('advice composer template (top driver present)', () => {
+  it('advice composer template (top driver present) via next_step', () => {
     // Enriched composers (this workstream) no longer match a single
     // hard-coded string — they include optional probability / margin /
     // robustness fragments that degrade gracefully when fields are
     // absent. The structural contract is: the opener uses the new
     // "currently favours" vocabulary, the leading option is named,
     // and the top driver is referenced as the next-examine point.
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What would you recommend?',
+    const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
+      message: 'What is the next step?',
       analysis: FIXTURE_ANALYSIS,
       freshness: 'fresh',
-    });
+    };
+    expect(tryPostAnalysisAdviceGate({ ...input, message: 'What would you recommend?' }))
+      .toEqual({ matched: false, reason: 'reasoning_request' });
+    const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
@@ -687,22 +700,23 @@ describe('tryPostAnalysisAdviceGate — new patterns (grounded fresh-analysis wo
     { message: 'What might need to happen to flip things?', expectedClass: 'what_would_flip_free_text', label: 'what might need to happen' },
     { message: 'What would need to shift in this?', expectedClass: 'what_would_flip_free_text', label: 'what would need to shift' },
 
-    // Existing advice-class regression — "what should I pay attention to"
-    // continues to route to `advice` per the brief's preserve-precedence
-    // instruction. Pinning this case proves the precedence is not
-    // accidentally pre-empted by a more specific pattern this workstream
-    // added.
+    // Broad attention advice belongs to contextual reasoning. Specific
+    // validation/evidence questions above retain their deterministic class.
     { message: 'What should I pay attention to?', expectedClass: 'advice', label: 'what should I pay attention to (regression)' },
   ];
 
   for (const { message, expectedClass, label } of newPatternRows) {
-    it(`classifies as ${expectedClass}: ${label}`, () => {
+    it(`${expectedClass === 'advice' ? 'delegates open advice' : `classifies as ${expectedClass}`}: ${label}`, () => {
       const out = tryPostAnalysisAdviceGate({
         message,
         analysis: FIXTURE_ANALYSIS,
         analysisReady: READY_PAYLOAD_OPEN,
         freshness: 'fresh',
       });
+      if (expectedClass === 'advice') {
+        expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+        return;
+      }
       expect(out.matched).toBe(true);
       if (out.matched) {
         expect(out.advice_class).toBe(expectedClass);
@@ -1001,12 +1015,15 @@ describe('tryPostAnalysisAdviceGate — enriched composer output (full data)', (
     }
   });
 
-  it('composeAdvice: includes margin sentence when runner_up + margin present', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should we do?',
+  it('composeAdvice: includes margin sentence when runner_up + margin present via next_step', () => {
+    const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
+      message: 'What is the next step?',
       analysis: ENRICHED_ANALYSIS,
       freshness: 'fresh',
-    });
+    };
+    expect(tryPostAnalysisAdviceGate({ ...input, message: 'What should we do?' }))
+      .toEqual({ matched: false, reason: 'reasoning_request' });
+    const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.assistant_text).toContain('Based on this model, the analysis currently favours Hire two senior engineers locally');
@@ -1459,13 +1476,17 @@ describe('tryPostAnalysisAdviceGate — suggested_actions per class', () => {
     ['What should we improve?', 'improvement'],
   ];
   for (const [message, expectedClass] of oneChipClasses) {
-    it(`${expectedClass} ("${message}") emits exactly one what_would_flip chip`, () => {
+    it(`${expectedClass} ("${message}") ${expectedClass === 'advice' ? 'delegates chip choice to reasoning' : 'emits exactly one what_would_flip chip'}`, () => {
       const out = tryPostAnalysisAdviceGate({
         message,
         analysis: FIXTURE_ANALYSIS,
         analysisReady: READY_PAYLOAD_OPEN,
         freshness: 'fresh',
       });
+      if (expectedClass === 'advice') {
+        expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
+        return;
+      }
       expect(out.matched).toBe(true);
       if (out.matched) {
         expect(out.advice_class).toBe(expectedClass);
@@ -1573,23 +1594,14 @@ describe('tryPostAnalysisAdviceGate — V5 coaching (validation/research advice)
     }
   });
 
-  it('misclassification guard — "What should I change?" routes to advice, NOT evidence_gap', () => {
-    // The new evidence_gap patterns require a specific verb after the
-    // pronoun (validate|verify|confirm|de-risk, research|investigate, etc.).
-    // Generic "what should I/we/you change?" must continue to land on the
-    // broader `advice` class so it answers in advice prose (leverage
-    // point + next examine target), not in evidence-gap prose.
+  it('generic change advice delegates to reasoning rather than evidence_gap', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should I change?',
       analysis: FIXTURE_ANALYSIS,
       analysisReady: READY_PAYLOAD_OPEN,
       freshness: 'fresh',
     });
-    expect(out.matched).toBe(true);
-    if (out.matched) {
-      expect(out.advice_class).toBe('advice');
-      expect(out.advice_class).not.toBe('evidence_gap');
-    }
+    expect(out).toEqual({ matched: false, reason: 'reasoning_request' });
   });
 
   it('exact long workstream prompt routes to evidence_gap', () => {
@@ -2440,9 +2452,9 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
   });
 
   // ── 9. Sibling lock-in: composeAdvice stays NEUTRAL on near-tie ────────
-  it('composeAdvice on near-tie: no strength claim added (neutral margin sentence preserved)', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should we do?',
+  it('composeAdvice on near-tie: no strength claim added (neutral margin sentence preserved) via next_step', () => {
+    const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
+      message: 'What is the next step?',
       analysis: {
         status: 'success',
         leading_option: { label: 'A', probability: 0.5005 },
@@ -2452,7 +2464,10 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
         top_drivers: [{ factor_label: 'Risk', sensitivity_value: 0.45 }],
       },
       freshness: 'fresh',
-    });
+    };
+    expect(tryPostAnalysisAdviceGate({ ...input, message: 'What should we do?' }))
+      .toEqual({ matched: false, reason: 'reasoning_request' });
+    const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(true);
     if (out.matched) {
       // composeAdvice does NOT assert lead-strength; ensure no false certainty
@@ -2481,21 +2496,12 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
     }
   });
 
-  // ── 10b. Sibling pin: composeAdvice at the reported 0.05pp case ────────
-  //
-  // Policy choice (codified here, not re-litigated): composeAdvice answers
-  // "what should we do?" — the user is asking for advice, not for the
-  // strength of the lead. The opener ("currently favours X") + neutral
-  // margin sentence ("It sits ahead of Y by 0.1 percentage points") is
-  // technically true at 0.05pp and softer than the explain-results
-  // composer's previous "meaningful rather than marginal" assertion.
-  // We deliberately keep the existing copy and only assert it stays
-  // free of stronger strength claims. If product later decides advice
-  // copy should also reframe on near-tie, this test makes that change
-  // intentional.
-  it('composeAdvice at reported 0.05pp: existing copy preserved, no escalation to strength claims', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What should we do?',
+  // The shared composeAdvice implementation remains reachable through next_step.
+  // Retain its near-tie and forbidden-strength assertions on the same fixture,
+  // while checking that the original generic request delegates to reasoning.
+  it('composeAdvice at reported 0.05pp: existing copy preserved, no escalation to strength claims via next_step', () => {
+    const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
+      message: 'What is the next step?',
       analysis: {
         status: 'success',
         leading_option: { label: 'Hire One Tech Lead', probability: 0.48475 },
@@ -2505,10 +2511,13 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
         top_drivers: [{ factor_label: 'Delivery risk', sensitivity_value: 0.45 }],
       },
       freshness: 'fresh',
-    });
+    };
+    expect(tryPostAnalysisAdviceGate({ ...input, message: 'What should we do?' }))
+      .toEqual({ matched: false, reason: 'reasoning_request' });
+    const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.advice_class).toBe('advice');
+      expect(out.advice_class).toBe('next_step');
       const text = out.assistant_text;
       // Existing opener preserved.
       expect(text).toContain('currently favours Hire One Tech Lead');
@@ -2704,12 +2713,12 @@ describe('tryPostAnalysisAdviceGate — near-tie + raw robustness', () => {
 });
 
 // ===========================================================================
-// Scope B — two-driver evidence-gap fallback + by-design phase3 grounding
+// Scope B — qualified sensitivity fallback + by-design phase3 grounding
 // ===========================================================================
 
-describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
+describe('composeEvidenceGap — qualified sensitivity fallback', () => {
   // Pure top-driver fallback: no readiness gaps (no analysisReady), no fragile
-  // edges, no decision_review → the composer names where evidence matters most.
+  // edges, no decision_review → influence does not establish evidence priority.
   const TWO_DRIVERS_NO_EDGES: AdviceGateAnalysis = {
     ...FIXTURE_ANALYSIS,
     fragile_edges: [],
@@ -2719,7 +2728,19 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     ],
   };
 
-  it('names BOTH highest-leverage drivers when the projection carries a second one', () => {
+  it('does not infer a research ranking from influence-only drivers', () => {
+    const out = tryPostAnalysisAdviceGate({
+      message: 'What should we validate?', analysis: TWO_DRIVERS_NO_EDGES, freshness: 'fresh',
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) throw new Error('Expected the scoped evidence answer');
+    expect(out.assistant_text).toContain('Delivery risk');
+    expect(out.assistant_text).toContain('Cost overrun risk');
+    expect(out.assistant_text).not.toMatch(/biggest open gap|evidence would change the analysis the most|second place where more evidence would help/);
+    expect(out.assistant_text).toContain('Sensitivity alone does not establish where research would be most valuable');
+  });
+
+  it('names both material drivers without ranking evidence value', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: TWO_DRIVERS_NO_EDGES,
@@ -2731,9 +2752,8 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
       expect(out.advice_class).toBe('evidence_gap');
       expect(out.assistant_text).toContain('Delivery risk');
       expect(out.assistant_text).toContain('Cost overrun risk');
-      expect(out.assistant_text).toMatch(/next most sensitive factor/);
-      // Both surface as bullets under the plural header.
-      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
+      expect(out.assistant_text).toContain('sensitive to Delivery risk and Cost overrun risk');
+      expect(out.assistant_text).not.toMatch(/biggest open gaps|next most|evidence.*the most/i);
       // Direction-honest by construction: makes no increases/decreases claim.
       expect(out.assistant_text).not.toMatch(/increase|decrease|raises|lowers/i);
       // No raw IDs / decimals / readiness percentage.
@@ -2741,7 +2761,7 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     }
   });
 
-  it('keeps single-driver wording intact when only one driver is renderable', () => {
+  it('qualifies a single material driver without inventing another factor', () => {
     const out = tryPostAnalysisAdviceGate({
       message: 'What should we validate?',
       analysis: { ...TWO_DRIVERS_NO_EDGES, top_drivers: [{ factor_label: 'Delivery risk' }] },
@@ -2749,10 +2769,9 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     });
     expect(out.matched).toBe(true);
     if (out.matched) {
-      // Singular header, original sentence, no second-driver line.
-      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toMatch(/^The analysis is sensitive to Delivery risk\./);
       expect(out.assistant_text).toContain(
-        'the strongest sensitivity is on Delivery risk, so that',
+        'Sensitivity alone does not establish where research would be most valuable',
       );
       expect(out.assistant_text).not.toContain('Cost overrun risk');
       expect(out.assistant_text).not.toMatch(/next most sensitive/);
@@ -2769,8 +2788,8 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     if (out.matched) {
       // Confirm we exercised the two-driver branch (not single-driver / DR / readiness).
       expect(out.advice_class).toBe('evidence_gap');
-      expect(out.assistant_text).toMatch(/biggest open gaps right now are/i);
-      expect(out.assistant_text).toMatch(/next most sensitive factor/);
+      expect(out.assistant_text).toContain('sensitive to Delivery risk and Cost overrun risk');
+      expect(out.assistant_text).toContain('Sensitivity alone does not establish');
 
       const text = out.assistant_text;
       // Real egress guards run against the matched assistant_text.
@@ -2813,7 +2832,7 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
       const occurrences = out.assistant_text.split('Delivery risk').length - 1;
       expect(occurrences).toBe(1);
       expect(out.assistant_text).not.toMatch(/next most sensitive/);
-      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toMatch(/^The analysis is sensitive to Delivery risk\./);
     }
   });
 
@@ -2831,7 +2850,7 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     if (out.matched) {
       // Normalised compare → treated as one factor → single-driver wording.
       expect(out.assistant_text).not.toMatch(/next most sensitive/);
-      expect(out.assistant_text).toMatch(/^The biggest open gap right now is:/);
+      expect(out.assistant_text).toMatch(/^The analysis is sensitive to Delivery risk\./);
       // The variant second label must not appear as its own named driver.
       expect(out.assistant_text).not.toContain('delivery risk ');
     }
@@ -2850,9 +2869,8 @@ describe('composeEvidenceGap — two-driver evidence-priority fallback', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       // Both named (distinct), and the second renders trimmed — no double space.
-      expect(out.assistant_text).toMatch(/next most sensitive factor/);
-      expect(out.assistant_text).toContain('Cost risk is the next most sensitive factor');
-      expect(out.assistant_text).not.toContain('Cost risk  is');
+      expect(out.assistant_text).toContain('sensitive to Delivery risk and Cost risk.');
+      expect(out.assistant_text).not.toContain('Cost risk .');
     }
   });
 });
@@ -2951,15 +2969,18 @@ describe('advice-gate copy-source descriptor (Scope C diagnostics)', () => {
     }
   });
 
-  it('tags projection-class composers as analysis_projection with the fields used', () => {
-    const out = tryPostAnalysisAdviceGate({
-      message: 'What would you recommend?',
+  it('tags projection-class composers as analysis_projection with the fields used via next_step', () => {
+    const input: Parameters<typeof tryPostAnalysisAdviceGate>[0] = {
+      message: 'What is the next step?',
       analysis: FIXTURE_ANALYSIS,
       freshness: 'fresh',
-    });
+    };
+    expect(tryPostAnalysisAdviceGate({ ...input, message: 'What would you recommend?' }))
+      .toEqual({ matched: false, reason: 'reasoning_request' });
+    const out = tryPostAnalysisAdviceGate(input);
     expect(out.matched).toBe(true);
     if (out.matched) {
-      expect(out.advice_class).toBe('advice');
+      expect(out.advice_class).toBe('next_step');
       expect(out.copy_source).toBe('analysis_projection');
       expect(out.coaching_fields_used).toEqual(
         expect.arrayContaining(['leading_option', 'top_drivers']),

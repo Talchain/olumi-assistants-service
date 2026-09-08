@@ -157,6 +157,27 @@ const ContextPackAnalysisDriverSchema = z
   .object({
     factor_label: z.string(),
     sensitivity_value: z.number().finite(),
+    // The producer's verdict on whether resolving this factor has measured
+    // value (`./factor-investigation-licence.ts`). Optional: absent for an
+    // older producer and for a factor that genuinely IS worth investigating,
+    // both of which keep the pre-fix byte-shape. The enum is closed on purpose
+    // — a verdict this schema does not recognise must fail loudly here rather
+    // than reach the model as an unrendered token.
+    investigation_verdict: z
+      .enum([
+        'option_controlled',
+        'no_reordering_found',
+        'no_information_value',
+        'informative',
+        'unscored',
+      ])
+      .optional(),
+    investigation_basis_heuristic: z.literal(true).optional(),
+    // The producer's public-surface value_of_information for this factor.
+    // Additive disclosure — never a suppression input. Finite by construction
+    // (`readFiniteNumber` at the derivation site); pinned finite here too so a
+    // NaN can never reach the model.
+    investigation_voi: z.number().finite().optional(),
   })
   .strict();
 
@@ -237,6 +258,26 @@ const ContextPackAnalysisSchema = z
     // `false`), matching the pack's key-absence style (cf. conversation
     // `truncated`).
     evidence_gaps_lever_suppressed: z.literal(true).optional(),
+    /**
+     * The EVPPI channel's investigation-priority verdict
+     * (`../coaching/investigation-priority.ts`). A discriminated union so a
+     * malformed or unknown state fails the schema rather than reaching the
+     * display projection as an unrecognised object.
+     *
+     * `'not_assessed'` is a legal member of the TYPE but is never attached by
+     * the producer seam; it
+     * is admitted here so the schema describes the type rather than the
+     * producer's current habit — a schema narrower than its type is a trap
+     * for the next writer.
+     */
+    investigation_priority: z
+      .discriminatedUnion('kind', [
+        z.object({ kind: z.literal('named'), factorId: z.string().min(1), factorLabel: z.string().min(1), specificAction: z.string().min(1).nullable() }).strict(),
+        z.object({ kind: z.literal('below_resolution') }).strict(),
+        z.object({ kind: z.literal('incomplete') }).strict(),
+        z.object({ kind: z.literal('not_assessed') }).strict(),
+      ])
+      .optional(),
     goal_fit: ContextPackAnalysisGoalFitSchema.nullable().optional(),
     /**
      * Lane 30 fix 3 — top-level ordinal confidence tier (attested values

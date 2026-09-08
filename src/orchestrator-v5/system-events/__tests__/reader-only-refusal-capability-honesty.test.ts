@@ -125,15 +125,20 @@ describe('reader-only refusal — the capability denial must be true', () => {
     it('⭐ THE WITNESSED FALSE SENTENCES — bound VERBATIM, by identity', () => {
       // Value predicates could be satisfied by a different sentence (trap 19);
       // these are the exact strings #1138 shipped.
-      expect(textFor('structural_add')).not.toContain(
-        "i can't add a factor to the model in this version",
-      );
+      // `structural_add` is no longer reader-only — it has a writer — so its
+      // refusal branch is unreachable and there is no sentence left to pin here.
+      // The pin migrated to `structural-add.test.ts`, which asserts the WRITER's
+      // copy states what actually happened AND what is still missing.
       expect(textFor('structural_add_edge')).not.toContain(
         "i can't add a link between factors in this version",
       );
-      expect(textFor('structural_rename')).not.toContain(
-        "i can't rename a factor in this version",
-      );
+      // `structural_rename` is no longer reader-only — it has a writer — so its
+      // refusal branch is unreachable and there is no sentence left to pin. The
+      // pin migrated to `structural-rename.test.ts`, which asserts the WRITER's
+      // copy states what actually happened. Removing it here rather than leaving
+      // it asserting against the generic fallback is deliberate: a test that
+      // passes because the branch it names is dead is a guard agreeing with
+      // itself (trap 13b).
     });
 
     it('⭐ the honest state claim SURVIVES the fix', () => {
@@ -186,9 +191,7 @@ describe('reader-only refusal — the capability denial must be true', () => {
 
     it('⭐ the route table is EXACT — it REDs if it grows or shrinks', () => {
       expect(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).sort()).toEqual([
-        'structural_add',
         'structural_add_edge',
-        'structural_rename',
       ]);
     });
   });
@@ -210,5 +213,56 @@ describe('reader-only refusal — the capability denial must be true', () => {
       expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
       expect(block.details?.reason).toBe(`${kind}_reader_only`);
     }
+  });
+});
+
+/**
+ * ⭐ THE KIND THE SUITE ABOVE STRUCTURALLY CANNOT SEE.
+ *
+ * `READER_ONLY_KINDS` is derived from `SYSTEM_EVENT_HANDLING` — correctly, so it
+ * cannot drift. But `edge_strength_edit` is declared `'mutating'` there and only
+ * becomes a refusal at RUNTIME, when `dispatchSystemEvent` demotes it because
+ * `config.features.graphCas.rpcEnforce !== true`. So the one kind whose copy was
+ * actually false was invisible to the one suite written to catch false copy, and
+ * nothing but a single integration assertion pinned it.
+ *
+ * That is why this block is keyed on the kind directly rather than on a derived
+ * list: a runtime-demoted kind has no declaration to derive from. It is a
+ * deliberate exception to "derive, never re-list", and the derived precondition
+ * below states the exact reason it is allowed, so it REDs if that stops being
+ * true — e.g. if the kind is ever declared `reader_only_refusal`, at which point
+ * the suite above covers it and this block should be deleted.
+ */
+describe('edge_strength_edit — a runtime-demoted kind, refused without naming a gesture', () => {
+  it('⭐ PRECONDITION — this kind is NOT declared reader-only, which is why it needs its own pin', () => {
+    expect(SYSTEM_EVENT_HANDLING.edge_strength_edit).toBe('mutating');
+    expect(READER_ONLY_KINDS).not.toContain('edge_strength_edit');
+  });
+
+  /**
+   * One kind, two gestures since 0.50.0 (`direction_intent`). The copy table
+   * reads `event.kind` alone, so ANY axis it names is a guess — and it was wrong
+   * for every direction-only edit. Naming no axis cannot be false.
+   */
+  it.each(['strength', 'direction', 'helps', 'hurts'])(
+    'does not name the "%s" axis it cannot know the user changed',
+    (axis) => {
+      expect(textFor('edge_strength_edit')).not.toContain(axis);
+    },
+  );
+
+  it('still says what happened and that nothing changed', () => {
+    const text = textFor('edge_strength_edit');
+    expect(text).toContain('link');
+    expect(text).toContain("haven't changed the model");
+  });
+
+  it('keeps the machine reason, so the rollout floor stays distinguishable from B1/422', () => {
+    const block = refusalFor('edge_strength_edit').blocks[0] as {
+      error_code?: string;
+      details?: { reason?: string };
+    };
+    expect(block.error_code).toBe('FEATURE_NOT_ENABLED');
+    expect(block.details?.reason).toBe('edge_strength_edit_reader_only');
   });
 });

@@ -41,7 +41,10 @@
 import { describe, expect, it } from "vitest";
 
 import { normaliseDraftResponse } from "../../../../adapters/llm/normalisation.js";
-import { resolveRunAdmission } from "../../../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
+import {
+  resolveRunAdmission,
+  NO_COMPARISON_NEXT_STEP,
+} from "../../../../orchestrator-v5/tools/handlers/analysis-ready-core.js";
 import { buildAnalysisReadyPayload } from "../../../transforms/analysis-ready.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
 import type { DraftRecordSet } from "../grammar.js";
@@ -427,10 +430,23 @@ describe("composition with the IDENTICAL_OPTIONS admission floor", () => {
     // that were merely un-ready would refuse for a different reason entirely, and
     // this assertion would then be about the wrong mechanism.
     expect(admission.strict?.status).toBe("analysis_ready");
-    expect(admission.blockedNextStep).toBeNull();
     expect(admission.willProceed).toBe(false);
 
-    // And this change supplies what that refusal does not carry on its own.
+    // ⭐ UPDATED with the silent-refusal fix. This line asserted `toBeNull()`,
+    // and the comment below it ("what that refusal does not carry on its own")
+    // recorded exactly why: a graph refused by the IDENTICAL_OPTIONS floor alone
+    // has `strict.status === "analysis_ready"`, so it inherited a NULL next step
+    // and the refusal reached the user carrying no reason.
+    //
+    // That null was an observation of the defect, never the property this test
+    // exists to prove — the subject is that the ASKS below resolve the contest.
+    // Those assertions are untouched. The refusal now also names the user's next
+    // move, and the copy is honest for this shape specifically: two options that
+    // set the SAME figure are not two different options to weigh.
+    // See `tests/unit/analysis-refusal-carries-a-reason.test.ts`.
+    expect(admission.blockedNextStep).toBe(NO_COMPARISON_NEXT_STEP);
+
+    // And this is the channel that supplies the per-contest asks.
     expect(readiness.status).toBe("needs_user_input");
     const asks = (readiness.blockers ?? []).filter(
       (blocker) => blocker.blocker_type === "ambiguous_value",

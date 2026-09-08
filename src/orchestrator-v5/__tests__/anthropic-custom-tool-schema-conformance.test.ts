@@ -56,12 +56,32 @@ import {
 } from '../routing/tool-schema.js';
 import { OPEN_FRAME_INTAKE_TOOL } from '../routing/open-frame-intake.js';
 import {
+  buildAddOptionGrounding,
+  buildProposeAddOptionTool,
+} from '../tools/propose-add-option.js';
+import {
   buildProposeStructuralEditTool,
   buildStructuralEditGrounding,
   type StructuralEditGrounding,
 } from '../tools/propose-structural-edit.js';
 
 const SRC_ROOT = join(fileURLToPath(new URL('../../', import.meta.url)));
+
+/** A grounded add-option model, so its tool schema is built the way it is served. */
+const ADD_OPTION_GROUNDING = buildAddOptionGrounding({
+  nodes: [
+    { id: 'dec_mrr', kind: 'decision', label: 'MRR Growth Strategy' },
+    { id: 'goal_mrr', kind: 'goal', label: 'Reach £250,000 MRR' },
+    {
+      id: 'fac_churn',
+      kind: 'factor',
+      label: 'Monthly churn',
+      category: 'controllable',
+      observed_state: { value: 0.05, unit: 'percent' },
+    },
+  ],
+  edges: [{ from: 'dec_mrr', to: 'goal_mrr' }],
+})!;
 
 const GROUNDING: StructuralEditGrounding = buildStructuralEditGrounding({
   nodes: [
@@ -101,6 +121,14 @@ const SERVED_TOOL_SCHEMAS: readonly {
     label: 'olumi_route_open_frame_intake',
     schema: OPEN_FRAME_INTAKE_TOOL.input_schema,
   },
+  {
+    // The add-option text leg's focused tool. It CONSTRUCTS its own schema
+    // (nested objects under `links.items` and `clarification`), so the
+    // adapter's top-level-only `additionalProperties` injection cannot rescue
+    // it — exactly the shape that 400'd `propose_structural_edit` twice.
+    label: 'propose_add_option',
+    schema: buildProposeAddOptionTool(ADD_OPTION_GROUNDING).input_schema,
+  },
 ];
 
 /**
@@ -120,6 +148,7 @@ const TOOL_SCHEMA_CONSTRUCTION_FILES: readonly string[] = [
   'orchestrator-v5/routing/open-frame-intake.ts',
   'orchestrator-v5/routing/tool-schema.ts',
   'orchestrator-v5/tools/propose-structural-edit.ts',
+  'orchestrator-v5/tools/propose-add-option.ts',
 ];
 
 interface ObjectNode {

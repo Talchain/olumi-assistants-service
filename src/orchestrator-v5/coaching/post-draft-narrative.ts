@@ -73,6 +73,7 @@ import { deriveNotModelledManifest } from '../../cee/context-integrity/not-model
 import { composeDroppedFigureNotice } from '../../cee/context-integrity/brief-audit-answer.js';
 
 import { isDirectionClarificationId } from '../../cee/compound-goal/direction-gate.js';
+import { UNAUTHORED_DECISION_LABEL } from '../../cee/draft/records/objective-label.js';
 
 import {
   gateAssumptionFragment,
@@ -328,6 +329,23 @@ export function validateUncertaintyDriver(driver: string): boolean {
     if (lower.includes(term)) return false;
   }
   return true;
+}
+
+/**
+ * The edge fields this composer reads. Deliberately tiny: the only question
+ * asked of an edge here is which way a factor pushes the goal.
+ */
+interface EdgeLite {
+  readonly from?: string;
+  readonly to?: string;
+  readonly effect_direction?: 'positive' | 'negative';
+  readonly strength?: { readonly mean?: number };
+  /**
+   * ⚠ READ, NOT IGNORED. An edge the model says does not exist establishes no
+   *   effect however large its mean — omitting this field let a zero-existence
+   *   edge license a trade-off claim.
+   */
+  readonly exists_probability?: number;
 }
 
 interface NodeLite {
@@ -663,22 +681,56 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
   const optionsBlock = buildOptionsBlock(options, provisionalDecision);
 
-  const tradeOffBullet = buildTradeOffBullet(factors, risks);
+  const edges = (graph?.edges ?? []) as readonly EdgeLite[];
+  // The goal is identified the same way `findGoalLabel` identifies it — by node
+  // kind — so the two cannot disagree about which node the goal is.
+  const goalId = nodes.find((n) => n?.kind === 'goal')?.id ?? null;
+  const tradeOffBullet = buildTradeOffBullet(
+    factors,
+    risks,
+    findOpposingFactorPair(nodes, edges, goalId),
+  );
   const mayServeFreeformCoaching = analysisReady?.status === 'ready';
 
   // A direction clarification gets its OWN slot and is therefore removed from
   // the general-purpose pickers below. Leaving it in both would surface the
   // same question twice, and leaving it ONLY in the generic pool is the defect
-  // being fixed — see `pickDirectionClarifications`. Non-ready turns cannot
-  // trust it, however: at this boundary a producer-built clarification and an
-  // LLM item are distinguished only by a spoofable ID prefix, and package
-  // deduplication can let the latter occupy that ID. Until provenance is
-  // carried structurally, direction copy follows the same ready-only policy.
-  const directionBullets = mayServeFreeformCoaching
-    ? pickDirectionClarifications(strengthenItems, MAX_DIRECTION_BULLETS).map(
-        (text) => toDirectionBullet(text),
-      )
-    : [];
+  // being fixed — see `pickDirectionClarifications`.
+  //
+  // ⭐⭐ IT IS NO LONGER GATED ON READINESS, AND THE PRECONDITION THE OLD GATE
+  // NAMED HAS BEEN MET. The previous comment here read: "at this boundary a
+  // producer-built clarification and an LLM item are distinguished only by a
+  // spoofable ID prefix, and package deduplication can let the latter occupy
+  // that ID. Until provenance is carried structurally, direction copy follows
+  // the same ready-only policy." The prefix is now a RESERVED NAMESPACE:
+  // `runStagePackage` evicts every `direction_unresolved_*` item it did not
+  // mint itself, unconditionally, immediately before its own append — so an LLM
+  // item cannot reach this function under that id, and cannot displace the
+  // producer's card either.
+  //
+  // ⚠ WHY THE READY-ONLY POLICY DOES NOT APPLY TO THIS CLASS ANYWAY. That
+  // policy exists to keep FREEFORM LLM PROSE off non-ready turns ("do not
+  // inspect those bytes at all"). These bullets are not that: the copy is
+  // composed deterministically by `renderDirectionClarifications` from a fixed
+  // template over the user's own quoted amount, and every candidate still
+  // passes `gateCoachingCardBody` and is DROPPED WHOLE if it trips it. The
+  // freeform pool below keeps the ready-only gate unchanged, which is the
+  // discrimination this pair of lines exists to make.
+  //
+  // ⚠ AND THE HARM THE OLD GATE CAUSED, MEASURED — this is why it moved rather
+  // than being left alone. Across 13 live draft turns on staging build
+  // `3427aea` (2026-09-07), `analysis_ready.status` was `ready` on 4 and not
+  // ready on 9. The limit question reached the user on 4 of 4 ready turns and 0
+  // of 9 non-ready ones, a perfect correlation. So the user was told their
+  // stated limit had not been understood exactly when their model was already
+  // in good shape, and was told nothing when it was not — and a brief whose
+  // limits are the part that failed to land is more likely, not less, to leave
+  // the draft non-ready. Silent loss of a stated constraint is the worse
+  // defect; that is the whole argument the gate below it makes for asking.
+  const directionBullets = pickDirectionClarifications(
+    strengthenItems,
+    MAX_DIRECTION_BULLETS,
+  ).map((text) => toDirectionBullet(text));
   const generalStrengthenItems = mayServeFreeformCoaching && Array.isArray(strengthenItems)
     ? strengthenItems.filter((i) => !isDirectionClarificationItem(i))
     : [];
@@ -1149,6 +1201,182 @@ function buildOptionsBlock(
 }
 
 /**
+ * The sign this edge carries, or `null` when it carries none.
+ *
+ * ⚠ `exists_probability: 0` YIELDS NULL. An edge the model says does not exist
+ *   cannot establish an effect, however large its mean. Reading the sign alone
+ *   let a zero-existence edge license a trade-off claim.
+ *
+ * `effect_direction` is the producer's own field and is authoritative. The sign
+ * of `strength.mean` is a fallback only, and a mean of exactly 0 yields `null`
+ * rather than a guess — at zero the sign cannot recover direction, and
+ * `-0 >= 0` is `true`, so an unguarded test calls every zero positive.
+ */
+function edgeSign(e: EdgeLite): 1 | -1 | null {
+  if (e?.exists_probability === 0) return null;
+  if (e?.effect_direction === 'positive') return 1;
+  if (e?.effect_direction === 'negative') return -1;
+  const mean = e?.strength?.mean;
+  if (typeof mean === 'number' && mean !== 0) return mean > 0 ? 1 : -1;
+  return null;
+}
+
+/**
+ * Depth bound, so a cyclic or densely connected graph cannot make this walk the
+ * cost. Chosen to traverse the indirect chains real drafted models contain; a
+ * path longer than this is not silently ignored — see `truncated` below.
+ */
+const MAX_PATH_DEPTH = 8;
+
+interface PathScan {
+  /** Composed signs of every INDIRECT path fully traversed to the goal. */
+  readonly signs: ReadonlySet<number>;
+  /**
+   * ⚠ TRUE WHEN THE WALK STOPPED SHORT — and this field is the whole point.
+   *
+   * A previous cut returned an empty set at the depth cap, and the caller read
+   * that as "no contradictory path exists". It meant "no contradictory path was
+   * LOOKED FOR beyond here". Reproduced: a six-edge chain positive at every hop
+   * except a final negative one lies past a four-deep lookahead, so the direct
+   * +0.2 survived as an unqualified sign and the product claimed a trade-off
+   * the fuller model refutes. An incomplete check is not a negative result.
+   */
+  readonly truncated: boolean;
+}
+
+/**
+ * Composed signs of every indirect path from `fromId` to the goal.
+ *
+ * Direct edges are excluded — they are the establishing evidence, handled by
+ * the caller; these paths exist only to contradict it.
+ */
+function scanIndirectPaths(
+  fromId: string,
+  goalId: string,
+  edges: readonly EdgeLite[],
+  depth = 0,
+  seen: ReadonlySet<string> = new Set(),
+  carried: 1 | -1 | null = null,
+): PathScan {
+  const signs = new Set<number>();
+  let truncated = false;
+  for (const e of edges) {
+    if (e?.from !== fromId || typeof e.to !== 'string') continue;
+    if (seen.has(e.to)) continue;
+    const sign = edgeSign(e);
+    if (sign === null) continue;
+    const composed = carried === null ? sign : ((carried * sign) as 1 | -1);
+    if (e.to === goalId) {
+      // A single hop straight to the goal is the DIRECT edge, not an indirect
+      // path; it only counts once something has been carried into it.
+      if (carried !== null) signs.add(composed);
+      continue;
+    }
+    if (depth + 1 >= MAX_PATH_DEPTH) {
+      // There is more graph beyond here that this walk will not look at.
+      truncated = true;
+      continue;
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(fromId);
+    const deeper = scanIndirectPaths(e.to, goalId, edges, depth + 1, nextSeen, composed);
+    for (const d of deeper.signs) signs.add(d);
+    if (deeper.truncated) truncated = true;
+  }
+  return { signs, truncated };
+}
+
+/**
+ * ⭐ WHICH WAY DOES THIS FACTOR PUSH THE GOAL? `null` unless the model settles it.
+ *
+ * ⚠ A DIRECT EDGE ESTABLISHES; AN INDIRECT PATH MAY ONLY VETO. Two independently
+ *   reproduced counterexamples forced this shape, and both were my own defect
+ *   repeated one level in — I had replaced "two labels exist" with "one direct
+ *   edge exists" and again claimed more than the model supports:
+ *
+ *     · A→goal +0.2 was promoted to a global positive sign while
+ *       A→outcome +1 → goal −1 makes A's fuller path negative. A mixed model
+ *       does not establish unqualified opposition, so "A balanced against B"
+ *       remained unearned.
+ *     · A→goal +0.2 with `exists_probability: 0` still licensed the pair.
+ *
+ *   Indirect paths are deliberately NOT allowed to establish a sign on their
+ *   own either: an indirect-only factor stays unknown rather than having a
+ *   global sign invented for it from a chain the person never sees summarised.
+ */
+function factorDirectionOnGoal(
+  factorId: string,
+  goalId: string | null,
+  edges: readonly EdgeLite[],
+): 'positive' | 'negative' | null {
+  if (goalId === null) return null;
+  let direct: 1 | -1 | null = null;
+  for (const e of edges) {
+    if (e?.from !== factorId || e?.to !== goalId) continue;
+    const sign = edgeSign(e);
+    if (sign === null) return null;
+    if (direct !== null && direct !== sign) return null;
+    direct = sign;
+  }
+  if (direct === null) return null;
+  const scan = scanIndirectPaths(factorId, goalId, edges);
+  // ⚠ A TRUNCATED WALK CANNOT REPORT "NO CONTRADICTION". Unknown is not
+  //   permission: if the search stopped short, the direct sign is not an
+  //   unqualified claim and no trade-off is asserted.
+  if (scan.truncated) return null;
+  for (const indirect of scan.signs) {
+    if (indirect !== direct) return null;
+  }
+  return direct > 0 ? 'positive' : 'negative';
+}
+
+/**
+ * ⭐⭐ THE FIRST TWO FACTOR LABELS ARE NOT A TRADE-OFF, AND THIS PRODUCT SAID THEY WERE.
+ *
+ * MEASURED ON A REAL SERVED TURN (CEE `083e0da`, request `2e5d48a8`, scenario
+ * `e309fd7e`, 8 Sep 2026). The user's first reply contained:
+ *
+ *   "Main trade-off: Team Coordination Overhead balanced against
+ *    Onboarding and Ramp Time"
+ *
+ * Both are COSTS of hiring. They push the goal the same way and are not in
+ * tension with each other. The sentence asserted a relationship the model does
+ * not contain, in the first thing the person reads — because
+ * `buildTradeOffBullet` received only `string[]` labels and emitted
+ * `factors[0] balanced against factors[1]` whenever two labels existed. Nothing
+ * consulted an edge; `graph` was in scope the whole time and `graph.edges` was
+ * never read. The suite's own case was named "…using the first two factor
+ * labels" and built its fixture with `edges: []`, so it required the claim to
+ * be made about a graph containing no relationships at all.
+ *
+ * A trade-off is a claim about DIRECTION: raising one lowers the other's
+ * contribution to the goal. It is now said only when two factors provably push
+ * the goal opposite ways, and the pair is chosen by that test rather than by
+ * array position.
+ *
+ * ⚠ WHEN NOTHING OPPOSES, THE ANSWER IS NOT SILENCE. Dropping the bullet would
+ *   delete a true and useful line (these ARE the factors the model weighs) to
+ *   avoid a false one. The caller keeps the names and loses only the unearned
+ *   relationship.
+ */
+function findOpposingFactorPair(
+  nodes: readonly NodeLite[],
+  edges: readonly EdgeLite[],
+  goalId: string | null,
+): readonly [string, string] | null {
+  const positive: string[] = [];
+  const negative: string[] = [];
+  for (const f of nodes) {
+    if (f?.kind !== 'factor' || typeof f.id !== 'string' || typeof f.label !== 'string') continue;
+    const dir = factorDirectionOnGoal(f.id, goalId, edges);
+    if (dir === 'positive') positive.push(f.label);
+    else if (dir === 'negative') negative.push(f.label);
+  }
+  if (positive.length === 0 || negative.length === 0) return null;
+  return [positive[0], negative[0]] as const;
+}
+
+/**
  * Return a single bullet-ready trade-off fragment (no leading bullet
  * glyph; no trailing full stop — the renderer adds those). Returns null
  * when no factor/risk material is available, so the caller can omit the
@@ -1157,10 +1385,18 @@ function buildOptionsBlock(
 function buildTradeOffBullet(
   factors: readonly string[],
   risks: readonly string[],
+  opposingPair: readonly [string, string] | null,
 ): string | null {
   const trimmedFactors = factors.map((l) => elideLabelAtWordBoundary(l, MAX_LABEL_CHARS));
+  if (opposingPair !== null) {
+    const a = elideLabelAtWordBoundary(opposingPair[0], MAX_LABEL_CHARS);
+    const b = elideLabelAtWordBoundary(opposingPair[1], MAX_LABEL_CHARS);
+    return `Main trade-off: ${a} balanced against ${b}`;
+  }
   if (trimmedFactors.length >= 2) {
-    return `Main trade-off: ${trimmedFactors[0]} balanced against ${trimmedFactors[1]}`;
+    // Two factors, no opposition the model can show: name them without
+    // asserting a relationship. See `findOpposingFactorPair`.
+    return `The model weighs ${trimmedFactors[0]} and ${trimmedFactors[1]}`;
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
@@ -1616,13 +1852,20 @@ function stripBulletLabel(bullet: string): string {
 // ----- data accessors -------------------------------------------------------
 
 /**
- * The generic label `deriveDecisionLabel` falls back to when it declines to
- * author a decision statement (`objective-label.ts:807`). Mirrored here because
- * the narrative cannot import the projector's draft-records layer; the mirror is
- * held honest by a test that calls `deriveDecisionLabel` itself and asserts this
- * exact string, so drift REDs rather than silently disabling the gate.
+ * ⭐ THE MIRROR IS GONE — this now IMPORTS the producer's constant.
+ *
+ * This was a hand-copied literal `'Decision'`, justified on the grounds that
+ * "the narrative cannot import the projector's draft-records layer". That was
+ * false: this module already imports from three other `cee/` subtrees, and
+ * `objective-label.ts` has ZERO imports of its own, so there is no cycle to
+ * avoid. The copy was the hand-maintained mirror this estate keeps paying for
+ * (trap 12) — a second definition of one cross-service vocabulary word, kept in
+ * step only by a test somebody had to remember to keep pointed at it.
+ *
+ * With the import there is ONE string. The gate cannot silently stop firing
+ * because a rename moved the producer and not the copy, which is exactly what
+ * the `Decision` -> `Question` rename would otherwise have done.
  */
-const UNAUTHORED_DECISION_LABEL = 'Decision';
 
 /**
  * TRUE when the model carries a decision node whose label the projector could
@@ -1662,13 +1905,15 @@ const UNAUTHORED_DECISION_LABEL = 'Decision';
  *
  * The producer's actual signature for "could not derive" is BOTH: the flag
  * absent AND the label left as the generic placeholder. `deriveDecisionLabel`
- * returns exactly `{ label: "Decision", authored: false }` when nothing yields
+ * returns exactly `{ label: UNAUTHORED_DECISION_LABEL, authored: false }` when nothing yields
  * a faithful statement (`objective-label.ts:807`) — derived there, not assumed
  * here, and pinned by a test that calls that producer directly so this
  * constant cannot silently drift out of agreement with it.
  *
- * If that literal ever changes, this gate STOPS FIRING and the copy reverts to
- * today's wording — the safe direction: a lost hedge, never a fresh lie.
+ * The literal is now IMPORTED rather than copied, so it cannot drift out of
+ * agreement with the producer at all. Were the two ever to diverge again, the
+ * gate would simply stop firing and the copy revert to today's wording — the
+ * safe direction: a lost hedge, never a fresh lie.
  *
  * ⚠ KNOWN GAP, STATED RATHER THAN PAPERED OVER: this catches the cases where
  * `deriveDecisionLabel` DECLINED to author. It does NOT catch a brief whose

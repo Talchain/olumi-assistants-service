@@ -1,6 +1,12 @@
 /**
  * ⭐⭐ THE NODE LABEL IS AN AUTHORED OBJECTIVE, NOT THE USER'S RAW BRIEF FRAGMENT
- * — and the decision node is not the word "Decision".
+ * — and the decision node is not labelled with the generic word for its kind.
+ *
+ * ⚠ THE CAPTURES AND SCREENSHOTS BELOW SAY `Decision`, AND ARE LEFT THAT WAY:
+ * they are dated records of what the product ACTUALLY emitted, not fixtures to
+ * keep current (trap 14b). Today's placeholder is `Question`
+ * ({@link UNAUTHORED_DECISION_LABEL}), renamed to agree with the UI's node
+ * vocabulary; assertions track the constant, the history does not.
  *
  * ── THE WITNESSED DEFECT ───────────────────────────────────────────────────
  * The founder photographed a goal node reading
@@ -42,6 +48,7 @@ import {
   deriveGoalObjectiveLabel,
   deriveDecisionLabel,
   labelIsDerivedFrom,
+  UNAUTHORED_DECISION_LABEL,
 } from "../objective-label.js";
 import { enforceSingleGoal } from "../../../structure/index.js";
 import { projectGraphAndOptionsToV3 } from "../../../transforms/schema-v3.js";
@@ -201,7 +208,7 @@ describe("the goal label is an authored objective, not the user's verbatim fragm
 });
 
 describe("the decision node carries a real label derived from the decision being made", () => {
-  it("the projector no longer mints the literal 'Decision' when the brief states the decision", () => {
+  it("the projector no longer mints the generic placeholder when the brief states the decision", () => {
     const brief = "Should we raise the price or keep it as is? Our churn is 3.5% monthly.";
     const records: DraftRecordSet = {
       stated_items: [
@@ -247,7 +254,7 @@ describe("the decision node carries a real label derived from the decision being
     const decisions = projected.nodes.filter((n) => n.kind === "decision");
     expect(decisions).toHaveLength(1);
     const decision = decisions[0];
-    expect(decision.label).not.toBe("Decision");
+    expect(decision.label).not.toBe(UNAUTHORED_DECISION_LABEL);
     expect(decision.label).toBe("Raise the Price or Keep It as Is");
     expect(decision.provenance?.label_authored).toBe(true);
   });
@@ -368,7 +375,7 @@ describe("the decision node carries a real label derived from the decision being
     (_name, vetoed, twin, twinLabel) => {
       const refused = deriveDecisionLabel({ brief: vetoed, goalQuotes: [] });
       expect(refused.authored, `must refuse: ${vetoed}`).toBe(false);
-      expect(refused.label).toBe("Decision");
+      expect(refused.label).toBe(UNAUTHORED_DECISION_LABEL);
       const authored = deriveDecisionLabel({ brief: twin, goalQuotes: [] });
       expect(authored.authored, `twin must author: ${twin}`).toBe(true);
       expect(authored.label).toBe(twinLabel);
@@ -378,7 +385,7 @@ describe("the decision node carries a real label derived from the decision being
   it("a refused decision keeps the honest generic and says so", () => {
     const derived = deriveDecisionLabel({ brief: "The board set two main options.", goalQuotes: [] });
     expect(derived.authored).toBe(false);
-    expect(derived.label).toBe("Decision");
+    expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
   });
 });
 
@@ -851,7 +858,7 @@ describe("an investigative brief does not name the decision from a question it a
       "What Is Actually Driving It Before We Commit Budget to a Fix",
     );
     expect(derived.authored).toBe(false);
-    expect(derived.label).toBe("Decision");
+    expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
     expect(derived.reason).toBe("no_derivable_decision_statement");
   });
 
@@ -871,7 +878,7 @@ describe("an investigative brief does not name the decision from a question it a
     (_frame, brief) => {
       const derived = deriveDecisionLabel({ brief });
       expect(derived.authored).toBe(false);
-      expect(derived.label).toBe("Decision");
+      expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
     },
   );
 
@@ -952,7 +959,7 @@ describe("an investigative brief does not name the decision from a question it a
   it.each(KNOWN_DROPPED)("known-dropped, deliberately: %s", (_why, brief) => {
     const derived = deriveDecisionLabel({ brief });
     expect(derived.authored).toBe(false);
-    expect(derived.label).toBe("Decision");
+    expect(derived.label).toBe(UNAUTHORED_DECISION_LABEL);
   });
 
   /**
@@ -983,5 +990,326 @@ describe("an investigative brief does not name the decision from a question it a
     expect(derived.authored).toBe(false);
     expect(derived.reason).toBe("deliberation_frame");
     expect(derived.label).toBe(quote);
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE CROSS-SERVICE VOCABULARY PIN — the decision node's unauthored
+ * placeholder is the word the UI shows for that node's KIND, and the two
+ * services must agree on it or a freshly-drafted graph contradicts its own
+ * legend on screen.
+ *
+ * ── THE DEFECT THIS EXISTS TO CATCH ─────────────────────────────────────────
+ * The UI renamed the decision node's user-facing vocabulary from `Decision` to
+ * `Question`, from a single constant (`DECISION_NODE_LABEL`,
+ * `DecisionGuideAI:src/canvas/domain/vocabulary.ts`, PR #1026). That constant
+ * governs the LEGEND, the context menu, the inspector and the node registry's
+ * kind label — it does NOT rewrite a node's own `label` field. So a graph
+ * drafted by CEE carried the server-minted string `Decision` as the node's
+ * text while every affordance around it read `Question`: the two services
+ * disagreeing on one screen, which is what this pin forbids.
+ *
+ * ── WHY THE ASSERTION IS A LITERAL AND NOT THE CONSTANT ─────────────────────
+ * Asserting `=== UNAUTHORED_DECISION_LABEL` would be a tautology: it passes for
+ * whatever the constant happens to say, which is exactly the drift in question.
+ * The literal below is the CONTRACT with the UI. If someone changes the CEE
+ * constant, this REDs and the RED is the reminder that the UI half must move
+ * in the same wave.
+ *
+ * ⚠ SCOPE, STATED PRECISELY (trap 20): this pins CEE's half only. It cannot
+ * observe the UI's constant from this repo, so it proves the server emits the
+ * agreed string — never that the UI still agrees. The UI's own half is pinned
+ * in that repo.
+ */
+describe("the unauthored decision label agrees with the UI's node vocabulary", () => {
+  /** The string the UI's `DECISION_NODE_LABEL` holds. Changing one requires changing both. */
+  const UI_DECISION_NODE_LABEL = "Question";
+
+  it("⭐ the pure producer mints the agreed placeholder when it declines to author", () => {
+    const declined = deriveDecisionLabel({
+      brief: "Our burn rate is too high and the team is stretched thin.",
+      goalQuotes: [],
+    });
+    expect(declined.authored).toBe(false);
+    expect(declined.reason).toBe("no_derivable_decision_statement");
+    expect(declined.label).toBe(UI_DECISION_NODE_LABEL);
+
+    // CONTRAST CONTROL (trap 13): a brief that DOES pose a choice must author a
+    // real label. Without this the pin would pass against a producer that had
+    // stopped authoring anything at all and returned the placeholder always.
+    const authored = deriveDecisionLabel({
+      brief: "We are deciding whether to build our own fleet or partner with third-party couriers.",
+      goalQuotes: [],
+    });
+    expect(authored.authored).toBe(true);
+    expect(authored.label).not.toBe(UI_DECISION_NODE_LABEL);
+  });
+
+  /**
+   * ⭐ THE WHOLE MINT PATH, NOT THE LEAF FUNCTION. The pure-function pin above
+   * would still pass if the projector stopped calling `deriveDecisionLabel` and
+   * hardcoded its own string — which is how the literal got minted in the first
+   * place. This drives `projectRecordsToGraph` and reads the node a user would
+   * actually see, bound BY IDENTITY (the sole `kind === "decision"` node), never
+   * by a value predicate another node could satisfy.
+   */
+  it("⭐ the PROJECTED decision node a user sees carries the agreed placeholder", () => {
+    const brief = "Our burn rate is too high and the team is stretched thin.";
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "Our burn rate is too high" },
+        { kind: "option", source_quote: "cut contractor spend" },
+        { kind: "option", source_quote: "slow down hiring" },
+      ],
+      claims: [
+        { claim_kind: "outcome", label: "Monthly Burn", basis: [0] },
+        {
+          claim_kind: "causal_link",
+          label: "cutting contractors lowers burn",
+          from_stated: 1,
+          to_claim: 0,
+          effect: "negative",
+        },
+        {
+          claim_kind: "causal_link",
+          label: "slower hiring lowers burn",
+          from_stated: 2,
+          to_claim: 0,
+          effect: "negative",
+        },
+      ],
+    };
+
+    const projected = projectRecordsToGraph(records, brief).graph;
+    const decisions = projected.nodes.filter((n) => n.kind === "decision");
+    expect(decisions).toHaveLength(1);
+    const decision = decisions[0];
+
+    expect(decision.label).toBe(UI_DECISION_NODE_LABEL);
+    // The placeholder is NOT an authored label, and must not claim to be.
+    expect(decision.provenance?.label_authored).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐⭐⭐ `label_placeholder` — THE SIGNAL THAT REPLACES THE STRING MATCH.
+ *
+ * ── WHY A NEW FIELD AND NOT A FIX TO `label_authored` ───────────────────────
+ * Two different questions were riding one boolean (trap 21):
+ *
+ *   Q1  "is this display string OURS rather than the user's?"
+ *   Q2  "did we DERIVE a meaningful label from the brief?"
+ *
+ * On every node but this one the answers coincide. On the decision
+ * placeholder they diverge: the string is ours (Q1 yes) and we derived
+ * nothing (Q2 no). `label_authored` encodes Q2 while its own contract comment
+ * documents Q1 — *"Absent means the label IS the user's own text"* — which is
+ * FALSE of the placeholder.
+ *
+ * `label_authored` is NOT corrected here, deliberately. It has a live consumer
+ * that depends on the answer it currently gives: `hasProvisionalDecision`
+ * (`post-draft-narrative.ts`) reads `label_authored !== true` as half of its
+ * "the projector declined" signature, and gating on that flag ALONE already
+ * shipped a witnessed false claim in the opposite direction — telling users
+ * who had posed a perfectly good decision that we could not find one. So the
+ * concepts are NAMED APART rather than reconciled, which is trap 21's actual
+ * prescription.
+ *
+ * ── WHAT THIS BUYS THE UI ───────────────────────────────────────────────────
+ * A boolean. The consumer no longer has to compare a label against a known
+ * placeholder STRING to decide whether to show its empty state — which is the
+ * entire fragility class this change exists to remove. Two services agreeing
+ * on a display word is a coincidence waiting to lapse; a field is a contract.
+ */
+describe("label_placeholder — an un-chosen mint, marked as one", () => {
+  const UI_DECISION_NODE_LABEL = "Question";
+
+  /** A V1 decision node as the projector banks it on the DECLINE path. */
+  const placeholderV1 = (over: Record<string, unknown> = {}) => ({
+    version: "1",
+    nodes: [
+      {
+        id: "dec_1",
+        kind: "decision",
+        label: UI_DECISION_NODE_LABEL,
+        provenance: {
+          provenance_class: "projector_structural",
+          label_placeholder: true,
+        },
+        ...over,
+      },
+      { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+    ],
+    edges: [],
+  });
+
+  const wireDecision = (v1: unknown) =>
+    projectGraphAndOptionsToV3(v1 as never, { brief: "We are stretched thin." }).graph.nodes.find(
+      (n) => n.kind === "decision",
+    );
+
+  it("⭐ ARM 1 — the placeholder path MARKS the node on the wire", () => {
+    expect(wireDecision(placeholderV1())?.label_placeholder).toBe(true);
+  });
+
+  /**
+   * ⭐⭐ THE PRODUCER'S OWN TWO ARMS — ADDED AFTER A SURVIVING MUTANT EXPOSED
+   * THAT NOTHING BOUND THEM.
+   *
+   * The wire-level arms above drive `projectGraphAndOptionsToV3` from a
+   * hand-built V1 fixture, so they bypass the PROJECTOR entirely. A mutant that
+   * made the reader mark EVERY node SURVIVED all five of them — because the
+   * lift's label re-derivation still filtered it, so the suite was agreeing
+   * with itself about a producer it never ran (trap 13b). These two run
+   * `projectRecordsToGraph` and read what the producer actually banks.
+   *
+   * They are a PAIR on purpose: one arm alone cannot show the mark
+   * discriminates, only that it can appear.
+   */
+  it("⭐ PRODUCER ARM 1 — a brief that yields no decision statement banks the mark", () => {
+    const brief = "Our burn rate is too high and the team is stretched thin.";
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "Our burn rate is too high" },
+        { kind: "option", source_quote: "cut contractor spend" },
+        { kind: "option", source_quote: "slow down hiring" },
+      ],
+      claims: [{ claim_kind: "outcome", label: "Monthly Burn", basis: [0] }],
+    };
+    const projected = projectRecordsToGraph(records, brief).graph;
+    const decision = projected.nodes.filter((n) => n.kind === "decision")[0];
+    expect(decision.provenance?.label_placeholder).toBe(true);
+    expect(decision.provenance?.label_authored).toBeUndefined();
+  });
+
+  it("⭐ PRODUCER ARM 2 — a brief that DOES state the decision banks NO mark", () => {
+    const brief = "Should we raise the price or keep it as is? Our churn is 3.5% monthly.";
+    const records: DraftRecordSet = {
+      stated_items: [
+        { kind: "goal", source_quote: "Should we raise the price or keep it as is?" },
+        { kind: "option", source_quote: "raise the price" },
+        { kind: "option", source_quote: "keep it as is" },
+      ],
+      claims: [{ claim_kind: "outcome", label: "Monthly Recurring Revenue", basis: [1] }],
+    };
+    const projected = projectRecordsToGraph(records, brief).graph;
+    const decision = projected.nodes.filter((n) => n.kind === "decision")[0];
+    expect(decision.provenance?.label_authored).toBe(true);
+    expect(decision.provenance?.label_placeholder).toBeUndefined();
+  });
+
+  /**
+   * ⭐ ARM 2. A field that is always present is not a signal. This is the twin
+   * of ARM 1 and must be read with it: together they show the field
+   * DISCRIMINATES rather than merely existing.
+   */
+  it("⭐ ARM 2 — an AUTHORED decision label is NOT marked", () => {
+    const authoredV1 = {
+      version: "1",
+      nodes: [
+        {
+          id: "dec_1",
+          kind: "decision",
+          label: "Build Our Own Fleet or Partner With Couriers",
+          provenance: { provenance_class: "projector_structural", label_authored: true },
+        },
+        { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+      ],
+      edges: [],
+    };
+    const wire = wireDecision(authoredV1);
+    expect(wire?.label_authored).toBe(true);
+    expect(wire?.label_placeholder).toBeUndefined();
+  });
+
+  /**
+   * ⭐⭐ A USER RENAME CLEARS IT — BY DERIVATION, NOT BY A WRITER REMEMBERING.
+   *
+   * The flag is RE-DERIVED at the lift on every response (the RESPONSE-ONLY
+   * rule its two siblings already follow), so it clears when the label stops
+   * being the placeholder REGARDLESS of whether a rename writer thought to
+   * drop it. That matters because the rename writer is a different lane
+   * (#1273): a design that required it to remember would be the
+   * hand-maintained mirror this estate keeps paying for (trap 12).
+   *
+   * Both renames below carry the STALE `label_placeholder: true` banked at
+   * draft time — that is the whole point. If the field were merely carried
+   * through, these would pass it to the wire and the UI would show an empty
+   * state over a name the user had chosen.
+   */
+  it("⭐ a user rename clears the mark, even with the stale flag still banked", () => {
+    const renamed = placeholderV1({
+      label: "Should We Move the Warehouse?",
+      provenance: { provenance_class: "projector_structural", label_placeholder: true },
+    });
+    expect(wireDecision(renamed)?.label_placeholder).toBeUndefined();
+  });
+
+  it("⭐ a rename stamped `user_set` clears it too (the #1273 shape)", () => {
+    const renamed = {
+      version: "1",
+      nodes: [
+        {
+          id: "dec_1",
+          kind: "decision",
+          label: "Should We Move the Warehouse?",
+          provenance: "user_set",
+        },
+        { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+      ],
+      edges: [],
+    };
+    expect(wireDecision(renamed)?.label_placeholder).toBeUndefined();
+  });
+
+  /**
+   * ⭐ THE BLANK-LABEL PATH, STATED RATHER THAN PAPERED OVER. `NodeV3` ACCEPTS
+   * `""` and `"   "` (measured: only ABSENT and NULL are rejected), and no CEE
+   * validator errors on a blank label. This field's claim is narrow — "this
+   * string is the generic mint we fall back to" — and a blank label is NOT
+   * that. So it is left UNMARKED, and the surface's own unnamed-node handling
+   * governs it. Deliberately NOT widened to mean "not a real name": that would
+   * be one boolean answering two questions again, which is the defect this
+   * field was minted to end.
+   */
+  /**
+   * ⭐⭐ THE USER WHO NAMES THEIR NODE "Question" — the discriminating fixture
+   * that settles a SURVIVING mutant rather than asserting it away.
+   *
+   * A mutant making the provenance reader mark EVERY node survived the arms
+   * above, so the honest question was whether it is EQUIVALENT (trap 13c: a
+   * survivor is a claim either way, and both directions must be demonstrated).
+   * It is NOT. This is the input that separates them: the banked flag is
+   * ABSENT — nobody minted a placeholder here — while the label happens to
+   * equal the placeholder word because the user typed it.
+   *
+   * The mark must NOT appear. The user chose this name, and showing them an
+   * empty state over a node they deliberately titled would be the same class
+   * of false claim as the one this whole change removes — just pointing the
+   * other way.
+   */
+  it("⭐ a user who NAMES their decision \"Question\" is not marked as a placeholder", () => {
+    const userNamed = {
+      version: "1",
+      nodes: [
+        {
+          id: "dec_1",
+          kind: "decision",
+          label: UI_DECISION_NODE_LABEL,
+          // No `label_placeholder`: the producer never minted one here.
+          provenance: { provenance_class: "projector_structural" },
+        },
+        { id: "opt_1", kind: "option", label: "invest", data: { interventions: {} } },
+      ],
+      edges: [],
+    };
+    expect(wireDecision(userNamed)?.label_placeholder).toBeUndefined();
+  });
+
+  it("⭐ a blank label is NOT marked as the placeholder — a different question", () => {
+    for (const blank of ["", "   "]) {
+      const v1 = placeholderV1({ label: blank });
+      expect(wireDecision(v1)?.label_placeholder, `blank=${JSON.stringify(blank)}`).toBeUndefined();
+    }
   });
 });

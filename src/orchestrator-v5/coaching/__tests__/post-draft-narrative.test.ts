@@ -21,6 +21,7 @@ import {
 } from '../../compose/forbidden-user-facing-phrases.js';
 import { buildAnalysisReadyPayload } from '../../../cee/transforms/analysis-ready.js';
 import { renderDirectionClarifications } from '../../../cee/compound-goal/direction-gate.js';
+import { UNAUTHORED_DECISION_LABEL } from '../../../cee/draft/records/objective-label.js';
 import type { GraphV3T, DraftCoachingWideningLog } from '../../../orchestrator/types.js';
 import type { AnalysisReadyPayloadT } from '../../../schemas/analysis-ready.js';
 
@@ -63,9 +64,41 @@ function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-function makeGraph(nodes: GraphV3T['nodes']): GraphV3T {
-  return { nodes, edges: [] } as unknown as GraphV3T;
+function makeGraph(nodes: GraphV3T['nodes'], edges: unknown[] = []): GraphV3T {
+  return { nodes, edges } as unknown as GraphV3T;
 }
+
+/** An edge from a factor to the goal, pushing it one way. */
+function edgeToGoal(from: string, effect: 'positive' | 'negative', existsProbability = 0.9) {
+  return anEdge(from, 'g1', effect, existsProbability);
+}
+
+/** Any edge, so an INDIRECT path can be built. */
+function anEdge(
+  from: string,
+  to: string,
+  effect: 'positive' | 'negative',
+  existsProbability = 0.9,
+) {
+  return {
+    from,
+    to,
+    strength: { mean: effect === 'positive' ? 0.5 : -0.5, std: 0.1 },
+    exists_probability: existsProbability,
+    effect_direction: effect,
+  };
+}
+
+/**
+ * An intermediate node, so a factor can reach the goal by more than one route.
+ *
+ * ⚠ `outcome`, NOT `factor`, and that is load-bearing for these cases. My first
+ *   fixture made it a factor, which gave it a direct goal edge of its own — so
+ *   it became a legitimate trade-off candidate and the "indirect-only" case
+ *   failed for the right reason. The composer collects `option`, `factor` and
+ *   `risk`; an `outcome` can carry a path without competing to be named.
+ */
+const VIA_NODE = { id: 'v1', kind: 'outcome' as const, label: 'Delivery throughput' };
 
 /**
  * Helper: most tests only care about the rendered `text` field of the
@@ -222,14 +255,58 @@ describe('buildPostDraftNarrative', () => {
     assertCleanCopy(text);
   });
 
-  it('frames the trade-off as a Main trade-off bullet using the first two factor labels', () => {
+  /**
+   * ⭐⭐ THIS TEST USED TO PIN THE DEFECT, AND ITS NAME SAID SO.
+   *
+   * It was called "…using the first two factor labels" and asserted
+   * `Main trade-off: … balanced against …` from `makeGraph([...])`, whose edge
+   * array was `[]`. It required the product to claim a trade-off relationship
+   * from a graph containing NO RELATIONSHIPS, and it passed for as long as it
+   * existed. Measured on a real served turn (CEE `083e0da`, request
+   * `2e5d48a8`): the user was told "Team Coordination Overhead balanced against
+   * Onboarding and Ramp Time" — both COSTS of hiring, pushing the goal the same
+   * way.
+   *
+   * A trade-off is a claim about DIRECTION, so it is now said only when two
+   * factors provably push the goal opposite ways. The pair below is the
+   * discriminator: identical nodes, edges the only difference.
+   */
+  it('claims a trade-off ONLY when two factors push the goal opposite ways', () => {
     const text = textOf({
-      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY],
+        [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative')],
+      ),
     });
     expect(text).toContain('What the model is weighing');
     expect(text).toContain('Leadership quality');
     expect(text).toContain('Delivery capacity');
     expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+    assertCleanCopy(text);
+  });
+
+  it('TWIN — same factors pushing the SAME way name both without claiming a trade-off', () => {
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY],
+        [edgeToGoal('f1', 'negative'), edgeToGoal('f2', 'negative')],
+      ),
+    });
+    // The names survive — this is not silence, it is the loss of an unearned
+    // relationship. Deleting the bullet would remove a true, useful line.
+    expect(text).toContain('Leadership quality');
+    expect(text).toContain('Delivery capacity');
+    expect(text).not.toContain('balanced against');
+    expect(text).toMatch(/^• The model weighs .+ and /m);
+    assertCleanCopy(text);
+  });
+
+  it('TWIN — a graph with NO edges cannot claim a trade-off (the served defect)', () => {
+    const text = textOf({
+      graph: makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]),
+    });
+    expect(text).not.toContain('balanced against');
+    expect(text).toContain('Leadership quality');
     assertCleanCopy(text);
   });
 
@@ -1255,7 +1332,55 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     expect(result.telemetry.additional_checks_surfaced).toBe(0);
   });
 
-  it('serves a producer-rendered direction clarification only when exact readiness is ready', () => {
+  /**
+   * ⭐⭐ REPLACES 'serves a producer-rendered direction clarification only when
+   * exact readiness is ready'.
+   *
+   * That spec pinned a policy whose own comment named its expiry condition:
+   * *"Until provenance is carried structurally, direction copy follows the same
+   * ready-only policy."* Provenance is now carried structurally —
+   * `runStagePackage` evicts every `direction_unresolved_*` item it did not mint
+   * (`cee/unified-pipeline/stages/__tests__/direction-gate-surfacing-executed.test.ts`,
+   * "the direction-clarification id space is reserved to this stage") — so the
+   * reason for the gate is gone.
+   *
+   * ⚠ AND THE GATE WAS CAUSING A GAP. Measured across 13 live draft turns on
+   * staging build `3427aea` (2026-09-07): `analysis_ready.status` was `ready` on
+   * 4 and not ready on 9; the limit question reached the user on 4 of 4 and 0 of
+   * 9. Note what that is and is not — the producer only mints a
+   * `direction_unresolved_*` item for a bound it actually WITHHELD, so the
+   * disclosure was never FALSE on the 4 it reached. The defect was SILENCE on
+   * the other 9, and a brief whose limits are the part that failed to land is
+   * more likely, not less, to leave the draft non-ready.
+   *
+   * ⭐⭐⭐ THE CONTRAST IS ASSERTED ON TELEMETRY, NOT ON THE TEXT, AND THAT IS THE
+   * WHOLE POINT OF THIS COMMENT — THE OBVIOUS TEXT VERSION IS VACUOUS.
+   *
+   * An earlier form of this spec put both halves on one input and asserted
+   * `expect(nonReady.text).not.toContain(actionCopy)` under the message
+   * "CONTRAST: freeform LLM coaching is still excluded on a non-ready turn".
+   * MEASURED: with the readiness gate removed WHOLESALE
+   * (`mayServeFreeformCoaching = true`), 10 of the 11 tests in this describe go
+   * RED and that one PASSES — the sole survivor, under a message advertising
+   * exactly the discrimination it was not making.
+   *
+   * The mechanism, established by dumping the narrative under the mutant rather
+   * than inferred: the freeform item IS read (`assumption_source` flips to
+   * `strengthen_item_detail`), but the direction bullet DISPLACES it from the
+   * "What the model is weighing" section, so the copy is absent from the text
+   * whether the gate is open or shut. Adding the producer card to the same input
+   * is what destroyed the discrimination. Proof of the confound: on the same
+   * items with NO card, the freeform copy DOES reach the text under the mutant.
+   *
+   * `assumption_source` sits UPSTREAM of that displacement, so it discriminates.
+   *
+   * ⭐ AND THE PRECONDITION IS PINNED IN-TEST (trap 13b). A negative assertion
+   * about a freeform item proves nothing unless that item COULD have been served
+   * on this input; the ready arm asserts it is served, so the non-ready arm's
+   * negative is provably the gate's doing and not the fixture quietly failing to
+   * produce a candidate at all.
+   */
+  it('serves a producer-rendered direction clarification on a NON-ready turn, while freeform coaching stays gated', () => {
     const [directionCard] = renderDirectionClarifications([{
       metric_text: 'customer satisfaction',
       amount_text: '85%',
@@ -1268,20 +1393,50 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     }]);
     expect(directionCard).toBeDefined();
 
-    const ready = buildReadyNarrative({ graph: baseGraph, strengthenItems: [directionCard] });
+    // ONE item set, decided twice — the only difference between the two runs is
+    // the readiness status, so any difference in outcome is the gate's.
+    const items = [directionCard, { detail: actionCopy }];
+
+    const ready = buildReadyNarrative({ graph: baseGraph, strengthenItems: items });
     expect(ready.text).toContain('Limit to confirm:');
     expect(ready.text).toContain('You mentioned 85% for customer satisfaction.');
     expect(ready.telemetry.direction_clarifications_surfaced).toBe(1);
+    // ⭐ THE PRECONDITION PIN. On THIS input the freeform item is a live
+    // candidate the picker actually takes. Without this line the non-ready
+    // assertion below could pass because no candidate existed.
+    expect(
+      ready.telemetry.assumption_source,
+      'PRECONDITION: the freeform item must be servable on this input, or the non-ready negative below proves nothing',
+    ).toBe('strengthen_item_detail');
 
     const nonReady = buildPostDraftNarrative({
       graph: baseGraph,
-      strengthenItems: [directionCard],
+      strengthenItems: items,
       analysisReady: needsInputReadiness,
     });
-    expect(nonReady.text).not.toContain('Limit to confirm:');
-    expect(nonReady.text).not.toContain('85%');
+
+    // DELIVERY — the disclosure crosses a non-ready turn. This is what the
+    // change exists to do.
+    expect(nonReady.text, 'the user must be told their limit did not land').toContain('Limit to confirm:');
+    expect(nonReady.text).toContain('You mentioned 85% for customer satisfaction.');
+    expect(nonReady.telemetry.direction_clarifications_surfaced).toBe(1);
+
+    // CONTRAST — the freeform pool is still shut. Asserted on the source
+    // telemetry because the text channel is confounded by displacement (see the
+    // header); this is the assertion that REDs when the gate is removed
+    // wholesale, and the ready arm above proves the candidate was there to take.
+    expect(
+      nonReady.telemetry.assumption_source,
+      'CONTRAST: freeform LLM coaching is still excluded on a non-ready turn',
+    ).not.toBe('strengthen_item_detail');
+
+    // True, and deliberately NOT labelled a contrast: the user does not see the
+    // freeform copy here, but it is displaced as well as gated, so this line
+    // holds with the gate open too. It pins the user-visible outcome, not the
+    // gate. The text-channel discrimination lives in the freeform-only
+    // neighbours above, which do bite.
+    expect(nonReady.text.toLowerCase()).not.toContain(actionCopy);
     expect(nonReady.text.split('\n\n').at(-1)).toBe(typedRecovery);
-    expect(nonReady.telemetry.direction_clarifications_surfaced).toBe(0);
   });
 });
 
@@ -2032,7 +2187,7 @@ describe('RC4 — em-dash coaching summary survives with the dash rewritten', ()
  * the pin below is what stops that distinction rotting.
  */
 describe('provisional-decision framing (open brief)', () => {
-  const DECISION_UNAUTHORED = { id: 'd1', kind: 'decision' as const, label: 'Decision' };
+  const DECISION_UNAUTHORED = { id: 'd1', kind: 'decision' as const, label: UNAUTHORED_DECISION_LABEL };
   const DECISION_AUTHORED = {
     id: 'd1',
     kind: 'decision' as const,
@@ -2053,7 +2208,7 @@ describe('provisional-decision framing (open brief)', () => {
     const decisionRecord = (authored: boolean) => ({
       id: 'dec1',
       kind: 'decision',
-      label: authored ? 'Build our own fleet or partner with couriers' : 'Decision',
+      label: authored ? 'Build our own fleet or partner with couriers' : UNAUTHORED_DECISION_LABEL,
       provenance: {
         provenance_class: 'projector_structural',
         source_quote: 'structural',
@@ -2203,7 +2358,7 @@ describe('provisional-decision framing (open brief)', () => {
     expect(authored.authored).toBe(true);
 
     expect(declined.authored).toBe(false);
-    expect(declined.label).toBe('Decision');
+    expect(declined.label).toBe(UNAUTHORED_DECISION_LABEL);
   });
 
   /**
@@ -2314,7 +2469,7 @@ describe('provisional-decision framing (open brief)', () => {
     // (c) The caught members are caught for the producer's actual reason — the
     // placeholder literal this builder's gate reads — not incidentally.
     for (const d of derived.filter((x) => !x.authored)) {
-      expect(d.label, `${d.name}: expected the placeholder`).toBe('Decision');
+      expect(d.label, `${d.name}: expected the placeholder`).toBe(UNAUTHORED_DECISION_LABEL);
     }
   });
 
@@ -2468,10 +2623,10 @@ describe('provisional-decision framing (open brief)', () => {
    * Its discriminating twin is the "unflagged decision with a REAL label"
    * control above, which the OTHER conjunct decides.
    */
-  it('PIN: an authored decision is not hedged even when its label reads "Decision"', () => {
+  it('PIN: an authored decision is not hedged even when its label reads as the placeholder', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision', label_authored: true },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL, label_authored: true },
         GOAL_NODE,
         OPTION_A,
         OPTION_B,
@@ -2617,7 +2772,7 @@ describe('the provisional opener claims only what the product did', () => {
   it('the provisional opener names what the builder did, and invites correction', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision' },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
         OPTION_A,
         OPTION_B,
         OPTION_C,
@@ -2634,7 +2789,7 @@ describe('the provisional opener claims only what the product did', () => {
   it('the provisional opener quotes a whole goal when one exists, and still invites correction', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision' },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
         { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Cut delivery cost per parcel' },
         OPTION_A,
         OPTION_B,
@@ -2703,7 +2858,7 @@ describe('every draft says the model is one of several the system could build', 
 
   const authoredGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
   const provisionalGraph = makeGraph([
-    { id: 'd1', kind: 'decision', label: 'Decision' },
+    { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
     OPTION_A,
     OPTION_B,
     OPTION_C,
@@ -2829,7 +2984,7 @@ describe('every draft says the model is one of several the system could build', 
   it('the 140-word narrative budget still holds with the note in it', () => {
     const text = textOf({
       graph: makeGraph([
-        { id: 'd1', kind: 'decision', label: 'Decision' },
+        { id: 'd1', kind: 'decision', label: UNAUTHORED_DECISION_LABEL },
         GOAL_NODE,
         OPTION_A,
         OPTION_B,
@@ -2841,5 +2996,154 @@ describe('every draft says the model is one of several the system could build', 
     });
     expect(text).toContain(NOTE);
     expect(wordCount(text)).toBeLessThanOrEqual(140);
+  });
+});
+
+
+/**
+ * ⭐⭐ WHAT A DIRECT EDGE MAY AND MAY NOT ESTABLISH.
+ *
+ * The first version of the opposition check read ONLY the direct factor→goal
+ * edge. That was my own defect repeated one level in: I had replaced "two
+ * labels exist" with "one direct edge exists" and again claimed more than the
+ * model supports. Two independently reproduced counterexamples:
+ *
+ *   · a factor whose direct edge is +0.2 but whose fuller path runs
+ *     +1 → −1 is not proven positive, so the pair is unearned;
+ *   · a direct edge with `exists_probability: 0` establishes nothing at all.
+ *
+ * ⚠ THESE CASES EXIST BECAUSE MY OWN SUITE COULD NOT SEE EITHER DEFECT. Both
+ *   mutations — deleting the existence check, deleting the indirect veto —
+ *   SURVIVED 183/183 until these were added. A corpus that shares the code's
+ *   blind spot cannot see the code's defect, and the fix would have been
+ *   unguarded in this repo while passing everything in it.
+ */
+describe('a direct edge establishes a sign; an indirect path may only veto it', () => {
+  const NODES = [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, VIA_NODE];
+
+  it('POSITIVE CONTROL — genuine direct opposition still claims the trade-off', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative')]),
+    });
+    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+  });
+
+  it('a MIXED-PATH factor is not proven by its direct edge alone', () => {
+    // f1 direct +, but f1 → v1 (+) → goal (−) contradicts it.
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        edgeToGoal('f1', 'positive'),
+        anEdge('f1', 'v1', 'positive'),
+        anEdge('v1', 'g1', 'negative'),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).not.toContain('balanced against');
+    expect(text).toContain('Leadership quality');
+  });
+
+  it('a ZERO-EXISTENCE direct edge establishes nothing', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        edgeToGoal('f1', 'positive', 0),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).not.toContain('balanced against');
+  });
+
+  it('an INDIRECT-ONLY factor stays unknown rather than being given a global sign', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        anEdge('f1', 'v1', 'positive'),
+        anEdge('v1', 'g1', 'positive'),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).not.toContain('balanced against');
+  });
+
+  it('an indirect path that AGREES with the direct edge does not veto it', () => {
+    const text = textOf({
+      graph: makeGraph(NODES, [
+        edgeToGoal('f1', 'positive'),
+        anEdge('f1', 'v1', 'positive'),
+        anEdge('v1', 'g1', 'positive'),
+        edgeToGoal('f2', 'negative'),
+      ]),
+    });
+    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
+  });
+});
+
+
+/**
+ * ⭐⭐ A TRUNCATED WALK IS NOT A NEGATIVE RESULT.
+ *
+ * The depth bound existed to stop a cyclic or dense graph making the walk the
+ * cost. But hitting it returned an empty set of contradicting paths, and the
+ * caller read that as "no contradiction exists" when it meant "none was LOOKED
+ * FOR beyond here". Reproduced by review: a chain positive at every hop except
+ * a final negative one, lying past the lookahead, left a direct +0.2 standing
+ * as an unqualified sign — so the product claimed a trade-off the fuller model
+ * refutes.
+ *
+ * ⚠ THIS CASE EXISTS BECAUSE MY OWN SUITE COULD NOT SEE IT. Deleting the
+ *   truncation guard SURVIVED 188/188. It is the third time today a reviewer's
+ *   corpus caught what mine could not, and it is the same class as the two
+ *   before it: an incomplete search reported as an absence.
+ */
+describe('a truncated path search withholds rather than confirming', () => {
+  /** A chain far longer than the traversal bound, contradicting at the far end. */
+  function longChain(finalEffect: 'positive' | 'negative') {
+    const hops: ReturnType<typeof anEdge>[] = [];
+    const ids = Array.from({ length: 12 }, (_, i) => `chain${i}`);
+    hops.push(anEdge('f1', ids[0], 'positive'));
+    for (let i = 0; i < ids.length - 1; i += 1) {
+      hops.push(anEdge(ids[i], ids[i + 1], 'positive'));
+    }
+    hops.push(anEdge(ids[ids.length - 1], 'g1', finalEffect));
+    return { hops, nodes: ids.map((id) => ({ id, kind: 'outcome' as const, label: id })) };
+  }
+
+  it('withholds when a contradiction could lie beyond the depth bound', () => {
+    const { hops, nodes: chainNodes } = longChain('negative');
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, ...chainNodes],
+        [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative'), ...hops],
+      ),
+    });
+    expect(text).not.toContain('balanced against');
+    // Not silence: the names still reach the person.
+    expect(text).toContain('Leadership quality');
+  });
+
+  it('withholds even when the far end AGREES — unexamined is unknown either way', () => {
+    // The guard must not peek at the answer it cannot afford to compute. An
+    // agreeing far end is still unexamined, so the claim stays unearned.
+    const { hops, nodes: chainNodes } = longChain('positive');
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, ...chainNodes],
+        [edgeToGoal('f1', 'positive'), edgeToGoal('f2', 'negative'), ...hops],
+      ),
+    });
+    expect(text).not.toContain('balanced against');
+  });
+
+  it('CONTRAST — a short agreeing path is fully examined and keeps the claim', () => {
+    const text = textOf({
+      graph: makeGraph(
+        [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY, VIA_NODE],
+        [
+          edgeToGoal('f1', 'positive'),
+          anEdge('f1', 'v1', 'positive'),
+          anEdge('v1', 'g1', 'positive'),
+          edgeToGoal('f2', 'negative'),
+        ],
+      ),
+    });
+    expect(text).toMatch(/^• Main trade-off:.+balanced against/m);
   });
 });

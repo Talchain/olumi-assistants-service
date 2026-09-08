@@ -133,7 +133,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
     });
 
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
     expect(outcome.handler_facts).toHaveLength(1);
     const fact = outcome.handler_facts[0]!;
     expect(fact.fact_type).toBe('run_analysis');
@@ -149,7 +149,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
   });
 
   it('analysis_status="completed" succeeds with Case D headline', async () => {
@@ -158,7 +158,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
   });
 
   it('analysis_status="partial" succeeds with Case D headline + partial caveat suffix', async () => {
@@ -171,7 +171,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
     expect(outcome.assistant_text).toContain('provisional');
     // Card/chat parity: summary equals assistant_text.
     const fact = outcome.handler_facts[0]!;
@@ -211,7 +211,7 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    expect(outcome.assistant_text).toMatch(/^Raise price came out ahead in 62% of runs of this model/);
+    expect(outcome.assistant_text).toMatch(/^Raise price scored highest against your goal in 62% of runs of this model/);
     expect(outcome.assistant_text).toContain('treat the result with caution');
 
     const warnCall = warnSpy.mock.calls.find((c) => {
@@ -316,19 +316,129 @@ describe('run_analysis handler — permissive status matrix (Phase 2.3)', () => 
       scenarioReader,
     });
     const outcome = await handler(makeInvocation());
-    // Winner opt_3 has 35.3% probability → below MIN_LEAD_PROBABILITY
-    // (0.4) so strong cases A/B/C/D suppress. The V5 link-safe response
-    // floor (Case E) now produces the minimum non-overclaiming label-
-    // only headline instead of the locked DEFAULT template. Reference:
-    // RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT remains the fallback when
-    // no clean leading-option label exists at all.
-    expect(outcome.assistant_text).toBe('Introduce tiered pricing currently leads.');
-    expect(outcome.assistant_text).not.toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
+    // ⚠ POLICY REVERSAL, 31 Aug 2026. This previously asserted
+    //     expect(outcome.assistant_text).toBe('Introduce tiered pricing currently leads.');
+    //   on the reasoning: "Winner opt_3 has 35.3% probability → below
+    //   MIN_LEAD_PROBABILITY (0.4) so strong cases A/B/C/D suppress. The V5
+    //   link-safe response floor (Case E) now produces the minimum
+    //   non-overclaiming label-only headline instead of the locked DEFAULT
+    //   template."
+    //
+    // ⭐ THE CAPTURED RESPONSE ABOVE IS UNCHANGED AND MUST STAY UNCHANGED — it
+    // is a real staging envelope from 2026-03-15, and rewriting a capture to
+    // suit a new expectation would falsify the record. What changed is only
+    // what the product SAYS about it.
+    //
+    // And what it said was not defensible. The captured field is
+    // 0.353 / 0.347 / 0.300 — a THREE-WAY RACE DECIDED BY SIX TENTHS OF ONE
+    // PERCENTAGE POINT — and the product named a winner, with the number and
+    // every hedge stripped off, which is the most confident-reading sentence in
+    // the grammar. `MIN_LEAD_PROBABILITY` correctly suppressed the enriched
+    // cases and then the floor asserted the same claim anyway, unqualified.
+    //
+    // ⚠ NOTE WHAT THIS CAPTURE IS: a pricing brief with three genuine,
+    // decision-shaped options ("Raise price to £59" / "Keep current" /
+    // "Introduce tiered pricing"). So the defect this change closes was NEVER
+    // confined to open-ended diagnostic briefs — a well-formed decision brief
+    // produced a dead heat on real staging in March and got a named winner too.
+    // This is the oldest evidence in the suite for the fix, and it is the
+    // reason the gate keys on the FIELD rather than on the brief class.
+    expect(outcome.assistant_text).toBe(RUN_ANALYSIS_ASSISTANT_TEMPLATES.DEFAULT);
     const fact = outcome.handler_facts[0]!;
     if (fact.fact_type === 'run_analysis') {
       // opt_3 has the highest probability — handler picks it.
       expect(fact.result.leading_option_id).toBe('opt_3');
       expect(Object.keys(fact.result.win_probabilities ?? {})).toHaveLength(3);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Absent analysis_status must not be reported as success on an unusable
+// envelope.
+//
+// `evaluateAnalysisStatus` accepted `status === null` unconditionally, without
+// consulting `hasUsableResultFields` — that helper was reached only on the
+// unrecognised-status branch. So a PLoT 200 carrying neither an
+// `analysis_status` nor any usable result record was classified `ok` and became
+// a successful run fact.
+//
+// The asymmetry with `completed` below is deliberate, not an oversight.
+// `analysis_status: "completed"` is PLoT AFFIRMING the run finished, so
+// "no options were compared" (the NO_RESULTS template) is a truthful report and
+// stays reachable — pinned by `run-analysis.test.ts`, "NO_RESULTS template
+// fires when results[] is empty AND status is completed". An ABSENT status is
+// PLoT saying nothing at all: with no status and no records there is no
+// evidence the analysis ran, and reporting success is a claim CEE cannot
+// support.
+//
+// Invariants below are written against the `hasUsableResultFields` contract
+// (Part C: at least one record carries a string `option_id` or `option_label`
+// AND a finite numeric `win_probability`), not against the shape of the defect.
+// ---------------------------------------------------------------------------
+
+describe('run_analysis handler — absent analysis_status requires usable results', () => {
+  it('absent analysis_status WITH usable option_comparison still succeeds', async () => {
+    // Over-blocking guard, and the discriminating twin of the fatal cases
+    // below: the fix must narrow the null branch, never close it. Binds by
+    // IDENTITY to the option the records name, not to "some truthy outcome".
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus(null)),
+      scenarioReader,
+    });
+    const outcome = await handler(makeInvocation());
+    const fact = outcome.handler_facts[0]!;
+    expect(fact.fact_type).toBe('run_analysis');
+    if (fact.fact_type === 'run_analysis') {
+      expect(fact.result.leading_option_id).toBe('opt_1');
+    }
+  });
+
+  it('absent analysis_status AND zero result records is fatal with cause_kind analysis_not_completed', async () => {
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(withStatus(null, { option_comparison: [] })),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+
+  it('absent analysis_status AND records with a label but no finite win_probability is fatal', async () => {
+    // The `win_probability` limb of the usable-fields contract. Records are
+    // present and labelled, so a record-COUNT check would pass this envelope;
+    // only the field-level contract rejects it.
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(
+        withStatus(null, {
+          option_comparison: [
+            { option_id: 'opt_1', option_label: 'Raise price' },
+            { option_id: 'opt_2', option_label: 'Keep price' },
+          ],
+        }),
+      ),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
+  });
+
+  it('absent analysis_status AND records with a win_probability but no label is fatal', async () => {
+    // The label limb of the same contract.
+    const handler = createRunAnalysisHandler({
+      plotClient: mkPlot(
+        withStatus(null, {
+          option_comparison: [{ win_probability: 0.62 }, { win_probability: 0.38 }],
+        }),
+      ),
+      scenarioReader,
+    });
+    await expect(handler(makeInvocation())).rejects.toMatchObject({
+      name: 'HandlerInvocationFailedError',
+      cause_kind: 'analysis_not_completed',
+    });
   });
 });

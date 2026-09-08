@@ -838,12 +838,14 @@ app.get("/healthz", async (_request, reply) => {
     });
   }
 
-  const { arePromptsReady, getCriticalPromptCoverage } = await import("./prompts/readiness.js");
+  const { arePromptsReady, getCriticalPromptCoverage, promptStoreDegradationReasons } =
+    await import("./prompts/readiness.js");
   const prompts_ready = await arePromptsReady();
+  const criticalPromptCoverage = await getCriticalPromptCoverage();
   // Additive honest signal: true iff every critical (tracked) prompt resolves
   // from PMS. Unlike `prompts_ready`, a bundled default makes this false.
   // Deliberately does NOT affect `degraded` (avoids load-balancer side effects).
-  const critical_prompts_pms = (await getCriticalPromptCoverage()).all_pms;
+  const critical_prompts_pms = criticalPromptCoverage.all_pms;
   const promptStoreStatus = getPromptStoreStatus();
   const promptStoreHealthy = isPromptStoreHealthy();
   const hasAuthKeys = !!(env.ASSIST_API_KEY || env.ASSIST_API_KEYS);
@@ -872,6 +874,18 @@ app.get("/healthz", async (_request, reply) => {
   if (!hasLlmKey) {
     degradationReasons.push('no_llm_key_configured');
   }
+
+  // A CRITICAL prompt key fell back because the PMS store THREW.
+  //
+  // P0 (~2.5h): a single undecodable version row made the store throw for
+  // every version of `draft_graph`; the loader swallowed it and served a
+  // bundled default, so `/healthz` reported ok/ready/not-degraded throughout.
+  // `critical_prompts_pms` was false but is DELIBERATELY excluded from
+  // `degraded_reasons` — correctly, since it is false in healthy shapes too.
+  // This reason is scoped to an actual store FAILURE instead, which is what
+  // makes it an alarm rather than a permanent amber light. `degraded` does not
+  // change the status code, so this is safe for the load balancer.
+  degradationReasons.push(...promptStoreDegradationReasons(criticalPromptCoverage));
 
   // Non-fatal prompt-environment misconfiguration (e.g. a deployed service
   // that never declared PROMPTS_ENVIRONMENT) surfaces here without failing

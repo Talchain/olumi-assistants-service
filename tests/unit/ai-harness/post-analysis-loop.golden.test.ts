@@ -301,7 +301,7 @@ describe('AI Harness capability 1 — post-analysis loop golden journey', () => 
   const RICH_TURNS: ReadonlyArray<{ id: string; label: string; message: string }> = [
     { id: 'explain', label: 'Explain the result', message: 'What does this mean?' },
     { id: 'improve', label: 'Request improvement / change-advice', message: 'How can we improve this?' },
-    { id: 'next_step', label: 'What should we do next', message: 'What should we do next?' },
+    { id: 'next_step', label: 'What is the next step', message: 'What is the next step?' },
   ];
 
   it.each(RICH_TURNS)(
@@ -349,6 +349,13 @@ describe('AI Harness capability 1 — post-analysis loop golden journey', () => 
       });
     },
   );
+
+  // Specific next-step safe-now content remains covered above. This only
+  // records the generic question's handoff, not the contextual answer's safety.
+  it.each([false, true])('generic next-action question delegates with loop enabled=%s', (withLoop) => {
+    const out = runGate('What should we do next?', { withLoop });
+    expect(out.result).toEqual({ matched: false, reason: 'reasoning_request' });
+  });
 
   it('change-request is never hijacked by the composer — routes to the safe-apply path', () => {
     const message = 'Set delivery risk to 0.4';

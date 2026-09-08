@@ -1,0 +1,1596 @@
+{
+  "schema_version": "3.0",
+  "nodes": [
+    {
+      "id": "dec_billing",
+      "kind": "decision",
+      "label": "Usage-Based Billing System Approach",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_billing_complexity",
+      "kind": "factor",
+      "label": "Usage-Based Billing Complexity",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.4,
+        "range_max": 0.9
+      },
+      "display_value": "0.4 to 0.9",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_build_indicator",
+      "kind": "factor",
+      "label": "In-House Build Approach",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "No in-house build pursued",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_dev_time",
+      "kind": "factor",
+      "label": "Time to Live (Quarters)",
+      "observed_state": {
+        "value": 0.5,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "time",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "Moderate delivery timeline",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_eng_capacity",
+      "kind": "factor",
+      "label": "Engineering Capacity Allocated to Billing",
+      "observed_state": {
+        "value": 0.5,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "Moderate engineering allocation (2 of 4 engineers)",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_platform_migration",
+      "kind": "factor",
+      "label": "Platform Migration Competing Demand",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.4,
+        "range_max": 1
+      },
+      "extractionType": "explicit",
+      "display_value": "0.4 to 1",
+      "provenance": "from_brief"
+    },
+    {
+      "id": "fac_stripe_indicator",
+      "kind": "factor",
+      "label": "Stripe Middleware Extension",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "No Stripe extension pursued",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_vendor_cost",
+      "kind": "factor",
+      "label": "Vendor Licensing Cost",
+      "category": "external",
+      "prior": {
+        "distribution": "uniform",
+        "range_min": 0.25,
+        "range_max": 0.75
+      },
+      "extractionType": "inferred",
+      "display_value": "0.25 to 0.75",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "fac_vendor_indicator",
+      "kind": "factor",
+      "label": "Vendor Solution Adoption",
+      "observed_state": {
+        "value": 0,
+        "source": "cee_inference",
+        "extractionType": "inferred",
+        "factor_type": "other",
+        "uncertainty_drivers": [
+          "Not provided"
+        ]
+      },
+      "category": "controllable",
+      "display_value": "No vendor solution adopted",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "goal_billing",
+      "kind": "goal",
+      "label": "Deliver Accurate Usage-Based Billing Within Two Quarters",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_build",
+      "kind": "option",
+      "label": "Build In-House Metering and Invoicing",
+      "interventions": {
+        "fac_build_indicator": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_build_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.9,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.85,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_status_quo",
+      "kind": "option",
+      "label": "Delay Billing Migration (Status Quo)",
+      "interventions": {
+        "fac_build_indicator": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_build_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_vendor_indicator": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_vendor_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_stripe_indicator": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_stripe_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": true,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_stripe",
+      "kind": "option",
+      "label": "Extend Stripe with Custom Middleware",
+      "interventions": {
+        "fac_stripe_indicator": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_stripe_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.55,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "opt_vendor",
+      "kind": "option",
+      "label": "Buy Vendor Solution (Metronome or Orb)",
+      "interventions": {
+        "fac_vendor_indicator": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_vendor_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.2,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.2,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "is_baseline": false,
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_billing_accuracy",
+      "kind": "outcome",
+      "label": "Billing Accuracy and Reliability",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "out_delivery_speed",
+      "kind": "outcome",
+      "label": "On-Time Delivery Within Two Quarters",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_billing_errors",
+      "kind": "risk",
+      "label": "Billing Errors Damaging Customer Trust",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_eng_overload",
+      "kind": "risk",
+      "label": "Engineering Overload and Platform Migration Delay",
+      "provenance": "ai_inferred"
+    },
+    {
+      "id": "risk_vendor_lock",
+      "kind": "risk",
+      "label": "Vendor Lock-In and Pricing Dependency",
+      "provenance": "ai_inferred"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dec_billing",
+      "to": "opt_build",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_billing",
+      "to": "opt_status_quo",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_billing",
+      "to": "opt_stripe",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "dec_billing",
+      "to": "opt_vendor",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_billing_complexity",
+      "to": "out_delivery_speed",
+      "strength": {
+        "mean": -0.14491525423728813,
+        "std": 0.0805084745762712
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_billing_complexity",
+      "to": "risk_billing_errors",
+      "strength": {
+        "mean": 0.2353982300884956,
+        "std": 0.1176991150442478
+      },
+      "exists_probability": 0.78,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_build_indicator",
+      "to": "out_billing_accuracy",
+      "strength": {
+        "mean": 0.28177966101694907,
+        "std": 0.1449152542372881
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_build_indicator",
+      "to": "risk_billing_errors",
+      "strength": {
+        "mean": 0.3194690265486726,
+        "std": 0.16814159292035402
+      },
+      "exists_probability": 0.78,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_dev_time",
+      "to": "out_delivery_speed",
+      "strength": {
+        "mean": -0.44279661016949157,
+        "std": 0.11271186440677966
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_eng_capacity",
+      "to": "out_delivery_speed",
+      "strength": {
+        "mean": 0.3622881355932203,
+        "std": 0.12076271186440676
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_eng_capacity",
+      "to": "risk_eng_overload",
+      "strength": {
+        "mean": -0.5,
+        "std": 0.14
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_platform_migration",
+      "to": "risk_eng_overload",
+      "strength": {
+        "mean": 0.4,
+        "std": 0.12
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_stripe_indicator",
+      "to": "out_billing_accuracy",
+      "strength": {
+        "mean": 0.2254237288135593,
+        "std": 0.12881355932203387
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_stripe_indicator",
+      "to": "risk_billing_errors",
+      "strength": {
+        "mean": 0.1849557522123894,
+        "std": 0.1176991150442478
+      },
+      "exists_probability": 0.72,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_vendor_cost",
+      "to": "risk_vendor_lock",
+      "strength": {
+        "mean": 0.3,
+        "std": 0.12
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_vendor_indicator",
+      "to": "out_billing_accuracy",
+      "strength": {
+        "mean": 0.44279661016949146,
+        "std": 0.11271186440677965
+      },
+      "exists_probability": 0.88,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_vendor_indicator",
+      "to": "risk_billing_errors",
+      "strength": {
+        "mean": -0.2101769911504425,
+        "std": 0.1008849557522124
+      },
+      "exists_probability": 0.8,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "fac_vendor_indicator",
+      "to": "risk_vendor_lock",
+      "strength": {
+        "mean": 0.62,
+        "std": 0.15
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_build",
+      "to": "fac_build_indicator",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_build",
+      "to": "fac_dev_time",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_build",
+      "to": "fac_eng_capacity",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_build_indicator",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_dev_time",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_eng_capacity",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_stripe_indicator",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_status_quo",
+      "to": "fac_vendor_indicator",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_stripe",
+      "to": "fac_dev_time",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_stripe",
+      "to": "fac_eng_capacity",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_stripe",
+      "to": "fac_stripe_indicator",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_vendor",
+      "to": "fac_dev_time",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_vendor",
+      "to": "fac_eng_capacity",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "opt_vendor",
+      "to": "fac_vendor_indicator",
+      "strength": {
+        "mean": 1,
+        "std": 0.01
+      },
+      "exists_probability": 1,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_billing_accuracy",
+      "to": "goal_billing",
+      "strength": {
+        "mean": 0.55,
+        "std": 0.12
+      },
+      "exists_probability": 0.95,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "out_delivery_speed",
+      "to": "goal_billing",
+      "strength": {
+        "mean": 0.5,
+        "std": 0.12
+      },
+      "exists_probability": 0.95,
+      "effect_direction": "positive",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_billing_errors",
+      "to": "goal_billing",
+      "strength": {
+        "mean": -0.55,
+        "std": 0.14
+      },
+      "exists_probability": 0.92,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_eng_overload",
+      "to": "goal_billing",
+      "strength": {
+        "mean": -0.4,
+        "std": 0.14
+      },
+      "exists_probability": 0.9,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    },
+    {
+      "from": "risk_vendor_lock",
+      "to": "goal_billing",
+      "strength": {
+        "mean": -0.18,
+        "std": 0.1
+      },
+      "exists_probability": 0.75,
+      "effect_direction": "negative",
+      "provenance": {
+        "source": "cee_hypothesis"
+      },
+      "provenance_display": "ai_inferred",
+      "origin": "ai"
+    }
+  ],
+  "options": [
+    {
+      "id": "opt_build",
+      "label": "Build In-House Metering and Invoicing",
+      "status": "ready",
+      "interventions": {
+        "fac_build_indicator": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_build_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.9,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.85,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_status_quo",
+      "label": "Delay Billing Migration (Status Quo)",
+      "status": "ready",
+      "interventions": {
+        "fac_build_indicator": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_build_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_vendor_indicator": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_vendor_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_stripe_indicator": {
+          "value": 0,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_stripe_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": true
+    },
+    {
+      "id": "opt_stripe",
+      "label": "Extend Stripe with Custom Middleware",
+      "status": "ready",
+      "interventions": {
+        "fac_stripe_indicator": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_stripe_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.55,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.5,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    },
+    {
+      "id": "opt_vendor",
+      "label": "Buy Vendor Solution (Metronome or Orb)",
+      "status": "ready",
+      "interventions": {
+        "fac_vendor_indicator": {
+          "value": 1,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_vendor_indicator",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_eng_capacity": {
+          "value": 0.2,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_eng_capacity",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "fac_dev_time": {
+          "value": 0.2,
+          "source": "brief_extraction",
+          "target_match": {
+            "node_id": "fac_dev_time",
+            "match_type": "exact_id",
+            "confidence": "high"
+          },
+          "value_confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        }
+      },
+      "provenance": {
+        "source": "brief_extraction"
+      },
+      "is_baseline": false
+    }
+  ],
+  "goal_node_id": "goal_billing",
+  "validation_warnings": [
+    {
+      "code": "CAUSAL_CLAIM_DROPPED",
+      "message": "Dropped 8 malformed causal claim(s)",
+      "severity": "warn",
+      "details": {
+        "count": 8,
+        "first_3_reasons": [
+          "type: Invalid discriminator value. Expected 'direct_effect' | 'mediation_only' | 'no_direct_effect' | 'unmeasured_confounder'",
+          "type: Invalid discriminator value. Expected 'direct_effect' | 'mediation_only' | 'no_direct_effect' | 'unmeasured_confounder'",
+          "type: Invalid discriminator value. Expected 'direct_effect' | 'mediation_only' | 'no_direct_effect' | 'unmeasured_confounder'"
+        ]
+      }
+    }
+  ],
+  "coaching": {
+    "summary": "The graph covers the main options and key risks well, but several high-stakes causal links are missing or underweighted. The two-quarter deadline combined with four already-committed engineers makes capacity the single most constraining factor, and that pressure deserves sharper representation.",
+    "strengthen_items": [
+      {
+        "id": "link-platform-migration-to-eng-capacity",
+        "label": "Connect platform migration demand directly to engineering capacity",
+        "detail": "Platform Migration Competing Demand currently only flows to Engineering Overload and Platform Migration Delay, but it should also reduce Engineering Capacity Allocated to Billing, making the capacity constraint explicit rather than implied.",
+        "action_type": "add_edge",
+        "bias_category": "availability"
+      },
+      {
+        "id": "quantify-eng-capacity",
+        "label": "Quantify engineering capacity available per option",
+        "detail": "Assign concrete engineer-quarter estimates to each option's Engineering Capacity Allocated to Billing value so the two-quarter constraint becomes a hard filter rather than a soft concern.",
+        "action_type": "quantify",
+        "bias_category": "overconfidence"
+      },
+      {
+        "id": "add-vendor-integration-risk",
+        "label": "Add an integration-effort factor for the vendor path",
+        "detail": "Vendor solutions still require non-trivial integration work against your existing stack; without a factor capturing this, Buy Vendor Solution (Metronome or Orb) looks cheaper in engineering time than it likely is.",
+        "action_type": "add_factor",
+        "bias_category": "optimism"
+      },
+      {
+        "id": "clarify-status-quo-goal",
+        "label": "Clarify what Delay Billing Migration (Status Quo) actually means for the goal",
+        "detail": "Delay Billing Migration (Status Quo) feeds all indicator factors simultaneously, which is structurally incoherent; clarify whether it represents 'do nothing' (billing stays broken) or a phased delay, and wire it only to the outcomes that apply.",
+        "action_type": "clarify_goal"
+      }
+    ],
+    "widening_log": {
+      "elements_added": [],
+      "elements_considered_but_excluded": [
+        "customer-trust recovery cost node — the brief mentions it but Billing Errors Damaging Customer Trust already proxies it; adding a separate node would duplicate without new causal information given current graph scope",
+        "data-migration complexity node — relevant for stripe middleware but not enough graph evidence to anchor it"
+      ],
+      "brief_completeness": "partial"
+    },
+    "bias_signals": [
+      {
+        "type": "overconfidence",
+        "detail": "The graph treats Time to Live (Quarters) as a factor each option sets independently, implying delivery timing is controllable; in practice, billing complexity and integration surprises make the two-quarter window highly uncertain for Build In-House Metering and Invoicing and Extend Stripe with Custom Middleware.",
+        "target": "fac_dev_time"
+      },
+      {
+        "type": "omission / status-quo bias",
+        "detail": "Delay Billing Migration (Status Quo) is modeled as a live option with full factor connections rather than as a dominated baseline, which may give it unwarranted analytical weight and obscure that delay itself carries the risk of ongoing billing breakage.",
+        "target": "opt_status_quo"
+      },
+      {
+        "type": "availability",
+        "detail": "Vendor Lock-In and Pricing Dependency receives two incoming edges while Engineering Overload and Platform Migration Delay receives only two despite the brief explicitly flagging four already-committed engineers; the graph may be over-indexing on vendor risk relative to the more immediate capacity risk.",
+        "target": "risk_vendor_lock"
+      }
+    ]
+  },
+  "causal_claims": [],
+  "topology_plan": [],
+  "draft_warnings": [
+    {
+      "id": "goal_no_baseline_value",
+      "severity": "low",
+      "node_ids": [
+        "goal_billing"
+      ],
+      "edge_ids": [],
+      "affected_node_ids": [
+        "goal_billing"
+      ],
+      "affected_edge_ids": [],
+      "explanation": "Goal node has no observed_state.value set.",
+      "fix_hint": "Set goal node's observed_state.value to establish baseline for comparison"
+    }
+  ],
+  "analysis_ready": {
+    "options": [
+      {
+        "id": "opt_build",
+        "label": "Build In-House Metering and Invoicing",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_build_indicator": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          },
+          "fac_eng_capacity": {
+            "value": 0.9,
+            "source": "brief_extraction",
+            "display_value": "Very high (0.9)"
+          },
+          "fac_dev_time": {
+            "value": 0.85,
+            "source": "brief_extraction",
+            "display_value": "Very high (0.85)"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_build_indicator": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          },
+          "fac_eng_capacity": {
+            "display_value": "Very high (0.9)",
+            "normalised_value": 0.9
+          },
+          "fac_dev_time": {
+            "display_value": "Very high (0.85)",
+            "normalised_value": 0.85
+          }
+        }
+      },
+      {
+        "id": "opt_status_quo",
+        "label": "Delay Billing Migration (Status Quo)",
+        "status": "ready",
+        "status_reason": "5 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_build_indicator": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "No in-house build pursued"
+          },
+          "fac_vendor_indicator": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "No vendor solution adopted"
+          },
+          "fac_stripe_indicator": {
+            "value": 0,
+            "source": "brief_extraction",
+            "display_value": "No Stripe extension pursued"
+          },
+          "fac_eng_capacity": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "Moderate engineering allocation (2 of 4 engineers)"
+          },
+          "fac_dev_time": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "Moderate delivery timeline"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "is_baseline": true,
+        "intervention_details": {
+          "fac_build_indicator": {
+            "display_value": "No in-house build pursued",
+            "normalised_value": 0
+          },
+          "fac_vendor_indicator": {
+            "display_value": "No vendor solution adopted",
+            "normalised_value": 0
+          },
+          "fac_stripe_indicator": {
+            "display_value": "No Stripe extension pursued",
+            "normalised_value": 0
+          },
+          "fac_eng_capacity": {
+            "display_value": "Moderate engineering allocation (2 of 4 engineers)",
+            "normalised_value": 0.5
+          },
+          "fac_dev_time": {
+            "display_value": "Moderate delivery timeline",
+            "normalised_value": 0.5
+          }
+        }
+      },
+      {
+        "id": "opt_stripe",
+        "label": "Extend Stripe with Custom Middleware",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_stripe_indicator": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          },
+          "fac_eng_capacity": {
+            "value": 0.55,
+            "source": "brief_extraction",
+            "display_value": "High (0.55)"
+          },
+          "fac_dev_time": {
+            "value": 0.5,
+            "source": "brief_extraction",
+            "display_value": "Moderate delivery timeline"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_stripe_indicator": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          },
+          "fac_eng_capacity": {
+            "display_value": "High (0.55)",
+            "normalised_value": 0.55
+          },
+          "fac_dev_time": {
+            "display_value": "Moderate delivery timeline",
+            "normalised_value": 0.5
+          }
+        }
+      },
+      {
+        "id": "opt_vendor",
+        "label": "Buy Vendor Solution (Metronome or Orb)",
+        "status": "ready",
+        "status_reason": "3 intervention(s) ready for analysis",
+        "interventions": {
+          "fac_vendor_indicator": {
+            "value": 1,
+            "source": "brief_extraction",
+            "display_value": "Very high (1)"
+          },
+          "fac_eng_capacity": {
+            "value": 0.2,
+            "source": "brief_extraction",
+            "display_value": "Low (0.2)"
+          },
+          "fac_dev_time": {
+            "value": 0.2,
+            "source": "brief_extraction",
+            "display_value": "Low (0.2)"
+          }
+        },
+        "extraction_metadata": {
+          "source": "brief_extraction",
+          "confidence": "high",
+          "reasoning": "Direct from V4 prompt data.interventions"
+        },
+        "intervention_details": {
+          "fac_vendor_indicator": {
+            "display_value": "Very high (1)",
+            "normalised_value": 1
+          },
+          "fac_eng_capacity": {
+            "display_value": "Low (0.2)",
+            "normalised_value": 0.2
+          },
+          "fac_dev_time": {
+            "display_value": "Low (0.2)",
+            "normalised_value": 0.2
+          }
+        }
+      }
+    ],
+    "goal_node_id": "goal_billing",
+    "status": "ready",
+    "bias_findings": [],
+    "model_adjustments": [
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_billing_complexity",
+        "field": "nodes[fac_billing_complexity].category",
+        "reason": "Reclassified unreachable factor \"Usage-Based Billing Complexity\" to external",
+        "source": "deterministic_sweep"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_platform_migration",
+        "field": "nodes[fac_platform_migration].category",
+        "reason": "Reclassified unreachable factor \"Platform Migration Competing Demand\" to external with synthesised prior [0.4, 1]",
+        "source": "deterministic_sweep"
+      },
+      {
+        "code": "category_reclassified",
+        "node_id": "fac_vendor_cost",
+        "field": "nodes[fac_vendor_cost].category",
+        "reason": "Reclassified unreachable factor \"Vendor Licensing Cost\" to external with synthesised prior [0.25, 0.75]",
+        "source": "deterministic_sweep"
+      }
+    ]
+  },
+  "meta": {
+    "roots": [
+      "dec_billing",
+      "fac_billing_complexity",
+      "fac_platform_migration",
+      "fac_vendor_cost"
+    ],
+    "leaves": [
+      "goal_billing"
+    ],
+    "source": "assistant"
+  },
+  "quality": {
+    "overall": 9,
+    "structure": 8,
+    "coverage": 10,
+    "structural_proxy": 8,
+    "safety": 8
+  },
+  "_pipeline_outcome": {
+    "graph_drafted": true,
+    "graph_structurally_valid": true,
+    "deterministic_sweep_violations": 0,
+    "verification_status": "failed_degraded",
+    "validation_status": "skipped",
+    "enrichment_status": "complete",
+    "coaching_status": "complete",
+    "warnings": [
+      {
+        "stage": "verification",
+        "error": "Response does not conform to expected schema",
+        "degraded": true
+      }
+    ],
+    "rescue_score": 23,
+    "factor_value_coverage": {
+      "total": 8,
+      "explicit": 0,
+      "inferred_with_evidence": 3,
+      "fallback_default": 5
+    },
+    "edge_strength_unique_count": 19,
+    "llm_repair": {
+      "triggered": false,
+      "outcome": "skipped",
+      "fallback_reason": null,
+      "attempts": 0
+    },
+    "repair_provenance": [
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_build_indicator].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_dev_time].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_eng_capacity].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_stripe_indicator].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "CONTROLLABLE_MISSING_DATA",
+        "code": "CONTROLLABLE_MISSING_DATA",
+        "node_or_edge_id": "nodes[fac_vendor_indicator].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "OBSERVABLE_EXTRA_DATA",
+        "code": "OBSERVABLE_EXTRA_DATA",
+        "node_or_edge_id": "nodes[fac_platform_migration].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "OBSERVABLE_EXTRA_DATA",
+        "code": "OBSERVABLE_EXTRA_DATA",
+        "node_or_edge_id": "nodes[fac_vendor_cost].data",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "fallback_default"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_billing_complexity].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_platform_migration].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "code": "UNREACHABLE_FACTOR_RECLASSIFIED",
+        "node_or_edge_id": "nodes[fac_vendor_cost].category",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "INBOUND_BUDGET_RESCALED",
+        "code": "INBOUND_BUDGET_RESCALED",
+        "node_or_edge_id": "edges[*→out_billing_accuracy]",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "INBOUND_BUDGET_RESCALED",
+        "code": "INBOUND_BUDGET_RESCALED",
+        "node_or_edge_id": "edges[*→out_delivery_speed]",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      },
+      {
+        "rule": "INBOUND_BUDGET_RESCALED",
+        "code": "INBOUND_BUDGET_RESCALED",
+        "node_or_edge_id": "edges[*→risk_billing_errors]",
+        "field": "graph",
+        "before": null,
+        "after": null,
+        "source": "structure"
+      }
+    ]
+  }
+}
