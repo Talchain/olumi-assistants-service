@@ -444,6 +444,17 @@ export function optionLabelPattern(label: string): RegExp {
 // cannot itself match an option label or manufacture leader-word adjacency.
 const OPTION_REFERENT = '\uFFFC';
 
+/**
+ * The grammatical chain that may stand between a claim's SUBJECT and its
+ * predicate — auxiliaries, negation, determiners and adverbs, and nothing else.
+ * Declared once (CLAUDE.md trap #12): `bindOptionReferences` uses it to protect
+ * a subject from masking, and {@link assertedLeaderNamesItsOwnSubject} uses the
+ * SAME chain to ask whether a claim's subject is a named option. Two copies of
+ * this would be two answers to one question the first time either is tuned.
+ */
+const PREDICATE_PRELUDE =
+  /^(?:\s|\b(?:am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|will|would|should|must|not|never|the|a|an|[a-z]+ly)\b)*$/i;
+
 function bindOptionReferences(value: string, context: LeaderProseContext): string {
   const references = context.optionLabels.flatMap((label) => label.trim() === '' ? [] :
     [...value.matchAll(optionLabelPattern(label))].map((match) => ({
@@ -454,7 +465,7 @@ function bindOptionReferences(value: string, context: LeaderProseContext): strin
   // also be genuine auxiliaries: in "May may be the leading option", the first
   // May is the subject and the second is a modal. Do not mask that auxiliary.
   // A prelude is a grammatical chain, not arbitrary preceding prose.
-  const predicatePrelude = /^(?:\s|\b(?:am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|will|would|should|must|not|never|the|a|an|[a-z]+ly)\b)*$/i;
+  const predicatePrelude = PREDICATE_PRELUDE;
   const preludes: Array<{ start: number; end: number }> = [];
   for (const { re } of LEADER_CLAIM_PATTERNS) {
     for (const claim of value.matchAll(new RegExp(re.source, 'gi'))) {
@@ -599,6 +610,48 @@ export function textAssertsOnlyImplicitLeadingOptions(value: string, context: Le
   return matches.length > 0 && matches.every((match) =>
     implicit.some((designation) => designation.start <= match.start && match.end <= designation.end),
   );
+}
+
+/**
+ * ⭐⭐ DOES AN ASSERTION NAME ITS OWN SUBJECT, OR ONLY SOMEONE ELSE'S?
+ *
+ * "Names an option" and "names the option it designates" are DIFFERENT
+ * QUESTIONS, and the wire projection was asking the first while needing the
+ * second. Measured counterexample, reproduced by the independent reviewer at
+ * `7b54f07c`:
+ *
+ *   "Hire a Hands-on Technical Lead is strong. It leads in 54% of simulations
+ *    against Two Developers."
+ *
+ * The asserting unit is the second one. It names a roster option — the
+ * COMPARATOR, "Two Developers" — while its own subject is the anaphoric "It",
+ * borrowed from the sentence before. Reading that as self-contained left the
+ * first, naming half standing, so the withheld answer still designated the
+ * leader it was not permitted to name. A comparator mention is not a subject.
+ *
+ * This asks the second question, and asks it with the machinery that already
+ * exists: a claim's subject is the option reference that reaches its predicate
+ * through {@link PREDICATE_PRELUDE} — the same binding `bindOptionReferences`
+ * performs, on the same masked text, with no second vocabulary and no keyword
+ * list of comparison words. A comparator sits AFTER the predicate and is
+ * therefore never in `before`; an anaphor leaves `before` without a referent.
+ *
+ * ⚠ NARROW ON PURPOSE, IN THE SAFE DIRECTION. Returning `false` escalates and
+ *   costs collateral prose; returning `true` leaves a naming half standing and
+ *   the product asserts a leader it may not name. A gap is recoverable, a lie
+ *   is not — so an assertion counts as self-naming ONLY when a named subject
+ *   is bound to it, never merely because a roster label appears somewhere.
+ */
+export function assertedLeaderNamesItsOwnSubject(
+  value: string,
+  context: LeaderProseContext,
+): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return assertedLeaderMatches(value, context).some(({ before }) => {
+    const subject = before.lastIndexOf(OPTION_REFERENT);
+    if (subject === -1) return false;
+    return PREDICATE_PRELUDE.test(before.slice(subject + OPTION_REFERENT.length));
+  });
 }
 
 /**

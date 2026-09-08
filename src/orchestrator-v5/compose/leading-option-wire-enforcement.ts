@@ -202,6 +202,7 @@ import {
   // drift from the alarm and the first symptom would be a leak this gate is
   // reported to have closed (CLAUDE.md trap #12).
   keyDesignatesLeadingOption,
+  assertedLeaderNamesItsOwnSubject,
   BLOCK_PROSE_FIELDS,
 } from './leading-option-egress-guard.js';
 import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
@@ -730,9 +731,33 @@ function projectField(
   // ⚠ NOT A RELAXATION OF WHAT MAY BE CLAIMED. Every asserting unit is still
   //   removed, by the same predicate, and a distributed claim still loses both
   //   halves. This narrows only WHICH NON-ASSERTING units are collateral.
+  //
+  // ⭐⭐ AND "NAMES AN OPTION" IS NOT "NAMES ITS OWN SUBJECT" — the first cut of
+  //   this discriminator asked the wider question and reopened the very leak
+  //   the escalation exists for. Reproduced by the independent reviewer at
+  //   `7b54f07c`:
+  //
+  //     "Hire a Hands-on Technical Lead is strong. It leads in 54% of
+  //      simulations against Two Developers."
+  //
+  //   The asserting unit names a roster option — the COMPARATOR — while its own
+  //   subject is the anaphoric "It", borrowed from the sentence before. Under
+  //   `textNamesAnOption` it read as self-contained, so no escalation ran and
+  //   the withheld answer shipped as "Hire a Hands-on Technical Lead is strong.
+  //   No single option can be put forward yet." — still designating the leader
+  //   it may not name. A comparator mention is not a subject.
+  //
+  //   `assertedLeaderNamesItsOwnSubject` asks the narrower question, and asks it
+  //   with the binding the guard already performs: a claim's subject is the
+  //   option reference that reaches its predicate through the grammatical
+  //   prelude. No comparison-word list, no new policy, no new runtime model —
+  //   the same classifier, one question sharper. Withholding is unchanged in
+  //   both directions it must be: a self-contained comparative ("Hire X leads
+  //   in 54% against Y") still names its subject and still keeps neighbouring
+  //   conditional paragraphs, and an anaphoric claim still loses both halves.
   const units = splitIntoRedactableUnits(value).filter((unit) => !/^\s+$/.test(unit));
   const someAssertionBorrowsItsName = units.some(
-    (unit) => asserts(unit) && !textNamesAnOption(unit, roster),
+    (unit) => asserts(unit) && !assertedLeaderNamesItsOwnSubject(unit, context),
   );
   const needsNameEscalation =
     namesOption &&

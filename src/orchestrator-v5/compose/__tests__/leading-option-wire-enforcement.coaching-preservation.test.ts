@@ -432,5 +432,76 @@ describe('controlled preservation of qualitative coaching at the real wire guard
     expect(result.response.assistant_text).not.toContain(LEAD);
     expect(result.response.assistant_text).not.toContain('54%');
   });
+
+  /**
+   * ⭐⭐ THE COMPARATOR IS NOT THE SUBJECT — reproduced by the independent
+   * reviewer at `7b54f07c` and repaired here.
+   *
+   * `BORROWED` and `UNSAFE` differ in ONE way: who the claim is about. Both
+   * carry the same statistic, the same comparator and the same two roster
+   * labels; `UNSAFE` names its own subject, `BORROWED` takes it anaphorically
+   * from the sentence before. The first cut of the escalation discriminator
+   * asked only "does this asserting unit name AN option", so `BORROWED`'s unit
+   * answered yes on the COMPARATOR, no escalation ran, and the withheld answer
+   * shipped as "Hire a Hands-on Technical Lead is strong. No single option can
+   * be put forward yet." — still designating the leader it may not name.
+   *
+   * These cases are a PAIR and neither is evidence alone. The borrowed case
+   * shows the leak is closed; the self-contained case, one line below, shows it
+   * was closed WITHOUT reopening the over-escalation this PR exists to fix, on
+   * prose that differs only in its subject. A repair that escalated everything
+   * would pass the first and fail the second.
+   */
+  const BORROWED = `${LEAD} is strong. It leads in 54% of simulations against ${DEVELOPERS}.`;
+
+  it('a borrowed subject naming only the comparator loses BOTH halves', () => {
+    const result = enforceLeadingOptionClaimsAtWire(envelope(BORROWED), OPTS);
+    expect(result.changed).toBe(true);
+    // The naming half is the whole point: it survived the first cut.
+    expect(result.response.assistant_text).not.toContain(LEAD);
+    expect(result.response.assistant_text).not.toContain('54%');
+    expect(textAssertsLeadingOption(result.response.assistant_text, CONTEXT)).toBe(false);
+  });
+
+  it('the self-contained comparative twin keeps its conditional neighbours', () => {
+    // Same statistic, same comparator, same roster — the assertion names its
+    // OWN subject, so surgery is complete and nothing else is collateral.
+    const field = [BUDGET, UNSAFE, QUALITATIVE_LEAD, QUALITATIVE_DEVELOPERS].join('\n\n');
+    const result = enforceLeadingOptionClaimsAtWire(envelope(field), OPTS);
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain('54%');
+    expect(result.response.assistant_text).toContain(QUALITATIVE_LEAD);
+    expect(result.response.assistant_text).toContain(QUALITATIVE_DEVELOPERS);
+    expect(result.response.assistant_text).toContain(BUDGET);
+  });
+
+  it('the borrowed twin in the SAME field does escalate — the discrimination is the subject', () => {
+    const field = [BUDGET, BORROWED, QUALITATIVE_LEAD, QUALITATIVE_DEVELOPERS].join('\n\n');
+    const result = enforceLeadingOptionClaimsAtWire(envelope(field), OPTS);
+    expect(result.changed).toBe(true);
+    expect(result.response.assistant_text).not.toContain(LEAD);
+    expect(result.response.assistant_text).not.toContain('54%');
+    expect(textAssertsLeadingOption(result.response.assistant_text, CONTEXT)).toBe(false);
+    // The option-free coaching is still not collateral, even when escalating.
+    expect(result.response.assistant_text).toContain(BUDGET);
+  });
+
+  it('permission identity is unchanged for the borrowed-subject input', () => {
+    // ⚠ `OPTS.mayNameLeadingOption` is ALREADY true here — the permit is a
+    //   CONJUNCTION with admission, and this fixture's captured admission
+    //   withholds. Flipping the turn flag alone would have proved nothing, so
+    //   the permitting half is supplied too, and the assertion is BY REFERENCE:
+    //   a permitted turn must not be re-serialised, whatever its prose says.
+    expect(analysisReadyPermitsLeaderNaming(CAPTURED.analysisReady)).toBe(false);
+    const input = envelope(BORROWED);
+    const result = enforceLeadingOptionClaimsAtWire(input, {
+      ...OPTS,
+      mayNameLeadingOption: true,
+      analysisReady: undefined,
+    });
+    expect(result.changed).toBe(false);
+    expect(result.response).toBe(input);
+    expect(result.response.assistant_text).toBe(BORROWED);
+  });
 });
 
