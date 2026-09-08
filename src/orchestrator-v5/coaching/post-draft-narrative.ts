@@ -331,6 +331,23 @@ export function validateUncertaintyDriver(driver: string): boolean {
   return true;
 }
 
+/**
+ * The edge fields this composer reads. Deliberately tiny: the only question
+ * asked of an edge here is which way a factor pushes the goal.
+ */
+interface EdgeLite {
+  readonly from?: string;
+  readonly to?: string;
+  readonly effect_direction?: 'positive' | 'negative';
+  readonly strength?: { readonly mean?: number };
+  /**
+   * ⚠ READ, NOT IGNORED. An edge the model says does not exist establishes no
+   *   effect however large its mean — omitting this field let a zero-existence
+   *   edge license a trade-off claim.
+   */
+  readonly exists_probability?: number;
+}
+
 interface NodeLite {
   readonly id?: string;
   readonly kind?: string;
@@ -664,7 +681,15 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
   const optionsBlock = buildOptionsBlock(options, provisionalDecision);
 
-  const tradeOffBullet = buildTradeOffBullet(factors, risks);
+  const edges = (graph?.edges ?? []) as readonly EdgeLite[];
+  // The goal is identified the same way `findGoalLabel` identifies it — by node
+  // kind — so the two cannot disagree about which node the goal is.
+  const goalId = nodes.find((n) => n?.kind === 'goal')?.id ?? null;
+  const tradeOffBullet = buildTradeOffBullet(
+    factors,
+    risks,
+    findOpposingFactorPair(nodes, edges, goalId),
+  );
   const mayServeFreeformCoaching = analysisReady?.status === 'ready';
 
   // A direction clarification gets its OWN slot and is therefore removed from
@@ -1176,6 +1201,182 @@ function buildOptionsBlock(
 }
 
 /**
+ * The sign this edge carries, or `null` when it carries none.
+ *
+ * ⚠ `exists_probability: 0` YIELDS NULL. An edge the model says does not exist
+ *   cannot establish an effect, however large its mean. Reading the sign alone
+ *   let a zero-existence edge license a trade-off claim.
+ *
+ * `effect_direction` is the producer's own field and is authoritative. The sign
+ * of `strength.mean` is a fallback only, and a mean of exactly 0 yields `null`
+ * rather than a guess — at zero the sign cannot recover direction, and
+ * `-0 >= 0` is `true`, so an unguarded test calls every zero positive.
+ */
+function edgeSign(e: EdgeLite): 1 | -1 | null {
+  if (e?.exists_probability === 0) return null;
+  if (e?.effect_direction === 'positive') return 1;
+  if (e?.effect_direction === 'negative') return -1;
+  const mean = e?.strength?.mean;
+  if (typeof mean === 'number' && mean !== 0) return mean > 0 ? 1 : -1;
+  return null;
+}
+
+/**
+ * Depth bound, so a cyclic or densely connected graph cannot make this walk the
+ * cost. Chosen to traverse the indirect chains real drafted models contain; a
+ * path longer than this is not silently ignored — see `truncated` below.
+ */
+const MAX_PATH_DEPTH = 8;
+
+interface PathScan {
+  /** Composed signs of every INDIRECT path fully traversed to the goal. */
+  readonly signs: ReadonlySet<number>;
+  /**
+   * ⚠ TRUE WHEN THE WALK STOPPED SHORT — and this field is the whole point.
+   *
+   * A previous cut returned an empty set at the depth cap, and the caller read
+   * that as "no contradictory path exists". It meant "no contradictory path was
+   * LOOKED FOR beyond here". Reproduced: a six-edge chain positive at every hop
+   * except a final negative one lies past a four-deep lookahead, so the direct
+   * +0.2 survived as an unqualified sign and the product claimed a trade-off
+   * the fuller model refutes. An incomplete check is not a negative result.
+   */
+  readonly truncated: boolean;
+}
+
+/**
+ * Composed signs of every indirect path from `fromId` to the goal.
+ *
+ * Direct edges are excluded — they are the establishing evidence, handled by
+ * the caller; these paths exist only to contradict it.
+ */
+function scanIndirectPaths(
+  fromId: string,
+  goalId: string,
+  edges: readonly EdgeLite[],
+  depth = 0,
+  seen: ReadonlySet<string> = new Set(),
+  carried: 1 | -1 | null = null,
+): PathScan {
+  const signs = new Set<number>();
+  let truncated = false;
+  for (const e of edges) {
+    if (e?.from !== fromId || typeof e.to !== 'string') continue;
+    if (seen.has(e.to)) continue;
+    const sign = edgeSign(e);
+    if (sign === null) continue;
+    const composed = carried === null ? sign : ((carried * sign) as 1 | -1);
+    if (e.to === goalId) {
+      // A single hop straight to the goal is the DIRECT edge, not an indirect
+      // path; it only counts once something has been carried into it.
+      if (carried !== null) signs.add(composed);
+      continue;
+    }
+    if (depth + 1 >= MAX_PATH_DEPTH) {
+      // There is more graph beyond here that this walk will not look at.
+      truncated = true;
+      continue;
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(fromId);
+    const deeper = scanIndirectPaths(e.to, goalId, edges, depth + 1, nextSeen, composed);
+    for (const d of deeper.signs) signs.add(d);
+    if (deeper.truncated) truncated = true;
+  }
+  return { signs, truncated };
+}
+
+/**
+ * ⭐ WHICH WAY DOES THIS FACTOR PUSH THE GOAL? `null` unless the model settles it.
+ *
+ * ⚠ A DIRECT EDGE ESTABLISHES; AN INDIRECT PATH MAY ONLY VETO. Two independently
+ *   reproduced counterexamples forced this shape, and both were my own defect
+ *   repeated one level in — I had replaced "two labels exist" with "one direct
+ *   edge exists" and again claimed more than the model supports:
+ *
+ *     · A→goal +0.2 was promoted to a global positive sign while
+ *       A→outcome +1 → goal −1 makes A's fuller path negative. A mixed model
+ *       does not establish unqualified opposition, so "A balanced against B"
+ *       remained unearned.
+ *     · A→goal +0.2 with `exists_probability: 0` still licensed the pair.
+ *
+ *   Indirect paths are deliberately NOT allowed to establish a sign on their
+ *   own either: an indirect-only factor stays unknown rather than having a
+ *   global sign invented for it from a chain the person never sees summarised.
+ */
+function factorDirectionOnGoal(
+  factorId: string,
+  goalId: string | null,
+  edges: readonly EdgeLite[],
+): 'positive' | 'negative' | null {
+  if (goalId === null) return null;
+  let direct: 1 | -1 | null = null;
+  for (const e of edges) {
+    if (e?.from !== factorId || e?.to !== goalId) continue;
+    const sign = edgeSign(e);
+    if (sign === null) return null;
+    if (direct !== null && direct !== sign) return null;
+    direct = sign;
+  }
+  if (direct === null) return null;
+  const scan = scanIndirectPaths(factorId, goalId, edges);
+  // ⚠ A TRUNCATED WALK CANNOT REPORT "NO CONTRADICTION". Unknown is not
+  //   permission: if the search stopped short, the direct sign is not an
+  //   unqualified claim and no trade-off is asserted.
+  if (scan.truncated) return null;
+  for (const indirect of scan.signs) {
+    if (indirect !== direct) return null;
+  }
+  return direct > 0 ? 'positive' : 'negative';
+}
+
+/**
+ * ⭐⭐ THE FIRST TWO FACTOR LABELS ARE NOT A TRADE-OFF, AND THIS PRODUCT SAID THEY WERE.
+ *
+ * MEASURED ON A REAL SERVED TURN (CEE `083e0da`, request `2e5d48a8`, scenario
+ * `e309fd7e`, 8 Sep 2026). The user's first reply contained:
+ *
+ *   "Main trade-off: Team Coordination Overhead balanced against
+ *    Onboarding and Ramp Time"
+ *
+ * Both are COSTS of hiring. They push the goal the same way and are not in
+ * tension with each other. The sentence asserted a relationship the model does
+ * not contain, in the first thing the person reads — because
+ * `buildTradeOffBullet` received only `string[]` labels and emitted
+ * `factors[0] balanced against factors[1]` whenever two labels existed. Nothing
+ * consulted an edge; `graph` was in scope the whole time and `graph.edges` was
+ * never read. The suite's own case was named "…using the first two factor
+ * labels" and built its fixture with `edges: []`, so it required the claim to
+ * be made about a graph containing no relationships at all.
+ *
+ * A trade-off is a claim about DIRECTION: raising one lowers the other's
+ * contribution to the goal. It is now said only when two factors provably push
+ * the goal opposite ways, and the pair is chosen by that test rather than by
+ * array position.
+ *
+ * ⚠ WHEN NOTHING OPPOSES, THE ANSWER IS NOT SILENCE. Dropping the bullet would
+ *   delete a true and useful line (these ARE the factors the model weighs) to
+ *   avoid a false one. The caller keeps the names and loses only the unearned
+ *   relationship.
+ */
+function findOpposingFactorPair(
+  nodes: readonly NodeLite[],
+  edges: readonly EdgeLite[],
+  goalId: string | null,
+): readonly [string, string] | null {
+  const positive: string[] = [];
+  const negative: string[] = [];
+  for (const f of nodes) {
+    if (f?.kind !== 'factor' || typeof f.id !== 'string' || typeof f.label !== 'string') continue;
+    const dir = factorDirectionOnGoal(f.id, goalId, edges);
+    if (dir === 'positive') positive.push(f.label);
+    else if (dir === 'negative') negative.push(f.label);
+  }
+  if (positive.length === 0 || negative.length === 0) return null;
+  return [positive[0], negative[0]] as const;
+}
+
+/**
  * Return a single bullet-ready trade-off fragment (no leading bullet
  * glyph; no trailing full stop — the renderer adds those). Returns null
  * when no factor/risk material is available, so the caller can omit the
@@ -1184,10 +1385,18 @@ function buildOptionsBlock(
 function buildTradeOffBullet(
   factors: readonly string[],
   risks: readonly string[],
+  opposingPair: readonly [string, string] | null,
 ): string | null {
   const trimmedFactors = factors.map((l) => elideLabelAtWordBoundary(l, MAX_LABEL_CHARS));
+  if (opposingPair !== null) {
+    const a = elideLabelAtWordBoundary(opposingPair[0], MAX_LABEL_CHARS);
+    const b = elideLabelAtWordBoundary(opposingPair[1], MAX_LABEL_CHARS);
+    return `Main trade-off: ${a} balanced against ${b}`;
+  }
   if (trimmedFactors.length >= 2) {
-    return `Main trade-off: ${trimmedFactors[0]} balanced against ${trimmedFactors[1]}`;
+    // Two factors, no opposition the model can show: name them without
+    // asserting a relationship. See `findOpposingFactorPair`.
+    return `The model weighs ${trimmedFactors[0]} and ${trimmedFactors[1]}`;
   }
   if (trimmedFactors.length === 1 && risks.length >= 1) {
     const risk = elideLabelAtWordBoundary(risks[0], MAX_LABEL_CHARS);
