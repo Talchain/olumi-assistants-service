@@ -71,7 +71,11 @@ describe('factor investigation — real envelope through the join to the rendere
       fragile_edges: [],
     });
 
-    const rendered = (out?.top_drivers ?? []) as Array<Record<string, unknown>>;
+    // Cast through `unknown`: `top_drivers` is a `readonly DisplaySafeAnalysisDriver[]`,
+    // which does not sufficiently overlap `Record<string, unknown>[]` (TS2352).
+    // The test reads arbitrary display fields off it deliberately, so widening
+    // via `unknown` is the honest expression of that — not a weaker assertion.
+    const rendered = (out?.top_drivers ?? []) as unknown as Array<Record<string, unknown>>;
     expect(rendered.length).toBeGreaterThan(0);
 
     // ── The load-bearing assertion. `fac_offshore` ("Offshore Engagement"):
@@ -118,7 +122,9 @@ describe('factor investigation — real envelope through the join to the rendere
       top_drivers: drivers,
       fragile_edges: [],
     });
-    const engRendered = ((out?.top_drivers ?? []) as Array<Record<string, unknown>>).find(
+    const engRendered = (
+      (out?.top_drivers ?? []) as unknown as Array<Record<string, unknown>>
+    ).find(
       (d) => d.label === 'Engineering Capacity',
     );
     expect(engRendered).toBeDefined();
