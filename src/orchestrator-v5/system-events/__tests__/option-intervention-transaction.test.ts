@@ -5,6 +5,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import { createMockSessionStore, makeSessionTurnRow } from '../../../../tests/utils/mock-session-store.js';
 import { GraphStateIngressSchema } from '../../boundary/request-extensions.js';
 import { computeAnalysisAffectingGraphHash } from '../../context/graph-hash.js';
+import { buildCanonicalAnalysisReadyFromGraph } from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import type {
   AtomicCommittedModelVersionReceipt, SessionStore, SessionTurnWrite,
@@ -161,6 +162,15 @@ function jsonStore(initial: ReturnType<typeof canonicalGraph>, options: {
     loadCount: () => loads,
     stageConcurrentGraphOnDuplicate: (graph: unknown) => { concurrentGraphJson = JSON.stringify(graph); },
   };
+}
+
+/** The submission may carry a bare number or the rich `{ value }` form. */
+function interventionNumber(raw: unknown): number | undefined {
+  if (typeof raw === 'number') return raw;
+  if (raw !== null && typeof raw === 'object' && typeof (raw as { value?: unknown }).value === 'number') {
+    return (raw as { value: number }).value;
+  }
+  return undefined;
 }
 
 beforeEach(() => {
@@ -522,6 +532,71 @@ describe('option-intervention transaction — real commit, serialized store boun
     // The twin's own precondition: the receipt was really parsed and attached,
     // so the case above refused a PRESENT receipt rather than an absent one.
     expect(matched.response.model_version_receipt?.version_id).toBe(receiptBase.version_id);
+  });
+
+  /**
+   * ⭐⭐ THE ANALYSIS ACTUALLY CONSUMES THE EDITED VALUE — the join this file
+   * stopped one hop short of.
+   *
+   * Every case above ends at the durable graph or the readback. "It is in the
+   * graph" is not "the analysis runs on it": the submission is a PROJECTION,
+   * and a projection can drop, re-derive or stale a field without any of these
+   * assertions moving. So this walks one hop further, to
+   * `buildCanonicalAnalysisReadyFromGraph` — the canonical payload the run is
+   * built from.
+   *
+   * ⚠ NOT A SECOND COPY OF THE APPLY CHAIN. `option-effect-write-apply-chain`
+   * already pins hops 0-5 for the operation the NL resolver composes, including
+   * the readiness flip and #1016's guard. This asserts only what that file
+   * cannot: that the value THIS transactional writer committed is the value the
+   * submission carries. Duplicating its hops here would be two spellings of one
+   * proof.
+   *
+   * ⚠ THE BEFORE/AFTER PAIR IS THE EVIDENCE, NOT THE AFTER. The fixture's
+   * option already holds 0.2 on this factor, so "the payload has a number for
+   * this pair" is true before the write and proves nothing. The discrimination
+   * is that the number CHANGES to the committed one — and that its three
+   * neighbours (the same option's other factor, and the baseline option's two)
+   * are byte-identical, which is the wrong-object control.
+   */
+  it('submits the edited value to the analysis, and moves nothing else', async () => {
+    const before = canonicalGraph();
+    const readBefore = buildCanonicalAnalysisReadyFromGraph(before);
+    const optionBefore = readBefore?.options.find(option => option.option_id === 'option');
+    // Precondition, pinned in-test: the pair already carries the OLD number, so
+    // the assertion below cannot pass by the payload merely having a value.
+    expect(interventionNumber(optionBefore?.interventions.factor)).toBe(0.2);
+
+    const persistence = jsonStore(before);
+    const result = await executeOptionInterventionEdit(inputFor(before), persistence.fresh());
+    expect(result.kind).toBe('committed');
+    if (result.kind !== 'committed') throw new Error('Expected the ordinary commit');
+
+    const readAfter = buildCanonicalAnalysisReadyFromGraph(result.graph);
+    const optionAfter = readAfter?.options.find(option => option.option_id === 'option');
+    expect(interventionNumber(optionAfter?.interventions.factor)).toBe(0.3);
+
+    // Wrong-object control: the same option's other factor and the baseline
+    // option's pair are exactly what they were.
+    expect(interventionNumber(optionAfter?.interventions.other_factor)).toBe(0.55);
+    const baselineAfter = readAfter?.options.find(option => option.option_id === 'other_option');
+    expect(interventionNumber(baselineAfter?.interventions.factor)).toBe(0.7);
+    expect(interventionNumber(baselineAfter?.interventions.other_factor)).toBe(0.65);
+
+    // ⭐ AND THE USER-FACING MEANING TRAVELS WITH IT. `intervention_details` is
+    // the payload's display half, derived from the factor's own unit and cap —
+    // so this asserts the submission does not carry a new number under an old
+    // rendering of it, which is the split a value edit is most likely to leave.
+    expect(optionAfter?.intervention_details?.factor)
+      .toEqual({ display_value: '30%', normalised_value: 0.3, raw_value: 30, unit: '%' });
+    expect(optionBefore?.intervention_details?.factor)
+      .toEqual({ display_value: '20%', normalised_value: 0.2, raw_value: 20, unit: '%' });
+
+    // The edit did not cost the option its analysis status, or the run its
+    // admission. (`may_run` is false on this fixture for unrelated reasons —
+    // the assertion is that the write did not MOVE it, not that it is true.)
+    expect(optionAfter?.status).toBe('ready');
+    expect(readAfter?.may_run).toBe(readBefore?.may_run);
   });
 
   it('does not turn unknown freshness into permission to append', async () => {
