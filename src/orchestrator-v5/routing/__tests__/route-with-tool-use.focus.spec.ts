@@ -204,6 +204,21 @@ describe('buildUserMessage — a turn with no selection remains byte-stable', ()
     ).toBeTypeOf('string');
     delete analysis?.analysis_not_current_note;
 
+    // #1332 intentionally qualifies the previous global information-value
+    // absence claim. Assert that exact delta, restore its historical bytes,
+    // and retain the original no-selection golden rather than blessing a new hash.
+    expect(analysis?.value_of_information_note).toBe(
+      'no evidence-gap coaching scores are available in this channel — ' +
+      'do not infer an information-value priority from this evidence-gap channel or from ' +
+      'influence alone. Other investigation signals retain their own stated basis and limits',
+    );
+    if (analysis === null) throw new Error('Expected the fixture analysis');
+    analysis.value_of_information_note =
+      'no value-of-information scores are available for this analysis — ' +
+      'do not claim any factor carries the highest (or a high) value of information, and do ' +
+      'not present a sensitivity or influence ranking as a value-of-information ranking — ' +
+      'describe factors by their modelled influence instead';
+
     // SECOND SUBTRACTION, same doctrine as the first. `display_graph.goals` is
     // now projected through `projectNode` instead of passing the raw
     // `ContextPackGraph.goals` through by reference — it was a raw-value leak
