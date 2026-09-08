@@ -70,7 +70,37 @@ import { applyStructuralRename, findStaleRenamedLabel } from './structural-renam
 // grammar at typecheck time without adding a runtime edge into the tools layer.
 import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
 
-export type SystemEventCommitSkipReason = 'client_only_event';
+/**
+ * Why a system-event turn committed nothing — and why this is a VOCABULARY
+ * rather than a boolean.
+ *
+ * ⚠ IT HAD ONE MEMBER, AND THAT MADE `commitPerformed: false` MEAN "THE SERVER
+ * BROKE". `route-v2` reads exactly this: anything that did not commit and is
+ * not a recognised skip becomes HTTP 500 `system_event_commit_failed`,
+ * `retryable: true`. For an acknowledgement kind that was fine. For a
+ * value-carrying writer it is not: a same-value edit and a permanently stale
+ * base both commit nothing, and telling the client to retry either is telling
+ * it to repeat a request that cannot succeed.
+ *
+ * So the states are named apart, because they need opposite follow-ups:
+ *
+ *   · `client_only_event` — nothing to write, by kind.
+ *   · `verified_no_op`    — the server LOOKED and the model already holds what
+ *                           was asked for. Success with nothing to do.
+ *   · `refused_no_write`  — a gate declined and NOTHING was written. The client
+ *                           cannot fix it by repeating the request.
+ *
+ * ⚠ AND THERE IS DELIBERATELY NO MEMBER FOR "UNVERIFIED". A writer that could
+ * not confirm what happened must NOT be described as a skip: a commit may have
+ * landed, so it keeps the retryable failure path (the retry is idempotent on
+ * `(scenario_id, turn_id)`). Minting a skip reason for it would convert "we do
+ * not know" into "nothing happened", which is the one claim the writer
+ * explicitly refuses to make.
+ */
+export type SystemEventCommitSkipReason =
+  | 'client_only_event'
+  | 'verified_no_op'
+  | 'refused_no_write';
 
 export interface DispatchSystemEventResult {
   readonly response: OlumiResponse;
@@ -1958,6 +1988,50 @@ async function dispatchOptionInterventionEdit(
   );
 
   if (outcome.kind === 'committed') {
+    // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
+    // `DispatchSystemEventResult.graph` feeds the egress sanitiser, which needs
+    // a parsed GraphV3 to resolve entity ids to labels. The writer returns the
+    // raw persisted bytes as `unknown` ON PURPOSE — they are the postimage it
+    // verified, and re-parsing them must never become a second source of truth.
+    // So: parse for PRESENTATION, and keep `analysisGraphHash` — computed by the
+    // writer over the raw bytes — as the hash on the wire. A parse failure
+    // degrades the scrub to graph-free; it does not degrade the receipt.
+    const committedParse = GraphV3.safeParse(outcome.graph);
+    const graphForReadiness = committedParse.success ? committedParse.data : null;
+
+    // ⭐ READINESS AND FRESHNESS ARE RE-DERIVED AGAINST THE BYTES THAT LANDED.
+    //
+    // The `freshness` passed INTO the writer is a pre-write input the referee
+    // consumes; forwarding it here would describe the model as it was before
+    // this edit. The sibling structural/edge writers derive both after the
+    // commit for exactly that reason, and this is a model-changing route.
+    //
+    // ⚠ AND THE HEALTHY-EMPTY / DEGRADED DISTINCTION SURVIVES. A history read
+    // that succeeded and found nothing is `none` — a real verdict. A read that
+    // degraded is `unknown`. Collapsing them would let a transport failure
+    // masquerade as "this model has never been analysed". No extra I/O: the
+    // prior facts are re-projected against the committed hash.
+    const freshnessAfterCommit: FreshnessDerivation =
+      priorFactsRead.status === 'ok'
+        ? deriveAnalysisFreshness(priorFactsRead.facts, outcome.analysisGraphHash)
+        : {
+            freshness: 'unknown',
+            reason: 'derivation_failed',
+            selected_fact_index: null,
+            graph_hash_at_run: null,
+            current_graph_hash: outcome.analysisGraphHash,
+            computed_at: null,
+          };
+    emitFreshnessTelemetry(
+      freshnessAfterCommit,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'system_event.option_intervention_edit',
+      },
+      { prior_fact_count: priorFactsRead.status === 'ok' ? priorFactsRead.facts.length : 0 },
+    );
+
     log.info(
       {
         request_id: requestId,
@@ -1966,30 +2040,116 @@ async function dispatchOptionInterventionEdit(
         option_id: event.option_id,
         factor_id: event.factor_id,
         persisted_row_id: outcome.persistedRowId,
+        freshness_after_commit: freshnessAfterCommit.freshness,
+        committed_graph_parsed: committedParse.success,
       },
       'V5 option_intervention_edit — committed',
     );
     return {
       response: { ...outcome.response, graph_hash: outcome.analysisGraphHash },
       commitPerformed: true,
-      graph: outcome.graph,
+      // Readiness from the bytes that LANDED. `undefined` only when the
+      // committed graph did not parse — an honest absence, not a guess.
+      ...(graphForReadiness !== null
+        ? { analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness) }
+        : {}),
+      freshness: freshnessAfterCommit,
+      graph: graphForReadiness,
     };
   }
 
-  log.info(
+  // ── Everything below committed NOTHING, and the three cases need opposite
+  // follow-ups. Reporting them all as `commitPerformed: false` with no skip
+  // reason is what made a permanently stale base and a same-value edit arrive
+  // at the client as a retryable 500.
+  if (outcome.kind === 'unchanged') {
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        option_id: event.option_id,
+        factor_id: event.factor_id,
+      },
+      'V5 option_intervention_edit — verified no-op: the model already holds this value',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      commitSkippedReason: 'verified_no_op',
+      graph: null,
+    };
+  }
+
+  if (outcome.kind === 'refused') {
+    // ⭐ A STALE BASE IS A CONFLICT, NOT A FAILURE, and it has a shipped
+    // recovery: refresh and reconfirm. The hash handed back is read from the
+    // CURRENT persisted graph in analysis space — the same space the client
+    // sent — so the instruction is followable rather than a bare "try again".
+    if (outcome.reason === 'stale_graph') {
+      const expectedBaseGraphHash = await readClientRecoverableBaseHash(payload.scenario_id);
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          option_id: event.option_id,
+          factor_id: event.factor_id,
+          client_base_graph_hash: event.base_graph_hash,
+          expected_base_graph_hash: expectedBaseGraphHash,
+        },
+        'V5 option_intervention_edit — stale base: refusing with refresh-and-reconfirm',
+      );
+      return {
+        response: buildAcknowledgementResponse(payload),
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: 'stale_base_graph_hash',
+          expected_base_graph_hash: expectedBaseGraphHash,
+        },
+      };
+    }
+    // Every other refusal is the request itself being unhonourable against the
+    // canonical model — an unresolvable id, an option and factor that are not
+    // linked, a value outside the model scale. Repeating it cannot succeed, so
+    // it must not be advertised as retryable.
+    log.warn(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        option_id: event.option_id,
+        factor_id: event.factor_id,
+        refusal_reason: outcome.reason,
+      },
+      'V5 option_intervention_edit — refused, nothing written',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      commitSkippedReason: 'refused_no_write',
+      graph: null,
+    };
+  }
+
+  // ⚠ UNVERIFIED. The writer could not prove what happened and explicitly
+  // refuses to assert a rollback; a commit MAY have landed. So this deliberately
+  // takes NO skip reason and keeps the retryable failure path: the retry is
+  // idempotent on (scenario_id, turn_id), and "we do not know" must not be
+  // rendered as "nothing happened".
+  log.error(
     {
       request_id: requestId,
       event_kind: event.kind,
       scenario_id: payload.scenario_id,
       option_id: event.option_id,
       factor_id: event.factor_id,
-      outcome: outcome.kind,
-      reason: outcome.kind === 'unchanged' ? null : outcome.reason,
-      // The boolean below cannot carry this, so the log does: on `unverified` a
-      // commit MAY have landed and no rollback is being asserted.
-      commit_attempted: outcome.kind === 'unverified' ? outcome.commitAttempted : false,
+      reason: outcome.reason,
+      commit_attempted: outcome.commitAttempted,
     },
-    'V5 option_intervention_edit — no committed write claimed',
+    'V5 option_intervention_edit — UNVERIFIED: no success claimed and no rollback asserted',
   );
   return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
 }

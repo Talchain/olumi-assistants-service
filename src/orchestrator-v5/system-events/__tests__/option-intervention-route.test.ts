@@ -167,7 +167,8 @@ describe('D — the four outcomes, reported honestly', () => {
 
   it.each([
     ['unchanged', { kind: 'unchanged' }],
-    ['refused', { kind: 'refused', reason: 'stale_graph' }],
+    ['refused', { kind: 'refused', reason: 'unresolved_effect_relationship' }],
+    ['stale base', { kind: 'refused', reason: 'stale_graph' }],
     ['unverified', { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true }],
   ] as Array<[string, Record<string, unknown>]>)(
     '%s: claims no commit and hands over no graph',
@@ -178,6 +179,52 @@ describe('D — the four outcomes, reported honestly', () => {
       expect(result.graph).toBeNull();
     },
   );
+
+  /**
+   * ⭐ AND THEY ARE THREE DIFFERENT ANSWERS, NOT ONE.
+   *
+   * `commitPerformed: false` alone routes to HTTP 500 `retryable: true`. That
+   * is right for "we could not confirm" and wrong for both of the others: a
+   * same-value edit is a success with nothing to do, and a permanently stale
+   * base cannot be fixed by repeating the request. The route branches on these
+   * exact tokens, so asserting them here is asserting the wire behaviour's
+   * input — the wire behaviour ITSELF is asserted over the real route in
+   * `tests/integration/orchestrator/route-v2-option-intervention-edit.test.ts`.
+   */
+  it('a verified no-op is a recognised skip, not an unexplained non-commit', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue({ kind: 'unchanged' });
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-8a' });
+    expect(result.commitSkippedReason).toBe('verified_no_op');
+    expect(result.graphConflict).toBeUndefined();
+  });
+
+  it('a permanent refusal is a recognised skip — repeating it cannot succeed', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue({
+      kind: 'refused', reason: 'unresolved_effect_relationship',
+    });
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-8b' });
+    expect(result.commitSkippedReason).toBe('refused_no_write');
+    expect(result.graphConflict).toBeUndefined();
+  });
+
+  it('a stale base is a CONFLICT with a followable recovery, not a refusal or a failure', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue({ kind: 'refused', reason: 'stale_graph' });
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-8c' });
+    expect(result.graphConflict?.recovery_action).toBe('refresh_and_reconfirm');
+    expect(result.graphConflict?.conflict_category).toBe('stale_base_graph_hash');
+    // Not ALSO a skip: a conflict has its own route branch, and carrying both
+    // would let whichever branch runs first decide the answer.
+    expect(result.commitSkippedReason).toBeUndefined();
+  });
+
+  it('⚠ unverified takes NO skip reason — "we do not know" must not become "nothing happened"', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue({
+      kind: 'unverified', reason: 'commit_not_confirmed', commitAttempted: true,
+    });
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-8d' });
+    expect(result.commitSkippedReason).toBeUndefined();
+    expect(result.graphConflict).toBeUndefined();
+  });
 
   it('⚠ unverified does not become a SUCCESS just because a commit was attempted', async () => {
     // The writer reaches `unverified` because it could not prove what happened.
