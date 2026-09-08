@@ -469,6 +469,7 @@ import {
 import { pickLatestDecisionReview } from './coaching/pick-decision-review.js';
 import { pickLatestFactorEvppiPriorityGuidance } from './coaching/select-factor-evppi.js';
 import { pickLatestRawRobustness } from './coaching/pick-raw-robustness.js';
+import { separationEstablishedFromRobustness } from './compose/analysis-state-v1.js';
 import { pickLatestDefaultedAssumptions } from './coaching/pick-defaulted-assumptions.js';
 import { applyDefaultedValueEgress } from './compose/defaulted-value-egress.js';
 import { applyBlockedSlotClaimGuard } from './compose/blocked-slot-claim-guard.js';
@@ -2733,15 +2734,49 @@ export async function runTurnExecutor(
       // unknown readiness stays UNKNOWN rather than reading as "unblocked".
       const readinessForPack =
         projectContextPackReadiness(analysisReadyForTurn) ?? undefined;
-      // Non-null ONLY when the run is separable/entitled (that is the caller's
-      // condition) yet the admission caps the mode below `comparative_leader`.
-      // Read from the SAME existing admission reader the wire enforcer uses —
-      // no second policy, no new authority, and `null` whenever the admission
-      // is absent, so legacy packs keep their exact behaviour.
+      // ⭐⭐ THE POPULATION, AND WHY THIS READS SEPARATION RATHER THAN ENTITLEMENT.
+      //
+      // ⛔ MY FIRST CUT WAS WRONG AND THE INDEPENDENT REVIEW CAUGHT IT
+      //    (CHANGES_REQUIRED `5592620999` at `39557a98`). It gated only on
+      //    `mayNameLeadingOptionForRun`, which resolves through
+      //    `claim-safety-read.ts:412-415` -> `constraint-feasibility.ts:1042-1053`
+      //    to the persisted CONSTRAINT verdict. That is ENTITLEMENT. It says
+      //    nothing about whether this result separated the arms. So an entitled
+      //    `quantified_provisional` run with `near_tie.is_tie = true`, or with
+      //    no separation computed at all, was handed
+      //    `PROVISIONAL_FIGURES_INSTRUCTION` — a deterministic statement that
+      //    its options ARE separable, which is false — while the final wire arm
+      //    (which does read separation) refused that same population. It
+      //    recreated the coach/summary disagreement this work exists to remove,
+      //    from the opposite side.
+      //
+      // The separation interpretation is REUSED, not recomputed:
+      // `pickLatestRawRobustness` off the SAME selected `run_analysis` fact,
+      // and the SAME predicate `composeLeaderClaim` applies
+      // (`compose/analysis-state-v1.ts:604-606`) — known AND not a near tie.
+      // No second calculator, and `composeLeaderClaim` remains the author of
+      // the published `analysis_state.leader_claim.separation`.
+      //
+      // ⚠ EXACTLY `quantified_provisional`, not "any mode below comparative".
+      //   That was the second half of the same finding: `none` and
+      //   `exploratory` are different admission answers and keep their
+      //   restrictions, and the final wire arm already required the exact mode.
+      //   The two consumers must name the same population or they disagree
+      //   again.
+      //
+      // ⚠ ABSENCE IS NOT PERMISSION. Unknown separation (`null` signals) is NOT
+      //   separated: it falls through to today's behaviour rather than
+      //   asserting separability the model never established.
+      const separationEstablishedForRun = separationEstablishedFromRobustness(
+        pickLatestRawRobustness(context.prior_facts),
+      );
       const provisionalAdmissionModeForRun: PermittedAnalysisMode | null =
-        analysisReadyPermitsLeaderNaming(analysisReadyForTurn)
-          ? null
-          : permittedAnalysisModeFromAnalysisReady(analysisReadyForTurn);
+        !analysisReadyPermitsLeaderNaming(analysisReadyForTurn) &&
+        separationEstablishedForRun &&
+        permittedAnalysisModeFromAnalysisReady(analysisReadyForTurn) ===
+          'quantified_provisional'
+          ? 'quantified_provisional'
+          : null;
       // Context v2 S4-INJECT (ROADMAP 1.73; 01 §2/§4, 05 §S4 inject row):
       // read the stored rolling summary for injection — UNCONDITIONAL since
       // the O-2 activation (CEE_ROLLING_SUMMARY deleted per the

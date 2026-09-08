@@ -599,11 +599,35 @@ function composeRunState(input: AnalysisStateComposeInput): AnalysisRunState {
   }
 }
 
+/**
+ * ⭐ ONE DEFINITION OF "THIS RESULT SEPARATED THE ARMS".
+ *
+ * Exported because a SECOND consumer now needs the same answer: the receiving
+ * decision in `turn-executor.ts` must not tell the coach that options are
+ * separable when they are not. The independent review of `39557a98` found
+ * exactly that — the receiving branch was reading the CONSTRAINT verdict
+ * (entitlement) and treating it as separation.
+ *
+ * A copy in the caller would be CLAUDE.md trap 12 in its purest form: two lists,
+ * one of which gets the next fix. `composeLeaderClaim` below remains the sole
+ * author of the PUBLISHED `analysis_state.leader_claim.separation`; this is the
+ * predicate it uses, named so others can ask the same question rather than
+ * invent a second calculator.
+ *
+ * ⚠ UNKNOWN IS NOT SEPARATED. `null` signals mean no separation statement was
+ *   computed — never "the options do not separate", and never permission.
+ */
+export function separationEstablishedFromRobustness(
+  raw: RawRobustnessSignals | null,
+): boolean {
+  return raw !== null && !raw.near_tie_is_tie;
+}
+
 function composeLeaderClaim(input: AnalysisStateComposeInput): AnalysisLeaderClaim {
   const entitled = input.mayNameLeadingOption === true;
   const raw: RawRobustnessSignals | null = input.rawRobustness;
   const separationKnown = raw !== null;
-  const separates = separationKnown && !raw.near_tie_is_tie;
+  const separates = separationEstablishedFromRobustness(raw);
 
   const claim: {
     permitted: boolean;

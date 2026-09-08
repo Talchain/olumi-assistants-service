@@ -822,6 +822,77 @@ function projectField(
 }
 
 /**
+ * ⭐⭐ THE QUALIFICATION THE QUALIFIED POPULATION MUST CARRY — output, not advice.
+ *
+ * ⛔ MY FIRST CUT RETURNED THE WHOLE RESPONSE UNCHANGED for this population and
+ *    the independent review named it exactly (`5592620999` at `39557a98`):
+ *    "the final projection permits unqualified output, not qualified output".
+ *    It was right. `Adopt RudderStack is the best option.` took the same early
+ *    return as a carefully caveated sentence, because nothing derived, applied
+ *    or verified a qualification. A PROMPT INSTRUCTION IS GUIDANCE; the
+ *    receiving contract says in terms that guidance is not output enforcement,
+ *    and I shipped the thing it warned against.
+ *
+ * So the permit for this population is not "pass through". It is "pass through
+ * WITH the caveat attached", applied deterministically at the chokepoint that
+ * already owns final claim projection — one interpretation reaching the two
+ * surfaces that disagreed on the captured turn: the assistant prose and the
+ * retained `analysis_result.summary`.
+ *
+ * ⚠ THIS IS NOT A CLASSIFIER AND NOT A WORDING RULE. Nothing here reads the
+ *   model's language, judges whether prose "sounds qualified", or bans a word.
+ *   Idempotence is IDENTITY ON OUR OWN CONSTANT — `includes` of the exact
+ *   sentence below — so re-running is a no-op and an already-caveated answer is
+ *   not caveated twice. A natural-language predicate here would be the
+ *   over-suppression trade running backwards (module docstring).
+ *
+ * ⚠ TERMINOLOGY IS THE PRODUCT'S, NOT THE CAPTURE'S. Goal fit, not a contest:
+ *   a simulation share is how often an option scored highest against the goal,
+ *   never the probability the goal is achieved and never evidence confidence.
+ */
+export const PROVISIONAL_FIGURES_CAVEAT =
+  'These figures are provisional: every estimate behind them is machine-authored and unconfirmed, ' +
+  'and a simulation share is how often an option scored highest against your goal, not the chance ' +
+  'the goal is achieved.';
+
+/** Append the caveat once. Identity on the constant, never a language test. */
+function withProvisionalCaveat(text: string): string {
+  if (text.includes(PROVISIONAL_FIGURES_CAVEAT)) return text;
+  const trimmed = text.trimEnd();
+  return trimmed.length === 0
+    ? PROVISIONAL_FIGURES_CAVEAT
+    : `${trimmed}\n\n${PROVISIONAL_FIGURES_CAVEAT}`;
+}
+
+/**
+ * Attach the caveat to the retained `analysis_result` summaries.
+ *
+ * ⚠ SUMMARIES ONLY, AND NOTHING IS REMOVED. The honest figures stay; the
+ *   leading option ID stays exactly as the producer set it. A legitimate null
+ *   projection (unrequested / constraint / run-identity) is left null — this
+ *   seam never restores an ID over a restriction, which the review explicitly
+ *   asked for and which the upstream-null observation does not license.
+ *
+ * Returns `null` when nothing changed, so the caller keeps byte-identity by
+ * construction rather than by hope — the same contract
+ * {@link projectBlocksForWithheldClaim} follows.
+ */
+function qualifyAnalysisResultSummaries(blocks: unknown): unknown[] | null {
+  if (!Array.isArray(blocks) || blocks.length === 0) return null;
+  let changed = false;
+  const projected = blocks.map((block) => {
+    if (block === null || typeof block !== 'object') return block;
+    const source = block as { readonly type?: unknown; readonly summary?: unknown };
+    if (source.type !== 'analysis_result' || typeof source.summary !== 'string') return block;
+    const next = withProvisionalCaveat(source.summary);
+    if (next === source.summary) return block;
+    changed = true;
+    return { ...(block as Record<string, unknown>), summary: next };
+  });
+  return changed ? projected : null;
+}
+
+/**
  * Remove unlicensed leading-option designations from the prose the user reads.
  *
  * NEVER THROWS. Same house rule as the alarm and the finalise chokepoint:
@@ -889,10 +960,30 @@ export function enforceLeadingOptionClaimsAtWire(
   const separableProvisional =
     opts.separationEstablished === true &&
     permittedAnalysisModeFromAnalysisReady(opts.analysisReady) === 'quantified_provisional';
-  if (
-    opts.mayNameLeadingOption &&
-    (analysisReadyPermitsLeaderNaming(opts.analysisReady) || separableProvisional)
-  ) {
+  if (opts.mayNameLeadingOption && separableProvisional) {
+    // PERMIT-WITH-CAVEAT, not permit. See {@link PROVISIONAL_FIGURES_CAVEAT}:
+    // the review's second finding was that returning the response untouched
+    // here admits an unqualified assertion, and it does. Both surfaces that
+    // disagreed on the captured turn are qualified from this one decision.
+    const answer =
+      typeof response.assistant_text === 'string'
+        ? withProvisionalCaveat(response.assistant_text)
+        : response.assistant_text;
+    const qualifiedBlocks = qualifyAnalysisResultSummaries(response.blocks);
+    const answerChanged = answer !== response.assistant_text;
+    if (!answerChanged && qualifiedBlocks === null) return unchanged(response);
+    return {
+      response: {
+        ...response,
+        ...(answerChanged ? { assistant_text: answer } : {}),
+        ...(qualifiedBlocks !== null ? { blocks: qualifiedBlocks } : {}),
+      } as OlumiResponse,
+      changed: true,
+      editedFields: answerChanged ? (['assistant_text'] as const) : [],
+      blocksProjected: qualifiedBlocks !== null,
+    };
+  }
+  if (opts.mayNameLeadingOption && analysisReadyPermitsLeaderNaming(opts.analysisReady)) {
     return unchanged(response);
   }
 
@@ -1075,6 +1166,30 @@ function assertReplacementIsInertAndNonVacuous(): void {
     throw new Error(
       'leading-option-wire-enforcement: the replacement trips the ALARM vocabulary. The gate ' +
         'would inject the residue the alarm measures on every enforced turn.',
+    );
+  }
+  // ⭐ THE SAME OBLIGATION FOR THE CAVEAT THIS GATE NOW ATTACHES. A caveat that
+  //   tripped either reader would be a claim the gate injects on every qualified
+  //   turn — the exact defect the two probes above exist to prevent, one arm
+  //   over. Checked at module load so it fails the process, not a review.
+  if (textAssertsLeadingOption(PROVISIONAL_FIGURES_CAVEAT)) {
+    throw new Error(
+      'leading-option-wire-enforcement: PROVISIONAL_FIGURES_CAVEAT trips the ENFORCEMENT reader, ' +
+        'so the qualified arm would attach a sentence a later pass reads as a leader claim.',
+    );
+  }
+  if (textNamesLeadingOption(PROVISIONAL_FIGURES_CAVEAT)) {
+    throw new Error(
+      'leading-option-wire-enforcement: PROVISIONAL_FIGURES_CAVEAT trips the ALARM vocabulary, so ' +
+        'the qualified arm would inject the residue the alarm measures.',
+    );
+  }
+  // IDEMPOTENCE, exercised rather than argued: attaching twice attaches once.
+  const caveated = withProvisionalCaveat('Some answer.');
+  if (withProvisionalCaveat(caveated) !== caveated) {
+    throw new Error(
+      'leading-option-wire-enforcement: the provisional caveat is not idempotent, so a re-run of ' +
+        'the qualified arm would repeat it in the answer the person reads.',
     );
   }
   // POSITIVE CONTROL — the probe above is vacuous if the readers see nothing.
