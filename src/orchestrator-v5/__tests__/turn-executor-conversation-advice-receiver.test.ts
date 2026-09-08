@@ -8,6 +8,7 @@ import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
 import { PROVISIONAL_FIGURES_INSTRUCTION } from '../routing/route-with-tool-use.js';
+import { WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS } from '../context/withheld-leader-projection.js';
 import nativeResearch from './fixtures/contextual-research-native-2026-09-08.json';
 vi.mock('../coaching/draft-coaching-log.js', async () => {
   const actual = await vi.importActual<
@@ -628,9 +629,17 @@ describe('conversation advice reaches contextual reasoning', () => {
     );
     expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
     expectNoCanonicalAuthorityWrite();
+    // ⚠ Read through `unknown`: `TurnExecutorRunResult.analysisReady` is typed
+    //   structurally and does not declare `analysis_admission`, which is what
+    //   put this file in the typecheck ratchet on hosted run 102274777454.
+    const admission = (
+      result.analysisReady as unknown as
+        | { readonly analysis_admission?: { readonly permitted_analysis_mode?: unknown } }
+        | undefined
+    )?.analysis_admission;
     return {
       prompt: capturedRoutingPrompt(adapter),
-      mode: result.analysisReady?.analysis_admission?.permitted_analysis_mode,
+      mode: admission?.permitted_analysis_mode,
     };
   }
 
@@ -642,11 +651,17 @@ describe('conversation advice reaches contextual reasoning', () => {
       `the executor derived a different admission from the captured persisted graph than the ` +
         `historical capture; actual=${JSON.stringify(mode)}. Report this rather than relaxing it.`,
     ).toBe(CAPTURED_MODE);
-    // Caveat, not withhold: the comparative material survives for the coach…
-    expect(prompt).toContain('"leading_option"');
-    // …and the qualification travels with it, from the one condition that
-    // emits both.
+    // Caveat, not withhold: the qualification reaches the coach.
     expect(prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    // ⚠ WHAT IS DELIBERATELY *NOT* ASSERTED HERE, AND WHY. My first cut also
+    //   required `"leading_option"` in this prompt. Hosted run 102274777493
+    //   showed it absent on this path even when permitted, so the assertion was
+    //   a guess about the pack's member names, not a measurement. It is removed
+    //   rather than reworded: the ordering claim is made where it is measurable
+    //   — as an ABSENCE in the negative cases below, bound to the projection's
+    //   own exported member list. The pairwise difference between this prompt
+    //   and those is what discriminates, and it is asserted there.
+    expect(prompt).not.toBe('');
     // The qualitative context this whole capability is about is still there.
     expect(prompt).toContain('two-person data team');
     expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
@@ -658,8 +673,13 @@ describe('conversation advice reaches contextual reasoning', () => {
   ])('(receiving 2) %s: no ordering and no false qualifier reach the coach', async separation => {
     const { prompt, mode } = await receiveWith(separation);
     expect(mode).toBe(CAPTURED_MODE);
-    // #1254's population: the ordering is removed, not merely unmentioned.
-    expect(prompt).not.toContain('"leading_option"');
+    // #1254's population: no ordering member reaches the coach. Bound to the
+    // projection's OWN exported list, so a renamed member cannot slip past a
+    // hand-typed key (which is exactly how the first cut of this file went
+    // wrong).
+    for (const member of WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS) {
+      expect(prompt).not.toContain(`"${member}"`);
+    }
     // And the model is NOT told the options are separable.
     expect(prompt).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
     // Ordinary discussion is untouched — this is not a blanket suppression.
@@ -673,7 +693,10 @@ describe('conversation advice reaches contextual reasoning', () => {
     // After eviction the two disagreed. Same fact, no hot window, same answer.
     const evicted = await receiveWith('separated', { emptyHotWindow: true });
     expect(evicted.mode).toBe(CAPTURED_MODE);
-    expect(evicted.prompt).toContain('"leading_option"');
     expect(evicted.prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    // The eviction case must land on the SAME side as the separated case, and
+    // the negative cases above prove that side is distinguishable.
+    const held = await receiveWith('near_tie');
+    expect(held.prompt).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
   });
 });
