@@ -31,6 +31,10 @@ import type {
 import { formatPercentagePoints, formatProbability } from './format-analysis-value.js';
 import { looksLikeRawDecimal } from './format-graph-for-context.js';
 import { bandFromMagnitude, NEAR_ZERO_INFLUENCE_THRESHOLD } from './influence-bands.js';
+import {
+  hasFactorEvppiAssessment,
+  investigationPriorityNote,
+} from '../coaching/investigation-priority.js';
 
 export interface DisplaySafeAnalysisOption {
   readonly label: string;
@@ -356,6 +360,27 @@ export interface DisplaySafeAnalysis {
    * VOI-claim truthfulness outranks breadth.
    */
   readonly value_of_information_note?: string;
+  /**
+   * ⭐ WHAT THE INFORMATION-VALUE SCIENCE SAID ABOUT WHAT TO INVESTIGATE FIRST.
+   *
+   * A DIFFERENT QUESTION FROM `value_of_information` ABOVE, AND THAT IS THE
+   * POINT — they read different producer channels and answered differently on
+   * the capture that produced this field. `value_of_information` bands
+   * `m1_coaching.evidence_gaps[]`; this projects the `factor_evppi` authority
+   * (`coaching/select-factor-evppi.ts` → `coaching/investigation-priority.ts`),
+   * which is the channel PLoT actually populated on 3 Sep 2026.
+   *
+   * Present exactly when the caller supplied a licence AND that licence is not
+   * `not_assessed` (already covered by `value_of_information_note`). Absent
+   * otherwise, so a caller that has not wired the licence gets a
+   * byte-identical projection.
+   *
+   * Like `goal_fit` and `value_of_information_note`, NEVER dropped by the
+   * char-budget guard: without it the pack's only ranking is `top_drivers`,
+   * which ranks INFLUENCE, and narrating that as an investigation priority is
+   * the live defect this field exists to stop.
+   */
+  readonly investigation_priority_note?: string;
   readonly goal_fit?: string;
   /**
    * Lane 30 fix 3 — analysis confidence prose from the producer's ordinal
@@ -868,12 +893,12 @@ export function voiBandPhrase(voiScore: number): string | null {
 
 /**
  * ROADMAP 2.54 (b) — the three DISCLOSED-absence lines for the VOI section.
- * Shared instruction tail: forbid VOI superlatives, redirect to influence
- * phrasing (the vocabulary `top_drivers` actually grounds). Claim
+ * Shared instruction tail: scope absence to evidence-gap coaching, without
+ * negating independent EVPPI or factor-sensitivity signals. Claim
  * discipline per line:
  *
  *  - NOT_SCORED: no evidence-gap signal reached this projection — "no
- *    value-of-information scores are available" is unconditionally true.
+ *    evidence-gap scores are available" is scoped to that channel.
  *  - ALL_NEAR_ZERO: entries arrived but every score banded below the
  *    shared noise floor (`NEAR_ZERO_INFLUENCE_THRESHOLD`) — exactly the
  *    live scorecard shape (every delivered VOI was zero).
@@ -888,23 +913,21 @@ export function voiBandPhrase(voiScore: number): string | null {
  * strings.
  */
 const VOI_NOTE_INSTRUCTION_TAIL =
-  'do not claim any factor carries the highest (or a high) value of information, and do ' +
-  'not present a sensitivity or influence ranking as a value-of-information ranking — ' +
-  'describe factors by their modelled influence instead';
+  'do not infer an information-value priority from this evidence-gap channel or from ' +
+  'influence alone. Other investigation signals retain their own stated basis and limits';
 
 export const VOI_NOT_SCORED_NOTE =
-  'no value-of-information scores are available for this analysis — ' +
+  'no evidence-gap coaching scores are available in this channel — ' +
   VOI_NOTE_INSTRUCTION_TAIL;
 
 export const VOI_ALL_NEAR_ZERO_NOTE =
-  'value of information is at or near zero for every factor available to investigate in ' +
-  'this analysis, so no factor stands out as worth investigating on value-of-information ' +
-  'grounds — ' +
+  'the received evidence-gap coaching scores are all below the display threshold; ' +
+  'this is not a verdict on unassessed factors or other information-value channels — ' +
   VOI_NOTE_INSTRUCTION_TAIL;
 
 export const VOI_LEVER_SUPPRESSED_NOTE =
-  'no independently investigable factor carries a scored value of information in this ' +
-  'analysis (factors set directly by the options themselves are excluded by design — ' +
+  'no independently investigable scored entry remains in the evidence-gap coaching ' +
+  'channel (factors set directly by the options themselves are excluded by design — ' +
   'they are choices, not uncertainties to investigate) — ' +
   VOI_NOTE_INSTRUCTION_TAIL;
 
@@ -1156,8 +1179,31 @@ export function formatAnalysisForContext(
     out.value_of_information_note = VOI_ALL_NEAR_ZERO_NOTE;
   } else if (raw.evidence_gaps_lever_suppressed === true) {
     out.value_of_information_note = VOI_LEVER_SUPPRESSED_NOTE;
-  } else {
+  } else if (!hasFactorEvppiAssessment(raw.investigation_priority)) {
+    // Avoid a redundant empty-channel note when an EVPPI verdict is present.
+    // All emitted notes are channel-scoped, including mixed nonempty cases.
     out.value_of_information_note = VOI_NOT_SCORED_NOTE;
+  }
+
+  // The investigation-priority licence — the EVPPI channel's own verdict, in
+  // the pack for the first time.
+  //
+  // NEVER DROPPED by the char-budget guard (deliberately absent from
+  // {@link DISPLAY_ANALYSIS_TRUNCATION_ORDER}), on the same doctrine as
+  // `goal_fit` and `value_of_information_note`: a truncated projection that
+  // loses this note leaves the influence ranking as the only ranking in the
+  // pack, which is the exact condition under which the model narrated one as
+  // the other. Set BEFORE the guard so its own length is inside the budget
+  // arithmetic.
+  //
+  // The contract suite investigation-priority-not-narrated-from-influence
+  // pins retention under actual truncation; the module tests bound fixed
+  // note length. Optional producer action text is not part of that fixed cost.
+  if (raw.investigation_priority !== undefined) {
+    const priorityNote = investigationPriorityNote(raw.investigation_priority);
+    if (priorityNote !== null) {
+      out.investigation_priority_note = priorityNote;
+    }
   }
 
   // Lane 30 — goal-fit prose. Three DISCLOSED states (never silent, so the

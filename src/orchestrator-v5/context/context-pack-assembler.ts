@@ -39,6 +39,7 @@ import type { GraphV3Compact } from '../../orchestrator/context/graph-compact.js
 import type { ContextPackGoalTarget } from './goal-target-record.js';
 import type { ContextPackFactorValues } from './factor-value-record.js';
 import { buildRunDelta } from '../coaching/build-run-delta.js';
+import { eligibleInvestigationPriority, type InvestigationPriorityLicence } from '../coaching/investigation-priority.js';
 import { toSignedInfluenceValue } from '../../orchestrator/context/influence-direction.js';
 import { log } from '../../utils/telemetry.js';
 import { sha8 } from '../../utils/logger-config.js';
@@ -343,6 +344,23 @@ export interface ContextPackAnalysis {
    * #308-union structural authority) fires.
    */
   readonly evidence_gaps_lever_suppressed?: true;
+  /**
+   * ⭐ WHAT THE INFORMATION-VALUE SCIENCE SAID ABOUT WHAT TO INVESTIGATE FIRST.
+   *
+   * A DIFFERENT QUESTION FROM `evidence_gaps` ABOVE, from a DIFFERENT PRODUCER
+   * CHANNEL, and the two disagreed on the capture that produced this field.
+   * `evidence_gaps` is `enrichment.m1_coaching.evidence_gaps[]`; this is ISL's
+   * `enrichment.factor_evppi`, read through the existing
+   * `coaching/select-factor-evppi.ts` authority.
+   *
+   * Attached at `reconcileAnalysisSummaryWithEnrichment` — the single seam
+   * between a summary and its own enrichment — so it can never describe a
+   * different run from the analysis it travels with.
+   *
+   * ABSENT (never `'not_assessed'`) when the EVPPI channel said nothing at all:
+   * other information-value channels retain their separate disclosures.
+   */
+  readonly investigation_priority?: InvestigationPriorityLicence;
   readonly goal_fit?: ContextPackAnalysisGoalFit | null;
   /**
    * Lane 30 fix 3 — top-level ordinal confidence tier (attested values
@@ -1666,6 +1684,13 @@ export function assembleContextPackWithSummary(
     analysis: selectedDisplayAnalysisSource,
     scenarioId: input.payload.scenario_id ?? null,
   });
+  // Eligibility is current-model identity, not another estimate or ranking.
+  // Use the canonical input before budgeting can remove a factor. Missing
+  // graph or option-control authority withholds a named EVPPI priority.
+  const currentFactorIds = graphContext.status === 'canonical'
+    ? new Set((input.compactedGraph?.nodes ?? input.graph?.nodes ?? [])
+        .filter(node => node.kind === 'factor').map(node => node.id))
+    : undefined;
   // Keep raw handler policy on its hot-window source. It is not part of the
   // model context budget once a distinct display source is supplied. Legacy
   // callers still reuse the budgeted value exactly as before.
@@ -1673,6 +1698,7 @@ export function assembleContextPackWithSummary(
     hasDistinctDisplayAnalysisSource ? input.analysis ?? null : budgeted.analysis,
     input.analysisStalenessReason ?? null,
     input.interventionControlledFactorIds,
+    currentFactorIds,
   );
   const displayRawAnalysis = hasDistinctDisplayAnalysisSource
     ? projectAnalysis(
@@ -1681,6 +1707,7 @@ export function assembleContextPackWithSummary(
         // the split source explicit without creating a second inert contract.
         null,
         input.interventionControlledFactorIds,
+        currentFactorIds,
       )
     : rawAnalysis;
   const projectedGraphBeforeAuthority: ContextPackGraph = budgeted.compactedGraph
@@ -2543,6 +2570,7 @@ export function projectAnalysis(
   analysis: AnalysisResponseSummaryWithSignals | null,
   stalenessReason: string | null,
   controlledFactorIds?: ReadonlySet<string>,
+  currentFactorIds?: ReadonlySet<string>,
 ): ContextPackAnalysis | null {
   if (analysis === null) return null;
 
@@ -2737,6 +2765,13 @@ export function projectAnalysis(
     // ROADMAP 2.54 (b) — key absent (never `false`) when nothing was
     // suppressed.
     ...(evidenceGapsLeverSuppressed ? { evidence_gaps_lever_suppressed: true as const } : {}),
+    // Same-run producer verdict, qualified by current model membership and
+    // the existing option-control set. A refusal never promotes another row.
+    ...(analysis.investigation_priority !== undefined
+      ? { investigation_priority: eligibleInvestigationPriority(
+          analysis.investigation_priority, currentFactorIds, controlledFactorIds,
+        ) }
+      : {}),
     goal_fit: goalFit,
     confidence_tier: confidenceTier,
     // Trust-spine board #1 (CEE half): the honest constraint note, verbatim
