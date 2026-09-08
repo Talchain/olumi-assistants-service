@@ -444,6 +444,17 @@ export function optionLabelPattern(label: string): RegExp {
 // cannot itself match an option label or manufacture leader-word adjacency.
 const OPTION_REFERENT = '\uFFFC';
 
+/**
+ * The grammatical chain that may stand between a claim's SUBJECT and its
+ * predicate — auxiliaries, negation, determiners and adverbs, and nothing else.
+ * Declared once (CLAUDE.md trap #12): `bindOptionReferences` uses it to protect
+ * a subject from masking, and {@link assertedLeaderNamesItsOwnSubject} uses the
+ * SAME chain to ask whether a claim's subject is a named option. Two copies of
+ * this would be two answers to one question the first time either is tuned.
+ */
+const PREDICATE_PRELUDE =
+  /^(?:\s|\b(?:am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|will|would|should|must|not|never|the|a|an|[a-z]+ly)\b)*$/i;
+
 function bindOptionReferences(value: string, context: LeaderProseContext): string {
   const references = context.optionLabels.flatMap((label) => label.trim() === '' ? [] :
     [...value.matchAll(optionLabelPattern(label))].map((match) => ({
@@ -454,7 +465,7 @@ function bindOptionReferences(value: string, context: LeaderProseContext): strin
   // also be genuine auxiliaries: in "May may be the leading option", the first
   // May is the subject and the second is a modal. Do not mask that auxiliary.
   // A prelude is a grammatical chain, not arbitrary preceding prose.
-  const predicatePrelude = /^(?:\s|\b(?:am|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|will|would|should|must|not|never|the|a|an|[a-z]+ly)\b)*$/i;
+  const predicatePrelude = PREDICATE_PRELUDE;
   const preludes: Array<{ start: number; end: number }> = [];
   for (const { re } of LEADER_CLAIM_PATTERNS) {
     for (const claim of value.matchAll(new RegExp(re.source, 'gi'))) {
@@ -599,6 +610,93 @@ export function textAssertsOnlyImplicitLeadingOptions(value: string, context: Le
   return matches.length > 0 && matches.every((match) =>
     implicit.some((designation) => designation.start <= match.start && match.end <= designation.end),
   );
+}
+
+/**
+ * ⭐⭐ DOES AN ASSERTION NAME ITS OWN SUBJECT, OR ONLY SOMEONE ELSE'S?
+ *
+ * "Names an option" and "names the option it designates" are DIFFERENT
+ * QUESTIONS, and the wire projection was asking the first while needing the
+ * second. Measured counterexample, reproduced by the independent reviewer at
+ * `7b54f07c`:
+ *
+ *   "Hire a Hands-on Technical Lead is strong. It leads in 54% of simulations
+ *    against Two Developers."
+ *
+ * The asserting unit is the second one. It names a roster option — the
+ * COMPARATOR, "Two Developers" — while its own subject is the anaphoric "It",
+ * borrowed from the sentence before. Reading that as self-contained left the
+ * first, naming half standing, so the withheld answer still designated the
+ * leader it was not permitted to name. A comparator mention is not a subject.
+ *
+ * This asks the second question, and asks it with the machinery that already
+ * exists: a claim's subject is the option reference that reaches its predicate
+ * through {@link PREDICATE_PRELUDE} — the same binding `bindOptionReferences`
+ * performs, on the same masked text, with no second vocabulary and no keyword
+ * list of comparison words. A comparator sits AFTER the predicate and is
+ * therefore never in `before`; an anaphor leaves `before` without a referent.
+ *
+ * ⚠ NARROW ON PURPOSE, IN THE SAFE DIRECTION. Returning `false` escalates and
+ *   costs collateral prose; returning `true` leaves a naming half standing and
+ *   the product asserts a leader it may not name. A gap is recoverable, a lie
+ *   is not — so an assertion counts as self-naming ONLY when a named subject
+ *   is bound to it, never merely because a roster label appears somewhere.
+ *
+ * ⭐⭐ AND THE QUANTIFIER IS PART OF THE QUESTION. The first cut of this helper
+ *   asked whether SOME asserted predicate names itself. The caller asks whether
+ *   ANY assertion BORROWS its name — the negation of "every predicate names
+ *   itself", which is a different sentence. One unit can carry both kinds, and
+ *   the independent reviewer found the pair that proves it at `15984f06`:
+ *
+ *     "Hire a Hands-on Technical Lead is strong. It leads in 54% of simulations
+ *      against Two Developers, while Two Developers leads on cost."
+ *
+ *   The splitter yields two units; the SECOND holds an anaphoric predicate
+ *   ("It leads") and a self-named one ("Two Developers leads on cost"). Under
+ *   `.some` the self-named predicate vouched for the whole unit, so the
+ *   borrowed one was concealed and the same forbidden naming half survived —
+ *   the exact leak the previous cut had just closed, re-entered through the
+ *   quantifier rather than through the subject test.
+ *
+ *   So EVERY asserted predicate must name its own subject, not merely some one
+ *   of them.
+ *
+ * ⚠ AND WHY THIS IS `every(...)` RATHER THAN A CONTAINMENT TEST, which is what
+ *   the reviewer's wording suggested and what I wrote first. Containment —
+ *   "every match is covered by a NAMED match" — exists to treat overlapping
+ *   vocabulary as one predicate seen twice, the idiom
+ *   {@link textAssertsOnlyImplicitLeadingOptions} uses. Its mutant SURVIVED the
+ *   whole corpus, so rather than ship an unexercised branch I derived why:
+ *   {@link LEADER_CLAIM_PATTERNS} contains exactly ONE overlapping pair,
+ *   `which_option_leads` ⊃ `leads`, and the inner match's `before` always ends
+ *   in "which option ", which {@link PREDICATE_PRELUDE} cannot match — so the
+ *   inner match is never named, and the two forms can differ only when the
+ *   OUTER is named, i.e. when prelude-only text separates an option label from
+ *   "which". The two forms are therefore equivalent over today's vocabulary.
+ *
+ *   Given equivalence, the tie is broken by DIRECTION: if that vocabulary ever
+ *   gains an overlapping pair, `every` over-escalates (a gap) while containment
+ *   under-escalates (a leak). This helper's whole cost function says take the
+ *   gap. Implicit-designation semantics are untouched either way — they live in
+ *   `textAssertsOnlyImplicitLeadingOptions`, a separate conjunct in the caller,
+ *   which keeps its own containment test.
+ */
+export function assertedLeaderNamesItsOwnSubject(
+  value: string,
+  context: LeaderProseContext,
+): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  const matches = assertedLeaderMatches(value, context);
+  return matches.length > 0 && matches.every(predicateNamesItsOwnSubject);
+}
+
+/** One predicate's own subject: the nearest option referent that reaches it
+ *  through {@link PREDICATE_PRELUDE}. A comparator sits after the predicate and
+ *  is never in `before`; an anaphor leaves `before` without a referent. */
+function predicateNamesItsOwnSubject({ before }: AssertedLeaderMatch): boolean {
+  const subject = before.lastIndexOf(OPTION_REFERENT);
+  if (subject === -1) return false;
+  return PREDICATE_PRELUDE.test(before.slice(subject + OPTION_REFERENT.length));
 }
 
 /**
