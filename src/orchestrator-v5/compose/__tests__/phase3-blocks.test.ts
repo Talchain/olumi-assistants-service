@@ -1798,11 +1798,10 @@ describe('Round-3 adversarial prose-guard (P1.4)', () => {
       factorSensitivity: [{ factor_id: 'fac_delivery_risk', confidence: 0.2 }],
     });
     const blocks = buildEvidenceBlocks(fact, cleanLookup, cleanConf, CTX);
-      // ⚠ 2026-09-08 race-framing ruling: a rank claim has no content-preserving
-      // rewrite, so it is fatal-class now and the block DROPS instead of shipping
-      // "the leading option". Withholding beats laundering.
+    // ⚠ 2026-09-08 race-framing ruling: a rank claim has no content-preserving
+    // rewrite, so it is fatal-class now and the block DROPS instead of shipping
+    // "the leading option". Withholding beats laundering.
     expect(blocks).toHaveLength(0);
-    expect(blocks[0]!.evidence_gap).not.toMatch(/\bthe\s+winners?\b/i);
   });
 
   it('evidence block drops when impact_if_gathered contains a raw decimal sensitivity value', () => {
