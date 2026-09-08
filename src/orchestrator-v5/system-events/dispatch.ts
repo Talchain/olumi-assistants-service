@@ -42,12 +42,16 @@ import {
   loadPriorFactsWithReadState,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { getSessionStore } from '../session/index.js';
+import { executeOptionInterventionEdit } from './option-intervention-edit.js';
+import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
@@ -320,6 +324,19 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // and it now can. See `structural-rename.ts` for the two gates this kind needs
   // and why only ONE of them answers 409.
   structural_rename: 'mutating',
+  // 0.54.0 — the per-cell option→factor effect carrier. `'mutating'` because it
+  // has exactly what that value requires and nothing weaker: a receipt-bearing
+  // writer already on this branch (`option-intervention-edit.ts`, banked
+  // internal in #1279 and released), a server-side write to `scenarios.graph`
+  // through the SAME operation constructor → parser → referee → applier the
+  // conversational path uses, and a committed `edit_graph` fact.
+  //
+  // ⚠ NOT `'ack_and_commit'`, and the delete sibling above says why that
+  // matters: an ack-and-commit writes a turn row and NO graph, so the next turn
+  // reloads a graph that still holds the old value. An effect value that does
+  // not reach `scenarios.graph` is not an edit — it is a number the user watched
+  // vanish on reload.
+  option_intervention_edit: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -645,6 +662,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'structural_add'
   ) {
     return await dispatchStructuralAdd(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'option_intervention_edit'
+  ) {
+    return await dispatchOptionInterventionEdit(payload, payload.event, requestId);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -1811,6 +1834,166 @@ async function dispatchFactorValueEdit(
  * the rollback. The safety posture is stated the same honest way: base checked at
  * T0, writes ordered by the turn fence, CAS stamped-not-enforced.
  */
+/**
+ * ⭐⭐ 0.54.0 — the PUBLIC route to the option→factor effect writer.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT THIS IS, AND WHY IT IS THIN
+ *
+ * Its siblings above are long because their writers are inline. This one is
+ * short on purpose: `executeOptionInterventionEdit` — released internally and
+ * unadmitted until now — already owns the whole transaction. It loads the
+ * canonical graph, reads the pending authority, verifies the client's asserted
+ * base hash AGAINST THE LOADED BYTES, composes through the same operation
+ * constructor → parser → live referee → applier → intervention encoder the
+ * conversational path uses, commits through `commitDirectAnswer`, reads the
+ * graph BACK, and binds the persisted parent row and its atomic fact before it
+ * will call anything committed.
+ *
+ * So this function adds exactly two things and must add nothing else:
+ * the server-derived inputs the client is not entitled to supply, and an
+ * honest mapping of four outcomes onto the dispatch result.
+ *
+ * ⚠ IT MINTS NO SECOND WRITER, NO SECOND VALIDATION AND NO SECOND POLICY. If a
+ * rule seems missing here, it is because the writer already owns it — check
+ * `prepareOptionInterventionEdit` before adding one, because a second copy of a
+ * rule is how the two spellings start to disagree.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT THE CLIENT SUPPLIES, AND WHAT IT MAY NOT
+ *
+ * From the event: the two canonical ids, the model-scale value, and the base
+ * graph hash it last read. Nothing else — the member is `.strict()` and carries
+ * no unit, raw value, provenance or actor precisely so that none of them can
+ * arrive as a claim.
+ *
+ * ⚠ `base_graph_hash` IS AN ASSERTION, NEVER A FACT, and the writer treats it
+ * as one: `prepareOptionInterventionEdit` recomputes the analysis-affecting
+ * hash from the graph it loaded and refuses `stale_graph` on a mismatch. So a
+ * client on a stale base cannot write, whatever it claims here.
+ *
+ * Server-derived here, because they are authority the client does not hold:
+ *
+ *   · `freshness` — the referee consumes it. Derived from the prior facts
+ *     against the hash under edit. ⚠ A DEGRADED READ FAILS CLOSED TO
+ *     `'unknown'`, and the writer REFUSES on `'unknown'` (pinned by
+ *     `option-intervention-transaction.test.ts`). That is deliberate: an
+ *     unreadable fact history is not permission, and this is the one place the
+ *     temptation to default to `'none'` would silently grant it.
+ *   · `hasExistingAnalysis` — observational only. It never authorises the write.
+ *   · `turnId` / `requestId` / `requestHash` — the replay key and the record,
+ *     from the turn rather than from anything the client said.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE FOUR OUTCOMES, AND WHY THREE OF THEM RETURN `commitPerformed: false`
+ *
+ *   committed   → the writer proved it: graph read back, parent row and fact
+ *                 bound, receipt (if any) matching this turn. Its own response
+ *                 is returned with the persisted hash stamped, and the applied
+ *                 graph is handed to the egress sanitiser so the ack's entity
+ *                 ids resolve to labels against the graph that actually landed.
+ *   unchanged   → the value was already what the user asked for. Nothing was
+ *                 appended, so nothing is claimed.
+ *   refused     → a gate declined. No graph, no commit.
+ *   unverified  → ⚠ THE ONE THAT NEEDS CARE. The writer reached this state
+ *                 because it could NOT prove what happened — a commit may have
+ *                 landed. It explicitly refuses to assert a rollback, and
+ *                 neither does this. `commitPerformed: false` is the fail-closed
+ *                 report, not a claim that nothing was written: the retry is
+ *                 idempotent on (scenario_id, turn_id), so under-reporting
+ *                 costs a duplicate-key no-op while over-reporting would tell
+ *                 the finaliser a turn exists that may not. The distinction the
+ *                 boolean cannot carry is carried by the log line instead.
+ *
+ * ⚠ AND NONE OF THE THREE INVENTS COPY. The silent acknowledgement is this
+ * seam's convention, shared with every sibling's refusal path. The surface that
+ * performed the gesture renders the outcome; a message bubble minted here would
+ * be a second voice describing an edit the user is already looking at.
+ */
+async function dispatchOptionInterventionEdit(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'option_intervention_edit' }>,
+  requestId: string,
+): Promise<DispatchSystemEventResult> {
+  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  try {
+    priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
+  } catch (err) {
+    // The read itself threw. Refuse before any append: a degraded history gives
+    // no trusted freshness, and the prior row stays newest and authoritative.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 option_intervention_edit — prior-fact read failed; refusing any append',
+    );
+    return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+  }
+
+  const freshness: FrameFreshness =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(priorFactsRead.facts, event.base_graph_hash).freshness
+      : 'unknown';
+  const hasExistingAnalysis =
+    priorFactsRead.status === 'ok' && priorFactsRead.facts.some(isSuccessfulRunAnalysisFact);
+
+  const outcome = await executeOptionInterventionEdit(
+    {
+      optionId: event.option_id,
+      factorId: event.factor_id,
+      modelValue: event.value,
+      expectedGraphHash: event.base_graph_hash,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+      stage: payload.stage,
+      requestHash: computeRequestHash(payload),
+      freshness,
+      hasExistingAnalysis,
+    },
+    getSessionStore(),
+  );
+
+  if (outcome.kind === 'committed') {
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        option_id: event.option_id,
+        factor_id: event.factor_id,
+        persisted_row_id: outcome.persistedRowId,
+      },
+      'V5 option_intervention_edit — committed',
+    );
+    return {
+      response: { ...outcome.response, graph_hash: outcome.analysisGraphHash },
+      commitPerformed: true,
+      graph: outcome.graph,
+    };
+  }
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      option_id: event.option_id,
+      factor_id: event.factor_id,
+      outcome: outcome.kind,
+      reason: outcome.kind === 'unchanged' ? null : outcome.reason,
+      // The boolean below cannot carry this, so the log does: on `unverified` a
+      // commit MAY have landed and no rollback is being asserted.
+      commit_attempted: outcome.kind === 'unverified' ? outcome.commitAttempted : false,
+    },
+    'V5 option_intervention_edit — no committed write claimed',
+  );
+  return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+}
+
 async function dispatchStructuralRename(
   payload: SystemEventTurnPayload,
   event: Extract<SystemEventTurnPayload['event'], { kind: 'structural_rename' }>,

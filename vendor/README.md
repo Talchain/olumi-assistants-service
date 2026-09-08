@@ -7,7 +7,42 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.50.0.tgz`
+### `talchain-schemas-0.54.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> Downloaded from GitHub Packages at
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.54.0/1281c86238dc28b09877f00b919b9bbfe270f40f`,
+> the tarball `npm publish` produced from `olumi-schemas` `main`
+> **`cc5c9e8482f3cf638db8e99829d3a7e4a3a09840`** (tag `v0.54.0`; the registry's
+> own `gitHead` binds that commit), publisher job `102259342523`, 22:21:04 UTC
+> on 2026-09-08.
+>
+> **495,147 bytes.** Verified three ways against the registry's published
+> metadata, all exact:
+>
+> ```
+> npm shasum (sha1)  1281c86238dc28b09877f00b919b9bbfe270f40f   ← matches
+> integrity (sha512) sha512-c/2IvSiRhZS3qcOiEhQReSzGjaivbqJUs7PFsLgFXA5LLl
+>                    GDILPeKbglk2xY1PyqC7ETLO+xNZMDAXtvryEEIA==  ← matches
+> sha256             8dffea3a966930e10818e2657e4ce0e08a4d0dcc7c5b15b5ff8c21702d24a55c
+> ```
+>
+> ⭐ **THIS ENTRY CLOSES THE CAVEAT THE LAST TWO CARRY.** 0.48.0 and 0.50.0 both
+> record *"REGISTRY CONTENT-IDENTITY NOT VERIFIED"* because the comparison
+> needed a registry credential those lanes did not have. These are the registry
+> bytes, so identity is not inferred from a reproducible re-pack — it is the
+> artefact. The provenance question the older entries answer indirectly ("do our
+> bytes derive from the tagged source?") is answered here directly ("these ARE
+> the published bytes"), which is strictly stronger.
+>
+> ⚠ **AND IT IS A DIFFERENT PROCEDURE FROM THE ENTRIES BELOW — read this before
+> copying one.** They were SOURCE-PACKED (`npm ci && npm run build && npm pack`
+> from an asserted tag checkout). This one was DOWNLOADED. Both are legitimate;
+> they prove different things and the difference is recorded rather than
+> flattened. Do not describe a download as a pack, or vice versa.
+
+### `talchain-schemas-0.50.0.tgz` (historical — no longer vendored)
 
 > **✔ SOURCE-PACKED FROM THE MERGED, TAGGED RELEASE.**
 >
