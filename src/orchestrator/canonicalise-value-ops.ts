@@ -278,9 +278,14 @@ function canonicaliseUpdateNodeValue(
   // `NODE_DECLARED_FIELDS` (= `Object.keys(NodeV3.shape)`) happening to
   // contain `observed_state` and not `data`. One intent must have one outcome.
   //
-  // `reconcileObservedValuePair` records this wipe as "a real and separate
-  // defect … Recorded, not absorbed" and declines to repair it there —
-  // correctly, because the repair belongs at the writer, which is here.
+  // `reconcileObservedValuePair` USED TO record this wipe as "a real and
+  // separate defect … Recorded, not absorbed" and declined to repair it there
+  // — correctly, because the repair belongs at the writer, which is here.
+  // ⚠ PAST TENSE DELIBERATELY: that paragraph is now marked SPENT at its own
+  // site, because this change closed the wipe. A literal payload now reaches
+  // `reconcileObservedValuePair` MERGED and carrying `raw_value`, so it lands
+  // inside the breadth of that function's stale-carry-forward guard rather
+  // than short-circuiting before it.
   const literalObserved = asRecord(value[OBSERVED_ROOT]);
   if (observedPatch === null && literalObserved === null) return null;
 
@@ -763,15 +768,37 @@ export function reconcileObservedValuePair(
     // observed_state under the write. A payload WITHOUT it cannot strand a
     // stale claim, so this lane leaves it exactly as it found it.
     //
-    // This is the boundary, and it is deliberate. A literal nested
-    // `{ observed_state: { value } }` op takes the declared-field branch, is
-    // never merged, and the applier's whole-object replace then drops
-    // `unit`/`cap`/`raw_value` outright — pinned today by
-    // `gm-held-value-canonicalisation.test.ts` ("the canonicaliser is the
-    // identity"). That sibling WIPE is a real and separate defect; it is NOT
-    // this defect (nothing stale survives a wipe), and repairing it here
-    // would be the "while we're here" scope creep this programme keeps
-    // paying for. Recorded, not absorbed.
+    // ⚠⚠⚠ THE BOUNDARY RECORDED HERE IS SPENT, AND IT WAS #1342 THAT
+    // SPENT IT. The original text — kept below in full, because a superseded
+    // reason is evidence and deleting it would hide why this guard is drawn
+    // where it is — read:
+    //
+    //   "This is the boundary, and it is deliberate. A literal nested
+    //    `{ observed_state: { value } }` op takes the declared-field branch,
+    //    is never merged, and the applier's whole-object replace then drops
+    //    `unit`/`cap`/`raw_value` outright. That sibling WIPE is a real and
+    //    separate defect; it is NOT this defect (nothing stale survives a
+    //    wipe), and repairing it here would be the 'while we're here' scope
+    //    creep this programme keeps paying for. Recorded, not absorbed."
+    //
+    // #1342 CLOSED THAT WIPE AT THE WRITER (`canonicaliseUpdateNodeValue`,
+    // this file): the literal spelling is now merged onto the node's existing
+    // `observed_state` like every other spelling, so `unit` and `cap` survive
+    // and the payload ARRIVES HERE CARRYING `raw_value`. Pinned by
+    // `gm-held-value-canonicalisation.test.ts` — the case now titled
+    // "canonical observed_state spelling: siblings survive the merge", which
+    // asserts the merge (the old title cited here, "the canonicaliser is the
+    // identity", still exists in that file on a DIFFERENT, purely structural
+    // case, so the stale citation resolved silently to the wrong test) — and
+    // by `literal-observed-state-sibling-merge.test.ts`.
+    //
+    // ⭐ WHY THIS MATTERS TO THE GUARD BELOW, not just to the record: the
+    // superseded paragraph is the stated justification for the BREADTH of the
+    // `!hasOwnProperty(observed, 'raw_value') && !storedFrameAdmits` gate, and
+    // its premise was that the literal path CANNOT REACH that gate. It now
+    // reaches it routinely, which is how a stale `raw_value` on this path gets
+    // re-derived rather than carried forward. Reason about that guard's
+    // breadth from THIS text, never from the superseded paragraph above.
     //
     // ⭐ ONE EXCEPTION, AND IT IS THE WHOLE DEFECT: a factor the brief stated no
     // value for has NO `observed_state`, so the canonicaliser has nothing to
