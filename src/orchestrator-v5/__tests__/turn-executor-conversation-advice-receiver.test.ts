@@ -667,16 +667,21 @@ describe('conversation advice reaches contextual reasoning', () => {
     expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
   });
 
-  it.each([
-    ['near_tie' as const, 'a near tie'],
-    ['unavailable' as const, 'no computed separation'],
-  ])('(receiving 2) %s: no ordering and no false qualifier reach the coach', async separation => {
+  /**
+   * ⚠ TWO EXPLICIT CASES, NOT `it.each`. The tuple form inferred the callback
+   *   parameter as bare `string`, which does not satisfy the narrow separation
+   *   union — that is what put this file in the typecheck ratchet
+   *   (`102280852099`, and `102274777454` before it). An `as const` dance around
+   *   `it.each` would work too; two named tests are clearer and cannot regress
+   *   the same way.
+   */
+  async function expectHeld(separation: 'near_tie' | 'unavailable'): Promise<void> {
     const { prompt, mode } = await receiveWith(separation);
     expect(mode).toBe(CAPTURED_MODE);
     // #1254's population: no ordering member reaches the coach. Bound to the
     // projection's OWN exported list, so a renamed member cannot slip past a
     // hand-typed key (which is exactly how the first cut of this file went
-    // wrong).
+    // wrong — see the note in the separated case).
     for (const member of WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS) {
       expect(prompt).not.toContain(`"${member}"`);
     }
@@ -685,6 +690,14 @@ describe('conversation advice reaches contextual reasoning', () => {
     // Ordinary discussion is untouched — this is not a blanket suppression.
     expect(prompt).toContain('two-person data team');
     expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
+  }
+
+  it('(receiving 2a) a near tie: no ordering and no false qualifier reach the coach', async () => {
+    await expectHeld('near_tie');
+  });
+
+  it('(receiving 2b) no computed separation: no ordering and no false qualifier reach the coach', async () => {
+    await expectHeld('unavailable');
   });
 
   it('(receiving 3) an EMPTY hot window with the same durable fact keeps the same interpretation', async () => {
