@@ -200,6 +200,7 @@
  */
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import {
   buildCanonicalAnalysisReadyFromGraph,
   mergeInterventionSources,
@@ -700,7 +701,7 @@ export function countCollidingOptionLabels(labels: readonly string[]): number {
 
 /** The factors this option is wired to. Same reader as the recovery copy. */
 export function linkedFactorsOf(
-  graph: GraphV3T,
+  graph: Pick<GraphStateIngress, 'nodes' | 'edges'>,
   optionId: string,
 ): { readonly id: string; readonly label: unknown }[] {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
