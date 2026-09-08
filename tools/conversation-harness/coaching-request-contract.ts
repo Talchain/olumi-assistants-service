@@ -47,6 +47,7 @@ import { assembleContextPack } from '../../src/orchestrator-v5/context/context-p
 // invalid pack would have made the whole contract worthless, so the fixture that
 // the routing tests already use is single-sourced instead of re-specified.
 import { makeMessagePayload } from '../../src/orchestrator-v5/__tests__/fixtures.js';
+import { frozenBrief, frozenGraph, recordedPriorTurns } from './coaching-recorded-context.js';
 import {
   canonicalStateFromFreshness,
   summariseCoachingStatePack,
@@ -59,6 +60,9 @@ const SRC = 'src/orchestrator-v5/routing/route-with-tool-use.ts';
 
 /** The authorised TOTAL generated answers, both arms combined. A ceiling, not a budget. */
 export const ANSWER_CEILING = 18;
+
+/** The two arms of the comparison. */
+export type ArmName = 'baseline' | 'candidate';
 
 /**
  * The three questions. Q1 is the user's OWN wording from the deployed staging
@@ -148,14 +152,25 @@ export function assembleArms(
   freshness: 'none' | 'stale',
   baseline: string,
 ): ArmMessages {
+  // ⚠ THE NONEMPTY RECORDED CONTEXT, and it is the whole point of the fixture.
+  // The first draft of this function passed the minimal payload with empty
+  // priorTurns/priorFacts, which assembled six packs with graph_context
+  // "unavailable", zero nodes/edges/options/goals/constraints and zero
+  // recent_turns — so Q2 and Q3 carried neither the budget, nor the named
+  // options, nor any history to be a follow-up to. Measuring an instruction
+  // about "reasoning from the supplied concerns, goals and constraints" on a
+  // pack that supplies none of them would have measured nothing.
   const pack = assembleContextPack({
     payload: makeMessagePayload({
       turn_id: `contract-${freshness}`,
       scenario_id: 'coaching-capability-contract',
       message: question,
     }),
-    priorTurns: [],
+    priorTurns: recordedPriorTurns(),
     priorFacts: [],
+    brief: frozenBrief(),
+    graphContext: { status: 'canonical' },
+    graph: frozenGraph() as never,
     coachingContext: coachingState(freshness),
   });
   const candidate = buildUserMessage(pack, question);
