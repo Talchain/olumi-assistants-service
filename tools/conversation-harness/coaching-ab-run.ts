@@ -262,4 +262,10 @@ async function main(): Promise<void> {
   );
 }
 
-await main();
+// ⚠ CLI-ENTRY GUARD, and it is not decorative. This module hands a REAL model
+// client to `dispatchBounded`; an unguarded top-level `await main()` would spend
+// budget on any import — including a test that merely wanted to read a constant.
+// It runs only when it is the process entry point.
+if (process.argv[1] && process.argv[1].endsWith('coaching-ab-run.ts')) {
+  await main();
+}

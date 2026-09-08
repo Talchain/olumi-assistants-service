@@ -490,14 +490,29 @@ describe('#1398 budget — every attempt is charged BEFORE dispatch, retries and
     );
   });
 
-  it('nothing in this repository hands dispatchBounded a real model client', async () => {
+  it('only the definition and the ONE cleared driver call dispatchBounded', async () => {
+    // ⚠ THIS GUARD FIRED FOR REAL on 2026-09-09 and was right to: the cleared
+    // A/B driver became the first module to hand `dispatchBounded` a real model
+    // client, and the assertion caught it in CI. The fix is an ALLOWLIST, not a
+    // deletion — the control's job is that no UNREVIEWED caller can appear, and
+    // an unlisted new one still turns this red.
     const { readFileSync, readdirSync } = await import('node:fs');
     const dir = join(REPO, 'tools', 'conversation-harness');
     const callers = readdirSync(dir)
       .filter((f) => f.endsWith('.ts'))
       .filter((f) => readFileSync(join(dir, f), 'utf8').includes('dispatchBounded('));
-    // Only the module that defines it. A future caller must be reviewed.
-    expect(callers).toEqual(['coaching-request-boundary.ts']);
+    expect(callers.sort()).toEqual(['coaching-ab-run.ts', 'coaching-request-boundary.ts']);
+  });
+
+  it('the cleared driver cannot spend budget on import — it runs only as a CLI entry', async () => {
+    // The second half of the same control. An allowlisted caller that executed
+    // at import time would spend the budget from any `import` of the module,
+    // which is exactly the hazard the original assertion was protecting.
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(join(REPO, 'tools', 'conversation-harness', 'coaching-ab-run.ts'), 'utf8');
+    expect(src).toMatch(/process\.argv\[1\][\s\S]{0,80}endsWith\('coaching-ab-run\.ts'\)/);
+    // No unguarded top-level invocation.
+    expect(src).not.toMatch(/^await main\(\);/m);
   });
 });
 
