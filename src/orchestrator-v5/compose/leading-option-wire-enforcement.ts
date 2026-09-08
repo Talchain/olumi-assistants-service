@@ -563,10 +563,11 @@ function unchanged(response: OlumiResponse): WireLeaderClaimEnforcementResult {
 function projectBlocksForWithheldClaim(
   blocks: unknown,
   roster: readonly string[],
-): { blocks: unknown[]; mode: WireEnforcementMode } | null {
+): { blocks: unknown[]; mode: WireEnforcementMode; removed: RemovedUnitCounts } | null {
   if (!Array.isArray(blocks) || blocks.length === 0) return null;
 
   let changed = false;
+  const removed = { assertingRemoved: 0, nameOnlyRemoved: 0 };
   // The LOUDEST mode wins the report, same rule as the prose fields.
   let mode: WireEnforcementMode = 'surgical';
   const escalate = (next: WireEnforcementMode): void => {
@@ -635,6 +636,8 @@ function projectBlocksForWithheldClaim(
         const result = projectField(value, roster);
         if (result === null) continue;
         escalate(result.mode);
+        removed.assertingRemoved += result.assertingRemoved;
+        removed.nameOnlyRemoved += result.nameOnlyRemoved;
         write(field, result.text);
       }
     }
@@ -642,7 +645,7 @@ function projectBlocksForWithheldClaim(
     return next ?? block;
   });
 
-  return changed ? { blocks: projected, mode } : null;
+  return changed ? { blocks: projected, mode, removed } : null;
 }
 
 /**
@@ -692,10 +695,40 @@ function projectBlocksForWithheldClaim(
  * cost-function doctrine, and `assertEnforcerIsNarrowerThanAlarm` now pins
  * narrow ⊆ wide, so nothing designating can hide in the gap.
  */
+/**
+ * ⭐⭐ WHY THIS RETURNS COUNTS AND NOT JUST A MODE.
+ *
+ * On native request `478d3445` (8 Sep 2026) this projection cut a coaching
+ * answer from 1,521 to 1,023 characters, mode `surgical_escalated`. Whether
+ * that removed a leader claim or removed the user's conditional hiring advice
+ * **could not be determined** — the pre-egress text is not recoverable, and the
+ * event carried lengths and a mode only. `surgical_escalated` says an escalation
+ * ran; it does not say whether anything NON-ASSERTING was caught by it, and that
+ * is the entire difference between a guard doing its job and the
+ * over-suppression this module weights equally with the leak.
+ *
+ * The two counts below separate them, and cost nothing to know: the projection
+ * has already classified every unit. `nameOnlyRemoved > 0` means prose was
+ * removed that asserted NOTHING and went only for naming an option — collateral,
+ * by this module's own decision table. No prose is carried, only cardinalities,
+ * so the claim-safety boundary at the emit site is unchanged.
+ */
+interface FieldProjection {
+  readonly text: string;
+  readonly mode: WireEnforcementMode;
+  /** Units removed because they ASSERT a leading option — the guard's job. */
+  readonly assertingRemoved: number;
+  /** Units removed although they assert nothing — collateral. */
+  readonly nameOnlyRemoved: number;
+}
+
+/** The two cardinalities, shared by the field and block projections. */
+type RemovedUnitCounts = Pick<FieldProjection, 'assertingRemoved' | 'nameOnlyRemoved'>;
+
 function projectField(
   value: string,
   roster: readonly string[],
-): { text: string; mode: WireEnforcementMode } | null {
+): FieldProjection | null {
   if (typeof value !== 'string' || value.length === 0) return null;
   const context = { optionLabels: roster };
   const asserts = (text: string): boolean => textAssertsLeadingOption(text, context);
@@ -768,12 +801,26 @@ function projectField(
     !asserts(candidate) &&
     (!needsNameEscalation || !textNamesAnOption(candidate, roster));
 
+  // Counted from the SAME predicates the passes below use, so a count can never
+  // disagree with what was actually replaced.
+  const assertingUnits = units.filter((unit) => asserts(unit)).length;
+  const nameOnlyUnits = units.filter(
+    (unit) => !asserts(unit) && textNamesAnOption(unit, roster),
+  ).length;
+
   const surgical = replaceAssertingUnits(
     value,
     asserts,
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
-  if (isClean(surgical)) return { text: surgical, mode: 'surgical' };
+  if (isClean(surgical)) {
+    return {
+      text: surgical,
+      mode: 'surgical',
+      assertingRemoved: assertingUnits,
+      nameOnlyRemoved: 0,
+    };
+  }
 
   // ⚠ ESCALATION RUNS FROM THE ORIGINAL VALUE, NOT FROM `surgical`. Running it
   // over the surgical output leaves the replacement sentence sitting in the text
@@ -788,9 +835,22 @@ function projectField(
     (unit) => asserts(unit) || textNamesAnOption(unit, roster),
     WIRE_WITHHELD_LEADER_REPLACEMENT,
   );
-  if (isClean(escalated)) return { text: escalated, mode: 'surgical_escalated' };
+  if (isClean(escalated)) {
+    return {
+      text: escalated,
+      mode: 'surgical_escalated',
+      assertingRemoved: assertingUnits,
+      nameOnlyRemoved: nameOnlyUnits,
+    };
+  }
 
-  return { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' };
+  // The whole field goes, so every unit went — asserting or not.
+  return {
+    text: WIRE_WITHHELD_LEADER_REPLACEMENT,
+    mode: 'whole_field',
+    assertingRemoved: assertingUnits,
+    nameOnlyRemoved: units.length - assertingUnits,
+  };
 }
 
 /**
@@ -896,6 +956,10 @@ export function enforceLeadingOptionClaimsAtWire(
           mode: 'roster_unavailable',
           original_length: 0,
           projected_length: 0,
+          // No roster means no unit was classified, let alone removed. Zero
+          // here means "nothing removed", and the mode says why.
+          asserting_units_removed: 0,
+          name_only_units_removed: 0,
         });
       }
       // The structured block edits still ship — they never needed the roster.
@@ -922,12 +986,19 @@ export function enforceLeadingOptionClaimsAtWire(
     };
     let originalLength = 0;
     let projectedLength = 0;
+    // See {@link FieldProjection}: `mode` alone cannot distinguish a guard doing
+    // its job from collateral removal, which is why the native 1,521 -> 1,023
+    // cut on request 478d3445 could not be classified from telemetry.
+    let assertingRemoved = 0;
+    let nameOnlyRemoved = 0;
     let next = response;
 
     const answer = projectField(response.assistant_text, roster);
     if (answer !== null) {
       originalLength += response.assistant_text.length;
       projectedLength += answer.text.length;
+      assertingRemoved += answer.assertingRemoved;
+      nameOnlyRemoved += answer.nameOnlyRemoved;
       escalate(answer.mode);
       editedFields.push('assistant_text');
       next = { ...next, assistant_text: answer.text };
@@ -939,6 +1010,8 @@ export function enforceLeadingOptionClaimsAtWire(
       if (projected !== null) {
         originalLength += framing.length;
         projectedLength += projected.text.length;
+        assertingRemoved += projected.assertingRemoved;
+        nameOnlyRemoved += projected.nameOnlyRemoved;
         escalate(projected.mode);
         editedFields.push('framing_question');
         next = { ...next, framing_question: projected.text };
@@ -947,6 +1020,8 @@ export function enforceLeadingOptionClaimsAtWire(
 
     if (blockProjection !== null) {
       escalate(blockProjection.mode);
+      assertingRemoved += blockProjection.removed.assertingRemoved;
+      nameOnlyRemoved += blockProjection.removed.nameOnlyRemoved;
       next = { ...next, blocks: blockProjection.blocks } as OlumiResponse;
     }
 
@@ -965,6 +1040,11 @@ export function enforceLeadingOptionClaimsAtWire(
       mode: modes,
       original_length: originalLength,
       projected_length: projectedLength,
+      // CARDINALITIES ONLY — still no prose, so the claim-safety boundary above
+      // is unchanged. `name_only_units_removed > 0` is the collateral signal:
+      // prose that asserted nothing was removed for naming an option.
+      asserting_units_removed: assertingRemoved,
+      name_only_units_removed: nameOnlyRemoved,
     });
 
     return {
