@@ -486,6 +486,7 @@ describe('conversation advice reaches contextual reasoning', () => {
   it.each([
     nativeResearch.message,
     'Given our limited data-team capacity, what evidence should we gather first? I want to weigh the practical options before deciding on a change.',
+    'Do you have recommendations on how our two-person team should investigate?',
   ])('receives captured scientific state and qualitative research context: %j', async message => {
     const state = useCapturedResearchScenario();
     const answer = 'Research discussion from the receiving adapter, not a sensitivity template.';

@@ -762,10 +762,13 @@ const CLASS_PATTERNS: readonly ClassPattern[] = [
     pattern: /\bwhat\s+assumptions?\s+(?:should|could|can|might|do|would)\s+(?:we|i|you)\s+(?:need\s+to\s+|have\s+to\s+|want\s+to\s+|like\s+to\s+)?(?:test|verify|check|question|challenge|tested|verified)\b/i,
   },
   // "Do you have any recommendations on what we should validate or research..."
-  // — exact target phrasing from the workstream brief.
+  // — exact target phrasing from the workstream brief. Keep the same generic
+  // modal/pronoun grammar as the sibling requests: a wildcard here swallowed
+  // qualitative context ("how our two-person team should investigate") inside
+  // the match, where the surrounding-context check could not see it.
   {
     advice_class: 'evidence_gap',
-    pattern: /\b(?:any\s+)?recommendations?\s+(?:on|for|to|about)\s+(?:what|how)\b[^.?!\n]{0,60}\b(?:validate|research|verify|test|investigate|confirm|gather)\b/i,
+    pattern: /\b(?:any\s+)?recommendations?\s+(?:on|for|to|about)\s+(?:what|how)\s+(?:(?:should|could|can|might|would|do)\s+(?:we|i|you)|(?:we|i|you)\s+(?:should|could|can|might|need\s+to|have\s+to))\s+(?:validate|research|verify|test|investigate|confirm|gather)\b/i,
   },
 
   // ── improvement (must precede the broader 'how should we' advice pattern) ─
