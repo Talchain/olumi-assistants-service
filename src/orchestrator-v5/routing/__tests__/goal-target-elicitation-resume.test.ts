@@ -90,6 +90,28 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
     expect(result.skip_reason).toBe('unreadable_answer');
   });
 
+  it('⭐ OTHER SUBJECT — a price named on another node is not the goal target', () => {
+    // The reply carries exactly one amount and is plainly about something else.
+    // `f-churn` is labelled 'Pro Plan Churn Rate'; naming it withdraws the
+    // bind. The bound is deliberate and stated at the gate: this refuses
+    // answers that NAME ANOTHER NODE, it does not try to decide aboutness from
+    // prose alone.
+    const result = resume('Pro Plan Churn Rate is 4 percent', [pending()]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('unreadable_answer');
+    expect(result.reason).toBe('names_other_subject');
+  });
+
+  it('CONTRAST — the same shape naming NO other node still binds', () => {
+    // Without this the gate above could be refusing on the sentence's length
+    // or its verb rather than on the subject it names.
+    const result = resume('It is 20000', [pending({ action: { unit: '£' } })]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+  });
+
   it('SEVERAL AMOUNTS — the product asks again rather than choosing one', () => {
     const result = resume('somewhere between £20k and £30k', [pending()]);
     expect(result.matched).toBe(false);

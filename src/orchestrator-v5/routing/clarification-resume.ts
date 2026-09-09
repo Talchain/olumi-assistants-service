@@ -783,7 +783,12 @@ export type GoalTargetResumeDispatch =
       readonly matched: false;
       readonly skip_reason: 'unreadable_answer';
       readonly pending: ElicitGoalTargetPending;
-      readonly reason: 'no_amount' | 'several_amounts' | 'ceiling_not_minimum' | 'degraded_parse';
+      readonly reason:
+        | 'no_amount'
+        | 'several_amounts'
+        | 'ceiling_not_minimum'
+        | 'degraded_parse'
+        | 'names_other_subject';
     }
   | {
       readonly matched: true;
@@ -806,7 +811,7 @@ export function tryGoalTargetElicitationResume(input: {
   readonly pendingActions: readonly PendingAction[];
   readonly nowMs: number;
   readonly currentGraphHash?: string;
-  readonly graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined;
+  readonly graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown; kind?: unknown }> | undefined;
 }): GoalTargetResumeDispatch {
   const pending = findSoleLiveGoalTargetPending(input.pendingActions, input.nowMs);
   if (pending === null) return { matched: false, skip_reason: 'no_pending_question' };
@@ -840,6 +845,43 @@ export function tryGoalTargetElicitationResume(input: {
       skip_reason: 'unreadable_answer',
       pending,
       reason: 'ceiling_not_minimum',
+    };
+  }
+  // ⭐ THE SUBJECT GATE — one amount is not enough; it must not be ABOUT
+  // something else in the model.
+  //
+  // The question is "what value counts as success for <goal>?", and a person
+  // may reply with a sentence that carries exactly one number and is plainly
+  // about a different thing: "the Pro tier is £59 a month", "Pro plan churn
+  // rate is 4%". Stamping either as the goal's success threshold would put a
+  // price or a guardrail into `goal_threshold_raw`, which is what ISL scores
+  // every option against.
+  //
+  // ⚠ AND THE BOUND, STATED RATHER THAN IMPLIED. This refuses answers that
+  // NAME ANOTHER NODE IN THE MODEL — a derivable, testable property. It does
+  // NOT attempt to decide from prose alone whether an arbitrary sentence is
+  // "about" the goal: a wider predicate over natural language is precisely the
+  // failure mode CLAUDE.md trap 22f records (four consecutive rounds, each
+  // fixing one direction and reopening the other). Where this gate cannot
+  // decide, the ordinary refusals above still apply and the message still
+  // reaches the ordinary lanes intact.
+  //
+  // Labels under three characters are skipped: a one- or two-character label
+  // matches almost any sentence, and a gate that refuses everything is the
+  // same defect as one that refuses nothing.
+  const lowerMessage = input.message.toLowerCase();
+  const namesOther = (input.graphNodes ?? []).some((n) => {
+    if (n.id === goalId) return false;
+    const label = typeof n.label === 'string' ? n.label.trim().toLowerCase() : '';
+    if (label.length < 3) return false;
+    return lowerMessage.includes(label);
+  });
+  if (namesOther) {
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      reason: 'names_other_subject',
     };
   }
   // The answer's own unit, else the one the question already established.
