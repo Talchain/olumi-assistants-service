@@ -402,7 +402,7 @@ export function runIntegrityChecks(
 // ============================================================================
 
 /** Source classification for a defaulted edge. */
-export type DefaultSource = "v3_transform" | "nan_fix";
+export type DefaultSource = "v3_transform" | "nan_fix" | "producer_declared";
 
 /** Result of strength default detection. */
 export interface StrengthDefaultsResult {
@@ -418,8 +418,17 @@ export interface StrengthDefaultsResult {
   default_value: number | null;
   /** Array of edge IDs in "{from}->{to}" format that have default values */
   defaulted_edge_ids: string[];
-  /** Per-source breakdown: how many defaults came from V3 transform vs NaN-fix (both now std≈0.125) */
-  defaulted_by_source: { v3_transform: number; nan_fix: number };
+  /**
+   * Per-source breakdown.
+   *
+   * `v3_transform` / `nan_fix` are edges matched by the NUMERIC signature (both
+   * now std≈0.125). `producer_declared` are edges a producer MARKED defaulted
+   * that the numeric signature does not match — see the note on
+   * `detectStrengthDefaultsCore`. An edge is counted once, and a numeric match
+   * keeps its existing attribution, so these two figures are unchanged by the
+   * declared-marker path.
+   */
+  defaulted_by_source: { v3_transform: number; nan_fix: number; producer_declared: number };
 }
 
 /**
@@ -432,12 +441,25 @@ export interface StrengthDefaultsResult {
  * was missing and fell back to defaults in schema-v3.ts, where mean defaults to 0.5
  * and std is derived as 0.125 from mean=0.5 + belief=0.5).
  *
- * **Note on detection strictness**: This requires BOTH mean and std to match defaults.
- * If the LLM omits strength_mean but provides explicit belief_exists (≠0.5) or
- * provenance="hypothesis", the derived std will differ from 0.125 and won't be detected.
- * This is intentional - it means the LLM provided *some* strength-related information
- * (belief/provenance), just not the magnitude. The detection targets pure omission where
- * ALL strength fields default (mean=0.5, belief=0.5, provenance=undefined → std=0.125).
+ * **Note on detection strictness**: the NUMERIC path requires BOTH mean and std to
+ * match defaults. If the LLM omits strength_mean but provides explicit belief_exists
+ * (≠0.5) or provenance="hypothesis", the derived std will differ from 0.125 and the
+ * numeric path won't see it. That is intentional for LLM output — it means the model
+ * provided *some* strength-related information, just not the magnitude.
+ *
+ * ⚠⚠ BUT THAT SENTENCE ALSO DESCRIBED A REAL BLIND SPOT, AND IT SAT HERE UNJOINED.
+ * The enricher's add path writes `strength_mean: 0.5, strength_std: 0.2` with
+ * `defaulted: true` (`factor-extraction/enricher.ts:679`, `:1395`). `0.2 ≠ 0.125`,
+ * so `stdMatchesDefault` was false and EVERY enrichment-created edge was invisible
+ * to the programme's own answer to "are we serving defaulted strengths?" — at any
+ * threshold, because the signature is an AND, not a percentage.
+ *
+ * The marker was already carried end to end: the producer sets it, and
+ * `transforms/schema-v3.ts:889` preserves it explicitly through the V3 transform.
+ * Nobody read it here. So this is a JOIN, not a new admission rule — and
+ * deliberately NOT a widened numeric-equality rule, which would have started
+ * calling genuine measurements defaults. A real measurement does not carry
+ * `defaulted: true`; the opposite controls pin exactly that.
  *
  * Excludes structural edges (decision→*, option→*) from analysis,
  * as these are organisational wiring, not causal LLM output.
@@ -457,6 +479,11 @@ export interface StrengthDefaultsResult {
  * @param edges  - Edges with `from`, `to`, and strength values
  * @param getMean - Accessor: extract strength mean from an edge
  * @param getStd  - Accessor: extract strength std from an edge
+ * @param getDeclaredDefault - Accessor: the producer's own `defaulted` marker.
+ *   Passed as an accessor rather than read inline for the same reason the other
+ *   two are: both entry points delegate here so the flat and nested paths cannot
+ *   drift apart, and a marker read in only one of them would be the drift this
+ *   shared core exists to prevent.
  */
 function detectStrengthDefaultsCore<
   N extends { id: string; kind?: string },
@@ -466,6 +493,7 @@ function detectStrengthDefaultsCore<
   edges: ReadonlyArray<E>,
   getMean: (edge: E) => number | undefined,
   getStd: (edge: E) => number | undefined,
+  getDeclaredDefault: (edge: E) => boolean | undefined,
 ): StrengthDefaultsResult {
   const THRESHOLD = STRENGTH_DEFAULT_THRESHOLD;
   const MIN_EDGES = STRENGTH_DEFAULT_MIN_EDGES;
@@ -508,7 +536,7 @@ function detectStrengthDefaultsCore<
       defaulted_count: 0,
       default_value: null,
       defaulted_edge_ids: [],
-      defaulted_by_source: { v3_transform: 0, nan_fix: 0 },
+      defaulted_by_source: { v3_transform: 0, nan_fix: 0, producer_declared: 0 },
     };
   }
 
@@ -518,7 +546,7 @@ function detectStrengthDefaultsCore<
   // Default std is 0.125 (from constants), derived from deriveStrengthStd(0.5, 0.5, undefined).
   let defaultedCount = 0;
   const defaultedEdgeIds: string[] = [];
-  const bySource = { v3_transform: 0, nan_fix: 0 };
+  const bySource = { v3_transform: 0, nan_fix: 0, producer_declared: 0 };
   for (const edge of causalEdges) {
     const strengthMean = getMean(edge);
     const strengthStd = getStd(edge);
@@ -527,11 +555,23 @@ function detectStrengthDefaultsCore<
     // NaN-fix and V3 transform now use the same DEFAULT_STRENGTH_STD (0.125).
     const meanMatchesDefault = strengthMean !== undefined && Math.abs(Math.abs(strengthMean) - DEFAULT_STRENGTH_MEAN) < 1e-9;
     const stdMatchesDefault = strengthStd !== undefined && Math.abs(strengthStd - DEFAULT_STRENGTH_STD) < 1e-9;
+    const numericSignature = meanMatchesDefault && stdMatchesDefault;
 
-    if (meanMatchesDefault && stdMatchesDefault) {
+    // ⭐ THE PRODUCER'S OWN MARKER, READ RATHER THAN RECONSTRUCTED.
+    // `defaulted: true` means "default strength was applied" (EdgeV3, cee-v3.ts).
+    // Reading it cannot mis-flag a genuine measurement, because a genuine
+    // measurement does not carry it — which is exactly why this is a join and
+    // not a loosened numeric rule.
+    const declaredDefault = getDeclaredDefault(edge) === true;
+
+    if (numericSignature || declaredDefault) {
       defaultedCount++;
       defaultedEdgeIds.push(`${edge.from}->${edge.to}`);
-      bySource.v3_transform++;
+      // ⚠ A numeric match KEEPS its existing attribution, so v3_transform and
+      // nan_fix are unchanged by this addition. `producer_declared` counts only
+      // edges that were previously INVISIBLE here.
+      if (numericSignature) bySource.v3_transform++;
+      else bySource.producer_declared++;
     }
   }
 
@@ -564,6 +604,7 @@ export function detectStrengthDefaults(
       const edgeData = edge as { strength?: { std?: number } };
       return edgeData.strength?.std;
     },
+    (edge) => (edge as { defaulted?: boolean }).defaulted,
   );
 }
 
@@ -588,7 +629,7 @@ export function detectStrengthDefaults(
  */
 export function detectStrengthDefaultsV1(
   nodes: ReadonlyArray<{ id: string; kind?: string }>,
-  edges: ReadonlyArray<{ from: string; to: string; strength_mean?: number; strength_std?: number; strength?: { mean?: number; std?: number } }>,
+  edges: ReadonlyArray<{ from: string; to: string; strength_mean?: number; strength_std?: number; strength?: { mean?: number; std?: number }; defaulted?: boolean }>,
 ): StrengthDefaultsResult {
   let nestedFallbackCount = 0;
 
@@ -611,6 +652,10 @@ export function detectStrengthDefaultsV1(
       }
       return undefined;
     },
+    // The flat path sees the producer's marker FIRST — this is the stage the
+    // enricher's edges pass through before the V3 transform, so a marker read
+    // only on the nested side would have left the parse stage still blind.
+    (edge) => edge.defaulted,
   );
 
   // Warn if nested fallback was used — indicates adapter normalisation didn't
