@@ -3279,10 +3279,70 @@ function projectOnce(
         const claim = origin === undefined ? undefined : claims[origin.index];
         const isDirectStatedOption =
           claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
-        const binding =
+        const directBinding =
           claim === undefined
             ? undefined
             : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
+        // ⭐⭐ AN UNCITED MAGNITUDE IS OURS ON *EVERY* PATH, NOT ONLY THE
+        // DIRECT-STATED ONE. `bindDirectStatedMagnitude` opens with
+        // `if (claim.from_stated === undefined …) return undefined`, so it
+        // correctly declines a link that arrives via `from_claim` — which is
+        // exactly what a MERGED REFINEMENT's option→factor link is once
+        // `projectOnce` folds "one alternative under two names" onto its stated
+        // parent. Nothing else picked it up, so the magnitude reached
+        // `interventions` with NO `intervention_details` entry: the class-1
+        // defect ("absence represented as value") in the field the analysis
+        // ranks options on, in the very shape the direct-stated stamp above was
+        // written to close. Measured by executing the projector: a refinement
+        // contributing a factor the parent does not touch produced
+        // `interventions` with two keys and `intervention_details` with one.
+        //
+        // ⚠ SCOPED TO `!isDirectStatedOption` ON PURPOSE, AND THAT GUARD IS
+        // LOAD-BEARING. The direct-stated arm has its OWN deliberate `undefined`
+        // return — when the value IS a stated figure, so the extractor may still
+        // earn it brief authority via `classifyAmountAgainstBrief`. Stamping
+        // there would demote a user's own figure to our estimate: this defect's
+        // mirror image, and strictly worse. The two returns look identical from
+        // here and mean opposite things, so the discriminator is the CALLER's
+        // already-computed `isDirectStatedOption`, never the absent binding.
+        //
+        // ⚠ `cee_hypothesis`, never brief authority: a refinement's magnitude is
+        // model-authored by construction. And the receipt deliberately avoids the
+        // `Direct causal value …` prefix that `transforms/analysis-ready.ts:833`
+        // turns into a NON-WAIVABLE `ambiguous_value` refusal — an honest estimate
+        // is disclosed, not refused (trap 23).
+        //
+        // ⚠⚠ THE RECEIPT ASSERTS ONLY WHAT THE GUARD ESTABLISHES, AND THAT IS
+        // NARROWER THAN IT FIRST READ. `bindDirectStatedMagnitude` has TWO early
+        // returns — `from_stated` absent, and `from_stated` present but pointing at
+        // a NON-OPTION stated item — and `!isDirectStatedOption` is true for BOTH.
+        // An earlier draft of this sentence also claimed the effect "cites no
+        // stated figure", which the guard does NOT establish: a claim whose
+        // `from_stated` names a `figure` cites one. Since this `reasoning` is
+        // provenance carried to the wire (`schema-v3.ts:1277`) and this class
+        // previously produced NO entry at all, that would have replaced SILENCE
+        // with a sentence that can be FALSE — the lie direction this module's
+        // doctrine at :1738-1752 exists to prevent. Found in review.
+        //
+        // ⚠ AND THE SECOND CLASS IS NOT GIVEN ITS OWN BRANCH ON PURPOSE. Probing
+        // `from_stated` at a `figure`, a `goal` and a `constraint` produced ZERO
+        // option→factor edges in every case — the ref resolves to a non-option
+        // node, so it never reaches this loop. Three probes are not a proof of
+        // unreachability, which is exactly why the SENTENCE is narrowed rather
+        // than the class special-cased: a branch for a case that cannot be
+        // constructed is a branch no test can kill, the same "guard that cannot
+        // fail" shape this pass already deleted once (see the `undefined` note
+        // below). Narrow the claim; do not add unreachable code to justify it.
+        const binding =
+          directBinding !== undefined
+            ? directBinding
+            : claim !== undefined && !isDirectStatedOption
+              ? ({
+                  raw_value: setsTo,
+                  source: "cee_hypothesis",
+                  reasoning: `Olumi estimate via edge ${edge.id}; this option\u2192factor effect is not bound to a stated option record`,
+                } as const)
+              : undefined;
         candidate = {
           edgeId: edge.id,
           setsTo,
