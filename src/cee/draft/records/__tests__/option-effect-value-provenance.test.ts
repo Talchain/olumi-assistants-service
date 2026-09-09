@@ -172,3 +172,125 @@ describe("an option→factor effect value is never projected without a provenanc
     ).toBe(true);
   });
 });
+
+/* ===========================================================================
+ * THE SAME INVARIANT, ON THE MERGE PATH.
+ *
+ * ⚠ WHY THIS BLOCK EXISTS: the invariant above is CORRECT AS STATED and its
+ * corpus contained ZERO `option_refinement` records — measured, with a control
+ * (`from_stated` and `from_claim` both present, so the probe could see). A guard
+ * that is right over a corpus sharing the code's blind spot cannot observe the
+ * code's defect. Extending the corpus is the half that stops this recurring;
+ * the reach fix alone would leave the next merge-path gap equally invisible.
+ *
+ * THE PATH. `projectOnce` merges ONE refinement into its stated parent when the
+ * refinement names exactly one stated option and does not conflict — "one
+ * alternative under two names". The refinement's own option→factor links then
+ * land on the merged parent. But `bindDirectStatedMagnitude` opens with
+ * `if (claim.from_stated === undefined … ) return undefined`, and a refinement's
+ * link carries `from_claim`, so the stamp function correctly declines and
+ * NOTHING ELSE PICKED IT UP: the magnitude reached `interventions` with no
+ * `intervention_details` entry.
+ *
+ * That is the same class-1 defect the direct-stated arm above was written to
+ * close — an estimate of OURS wearing a user fact's clothes — surviving on the
+ * path the corpus never walked.
+ *
+ * FIXTURE SHAPE is the captured production one: a stated option carrying the
+ * price, one refinement contributing a SECOND factor the parent does not touch.
+ * ========================================================================= */
+
+const MERGE_BRIEF =
+  "Given our goal of reaching 20000 MRR within 12 months, should we increase the Pro plan price from 49 to 59 per month with the next Pro feature release?";
+
+const MERGE_RECORDS: DraftRecordSet = {
+  stated_items: [
+    { kind: "option", source_quote: "increase the Pro plan price from 49 to 59 per month" },
+    { kind: "goal", source_quote: "reaching 20000 MRR within 12 months", role: "target" },
+  ],
+  claims: [
+    { claim_kind: "factor", label: "Pro plan price", basis: [0], category: "controllable" },
+    { claim_kind: "factor", label: "Perceived value", basis: [0], category: "controllable" },
+    // The refinement: the SAME proposal under the model's own name.
+    { claim_kind: "option_refinement", label: "Raise Price with Feature Release", basis: [0] },
+    // The PARENT's own link — the direct-stated arm, which already stamps.
+    {
+      claim_kind: "causal_link",
+      label: "the option sets the plan price",
+      from_stated: 0,
+      to_claim: 0,
+      effect: "positive",
+      sets_to: 0.59,
+    },
+    // The REFINEMENT's link, on a factor the parent never touches. `from_claim`,
+    // so the direct-stated binder declines it.
+    {
+      claim_kind: "causal_link",
+      label: "the feature release also moves perceived value",
+      from_claim: 2,
+      to_claim: 1,
+      effect: "positive",
+      sets_to: 0.8,
+    },
+    { claim_kind: "causal_link", label: "price bears on the goal", from_claim: 0, to_stated: 1, effect: "positive" },
+    { claim_kind: "causal_link", label: "perceived value bears on the goal", from_claim: 1, to_stated: 1, effect: "positive" },
+  ],
+};
+
+describe("the provenance invariant holds on the MERGE path", () => {
+  const { graph } = projectRecordsToGraph(MERGE_RECORDS, MERGE_BRIEF) as { graph: ProjectedGraph };
+  const mergedId = idOf(graph, "increase the Pro plan price from 49 to 59 per month");
+  const priceId = idOf(graph, "Pro plan price");
+  const valueId = idOf(graph, "Perceived value");
+
+  it("⭐ PRECONDITION — the refinement MERGED: one option, not two", () => {
+    // If this ever reds, the fixture stopped exercising the merge and every
+    // assertion below would pass for the wrong reason.
+    expect(graph.nodes.filter((n) => n.kind === "option")).toHaveLength(1);
+  });
+
+  it("⭐ PRECONDITION — the merged option carries BOTH magnitudes", () => {
+    // The parent's own factor AND the one only the refinement touches. Without
+    // this the invariant could pass on a map that never received the merge.
+    const keys = Object.keys(interventionsOf(graph, mergedId) ?? {});
+    expect(keys).toContain(priceId);
+    expect(keys).toContain(valueId);
+  });
+
+  it("⛔ THE HARM — every intervention on the merged option has a provenance entry", () => {
+    const interventions = interventionsOf(graph, mergedId) ?? {};
+    const details = detailsOf(graph, mergedId) ?? {};
+    for (const key of Object.keys(interventions)) {
+      expect(
+        details[key],
+        `the merged option carries a value for factor ${key} with no provenance entry`,
+      ).toBeDefined();
+      expect(details[key]!.source).toBeTruthy();
+    }
+  });
+
+  it("⭐ the refinement's magnitude is stamped as OURS, never as the user's", () => {
+    // The number is model-authored: the brief states no per-factor figure for
+    // perceived value. Claiming the user's authorship would be the mirror
+    // defect of omitting our own, and strictly worse.
+    const detail = (detailsOf(graph, mergedId) ?? {})[valueId];
+    expect(detail, "the refinement-contributed magnitude carries a receipt").toBeDefined();
+    expect(detail!.source).toBe("cee_hypothesis");
+    expect(detail!.raw_value).toBe(0.8);
+  });
+
+  it("⭐ CONTROL — the direct-stated arm is unchanged by the merge", () => {
+    // The parent's own link already stamped before this change. If it moves,
+    // the repair reached further than it should have.
+    const detail = (detailsOf(graph, mergedId) ?? {})[priceId];
+    expect(detail).toBeDefined();
+    expect(detail!.raw_value).toBe(0.59);
+  });
+
+  it("⭐ the receipt does NOT trip the consumer's ambiguous_value refusal", () => {
+    // Same reasoning as the fourth case above, derived from the consumer's own
+    // bytes: reusing that prefix would swap a visible refusal for a blocked user.
+    const detail = (detailsOf(graph, mergedId) ?? {})[valueId];
+    expect(AMBIGUOUS_VALUE_TRIGGER.test(detail?.reasoning ?? "")).toBe(false);
+  });
+});

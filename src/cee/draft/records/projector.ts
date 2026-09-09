@@ -3279,10 +3279,48 @@ function projectOnce(
         const claim = origin === undefined ? undefined : claims[origin.index];
         const isDirectStatedOption =
           claim?.from_stated !== undefined && statedItems[claim.from_stated]?.kind === "option";
-        const binding =
+        const directBinding =
           claim === undefined
             ? undefined
             : bindDirectStatedMagnitude({ claim, edgeId: edge.id, statedItems, claims, brief });
+        // ⭐⭐ AN UNCITED MAGNITUDE IS OURS ON *EVERY* PATH, NOT ONLY THE
+        // DIRECT-STATED ONE. `bindDirectStatedMagnitude` opens with
+        // `if (claim.from_stated === undefined …) return undefined`, so it
+        // correctly declines a link that arrives via `from_claim` — which is
+        // exactly what a MERGED REFINEMENT's option→factor link is once
+        // `projectOnce` folds "one alternative under two names" onto its stated
+        // parent. Nothing else picked it up, so the magnitude reached
+        // `interventions` with NO `intervention_details` entry: the class-1
+        // defect ("absence represented as value") in the field the analysis
+        // ranks options on, in the very shape the direct-stated stamp above was
+        // written to close. Measured by executing the projector: a refinement
+        // contributing a factor the parent does not touch produced
+        // `interventions` with two keys and `intervention_details` with one.
+        //
+        // ⚠ SCOPED TO `!isDirectStatedOption` ON PURPOSE, AND THAT GUARD IS
+        // LOAD-BEARING. The direct-stated arm has its OWN deliberate `undefined`
+        // return — when the value IS a stated figure, so the extractor may still
+        // earn it brief authority via `classifyAmountAgainstBrief`. Stamping
+        // there would demote a user's own figure to our estimate: this defect's
+        // mirror image, and strictly worse. The two returns look identical from
+        // here and mean opposite things, so the discriminator is the CALLER's
+        // already-computed `isDirectStatedOption`, never the absent binding.
+        //
+        // ⚠ `cee_hypothesis`, never brief authority: a refinement's magnitude is
+        // model-authored by construction. And the receipt deliberately avoids the
+        // `Direct causal value …` prefix that `transforms/analysis-ready.ts:833`
+        // turns into a NON-WAIVABLE `ambiguous_value` refusal — an honest estimate
+        // is disclosed, not refused (trap 23).
+        const binding =
+          directBinding !== undefined
+            ? directBinding
+            : claim !== undefined && !isDirectStatedOption
+              ? ({
+                  raw_value: setsTo,
+                  source: "cee_hypothesis",
+                  reasoning: `Olumi estimate via edge ${edge.id}; this option\u2192factor effect arrives from a claim that is not a direct stated option and cites no stated figure`,
+                } as const)
+              : undefined;
         candidate = {
           edgeId: edge.id,
           setsTo,
