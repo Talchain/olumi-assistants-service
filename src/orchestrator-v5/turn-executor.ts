@@ -11285,6 +11285,7 @@ export async function runTurnExecutor(
         contextPack: contextPackForLog ?? null,
         priorFacts: context.prior_facts,
         handlerFacts: handlerFactsForCommit,
+        analysisReady: analysisReadyForTurn,
         requestId,
         scenarioId: context.session_id,
         // ROADMAP 2.804 — the SCOPE only. The helper derives the leader-claim

@@ -25,6 +25,8 @@ import {
   type ClaimSafetyScenarioScope,
 } from '../context/claim-safety-read.js';
 import type { ContextPack } from '../context/context-pack-assembler.js';
+import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
+import { analysisReadyPermitsLeaderNaming } from '../admission/analysis-admission.js';
 import { detectCoachingSignal } from '../signals/coaching-signals.js';
 import type { SuccessfulHandlerOutcome } from '../tools/handler-outcome.js';
 import { appendLastCoachingSignal } from './last-coaching-signal-log.js';
@@ -40,6 +42,8 @@ export interface ApplyCoachingSignalInput {
    * path (which assembles no pack). See CoachingSignalInput.contextPack.
    */
   readonly contextPack: ContextPack | null;
+  /** Current canonical admission; absent retains the existing legacy behaviour. */
+  readonly analysisReady?: AnalysisReadyPayload;
   /** Facts from prior turns in this scenario (newest-first). */
   readonly priorFacts: readonly HandlerFact[];
   /**
@@ -140,6 +144,10 @@ export function applyCoachingSignal(
     contextPack: input.contextPack,
     priorFacts: input.priorFacts,
     mayNameLeadingOption,
+    // Result entitlement and the model's designation cap answer different
+    // questions. Only the coaching slot consumes this conjunction; never
+    // rewrite the fact verdict or suppress the qualified numeric comparison.
+    admissionPermitsLeaderNaming: analysisReadyPermitsLeaderNaming(input.analysisReady),
     ...(input.interventionControlledFactorIds !== undefined
       ? { interventionControlledFactorIds: input.interventionControlledFactorIds }
       : {}),

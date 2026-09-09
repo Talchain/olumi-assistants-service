@@ -23,7 +23,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
-import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -125,11 +125,13 @@ function payload() {
 }
 
 // Minimal schema-valid graph so the snapshot pre-load path resolves.
-const READY_GRAPH: GraphV3T = {
+const READY_GRAPH: GraphV3T = GraphV3.parse({
   nodes: [
     { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
-    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend' },
+    // A material, user-stated input makes the existing leader-positive cases
+    // genuinely comparative, rather than accidentally relying on a missing cap.
+    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend', observed_state: { value: 0.5, source: 'user_override' } },
     { id: 'opt_launch', kind: 'option', label: 'Launch now', interventions: { fac_marketing: 0.7 } },
     { id: 'opt_status_quo', kind: 'option', label: 'Status quo', interventions: { fac_marketing: 0.3 } },
   ],
@@ -140,7 +142,7 @@ const READY_GRAPH: GraphV3T = {
     { from: 'opt_status_quo', to: 'fac_marketing', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
     { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
   ],
-} as unknown as GraphV3T;
+});
 
 function snapshot(): RunAnalysisScenarioSnapshot {
   return {
@@ -176,6 +178,7 @@ function handlerOutcome() {
           scenario_id: SCENARIO_ID,
           leading_option_id: 'opt_launch',
           summary: 'Analysis ran with two options compared.',
+          win_probabilities: { 'Launch now': 0.62, 'Status quo': 0.38 },
           enrichment: runEnvelope(),
           // ROADMAP 2.804 — now LOAD-BEARING. The coaching slot's leader-claim
           // permission comes from the fact chain, which fails CLOSED on a fact
@@ -250,7 +253,9 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
     });
 
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
     expect(out.response.assistant_text).toContain('first analysis');
+    expect(out.response.assistant_text).toContain('the leading option');
   });
 
   it('chip RERUN: RERUN_ANALYSIS_COMPLETE text joins assistant_text and names the unchanged leader', async () => {
@@ -262,6 +267,7 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
     });
 
     if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('comparative_leader');
     // Same envelope both runs → unchanged leader copy from compareRuns.
     expect(out.response.assistant_text).toContain('unchanged');
     expect(out.response.assistant_text).toContain('Launch now still leads');
@@ -287,6 +293,84 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
     expect(committed.handler_facts[0]!.result.enrichment?.coaching_signal_turn_id).toBe(
       'req-cc-rerun-fact',
     );
+  });
+});
+
+describe('chip-click admission caps designation, not the completed comparison', () => {
+  function machineAuthoredSnapshot(): RunAnalysisScenarioSnapshot {
+    const original = snapshot();
+    const graph = GraphV3.parse({
+      ...READY_GRAPH,
+      nodes: READY_GRAPH.nodes.map((node) => node.id === 'fac_marketing'
+        ? { ...node, observed_state: { value: 0.5, source: 'cee_inference' } }
+        : node),
+    });
+    return { ...original, graph, rawPersistedGraph: graph };
+  }
+
+  it.each([false, true])('provisional run (prior=%s) keeps figures, first-run guidance and actual rerun comparison', async (hasPrior) => {
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(machineAuthoredSnapshot());
+    buildTurnContextStub.priorFacts = hasPrior ? [priorRunFact()] : [];
+    const out = await dispatchChipClickRunAnalysis({ payload: payload(), requestId: 'req-provisional' });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+
+    // Real canonical snapshot -> admission -> shared signal -> composer/commit.
+    // The registry/store/optional review are stubbed; admission and composition
+    // are not. This assertion must fail before the consumer assertions if the
+    // graph ever stops representing the witnessed machine-authored population.
+    expect(out.analysisReady?.analysis_admission).toMatchObject({
+      structurally_analysable: true,
+      permitted_analysis_mode: 'quantified_provisional',
+    });
+    expect(out.mayNameLeadingOption).toBe(true); // distinct result entitlement
+    expect(out.response.assistant_text).toContain('62% of runs of this model');
+    if (hasPrior) {
+      // The admission must not erase a real rerun delta or its explanation.
+      // This same-envelope case is the positive twin to the first-run nudge.
+      expect(out.response.assistant_text).toContain('unchanged');
+      expect(out.response.assistant_text).toContain('Launch now still leads');
+      expect(out.response.assistant_text).not.toContain('first analysis');
+    } else {
+      expect(out.response.assistant_text).toContain('Explore the comparison');
+      expect(out.response.assistant_text).not.toContain('the leading option');
+    }
+    expect(out.response.assistant_text).not.toContain('No single option can be put forward');
+    const block = out.response.blocks?.find((item) => item.type === 'analysis_result');
+    expect(block).toMatchObject({ type: 'analysis_result', leading_option_id: 'opt_launch' });
+    expect(block).toHaveProperty('summary', 'Analysis ran with two options compared.');
+    expect(block).toHaveProperty('win_probabilities', { 'Launch now': 0.62, 'Status quo': 0.38 });
+    const committed = commitDirectAnswerMock.mock.calls[0];
+    expect(committed).toBeDefined();
+    expect(committed![0]).toMatchObject({ assistant_text: out.response.assistant_text });
+    expect(committed![1]).toMatchObject({ handler_facts: [expect.objectContaining({
+      result: expect.objectContaining({ scenario_id: SCENARIO_ID, leading_option_id: 'opt_launch' }),
+    })] });
+  });
+
+  it('unavailable admission preserves the existing permitting first-run behaviour', async () => {
+    // The existing injected-registry path has no canonical snapshot. Missing
+    // evidence must not be fabricated as a machine-authored/provisional mode.
+    const out = await dispatchChipClickRunAnalysis({
+      payload: payload(), requestId: 'req-admission-unavailable',
+      handlerRegistry: new Map([['run_analysis', handlerFnMock]]),
+    });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady).toBeUndefined();
+    expect(out.response.assistant_text).toContain('the leading option');
+    expect(out.response.assistant_text).toContain('62% of runs of this model');
+  });
+
+  it('provisional admission cannot reopen a genuinely withheld fact', async () => {
+    loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(machineAuthoredSnapshot());
+    const held = handlerOutcome();
+    held.handler_facts[0]!.result.constraint_verdict.may_name_leading_option = false;
+    handlerFnMock.mockResolvedValue(held);
+    const out = await dispatchChipClickRunAnalysis({ payload: payload(), requestId: 'req-held' });
+    if (out.outcome !== 'ok') throw new Error(`expected ok, got ${out.outcome}`);
+    expect(out.analysisReady?.analysis_admission?.permitted_analysis_mode).toBe('quantified_provisional');
+    expect(out.mayNameLeadingOption).toBe(false);
+    expect(out.response.assistant_text).not.toContain('first analysis');
+    expect(out.response.assistant_text).not.toContain('Explore the comparison');
   });
 });
 

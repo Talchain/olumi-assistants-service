@@ -1645,6 +1645,7 @@ export async function dispatchChipClickRunAnalysis(
       contextPack: null,
       priorFacts: context.prior_facts,
       handlerFacts: enrichedFacts,
+      analysisReady,
       requestId,
       scenarioId: context.session_id,
       // ROADMAP 2.804 — the SAME scope builder this path's own claim-safety

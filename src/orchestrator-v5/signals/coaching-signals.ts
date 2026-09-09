@@ -107,6 +107,8 @@ export interface CoachingSignalInput {
    * as a granted one.
    */
   readonly mayNameLeadingOption: boolean;
+  /** Separate model admission cap, read by the shared application helper. */
+  readonly admissionPermitsLeaderNaming?: boolean;
 }
 
 export interface CoachingSignalDetection {
@@ -619,6 +621,16 @@ export function detectCoachingSignal(
       // (v5.run_analysis.constraint_unevaluated /
       // .constraint_identity_unresolved) already count these turns.
       if (leaderWithheld) return null;
+      // A provisional comparison remains useful. Make its FIRST-run nudge
+      // about exploring the comparison/assumptions rather than "the leader".
+      // Do not apply this to reruns: their actual delta, attribution and inert
+      // edit explanations below must survive, with the existing wire caveat.
+      if (input.admissionPermitsLeaderNaming === false) {
+        return {
+          signal_id: 'FIRST_ANALYSIS_COMPLETE',
+          coaching_text: 'Your first analysis is ready. Explore the comparison and the assumptions shaping it before acting on the result.',
+        };
+      }
       return {
         signal_id: 'FIRST_ANALYSIS_COMPLETE',
         coaching_text: COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}),
