@@ -92,6 +92,51 @@ function extractRefs(text: string): { clean: string; refs: string[] } {
 }
 
 /**
+ * The length the cap actually governs: the bytes that SURVIVE into storage.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
+ * Witnessed on deployed staging, scenario `8a8721ae`, 2026-09-08. All twenty
+ * `v5.summary.updated` records for one real conversation: applied sizes climb
+ * 702 → 975 → 1229 → 1460 chars, and from that point EVERY incremental pass is
+ * `rejected_kept_prior / over_cap` — fourteen of twenty — with two full
+ * regenerations briefly recovering at 1382 and 1479. The last rejection spent
+ * 9,559 ms and 615 output tokens and then kept the old summary. Fourteen turns
+ * of evolving discussion — competitor reactions, churn and conversion
+ * pathways, the user's own grandfathering idea — never reached the record.
+ *
+ * ── WHY IT ESCALATES, WHICH IS THE PART THAT MATTERS ───────────────────────
+ * The check measured `raw.length`: the model's typed output, `[tN]` provenance
+ * stamps included. But the stamps are STRIPPED by `extractRefs` below, land in
+ * `slots[].entries[].source_turn_ids`, and are NEVER re-rendered into the
+ * stored text (`assemble.ts` writes `LABEL: <clean text>`); the `chars` figure
+ * on the telemetry above is `summary.text.length` — the assembled form. So the
+ * cap was charging a summary for bytes it does not keep and never injects.
+ *
+ * And the prompt REQUIRES those citations ("cite the turn(s) it came from").
+ * Every additional turn adds another stamp, so the longer a conversation runs
+ * the more of its length budget is consumed by provenance rather than content
+ * — which is exactly the escalating pattern the capture shows, rejections
+ * beginning the moment the summary approaches the ceiling and never
+ * recovering.
+ *
+ * ── WHAT THIS IS NOT ───────────────────────────────────────────────────────
+ * The numbers are UNCHANGED: `SUMMARY_HARD_CAP_CHARS` is still 1600 and the
+ * prompt's 800–1400 target still stands. Nothing is truncated, nothing is
+ * accepted that would not fit, and an oversized or malformed summary still
+ * rejects and keeps the prior one. Only the UNIT changed, to the one the cap
+ * was always described as bounding.
+ *
+ * Deliberately CONSERVATIVE: only the stamps are discounted, because they are
+ * provably dropped. Slot labels still count, since `assemble.ts` re-emits them.
+ * This converts the marginal rejections; a genuinely bloated summary is still
+ * refused.
+ */
+function retainedLength(raw: string): number {
+  // A fresh regex per call: PROVENANCE_RE is /g and carries lastIndex state.
+  return raw.replace(new RegExp(PROVENANCE_RE.source, 'gi'), '').length;
+}
+
+/**
  * Parse the summariser's raw text into four slots, or reject. STRICT: ALL
  * FOUR slots must be present exactly once (Codex r2 blocker 2 — a response
  * missing CONSTRAINTS/RESOLVED/OPEN previously parsed OK and the missing
@@ -102,7 +147,7 @@ function extractRefs(text: string): { clean: string; refs: string[] } {
  */
 export function parseSummaryOutput(raw: string): ParseSummaryResult {
   if (raw.trim().length === 0) return { ok: false, reason: 'empty' };
-  if (raw.length > SUMMARY_HARD_CAP_CHARS) return { ok: false, reason: 'over_cap' };
+  if (retainedLength(raw) > SUMMARY_HARD_CAP_CHARS) return { ok: false, reason: 'over_cap' };
 
   const lines = raw.split(/\r?\n/);
   const acc = new Map<RollingSummarySlot, string[]>();

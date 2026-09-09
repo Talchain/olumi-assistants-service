@@ -18,6 +18,7 @@ import { config } from '../../config/index.js';
 
 import {
   DEFAULT_SUMMARY_MODEL,
+  SUMMARY_HARD_CAP_CHARS,
   SUMMARY_TARGET_MAX_CHARS,
   SUMMARY_TARGET_MIN_CHARS,
 } from './summary-types.js';
@@ -35,7 +36,15 @@ export const SUMMARISER_SYSTEM_PROMPT = [
   'OPEN: <unanswered questions or pending intents; "(none)" if none> [tN]',
   '',
   'Rules:',
+  // ⚠ THE CEILING IS STATED, AND IN THE UNIT IT IS ENFORCED IN. Previously the
+  // model was told a target of 800-1400 and then silently judged against a
+  // 1600-char hard reject it was never shown — so a pass that overshot its
+  // target by a little had no idea it had crossed a fatal line, and the whole
+  // update was discarded. Naming the real ceiling, and saying plainly that the
+  // [tN] citations do not count towards it, removes both the hidden limit and
+  // the perverse incentive to skip the citations the next rule demands.
   `- Keep the whole summary between ${SUMMARY_TARGET_MIN_CHARS} and ${SUMMARY_TARGET_MAX_CHARS} characters. Never exceed the length — drop the least important detail instead.`,
+  `- The hard limit is ${SUMMARY_HARD_CAP_CHARS} characters, NOT counting the [tN] citations: a summary longer than that is discarded and the previous one is kept, so nothing you wrote this turn is recorded. Citing your sources costs you nothing against the limit — never drop a citation to save length.`,
   '- After each CONSTRAINTS / RESOLVED / OPEN entry, cite the turn(s) it came from as [t3] or [t3, t7], using the [tN] labels shown in the input. FRAME does not need a citation.',
   '- Preserve constraints the user stated long ago even if they were not repeated recently — that is the whole point of this summary.',
   '- Write plain prose. Do NOT include probabilities, percentages, scores, or any numeric analysis values — those live elsewhere. Never invent facts the conversation does not contain.',
