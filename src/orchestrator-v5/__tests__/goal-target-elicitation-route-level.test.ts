@@ -42,7 +42,7 @@ import { setTestSink } from '../../utils/telemetry.js';
 import { makeMessagePayload } from './fixtures.js';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
-import type { PendingAction } from '../session/pending-action.js';
+import { parsePendingAction, type PendingAction } from '../session/pending-action.js';
 
 const appendCalls: Array<Record<string, unknown>> = [];
 let mockedPendingActions: ReadonlyArray<PendingAction> = [];
@@ -430,6 +430,29 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     }
   });
 
+  it('CURRENT BASELINE — "our current MRR is £12,000" is a report, not a target', async () => {
+    // The counterexample the independent review traced at the source. It has
+    // exactly one finite non-ceiling currency amount and names no other node's
+    // label, so every gate except the ROLE gate passes it — and binding it
+    // would record where the person already IS as the value success is
+    // measured against.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('Our current MRR is £12,000.'), 'req-goal-baseline', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools).toHaveBeenCalled();
+    for (const g of committedGraphs()) {
+      expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
+    }
+  });
+
   it('NO QUESTION — the same bare amount with no live pending is just a message', async () => {
     // The route is ADDITIVE. This is the control that proves the positive
     // above is the question doing the work, not the message shape.
@@ -447,5 +470,81 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     for (const g of committedGraphs()) {
       expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
     }
+  });
+});
+
+describe('JOINED — turn 1 emits the question, turn 2 answers it through the real read boundary', () => {
+  /**
+   * ⭐⭐ THE HOP THE TWO HALVES ABOVE CANNOT SEE.
+   *
+   * Every ANSWER case above builds its pending with `goalTargetPending(...)` —
+   * a hand-written object shaped the way the author believes the emitter writes
+   * one. That is two separately-constructed halves agreeing with each other. A
+   * STORED/READ CONTRACT MISMATCH is invisible to both: if the emitter writes a
+   * field `parsePendingAction` refuses, or omits one it requires, the emit test
+   * still passes (it inspects the write) and the answer test still passes (it
+   * bypasses the read) while the live loop is broken end to end.
+   *
+   * So this drives turn 1, takes the pending IT ACTUALLY WROTE, puts it through
+   * `parsePendingAction` — the real read boundary every persisted pending
+   * crosses on the way back out — and hands the PARSED result to turn 2. A kind
+   * missing from `RESUMABLE_ACTION_TYPES`, or a parse block that refuses the
+   * emitter's own payload, REDs here and nowhere else.
+   */
+  it('⭐ the emitted pending survives the read and the answer commits the tuple', async () => {
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+
+    // TURN 1 — the product asks.
+    const askAdapter = directAnswerAdapter(FALSE_REGISTRATION_CLAIM);
+    const first = await runTurnExecutor(
+      payload('Set a success target on monthly recurring revenue.', {
+        turn_id: '11111111-1111-4111-8111-111111111111',
+      } as Partial<MessageTurnPayload>),
+      'req-goal-joined-ask',
+      { routingAdapter: askAdapter.adapter, graphState: graph },
+    );
+    expect(first.response.assistant_text).toContain("couldn't register that success target");
+
+    // THE READ BOUNDARY, not a re-creation. Whatever turn 1 wrote is parsed by
+    // the same function the store applies on the way back out; a refusal here
+    // is exactly the write-only failure this joined case exists to catch.
+    const written = appendCalls.flatMap(
+      (c) => (c.pending_actions ?? []) as unknown[],
+    );
+    const readBack = written
+      .map((raw) => parsePendingAction(raw))
+      .filter((pa): pa is PendingAction => pa !== null);
+    const question = readBack.filter((pa) => pa.action.kind === 'elicit_goal_target');
+    expect(
+      question,
+      'the emitted goal-target question did not survive parsePendingAction — it is write-only',
+    ).toHaveLength(1);
+
+    // TURN 2 — the person answers. Only the PARSED pending is offered.
+    appendCalls.length = 0;
+    mockedPendingActions = question;
+    const answerAdapter = directAnswerAdapter();
+    const second = await runTurnExecutor(
+      payload('£20k', {
+        turn_id: '22222222-2222-4222-8222-222222222222',
+      } as Partial<MessageTurnPayload>),
+      'req-goal-joined-answer',
+      { routingAdapter: answerAdapter.adapter, graphState: graph },
+    );
+
+    expect(second.telemetry.failure_type).toBeNull();
+    expect(answerAdapter.chatWithTools).not.toHaveBeenCalled();
+
+    const graphs = committedGraphs();
+    expect(graphs.length).toBeGreaterThan(0);
+    const goal = goalNodeOf(graphs[graphs.length - 1]);
+    const raw = goal?.goal_threshold_raw as number;
+    const cap = goal?.goal_threshold_cap as number;
+    const normalised = goal?.goal_threshold as number;
+    expect(raw).toBe(20000);
+    expect(goal?.goal_threshold_unit).toBe('£');
+    expect(cap).toBeGreaterThan(raw);
+    expect(normalised).toBeCloseTo(raw / cap, 10);
   });
 });

@@ -49,6 +49,7 @@ import { bigramDice } from './validator.js';
 import type { ElicitTargetBaselinePending, PendingAction, ElicitGoalTargetPending } from '../session/pending-action.js';
 import { findSoleLiveGoalTargetPending } from '../session/pending-action.js';
 import { runExtraction } from '../context/cqe/extract-quantities.js';
+import { reportsPresentState } from '../../cee/factor-extraction/stated-level.js';
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
@@ -788,7 +789,8 @@ export type GoalTargetResumeDispatch =
         | 'several_amounts'
         | 'ceiling_not_minimum'
         | 'degraded_parse'
-        | 'names_other_subject';
+        | 'names_other_subject'
+        | 'reports_current_level';
     }
   | {
       readonly matched: true;
@@ -845,6 +847,37 @@ export function tryGoalTargetElicitationResume(input: {
       skip_reason: 'unreadable_answer',
       pending,
       reason: 'ceiling_not_minimum',
+    };
+  }
+  // ⭐⭐ THE ROLE GATE — one amount is not enough; it must be a TARGET, not a
+  // REPORT OF WHERE THINGS STAND.
+  //
+  // The counterexample this closes, traced at the source by the independent
+  // review rather than found by me: with the question live, "Our current MRR is
+  // £12,000." carries exactly one finite, non-ceiling currency amount and names
+  // no other node's label. Every gate above passes it, and it would resolve
+  // `at_least 12000` on the goal — recording the person's CURRENT BASELINE as
+  // the value success is measured against. That is worse than refusing: the
+  // analysis would then score every option against the place they already are.
+  //
+  // ⚠ THE PREDICATE IS SINGLE-SOURCED, NOT MINTED HERE. `reportsPresentState`
+  // lives in `cee/factor-extraction/stated-level.ts` — the module that already
+  // owns "does this text assert a present state?" — and its marker set is the
+  // TENSE-BEARING subset of that module's existing closed
+  // `PRESENT_STATE_QUALIFIERS`, pinned as a subset by its own test. This is
+  // deliberately NOT a blacklist grown one counterexample at a time, and it is
+  // not a second parser: it decides ROLE, never value.
+  //
+  // A GENUINE TARGET STILL BINDS, which is the half that makes this safe to
+  // add: "£20k", "The target is £20,000", "we need to hit £20,000 by year end"
+  // carry no tense marker at all. Only a message that says WHERE THINGS ARE is
+  // withdrawn, and a withdrawal leaves the ordinary lanes untouched.
+  if (reportsPresentState(input.message)) {
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      reason: 'reports_current_level',
     };
   }
   // ⭐ THE SUBJECT GATE — one amount is not enough; it must not be ABOUT

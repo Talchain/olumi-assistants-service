@@ -90,6 +90,73 @@ const PRESENT_STATE_QUALIFIERS: readonly string[] = [
 const QUALIFIER_ALT = `(?:${PRESENT_STATE_QUALIFIERS.join("|")})`;
 
 /**
+ * ⭐⭐ THE TENSE-BEARING SUBSET — "does this message REPORT WHERE THINGS STAND?"
+ *
+ * A THIRD question in this module, named apart from the two above rather than
+ * folded into them (CLAUDE.md trap 21):
+ *   · `extractStatedCurrentLevels` asks "what present-state PERCENT does this
+ *     text state, and about what subject?" — it BINDS a value, so it is
+ *     percent-only and grammar-complete;
+ *   · `classifyElicitedBaselineAnswer` asks "is this an ATTEMPTED answer to the
+ *     baseline question?";
+ *   · THIS asks only "is this message reporting a CURRENT LEVEL rather than
+ *     naming a target?" It never binds anything. Its only power is to REFUSE.
+ *
+ * WHY IT IS NOT THE QUALIFIER LIST ITSELF. `PRESENT_STATE_QUALIFIERS` mixes two
+ * kinds of word: TENSE markers ("currently", "now", "presently", "today",
+ * "still") and HEDGES ("at", "around", "about", "roughly", "right"). The hedges
+ * are the right thing to allow BETWEEN a verb and a number and the wrong thing
+ * to read as evidence of tense — "at" alone appears in "£20k at minimum", which
+ * is a target, not a report. So this set is the tense-bearing members plus the
+ * adjectival/phrasal forms of the same idea, and the tense-bearing membership is
+ * DERIVED from the shared list in `stated-level-present-state.test.ts` rather
+ * than mirrored here.
+ *
+ * FAILURE DIRECTION, stated because it is the whole safety argument: a member
+ * added here can only cause a REFUSAL, and a refusal leaves the message to the
+ * ordinary lanes untouched. Over-refusal costs coverage; it cannot mint a
+ * wrong value. That is the same trade this module already takes.
+ */
+export const PRESENT_STATE_REPORT_MARKERS: readonly string[] = [
+  // Tense-bearing members of PRESENT_STATE_QUALIFIERS (pinned as a subset in
+  // the companion test, so a change to that list is visible here).
+  "currently",
+  "now",
+  "presently",
+  "today",
+  "still",
+  // The adjectival form of "currently", which the qualifier list does not carry
+  // because it never appears between a verb and a number ("our CURRENT MRR is
+  // £12,000" — the word sits in the SUBJECT).
+  "current",
+  // Phrasal equivalents. Multi-word members are matched as phrases.
+  "right now",
+  "at the moment",
+  "at present",
+  "so far",
+  "to date",
+  "as it stands",
+  "as things stand",
+];
+
+/**
+ * Does this message REPORT a present state rather than name a target?
+ *
+ * Word-boundary matched, case-insensitive, phrases matched literally. Pure and
+ * total; any non-string is `false` (an unreadable message is not evidence of
+ * anything, and the caller's other gates still apply).
+ */
+export function reportsPresentState(text: string | null | undefined): boolean {
+  if (typeof text !== "string" || text.trim() === "") return false;
+  const lower = text.toLowerCase();
+  return PRESENT_STATE_REPORT_MARKERS.some((marker) =>
+    marker.includes(" ")
+      ? lower.includes(marker)
+      : new RegExp(`\\b${marker}\\b`, "i").test(lower),
+  );
+}
+
+/**
  * What may sit between the verb and the number — the closed qualifier
  * vocabulary above, zero or more times.
  */

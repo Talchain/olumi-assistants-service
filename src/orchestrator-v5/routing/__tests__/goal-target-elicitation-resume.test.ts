@@ -90,6 +90,33 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
     expect(result.skip_reason).toBe('unreadable_answer');
   });
 
+  it('⭐ CURRENT BASELINE — "our current MRR is £12,000" is a report, not a target', () => {
+    // The independent review's source-traced counterexample: one finite,
+    // non-ceiling currency amount, naming no other node's label. Only the ROLE
+    // gate withdraws it, and binding it would record where the person already
+    // is as the value success is measured against.
+    const result = resume('Our current MRR is £12,000.', [pending()]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    // Narrowed by the discriminant before reading `reason`: only the
+    // `unreadable_answer` arm carries one, so a bare `expect` would not
+    // typecheck (and would read a field the other arms do not have).
+    if (result.skip_reason !== 'unreadable_answer') {
+      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
+    }
+    expect(result.reason).toBe('reports_current_level');
+  });
+
+  it('CONTRAST — a STATED TARGET of the same shape still binds', () => {
+    // The half that proves the gate above discriminates ROLE rather than
+    // sentence length or the presence of a copula.
+    const result = resume('The target is £20,000.', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+    expect(result.unit).toBe('£');
+  });
+
   it('⭐ OTHER SUBJECT — a price named on another node is not the goal target', () => {
     // The reply carries exactly one amount and is plainly about something else.
     // `f-churn` is labelled 'Pro Plan Churn Rate'; naming it withdraws the
@@ -99,7 +126,12 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
     const result = resume('Pro Plan Churn Rate is 4 percent', [pending()]);
     expect(result.matched).toBe(false);
     if (result.matched) return;
-    expect(result.skip_reason).toBe('unreadable_answer');
+    // Narrowed by the discriminant before reading `reason`: only the
+    // `unreadable_answer` arm carries one, so a bare `expect` would not
+    // typecheck (and would read a field the other arms do not have).
+    if (result.skip_reason !== 'unreadable_answer') {
+      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
+    }
     expect(result.reason).toBe('names_other_subject');
   });
 
