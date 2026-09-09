@@ -308,7 +308,7 @@ describe('chip-click admission caps designation, not the completed comparison', 
     return { ...original, graph, rawPersistedGraph: graph };
   }
 
-  it.each([false, true])('provisional run (prior=%s) keeps figures and useful coaching, without designation', async (hasPrior) => {
+  it.each([false, true])('provisional run (prior=%s) keeps figures, first-run guidance and actual rerun comparison', async (hasPrior) => {
     loadScenarioSnapshotForRunAnalysisMock.mockResolvedValue(machineAuthoredSnapshot());
     buildTurnContextStub.priorFacts = hasPrior ? [priorRunFact()] : [];
     const out = await dispatchChipClickRunAnalysis({ payload: payload(), requestId: 'req-provisional' });
@@ -324,8 +324,16 @@ describe('chip-click admission caps designation, not the completed comparison', 
     });
     expect(out.mayNameLeadingOption).toBe(true); // distinct result entitlement
     expect(out.response.assistant_text).toContain('62% of runs of this model');
-    expect(out.response.assistant_text).toContain('Explore the comparison');
-    expect(out.response.assistant_text).not.toMatch(/leading option|still leads|leads after/i);
+    if (hasPrior) {
+      // The admission must not erase a real rerun delta or its explanation.
+      // This same-envelope case is the positive twin to the first-run nudge.
+      expect(out.response.assistant_text).toContain('unchanged');
+      expect(out.response.assistant_text).toContain('Launch now still leads');
+      expect(out.response.assistant_text).not.toContain('first analysis');
+    } else {
+      expect(out.response.assistant_text).toContain('Explore the comparison');
+      expect(out.response.assistant_text).not.toContain('the leading option');
+    }
     expect(out.response.assistant_text).not.toContain('No single option can be put forward');
     const block = out.response.blocks?.find((item) => item.type === 'analysis_result');
     expect(block).toMatchObject({ type: 'analysis_result', leading_option_id: 'opt_launch' });
