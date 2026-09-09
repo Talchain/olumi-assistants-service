@@ -65,6 +65,7 @@ import type { PendingAction } from '../session/pending-action.js';
 import {
   extractCompoundGoals,
   remapConstraintTargets,
+  type ExtractedGoalConstraint,
 } from '../../cee/compound-goal/index.js';
 import {
   renderDirectionClarifications,
@@ -251,20 +252,54 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
     return { extracted, remap };
   }
 
-  it('PRECONDITION — the limit is extracted, and step 6 drops it into `unbindable`', () => {
+  /**
+   * The churn row, selected by IDENTITY rather than by index.
+   *
+   * ⚠ MEASURED, NOT ASSUMED: this sentence yields THREE unbindable rows, not
+   * one. My first version asserted `toHaveLength(1)` and CI returned 3 — the
+   * precondition doing exactly its job, refusing to let the rest of the file
+   * proceed on a guess about the producer. Binding by `targetName` + `value`
+   * is the house pattern for this producer
+   * (`constraint-target-unmatched-ask.test.ts` asserts
+   * `unbindable.map(c => c.targetName)`), and it is trap 19: an index could
+   * silently select a different row than the one this file is about.
+   */
+  function churnRow(remap: { readonly unbindable: readonly ExtractedGoalConstraint[] }) {
+    return remap.unbindable.find(
+      (c) => /churn/i.test(String(c.targetName ?? '')) && c.value === 4,
+    );
+  }
+
+  it('PRECONDITION — the limit is extracted, and step 6 drops the churn row into `unbindable`', () => {
     const { extracted, remap } = unbindableRow();
     // Pinned so a later extractor change cannot make the rest of this file
     // pass by producing nothing to drop.
     expect(extracted.constraints.length).toBeGreaterThan(0);
-    expect(remap.unbindable).toHaveLength(1);
+    const row = churnRow(remap);
+    expect(row, 'the churn limit must be among the step-6 drops').toBeDefined();
+    expect(row!.operator).toBe('<=');
     // It reached neither the bound set nor, therefore, `goal_constraints[]`.
     expect(remap.constraints).toHaveLength(0);
   });
 
+  it('the user is asked ONCE, however many rows the extractor produced', () => {
+    const { remap } = unbindableRow();
+    // Production maps EVERY unbindable row to an ask
+    // (`unified-pipeline/stages/repair/compound-goals.ts`), so render the whole
+    // set rather than one row: this is what the user would actually receive.
+    // `renderDirectionClarifications` dedupes by (metric, amount), and that
+    // dedupe is the only thing standing between one stated limit and a wall of
+    // identical questions.
+    const cards = renderDirectionClarifications(remap.unbindable.map(targetUnmatchedItem));
+    expect(remap.unbindable.length).toBeGreaterThan(0);
+    expect(cards).toHaveLength(1);
+  });
+
   it('⭐ THE FIRST HALF OF THE JOIN — the rendered card carries `action_type: add_constraint`', () => {
     const { remap } = unbindableRow();
-    const row = remap.unbindable[0]!;
-    const item = targetUnmatchedItem(row);
+    const row = churnRow(remap);
+    expect(row, 'fixture precondition: the churn row must exist').toBeDefined();
+    const item = targetUnmatchedItem(row!);
     // Bind by the REASON's identity, not by copy text a sibling card could
     // also satisfy.
     expect(item.reason).toBe('target_unmatched');
