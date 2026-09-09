@@ -611,3 +611,94 @@ describe('option-intervention transaction — real commit, serialized store boun
     expect(persistence.durableGraph()).toEqual(before);
   });
 });
+
+/**
+ * ⭐⭐⭐ THE SHAPE THE ESTATE ACTUALLY PERSISTS — the class this whole suite
+ * omitted, and the reason a witnessed manual Save was refused.
+ *
+ * Every fixture above builds interventions through `intervention()`, which
+ * always writes `target_match`. The graph a restored example actually returns
+ * does not: request 144 on 2026-09-09 read back
+ * `{ value: 1, source: 'brief_extraction', display_value: 'Very high (1)' }`.
+ * So the corpus could not see that `InterventionV3.safeParse` — whose
+ * `target_match` is REQUIRED — refuses real stored state. Root's first manual
+ * Save returned 422 `invalid_existing_intervention` with nothing written
+ * (request `6ec75b90`, valid write base, no chat and no analysis first).
+ *
+ * A corpus that omits a class the contract admits cannot certify the code over
+ * that class (CLAUDE.md trap 22). These cases supply it.
+ */
+describe('an existing intervention persisted WITHOUT target_match', () => {
+  /** The restored entry verbatim, minus the value under test. */
+  function persistedByBriefExtraction(value: number) {
+    return { value, source: 'brief_extraction', display_value: `Very high (${value})` };
+  }
+
+  function graphWithPersistedEntry(entry: Record<string, unknown>) {
+    const graph = canonicalGraph();
+    const option = graph.nodes.find(node => node.id === 'option')!;
+    (option as { interventions: Record<string, unknown> }).interventions.factor = entry;
+    return projectGraphForPersistence(graph) as ReturnType<typeof canonicalGraph>;
+  }
+
+  it('⭐ is EDITABLE — the first manual Save prepares a write, it is not refused', () => {
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(1));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    expect(candidate.kind).toBe('candidate');
+  });
+
+  it('⭐ and the write it prepares still satisfies the postimage scope check', () => {
+    // The encoder fills `source: user_specified` and synthesises `target_match`
+    // from the canonical key, so accepting the preimage does not move the
+    // refusal to `mutation_scope_mismatch` one step later.
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(1));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    if (candidate.kind !== 'candidate') throw new Error('Expected a candidate');
+    const written = candidate.graph.nodes.find(node => node.id === 'option')?.interventions?.factor;
+    expect(written).toMatchObject({ value: 0.75, source: 'user_specified' });
+    expect((written as { target_match?: { node_id?: string } })?.target_match?.node_id).toBe('factor');
+  });
+
+  it('an unchanged value is still a no-op, not a new user-authored measurement', () => {
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(0.4));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.4 }), persistedGraph: before,
+    });
+    expect(candidate.kind).toBe('unchanged');
+  });
+
+  it('⚠ REFUSAL RETAINED: a STATED target naming another node still refuses', () => {
+    // The anti-retargeting guarantee is the point of the check and is untouched.
+    const before = graphWithPersistedEntry({
+      value: 1, source: 'brief_extraction',
+      target_match: { node_id: 'other_factor', match_type: 'exact_id', confidence: 'high' },
+    });
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    expect(candidate).toMatchObject({ kind: 'refused', reason: 'invalid_existing_intervention' });
+  });
+
+  it('⚠ REFUSAL RETAINED: an entry with no usable value still refuses', () => {
+    const before = graphWithPersistedEntry({ source: 'brief_extraction', display_value: 'Very high' });
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    expect(candidate).toMatchObject({ kind: 'refused', reason: 'invalid_existing_intervention' });
+  });
+
+  it('⚠ BEFORE ANALYSIS TOO — the witnessed arm had never run one', () => {
+    // Root's stop was a saved example with no analysis and no chat. Nothing in
+    // this path may require either.
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(1));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75, hasExistingAnalysis: false, freshness: 'none' }),
+      persistedGraph: before,
+    });
+    expect(candidate.kind).toBe('candidate');
+  });
+});
