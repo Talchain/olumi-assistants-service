@@ -897,6 +897,39 @@ function applyGoalTargetRedirect(
   const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
   if (currentGoalNode.goal_threshold !== undefined) return false;
 
+  // ⭐⭐ AN UPSTREAM MINT THAT RESOLVED NO CAP STILL WROTE THE USER'S TARGET.
+  //
+  // `projector.ts:1335` writes `goal_threshold_raw` UNCONDITIONALLY and writes
+  // `goal_threshold`/`_cap`/`_frame` only `if (cap !== null)`. The cap resolver
+  // ends `if (raw > 0) return raw * 1.25; return null`
+  // (`utils/goal-threshold-cap.ts`), so a STATED TARGET OF ZERO resolves null
+  // and leaves a PARTIAL QUAD: raw written, threshold absent.
+  //
+  // Guarding on `goal_threshold` alone therefore misses it, and this function
+  // goes on to overwrite the user's stated zero with whatever the extracted
+  // factor carries — in the witnessed case, THE CURRENT LEVEL they were trying
+  // to move away from. A goal labelled "Cut Churn From 4% To Zero" shipped
+  // `goal_threshold_raw: 4`. That is not a mislabelled value; it CONTRADICTS
+  // the user's stated intent with the number they explicitly rejected.
+  //
+  // ⚠ THE PREDICATE IS THE CONSUMER'S, NOT `!== undefined`. `goal_threshold_raw`
+  // is `z.number().nullable().optional()` (`schemas/graph.ts:344`), and
+  // `null !== undefined` is TRUE — so an `!== undefined` guard would DEFER TO A
+  // NULL and suppress a legitimate mint, trading this lie for a gap. This is
+  // `pickGoalThresholdTrio`'s own anchor test (`utils/goal-threshold-trio.ts`),
+  // which is what decides whether a raw value actually rides to a consumer:
+  // defer exactly when one would.
+  //
+  // The zero is DEFERRED TO, not discarded — it stays on the node as
+  // `goal_threshold_raw: 0` and still rides the trio, so the target remains
+  // explicit and recoverable while `goal_threshold` stays honestly unresolved.
+  if (
+    typeof currentGoalNode.goal_threshold_raw === "number" &&
+    Number.isFinite(currentGoalNode.goal_threshold_raw)
+  ) {
+    return false;
+  }
+
   // Full delegation to the SAME cap doctrine as the chat-path
   // add_constraint handler (cap-doctrine unification, ROADMAP 1.18):
   // an existing compatible cap wins, '%' always normalises against
