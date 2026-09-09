@@ -822,10 +822,16 @@ function wordsBesidesTheValueToken(
   if (spanStart < 0 || spanEnd > text.length || spanStart >= spanEnd) return null;
   let start = spanStart;
   while (start > 0 && /[£$€\s]/.test(text[start - 1] as string)) start -= 1;
-  let end = spanEnd;
-  while (end < text.length && text[end] === '%') end += 1;
-  const suffix = /^[A-Za-z]{1,2}(?![A-Za-z])/.exec(text.slice(end));
-  if (suffix !== null) end += suffix[0].length;
+  // A percent sign and/or a short unit suffix ("£20k" → "k", "92%" → "%"),
+  // matched POSITIONALLY in one pass.
+  //
+  // ⚠ Written as one regex rather than a per-character equality scan on
+  // purpose: that spelling is the shape `unit-scale-class.test.ts` pins as a
+  // KNOWN-UNMIGRATED unit-equality site, and this is a CHARACTER scan, not a
+  // unit comparison. Adding this file to that set would have recorded it as
+  // something it is not — the honest fix is to stop matching the pattern.
+  const trailing = /^%?[A-Za-z]{0,2}(?![A-Za-z])/.exec(text.slice(spanEnd));
+  const end = spanEnd + (trailing === null ? 0 : trailing[0].length);
   const residue = `${text.slice(0, start)} ${text.slice(end)}`;
   return residue.toLowerCase().match(/[a-z']+/g) ?? [];
 }

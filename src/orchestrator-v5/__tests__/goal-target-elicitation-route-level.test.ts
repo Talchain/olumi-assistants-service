@@ -678,14 +678,30 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     mockedPersistedGraph = graph;
     const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
     mockedPendingActions = [goalTargetPending(liveHash)];
-    const { adapter, chatWithTools } = directAnswerAdapter();
+    const { adapter } = directAnswerAdapter();
 
     await runTurnExecutor(payload('Set churn to 4%'), 'req-goal-scoped-edit', {
       routingAdapter: adapter,
       graphState: graph,
     });
 
-    expect(chatWithTools, 'the pre-route claimed a scoped edit').toHaveBeenCalled();
+    // ⚠ THE ADAPTER IS NOT THE EVIDENCE HERE, and asserting it was my error —
+    // hosted CI showed `chatWithTools` UNCALLED. That is correct behaviour, not
+    // a defect: "Set churn to 4%" names a FACTOR with an edit verb and a
+    // quantity, so the DETERMINISTIC value-update pre-route claims it, and that
+    // route makes no LLM call. The message reaching its ordinary path and the
+    // adapter being called are different claims, and I conflated them.
+    //
+    // What actually proves the goal pre-route did not take the turn is that it
+    // emitted no match for its own kind, and that the question it asked is
+    // still live afterwards.
+    expect(
+      events.filter(
+        (e) =>
+          e.event === 'v5.pending_action.matched' && e.data['kind'] === 'elicit_goal_target',
+      ),
+      'the goal-target pre-route claimed a scoped factor edit',
+    ).toHaveLength(0);
     for (const g of committedGraphs()) {
       expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
     }
