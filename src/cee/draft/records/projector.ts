@@ -1534,10 +1534,25 @@ function causalTargetKey(claim: DraftInferenceClaim): string | null {
  * single-candidate case.
  */
 function claimConflictsWithStatedParent(
+  statedItems: readonly DraftStatedItem[],
   claims: readonly DraftInferenceClaim[],
   parentStatedIndex: number,
   refinementClaimIndex: number,
 ): boolean {
+  const parent = statedItems[parentStatedIndex];
+  const refinementClaim = claims[refinementClaimIndex];
+  // Opposing explicit baseline roles name distinct alternatives even when the
+  // parent supplies no magnitude to compare. Missing roles are not inferred.
+  if (
+    parent?.kind === "option" &&
+    refinementClaim?.claim_kind === "option_refinement" &&
+    typeof parent.is_baseline === "boolean" &&
+    typeof refinementClaim.is_baseline === "boolean" &&
+    parent.is_baseline !== refinementClaim.is_baseline
+  ) {
+    return true;
+  }
+
   const magnitudesByTarget = (
     ownsSource: (claim: DraftInferenceClaim) => boolean,
   ): Map<string, Set<number>> => {
@@ -2729,7 +2744,7 @@ function projectOnce(
       // alternatives; leave them standing.
       if (
         claimIndices.length === 1 &&
-        !claimConflictsWithStatedParent(claims, parent, claimIndices[0]!)
+        !claimConflictsWithStatedParent(statedItems, claims, parent, claimIndices[0]!)
       ) {
         refinementParentStatedIndex.set(claimIndices[0]!, parent);
       }
