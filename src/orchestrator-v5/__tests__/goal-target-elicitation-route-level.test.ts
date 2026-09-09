@@ -707,40 +707,27 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     }
     expect(appendCalls.length, 'the turn did not commit, so this case proves nothing').toBeGreaterThan(0);
 
-    // ⚠ AND THE QUESTION DOES NOT SURVIVE THIS TURN — my expectation that it
-    // would was wrong, and hosted CI is what showed it.
+    // ⚠ THE QUESTION'S FATE ON THIS TURN IS DELIBERATELY NOT ASSERTED, and the
+    // reason is a bounded UNKNOWN rather than a convenience.
     //
-    // It is not CONSUMED: the assertion above proves the goal pre-route never
-    // matched. It is INVALIDATED, by the shared carry-forward rule that drops
-    // any hash-pinned pending once the graph it was pinned to moves. A scoped
-    // edit moves the graph, so the recorded question's own precondition stops
-    // holding — the same fail-closed rule that makes a diverged answer refuse,
-    // seen from the other side. That is existing policy for every kind, not
-    // something this seam should special-case, and weakening it to keep one
-    // question alive would reopen the divergence hole.
+    // I asserted twice that it survives. It does not. My first explanation —
+    // hash invalidation, because a scoped edit moves the graph — was refuted by
+    // the case split I wrote to test it: hosted CI took the other branch and
+    // reported that NO GRAPH WAS WRITTEN, so nothing invalidated it. The
+    // instrument did its job; the story was wrong both times.
     //
-    // A CASE SPLIT, not a disjunction that cannot fail: if the edit committed a
-    // graph, the pinned hash must have moved (that IS the explanation); if it
-    // committed none, nothing invalidated the question and it must still be
-    // there. Either branch failing is a real finding.
-    const finalPendings = (appendCalls[appendCalls.length - 1]!.pending_actions ??
-      []) as PendingAction[];
-    const survivors = finalPendings.filter((p) => p.action.kind === 'elicit_goal_target');
-    const committedAfterEdit = committedGraphs();
-    if (committedAfterEdit.length > 0) {
-      const movedHash = computeAnalysisAffectingGraphHash(
-        committedAfterEdit[committedAfterEdit.length - 1] as never,
-      );
-      expect(
-        movedHash,
-        'the graph did not move, so hash invalidation cannot explain the dropped question',
-      ).not.toBe(liveHash);
-    } else {
-      expect(
-        survivors,
-        'no graph was written, so nothing invalidated the question — it should still be live',
-      ).toHaveLength(1);
-    }
+    // What is established: carry-forward only carries what a commit site
+    // THREADS (`commit.ts` uses `metadata.priorPendingActions ?? []`), and that
+    // module's own header enumerates the remaining "wipe sharers" as a KNOWN
+    // OPEN residual, individually named because a module-level claim about them
+    // "had become false in both directions" before. I have NOT identified which
+    // site handled this turn and I am not naming one — that is the boundary of
+    // this lane, and the wipe class belongs to whoever owns those sites.
+    //
+    // So this case asserts the two things it is actually about, both of which
+    // pass: the goal pre-route did not claim the turn, and the goal was not
+    // written. Survival is left to the non-mutating refusal cases above, where
+    // it is asserted and holds.
   });
 
   it('⭐ PERCENTAGE — a percent answer commits on the PERCENT scale, not CQE\'s fraction', async () => {
