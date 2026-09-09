@@ -341,7 +341,57 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
-      const params = resolveParams(invocation);
+      const proposedParams = resolveParams(invocation);
+
+      /**
+       * ⭐⭐ AN ANSWER TO THE BASELINE QUESTION STATES A CURRENT LEVEL, NEVER A
+       * NEW LIMIT — so this node's success constraint is UNCHANGED by it.
+       *
+       * A target carries TWO semantic quantities: its BASELINE (where it is
+       * now) and its SUCCESS CONSTRAINT (where the user needs it to get to).
+       * The warrant that admits an answer is scoped to (handler, target), and
+       * that is one scope too coarse: granting authority over the baseline
+       * conferred it on the limit. Measured — the offered answer "Churn rate is
+       * 30%" with a model proposal of 30 rewrote the user's own 10% limit to
+       * 30%, DROPPED its `value_frame: level`, and recorded NO baseline, while
+       * replying "Updated constraint: Churn rate must be at most 30%."
+       *
+       * Preserving the row is also what lets the baseline actually record: the
+       * frame is inherited only while this turn's value and unit are unchanged
+       * (see `inheritedValueFrame`), and the mint cell needs that frame. A turn
+       * that "updates" the limit to the answer's number destroys the very
+       * attestation the mint depends on — which is why the witnessed defect
+       * both corrupted the limit AND lost the baseline.
+       *
+       * This is the handler's existing OMISSION MEANS UNCHANGED doctrine — held
+       * already for `unit` (the gc-cdd6eb74 silent nullification) and for
+       * `value_frame` (2.877) — reaching the field those two left exposed. An
+       * EXPLICIT limit change never arrives with this authority and is
+       * byte-unchanged.
+       *
+       * Matched on the TARGET, not on the proposed operator: a model that
+       * mis-reads the answer may propose the other operator too, and appending
+       * a second row would be the same harm wearing a different shape.
+       */
+      const answersBaselineForThisTarget =
+        invocation.baselineAnswerAuthority?.targetId === targetId;
+      const constraintRowThisAnswerPreserves = answersBaselineForThisTarget
+        ? graph.goal_constraints?.find((c) => c.node_id === targetId)
+        : undefined;
+
+      const params =
+        constraintRowThisAnswerPreserves !== undefined
+          ? {
+              ...proposedParams,
+              constraint_type: (constraintRowThisAnswerPreserves.operator === '<='
+                ? 'at_most'
+                : 'at_least') as typeof proposedParams.constraint_type,
+              value: constraintRowThisAnswerPreserves.value,
+              ...(constraintRowThisAnswerPreserves.unit !== undefined
+                ? { unit: constraintRowThisAnswerPreserves.unit }
+                : {}),
+            }
+          : proposedParams;
       const operator = TYPE_TO_OPERATOR[params.constraint_type];
 
       // ROADMAP 1.52 — goal-fit sign-inversion backstop. "reduce/decrease/

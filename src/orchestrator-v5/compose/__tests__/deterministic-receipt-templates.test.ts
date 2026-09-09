@@ -145,6 +145,22 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
   // doctrine check below, because one producer key can only exercise one.
   formatBaselineReask: () =>
     receipts.formatBaselineReask({ targetLabel: SLOT, reason: 'unreadable' }),
+  // The DISAMBIGUATION ask, emitted when a baseline question and a second
+  // bare-number ask are live at once. Slot sentinels in EVERY label position:
+  // the target label, and both labels the competing ask carries into the copy.
+  formatBaselineAskCollision: () =>
+    receipts.formatBaselineAskCollision({
+      targetLabel: SLOT,
+      competing: [
+        {
+          action: {
+            kind: 'elicit_option_effect',
+            option_label: SLOT2,
+            factor_label: SLOT2,
+          },
+        },
+      ] as unknown as Parameters<typeof receipts.formatBaselineAskCollision>[0]['competing'],
+    }),
   // The effect-slot re-ask: `formatBaselineReask`'s shape generalised to the
   // option x factor cell, so it interpolates TWO labels and both are sentinels.
   // Not a receipt — it reports no durable change; it asks one question about a

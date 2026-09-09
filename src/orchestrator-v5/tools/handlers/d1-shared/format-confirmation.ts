@@ -13,6 +13,7 @@ import {
   bandFromMagnitude,
   NEAR_ZERO_INFLUENCE_THRESHOLD,
 } from '../../../format/influence-bands.js';
+import type { PendingAction } from '../../../session/pending-action.js';
 
 const NO_SPACE_UNITS = new Set(['%']);
 const PREFIX_UNITS = new Set(['£', '$', '€', '¥']);
@@ -245,6 +246,63 @@ export function formatBaselineElicitation(input: { readonly targetLabel: string 
  * no internal tokens, no em dash, and no leading-decimal numeral in the
  * example copy (the raw-decimal egress rule).
  */
+/**
+ * THE DISAMBIGUATION ASK, for a number that answers two open questions.
+ *
+ * THE DEFECT IT CLOSES, wire-witnessed on the deployed build. The product asks
+ * "Roughly what percentage is X at right now?" while a second question about an
+ * option effect is still live. A bare number answers the SHAPE of both, so the
+ * elliptical carry correctly refuses to guess which. It then fell through in
+ * SILENCE to a lane that does not refuse, and the number was written as an
+ * effect value on a node the user had never been asked about, disclosed only in
+ * the receipt. The user answered one question and got a value minted somewhere
+ * else.
+ *
+ * The exit is to ASK, not to guess better. Two open questions and one bare
+ * number is genuinely undetermined, and no threshold over the user's own text
+ * settles it: tuning one would trade this harm for its mirror, which is the
+ * oscillation pattern this estate has paid for repeatedly. Where direction
+ * cannot be determined, Olumi asks.
+ *
+ * SCOPE, and it is the whole safety argument: this is emitted ONLY for a
+ * message the SHARED classifier judged an answer to the baseline question
+ * (`bound` or `unresolved`). An INSTRUCTION that happens to carry a number
+ * ("set the pilot's effect on cost to 0.3") classifies `not_an_answer`, is
+ * never claimed here, and still reaches the edit lane exactly as it does today.
+ * A user with a live baseline question may still ask for an effect to be set.
+ *
+ * It states that nothing changed, and that is TRUE by construction rather than
+ * by promise: the caller returns before any handler runs and commits without a
+ * `pending_actions` override, so both questions stay live and no write occurs.
+ *
+ * Leak-safe on the same terms as the ask and the re-ask: no handler ids, no
+ * parameter names, no internal tokens, no em dash, and no raw decimal in the
+ * example copy.
+ */
+export function formatBaselineAskCollision(input: {
+  readonly targetLabel: string;
+  readonly competing: readonly PendingAction[];
+}): string {
+  // Name the OTHER question concretely where its own persisted fields say what
+  // it asked; stay truthfully generic otherwise. No kind list is mirrored here:
+  // an unrecognised kind falls to the generic phrasing, which is correct for
+  // every kind rather than stale for a new one.
+  const named = input.competing
+    .map((pa) =>
+      pa.action.kind === 'elicit_option_effect'
+        ? `the effect of "${pa.action.option_label}" on "${pa.action.factor_label}"`
+        : null,
+    )
+    .find((d): d is string => d !== null);
+  const other = named ?? 'the other question I asked just before this';
+  return (
+    `Two of my questions are open at once, and a number on its own could answer ` +
+    `either of them. Nothing has changed. ` +
+    `Did you mean the current level of ${input.targetLabel}, or ${other}? ` +
+    `Naming it is enough, for example "${input.targetLabel} is 30%".`
+  );
+}
+
 export function formatBaselineReask(input: {
   readonly targetLabel: string;
   readonly reason: 'out_of_range' | 'ambiguous_scale' | 'unreadable';

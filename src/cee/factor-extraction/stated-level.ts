@@ -594,8 +594,42 @@ const ELLIPTICAL_ANSWER_PATTERN = new RegExp(
  * Separating them is what lets the caller re-ask the first WITHOUT hijacking
  * the second. `unresolved` NEVER carries a value: it is the refusal, told.
  */
+/**
+ * ⭐⭐ WHERE A BOUND ANSWER GOT ITS SUBJECT — the second two-meanings-one-value
+ * collapse in this chain, and the one that made the collision fix over-narrow.
+ *
+ * `outcome: "bound"` was true of two replies that carry completely different
+ * authority, and a caller could not tell them apart:
+ *
+ *   - `"subject"` — the reply NAMES its own subject ("Churn rate is 30%",
+ *     "Churn is about 12%."). It bound through the full-sentence limb, which is
+ *     `deriveStatedTargetBaselinePercent`: identity match against the target's
+ *     label plus competitor unanimity. That limb needs NO pending question at
+ *     all — it is the same rule that binds on any other turn. A competing ask
+ *     is IRRELEVANT to it, because there is nothing to borrow.
+ *   - `"elliptical"` — the reply carries no subject ("30%", "about 12%") and
+ *     borrows the pending question's. THIS is the limb the sole-pending gate
+ *     licenses, and the only one a competing ask can make ambiguous.
+ *
+ * Sole-pending permission is needed for ELLIPTICAL CARRY, not for every reply
+ * that happens to be answer-shaped. Collapsing the two is how the product came
+ * to refuse its own offered disambiguating example: it prints
+ * `Naming it is enough, for example "Churn rate is 30%"` and then declined that
+ * exact sentence, because the sentence was `bound` and the gate could see only
+ * `bound`.
+ *
+ * DERIVED, NOT A NEW TEST. This field records WHICH LIMB produced the value —
+ * it is not a second predicate over user text and it tunes nothing. There is no
+ * threshold here to drift.
+ */
+export type ElicitedBaselineAnswerAuthority = "subject" | "elliptical";
+
 export type ElicitedBaselineAnswer =
-  | { readonly outcome: "bound"; readonly percent: number }
+  | {
+      readonly outcome: "bound";
+      readonly percent: number;
+      readonly authority: ElicitedBaselineAnswerAuthority;
+    }
   | {
       readonly outcome: "unresolved";
       readonly reason: "out_of_range" | "ambiguous_scale" | "unreadable";
@@ -642,8 +676,11 @@ export function classifyElicitedBaselineAnswer(
     return { outcome: "not_an_answer" };
   }
 
+  // LIMB 1 — the reply names its own subject. Independent authority: this is
+  // the plain #868 grammar, which binds by identity and competitor unanimity
+  // with no pending question in play at all.
   const full = deriveStatedTargetBaselinePercent(message, targetLabel, competingLabels);
-  if (full !== undefined) return { outcome: "bound", percent: full };
+  if (full !== undefined) return { outcome: "bound", percent: full, authority: "subject" };
 
   const m = ELLIPTICAL_ANSWER_PATTERN.exec(message);
   if (m !== null) {
@@ -659,7 +696,9 @@ export function classifyElicitedBaselineAnswer(
     if (!hasExplicitUnit && raw.includes(".") && value < 1) {
       return { outcome: "unresolved", reason: "ambiguous_scale" };
     }
-    return { outcome: "bound", percent: value };
+    // LIMB 2 — no subject of its own; the binding is BORROWED from the pending
+    // question. This is the carry the sole-pending gate licenses.
+    return { outcome: "bound", percent: value, authority: "elliptical" };
   }
 
   if (isAttemptedAnswerShape(message)) {
