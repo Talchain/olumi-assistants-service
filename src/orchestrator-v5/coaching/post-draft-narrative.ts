@@ -771,19 +771,9 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
   // stated and the product declined to enforce outranks a coaching suggestion,
   // and the core block is the one the word-budget ladder sheds LAST.
-  // ⭐⭐ PROMOTE THE FIRST DIRECTION CLARIFICATION AHEAD OF THE INVENTORY.
-  //
-  // The measured failure (native `3d5ce286…`, CEE `a03ead1a`): a first response
-  // that opened "I've built a first model", listed the options, and only then
-  // reached the limit the person had actually stated. This section's own
-  // comment already ranks that line above a coaching suggestion; it was simply
-  // below a change inventory.
-  //
-  // It is MOVED, not duplicated: the promoted bullet is removed from the core
-  // list, so the reader sees it exactly once. With no direction clarification
-  // the slot is null, the core list is unchanged, and the assembled narrative is
-  // byte-identical to before — which is why every draft without a dropped limit,
-  // including the served #1395 cases, does not move.
+  // Promote the first direction clarification to open the reply. Moved, not
+  // duplicated: it is dropped from the core bullets below. With none, the
+  // narrative is byte-identical to before.
   const [promotedDirectionBullet = null, ...remainingDirectionBullets] = directionBullets;
   const leadClarification = promotedDirectionBullet;
   const coreBullets = [
@@ -2096,13 +2086,10 @@ interface SectionedNarrativeInput {
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
   /**
-   * ⭐ The ONE stated-limit clarification promoted ahead of the change
-   * inventory, or `null` when the draft has none.
-   *
-   * Not a new sentence: it is the first `pickDirectionClarifications` line —
-   * the carrier that already exists for "you stated a limit and the product did
-   * not enforce it" — rendered on its own so it can lead. When it is non-null
-   * it is REMOVED from the weighing block below, so the person reads it once.
+   * The one stated-limit clarification promoted ahead of the confirm sentence,
+   * or `null` when the draft has none. Not new copy: the first
+   * `pickDirectionClarifications` line, MOVED — it is removed from the weighing
+   * block so the person reads it once.
    */
   readonly leadClarification: string | null;
   readonly nextStep: string;
@@ -2151,32 +2138,15 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     includeOptions: boolean,
     includeCompleteness: boolean,
   ): string => {
-    const blocks: string[] = [input.confirm];
-    // ⭐⭐ A STATED LIMIT THE PRODUCT DID NOT ENFORCE LEADS — BEFORE THE
-    // INVENTORY, NOT AFTER IT.
-    //
-    // Measured on the fresh pricing draft, native request
-    // `3d5ce286-9804-4a59-ad4e-d6921d31141f` (9 Sep 2026, CEE `a03ead1a`): the
-    // first thing the person read was "I've built a first model", then the
-    // option list, and only then anything about the limit they had stated.
-    // Their brief said "keeping monthly churn under 4%"; the server captured
-    // ZERO constraints for it. The one line that says so was composed — it is a
-    // direction clarification, and the weighing section's own comment already
-    // ranks it: "A limit the user stated and the product declined to enforce
-    // outranks a coaching suggestion." It was simply BELOW a change inventory.
-    //
-    // ⚠ THIS INTEGRATES THE EXISTING CARRIER RATHER THAN ADDING ONE. No new
-    //   sentence is invented, nothing is asserted about the limit's meaning, and
-    //   an unbound constraint stays honestly unbound — the promoted text is the
-    //   same `pickDirectionClarifications` line, moved.
-    //
-    // ⚠ NARROW BY CONSTRUCTION. When there is no such clarification the slot is
-    //   null and the assembly is byte-identical to before, so every draft
-    //   without a dropped limit — including the served #1395 cases — is
-    //   unchanged.
-    if (input.leadClarification !== null && input.leadClarification.length > 0) {
-      blocks.push(input.leadClarification);
-    }
+    // ⭐ A stated limit the product did not enforce LEADS — before the confirm
+    // sentence, not after it. Measured on native `3d5ce286…`; full narrative in
+    // `output/olumi-delivery-heartbeat/F361-FIRST-RESPONSE-20260909.md`.
+    // Null when the draft has no such clarification, so the assembly is then
+    // byte-identical to before.
+    const blocks: string[] =
+      input.leadClarification !== null && input.leadClarification.length > 0
+        ? [input.leadClarification, input.confirm]
+        : [input.confirm];
     if (includeOptions && input.optionsBlock !== null) {
       blocks.push(input.optionsBlock);
     }
