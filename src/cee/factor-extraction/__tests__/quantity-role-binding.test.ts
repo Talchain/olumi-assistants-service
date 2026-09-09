@@ -81,12 +81,30 @@ describe("quantity identity at the real enrichment write", () => {
     expect(result.factorsAdded).toBe(0);
   });
 
+  it("an unbound range does not quantify a differently named factor", async () => {
+    const brief = "Between 2 and 4.";
+    const input = model("Human Factors Confidence");
+    expect(extractFactors(brief)).toContainEqual(expect.objectContaining({ label: "Factor", value: 3, extractionType: "range" }));
+    const result = await enrichGraphWithFactorsAsync(input, brief);
+    expect(node(result.graph, FEATURE_ID)).toEqual(node(input, FEATURE_ID));
+    expect(result.factorsAdded).toBe(0);
+  });
+
+  it("an exact existing quantity label retains its prior binding", async () => {
+    const result = await enrichGraphWithFactorsAsync(model("Value"), "The stated amount is £20000.");
+    expect(FactorData.parse(node(result.graph, FEATURE_ID).data)).toMatchObject({
+      value: 0.2, raw_value: 20000, cap: 100000, unit: "£",
+    });
+    expect(result.factorsEnhanced).toBe(1);
+  });
+
   it("positive counterpart: the same brief retains stated current and proposed prices and raw scale", async () => {
     const result = await enrichGraphWithFactorsAsync(model(), ORIGINAL_BRIEF);
     expect(result.extractionMode).toBe("regex-only");
     const price = FactorData.parse(node(result.graph, PRICE_ID).data);
     expect(price).toMatchObject({ value: 0.59, baseline: 49, raw_value: 59, cap: 100, unit: "£", factor_type: "price", extractionType: "explicit", display_value: "£59" });
-    expect(price.value).toBe(price.raw_value! / price.cap!);
+    if (price.raw_value === undefined || price.cap === undefined) throw new Error("Price lost its raw scale");
+    expect(price.value).toBe(price.raw_value / price.cap);
     expect(node(result.graph, GOAL_ID).goal_baseline).toBeUndefined();
     // No claim that the existing goal grammar has acquired the trailing MRR
     // target or that execution now establishes goal/churn success.

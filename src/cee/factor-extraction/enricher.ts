@@ -257,6 +257,20 @@ function labelsMatch(label1: string, label2: string): boolean {
 }
 
 /**
+ * `inferLabel` uses Value/Rate/Factor when it cannot identify the quantity.
+ * Those fallback words can select a longer qualitative label by substring,
+ * but do not establish that the number measures that node. Even a shared
+ * sentence/source quote cannot supply the missing semantic identity.
+ * Keep exact-label behaviour and identified quantities unchanged; refuse the
+ * selected write (including replacement-node creation) rather than guessing.
+ */
+function hasUnboundQuantityLabel(node: NodeT, factor: ExtractedFactor): boolean {
+  const extractedLabel = factor.label.trim().toLowerCase();
+  return /^(?:value|rate|factor)$/.test(extractedLabel)
+    && node.label?.trim().toLowerCase() !== extractedLabel;
+}
+
+/**
  * ⭐⭐ THE STATED QUOTE ON A PROJECTED NODE, OR `undefined`.
  *
  * ⚠ READ FROM AN UNTYPED KEY ON PURPOSE. `Node` (`schemas/graph.ts:306`)
@@ -554,6 +568,10 @@ export function enrichGraphWithFactors(
     );
 
     if (existingNode) {
+      if (hasUnboundQuantityLabel(existingNode, factor)) {
+        factorsSkipped++;
+        continue;
+      }
       // Enhance existing factor with data if it doesn't have meaningful values
       // Check for actual numeric data, not just existence of data object
       // Use type guard to ensure we're checking FactorData properties (not OptionData)
@@ -1164,6 +1182,15 @@ export async function enrichGraphWithFactorsAsync(
     );
 
     if (existingNode) {
+      if (hasUnboundQuantityLabel(existingNode, factor)) {
+        factorsSkipped++;
+        warnings.push(`Quantity "${factor.matchedText}" has no identified measure for "${existingNode.label}"; its value was left unchanged.`);
+        log.info(
+          { event: "cee.factor_enrichment.refused_unbound_quantity", nodeId: existingNode.id, extractedLabel: factor.label },
+          "Refusing to bind a fallback quantity label to a different factor",
+        );
+        continue;
+      }
       // Enhance existing factor with data if it doesn't have meaningful values
       // Use type guard to ensure we're checking FactorData properties (not OptionData)
       const hasFactorData = isFactorData(existingNode.data) && (
