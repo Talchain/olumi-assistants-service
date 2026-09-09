@@ -135,6 +135,81 @@ describe("quantity identity at the real enrichment write", () => {
     expect(node(result.graph, FEATURE_ID)).toEqual(node(model(), FEATURE_ID));
   });
 
+
+  /**
+   * ⭐⭐⭐ THE RECEIVING-PATH REGRESSION FOR THE CURRENCY DEFAULT.
+   *
+   * `inferFactorType`'s currency branch is the one place in that function that
+   * answers a question it has no evidence for: three keyword checks, then
+   * `return "cost"`. Every other unknown falls through to `"other"`.
+   *
+   * ⚠ THESE TESTS DO NOT REPRODUCE THE WITNESSED MISBINDING, AND SAY SO. On the
+   * 2026-09-08 22:38 pricing run the £20k MRR amount reached the graph attached
+   * to "Pro Feature Value Perception" as `factor_type:'cost'`. The ATTACHMENT is
+   * already refused at this tip — that is what the first four cases in this file
+   * pin, and #1405 closed it. What remains reachable is narrower and is what is
+   * tested here: when a currency amount LEGITIMATELY binds under the extractor's
+   * fallback label `Value`, the write still stamps a positive claim about which
+   * kind of money it is.
+   *
+   * Both cases assert their own precondition — that the amount was actually
+   * written — so neither can pass by the binding quietly disappearing.
+   */
+  it("⭐ a legitimately bound fallback-label amount is NOT stamped as a cost", async () => {
+    const result = await enrichGraphWithFactorsAsync(model("Value"), "The stated amount is £20000.");
+    const written = FactorData.parse(node(result.graph, FEATURE_ID).data);
+
+    // Precondition, in-test: the amount really did land on this node.
+    expect(result.factorsEnhanced).toBe(1);
+    expect(written).toMatchObject({ raw_value: 20000, cap: 100000, unit: "£", value: 0.2 });
+
+    // "The stated amount" says nothing about the KIND of money.
+    expect(written.factor_type).not.toBe("cost");
+    expect(written.factor_type).toBe("other");
+  });
+
+  it("⭐ the captured pricing brief's £20k MRR amount, once bound, is not a cost either", async () => {
+    const result = await enrichGraphWithFactorsAsync(model("Value"), ORIGINAL_BRIEF);
+    const written = FactorData.parse(node(result.graph, FEATURE_ID).data);
+
+    // Precondition: this is the captured £20k, on the captured text.
+    expect(written).toMatchObject({ raw_value: 20000, unit: "£" });
+
+    expect(written.factor_type).not.toBe("cost");
+    expect(written.factor_type).toBe("other");
+  });
+
+  it("⚠ withholding the CLAIM withholds nothing the person sees or analyses", async () => {
+    // The amount, its scale and its rendering must be identical to a factor that
+    // genuinely types `cost`. Only the unsupported claim differs — otherwise this
+    // is a silent data loss wearing an honesty argument.
+    const asCost = await enrichGraphWithFactorsAsync(model("Annual Hiring Budget"), "Our hiring budget is £200k.");
+    const unclassified = await enrichGraphWithFactorsAsync(model("Value"), "The stated amount is £200k.");
+    const a = FactorData.parse(node(asCost.graph, FEATURE_ID).data);
+    const b = FactorData.parse(node(unclassified.graph, FEATURE_ID).data);
+
+    expect(a.factor_type).toBe("cost");
+    expect(b.factor_type).toBe("other");
+
+    expect(b.value).toBe(a.value);
+    expect(b.raw_value).toBe(a.raw_value);
+    expect(b.cap).toBe(a.cap);
+    expect(b.unit).toBe(a.unit);
+    expect(b.display_value).toBe(a.display_value);
+    expect(b.display_value).toBeDefined();
+  });
+
+  it("⭐ discriminating twin: a stated revenue amount still types revenue", async () => {
+    const result = await enrichGraphWithFactorsAsync(model("Revenue"), "Our monthly revenue is £30k.");
+    const written = FactorData.parse(node(result.graph, FEATURE_ID).data);
+    expect(result.factorsEnhanced).toBe(1);
+    expect(written).toMatchObject({ factor_type: "revenue", raw_value: 30000, unit: "£" });
+  });
+
+  // The cost twin is the existing "positive non-pricing counterpart" case above:
+  // "Annual Hiring Budget" / "Our hiring budget is £200k." already asserts
+  // `factor_type: "cost"`, and its expectation is deliberately NOT graduated.
+
   it("existing absolute-level authority distinguishes stated churn from uplift or an upper bound", () => {
     expect(deriveStatedTargetBaselinePercent("Monthly churn is 3% today.", "Monthly churn")).toBe(3);
     expect(deriveStatedTargetBaselinePercent("Monthly churn uplift is 4%.", "Monthly churn")).toBeUndefined();
