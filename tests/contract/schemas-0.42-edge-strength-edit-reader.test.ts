@@ -112,7 +112,36 @@ describe('schema 0.42 — root edge_strength_edit contract', () => {
     // constant, byte-identical validation, not a tightening. Nothing removed,
     // nothing renamed (`git diff --name-status -M` reports zero R entries).
     // `src/graph.ts` is byte-identical between the two tags.
-    expect(SCHEMA_PACKAGE_VERSION).toBe('0.50.0');
+    // 0.50.0 → 0.54.0 (`option_intervention_edit`, the per-cell option→factor
+    // effect carrier). RE-DERIVED THE SAME WAY rather than inherited: BOTH
+    // tarballs were pulled from the registry — 0.50.0 sha1 `ed84e38a…`, 0.54.0
+    // sha1 `1281c862…`, each matching the registry's own published shasum — and
+    // every `dist` file mentioning `edge_strength_edit` was compared.
+    //
+    // The FILE SET is identical (the same five files). Measured symmetrically,
+    // line numbers stripped from BOTH sides:
+    //   turn-payload.d.ts  19 → 19 lines, ZERO lost
+    //   turn-payload.js    10 → 11 lines, ZERO lost — the one added hit is a
+    //                      COMMENT inside the new member's header (`The
+    //                      reasoning is \`edge_strength_edit\`'s, unchanged,
+    //                      because the two`), the same shape as the four
+    //                      comment hits the 0.48.0 entry above records;
+    //   enums.js           3 → 3 lines, ZERO lost;
+    //   fixtures/index.js  3 → 3 lines, ZERO lost;
+    //   enums.d.ts         1 → 1, and the one line DIFFERS — it is the
+    //                      `SystemEventKind` literal. Proven APPEND-ONLY by
+    //                      STRING EQUALITY, exactly as the 0.48.0 entry did:
+    //                      0.50's literal with `, "option_intervention_edit"`
+    //                      inserted after `"structural_rename"` is EQUAL to
+    //                      0.54's, so nothing was removed, renamed or
+    //                      reordered.
+    // Same positive control as its predecessors: `package.json` DOES differ
+    // between the two tarballs, so the comparator is demonstrably able to see a
+    // difference and these verdicts are not a check that cannot fail.
+    //
+    // So the strict member, the root superRefine and the intent/direction
+    // vocabularies this suite exercises are unchanged across the bump.
+    expect(SCHEMA_PACKAGE_VERSION).toBe('0.54.0');
   });
 
   it('accepts a valid set event through the ROOT payload schema without rewriting it', () => {
@@ -267,12 +296,16 @@ describe('schema 0.42 — pre-0.42 system-event corpus is byte-compatible', () =
     // independent evidence that the 0.48.0 → 0.50.0 bump removed and renamed
     // NOTHING in this vocabulary — the additions genuinely arrive at the end.
     expect(SystemEventKind.options.slice(0, PRE_042_KINDS.length)).toEqual([...PRE_042_KINDS]);
+    // 0.54.0 appends `option_intervention_edit` the same way, and the PREFIX
+    // assertion above passing unchanged is again the independent evidence that
+    // the bump removed and renamed NOTHING — the addition arrives at the end.
     expect(SystemEventKind.options.slice(PRE_042_KINDS.length)).toEqual([
       'edge_strength_edit',
       'structural_delete',
       'structural_add',
       'structural_add_edge',
       'structural_rename',
+      'option_intervention_edit',
     ]);
   });
 

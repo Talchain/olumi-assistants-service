@@ -94,6 +94,28 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // graph the user was looking at). Neither is resolved back to a reader floor
     // under CAS off/shadow, for the reason `structural_delete` records.
     //
+    // 2026-09-08 (schemas 0.54.0) — `option_intervention_edit` joins, and this
+    // is the conscious act with its justification, as the note above requires.
+    //
+    // It could not be `'ack_and_commit'` for the reason `structural_delete`
+    // records, in the value direction rather than the removal one: an ack
+    // commits a turn row and writes NO graph, so the effect value the user set
+    // would be gone on the next reload — a number they watched vanish.
+    //
+    // It could not be `'reader_only_refusal'` either. That posture tells the
+    // user, truthfully, that this version cannot apply the gesture; the
+    // sentence becomes false the instant a writer exists, and one does — the
+    // writer released in #1279, reached here through its public route.
+    //
+    // ⚠ ITS SAFETY IS NOT INHERITED FROM THIS ROW. `base_graph_hash` is
+    // recomputed by the writer from the graph it loaded and refused on
+    // mismatch; the effect value is verified in the committed bytes before
+    // anything is called committed; and — unlike `structural_rename` — it needs
+    // no `expected` twin, because an intervention IS inside the
+    // analysis-affecting projection, so a concurrent write to the same cell
+    // moves the hash the gate already checks. Not resolved back to a reader
+    // floor under CAS off/shadow, for the reason `structural_delete` records.
+    //
     // ⚠ ORDER IS THE MAP'S INSERTION ORDER, not alphabetical, and is asserted
     // as such — `.map()` over `Object.entries` preserves it.
     expect(mutating).toEqual([
@@ -102,6 +124,7 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
       'structural_delete',
       'structural_add',
       'structural_rename',
+      'option_intervention_edit',
     ]);
   });
 

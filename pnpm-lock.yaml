@@ -67,8 +67,8 @@ importers:
         specifier: ^2.90.1
         version: 2.90.1
       '@talchain/schemas':
-        specifier: file:./vendor/talchain-schemas-0.50.0.tgz
-        version: file:vendor/talchain-schemas-0.50.0.tgz
+        specifier: file:./vendor/talchain-schemas-0.54.0.tgz
+        version: file:vendor/talchain-schemas-0.54.0.tgz
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
@@ -2146,9 +2146,9 @@ packages:
     resolution: {integrity: sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w==}
     engines: {node: '>=10'}
 
-  '@talchain/schemas@file:vendor/talchain-schemas-0.50.0.tgz':
-    resolution: {integrity: sha512-O389F41aM3ouzHiAqqgHmdwmJe4N/h+yE58gYJTl7tC8zxkQ84CcpMhtSJ+HO7mgfj3cziz8CrwOL8rEuxiYrQ==, tarball: file:vendor/talchain-schemas-0.50.0.tgz}
-    version: 0.50.0
+  '@talchain/schemas@file:vendor/talchain-schemas-0.54.0.tgz':
+    resolution: {integrity: sha512-c/2IvSiRhZS3qcOiEhQReSzGjaivbqJUs7PFsLgFXA5LLlGDILPeKbglk2xY1PyqC7ETLO+xNZMDAXtvryEEIA==, tarball: file:vendor/talchain-schemas-0.54.0.tgz}
+    version: 0.54.0
     engines: {node: '>=18.0.0'}
 
   '@types/archiver@7.0.0':
@@ -3053,6 +3053,7 @@ packages:
   eslint@9.39.1:
     resolution: {integrity: sha512-BhHmn2yNOFA9H9JmmIVKJmd288g9hrVRDkdoIgRCRuSySRUHH7r/DI6aAXW9T1WwUuY3DFgrcaqB+deURBLR5g==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -4095,6 +4096,7 @@ packages:
   prom-client@14.2.0:
     resolution: {integrity: sha512-sF308EhTenb/pDRPakm+WgiN+VdM/T1RaHj1x+MvAuT8UiQP8JmOEbxVqtkbfR4LrvOg5n7ic01kRBDGXjYikA==}
     engines: {node: '>=10'}
+    deprecated: prom-client has been replaced by @prometheus-io/client
 
   protobufjs@7.6.5:
     resolution: {integrity: sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw==}
@@ -7832,7 +7834,7 @@ snapshots:
     dependencies:
       defer-to-connect: 2.0.1
 
-  '@talchain/schemas@file:vendor/talchain-schemas-0.50.0.tgz':
+  '@talchain/schemas@file:vendor/talchain-schemas-0.54.0.tgz':
     dependencies:
       zod: 3.25.76
 

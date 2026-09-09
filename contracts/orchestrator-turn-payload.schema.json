@@ -979,6 +979,42 @@
                     "base_graph_hash"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "option_intervention_edit"
+                    },
+                    "option_id": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical id of the OPTION whose effect value is being set. The intervention belongs to the option: writing this map onto a factor is a well-formed patch that means nothing and that nothing downstream reports."
+                    },
+                    "factor_id": {
+                      "$ref": "#/definitions/OrchestratorTurnPayloadSchema/anyOf/1/properties/event/anyOf/11/properties/from",
+                      "description": "Exact canonical id of the FACTOR this option would move. The server must resolve it in its own persisted graph and refuse an id that names no node: every surface that lists interventions falls back to the raw key when the lookup misses, so an unchecked write surfaces a wire id to the user one hop later."
+                    },
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1,
+                      "description": "The effect value on the MODEL scale. Bounded [0, 1] because that is the scale the served edit instruction states and the range the canonical writer already refuses outside — the bound is derived from the producer, not chosen here. No unit, no currency and no percentage: the client converts nothing, and the server licenses no raw-unit conversion on this path."
+                    },
+                    "base_graph_hash": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The canonical analysis-affecting graph hash the client last read. The stale gate: an intervention value IS analysis-affecting, so a concurrent change to this cell moves the hash and the server refuses rather than clobbering it. Absent, null and empty are all forbidden. NO `expected` TWIN, and the asymmetry with structural_rename is DERIVED, not an oversight: rename needs one because CEE's projectNode deliberately omits `label` from the hash, so a concurrent rename moves nothing. Interventions are inside the projection, so this gate already sees a concurrent write to the same cell."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "option_id",
+                    "factor_id",
+                    "value",
+                    "base_graph_hash"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }

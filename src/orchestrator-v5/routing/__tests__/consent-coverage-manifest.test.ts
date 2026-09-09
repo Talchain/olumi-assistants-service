@@ -155,10 +155,24 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     'orchestrator-v5/handlers/chip-click-dispatch.ts',
     // V4 add-option / decline / offer.
     'orchestrator/route-v2.ts',
-    // INTERNAL / UNADMITTED / UNCOVERED: no production consumer today and
-    // no consent check inside this helper. Its caller must eventually supply
-    // reviewed admission; the mutation referee is NOT evidence of consent.
-    // Recording the writer does not license wiring it into a public path.
+    // ADMITTED 0.54.0 — one production consumer, and no consent check inside
+    // this helper. Updated rather than left standing: the sentence here said
+    // "no production consumer today… its caller must eventually supply reviewed
+    // admission", and that caller now exists.
+    //
+    // WHAT THE CALLER SUPPLIES (`system-events/dispatch.ts`): an authorised,
+    // scenario-bound store; the turn's own ids as the replay key; and
+    // server-derived freshness that fails CLOSED to 'unknown', which the writer
+    // refuses on. What it does NOT supply, because nothing can: a prose consent
+    // verdict. `detectWithheldConsent` is a predicate over the user's own words
+    // and a `system_event` carries none — which is why the value-carrying
+    // siblings (`factor_value_edit`, `edge_strength_edit`, the structural three)
+    // are not subject to it either. The gesture IS the consent: the user named
+    // one cell and typed one number.
+    //
+    // ⚠ THAT EXEMPTION IS PER-CELL AND MUST NOT BE INHERITED BY A BATCH. An
+    // affordance that moves cells the user did not individually name needs its
+    // own answer. The mutation referee is still NOT evidence of consent.
     INTERNAL_OPTION_WRITER,
   ];
 
@@ -213,7 +227,18 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     return body.includes('option-intervention-edit') || /\bexecuteOptionInterventionEdit\b/.test(body);
   }
 
-  it('records the real internal writer but finds no production consumer under the declared scan', () => {
+  /**
+   * ⭐ THE ASSERTION FLIPPED FROM "NONE" TO "EXACTLY ONE", AND THAT IS THE POINT.
+   *
+   * This read `toEqual([])` while the writer was unadmitted. 0.54.0 gave it a
+   * public route, so the honest pin is not "no consumer" — it is that there is
+   * exactly ONE, and which one. Loosening it to "at least one" would retire a
+   * live property: a SECOND consumer is how this estate ends up with two entry
+   * seams onto one applier, disagreeing about what they validate first.
+   *
+   * So a new caller still REDs here, deliberately, and has to be argued for.
+   */
+  it('records the real internal writer and pins its ONE production consumer', () => {
     expect(productionFiles.length).toBeGreaterThan(0);
     expect(graphBearingWriters).toContain(INTERNAL_OPTION_WRITER);
     const writerPath = join(SRC_ROOT, INTERNAL_OPTION_WRITER);
@@ -221,7 +246,9 @@ describe('DERIVED: the manifest of durable graph writers OUTSIDE the executor co
     expect(mentionsInternalOptionWriter(readFileSync(writerPath, 'utf8'))).toBe(true);
     const consumers = productionFiles.filter(p => p !== writerPath
       && mentionsInternalOptionWriter(readFileSync(p, 'utf8')));
-    expect(consumers.map(p => p.slice(SRC_ROOT.length))).toEqual([]);
+    expect(consumers.map(p => p.slice(SRC_ROOT.length))).toEqual([
+      'orchestrator-v5/system-events/dispatch.ts',
+    ]);
   });
 
   it.each([

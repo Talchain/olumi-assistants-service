@@ -2771,7 +2771,49 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         );
         return reply.code(409).send(boundaryError);
       }
-      if (!sysResult.commitPerformed && sysResult.commitSkippedReason !== 'client_only_event') {
+      // ⭐ A VERIFIED NO-OP IS A SUCCESS, NOT A FAILURE. The server looked and the
+      // model already holds what was asked for. Nothing committed, nothing
+      // broken, nothing for the client to do — so it takes the ordinary 200
+      // path below rather than being reported as an infrastructure failure.
+      // `analysis_ready` is deliberately not stamped: the graph did not move, so
+      // the client's prior value is still the truth.
+      //
+      // ⚠ A REFUSAL THAT WROTE NOTHING IS NOT RETRYABLE, and saying it is was the
+      // defect. A permanently unhonourable request — an unresolvable id, an
+      // option and factor that are not linked, a value outside the model scale —
+      // cannot succeed by being repeated. It gets a non-retryable 422 with the
+      // ingress-contract code, so the client corrects the request instead of
+      // hammering it. A STALE BASE does not come here at all: it is a
+      // `graphConflict` and was answered with 409 refresh-and-reconfirm above.
+      //
+      // ⚠ AND "UNVERIFIED" DELIBERATELY FALLS THROUGH TO THE RETRYABLE 500. A
+      // writer that could not confirm what happened must not be described as a
+      // skip — a commit may have landed, and the retry is idempotent on
+      // (scenario_id, turn_id). "We do not know" stays "we do not know".
+      if (sysResult.commitSkippedReason === 'refused_no_write') {
+        const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
+          validator: 'turn_commit',
+          reason: 'system_event_refused_no_write',
+          retryable: false,
+          requestId,
+          stage: ingress.stage,
+          errorCode: 'INGRESS_CONTRACT_VIOLATION',
+          preStageExtras: { event_kind: ingress.event.kind },
+        });
+        log.warn(
+          {
+            request_id: requestId,
+            event_kind: ingress.event.kind,
+          },
+          'V5 system event refused with no write — returning non-retryable 422 BoundaryError envelope',
+        );
+        return reply.code(422).send(boundaryError);
+      }
+      if (
+        !sysResult.commitPerformed &&
+        sysResult.commitSkippedReason !== 'client_only_event' &&
+        sysResult.commitSkippedReason !== 'verified_no_op'
+      ) {
         const boundaryError: BoundaryError = buildCommitFailureBoundaryError({
           validator: 'turn_commit',
           reason: 'system_event_commit_failed',

@@ -42,12 +42,16 @@ import {
   loadPriorFactsWithReadState,
 } from '../build-turn-context.js';
 import { commitDirectAnswer, computeRequestHash } from '../commit.js';
+import { getSessionStore } from '../session/index.js';
+import { executeOptionInterventionEdit } from './option-intervention-edit.js';
+import type { FrameFreshness } from '../graph-management/types.js';
 import type { AnalysisReadyPayload } from '../compose/analysis-ready-emit.js';
 import { computeExpectedGraphCasHashes } from '../context/graph-cas-conflict.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import {
   deriveAnalysisFreshness,
   emitFreshnessTelemetry,
+  isSuccessfulRunAnalysisFact,
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
@@ -66,7 +70,37 @@ import { applyStructuralRename, findStaleRenamedLabel } from './structural-renam
 // grammar at typecheck time without adding a runtime edge into the tools layer.
 import type { StructuralEditOp } from '../tools/propose-structural-edit.js';
 
-export type SystemEventCommitSkipReason = 'client_only_event';
+/**
+ * Why a system-event turn committed nothing — and why this is a VOCABULARY
+ * rather than a boolean.
+ *
+ * ⚠ IT HAD ONE MEMBER, AND THAT MADE `commitPerformed: false` MEAN "THE SERVER
+ * BROKE". `route-v2` reads exactly this: anything that did not commit and is
+ * not a recognised skip becomes HTTP 500 `system_event_commit_failed`,
+ * `retryable: true`. For an acknowledgement kind that was fine. For a
+ * value-carrying writer it is not: a same-value edit and a permanently stale
+ * base both commit nothing, and telling the client to retry either is telling
+ * it to repeat a request that cannot succeed.
+ *
+ * So the states are named apart, because they need opposite follow-ups:
+ *
+ *   · `client_only_event` — nothing to write, by kind.
+ *   · `verified_no_op`    — the server LOOKED and the model already holds what
+ *                           was asked for. Success with nothing to do.
+ *   · `refused_no_write`  — a gate declined and NOTHING was written. The client
+ *                           cannot fix it by repeating the request.
+ *
+ * ⚠ AND THERE IS DELIBERATELY NO MEMBER FOR "UNVERIFIED". A writer that could
+ * not confirm what happened must NOT be described as a skip: a commit may have
+ * landed, so it keeps the retryable failure path (the retry is idempotent on
+ * `(scenario_id, turn_id)`). Minting a skip reason for it would convert "we do
+ * not know" into "nothing happened", which is the one claim the writer
+ * explicitly refuses to make.
+ */
+export type SystemEventCommitSkipReason =
+  | 'client_only_event'
+  | 'verified_no_op'
+  | 'refused_no_write';
 
 export interface DispatchSystemEventResult {
   readonly response: OlumiResponse;
@@ -320,6 +354,19 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // and it now can. See `structural-rename.ts` for the two gates this kind needs
   // and why only ONE of them answers 409.
   structural_rename: 'mutating',
+  // 0.54.0 — the per-cell option→factor effect carrier. `'mutating'` because it
+  // has exactly what that value requires and nothing weaker: a receipt-bearing
+  // writer already on this branch (`option-intervention-edit.ts`, banked
+  // internal in #1279 and released), a server-side write to `scenarios.graph`
+  // through the SAME operation constructor → parser → referee → applier the
+  // conversational path uses, and a committed `edit_graph` fact.
+  //
+  // ⚠ NOT `'ack_and_commit'`, and the delete sibling above says why that
+  // matters: an ack-and-commit writes a turn row and NO graph, so the next turn
+  // reloads a graph that still holds the old value. An effect value that does
+  // not reach `scenarios.graph` is not an edit — it is a number the user watched
+  // vanish on reload.
+  option_intervention_edit: 'mutating',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -645,6 +692,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'structural_add'
   ) {
     return await dispatchStructuralAdd(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'option_intervention_edit'
+  ) {
+    return await dispatchOptionInterventionEdit(payload, payload.event, requestId);
   }
 
   // ── fact_and_commit: the judgement PERSISTS, or the turn fails loud ──────
@@ -1811,6 +1864,296 @@ async function dispatchFactorValueEdit(
  * the rollback. The safety posture is stated the same honest way: base checked at
  * T0, writes ordered by the turn fence, CAS stamped-not-enforced.
  */
+/**
+ * ⭐⭐ 0.54.0 — the PUBLIC route to the option→factor effect writer.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT THIS IS, AND WHY IT IS THIN
+ *
+ * Its siblings above are long because their writers are inline. This one is
+ * short on purpose: `executeOptionInterventionEdit` — released internally and
+ * unadmitted until now — already owns the whole transaction. It loads the
+ * canonical graph, reads the pending authority, verifies the client's asserted
+ * base hash AGAINST THE LOADED BYTES, composes through the same operation
+ * constructor → parser → live referee → applier → intervention encoder the
+ * conversational path uses, commits through `commitDirectAnswer`, reads the
+ * graph BACK, and binds the persisted parent row and its atomic fact before it
+ * will call anything committed.
+ *
+ * So this function adds exactly two things and must add nothing else:
+ * the server-derived inputs the client is not entitled to supply, and an
+ * honest mapping of four outcomes onto the dispatch result.
+ *
+ * ⚠ IT MINTS NO SECOND WRITER, NO SECOND VALIDATION AND NO SECOND POLICY. If a
+ * rule seems missing here, it is because the writer already owns it — check
+ * `prepareOptionInterventionEdit` before adding one, because a second copy of a
+ * rule is how the two spellings start to disagree.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHAT THE CLIENT SUPPLIES, AND WHAT IT MAY NOT
+ *
+ * From the event: the two canonical ids, the model-scale value, and the base
+ * graph hash it last read. Nothing else — the member is `.strict()` and carries
+ * no unit, raw value, provenance or actor precisely so that none of them can
+ * arrive as a claim.
+ *
+ * ⚠ `base_graph_hash` IS AN ASSERTION, NEVER A FACT, and the writer treats it
+ * as one: `prepareOptionInterventionEdit` recomputes the analysis-affecting
+ * hash from the graph it loaded and refuses `stale_graph` on a mismatch. So a
+ * client on a stale base cannot write, whatever it claims here.
+ *
+ * Server-derived here, because they are authority the client does not hold:
+ *
+ *   · `freshness` — the referee consumes it. Derived from the prior facts
+ *     against the hash under edit. ⚠ A DEGRADED READ FAILS CLOSED TO
+ *     `'unknown'`, and the writer REFUSES on `'unknown'` (pinned by
+ *     `option-intervention-transaction.test.ts`). That is deliberate: an
+ *     unreadable fact history is not permission, and this is the one place the
+ *     temptation to default to `'none'` would silently grant it.
+ *   · `hasExistingAnalysis` — observational only. It never authorises the write.
+ *   · `turnId` / `requestId` / `requestHash` — the replay key and the record,
+ *     from the turn rather than from anything the client said.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE FOUR OUTCOMES, AND WHY THREE OF THEM RETURN `commitPerformed: false`
+ *
+ *   committed   → the writer proved it: graph read back, parent row and fact
+ *                 bound, receipt (if any) matching this turn. Its own response
+ *                 is returned with the persisted hash stamped, and the applied
+ *                 graph is handed to the egress sanitiser so the ack's entity
+ *                 ids resolve to labels against the graph that actually landed.
+ *   unchanged   → the value was already what the user asked for. Nothing was
+ *                 appended, so nothing is claimed.
+ *   refused     → a gate declined. No graph, no commit.
+ *   unverified  → ⚠ THE ONE THAT NEEDS CARE. The writer reached this state
+ *                 because it could NOT prove what happened — a commit may have
+ *                 landed. It explicitly refuses to assert a rollback, and
+ *                 neither does this. `commitPerformed: false` is the fail-closed
+ *                 report, not a claim that nothing was written: the retry is
+ *                 idempotent on (scenario_id, turn_id), so under-reporting
+ *                 costs a duplicate-key no-op while over-reporting would tell
+ *                 the finaliser a turn exists that may not. The distinction the
+ *                 boolean cannot carry is carried by the log line instead.
+ *
+ * ⚠ AND NONE OF THE THREE INVENTS COPY. The silent acknowledgement is this
+ * seam's convention, shared with every sibling's refusal path. The surface that
+ * performed the gesture renders the outcome; a message bubble minted here would
+ * be a second voice describing an edit the user is already looking at.
+ */
+async function dispatchOptionInterventionEdit(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'option_intervention_edit' }>,
+  requestId: string,
+): Promise<DispatchSystemEventResult> {
+  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  try {
+    priorFactsRead = await loadPriorFactsWithReadState(payload.scenario_id, requestId);
+  } catch (err) {
+    // The read itself threw. Refuse before any append: a degraded history gives
+    // no trusted freshness, and the prior row stays newest and authoritative.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+      },
+      'V5 option_intervention_edit — prior-fact read failed; refusing any append',
+    );
+    return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+  }
+
+  const freshness: FrameFreshness =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(priorFactsRead.facts, event.base_graph_hash).freshness
+      : 'unknown';
+  const hasExistingAnalysis =
+    priorFactsRead.status === 'ok' && priorFactsRead.facts.some(isSuccessfulRunAnalysisFact);
+
+  const outcome = await executeOptionInterventionEdit(
+    {
+      optionId: event.option_id,
+      factorId: event.factor_id,
+      modelValue: event.value,
+      expectedGraphHash: event.base_graph_hash,
+      scenarioId: payload.scenario_id,
+      turnId: payload.turn_id,
+      requestId,
+      stage: payload.stage,
+      requestHash: computeRequestHash(payload),
+      freshness,
+      hasExistingAnalysis,
+    },
+    getSessionStore(),
+  );
+
+  if (outcome.kind === 'committed') {
+    // ⚠ THE GRAPH FIELD IS A VALIDATED VIEW, AND IT IS NOT THE AUTHORITY.
+    // `DispatchSystemEventResult.graph` feeds the egress sanitiser, which needs
+    // a parsed GraphV3 to resolve entity ids to labels. The writer returns the
+    // raw persisted bytes as `unknown` ON PURPOSE — they are the postimage it
+    // verified, and re-parsing them must never become a second source of truth.
+    // So: parse for PRESENTATION, and keep `analysisGraphHash` — computed by the
+    // writer over the raw bytes — as the hash on the wire. A parse failure
+    // degrades the scrub to graph-free; it does not degrade the receipt.
+    const committedParse = GraphV3.safeParse(outcome.graph);
+    const graphForReadiness = committedParse.success ? committedParse.data : null;
+
+    // ⭐ READINESS AND FRESHNESS ARE RE-DERIVED AGAINST THE BYTES THAT LANDED.
+    //
+    // The `freshness` passed INTO the writer is a pre-write input the referee
+    // consumes; forwarding it here would describe the model as it was before
+    // this edit. The sibling structural/edge writers derive both after the
+    // commit for exactly that reason, and this is a model-changing route.
+    //
+    // ⚠ AND THE HEALTHY-EMPTY / DEGRADED DISTINCTION SURVIVES. A history read
+    // that succeeded and found nothing is `none` — a real verdict. A read that
+    // degraded is `unknown`. Collapsing them would let a transport failure
+    // masquerade as "this model has never been analysed". No extra I/O: the
+    // prior facts are re-projected against the committed hash.
+    const freshnessAfterCommit: FreshnessDerivation =
+      priorFactsRead.status === 'ok'
+        ? deriveAnalysisFreshness(priorFactsRead.facts, outcome.analysisGraphHash)
+        : {
+            freshness: 'unknown',
+            reason: 'derivation_failed',
+            selected_fact_index: null,
+            graph_hash_at_run: null,
+            current_graph_hash: outcome.analysisGraphHash,
+            computed_at: null,
+          };
+    emitFreshnessTelemetry(
+      freshnessAfterCommit,
+      {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        dispatch_path: 'system_event.option_intervention_edit',
+      },
+      { prior_fact_count: priorFactsRead.status === 'ok' ? priorFactsRead.facts.length : 0 },
+    );
+
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        option_id: event.option_id,
+        factor_id: event.factor_id,
+        persisted_row_id: outcome.persistedRowId,
+        freshness_after_commit: freshnessAfterCommit.freshness,
+        committed_graph_parsed: committedParse.success,
+      },
+      'V5 option_intervention_edit — committed',
+    );
+    return {
+      response: { ...outcome.response, graph_hash: outcome.analysisGraphHash },
+      commitPerformed: true,
+      // Readiness from the bytes that LANDED. `undefined` only when the
+      // committed graph did not parse — an honest absence, not a guess.
+      ...(graphForReadiness !== null
+        ? { analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness) }
+        : {}),
+      freshness: freshnessAfterCommit,
+      graph: graphForReadiness,
+    };
+  }
+
+  // ── Everything below committed NOTHING, and the three cases need opposite
+  // follow-ups. Reporting them all as `commitPerformed: false` with no skip
+  // reason is what made a permanently stale base and a same-value edit arrive
+  // at the client as a retryable 500.
+  if (outcome.kind === 'unchanged') {
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        option_id: event.option_id,
+        factor_id: event.factor_id,
+      },
+      'V5 option_intervention_edit — verified no-op: the model already holds this value',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      commitSkippedReason: 'verified_no_op',
+      graph: null,
+    };
+  }
+
+  if (outcome.kind === 'refused') {
+    // ⭐ A STALE BASE IS A CONFLICT, NOT A FAILURE, and it has a shipped
+    // recovery: refresh and reconfirm. The hash handed back is read from the
+    // CURRENT persisted graph in analysis space — the same space the client
+    // sent — so the instruction is followable rather than a bare "try again".
+    if (outcome.reason === 'stale_graph') {
+      const expectedBaseGraphHash = await readClientRecoverableBaseHash(payload.scenario_id);
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          option_id: event.option_id,
+          factor_id: event.factor_id,
+          client_base_graph_hash: event.base_graph_hash,
+          expected_base_graph_hash: expectedBaseGraphHash,
+        },
+        'V5 option_intervention_edit — stale base: refusing with refresh-and-reconfirm',
+      );
+      return {
+        response: buildAcknowledgementResponse(payload),
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: 'stale_base_graph_hash',
+          expected_base_graph_hash: expectedBaseGraphHash,
+        },
+      };
+    }
+    // Every other refusal is the request itself being unhonourable against the
+    // canonical model — an unresolvable id, an option and factor that are not
+    // linked, a value outside the model scale. Repeating it cannot succeed, so
+    // it must not be advertised as retryable.
+    log.warn(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        option_id: event.option_id,
+        factor_id: event.factor_id,
+        refusal_reason: outcome.reason,
+      },
+      'V5 option_intervention_edit — refused, nothing written',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      commitSkippedReason: 'refused_no_write',
+      graph: null,
+    };
+  }
+
+  // ⚠ UNVERIFIED. The writer could not prove what happened and explicitly
+  // refuses to assert a rollback; a commit MAY have landed. So this deliberately
+  // takes NO skip reason and keeps the retryable failure path: the retry is
+  // idempotent on (scenario_id, turn_id), and "we do not know" must not be
+  // rendered as "nothing happened".
+  log.error(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      option_id: event.option_id,
+      factor_id: event.factor_id,
+      reason: outcome.reason,
+      commit_attempted: outcome.commitAttempted,
+    },
+    'V5 option_intervention_edit — UNVERIFIED: no success claimed and no rollback asserted',
+  );
+  return { response: buildAcknowledgementResponse(payload), commitPerformed: false, graph: null };
+}
+
 async function dispatchStructuralRename(
   payload: SystemEventTurnPayload,
   event: Extract<SystemEventTurnPayload['event'], { kind: 'structural_rename' }>,
