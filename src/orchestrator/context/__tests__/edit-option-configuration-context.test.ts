@@ -109,7 +109,11 @@ describe('edit model configuration context', () => {
     expect(nodeFrom(editCompactGraph(graph), 'price')).toMatchObject({ scale_frame: 200, observed_state: price.observed_state });
     delete price.scale_frame;
     expect(nodeFrom(editCompactGraph(graph), 'price').scale_frame).toBeUndefined();
-    expect(nodeFrom(editCompactGraph(graph), 'price').observed_state).not.toHaveProperty('cap');
+    // The model consumes JSON, not optional own-properties whose value is
+    // undefined on the intermediate JS projection. Keep the absence check
+    // on the actual serialized boundary; a fabricated numeric cap still fails.
+    const sent = outboundGraph(serialiseEditContextForLLMWithMeta(context(graph)).text);
+    expect(nodeFrom(sent, 'price').observed_state).not.toHaveProperty('cap');
   });
 
   it('keeps absolute percentage values distinct from an unvalued uplift risk', () => {
