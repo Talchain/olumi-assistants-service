@@ -527,6 +527,11 @@ describe('tryClarificationResume — kind classification regression', () => {
     // the deterministic brief rubric (ask again or proceed to draft);
     // there is no graph at the pre-draft stage and no mutation applies.
     clarify_v2_round: 'non_mutating',
+    // The swapped success-target receipt's question. Answering it replays
+    // add_constraint on the goal, which stamps goal_threshold_raw/_unit/_cap
+    // and the normalised goal_threshold onto the goal node: graph-mutating,
+    // so ask→answer divergence fails closed.
+    elicit_goal_target: 'mutating',
   };
 
   it('every PendingAction kind has the expected safety classification (semantic regression)', () => {

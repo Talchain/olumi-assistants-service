@@ -141,6 +141,56 @@ export function extractPersistedGoalTarget(
 }
 
 /**
+ * ⭐ THE GOAL THE SWAPPED RECEIPT IS ASKING ABOUT — id and label of the SOLE
+ * goal-kind node, or null.
+ *
+ * ⚠ THIS ANSWERS A THIRD QUESTION, and it is deliberately not folded into
+ * either function above (CLAUDE.md trap 21 — the estate's chronic defect is
+ * merging predicates whose questions differ):
+ *   · `extractPersistedGoalTarget` asks "IS a target registered, and to what?"
+ *     — it requires a finite `goal_threshold_raw` and is therefore blind on
+ *     exactly the graphs this one exists for.
+ *   · `graphRegistersGoalTarget` asks the same question as a boolean.
+ *   · THIS asks "WHICH goal would a restated target apply to?" — a question
+ *     about identity, asked precisely when no target is registered.
+ *
+ * FAIL-CLOSED ON PLURALITY, and that is the whole safety argument for the
+ * pending this feeds. The swapped fallback says "including the value AND THE
+ * GOAL IT APPLIES TO"; with two goals in the model, a bare "£20,000" does not
+ * name one, and binding it to the first in graph order would be a guess
+ * written into durable state. Zero goals and more than one goal both return
+ * null, and the caller then persists no question — the copy still ships and a
+ * full-sentence restatement still routes through the ordinary LLM path.
+ *
+ * Tolerant reader: any non-graph shape returns null, never throws. A goal with
+ * a non-string or empty id is not a referent a resume could bind, so it is
+ * skipped rather than counted.
+ */
+export function findSoleGoalNode(
+  graph: unknown,
+): { readonly id: string; readonly label: string } | null {
+  if (graph === null || graph === undefined || typeof graph !== 'object') return null;
+  const nodes = (graph as Record<string, unknown>).nodes;
+  if (!Array.isArray(nodes)) return null;
+  let found: { readonly id: string; readonly label: string } | null = null;
+  for (const n of nodes) {
+    if (n === null || typeof n !== 'object') continue;
+    const node = n as Record<string, unknown>;
+    if (node.kind !== 'goal') continue;
+    if (typeof node.id !== 'string' || node.id.length === 0) continue;
+    // A SECOND goal makes the referent ambiguous — abandon immediately rather
+    // than keeping the first (a "first in graph order" tie-break is the guess
+    // this function exists to refuse).
+    if (found !== null) return null;
+    found = {
+      id: node.id,
+      label: typeof node.label === 'string' ? node.label : '',
+    };
+  }
+  return found;
+}
+
+/**
  * Conservative detector for success-target registration/description claims.
  * Both live emitters are covered:
  *   - formatGoalTargetSet (add_constraint receipt): "Success target set:

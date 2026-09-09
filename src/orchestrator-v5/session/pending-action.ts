@@ -289,7 +289,7 @@ export type PendingActionAction =
        * Bound to the specific goal AND the sentence actually asked, so a resume
        * cannot attach an answer to a question the person never saw.
        */
-      readonly kind: 'set_goal_target';
+      readonly kind: 'elicit_goal_target';
       readonly goal_node_id: string;
       /** The exact question put to the user, for the receipt and the audit. */
       readonly question: string;
@@ -607,6 +607,29 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // RESUMABLE_KINDS: a bare "yes" answers neither question.
   'elicit_effect_target',
   'elicit_edit_target',
+  // The swapped success-target receipt's own question ("Tell me it again in
+  // one message, including the value and the goal it applies to").
+  //
+  // ⚠ MANDATORY HERE, and this is the whole reason the entry carries a
+  // comment: `parsePendingAction` gates EVERY read on this set, so a kind
+  // omitted from it is WRITE-ONLY — it round-trips to the column and is
+  // dropped on the way back out, which is indistinguishable from never
+  // having been persisted. The same note is recorded on 2.1352/2.1353 above
+  // because it is not derivable from the set's name.
+  //
+  // ⚠ AND NOTE THE NAME IT DELIBERATELY DOES NOT USE. The legacy V2
+  // deterministic vocabulary has an `action_type: 'set_goal_target'`
+  // (`orchestrator/deterministic/types.ts`) carrying `{threshold, unit, cap}`
+  // — a DIFFERENT shape answering a different question in a different
+  // namespace. Reusing that spelling here would put two same-named,
+  // differently-shaped concepts in one estate, which is this repo's chronic
+  // defect (CLAUDE.md trap 21). This kind is named for the `elicit_*` family
+  // it belongs to: it records a QUESTION, not an action to replay.
+  //
+  // Deliberately ABSENT from the short-confirm resumer's local
+  // RESUMABLE_KINDS: a bare "yes" answers no "what value counts as success?"
+  // question.
+  'elicit_goal_target',
 ]);
 
 /**
@@ -842,6 +865,7 @@ export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = 
   elicit_option_effect: true, // "give me a number from 0 to 1"
   elicit_effect_target: true, // "which of these does your number belong to?"
   elicit_edit_target: true, // "which factor, edge, option or value?"
+  elicit_goal_target: true, // "what value counts as success for <goal>?"
   // Offers and holds. A bare "yes", a chip click or a follow-up parameter
   // resolves these, so a longer window IS the stale-hijack harm. Unchanged.
   run_analysis: false,
@@ -1188,7 +1212,7 @@ export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean>
   elicit_effect_target: true, // "which of these does your number belong to?"
   elicit_edit_target: true, // "which factor, edge, option or value?"
   set_factor_value: true, // a held quantity awaiting a target; "12" re-states it
-  set_goal_target: true, // "what value counts as success?" — a bare "20000" answers it
+  elicit_goal_target: true, // "what value counts as success?" — a bare "20000" answers it
   clarify_v2_round: true, // a clarify round may offer numbered choices
   proposed_concept: true, // the two-stage clarifier offers a choice
   // The asks a bare number CANNOT be answering: each expects a confirmation or
@@ -1222,9 +1246,9 @@ export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean>
  * caller fails closed by construction.
  */
 /** The goal-target elicitation pending, narrowed. */
-export type SetGoalTargetPending = PendingAction & {
+export type ElicitGoalTargetPending = PendingAction & {
   readonly action: {
-    readonly kind: 'set_goal_target';
+    readonly kind: 'elicit_goal_target';
     readonly goal_node_id: string;
     readonly question: string;
     readonly unit?: string;
@@ -1245,14 +1269,14 @@ export type SetGoalTargetPending = PendingAction & {
 export function findSoleLiveGoalTargetPending(
   pendings: readonly PendingAction[] | undefined,
   nowMs: number,
-): SetGoalTargetPending | null {
+): ElicitGoalTargetPending | null {
   const claimants = filterLivePendingActions(pendings ?? [], nowMs).filter(
     (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
   );
   if (claimants.length !== 1) return null;
   const sole = claimants[0]!;
-  if (sole.action.kind !== 'set_goal_target') return null;
-  return sole as SetGoalTargetPending;
+  if (sole.action.kind !== 'elicit_goal_target') return null;
+  return sole as ElicitGoalTargetPending;
 }
 
 export function findSoleLiveElicitBaselinePending(
@@ -1519,6 +1543,28 @@ export function parsePendingAction(input: unknown): PendingAction | null {
       if (typeof t.node_id !== 'string' || t.node_id.length === 0) return null;
       if (typeof t.label !== 'string' || t.label.length === 0) return null;
     }
+  }
+  if (a.kind === 'elicit_goal_target') {
+    // The goal's identity and the bytes the user actually read are both
+    // REQUIRED. Same flat-`if`-chain reasoning the three blocks above record:
+    // a kind admitted to RESUMABLE_ACTION_TYPES with no block here clears the
+    // envelope checks and is returned by a CAST, so a corrupted row would
+    // reach the readers with zero field validation.
+    //
+    // `goal_node_id` is what the answer binds to — a row without it names no
+    // goal and could only guess. `question` is the record of what was asked;
+    // it is bounded at 2000 (well above the fallback copy, well below
+    // anything that would bloat the column) so a corrupted row cannot smuggle
+    // an unbounded string into the context projection that renders pendings
+    // to the model.
+    if (typeof a.goal_node_id !== 'string' || a.goal_node_id.length === 0) return null;
+    if (typeof a.question !== 'string' || a.question.trim().length === 0) return null;
+    if (a.question.length > 2000) return null;
+    // Optional, and validated when present: an unvalidated optional is how a
+    // corrupted row reaches the writer. An empty unit is refused rather than
+    // coerced — the resume would carry it into `add_constraint`'s `unit`
+    // parameter, and "" is not a unit.
+    if (a.unit !== undefined && (typeof a.unit !== 'string' || a.unit.length === 0)) return null;
   }
   if (a.kind === 'proposed_concept') {
     // V5 P0 proposal-memory continuation. Both fields REQUIRED.

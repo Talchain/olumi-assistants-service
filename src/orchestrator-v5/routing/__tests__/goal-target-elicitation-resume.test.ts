@@ -41,7 +41,7 @@ function pending(overrides: Record<string, unknown> = {}) {
   return {
     id: 'pa-goal-1',
     action: {
-      kind: 'set_goal_target',
+      kind: 'elicit_goal_target',
       goal_node_id: 'g-revenue',
       question: 'What value counts as success for this goal?',
       ...(overrides.action as Record<string, unknown> | undefined),

@@ -46,7 +46,7 @@
 
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
-import type { ElicitTargetBaselinePending, PendingAction, SetGoalTargetPending } from '../session/pending-action.js';
+import type { ElicitTargetBaselinePending, PendingAction, ElicitGoalTargetPending } from '../session/pending-action.js';
 import { findSoleLiveGoalTargetPending } from '../session/pending-action.js';
 import { runExtraction } from '../context/cqe/extract-quantities.js';
 import {
@@ -288,6 +288,14 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // between ask and answer fails closed (a diverged graph may carry a
   // CHANGED row, and replaying the persisted value would overwrite it).
   elicit_target_baseline: 'mutating',
+  // The swapped success-target receipt's own question. MUTATING, and not
+  // merely fail-closed-by-default: answering it replays `add_constraint` on
+  // the goal, which stamps `goal_threshold_raw`/`_unit`/`_cap` and the
+  // normalised `goal_threshold` onto the goal node. A graph change between
+  // the ask and the answer can remove or replace that goal, and it can also
+  // register a target through another route — either way the answer must not
+  // land on a graph the question was not asked about.
+  elicit_goal_target: 'mutating',
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(
@@ -774,13 +782,21 @@ export type GoalTargetResumeDispatch =
   | {
       readonly matched: false;
       readonly skip_reason: 'unreadable_answer';
-      readonly pending: SetGoalTargetPending;
+      readonly pending: ElicitGoalTargetPending;
       readonly reason: 'no_amount' | 'several_amounts' | 'ceiling_not_minimum' | 'degraded_parse';
     }
   | {
       readonly matched: true;
-      readonly pending: SetGoalTargetPending;
+      readonly pending: ElicitGoalTargetPending;
       readonly goalNodeId: string;
+      /**
+       * The goal's CURRENT label, read from the live graph rather than from
+       * the pending. The replay proposal's entity carries it, and a label
+       * copied out of the question would be the graph's label as it was when
+       * the question was asked — a rename between ask and answer would then
+       * ship a stale name on a resolved-by-id entity.
+       */
+      readonly goalLabel: string;
       readonly value: number;
       readonly unit?: string;
     };
@@ -802,6 +818,7 @@ export function tryGoalTargetElicitationResume(input: {
   const goalId = pending.action.goal_node_id;
   const goal = input.graphNodes?.find((n) => n.id === goalId);
   if (goal === undefined) return { matched: false, skip_reason: 'target_missing' };
+  const goalLabel = typeof goal.label === 'string' ? goal.label : '';
 
   const extraction = runExtraction(input.message);
   if (extraction.summary.degraded) {
@@ -834,6 +851,7 @@ export function tryGoalTargetElicitationResume(input: {
     matched: true,
     pending,
     goalNodeId: goalId,
+    goalLabel,
     value: amount.value as number,
     ...(unit !== undefined ? { unit } : {}),
   };
