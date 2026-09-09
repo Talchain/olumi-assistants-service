@@ -1284,6 +1284,145 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
   });
 
   // ── detectStrengthDefaultsV1 (flat V1 edge format) ─────────────────────
+  /**
+   * ⭐⭐⭐ THE PRODUCER'S OWN MARKER, READ INSTEAD OF RECONSTRUCTED.
+   *
+   * `detectStrengthDefaults` is the programme's answer to "are we serving
+   * defaulted strengths?" It matched a NUMERIC signature — |mean|≈0.5 AND
+   * std≈0.125 — and nothing else.
+   *
+   * The enricher's add path writes `strength_mean: 0.5, strength_std: 0.2` with
+   * `defaulted: true` (`factor-extraction/enricher.ts:679`, `:1395`). `0.2 ≠
+   * 0.125`, so EVERY enrichment-created edge was invisible here — at any
+   * threshold, because the signature is an AND, not a percentage. The estate's
+   * own count of defaulted strengths was an undercount, structurally blind to
+   * one producer, and this file's own docstring had described that blindness
+   * without anyone joining it to the producer.
+   *
+   * ⚠ THE MARKER WAS ALREADY CARRIED END TO END. The producer sets it;
+   * `transforms/schema-v3.ts:889` preserves it explicitly through the V3
+   * transform; `EdgeV3.defaulted` declares it. Only this function did not read
+   * it. So this is a JOIN, not a new admission rule.
+   */
+  describe("producer-declared defaults (the enricher's edges were invisible)", () => {
+    const nodes = [
+      { id: "fac_price", kind: "factor" },
+      { id: "fac_demand", kind: "factor" },
+      { id: "fac_reach", kind: "factor" },
+      { id: "out_revenue", kind: "outcome" },
+    ];
+
+    /** The enricher's exact signature: default mean, NON-default std, marked. */
+    const enrichmentEdge = (from: string) => ({
+      from, to: "out_revenue", strength: { mean: 0.5, std: 0.2 }, defaulted: true,
+    });
+
+    it("⭐ counts an enrichment edge whose std is 0.2 — the case the numeric signature cannot see", () => {
+      const edges = [enrichmentEdge("fac_price"), enrichmentEdge("fac_demand"), enrichmentEdge("fac_reach")];
+
+      // Precondition, in-test: the numeric signature genuinely does NOT match
+      // these, so a pass here cannot come from the old path.
+      expect(edges.every(e => Math.abs(e.strength.std - 0.125) > 1e-9)).toBe(true);
+
+      const result = detectStrengthDefaults(nodes, edges);
+      expect(result.defaulted_count).toBe(3);
+      expect(result.detected).toBe(true);
+      expect(result.defaulted_by_source.producer_declared).toBe(3);
+      // The existing attributions are untouched by this addition.
+      expect(result.defaulted_by_source.v3_transform).toBe(0);
+      expect(result.defaulted_by_source.nan_fix).toBe(0);
+    });
+
+    it("⚠ OPPOSITE CONTROL — an UNMARKED edge at the same numbers is NOT a default", () => {
+      // The whole risk of this change is calling a genuine measurement a
+      // default. A user-supplied 0.5/0.2 carries no marker and must stay
+      // uncounted — which is why the fix reads the marker rather than widening
+      // the numeric rule.
+      const edges = [
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.2 } },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.2 } },
+        { from: "fac_reach", to: "out_revenue", strength: { mean: 0.5, std: 0.2 } },
+      ];
+      const result = detectStrengthDefaults(nodes, edges);
+      expect(result.defaulted_count).toBe(0);
+      expect(result.detected).toBe(false);
+      expect(result.defaulted_by_source.producer_declared).toBe(0);
+    });
+
+    it("⚠ OPPOSITE CONTROL — `defaulted: false` is a statement, not an absence", () => {
+      const edges = [
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.2 }, defaulted: false },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.2 }, defaulted: false },
+        { from: "fac_reach", to: "out_revenue", strength: { mean: 0.5, std: 0.2 }, defaulted: false },
+      ];
+      expect(detectStrengthDefaults(nodes, edges).defaulted_count).toBe(0);
+    });
+
+    it("a numeric-signature edge keeps its EXISTING attribution, and is not double-counted", () => {
+      // Both paths true on the same edge: it counts once, as v3_transform.
+      const edges = [
+        { from: "fac_price", to: "out_revenue", strength: { mean: 0.5, std: 0.125 }, defaulted: true },
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+        { from: "fac_reach", to: "out_revenue", strength: { mean: 0.5, std: 0.125 } },
+      ];
+      const result = detectStrengthDefaults(nodes, edges);
+      expect(result.defaulted_count).toBe(3);
+      expect(result.defaulted_by_source.v3_transform).toBe(3);
+      expect(result.defaulted_by_source.producer_declared).toBe(0);
+    });
+
+    it("a genuinely varied graph stays undetected even with one marked edge", () => {
+      const edges = [
+        enrichmentEdge("fac_price"),
+        { from: "fac_demand", to: "out_revenue", strength: { mean: 0.82, std: 0.31 } },
+        { from: "fac_reach", to: "out_revenue", strength: { mean: -0.44, std: 0.09 } },
+      ];
+      const result = detectStrengthDefaults(nodes, edges);
+      expect(result.defaulted_count).toBe(1);
+      expect(result.detected).toBe(false);
+      expect(result.defaulted_edge_ids).toEqual(["fac_price->out_revenue"]);
+    });
+
+    it("the FLAT path honours the marker too — so the two paths cannot drift", () => {
+      // ⚠ NOT because enrichment edges reach the parse stage — THEY DO NOT.
+      // `runStageParse` (unified-pipeline/index.ts:946) runs BEFORE
+      // `runStageEnrich` (:1009), so detectStrengthDefaultsV1 sees the LLM's
+      // draft graph and never an enrichment-created edge. The first version of
+      // this test said the opposite and was wrong.
+      //
+      // It is pinned because a marker honoured on the nested side and ignored
+      // on the flat one is exactly the divergence the shared core exists to
+      // prevent — and it would stay invisible until some future producer marked
+      // an edge before parse.
+      const edges = [
+        { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.2, defaulted: true },
+        { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.2, defaulted: true },
+        { from: "fac_reach", to: "out_revenue", strength_mean: 0.5, strength_std: 0.2, defaulted: true },
+      ];
+      const result = detectStrengthDefaultsV1(nodes, edges);
+      expect(result.defaulted_count).toBe(3);
+      expect(result.defaulted_by_source.producer_declared).toBe(3);
+
+      // Same numbers, no marker: still nothing.
+      const unmarked = edges.map(({ defaulted: _drop, ...rest }) => rest);
+      expect(detectStrengthDefaultsV1(nodes, unmarked).defaulted_count).toBe(0);
+    });
+
+    it("structural edges are still excluded, marker or not", () => {
+      const withStructural = [
+        { id: "dec", kind: "decision" }, { id: "opt", kind: "option" }, ...nodes,
+      ];
+      const edges = [
+        { from: "dec", to: "opt", strength: { mean: 0.5, std: 0.2 }, defaulted: true },
+        enrichmentEdge("fac_price"), enrichmentEdge("fac_demand"), enrichmentEdge("fac_reach"),
+      ];
+      const result = detectStrengthDefaults(withStructural, edges);
+      expect(result.structural_edges_excluded).toBe(1);
+      expect(result.total_edges).toBe(3);
+      expect(result.defaulted_count).toBe(3);
+    });
+  });
+
   describe("detectStrengthDefaultsV1", () => {
     const v1Nodes = [
       { id: "g1", kind: "goal" },
