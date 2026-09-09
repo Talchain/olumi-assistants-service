@@ -69,6 +69,7 @@ vi.mock('../session/index.js', () => ({
 
 const { runTurnExecutor } = await import('../turn-executor.js');
 const { computeAnalysisAffectingGraphHash } = await import('../context/graph-hash.js');
+const { OLUMI_ACTION_TOOL_NAME } = await import('../routing/tool-schema.js');
 
 const SCENARIO_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
@@ -151,6 +152,49 @@ function directAnswerAdapter(text = 'Understood.') {
       content: [{ type: 'text', text }],
       stop_reason: 'end_turn',
       usage: { input_tokens: 10, output_tokens: 5 } as unknown as ChatWithToolsResult['usage'],
+      model: 'mock',
+      latencyMs: 0,
+    }));
+  return { adapter: { chatWithTools }, chatWithTools };
+}
+
+/**
+ * The ORDINARY route: the router's own `add_constraint` tool call for a success
+ * target, exactly the shape `turn-executor-goal-target-commit-honesty.test.ts`
+ * drives. Used to show that a message the PRE-ROUTE declines still reaches the
+ * canonical writer by its normal path.
+ */
+function goalTargetToolCallAdapter() {
+  const chatWithTools = vi
+    .fn<(args: ChatWithToolsArgs, opts: { requestId: string }) => Promise<ChatWithToolsResult>>()
+    .mockImplementation(async () => ({
+      content: [
+        {
+          type: 'tool_use',
+          id: 'tu-goal-ordinary',
+          name: OLUMI_ACTION_TOOL_NAME,
+          input: {
+            intent_class: 'execute',
+            action: {
+              handler_id: 'add_constraint',
+              entity: {
+                id: 'g-revenue',
+                kind: 'goal',
+                resolution_status: 'resolved',
+                resolution_method: 'id_match',
+              },
+              parameters: [
+                { name: 'constraint_type', value: 'at_least', source: 'user_explicit' },
+                { name: 'value', value: 20000, source: 'user_explicit' },
+                { name: 'unit', value: '£', source: 'user_explicit' },
+              ],
+              cited_context_fields: ['graph.nodes'],
+            },
+          } as Record<string, unknown>,
+        },
+      ] as unknown as ChatWithToolsResult['content'],
+      stop_reason: 'tool_use' as const,
+      usage: { input_tokens: 10, output_tokens: 20 } as unknown as ChatWithToolsResult['usage'],
       model: 'mock',
       latencyMs: 0,
     }));
@@ -313,12 +357,10 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     const cap = goal!.goal_threshold_cap as number;
     const normalised = goal!.goal_threshold as number;
     expect(raw).toBe(20000);
-    // ⚠ `GBP`, not `£`. CQE normalises currency tokens
-    // (`context/cqe/rules.ts` `normaliseCurrencyUnit`), so the canonical
-    // representation reaching the writer is the ISO code. My earlier
-    // expectation of the display symbol was wrong about the producer; the fix
-    // belongs in the expectation, NOT in currency handling.
-    expect(goal!.goal_threshold_unit).toBe('GBP');
+    // ⚠ `£`, via the ESTABLISHED `mapCqeQuantityToProposalValue`. CQE emits
+    // `GBP`; that shared mapper is the sanctioned crossing to writer units and
+    // spells it `£`. This asserts the mapper's output, not a preferred symbol.
+    expect(goal!.goal_threshold_unit).toBe('£');
     // Cap doctrine rule 3 — 25% headroom on a non-percent target, and never
     // `cap === raw` (which would force goal_threshold = 1.0 and kill the
     // probability spread).
@@ -622,6 +664,99 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     ).toBe(true);
   });
 
+  it('⭐ SCOPED EDIT — "Set churn to 4%" makes no goal write, keeps the question, and reaches its own path', async () => {
+    // The review's round-5 counterexample at the real receiver. CQE's
+    // instruction pattern matches the WHOLE message, so subtracting `raw_text`
+    // left nothing and this scoped factor edit was taken as the revenue goal's
+    // answer — with the pre-route's pre-granted warrant behind it.
+    //
+    // THREE assertions, because the harm has three parts: the goal must not be
+    // written, the question must not be spent, and the message must still reach
+    // its ordinary route (the adapter being called is what shows it was not
+    // claimed by the pre-route).
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('Set churn to 4%'), 'req-goal-scoped-edit', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools, 'the pre-route claimed a scoped edit').toHaveBeenCalled();
+    for (const g of committedGraphs()) {
+      expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
+    }
+    expect(appendCalls.length, 'the turn did not commit, so this case proves nothing').toBeGreaterThan(0);
+    const finalPendings = (appendCalls[appendCalls.length - 1]!.pending_actions ??
+      []) as PendingAction[];
+    expect(
+      finalPendings.filter((p) => p.action.kind === 'elicit_goal_target'),
+      'the goal-target question was consumed by a scoped factor edit',
+    ).toHaveLength(1);
+  });
+
+  it('⭐ PERCENTAGE — a percent answer commits on the PERCENT scale, not CQE\'s fraction', async () => {
+    // CQE represents "92%" as 0.92/`percentage`; the writer stores user units
+    // and its cap helper expects the raw percent number against the literal
+    // '%'. Unconverted, this registered 0.92 against a 1.15 denominator. The
+    // whole tuple is asserted because the parts are only meaningful together.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('92%'), 'req-goal-percent', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools).not.toHaveBeenCalled();
+    const graphs = committedGraphs();
+    expect(graphs.length).toBeGreaterThan(0);
+    const goal = goalNodeOf(graphs[graphs.length - 1]);
+    expect(goal?.goal_threshold_raw).toBe(92);
+    expect(goal?.goal_threshold_unit).toBe('%');
+    // Cap doctrine rule 2: a '%' target within 0-100 normalises against 100.
+    expect(goal?.goal_threshold_cap).toBe(100);
+    expect(goal?.goal_threshold as number).toBeCloseTo(0.92, 10);
+  });
+
+  it("⭐ THE CAPABILITY IS PRESERVED — prose the pre-route declines still commits by the ORDINARY route", async () => {
+    // The contrast that keeps the coverage decision honest. "The target is
+    // £20,000." is a genuine goal statement that this pre-route deliberately
+    // does NOT claim — and a refusal assertion alone would leave open whether
+    // the user simply lost the capability.
+    //
+    // Here the same message, with the same live question, reaches the router,
+    // which emits the ordinary `add_constraint` tool call, and the canonical
+    // writer commits the tuple. Declining is a routing decision, not a loss.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = goalTargetToolCallAdapter();
+
+    await runTurnExecutor(payload('The target is £20,000.'), 'req-goal-ordinary-route', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    // The pre-route declined, so the turn went to the router.
+    expect(chatWithTools).toHaveBeenCalled();
+    const graphs = committedGraphs();
+    expect(graphs.length, 'the ordinary route committed no graph').toBeGreaterThan(0);
+    const goal = goalNodeOf(graphs[graphs.length - 1]);
+    expect(goal?.goal_threshold_raw).toBe(20000);
+    expect(goal?.goal_threshold_unit).toBe('£');
+    const cap = goal?.goal_threshold_cap as number;
+    expect(cap).toBeGreaterThan(20000);
+    expect(goal?.goal_threshold as number).toBeCloseTo(20000 / cap, 10);
+  });
+
   it('NO QUESTION — the same bare amount with no live pending is just a message', async () => {
     // The route is ADDITIVE. This is the control that proves the positive
     // above is the question doing the work, not the message shape.
@@ -712,7 +847,7 @@ describe('JOINED — turn 1 emits the question, turn 2 answers it through the re
     const cap = goal?.goal_threshold_cap as number;
     const normalised = goal?.goal_threshold as number;
     expect(raw).toBe(20000);
-    expect(goal?.goal_threshold_unit).toBe('GBP');
+    expect(goal?.goal_threshold_unit).toBe('£');
     expect(cap).toBeGreaterThan(raw);
     expect(normalised).toBeCloseTo(raw / cap, 10);
   });

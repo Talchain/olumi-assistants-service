@@ -141,15 +141,25 @@ describe('the answer to a target question sets the goal target, and only that', 
     const before = goalOf(fixture);
     expect(before.goal_threshold_raw, 'the fixture already carried a target').toBeUndefined();
 
-    await expect(
-      handler(
-        buildInvocation(
-          fixture,
-          proposal({ entityId: 'o-launch', entityKind: 'node', constraintType: 'at_least', value: 59, unit: '£' }),
-          'Raise the Pro plan price to £59',
-        ),
+    // ⚠ ASSERT THE TYPED CAUSE, NOT THE PROSE. My first repair matched
+    // `/ENTITY_KIND_MISMATCH|entity kind/i` against the MESSAGE, which actually
+    // reads "Cannot add a constraint to a option." — the code and cause are
+    // PROPERTIES on `HandlerInvocationFailedError`, not text in the message, so
+    // that regex would have failed for a second wrong reason. Caught by the
+    // independent review at the error's own bytes.
+    const failure = await handler(
+      buildInvocation(
+        fixture,
+        proposal({ entityId: 'o-launch', entityKind: 'node', constraintType: 'at_least', value: 59, unit: '£' }),
+        'Raise the Pro plan price to £59',
       ),
-    ).rejects.toThrow(/ENTITY_KIND_MISMATCH|entity kind/i);
+    ).then(
+      () => null,
+      (err: unknown) => err as { cause_kind?: unknown; details?: { d1_code?: unknown } },
+    );
+    expect(failure, 'the handler resolved where it should have refused').not.toBeNull();
+    expect(failure!.cause_kind).toBe('entity_kind_mismatch_at_execute');
+    expect(failure!.details?.d1_code).toBe('ENTITY_KIND_MISMATCH');
 
     // And the graph handed in is untouched — a throw must not have mutated it.
     expect(goalOf(fixture).goal_threshold_raw).toBeUndefined();

@@ -52,6 +52,8 @@ import type {
   PendingAction,
 } from '../session/pending-action.js';
 import { runExtraction } from '../context/cqe/extract-quantities.js';
+import { preNormalise } from '../context/cqe/pre-normalise.js';
+import { mapCqeQuantityToProposalValue } from './deterministic-value-update.js';
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
@@ -782,93 +784,100 @@ export function tryBaselineElicitationResume(input: {
  *   precise missing question and must not claim an edit.
  */
 /**
- * The words of the message that are NOT the quantity CQE read.
+ * The words of the message that are NOT the numeric value token.
  *
- * ⚠ NOT A PARSER, and it must not become one. It reads no value, decides no
- * unit and carries no magnitude vocabulary of its own: `raw_text` is the exact
- * bytes the extractor matched, INCLUDING any comparator phrase and magnitude
- * suffix it bound, so removing it leaves the message's remaining words with no
- * word list involved. The trailing digit pass only catches a second numeral the
- * extractor did not claim (the caller has already refused messages with more
- * than one amount, so this is defensive).
+ * ⛔ THIS USED TO SUBTRACT `raw_text`, AND THAT WAS A FALSE READING OF THE
+ * EXTRACTOR'S CONTRACT. CQE does not promise that a match contains only the
+ * scalar: an instruction pattern matches the WHOLE message, verb and subject
+ * included, and `makeResult` assigns that whole string to `raw_text`. So
+ * "Set churn to 4%" left an EMPTY residue, `.every()` on an empty array is
+ * true, and a scoped factor edit was accepted as the revenue goal's answer —
+ * with the pre-route's warrant behind it. Found by the independent review at
+ * the producer's bytes.
  *
- * ⛔ A PREVIOUS VERSION SPELLED OUT THE LONG-FORM MAGNITUDE WORDS, which put
- * this file inside the magnitude-alphabet guard's scan — correctly, because
- * that WAS a fifth hand-written magnitude list, the exact thing that guard
- * exists to stop. Deriving the strip from `raw_text` REMOVES the vocabulary
- * rather than relabelling it as incidental, which is why this file is not in
- * that guard's REVIEWED manifest: it no longer spells any of those words at
- * all. The short suffixes left in the fallback pattern are single letters, not
- * an alphabet. (Stated without spelling them, so this comment cannot itself
- * trip the scan — the guard reads file CONTENT, prose included.)
+ * `span_start`/`span_end` are the contract that actually says what is scalar:
+ * absolute offsets, in CQE-normalised coordinates, of the NUMERIC VALUE TOKEN
+ * alone (`extract-quantities.ts` `locateValueTokenSpan`). Subtracting the span
+ * leaves the instruction and its subject standing, which is the point — the
+ * words a scoped edit carries are exactly what must disqualify it.
+ *
+ * The widening around the span is POSITIONAL, not a vocabulary: a currency
+ * mark or whitespace immediately left, a percent sign and at most two letters
+ * immediately right ("£20k" → "£", "k"). No word list, and nothing that could
+ * grow one counterexample at a time.
+ *
+ * Returns `null` when the extractor emitted no span — a match with no digit
+ * token ("double it") — so the caller fails closed rather than treating an
+ * unlocatable value as a bare answer.
  */
-function wordsBesidesTheAmount(message: string, rawText: unknown): readonly string[] {
-  let residue = message;
-  if (typeof rawText === 'string' && rawText.length > 0) {
-    const at = residue.toLowerCase().indexOf(rawText.toLowerCase());
-    if (at >= 0) residue = `${residue.slice(0, at)} ${residue.slice(at + rawText.length)}`;
-  }
-  residue = residue.replace(/[£$€]?\s?\d[\d,. ]*\s*(?:%|k|m|bn|b)?/gi, ' ');
+function wordsBesidesTheValueToken(
+  message: string,
+  amount: { readonly span_start?: unknown; readonly span_end?: unknown },
+): readonly string[] | null {
+  const spanStart = amount.span_start;
+  const spanEnd = amount.span_end;
+  if (typeof spanStart !== 'number' || typeof spanEnd !== 'number') return null;
+  // Same coordinate space the spans are expressed in.
+  const text = preNormalise(message).text;
+  if (spanStart < 0 || spanEnd > text.length || spanStart >= spanEnd) return null;
+  let start = spanStart;
+  while (start > 0 && /[£$€\s]/.test(text[start - 1] as string)) start -= 1;
+  let end = spanEnd;
+  while (end < text.length && text[end] === '%') end += 1;
+  const suffix = /^[A-Za-z]{1,2}(?![A-Za-z])/.exec(text.slice(end));
+  if (suffix !== null) end += suffix[0].length;
+  const residue = `${text.slice(0, start)} ${text.slice(end)}`;
   return residue.toLowerCase().match(/[a-z']+/g) ?? [];
 }
 
 /**
  * ⭐⭐ IS THIS MESSAGE ELIGIBLE TO ANSWER THE LIVE GOAL-TARGET QUESTION?
  *
- * ⛔ THIS PREDICATE HAD FOUR ROUNDS AND THE FIFTH WAS NOT ANOTHER WINDOW.
- * Each version accepted a message that was not an answer, and each repair
- * narrowed the same idea one notch:
+ * ⛔ FIVE ROUNDS, AND ONLY THE LAST TWO WERE ABOUT THE RIGHT THING.
  *
- *   b56f54a7  one amount and no other node's full label
- *             → said nothing about the amount's ROLE.
- *   690b8735  plus: no present-state marker
- *             → a list returning FALSE is not evidence of a target;
- *               "Our baseline MRR is £12,000." carries no marker.
- *   35ed6e22  plus: a target word anywhere in the message
- *             → the amount was a baseline in a DIFFERENT clause.
- *   de9010fe  plus: the target word in the amount's own clause, and a subject
- *             gate
- *             → "Our baseline MRR for choosing a target is £12,000." satisfies
- *               all of it, and £12,000 is the baseline informing an UNDECIDED
- *               target.
+ *   b56f54a7  one amount, no other full label   → said nothing about ROLE
+ *   690b8735  + no present-state marker         → "Our baseline MRR is £12,000."
+ *   35ed6e22  + a target word anywhere          → the word was in another clause
+ *   de9010fe  + that word in the amount's clause → "…for choosing a target is
+ *                                                  £12,000."
+ *   f4fa9d7c  the message IS what CQE read      → `raw_text` can BE the whole
+ *                                                  instruction ("Set churn to 4%")
  *
- * CLAUDE.md trap 22f: two reversals on one predicate is a signal, four is proof
- * the approach is wrong, and "one more rule" is the sunk-cost fallacy wearing
- * engineering clothes. The exit it prescribes — and the one the independent
- * review sanctioned — is to STOP GUESSING FROM PROSE and keep only what is
- * typed.
+ * The first four were prose predicates and CLAUDE.md trap 22f applies to them:
+ * four reversals is proof the approach is wrong. The fifth was not a prose
+ * predicate — it was a wrong belief about a data contract, and the repair is to
+ * read the contract that exists.
  *
- * SO THERE IS EXACTLY ONE WAY IN, and it involves no vocabulary at all:
+ * THE RULE, and it involves no vocabulary at all:
  *
- *   THE MESSAGE IS THE QUANTITY CQE READ, PLUS HEDGES.
+ *   THE MESSAGE IS THE VALUE TOKEN, PLUS HEDGES.
  *
  * The recorded question named the goal, and F1-F3 (sole live claimant, matching
  * graph hash, goal still present) are that question's identity. A reply that
- * carries nothing but the amount can only be answering it, because there is no
- * second clause to borrow an affirmation from and no second subject to attribute
- * the amount to. `raw_text` does the work: whatever the extractor bound to the
- * quantity — a currency mark, a magnitude suffix, an `at least` — is part of
- * what it read, so no list here decides anything.
+ * carries nothing but the number can only be answering it — there is no verb to
+ * make it an instruction, no second clause to borrow an affirmation from, and no
+ * second subject to attribute the amount to.
  *
- * EVERYTHING RICHER FALLS THROUGH UNCHANGED to the ordinary receiver. That is a
- * deliberate loss of coverage, not an oversight: an explicit goal statement
- * still reaches the canonical writer by its ordinary route, and a message this
- * gate cannot certify becomes coaching rather than a silent mutation.
+ * EVERYTHING RICHER FALLS THROUGH UNCHANGED to the ordinary receiver, including
+ * every scoped edit. That is a deliberate loss of coverage: an explicit goal
+ * statement still reaches the canonical writer by its ordinary route, and a
+ * message this gate cannot certify becomes coaching or an ordinary edit rather
+ * than a silent mutation of the goal.
  *
- * ⚠ WHY THE BAR IS THIS HIGH — the review's authority trace, which is the part
- * I had underweighted. The executor pre-route sets `consumedPendingAction`, and
- * `detectMutationWarrant({ isConfirmResume: true })` grants `confirm_resume`
- * BEFORE the message is inspected, with the commit floor treating the consumed
- * ref as authority. A false match therefore supplies the wrong target AND its
- * licence to write, and no later classifier can undo that premise. Eligibility
- * here is an AUTHORITY decision, not a parsing convenience.
+ * ⚠ WHY THE BAR IS THIS HIGH — the authority trace. The executor pre-route sets
+ * `consumedPendingAction`, and `detectMutationWarrant({ isConfirmResume: true })`
+ * grants `confirm_resume` BEFORE the message is inspected, with the commit floor
+ * treating the consumed ref as authority. A false match supplies the wrong target
+ * AND its licence to write, and no later classifier can undo that premise.
  */
 function isEligibleGoalTargetAnswer(
   message: string,
-  amount: { readonly raw_text?: unknown },
+  amount: { readonly span_start?: unknown; readonly span_end?: unknown },
 ): boolean {
+  const words = wordsBesidesTheValueToken(message, amount);
+  if (words === null) return false;
   const hedges = new Set(ANSWER_HEDGE_WORDS);
-  return wordsBesidesTheAmount(message, amount.raw_text).every((w) => hedges.has(w));
+  return words.every((w) => hedges.has(w));
 }
 
 export type GoalTargetResumeDispatch =
@@ -1001,17 +1010,38 @@ export function tryGoalTargetElicitationResume(input: {
       reason: 'not_a_target_answer',
     };
   }
-  // The answer's own unit, else the one the question already established.
-  // Never guessed: an absent unit stays absent and the writer's existing cap
-  // doctrine decides what that means.
-  const unit =
-    typeof amount.unit === 'string' && amount.unit.length > 0 ? amount.unit : pending.action.unit;
+  // ⭐⭐ CROSS THE SCALE BOUNDARY THROUGH THE ESTABLISHED MAPPER.
+  //
+  // ⛔ THIS USED TO HAND CQE's OWN REPRESENTATION STRAIGHT TO THE WRITER, and
+  // for a percentage that is a silent scale error. CQE deliberately represents
+  // "92%" as `value: 0.92, unit: 'percentage'`, while `add_constraint` stores
+  // `params.value` in USER UNITS without conversion and its cap helper
+  // recognises the literal '%' and expects the RAW PERCENT NUMBER. Passing the
+  // pair through unchanged registered raw 0.92 / unit 'percentage', which falls
+  // to the non-percent cap rule — a target of 0.92 with a 1.15 denominator
+  // instead of 92 with 100. The number the person typed would be scored against
+  // the wrong scale, silently.
+  //
+  // `mapCqeQuantityToProposalValue` is the ESTABLISHED contract for this exact
+  // crossing (`deterministic-value-update.ts`), written for the sibling
+  // `set_factor_value` route and documenting the same double-normalisation
+  // hazard. Reusing it is single-sourcing one conversion; a second copy here
+  // would be the hand-maintained mirror this repo keeps paying for. It also
+  // maps `GBP` → `£`, which is the writer's user-unit spelling — so the unit
+  // reaching the graph is the display form BECAUSE the shared mapper says so,
+  // not because a test wanted a symbol.
+  //
+  // The pending's own unit is NOT mapped: it was captured from an already-
+  // registered target, so it is in writer units already. Never guessed — an
+  // absent unit on both sides stays absent, and the cap doctrine decides.
+  const mapped = mapCqeQuantityToProposalValue(amount);
+  const unit = mapped.unit !== undefined && mapped.unit.length > 0 ? mapped.unit : pending.action.unit;
   return {
     matched: true,
     pending,
     goalNodeId: goalId,
     goalLabel,
-    value: amount.value as number,
+    value: mapped.value,
     ...(unit !== undefined ? { unit } : {}),
   };
 }

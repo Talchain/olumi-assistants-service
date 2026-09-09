@@ -90,20 +90,23 @@ describe('the quantity CQE read, plus hedges — and nothing else', () => {
     if (!result.matched) return;
     expect(result.goalNodeId).toBe('g-revenue');
     expect(result.value).toBe(20000);
-    // ⚠ `GBP`, not `£`. CQE normalises currency tokens
-    // (`context/cqe/rules.ts` `normaliseCurrencyUnit`), so the canonical
-    // representation reaching the writer is the ISO code. My earlier
-    // expectation of the display symbol was wrong about the producer, and the
-    // fix belongs here — NOT in currency handling, which is correct.
-    expect(result.unit).toBe('GBP');
+    // ⚠ `£`, and the route to it matters more than the spelling. CQE emits
+    // `GBP`; the resolver crosses to writer units through the ESTABLISHED
+    // `mapCqeQuantityToProposalValue`, which maps `GBP` → `£`. So this asserts
+    // the shared mapper's output, not a preferred symbol — and I have had this
+    // wrong in BOTH directions, first expecting `£` from a producer that emits
+    // `GBP`, then expecting `GBP` at a boundary that converts.
+    expect(result.unit).toBe('£');
   });
 
   it('a bare number answers it too, taking the unit the question established', () => {
-    const result = resume('20000', [pending({ action: { unit: 'GBP' } })]);
+    // The pending's unit is NOT mapped — it was captured from an already
+    // registered target, so it is in writer units already.
+    const result = resume('20000', [pending({ action: { unit: '£' } })]);
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.value).toBe(20000);
-    expect(result.unit).toBe('GBP');
+    expect(result.unit).toBe('£');
   });
 
   it('HEDGED — "about £20k" is still just the amount', () => {
@@ -113,6 +116,20 @@ describe('the quantity CQE read, plus hedges — and nothing else', () => {
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.value).toBe(20000);
+  });
+
+  it('⭐ PERCENTAGE — the scale is converted to the writer\'s convention', () => {
+    // CQE deliberately represents "92%" as value 0.92 / unit `percentage`.
+    // `add_constraint` stores `params.value` in USER UNITS and its cap helper
+    // expects the RAW PERCENT NUMBER against the literal '%'. Handing CQE's
+    // pair through unchanged registered 0.92 against a 1.15 denominator instead
+    // of 92 against 100 — the person's number scored on the wrong scale,
+    // silently. The crossing now goes through the established mapper.
+    const result = resume('92%', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(92);
+    expect(result.unit).toBe('%');
   });
 
   it('PUNCTUATION is not content — "£20,000." binds', () => {
@@ -149,6 +166,22 @@ describe('every richer message falls through — the four refuted predicates', (
     expect(refusalReason(resume('Our current MRR is £12,000.', [pending()]))).toBe(
       'not_a_target_answer',
     );
+  });
+
+  it('⭐ ROUND 5 — "Set churn to 4%" is a scoped edit, not the goal\'s answer', () => {
+    // The counterexample against subtracting `raw_text`. CQE's instruction
+    // pattern matches the WHOLE message — verb and subject included — and
+    // `makeResult` assigns all of it to `raw_text`, so subtracting it left an
+    // EMPTY residue and `.every()` on an empty array is true. A scoped factor
+    // edit was accepted as the revenue goal's answer, with the pre-route's
+    // pre-granted warrant behind it.
+    //
+    // Subtracting the VALUE TOKEN SPAN instead leaves "set churn to" standing,
+    // which is exactly the evidence that disqualifies it. Note the fixture's
+    // churn node is labelled "Pro Plan Churn Rate", so the bare word `churn`
+    // does NOT trip the complete-label fence — this case reaches, and must be
+    // refused by, eligibility itself.
+    expect(refusalReason(resume('Set churn to 4%', [pending()]))).toBe('not_a_target_answer');
   });
 
   it('⭐ DISTINCT CHURN — a guardrail wearing the word "target"', () => {
