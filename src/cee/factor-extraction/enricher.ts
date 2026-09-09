@@ -233,10 +233,24 @@ function inferFactorType(
     // untouched: the amount still reaches analysis, only the unsupported claim
     // about WHICH kind of money it is is withheld.
     //
-    // ⚠ AND IT IS NOT AN ABSENCE. `display-value.ts:246` branches on
-    // `else if (factorType)` — truthiness, not identity — so an `"other"`
-    // currency factor keeps the exact display path `"cost"` took. Returning
-    // `undefined` would have changed rendering; this does not.
+    // ⚠ AND IT IS NOT AN ABSENCE — though not for the reason first given here.
+    // A currency factor carrying `raw_value` NEVER REACHES the `factorType`
+    // branch at all, so its type cannot affect its rendering.
+    // `synthesiseDisplayValue` sets `result` in the Priority 1–4 block
+    // (`raw_value` present + a currency prefix → Priority 1), and the entire
+    // Priority 5–7 block is guarded by `result === undefined`. Priority 6
+    // (`else if (factorType)`) sits inside that guard AND behind
+    // `else if (unit)` — so it is DOUBLY unreachable for this class: once by
+    // the guard, and again because a currency factor always carries a unit.
+    //
+    // ⚠ CORRECTION (reviewer, #1417): this comment previously read
+    // "`display-value.ts:246` branches on `else if (factorType)` — truthiness,
+    // not identity … Returning `undefined` would have changed rendering".
+    // The CONCLUSION held but the MECHANISM was false, and false in the
+    // expensive direction: it deters a correct future simplification. For a
+    // currency factor with `raw_value`, `"cost"`, `"other"` and `undefined`
+    // all render IDENTICALLY. That is why the regression ASSERTS an identical
+    // `display_value` rather than arguing it.
     return "other";
   }
 
