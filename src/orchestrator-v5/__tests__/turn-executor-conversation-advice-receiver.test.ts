@@ -671,6 +671,17 @@ describe('conversation advice reaches contextual reasoning', () => {
     options: { readonly emptyHotWindow?: boolean } = {},
   ): Promise<{ prompt: string; mode: unknown }> {
     const state = useCapturedResearchScenario();
+    // ⚠ PER-TURN COUNTERS, RESET PER TURN. `expectNoCanonicalAuthorityWrite`
+    //   asserts exactly ONE durable append for THIS turn, but `mockState`
+    //   accumulates across runs and `beforeEach` only fires between TESTS. The
+    //   eviction case deliberately runs two turns in one test to compare their
+    //   receiving sides, so the second inherited the first's write and read as
+    //   `expected 2 to be 1` (hosted `102288443301`). That is fixture scoping,
+    //   not a product write — the invariant itself is unchanged and still runs
+    //   on every turn.
+    mockState.appendWrites = [];
+    mockState.invalidationCalls = 0;
+    mockState.storeDraftGraphCalls = 0;
     const fact = researchFact(separation);
     // The DURABLE selected fact is the one the prompt's analysis comes from.
     mockState.newestAnalysisFact = fact;
