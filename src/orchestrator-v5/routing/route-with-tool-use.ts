@@ -1242,6 +1242,16 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // bytes; without an interpretation rule the model can mistake the reduced
   // projection for proof that the omitted facts do not exist. Under-budget
   // packs carry neither the marker nor this instruction.
+  // ⭐⭐ WHAT `margin` MEANS. Emitted by the SAME condition that serialises it,
+  // so the number and its definition cannot travel apart — the mechanism
+  // `DISPLAY_GRAPH_INSTRUCTION` and `PROVISIONAL_FIGURES_INSTRUCTION` already
+  // use, not a new policy or a word rule.
+  if (
+    (llmFacing.analysis as { readonly margin?: unknown } | null | undefined)?.margin !== undefined &&
+    (llmFacing.analysis as { readonly margin?: unknown } | null | undefined)?.margin !== null
+  ) {
+    parts.push('', MARGIN_MEANING_INSTRUCTION);
+  }
   if (llmFacing.context_budget !== undefined) {
     parts.push('', CONTEXT_BUDGET_INSTRUCTION);
   }
@@ -1736,6 +1746,48 @@ export const PROVISIONAL_FIGURES_INSTRUCTION = [
   '- No winner or contest framing. Discuss goal fit and what is still uncertain.',
   '- Say what would firm it up — which estimates matter most and what evidence would settle them.',
   '- Do not expose status tokens, internal fields or admission modes.',
+].join('\n');
+
+/**
+ * ⭐⭐ `margin` IS A DIFFERENCE BETWEEN TWO SIMULATION SHARES, AND WE WERE
+ *    HANDING IT OVER UNLABELLED.
+ *
+ * Producer, `orchestrator/context/analysis-compact.ts:836-838` and the field's
+ * own doc at `:140`:
+ *
+ *     margin = recommendableOptions[0].win_probability
+ *            - recommendableOptions[1].win_probability
+ *     "Winner win_probability minus runner-up win_probability."
+ *
+ * So it is the gap between how OFTEN two options came top across the simulated
+ * runs. It is not an outcome gap, not a probability that one option does better
+ * by that amount, and not an effect size.
+ *
+ * MEASURED CONSEQUENCE, native request `e986bfbe-2bbf-4a5a-bb40-816bf3bf5050`
+ * (9 Sep 2026, CEE `42d1f62`): the answer called 55% vs 36% **"a 19 point
+ * margin"** while the rendered `decision_review` in the SAME response said in
+ * terms that a frequency difference is not an outcome difference. One number,
+ * two meanings, one response.
+ *
+ * ⚠ THE MODEL DID NOT INVENT THAT. It read a field we ship with no statement of
+ *   what it is. The fix is therefore the same shape as the provisional-figures
+ *   qualification: say what the number means, beside the number. No word is
+ *   banned, no claim is suppressed, and legitimate conditional discussion of the
+ *   comparison is untouched — the model may still discuss the gap, accurately.
+ *
+ * ⚠ NOT the `robustness.confidence` mislabelling. That one is an ISL-side
+ *   identity (`recommendation_stability = option_wins[winner] / n_samples`,
+ *   basis `recommendation_stability_uncalibrated`), CEE reads nothing from it,
+ *   and it never reaches this pack. See
+ *   `compose/withheld-claim-projection.ts:299-327`; it has its own row.
+ */
+export const MARGIN_MEANING_INSTRUCTION = [
+  '## What `margin` measures (deterministic authority)',
+  '`analysis.margin` is the leading option\'s win share minus the runner-up\'s: how much more OFTEN the leader came top across the simulated runs.',
+  '- It is NOT an outcome gap, NOT an effect size, and NOT the probability that the leader does better by that amount. Two options can differ in share while their outcomes barely differ.',
+  '- Discuss it as a difference in how often each option came top, and say what it does not settle. Do not restate it as the size of the advantage.',
+  '- The figures come from estimates in this model, so the gap moves when those estimates change. Prefer discussing what would narrow or widen it.',
+  '- Do not expose field names, status tokens or internal identifiers.',
 ].join('\n');
 
 export const ANALYSIS_CONTEXT_INSTRUCTION = [

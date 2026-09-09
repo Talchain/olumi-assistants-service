@@ -61,6 +61,7 @@ import {
   DISPLAY_GRAPH_INSTRUCTION,
   ANALYSIS_CONTEXT_INSTRUCTION,
   PROVISIONAL_FIGURES_INSTRUCTION,
+  MARGIN_MEANING_INSTRUCTION,
   CONTEXT_BUDGET_INSTRUCTION,
   FACTOR_VALUES_INSTRUCTION,
   OLDER_RELEVANT_FACTS_INSTRUCTION,
@@ -143,6 +144,8 @@ const CODE_OWNED_INSTRUCTIONS = [
   ['DISPLAY_GRAPH_INSTRUCTION', DISPLAY_GRAPH_INSTRUCTION],
   ['ANALYSIS_CONTEXT_INSTRUCTION', ANALYSIS_CONTEXT_INSTRUCTION],
   ['PROVISIONAL_FIGURES_INSTRUCTION', PROVISIONAL_FIGURES_INSTRUCTION],
+  // Emitted by the same condition that serialises a non-null `analysis.margin`.
+  ['MARGIN_MEANING_INSTRUCTION', MARGIN_MEANING_INSTRUCTION],
   // Prompt coverage. Emitted by the SAME condition that serialises
   // `context_budget`, so a reduced graph/analysis projection cannot be read as
   // proof of absence. The maximal fixture reaches this through real graph
