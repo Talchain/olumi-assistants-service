@@ -11,11 +11,18 @@
  * ⚠ WHAT THIS IS NOT. The same turn recorded the model's coaching summary
  *   rejected `no_tradeoff_or_gap`, and the raw candidate was NOT captured — so
  *   nothing here claims a good answer was filtered, and the gate is untouched.
- *   The deterministic builder is simply the ONLY first-response composer:
- *   acceptance alone is not sufficient at `post-draft-narrative.ts:590`, which
- *   also requires `analysisReady.status === 'ready'`, and on a first draft
- *   analysis has not run (this one auto-ran at 03:48:43, after the 03:47:50
- *   draft).
+ *
+ * ⛔ AND A CLAIM I MADE AND WITHDRAW: I wrote that a first draft can never use
+ *    the model summary because `post-draft-narrative.ts:590` requires
+ *    `analysisReady.status === 'ready'` and "analysis has not run yet". That is
+ *    FALSE. `analysisReady` means ready TO ANALYSE, not already analysed, so a
+ *    first draft CAN be `ready` and CAN ship an accepted summary — `:548-635`
+ *    permits exactly that. What was true of THIS turn is only true of this
+ *    turn: its joined `analysis_ready.built` was `needs_user_input` with ONE
+ *    blocker (all three readyOptions) at 03:48:34.446, and the copy gate
+ *    separately rejected. A property of one capture is not a property of the
+ *    path, and the READY first-draft case below is the control that keeps me
+ *    honest about it.
  *
  * ⚠ AND NOTHING IS INVENTED. The promoted text is the existing
  *   `pickDirectionClarifications` line — the carrier the weighing section's own
@@ -87,6 +94,25 @@ describe('the first response leads with the stated limit, not the inventory', ()
     expect(confirm).toBe(0);
     expect(inventory).toBeGreaterThan(confirm);
     expect(weighing).toBeGreaterThan(inventory);
+  });
+
+  it('⭐ READY FIRST DRAFT + accepted summary still ships the model summary, untouched by this change', () => {
+    // The control the withdrawn claim would have made unthinkable. A first draft
+    // CAN be ready, and when its summary passes the copy gate the shortcut at
+    // `:590` ships it verbatim — the deterministic builder, and therefore this
+    // promotion, never runs. If this ever starts returning the sectioned
+    // narrative, the change has widened to all first responses, which is exactly
+    // what it must not do.
+    const accepted =
+      'This decision comes down to one trade-off: raising the price protects margin while risking churn, and the churn limit is the constraint to weigh. Next, set that limit so the model can test it.';
+    const text = buildPostDraftNarrative({
+      graph: { nodes: [GOAL, OPTION_A, OPTION_B], edges: [] },
+      analysisReady: { status: 'ready' },
+      coachingSummary: accepted,
+      strengthenItems: [DIRECTION_ITEM],
+    } as never).text;
+    expect(text).toContain('one trade-off');
+    expect(text).not.toContain('Options compared');
   });
 
   it('NEGATIVE — the unbound limit is raised as a question, never asserted as captured', () => {
