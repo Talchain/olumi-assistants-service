@@ -129,6 +129,8 @@ const UNBINDABLE_NODES = [
  * value. It is recorded, not concluded, and it is not tested here.
  */
 const SECOND_LIMIT_SENTENCE = 'Keep costs under 4%.';
+/** Carries a NEGATION ("must not"), so the negated-bound detector is in play. */
+const THIRD_LIMIT_SENTENCE = 'Refund rate must not exceed 4%.';
 const TWO_LIMITS_ONE_NUMBER = `${BRIEF_LIMIT_SENTENCE} ${SECOND_LIMIT_SENTENCE}`;
 
 /**
@@ -330,10 +332,28 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
    * shrinks (CLAUDE.md 22f) and a later reader can see WHICH limits were asked
    * about rather than how many.
    */
-  function unmatchedMetrics(brief: string): readonly string[] {
+  /**
+   * ⚠⚠ EVERY ASK, WITH ITS REASON — NEVER FILTERED TO ONE REASON.
+   *
+   * The first version of this helper filtered to `reason === 'target_unmatched'`
+   * and I read its empty result as "the user is asked nothing". It is not: it is
+   * "no ask OF THAT REASON". `ctx.directionUnresolved` is assembled from THREE
+   * sources, and a question from either of the others is invisible to a
+   * single-reason filter — so a suppressed-by-design ask and an absent one look
+   * identical. Two separate seats made that exact mistake today, by different
+   * routes, and both reported designed behaviour as silence.
+   *
+   * The dedup this file probes is DELIBERATE and its rationale is written above
+   * it (`compound-goals.ts:628-666`): the filter runs against everything that
+   * has already spoken for the quantity, and the ask fires only on the residue —
+   * because (a) the extractor emits several overlapping rows per sentence, and
+   * (b) an unproven direction is a LIE RISK where an unbound limit is a GAP, and
+   * "a lie outranks a gap". A residue count is therefore NOT a count of the
+   * questions a user sees.
+   */
+  function allAsks(brief: string): readonly string[] {
     return runPipeline(brief)
-      .asks.filter((a) => a.reason === 'target_unmatched')
-      .map((a) => a.metric_text.toLowerCase())
+      .asks.map((a) => `${a.reason}|${a.metric_text.toLowerCase()}`)
       .sort();
   }
 
@@ -352,81 +372,51 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
    * extractor — `Churn must not exceed 4%.` is in its own corpus verbatim — so
    * a null result cannot be blamed on a phrasing this producer never handles.
    */
-  it('CONTROL — each limit, alone, reaches no wire row and IS asked about', () => {
-    const churn = runPipeline(BRIEF_LIMIT_SENTENCE);
-    const second = runPipeline(SECOND_LIMIT_SENTENCE);
-    // ⚠ BOTH HALVES, so a null ask can be told apart from a limit that BOUND.
-    // Without the wire assertion, an empty ask list is ambiguous between "the
-    // limit was dropped and not asked about" and "the limit bound to a node and
-    // needed no ask" — and only the first is a defect.
-    expect(churn.wire).toHaveLength(0);
-    expect(second.wire).toHaveLength(0);
-    expect(unmatchedMetrics(BRIEF_LIMIT_SENTENCE)).toContain('monthly churn');
-    expect(unmatchedMetrics(SECOND_LIMIT_SENTENCE)).toContain('costs');
+  /**
+   * ⚠ AN EMPTY WIRE IS CORRECT BEHAVIOUR HERE, NOT A DEFECT, and it is asserted
+   * as a PRECONDITION rather than as a finding. The row genuinely matches no
+   * node in this fixture, so it SHOULD NOT reach the graph — `rejected_no_match`
+   * is the honest outcome. Its only job is to remove the alternative reading of
+   * an absent ask ("it bound and needed none"). Folding it together with an ask
+   * assertion under one name would record a correct behaviour and a questionable
+   * one as a single fact, and would go green for the wrong reason if only one
+   * of them changed.
+   */
+  it('PRECONDITION — each limit, alone, binds to nothing (so an absent ask is not a bind)', () => {
+    expect(runPipeline(BRIEF_LIMIT_SENTENCE).wire).toHaveLength(0);
+    expect(runPipeline(SECOND_LIMIT_SENTENCE).wire).toHaveLength(0);
+    expect(runPipeline(THIRD_LIMIT_SENTENCE).wire).toHaveLength(0);
+  });
+
+  it('OBSERVED — every ask each limit produces on its own, with its reason', () => {
+    expect(allAsks(BRIEF_LIMIT_SENTENCE)).toEqual(['target_unmatched|monthly churn']);
+    expect(allAsks(SECOND_LIMIT_SENTENCE)).toEqual(['target_unmatched|costs']);
+    expect(allAsks(THIRD_LIMIT_SENTENCE)).toEqual(['target_unmatched|refund rate']);
   });
 
   /**
-   * ⚠⚠ A RECORD, NOT A CLAIM — and pinned rather than noted because a record
-   * with nothing running behind it is how this estate loses things.
+   * ⭐ THE OPEN QUESTION, STATED AS A QUESTION AND NOT AS A FINDING.
    *
-   * `Refund rate must not exceed 4%.` is the same CONSTRUCTION as
-   * `Keep costs under 4%.` above and as `Churn must not exceed 4%.` in this
-   * extractor's own corpus. Against the same unbindable node set it produces
-   * NO wire row AND NO question: the user states a limit and is neither told it
-   * was dropped nor asked where it belongs.
+   * The dedup key is value-only (`alreadyAsked: Set<number>`,
+   * `compound-goals.ts:678-684`) — a fact about the code, not a verdict on it.
+   * Its written rationale covers TWO cases: overlapping rows from the SAME
+   * sentence, and a direction question outranking a referent question. **Neither
+   * covers two DISTINCT metrics, in two sentences, sharing one number.**
    *
-   * ⚠ I HAVE NOT ESTABLISHED WHY, AND THIS ASSERTION DOES NOT SAY. The obvious
-   * suspect is `CONSTRAINT_ALIASES` (extractor.ts:1568), a hand-maintained list
-   * of twenty-eight metric names that does not include "refund rate" — but that
-   * map is consumed at STEP 4 of `remapConstraintTargets` (BINDING), not at
-   * extraction, so it does not explain a null. It could equally be a junk
-   * rejection or a non-finite value skipped at `compound-goals.ts:681`.
+   * ⚠ WHETHER THAT IS A GAP IS NOT ESTABLISHED HERE AND THIS CASE DOES NOT SAY.
+   * It records the full ask set, with reasons, so a reader can see whether the
+   * second metric is spoken for by ANY channel. An earlier version of this file
+   * asserted a single-reason subset and read its emptiness as silence; that was
+   * wrong, and it is why the assertion below is unfiltered.
    *
-   * ⭐ WHY PIN IT AT ALL (CLAUDE.md 22f — the sanctioned way to ship a known
-   * gap): asserting EXACTLY the observed state keeps the suite green for the
-   * right reason and REDs if the set GROWS or SHRINKS. Whoever makes this
-   * sentence produce a question will be handed this comment by a failing test
-   * rather than having to rediscover the behaviour.
-   *
-   * ⚠ AND NOTE WHAT THE EXISTING CORPUS CANNOT SEE: every other test of this
-   * producer uses an IN-VOCABULARY metric ("budget", "churn"). A corpus that
-   * shares the code's blind spot cannot observe the code's defect (trap 13d).
+   * Pinned as an exact set (CLAUDE.md 22f) so it REDs if the set grows OR
+   * shrinks, and is green only for the right reason.
    */
-  it('KNOWN-DROPPED — this limit reaches no wire row and produces no question', () => {
-    const { wire, asks } = runPipeline('Refund rate must not exceed 4%.');
-    expect(wire).toHaveLength(0);
-    expect(asks.filter((a) => a.reason === 'target_unmatched')).toEqual([]);
-  });
-
-  /**
-   * ⭐⭐ MEASURED, HOSTED: TWO STATED LIMITS SHARING ONE NUMBER PRODUCE ONE
-   * QUESTION. The second is silently dropped — no wire row, and no ask either.
-   *
-   * The CONTROL above is what makes this conclusive rather than suggestive:
-   * `costs` IS asked about when it is the only limit in the brief, and the node
-   * set is identical in both runs, so neither non-extraction nor binding can
-   * explain its absence here. **The only thing that changed is that another
-   * limit with the same number was asked about first.**
-   *
-   * The mechanism is in the source and matches exactly:
-   * `compound-goals.ts:678-684` builds `alreadyAsked` as a `Set<number>` —
-   * seeded from `coveredValues` and the detector findings, with NO metric
-   * component — and skips any unbindable row whose value it already holds.
-   *
-   * ⚠ TWO HARMS UNDER ONE PREDICATE (CLAUDE.md trap 22b). Asking twice about
-   * one limit is a WALL; dropping a question for a limit the user stated is a
-   * GAP — and they are opposite failures that one `Set<number>` cannot serve.
-   * This is the gap, and it is the same harm the `target_unmatched` ask exists
-   * to prevent, reintroduced by the mechanism that prevents the wall.
-   *
-   * ⛔ THE ASSERTION PINS THE OBSERVED BEHAVIOUR, IT DOES NOT ENDORSE IT.
-   * Widening the key is a change to a live user-facing predicate and belongs
-   * with its owner: this estate has already paid four oscillating rounds on
-   * exactly that shape (trap 22f). Pinned so the suite is green for the right
-   * reason and REDs if the set grows OR shrinks.
-   */
-  it('KNOWN-DROPPED — two limits sharing one number yield ONE question, not two', () => {
-    expect(unmatchedMetrics(TWO_LIMITS_ONE_NUMBER)).toEqual(['monthly churn']);
+  it('OBSERVED — the full ask set when two distinct metrics share one number', () => {
+    expect(allAsks(TWO_LIMITS_ONE_NUMBER)).toEqual([
+      'target_unmatched|costs',
+      'target_unmatched|monthly churn',
+    ]);
   });
 });
 
