@@ -15,6 +15,7 @@
 // ============================================================================
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SystemEventTurnPayload } from '@talchain/schemas/boundary';
+import { CanonicalCommittedGraphReceiptSchema } from '@talchain/schemas/boundary';
 
 const mocks = vi.hoisted(() => ({
   executeOptionInterventionEdit: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('../../commit.js', async (importOriginal) => ({
 }));
 
 import { dispatchSystemEvent, SYSTEM_EVENT_HANDLING } from '../dispatch.js';
+import { buildAppliedGraphWireField } from '../../compose/applied-graph-emit.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -206,6 +208,10 @@ describe('D — the four outcomes, reported honestly', () => {
     expect((result.response as { graph_hash?: string }).graph_hash).toBe('committed-hash');
     // No readiness is INVENTED from a graph that could not be read.
     expect(result.analysisReady).toBeUndefined();
+    // ⭐ AND NO RECEIPT EITHER. A receipt is an ATTESTATION about bytes; with no
+    // parsed view there is no basis for one, and an attestation invented from a
+    // graph this process could not read is worse than its absence.
+    expect((result.response as { draft_graph?: unknown }).draft_graph).toBeUndefined();
   });
 
   it.each([
@@ -282,4 +288,101 @@ describe('D — the four outcomes, reported honestly', () => {
     expect(result.graph).toBeNull();
     expect((result.response as { graph_hash?: string }).graph_hash).toBeUndefined();
   });
+});
+
+/**
+ * ⭐⭐⭐ E — THE COMMITTED POSTIMAGE GOES BACK.
+ *
+ * Without it this route is WRITE-ONLY. The client writes nothing locally — the
+ * applied response owns the store — so a SUCCESSFUL edit left the user's row
+ * saying "sent, not saved yet" for the rest of the session, with a second edit
+ * unreachable behind it.
+ *
+ * ⚠ AND THE CARRIER ALREADY EXISTED. I claimed a new schema operation was
+ * needed, having derived at ONE receiver (`applyV5State`'s three-operation
+ * `graph_patch` switch) and generalised to "the wire cannot carry the value".
+ * The applied-edit receiver is a different one: `useConversation.ts:5004` takes
+ * a top-level `draft_graph` on a non-empty canvas and reconciles it ATOMICALLY,
+ * precisely because "a successful edit returns `blocks: []` and the receipt's
+ * draft_graph is the entire committed post-state" — this writer's exact shape.
+ */
+describe('E — the committed postimage returns as a CANONICAL receipt', () => {
+  function committedOutcome() {
+    return {
+      kind: 'committed' as const,
+      response: { response_version: 2, assistant_text: 'ok', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse' },
+      graph: COMMITTED_GRAPH,
+      analysisGraphHash: 'committed-hash',
+      persistedRowId: 'row-E',
+    };
+  }
+
+  it('attaches a receipt that satisfies the CANONICAL contract, not a partial block', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue(committedOutcome());
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-E1' });
+    const receipt = (result.response as { draft_graph?: unknown }).draft_graph;
+    // The schema is `.strict()`, requires `options` / `goal_node_id` /
+    // `goal_constraints`, and refuses counts that disagree with the arrays. It
+    // is the contract itself, not a re-statement of it.
+    const parsed = CanonicalCommittedGraphReceiptSchema.safeParse(receipt);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('⭐ carries the COMMITTED INTERVENTION — the value the client cannot learn any other way', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue(committedOutcome());
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-E2' });
+    const receipt = (result.response as { draft_graph?: { nodes?: unknown[] } }).draft_graph;
+    const option = (receipt?.nodes ?? []).find(
+      (n): n is { id: string; interventions?: Record<string, unknown> } =>
+        typeof n === 'object' && n !== null && (n as { id?: unknown }).id === 'option_open_leeds',
+    );
+    // Bound by IDENTITY, never by position: another option carrying 0.6 must not
+    // be able to satisfy this.
+    expect(option?.interventions?.factor_capex).toBe(0.6);
+  });
+
+  it('⚠ owns `options` and `goal_node_id` — the two `buildAppliedGraphWireField` omits', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue(committedOutcome());
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-E3' });
+    const receipt = (result.response as { draft_graph?: Record<string, unknown> }).draft_graph;
+
+    // The contract reads an ABSENT `options` as "this producer made no complete
+    // options attestation" — which would be the wrong thing to say on the one
+    // turn whose subject is an option's canonical record. `[]` and `null` are
+    // attestations; omission is not.
+    expect(Array.isArray(receipt?.options)).toBe(true);
+    expect(Object.keys(receipt ?? {})).toContain('goal_node_id');
+
+    // ⭐ DISCRIMINATING CONTRAST, on the SAME graph: the older helper omits both,
+    // so this assertion is about the receipt's shape and not about the fixture
+    // happening to contain options.
+    const partial = buildAppliedGraphWireField(COMMITTED_GRAPH as never) as Record<string, unknown>;
+    expect(Object.keys(partial)).not.toContain('options');
+    expect(Object.keys(partial)).not.toContain('goal_node_id');
+  });
+
+  it('counts are taken from the arrays it emits, never carried', async () => {
+    mocks.executeOptionInterventionEdit.mockResolvedValue(committedOutcome());
+    const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-E4' });
+    const receipt = (result.response as {
+      draft_graph?: { nodes: unknown[]; edges: unknown[]; node_count: number; edge_count: number }
+    }).draft_graph;
+    expect(receipt?.node_count).toBe(receipt?.nodes.length);
+    expect(receipt?.edge_count).toBe(receipt?.edges.length);
+    expect(receipt?.node_count).toBe(3);
+  });
+
+  it.each([
+    ['unchanged', { kind: 'unchanged' }],
+    ['refused', { kind: 'refused', reason: 'unresolved_effect_relationship' }],
+    ['stale base', { kind: 'refused', reason: 'stale_graph' }],
+    ['unverified', { kind: 'unverified', reason: 'committed_graph_mismatch', commitAttempted: true }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    '⚠ %s attaches NO receipt — a non-commit must never advertise unpersisted state',
+    async (_name, outcome) => {
+      mocks.executeOptionInterventionEdit.mockResolvedValue(outcome);
+      const result = await dispatchSystemEvent({ payload: payload(), requestId: 'req-E5' });
+      expect((result.response as { draft_graph?: unknown }).draft_graph).toBeUndefined();
+    },
+  );
 });

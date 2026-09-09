@@ -55,7 +55,10 @@ import {
   type FreshnessDerivation,
 } from '../context/freshness.js';
 import { buildCanonicalAnalysisReadyFromGraph } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { buildAppliedGraphWireField } from '../compose/applied-graph-emit.js';
+import {
+  buildAppliedGraphWireField,
+  buildCanonicalCommittedGraphReceipt,
+} from '../compose/applied-graph-emit.js';
 import {
   applyEdgeStrengthEdit,
   isExactCommittedEdgeReadback,
@@ -2045,14 +2048,59 @@ async function dispatchOptionInterventionEdit(
       },
       'V5 option_intervention_edit — committed',
     );
+    // Derived ONCE and used twice — the receipt below must not disagree with
+    // the readiness beside it about which options and which goal the committed
+    // graph holds.
+    const canonicalReady =
+      graphForReadiness !== null
+        ? buildCanonicalAnalysisReadyFromGraph(graphForReadiness)
+        : undefined;
+
+    /**
+     * ⭐⭐⭐ THE COMMITTED POSTIMAGE GOES BACK, AND WITHOUT IT THIS WHOLE ROUTE
+     * IS WRITE-ONLY.
+     *
+     * The client wrote nothing locally — deliberately; the applied response owns
+     * the store. So until this turn carries the committed value back, a
+     * SUCCESSFUL edit leaves the user's row saying "sent, not saved yet" for the
+     * rest of the session, and a second edit is unreachable behind it.
+     *
+     * ⚠ AND THE CARRIER ALREADY EXISTS — I claimed otherwise and was wrong. I
+     * derived at ONE receiver (`applyV5State`'s three-operation `graph_patch`
+     * switch) and generalised to "the wire cannot carry the value". The UI's
+     * applied-edit path is a DIFFERENT receiver: `useConversation.ts:5004` takes
+     * a top-level `draft_graph` on a NON-EMPTY canvas as an applied-edit receipt
+     * and reconciles it atomically — adds, UPDATES and deletions — precisely
+     * because "a successful edit returns `blocks: []` and the receipt's
+     * draft_graph is the entire committed post-state", which is exactly this
+     * writer's shape.
+     *
+     * ⚠ NOT `buildAppliedGraphWireField`. That helper omits `options` and
+     * `goal_node_id`, and for a canonical transactional producer their omission
+     * is not a smaller truth but a different one — the contract reads an absent
+     * `options` as "this producer made no complete options attestation", on the
+     * one turn whose subject is an option's canonical record.
+     *
+     * ⚠ OMITTED ENTIRELY WHEN THE COMMITTED GRAPH DID NOT PARSE. A receipt is an
+     * attestation about bytes; with no parsed view there is no basis for one,
+     * and the honest answer is absence — the same rule the readiness above
+     * follows, for the same reason.
+     */
+    const committedReceipt =
+      graphForReadiness !== null && canonicalReady !== undefined
+        ? buildCanonicalCommittedGraphReceipt(graphForReadiness, canonicalReady)
+        : undefined;
+
     return {
-      response: { ...outcome.response, graph_hash: outcome.analysisGraphHash },
+      response: {
+        ...outcome.response,
+        graph_hash: outcome.analysisGraphHash,
+        ...(committedReceipt !== undefined ? { draft_graph: committedReceipt } : {}),
+      },
       commitPerformed: true,
       // Readiness from the bytes that LANDED. `undefined` only when the
       // committed graph did not parse — an honest absence, not a guess.
-      ...(graphForReadiness !== null
-        ? { analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness) }
-        : {}),
+      ...(graphForReadiness !== null ? { analysisReady: canonicalReady } : {}),
       freshness: freshnessAfterCommit,
       graph: graphForReadiness,
     };
