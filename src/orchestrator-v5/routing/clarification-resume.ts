@@ -46,15 +46,21 @@
 
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
-import type { ElicitTargetBaselinePending, PendingAction, ElicitGoalTargetPending } from '../session/pending-action.js';
-import { findSoleLiveGoalTargetPending } from '../session/pending-action.js';
+import type {
+  ElicitTargetBaselinePending,
+  ElicitGoalTargetPending,
+  PendingAction,
+} from '../session/pending-action.js';
 import { runExtraction } from '../context/cqe/extract-quantities.js';
-import { reportsPresentState } from '../../cee/factor-extraction/stated-level.js';
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
+  findSoleLiveGoalTargetPending,
 } from '../session/pending-action.js';
-import { classifyElicitedBaselineAnswer } from '../../cee/factor-extraction/stated-level.js';
+import {
+  classifyElicitedBaselineAnswer,
+  reportsPresentState,
+} from '../../cee/factor-extraction/stated-level.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
