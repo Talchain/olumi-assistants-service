@@ -12,14 +12,17 @@ import type { SessionTurnWithContent } from '../../../src/orchestrator-v5/sessio
 import type { SessionTurnWrite } from '../../../src/orchestrator-v5/session/store.js';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 import type { GraphStateIngress } from '../../../src/orchestrator-v5/boundary/request-extensions.js';
+import { GraphV3, type GraphV3T } from '../../../src/schemas/cee-v3.js';
+import type { ToolCallResponse } from '../../../src/orchestrator-v5/routing/tool-schema.js';
 
-const { append, editDispatch, coachCall, routeReceiver, handlerReceiver, telemetry } = vi.hoisted(() => ({
+const { append, editDispatch, coachCall, routeReceiver, handlerReceiver, telemetry, modelFixture } = vi.hoisted(() => ({
   append: vi.fn<(write: SessionTurnWrite) => Promise<{ id: string }>>(),
   editDispatch: vi.fn(),
   coachCall: vi.fn(),
   routeReceiver: vi.fn(),
   handlerReceiver: vi.fn(),
   telemetry: vi.fn(),
+  modelFixture: { includeGeneralQuery: true },
 }));
 
 const SCENARIO = 'd66123ea-cc6a-40aa-a33c-afcb14f3af59';
@@ -34,8 +37,8 @@ const GRAPH = {
     { id: 'opt_split', kind: 'option', label: 'Two-and-Two Split (AE + Engineer)', interventions: { fac_eng: 0.5 } },
     { id: 'fac_eng', kind: 'factor', label: 'Platform Engineer Headcount Added', observed_state: { value: 1 } },
   ],
-  edges: [{ from: 'fac_eng', to: 'goal_revenue', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9 }],
-} satisfies GraphStateIngress;
+  edges: [{ from: 'fac_eng', to: 'goal_revenue', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' }],
+} satisfies GraphStateIngress & GraphV3T;
 const GRAPH_HASH = computeAnalysisAffectingGraphHash(GRAPH);
 if (GRAPH_HASH === null) throw new Error('The persisted discussion fixture must have a real graph hash.');
 const PRIOR_TURN = {
@@ -109,8 +112,8 @@ vi.mock('../../../src/adapters/llm/router.js', () => {
       return Promise.resolve({
         content: [{ type: 'tool_use', id: 'toolu_discuss', name: 'olumi_action', input: {
           intent_class: 'execute',
-          action: { handler_id: 'explain_from_structure', entity: { id: 'opt_split', kind: 'option', resolution_status: 'resolved', resolution_method: 'context_inference' }, parameters: [], cited_context_fields: [], explanation: { answer_text: ANSWER } },
-        } }],
+          action: { handler_id: 'explain_from_structure', entity: { id: 'opt_split', kind: 'option', resolution_status: 'resolved', resolution_method: 'context_inference' }, parameters: [], cited_context_fields: [], explanation: { answer_text: ANSWER }, structure_query: modelFixture.includeGeneralQuery ? { kind: 'general' } : undefined },
+        } satisfies ToolCallResponse }],
         stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 20 }, model: 'test-model', latencyMs: 1,
       });
     },
@@ -153,6 +156,10 @@ describe('lean native discussion respects explicit no-change authority at both e
   afterAll(async () => { await app.close(); });
   beforeEach(() => {
     vi.clearAllMocks();
+    modelFixture.includeGeneralQuery = true;
+    // The write control must reach the real handler with a valid canonical
+    // graph, not fail before exercising the authority boundary under test.
+    expect(GraphV3.safeParse(GRAPH).success).toBe(true);
     append.mockResolvedValue({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
     editDispatch.mockResolvedValue({ response: { response_version: 2, assistant_text: 'EDIT DISPATCH SENTINEL', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse' }, commitPerformed: true });
   });
@@ -174,6 +181,8 @@ describe('lean native discussion respects explicit no-change authority at both e
     expect(routeReceiver).toHaveBeenCalledTimes(1);
     expect(coachCall).toHaveBeenCalledTimes(1);
     expect(handlerReceiver.mock.calls.map(([id]) => id)).toEqual(['explain_from_structure']);
+    expect(handlerReceiver.mock.calls[0][1].proposal.structure_query).toEqual({ kind: 'general' });
+    expect(handlerReceiver.mock.calls[0][1].explanation).toMatchObject({ answer_text_valid: true });
     expect(res.json().assistant_text).toContain('platform reliability');
     expect(JSON.stringify(coachCall.mock.calls)).toContain(PRIOR_TURN.assistant_message);
     expect(wroteGraph()).toBe(false);
@@ -185,6 +194,17 @@ describe('lean native discussion respects explicit no-change authority at both e
     expect(routeReceiver).toHaveBeenCalledTimes(1);
     expect(handlerReceiver.mock.calls.map(([id]) => id)).toEqual(['explain_from_structure']);
     expect(editDispatch).not.toHaveBeenCalled();
+    expect(wroteGraph()).toBe(false);
+  });
+
+  it('an unspecified structure-query arm retains the real fail-weak handler', async () => {
+    modelFixture.includeGeneralQuery = false;
+    const res = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: nativeRequest(REMINDER) });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(routeReceiver).toHaveBeenCalledTimes(1);
+    expect(handlerReceiver.mock.calls.map(([id]) => id)).toEqual(['explain_from_structure']);
+    expect(res.json().assistant_text).toContain('available Living Model structure');
+    expect(res.json().assistant_text).not.toContain('platform reliability');
     expect(wroteGraph()).toBe(false);
   });
 
