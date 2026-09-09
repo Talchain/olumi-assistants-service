@@ -23,7 +23,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
-import type { GraphV3T } from '../../../schemas/cee-v3.js';
+import { GraphV3, type GraphV3T } from '../../../schemas/cee-v3.js';
 import type { RunAnalysisScenarioSnapshot } from '../../tools/handlers/run-analysis.js';
 
 import { makeMessagePayload } from '../../__tests__/fixtures.js';
@@ -125,13 +125,13 @@ function payload() {
 }
 
 // Minimal schema-valid graph so the snapshot pre-load path resolves.
-const READY_GRAPH: GraphV3T = {
+const READY_GRAPH: GraphV3T = GraphV3.parse({
   nodes: [
     { id: 'dec_launch', kind: 'decision', label: 'Launch?' },
     { id: 'goal_revenue', kind: 'goal', label: 'Revenue', goal_threshold: 0.8 },
     // A material, user-stated input makes the existing leader-positive cases
     // genuinely comparative, rather than accidentally relying on a missing cap.
-    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend', observed_state: { value: 0.5, source: 'user_stated' } },
+    { id: 'fac_marketing', kind: 'factor', label: 'Marketing spend', observed_state: { value: 0.5, source: 'user_override' } },
     { id: 'opt_launch', kind: 'option', label: 'Launch now', interventions: { fac_marketing: 0.7 } },
     { id: 'opt_status_quo', kind: 'option', label: 'Status quo', interventions: { fac_marketing: 0.3 } },
   ],
@@ -142,7 +142,7 @@ const READY_GRAPH: GraphV3T = {
     { from: 'opt_status_quo', to: 'fac_marketing', strength: { mean: 0.3, std: 0.1 }, exists_probability: 0.9, effect_direction: 'positive' },
     { from: 'fac_marketing', to: 'goal_revenue', strength: { mean: 0.6, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
   ],
-} as unknown as GraphV3T;
+});
 
 function snapshot(): RunAnalysisScenarioSnapshot {
   return {
@@ -299,12 +299,12 @@ describe('chip-click run_analysis — STEP-5 coaching (ROADMAP 2.73 Fix A)', () 
 describe('chip-click admission caps designation, not the completed comparison', () => {
   function machineAuthoredSnapshot(): RunAnalysisScenarioSnapshot {
     const original = snapshot();
-    const graph = {
+    const graph = GraphV3.parse({
       ...READY_GRAPH,
       nodes: READY_GRAPH.nodes.map((node) => node.id === 'fac_marketing'
-        ? { ...node, observed_state: { value: 0.5, source: 'cee_hypothesis' } }
+        ? { ...node, observed_state: { value: 0.5, source: 'cee_inference' } }
         : node),
-    };
+    });
     return { ...original, graph, rawPersistedGraph: graph };
   }
 
