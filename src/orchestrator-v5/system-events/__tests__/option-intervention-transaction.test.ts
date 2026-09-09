@@ -637,8 +637,14 @@ describe('an existing intervention persisted WITHOUT target_match', () => {
   function graphWithPersistedEntry(entry: Record<string, unknown>) {
     const graph = canonicalGraph();
     const option = graph.nodes.find(node => node.id === 'option')!;
-    (option as { interventions: Record<string, unknown> }).interventions.factor = entry;
-    return projectGraphForPersistence(graph) as ReturnType<typeof canonicalGraph>;
+    // ⚠ `as unknown as` DELIBERATELY, AND NOT AS A CONVENIENCE. `interventions`
+    // is typed as the producer's record, and the whole point of this fixture is
+    // to install a shape that record does NOT describe — the one the estate
+    // actually persists. A single-step assertion is the TS2352 the ratchet
+    // caught; widening the baseline instead would have hidden the fixture's own
+    // reason for existing.
+    (option as unknown as { interventions: Record<string, unknown> }).interventions.factor = entry;
+    return projectGraphForPersistence(graph);
   }
 
   it('⭐ is EDITABLE — the first manual Save prepares a write, it is not refused', () => {
@@ -737,10 +743,11 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
   function persistedWithMetadata() {
     const graph = canonicalGraph();
     const option = graph.nodes.find(node => node.id === 'option')!;
-    (option as { interventions: Record<string, unknown> }).interventions.factor = {
+    // Same double assertion, same reason — see `graphWithPersistedEntry`.
+    (option as unknown as { interventions: Record<string, unknown> }).interventions.factor = {
       value: 1, source: 'brief_extraction', display_value: 'Very high (1)', ...RETAINED,
     };
-    return projectGraphForPersistence(graph) as ReturnType<typeof canonicalGraph>;
+    return projectGraphForPersistence(graph);
   }
 
   it('⭐ commits the new value and RETAINS reasoning and additive evidence', async () => {
