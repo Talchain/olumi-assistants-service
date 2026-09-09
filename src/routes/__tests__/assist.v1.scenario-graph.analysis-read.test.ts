@@ -188,8 +188,23 @@ const BASE_CAPTURE_PATH = join(
   "src/routes/__tests__/__fixtures__/scenario-graph-base-capture.json",
 );
 
-/** The complete set of keys this change adds. Anything else is a regression. */
-const NEW_KEYS = ["analysis_state", "analysis_result"] as const;
+/**
+ * The complete set of keys added SINCE THE BASE CAPTURE. Anything else is a
+ * regression.
+ *
+ * ⚠ THE NAME OUTLIVED ITS FIRST CHANGE, so the comment is corrected rather than
+ * the guard weakened: this was "the keys 2.1271 adds", and the fixture it
+ * compares against is a single frozen base, so every later additive field lands
+ * here too. The assertion stays EXACT in both directions — a key that appears
+ * without being declared here still fails, which is the property worth keeping.
+ *
+ * `graph_hash` (2026-09-09) is the write precondition for the graph this
+ * response carries. A manual edit is a compare-and-set and its base used to
+ * reach a client only on a turn response, so a reload had none and every first
+ * edit was refused; it is derived beside `graph_identity_hash` from the same
+ * bytes, and is NOT that hash — different projection, different question.
+ */
+const NEW_KEYS = ["analysis_state", "analysis_result", "graph_hash"] as const;
 
 describe("2.1271 — additive by construction (pin 1)", () => {
   it("adds EXACTLY the declared keys and rewrites no pre-existing value", async () => {
