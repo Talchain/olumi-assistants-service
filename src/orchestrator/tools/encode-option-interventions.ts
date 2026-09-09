@@ -162,9 +162,57 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
   }
 }
 
-/** Construct a canonical InterventionV3, preserving an existing top-level entry's target_match. */
+/**
+ * ⭐⭐ FIELDS THIS RECONSTRUCTION OWNS OR THE NEW VALUE INVALIDATES.
+ *
+ * Everything else on an existing entry is carried through. The split is the
+ * whole point: `reasoning`, evidence references and other additive provenance
+ * describe the ASSUMPTION and survive a change of number, while anything
+ * DERIVED FROM the old number would contradict the new one and must not be
+ * inherited.
+ *
+ *   value, source, target_match  — set explicitly below; the writer owns them.
+ *   display_value                — presentation synthesised from the value.
+ *                                  "Very high (1)" sitting on 0.75 is the exact
+ *                                  stale-display harm this list exists to stop.
+ *   raw_value, value_type,
+ *   encoding_map                 — the value's own encoding. Re-supplied from
+ *                                  the NEW proposal below when it carries them.
+ *   value_confidence             — confidence in the OLD value. A user-specified
+ *                                  number does not inherit a prior estimate's
+ *                                  confidence.
+ */
+const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
+  'value', 'source', 'target_match',
+  'display_value', 'raw_value', 'value_type', 'encoding_map', 'value_confidence',
+]);
+
+/**
+ * Construct a canonical InterventionV3, preserving an existing top-level entry's
+ * `target_match` AND its unrelated legitimate metadata.
+ *
+ * ⚠⚠ THE PRESERVATION HALF IS NEW, AND IT EXISTS BECAUSE ADMITTING A POPULATION
+ * MADE IT REACHABLE. Entries persisted without `target_match` used to be refused
+ * outright, so nothing of theirs could be lost. Now that they are editable, this
+ * reconstruction was silently dropping their `reasoning` and any additive
+ * evidence/provenance every time a value changed — the intervention contract is
+ * `.passthrough()`, so those fields are legal and were simply not rebuilt.
+ *
+ * ⚠ AND THE SCOPE GUARD CANNOT SEE IT. `optionInterventionPostimageIsScoped`
+ * restores the WHOLE selected cell before comparing, so it proves only that no
+ * OTHER cell moved — never that this cell kept its own fields. Passing it is not
+ * evidence of preservation, which is why the controls assert the committed
+ * object directly.
+ */
 function buildInterventionV3(fac: string, value: number, rec: RawIntervention, existing: unknown): Dict {
+  const carried: Dict = {};
+  if (isPlainObject(existing)) {
+    for (const [key, entryValue] of Object.entries(existing)) {
+      if (!VALUE_DERIVED_OR_OWNED_KEYS.has(key)) carried[key] = entryValue;
+    }
+  }
   const iv: Dict = {
+    ...carried,
     value,
     source: 'user_specified',
     target_match:

@@ -683,12 +683,27 @@ describe('an existing intervention persisted WITHOUT target_match', () => {
     expect(candidate).toMatchObject({ kind: 'refused', reason: 'invalid_existing_intervention' });
   });
 
-  it('⚠ REFUSAL RETAINED: an entry with no usable value still refuses', () => {
+  it('⚠ REFUSAL RETAINED: an entry with no usable value refuses at the SOURCE guard', () => {
+    // ⚠ THIS ASSERTED `invalid_existing_intervention` AND THAT REASON IS
+    // UNREACHABLE HERE — an independent review derived it from the source and it
+    // is correct. `hasFiniteInterventionValue` (analysis-ready-helper:299)
+    // rejects an entry with no numeric `value`, so
+    // `mergeInterventionSourceObjects(option)[factor.id]` is `undefined`, which
+    // differs from the supplied object and trips the CANONICAL-SOURCE guard
+    // three lines EARLIER than the reader.
+    //
+    // The refusal is corrected rather than the guard relaxed: the earlier gate
+    // is the stronger one, and an unusable entry never reaching the reader is
+    // the right order. What matters to the user is unchanged — refused, and
+    // nothing written.
     const before = graphWithPersistedEntry({ source: 'brief_extraction', display_value: 'Very high' });
     const candidate = applyOptionInterventionEdit({
       ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
     });
-    expect(candidate).toMatchObject({ kind: 'refused', reason: 'invalid_existing_intervention' });
+    expect(candidate).toMatchObject({ kind: 'refused', reason: 'noncanonical_intervention_source' });
+    // A refusal writes nothing and appends nothing.
+    expect(candidate).not.toHaveProperty('graph');
+    expect(candidate).not.toHaveProperty('operations');
   });
 
   it('⚠ BEFORE ANALYSIS TOO — the witnessed arm had never run one', () => {
@@ -700,5 +715,69 @@ describe('an existing intervention persisted WITHOUT target_match', () => {
       persistedGraph: before,
     });
     expect(candidate.kind).toBe('candidate');
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE NEWLY ADMITTED POPULATION THROUGH THE REAL STORE, COMMIT AND COLD
+ * READ — because the scope guard structurally cannot see what this asserts.
+ *
+ * `optionInterventionPostimageIsScoped` restores the WHOLE selected cell before
+ * comparing, so it proves no OTHER cell moved and says nothing about whether
+ * this cell kept its own fields. Admitting entries without `target_match` made
+ * their metadata reachable for the first time, and the reconstruction was
+ * dropping it. Only the committed object can show that.
+ */
+describe('a no-target entry keeps its unrelated metadata through commit', () => {
+  const RETAINED = {
+    reasoning: 'Recruiting capacity constrains this assumption',
+    evidence_refs: ['research-note-7'],
+  };
+
+  function persistedWithMetadata() {
+    const graph = canonicalGraph();
+    const option = graph.nodes.find(node => node.id === 'option')!;
+    (option as { interventions: Record<string, unknown> }).interventions.factor = {
+      value: 1, source: 'brief_extraction', display_value: 'Very high (1)', ...RETAINED,
+    };
+    return projectGraphForPersistence(graph) as ReturnType<typeof canonicalGraph>;
+  }
+
+  it('⭐ commits the new value and RETAINS reasoning and additive evidence', async () => {
+    const before = persistedWithMetadata();
+    const persistence = jsonStore(before);
+    const result = await executeOptionInterventionEdit(
+      inputFor(before, { modelValue: 0.75 }), persistence.fresh(),
+    );
+    expect(result.kind).toBe('committed');
+
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    const entry = cold.nodes.find(node => node.id === 'option')!.interventions!.factor as Record<string, unknown>;
+
+    expect(entry).toMatchObject({ value: 0.75, source: 'user_specified', ...RETAINED });
+  });
+
+  it('⚠ and DROPS the display derived from the old value — no stale representation', async () => {
+    // "Very high (1)" beside a committed 0.75 would be the product contradicting
+    // itself on screen. A carried-through field must not be a value-derived one.
+    const before = persistedWithMetadata();
+    const persistence = jsonStore(before);
+    await executeOptionInterventionEdit(inputFor(before, { modelValue: 0.75 }), persistence.fresh());
+
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    const entry = cold.nodes.find(node => node.id === 'option')!.interventions!.factor as Record<string, unknown>;
+
+    expect(entry.display_value).not.toBe('Very high (1)');
+  });
+
+  it('⚠ and leaves the untouched neighbour byte-identical', async () => {
+    const before = persistedWithMetadata();
+    const persistence = jsonStore(before);
+    await executeOptionInterventionEdit(inputFor(before, { modelValue: 0.75 }), persistence.fresh());
+
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    const neighbourBefore = before.nodes.find(node => node.id === 'option')!.interventions!.other_factor;
+    const neighbourAfter = cold.nodes.find(node => node.id === 'option')!.interventions!.other_factor;
+    expect(neighbourAfter).toEqual(neighbourBefore);
   });
 });
