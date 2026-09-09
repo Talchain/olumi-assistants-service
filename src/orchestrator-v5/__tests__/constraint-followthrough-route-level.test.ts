@@ -261,7 +261,7 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
     expect(remap.constraints).toHaveLength(0);
   });
 
-  it('⭐ THE JOIN'S FIRST HALF — the rendered card carries `action_type: add_constraint`', () => {
+  it('⭐ THE FIRST HALF OF THE JOIN — the rendered card carries `action_type: add_constraint`', () => {
     const { remap } = unbindableRow();
     const row = remap.unbindable[0]!;
     const item = targetUnmatchedItem(row);
