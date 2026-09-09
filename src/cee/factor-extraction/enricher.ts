@@ -210,7 +210,34 @@ function inferFactorType(
     if (labelLower.includes("revenue") || labelLower.includes("income") || labelLower.includes("sales")) {
       return "revenue";
     }
-    return "cost"; // Default for currency
+    // ⭐⭐ AN UNRECOGNISED CURRENCY LABEL IS NOT A COST — IT IS UNCLASSIFIED.
+    //
+    // This read `return "cost"` and called it "Default for currency". It is the
+    // one branch in this function that answers a question it has not been given
+    // the evidence to answer: every other unknown falls through to `"other"` at
+    // the end, and only money guesses.
+    //
+    // WITNESSED, not hypothesised. On the 2026-09-08 22:38 pricing run
+    // (`render-cee-initial-request.json`, request 0b3925bf, telemetry
+    // `extraction_mode: "regex-only"`), a £20k REVENUE target reached the graph
+    // as `factor_type:'cost'` on "Pro Feature Value Perception" — the brief's
+    // prefix carried no revenue/price/cost term, so the three checks above all
+    // missed and this line supplied a positive claim about the kind of money.
+    // "Reach £20k MRR" is not a cost, and nothing in the brief said it was.
+    //
+    // ⚠ `"other"` IS NOT A NEW TYPE AND NOT A DROPPED AMOUNT. It is already the
+    // declared member of `FactorType` for "not classified", and already what
+    // `unified-pipeline/stages/repair/deterministic-sweep.ts:482` assigns to any
+    // factor that arrives without one — so this agrees with the existing repair
+    // rather than inventing a vocabulary. The value, raw_value, unit and cap are
+    // untouched: the amount still reaches analysis, only the unsupported claim
+    // about WHICH kind of money it is is withheld.
+    //
+    // ⚠ AND IT IS NOT AN ABSENCE. `display-value.ts:246` branches on
+    // `else if (factorType)` — truthiness, not identity — so an `"other"`
+    // currency factor keeps the exact display path `"cost"` took. Returning
+    // `undefined` would have changed rendering; this does not.
+    return "other";
   }
 
   // Check label patterns
