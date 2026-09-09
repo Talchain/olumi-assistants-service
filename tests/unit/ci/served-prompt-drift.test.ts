@@ -29,8 +29,11 @@ import { parse } from 'yaml';
 import {
   evaluateDrift,
   evaluateConsistency,
+  evaluateTaskBinding,
+  selectTrackedRow,
   shortSha256,
   TRACKED_KEY,
+  TRACKED_PMS_TASK,
 } from '../../../scripts/verify-served-prompt.mjs';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -143,6 +146,166 @@ describe('evaluateConsistency — a split across instances is its OWN finding', 
       { version: 120, hash: 'ffffffffffffffff' },
     ];
     expect(evaluateConsistency(s).consistent).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. THE TASK BINDING — the verdict must be bound to WHOSE bytes these are
+// ---------------------------------------------------------------------------
+//
+// WHY THIS BLOCK EXISTS. Before it, the alarm was TASK-BLIND: its verdict was
+// bound to BYTES and never to the TASK IDENTITY that produced them. Measured
+// at 9de184f1 with two surviving mutants, both 16/16 green:
+//
+//   M1  TRACKED_KEY 'routing' -> 'draft_graph'                  → SURVIVED
+//   M2  row selection `.find(k => k.key === TRACKED_KEY)`
+//       replaced by `body.keys[0]`                              → SURVIVED
+//
+// M1 survived because the only assertion naming the key was
+// `expect(v.message).toContain(TRACKED_KEY)` — and the message is BUILT from
+// TRACKED_KEY, so it cannot ever disagree. A guard agreeing with itself.
+//
+// The consequence is the one that matters for every A/B result this estate
+// has recorded: a verify PASS proved "some prompt's bytes match the snapshot",
+// never "the ROUTING prompt's bytes match the snapshot". `stagingVersion` has
+// already been observed reporting a prompt the turns were not receiving, so a
+// verdict that cannot name its own task cannot settle which bytes a user got.
+//
+// THESE ASSERTIONS DELIBERATELY USE STRING LITERALS, NOT THE IMPORTED
+// CONSTANTS. Asserting against the constant is what made M1 survive.
+
+describe('evaluateTaskBinding — the verdict names WHOSE bytes it read', () => {
+  it('the tracked identity is `routing`, resolving the PMS task `orchestrator`', () => {
+    // Literals, not constants: re-pointing either constant MUST turn this red.
+    // The alias is declared at src/prompts/estate.ts (`routing: 'orchestrator'`).
+    expect(TRACKED_KEY).toBe('routing');
+    expect(TRACKED_PMS_TASK).toBe('orchestrator');
+  });
+
+  it('DERIVED: TRACKED_PMS_TASK agrees with the estate alias it mirrors', async () => {
+    // `verify-served-prompt.mjs` is plain ESM and cannot import the TypeScript
+    // alias map, so TRACKED_PMS_TASK is unavoidably a second copy. This is the
+    // estate's dominant defect class, so the copy is DERIVED-CHECKED here
+    // rather than left to drift silently.
+    //
+    // BOTH halves are kept on purpose (they are not redundant): the derived
+    // check catches the two constants disagreeing, and the literal assertion
+    // above catches the alias being re-pointed with the mirror dutifully
+    // following it — which would keep this derived check green while the
+    // pinned snapshot silently described a different PMS row.
+    const { PMS_TASK_ALIAS } = await import('../../../src/prompts/estate.js');
+    expect(PMS_TASK_ALIAS[TRACKED_KEY as 'routing']).toBe(TRACKED_PMS_TASK);
+  });
+
+  it('PASSES for the routing row resolved from its aliased PMS task', () => {
+    const v = evaluateTaskBinding({ key: 'routing', pmsTask: 'orchestrator', source: 'pms' });
+    expect(v.ok).toBe(true);
+  });
+
+  it('POSITIVE CONTROL — FAILS on a different task, and NAMES both sides', () => {
+    // The substitution M2 made reachable: read whichever row came back first.
+    const v = evaluateTaskBinding({ key: 'draft_graph', pmsTask: 'draft_graph', source: 'pms' });
+    expect(v.ok).toBe(false);
+    // Bound to the WRONG-ROW branch by its own header, not merely to `ok:false`.
+    // Written the loose way first, this test PASSED with the key check disabled:
+    // the payload fell through to the ALIAS branch, whose message also contains
+    // both 'routing' and 'draft_graph'. A test that accepts any failing branch
+    // is not a test of the branch it names. (Caught by mutant pair half 1.)
+    expect(v.message).toContain('WRONG PROMPT ROW');
+    expect(v.message).toContain('draft_graph');
+    expect(v.message).toContain('routing');
+  });
+
+  it('FAILS when the alias has been re-pointed to a different PMS task', () => {
+    // Bytes could still match the snapshot by coincidence or by copy; the
+    // question "which PMS row is Paul editing when he edits this prompt?"
+    // is not answerable from a hash.
+    const v = evaluateTaskBinding({ key: 'routing', pmsTask: 'draft_graph', source: 'pms' });
+    expect(v.ok).toBe(false);
+    expect(v.message).toContain('PROMPT ALIAS RE-POINTED');
+    expect(v.message).toContain('orchestrator');
+  });
+
+  it('FAILS when the task cannot be established at all (unprovable is not a pass)', () => {
+    // Matches this module's FAIL-LOUD CONTRACT: there is no skip branch. An
+    // absent pms_task means the row did not come from the live routing
+    // snapshot, so the binding is unproven — which is exactly the state the
+    // alarm exists to refuse to pass.
+    const v = evaluateTaskBinding({ key: 'routing', pmsTask: undefined, source: 'default' });
+    expect(v.ok).toBe(false);
+    expect(v.message).toContain('PROMPT TASK NOT ESTABLISHED');
+  });
+});
+
+describe('selectTrackedRow — the row is chosen BY KEY, never by position', () => {
+  // `/admin/prompts/status` does not contract row order, and the reported set
+  // is DERIVED (src/prompts/estate.ts) — it has already widened once. So the
+  // routing row is deliberately NOT first in these fixtures: a positional
+  // lookup must fail them.
+  const body = {
+    keys: [
+      { key: 'draft_graph', version: '15', content_hash: 'aaaaaaaaaaaaaaaa', pms_task: 'draft_graph' },
+      { key: 'routing', version: '121', sent_hash: 'bbbbbbbbbbbbbbbb', pms_task: 'orchestrator' },
+      { key: 'edit_graph', version: '3', content_hash: 'cccccccccccccccc', pms_task: 'edit_graph' },
+    ],
+  };
+
+  it('picks the routing row even when it is not first', () => {
+    const r = selectTrackedRow(body);
+    expect(r?.key).toBe('routing');
+    expect(r?.pms_task).toBe('orchestrator');
+  });
+
+  it('POSITIVE CONTROL — a positional lookup would pick the WRONG row here', () => {
+    // Pins this fixture's discriminating power in-test. Without this, someone
+    // could reorder the fixture so routing came first and the test above would
+    // keep passing while proving nothing.
+    expect(body.keys[0].key).not.toBe('routing');
+  });
+
+  it('returns null when the tracked key is absent (degraded PMS is not a pass)', () => {
+    expect(selectTrackedRow({ keys: [{ key: 'draft_graph' }] })).toBeNull();
+    expect(selectTrackedRow({ keys: [] })).toBeNull();
+    expect(selectTrackedRow({})).toBeNull();
+  });
+});
+
+describe('the hash and the task identity appear on the SAME line', () => {
+  // The brief's actual requirement: prove WHICH prompt bytes a task received.
+  // A hash on one line and a task id on another cannot be correlated after the
+  // fact — least of all across the multi-instance split this file documents.
+  it('the OK verdict carries task, PMS task, source, version AND hash together', () => {
+    const v = evaluateDrift({
+      liveHash: V119_HASH,
+      snapshotHash: V119_HASH,
+      version: 119,
+      liveChars: 24_410,
+      snapshotChars: 24_410,
+      pmsTask: 'orchestrator',
+      source: 'pms',
+    });
+    expect(v.ok).toBe(true);
+    const line = v.message.split('\n').find((l) => l.includes(V119_HASH));
+    expect(line, 'no line carries the hash').toBeDefined();
+    expect(line).toContain('routing');
+    expect(line).toContain('orchestrator');
+    expect(line).toContain('pms');
+  });
+
+  it('the DRIFT verdict names the task whose bytes drifted', () => {
+    const v = evaluateDrift({
+      liveHash: 'adcc5128d4e6e6bc',
+      snapshotHash: V119_HASH,
+      version: 120,
+      liveChars: 25_149,
+      snapshotChars: 24_410,
+      pmsTask: 'orchestrator',
+      source: 'pms',
+    });
+    expect(v.ok).toBe(false);
+    const line = v.message.split('\n').find((l) => l.includes('adcc5128d4e6e6bc'));
+    expect(line, 'no line carries the live hash').toBeDefined();
+    expect(line).toContain('orchestrator');
   });
 });
 
