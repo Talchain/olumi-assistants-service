@@ -114,8 +114,8 @@ const UNBINDABLE_NODES = [
  * Two limits, two metrics, ONE number. Neither binds to a node above, so both
  * reach the ask channel — where the dedupe is keyed on the value alone.
  */
-const TWO_LIMITS_ONE_NUMBER =
-  'We need to keep monthly churn under 4%. Refund rate must also stay under 4%.';
+const REFUND_LIMIT_SENTENCE = 'Refund rate must not exceed 4%.';
+const TWO_LIMITS_ONE_NUMBER = `${BRIEF_LIMIT_SENTENCE} ${REFUND_LIMIT_SENTENCE}`;
 
 /**
  * The answer-turn graph. `r-churn` satisfies every `mintEligible` conjunct
@@ -316,13 +316,38 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
    * shrinks (CLAUDE.md 22f) and a later reader can see WHICH limits were asked
    * about rather than how many.
    */
-  it('⭐ two different limits sharing one number — which of them is the user asked about?', () => {
-    const { asks } = runPipeline(TWO_LIMITS_ONE_NUMBER);
-    const metrics = asks
-      .filter((a) => a.reason === 'target_unmatched')
+  function unmatchedMetrics(brief: string): readonly string[] {
+    return runPipeline(brief)
+      .asks.filter((a) => a.reason === 'target_unmatched')
       .map((a) => a.metric_text.toLowerCase())
       .sort();
-    expect(metrics).toEqual(['monthly churn', 'refund rate']);
+  }
+
+  /**
+   * ⚠⚠ THE POSITIVE CONTROL IS WHAT MAKES THE NEXT CASE READABLE AT ALL.
+   *
+   * Without it, a combined-brief result of `['monthly churn']` is consistent
+   * with BOTH readings — the dedupe swallowed the refund limit, OR the
+   * extractor never produced one from that sentence. A control that cannot
+   * distinguish the two answers is non-discriminating on precisely the question
+   * it exists to answer (trap 13). Asking each sentence ON ITS OWN separates
+   * them: if the refund limit asks alone and vanishes in company, the dedupe is
+   * the only thing that changed.
+   *
+   * The refund sentence is deliberately an IN-DISTRIBUTION shape for this
+   * extractor — `Churn must not exceed 4%.` is in its own corpus verbatim — so
+   * a null result cannot be blamed on a phrasing this producer never handles.
+   */
+  it('CONTROL — each limit, alone, is asked about', () => {
+    expect(unmatchedMetrics(BRIEF_LIMIT_SENTENCE)).toContain('monthly churn');
+    expect(unmatchedMetrics(REFUND_LIMIT_SENTENCE)).toContain('refund rate');
+  });
+
+  it('⭐ two different limits sharing one number — which of them is the user asked about?', () => {
+    expect(unmatchedMetrics(TWO_LIMITS_ONE_NUMBER)).toEqual([
+      'monthly churn',
+      'refund rate',
+    ]);
   });
 });
 
