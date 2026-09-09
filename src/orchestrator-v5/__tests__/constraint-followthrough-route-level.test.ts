@@ -62,14 +62,10 @@ import { makeMessagePayload } from './fixtures.js';
 import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/types.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import type { PendingAction } from '../session/pending-action.js';
-import {
-  extractCompoundGoals,
-  remapConstraintTargets,
-  type ExtractedGoalConstraint,
-} from '../../cee/compound-goal/index.js';
+import { runCompoundGoals } from '../../cee/unified-pipeline/stages/repair/compound-goals.js';
 import {
   renderDirectionClarifications,
-  targetUnmatchedItem,
+  type DirectionUnresolvedItem,
 } from '../../cee/compound-goal/direction-gate.js';
 
 const appendCalls: Array<Record<string, unknown>> = [];
@@ -108,12 +104,18 @@ const BRIEF_LIMIT_SENTENCE = 'We need to keep monthly churn under 4%.';
  * deliberately unrelated rather than near-misses: this file pins what happens
  * AFTER the drop, and a fixture that bound would skip the whole sequence.
  */
-const UNBINDABLE_NODE_IDS = ['g-revenue', 'f-quality', 'o-response-time'];
-const UNBINDABLE_NODE_LABELS = new Map<string, string>([
-  ['g-revenue', 'Revenue'],
-  ['f-quality', 'Product quality'],
-  ['o-response-time', 'First response time'],
-]);
+const UNBINDABLE_NODES = [
+  { id: 'g-revenue', kind: 'goal', label: 'Revenue' },
+  { id: 'f-quality', kind: 'factor', label: 'Product quality' },
+  { id: 'o-response-time', kind: 'outcome', label: 'First response time' },
+];
+
+/**
+ * Two limits, two metrics, ONE number. Neither binds to a node above, so both
+ * reach the ask channel — where the dedupe is keyed on the value alone.
+ */
+const TWO_LIMITS_ONE_NUMBER =
+  'We need to keep monthly churn under 4%. Refund rate must also stay under 4%.';
 
 /**
  * The answer-turn graph. `r-churn` satisfies every `mintEligible` conjunct
@@ -236,94 +238,91 @@ afterEach(() => {
 
 describe('STEP 1 — the drop produces a card that points at add_constraint', () => {
   /**
-   * Run through the REAL producers rather than a hand-built item: the whole
-   * claim is about what the shipped chain emits, and a self-authored item would
-   * encode this author's model of the producer instead of the producer
-   * (trap 16-inverse).
-   */
-  function unbindableRow() {
-    const extracted = extractCompoundGoals(BRIEF_LIMIT_SENTENCE);
-    const remap = remapConstraintTargets(
-      extracted.constraints,
-      UNBINDABLE_NODE_IDS,
-      UNBINDABLE_NODE_LABELS,
-      'req-followthrough-step1',
-    );
-    return { extracted, remap };
-  }
-
-  /**
-   * The churn row, selected by IDENTITY rather than by index.
+   * ⚠⚠ THIS DRIVES THE REAL PIPELINE, AND MY FIRST VERSION DID NOT — which is
+   * why its result did not describe production.
    *
-   * ⚠ MEASURED, NOT ASSUMED: this sentence yields THREE unbindable rows, not
-   * one. My first version asserted `toHaveLength(1)` and CI returned 3 — the
-   * precondition doing exactly its job, refusing to let the rest of the file
-   * proceed on a guess about the producer. Binding by `targetName` + `value`
-   * is the house pattern for this producer
-   * (`constraint-target-unmatched-ask.test.ts` asserts
-   * `unbindable.map(c => c.targetName)`), and it is trap 19: an index could
-   * silently select a different row than the one this file is about.
+   * I hand-assembled `extractCompoundGoals` -> `remapConstraintTargets` ->
+   * `renderDirectionClarifications(unbindable.map(targetUnmatchedItem))`. That
+   * skips a step production performs: `compound-goals.ts:678-684` dedupes the
+   * unbindable rows into asks **by VALUE** (`alreadyAsked: Set<number>`) BEFORE
+   * any rendering. `renderDirectionClarifications` then dedupes again by
+   * (metric, amount) — a DIFFERENT key. Reconstructing the chain measured a
+   * path no user takes (CLAUDE.md trap 16: a fixture you assembled yourself is
+   * not evidence about the wire).
+   *
+   * `runCompoundGoals(ctx)` is the production entry point, driven here exactly
+   * as `constraint-target-unmatched-ask.test.ts` drives it.
    */
-  function churnRow(remap: { readonly unbindable: readonly ExtractedGoalConstraint[] }) {
-    return remap.unbindable.find(
-      (c) => /churn/i.test(String(c.targetName ?? '')) && c.operator === '<=',
-    );
+  function runPipeline(brief: string): {
+    readonly wire: ReadonlyArray<Record<string, unknown>>;
+    readonly asks: readonly DirectionUnresolvedItem[];
+  } {
+    const ctx = {
+      requestId: 'req-constraint-followthrough',
+      effectiveBrief: brief,
+      graph: { nodes: UNBINDABLE_NODES.map((n) => ({ ...n })), edges: [] },
+      llmGoalConstraints: undefined,
+      goalConstraints: undefined,
+      directionUnresolved: undefined,
+    } as unknown as Parameters<typeof runCompoundGoals>[0];
+    runCompoundGoals(ctx);
+    const c = ctx as unknown as {
+      goalConstraints?: ReadonlyArray<Record<string, unknown>>;
+      directionUnresolved?: readonly DirectionUnresolvedItem[];
+    };
+    return { wire: c.goalConstraints ?? [], asks: c.directionUnresolved ?? [] };
   }
 
-  it('PRECONDITION — the limit is extracted, and step 6 drops the churn row into `unbindable`', () => {
-    const { extracted, remap } = unbindableRow();
-    // Pinned so a later extractor change cannot make the rest of this file
-    // pass by producing nothing to drop.
-    expect(extracted.constraints.length).toBeGreaterThan(0);
-    const row = churnRow(remap);
-    expect(row, 'the churn limit must be among the step-6 drops').toBeDefined();
-    // ⚠ THE SCALE IS PINNED EXPLICITLY, AND IT IS NOT THE WRITER'S SCALE.
-    // This extractor emits a percentage as a FRACTION with `unit: '%'` —
-    // `risk-polarity-corpus.test.ts` records a captured `above 3%` arriving as
-    // `value: 0.03, unit: '%'`. My first version selected on `value === 4` and
-    // found nothing. The `add_constraint` handler further down this file
-    // commits `value: 4` for the same 4%, so TWO conventions meet in this one
-    // journey and only an explicit pin at each end makes that visible.
-    expect(row!.value).toBe(0.04);
-    expect(row!.unit).toBe('%');
-    // It reached neither the bound set nor, therefore, `goal_constraints[]`.
-    expect(remap.constraints).toHaveLength(0);
-  });
-
-  it('the user is asked ONCE, however many rows the extractor produced', () => {
-    const { remap } = unbindableRow();
-    // Production maps EVERY unbindable row to an ask
-    // (`unified-pipeline/stages/repair/compound-goals.ts`), so render the whole
-    // set rather than one row: this is what the user would actually receive.
-    // `renderDirectionClarifications` dedupes by (metric, amount), and that
-    // dedupe is the only thing standing between one stated limit and a wall of
-    // identical questions.
-    const cards = renderDirectionClarifications(remap.unbindable.map(targetUnmatchedItem));
-    expect(remap.unbindable.length).toBeGreaterThan(0);
-    // ⭐ THE EXACT SET, NOT A COUNT (CLAUDE.md 22f: pin the set so the suite
-    // REDs if it GROWS or SHRINKS, and stays green only for the right reason).
-    // A count would let a different pair of questions pass silently, and the
-    // whole question here is WHICH questions one sentence produces.
-    expect(cards.map((c) => c.label).sort()).toEqual([
-      'Say which part of the model the monthly churn limit applies to',
-    ]);
+  it('PRECONDITION — the limit reaches NO wire row, and DOES reach the ask channel', () => {
+    const { wire, asks } = runPipeline(BRIEF_LIMIT_SENTENCE);
+    // It reached neither `goal_constraints[]` nor, therefore, the analysis.
+    expect(wire).toHaveLength(0);
+    // And it is asked about rather than dropped in silence. Bound by REASON
+    // identity, never by copy another card could also carry (trap 19).
+    const unmatched = asks.filter((a) => a.reason === 'target_unmatched');
+    expect(unmatched.length).toBeGreaterThan(0);
+    expect(unmatched.some((a) => /churn/i.test(a.metric_text))).toBe(true);
   });
 
   it('⭐ THE FIRST HALF OF THE JOIN — the rendered card carries `action_type: add_constraint`', () => {
-    const { remap } = unbindableRow();
-    const row = churnRow(remap);
-    expect(row, 'fixture precondition: the churn row must exist').toBeDefined();
-    const item = targetUnmatchedItem(row!);
-    // Bind by the REASON's identity, not by copy text a sibling card could
-    // also satisfy.
-    expect(item.reason).toBe('target_unmatched');
+    const { asks } = runPipeline(BRIEF_LIMIT_SENTENCE);
+    const item = asks.find(
+      (a) => a.reason === 'target_unmatched' && /churn/i.test(a.metric_text),
+    );
+    expect(item, 'fixture precondition: the churn ask must exist').toBeDefined();
 
-    const cards = renderDirectionClarifications([item]);
+    const cards = renderDirectionClarifications([item!]);
     expect(cards).toHaveLength(1);
     expect(cards[0]!.action_type).toBe('add_constraint');
-    // The card tells the user the limit is NOT in force — the true statement,
-    // and the reason answering it is worth the user's time.
+    // ⚠ `action_type` is a single-member literal type
+    // (`DirectionStrengthenItem.action_type: 'add_constraint'`), so that line
+    // cannot fail under any type-safe mutation. The assertion below is the one
+    // that DISCRIMINATES: this copy exists only on the sixth-reason branch.
     expect(cards[0]!.detail).toContain('not being enforced');
+  });
+
+  /**
+   * ⭐⭐ THE ASK DEDUPE IS KEYED ON THE NUMBER ALONE, AND NOTHING PINNED THAT.
+   *
+   * `compound-goals.ts:678-684` skips an unbindable row when `alreadyAsked`
+   * already holds its VALUE — a `Set<number>` with no metric component, shared
+   * with `coveredValues` and the detector findings. So two DIFFERENT limits the
+   * user stated, on different metrics, that happen to share a number, collapse
+   * to ONE question.
+   *
+   * That is not the clarification wall; it is its inverse — a stated limit
+   * silently receiving no question at all. This case pins the observed set by
+   * `metric_text` rather than a count, so it REDs whether the set grows or
+   * shrinks (CLAUDE.md 22f) and a later reader can see WHICH limits were asked
+   * about rather than how many.
+   */
+  it('⭐ two different limits sharing one number — which of them is the user asked about?', () => {
+    const { asks } = runPipeline(TWO_LIMITS_ONE_NUMBER);
+    const metrics = asks
+      .filter((a) => a.reason === 'target_unmatched')
+      .map((a) => a.metric_text.toLowerCase())
+      .sort();
+    expect(metrics).toEqual(['monthly churn', 'refund rate']);
   });
 });
 
