@@ -70,6 +70,11 @@ import type {
 } from "../types.js";
 import type { RouteMetadata } from "../pipeline/types.js";
 import type { PLoTClient, ValidatePatchResult, PLoTClientRunOpts } from "../plot-client.js";
+// Value imports: `classifyPlotFailureCode` discriminates on these CLASSES.
+// Binding by class identity rather than by message text is deliberate — a
+// substring predicate over an error message is exactly the kind of guard this
+// estate has repeatedly shipped too wide (CLAUDE.md trap 22).
+import { PLoTError, PLoTTimeoutError } from "../plot-client.js";
 import { createGraphPatchBlock } from "../blocks/factory.js";
 import { serialiseEditContextForLLMWithMeta } from "../context/serialise.js";
 import { emitContextBudget } from "../../orchestrator-v5/context/context-budget-telemetry.js";
@@ -3569,13 +3574,19 @@ export async function handleEditGraph(
         );
 
         if (attempt === totalAttempts) {
+          // ⭐ ONE THROWABLE DOMAIN, TWO DIFFERENT TRUTHS. This `catch` covers
+          // the outbound payload check, the fetch, and our own handling of a
+          // SUCCESSFUL response, so the code cannot be a constant without the
+          // user-facing sentence being false over most of it. See
+          // `classifyPlotFailureCode`.
+          const rejectionCode = classifyPlotFailureCode(plotError);
           validationOutcome = 'plot_unavailable';
           setViolationCodes(['plot_unavailable']);
           recoveryPathChosen = 'rejection_block';
           branchTaken = 'rejection';
           branchReason = 'plot_unavailable';
           failureBranch = 'plot_unavailable';
-          failureCode = 'PLOT_UNAVAILABLE';
+          failureCode = rejectionCode;
           failureMessage = errorMessage;
           return buildRejectionResult(
             `PLoT semantic validation unavailable: ${errorMessage}`,
@@ -3583,7 +3594,7 @@ export async function handleEditGraph(
             baseGraphHash,
             turnId,
             startTime,
-            'PLOT_UNAVAILABLE',
+            rejectionCode,
             undefined,
             attempt,
             diagnostics(),
@@ -3824,7 +3835,18 @@ export async function handleEditGraph(
         failureBranch = 'option_interventions_unresolvable';
         failureCode = 'OPTION_INTERVENTIONS_UNRESOLVABLE';
         // Detailed id list stays in `failureMessage` for telemetry/diagnostics only;
-        // the block's rejection.reason (which the UI may surface) is kept generic.
+        // the block's rejection.reason is kept generic.
+        //
+        // ⚠ CORRECTED — this line used to read "(which the UI may surface)".
+        // That is FALSE, and it contradicted this same file at two other points
+        // ("never surfaced to the user"). `rejection.reason` does not reach a
+        // rendered surface and does not even reach the wire: the published
+        // `GraphPatchBlockSchema` is `.strict()` and carries no `rejection`
+        // field at all (verified at the bytes in @talchain/schemas 0.50.0 —
+        // the block is type/status/operation/target_id/before/after).
+        // The user-facing sentence comes solely from `mapCodeToRejectionReason`
+        // → `buildEditRejectionResponse`. Keeping it generic is still right;
+        // the stated reason for doing so was wrong.
         failureMessage = `Option intervention value(s) could not be encoded: ${encoded.unresolvedOptionIds.join(', ')}`;
         return buildRejectionResult(
           'Option interventions could not be safely encoded.',
@@ -4348,7 +4370,7 @@ function buildRejectionResult(
   baseGraphHash: string,
   turnId: string,
   startTime: number,
-  code?: string,
+  code?: EditRejectionCode,
   plotDetails?: { plot_code?: string; plot_violations?: unknown[] },
   attempts?: number,
   diagnostics?: EditGraphTraceDiagnostics,
@@ -4375,15 +4397,17 @@ function buildRejectionResult(
     "edit_graph rejected — all attempts exhausted",
   );
 
-  // Never surface raw structural violation text to the user.
-  // The raw reason is preserved in the block's rejection.reason for
-  // debugging; the assistant text always gives a safe, actionable recovery
-  // message via the centralised builder. Mapping (V5 A4 Commit 3):
-  //   MAX_OPERATIONS_EXCEEDED       -> too_many_operations
-  //   STRUCTURAL_VALIDATION_FAILED  -> structural_validation
-  //   PLOT_SEMANTIC_REJECTED        -> structural_validation
-  //   PLOT_UNAVAILABLE              -> structural_validation
-  //   anything else                 -> structural_validation (safe default)
+  // Never surface raw structural violation text to the user. The raw reason is
+  // preserved in the block's rejection.reason for debugging; the assistant text
+  // gives a safe, actionable recovery message via the centralised builder.
+  //
+  // ⚠ THE MAPPING IS NOT A FORMATTING DETAIL — IT IS A TRUTH CLAIM. See
+  // `mapCodeToRejectionReason` for the complete table. Until 2026-08-31 this
+  // comment read "anything else -> structural_validation (safe default)", and
+  // that default was not safe: it told a user whose analysis service had gone
+  // down that their own change was structurally invalid, and did the same for
+  // five system-side failure codes that were never given an arm. Whatever you
+  // add here, check what the copy ASSERTS about whose fault it was.
   const friendly = buildEditRejectionResponse(mapCodeToRejectionReason(code));
 
   return {
@@ -4397,16 +4421,205 @@ function buildRejectionResult(
   };
 }
 
-function mapCodeToRejectionReason(code?: string): EditRejectionReason {
+/**
+ * Every rejection code `buildRejectionResult` can be handed, as a runtime
+ * array AND (derived from it) the compile-time union.
+ *
+ * ⭐ THIS IS THE COMPLETENESS GUARD, and it is derived rather than
+ * hand-maintained (CLAUDE.md trap 12). Because `buildRejectionResult`'s
+ * `code` parameter is typed `EditRejectionCode`, a new call site passing a
+ * literal that is absent from this array is a COMPILE ERROR — the compiler
+ * reads every call site, so this list cannot silently go short the way a
+ * hand-copied list does. And because the switch below closes on a `never`
+ * arm, adding a member here without giving it a case is also a compile
+ * error. The two together mean an unmapped code cannot reach a user.
+ */
+export const EDIT_REJECTION_CODES = [
+  'MAX_OPERATIONS_EXCEEDED',
+  'STRUCTURAL_VALIDATION_FAILED',
+  'PLOT_SEMANTIC_REJECTED',
+  'PLOT_UNAVAILABLE',
+  'PLOT_REQUEST_FAILED',
+  'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS',
+  'SYNTHESIZED_GRAPH_INVALID',
+  'APPLIED_GRAPH_UNAVAILABLE',
+  'OPTION_INTERVENTIONS_UNRESOLVABLE',
+  'OPERATION_DID_NOT_LAND',
+] as const;
+
+export type EditRejectionCode = (typeof EDIT_REJECTION_CODES)[number];
+
+/**
+ * ⭐ WHICH PLoT FAILURES MAY BE CALLED "COULDN'T REACH THE ANALYSIS SERVICE".
+ *
+ * The `catch (plotError)` this feeds wraps the ENTIRE PLoT region — the
+ * outbound payload check, the fetch, and CEE's own handling of a successful
+ * response. Until 2026-09-07 every one of those became `PLOT_UNAVAILABLE`, so
+ * the user was told the service was unreachable when PLoT had in fact answered
+ * (400 / 413 / 429 / a malformed 200), when the request was never sent at all
+ * (`INTERNAL_PAYLOAD_ERROR`, thrown before any fetch), or when our own
+ * post-response code threw. That is the same defect class this module exists to
+ * fix, one layer up: a marking predicate written for one cause and then fired on
+ * every exception.
+ *
+ * ⚠ THE INVARIANT IS WRITTEN AGAINST THE SPEC, NOT AGAINST THE FAILURE MODE:
+ * *"I couldn't reach the analysis service" may be shown ONLY when we can PROVE
+ * no response was received.* Provability is decided by CLASS, never by parsing a
+ * message:
+ *
+ *   - `PLoTTimeoutError`      — the client gave up waiting. No usable answer,
+ *                               and transient. PROVABLE.
+ *   - `PLoTError`, status>=500 — the analysis service answered that it is
+ *                               broken. "Unavailable" is true of the service,
+ *                               and the retry advice is right. The threshold is
+ *                               not invented here: `plot-client.ts`'s own
+ *                               `isRetryableError` defines `status >= 500` as
+ *                               the transient class, so this reads the
+ *                               producer's declared semantics rather than a
+ *                               fresh guess (CLAUDE.md trap 13c).
+ *   - `PLoTError`, status<500  — PLoT was reached and answered deterministically
+ *                               (400 INVALID_REQUEST, 413 BAD_INPUT, 429
+ *                               RATE_LIMIT). "Couldn't reach" is FALSE, and for
+ *                               400/413 "try again in a moment" is futile —
+ *                               413 is deterministic in the size of the user's
+ *                               graph.
+ *   - anything else            — a pre-fetch payload error, an abort, a network
+ *                               error, or a throw from our own response
+ *                               handling. NOT PROVABLE either way.
+ *
+ * The unprovable bucket deliberately UNDER-CLAIMS: it takes the neutral code,
+ * whose copy attributes nothing and offers both routes forward. A genuine
+ * network outage (a bare `TypeError: fetch failed`) therefore gets neutral
+ * rather than outage-specific copy. That is the intended trade — the only way to
+ * put network errors in the specific bucket is to match on message substrings,
+ * and a confidently wrong sentence is worse than a correct general one. Neither
+ * branch ever blames the user, which is this module's actual guarantee.
+ */
+export function classifyPlotFailureCode(plotError: unknown): EditRejectionCode {
+  if (plotError instanceof PLoTTimeoutError) return 'PLOT_UNAVAILABLE';
+  if (plotError instanceof PLoTError && plotError.status >= 500) return 'PLOT_UNAVAILABLE';
+  return 'PLOT_REQUEST_FAILED';
+}
+
+/**
+ * An unmapped code is an UNKNOWN failure, and the honest copy for an unknown
+ * failure is not a specific accusation.
+ *
+ * ⚠ WHY THIS RETURNS RATHER THAN THROWS — the choice was deliberate. A throw
+ * here converts a rejection the user could recover from into a 500 they
+ * cannot, so fail-loud in the RUNTIME direction would harm exactly the person
+ * this fix is for. The loudness is therefore placed where it costs the user
+ * nothing and catches the mistake earlier: the `never` parameter makes an
+ * unmapped code a COMPILE error, and `log.error` makes one that somehow
+ * defeats the type a searchable operational signal. The user still gets copy
+ * that is true.
+ */
+function reasonForUnmappedCode(code: never): EditRejectionReason {
+  log.error(
+    { rejection_code: String(code) },
+    'edit_graph — rejection code has no copy mapping; falling back to unknown-failure copy',
+  );
+  return 'unknown_failure';
+}
+
+/**
+ * ⚠⚠ REACHABILITY OF THE PLoT-GUARDED CODES — STATE THE RUNG, DO NOT INHERIT
+ * THIS PARAGRAPH (derived at `eedbff59`, re-derived 2026-09-07).
+ *
+ * `PLOT_UNAVAILABLE`, `PLOT_REQUEST_FAILED`, `PLOT_SEMANTIC_REJECTED` (both
+ * sites) and `PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS` are assignable ONLY
+ * inside `if (plotClient) { … }`, over `opts?.plotClient ?? null`.
+ * `handleEditGraph` has exactly TWO executable call sites, both in
+ * `orchestrator-v5/handlers/edit-graph-dispatch.ts` (`:1153`, `:2491`), and
+ * NEITHER passes `plotClient` — both pass an explicit object literal with no
+ * spread. `grep -a 'plotClient'` over that file returns ZERO, with
+ * `handleEditGraph` at 24 hits in the same sweep as a contrast control, so the
+ * probe is not blind. The repo says so itself at `:3526-3529` and at
+ * `graph-structure-validator.ts:53-54`, both citing a staging replay
+ * (`plot_outcome: "skipped"` on every edit turn).
+ *
+ * SO: on the deployed V5 path these arms are DARK, and `case undefined` is dark
+ * too (every call site passes a code). The live-reachable improvement in this
+ * area is the OTHER arms — `SYNTHESIZED_GRAPH_INVALID`,
+ * `APPLIED_GRAPH_UNAVAILABLE`, `OPERATION_DID_NOT_LAND` and
+ * `OPTION_INTERVENTIONS_UNRESOLVABLE` — which is where the user-visible benefit
+ * actually is. The PLoT arms are kept correct rather than deleted because the
+ * gate is a live `if` over a caller-supplied option: the day a caller passes a
+ * client, this mapping is what the user reads.
+ *
+ * Rung: CODE-DERIVED at this tip, plus two in-repo corroborations citing a
+ * runtime witness. NOT re-witnessed on staging by this change.
+ */
+export function mapCodeToRejectionReason(code?: EditRejectionCode): EditRejectionReason {
   switch (code) {
+    // ── The user's request genuinely was the problem. Naming it is honest. ──
     case 'MAX_OPERATIONS_EXCEEDED':
       return 'too_many_operations';
     case 'STRUCTURAL_VALIDATION_FAILED':
     case 'PLOT_SEMANTIC_REJECTED':
+      return 'structural_validation';
+
+    // ── The analysis service gave us no usable answer, and may on a retry. ──
+    // NARROWED — this arm is reached only via `classifyPlotFailureCode`, which
+    // admits a timeout or a 5xx. Every other PLoT-region throwable now takes
+    // `PLOT_REQUEST_FAILED` below. Before that classifier existed this arm
+    // served the whole `catch`, so the sentence "I couldn't reach the analysis
+    // service" was shipped over a domain in which PLoT had usually answered.
     case 'PLOT_UNAVAILABLE':
-      return 'structural_validation';
+      return 'service_unavailable';
+
+    // ── PLoT answered, or we never sent, or the cause is not established. ──
+    // Deliberately neutral: see `classifyPlotFailureCode`'s unprovable bucket.
+    case 'PLOT_REQUEST_FAILED':
+      return 'unknown_failure';
+
+    // ── Our own side broke after the change was understood. Also not theirs. ──
+    // Note each of these call sites already passes an honest human-readable
+    // string as `reason` (e.g. "the system could not capture the final applied
+    // state"); that sentence survives only in `rejection.reason` for the turn
+    // trace. Before this mapping existed the arm below was `default`, so the
+    // user saw the structural accusation instead — honest copy was written and
+    // then thrown away.
+    case 'PLOT_APPLIED_GRAPH_OMITTED_WITH_REPAIRS':
+    case 'SYNTHESIZED_GRAPH_INVALID':
+    case 'APPLIED_GRAPH_UNAVAILABLE':
+      return 'internal_failure';
+
+    // ⭐ A SECOND MIXED DOMAIN, and the one with a dated live witness.
+    // `route-v2.ts:5345` and `telemetry.ts:2065` both record the 3 Aug 2026
+    // staging walk (`9a0541b`): a bare "Configure {option}" turn where the edit
+    // LLM invents an operation that does not survive canonicalisation. The
+    // proximate cause is ours; the distal cause is an under-specified user turn.
+    // So `internal_failure` fails the PR's own mixed-domain test — it takes the
+    // blame outright AND leads the user to the retry that this repo's own 2.11
+    // diagnosis calls a loop. `unknown_failure` attributes nothing and offers
+    // the rephrase alongside the retry.
+    case 'OPERATION_DID_NOT_LAND':
+      return 'unknown_failure';
+
+    // ⭐ A MIXED DOMAIN — one code, two opposite causes, so NEITHER specific
+    // copy is true across it. Derived from the producer
+    // (`encode-option-interventions.ts`), not from the code's name:
+    // `deriveValue` returns the defer signal both when the USER'S OWN VALUE is
+    // rejected by the canonical guards (`:161` — "unit mismatch / range /
+    // ambiguous", e.g. a headcount given for a £ factor) and when OUR side
+    // cannot proceed (target factor unresolvable, no cap available, ambiguous
+    // factor edges, encoder threw).
+    //
+    // `internal_failure` would take the blame for a guard working correctly AND
+    // prescribe a futile "try again"; `structural_validation` would blame the
+    // user for the system-side half. `unknown_failure` is the honest answer: it
+    // attributes nothing and offers BOTH routes forward. Splitting the code at
+    // the producer would let each half get specific copy — rowed, not done here.
+    case 'OPTION_INTERVENTIONS_UNRESOLVABLE':
+      return 'unknown_failure';
+
+    // ── No code supplied: cause not established, so claim nothing. ──
+    case undefined:
+      return 'unknown_failure';
+
     default:
-      return 'structural_validation';
+      return reasonForUnmappedCode(code);
   }
 }
 
