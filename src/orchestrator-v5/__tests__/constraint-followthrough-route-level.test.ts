@@ -266,7 +266,7 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
    */
   function churnRow(remap: { readonly unbindable: readonly ExtractedGoalConstraint[] }) {
     return remap.unbindable.find(
-      (c) => /churn/i.test(String(c.targetName ?? '')) && c.value === 4,
+      (c) => /churn/i.test(String(c.targetName ?? '')) && c.operator === '<=',
     );
   }
 
@@ -277,7 +277,15 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
     expect(extracted.constraints.length).toBeGreaterThan(0);
     const row = churnRow(remap);
     expect(row, 'the churn limit must be among the step-6 drops').toBeDefined();
-    expect(row!.operator).toBe('<=');
+    // ⚠ THE SCALE IS PINNED EXPLICITLY, AND IT IS NOT THE WRITER'S SCALE.
+    // This extractor emits a percentage as a FRACTION with `unit: '%'` —
+    // `risk-polarity-corpus.test.ts` records a captured `above 3%` arriving as
+    // `value: 0.03, unit: '%'`. My first version selected on `value === 4` and
+    // found nothing. The `add_constraint` handler further down this file
+    // commits `value: 4` for the same 4%, so TWO conventions meet in this one
+    // journey and only an explicit pin at each end makes that visible.
+    expect(row!.value).toBe(0.04);
+    expect(row!.unit).toBe('%');
     // It reached neither the bound set nor, therefore, `goal_constraints[]`.
     expect(remap.constraints).toHaveLength(0);
   });
@@ -292,7 +300,13 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
     // identical questions.
     const cards = renderDirectionClarifications(remap.unbindable.map(targetUnmatchedItem));
     expect(remap.unbindable.length).toBeGreaterThan(0);
-    expect(cards).toHaveLength(1);
+    // ⭐ THE EXACT SET, NOT A COUNT (CLAUDE.md 22f: pin the set so the suite
+    // REDs if it GROWS or SHRINKS, and stays green only for the right reason).
+    // A count would let a different pair of questions pass silently, and the
+    // whole question here is WHICH questions one sentence produces.
+    expect(cards.map((c) => c.label).sort()).toEqual([
+      'Say which part of the model the monthly churn limit applies to',
+    ]);
   });
 
   it('⭐ THE FIRST HALF OF THE JOIN — the rendered card carries `action_type: add_constraint`', () => {
