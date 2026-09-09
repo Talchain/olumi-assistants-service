@@ -107,6 +107,8 @@ export interface CoachingSignalInput {
    * as a granted one.
    */
   readonly mayNameLeadingOption: boolean;
+  /** Separate model admission cap, read by the shared application helper. */
+  readonly admissionPermitsLeaderNaming?: boolean;
 }
 
 export interface CoachingSignalDetection {
@@ -585,6 +587,18 @@ export function detectCoachingSignal(
     // re-derives the permission: it arrives already computed by the shared
     // `applyCoachingSignal` helper, from ONE derivation (CLAUDE.md trap #12).
     const leaderWithheld = !input.mayNameLeadingOption;
+    // A completed, entitled comparison may still be provisional. Keep a
+    // useful next step, but do not turn comparison frequencies into a leader
+    // designation. This is the producer decision, before compose/commit; the
+    // headline and analysis-result block remain the qualified result's own.
+    if (!leaderWithheld && input.admissionPermitsLeaderNaming === false) {
+      const first = !hasPriorRunAnalysisShownToUser(input.priorFacts);
+      return {
+        signal_id: first ? 'FIRST_ANALYSIS_COMPLETE' : 'RERUN_ANALYSIS_COMPLETE',
+        coaching_text: `${first ? 'Your first analysis is ready.' : 'This was a re-run.'} `
+          + 'Explore the comparison and the assumptions shaping it before acting on the result.',
+      };
+    }
 
     // ⭐⭐ THE QUESTION THIS BRANCH ASKS IS ABOUT THE USER, NOT ABOUT THE SERVER:
     // "has a result ever been PUT IN FRONT OF THIS USER before this turn?"
