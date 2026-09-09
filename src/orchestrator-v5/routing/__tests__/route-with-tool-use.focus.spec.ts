@@ -36,6 +36,7 @@ import {
   GRAPH_CONTEXT_INSTRUCTION,
   RECENT_CHANGES_INSTRUCTION,
   RUN_DELTA_INSTRUCTION,
+  MARGIN_MEANING_INSTRUCTION,
 } from '../route-with-tool-use.js';
 import { observeSerialisedPack } from '../../context/__tests__/observe-serialised-pack.js';
 import { ANALYSIS_NOT_CURRENT_NOTE } from '../../format/format-analysis-for-context.js';
@@ -156,6 +157,21 @@ function subtractMandatoryAuthorityDelta(message: string): string {
   const withoutRunDelta = message.replace(`\n\n${RUN_DELTA_INSTRUCTION}`, '');
   expect(withoutRunDelta).not.toBe(message);
   message = withoutRunDelta;
+  // ⭐ THE FOURTH MANDATORY BLOCK — same treatment, same reason. `margin`'s
+  // meaning is emitted by the condition that serialises the number, so this
+  // fixture (which carries a non-null margin) always renders it. Subtract that
+  // ONE intentional block so the HISTORICAL golden below stays valid instead of
+  // being re-pinned: the golden's job is to catch UNINTENDED drift, and
+  // re-pinning it to absorb a deliberate addition would retire exactly that.
+  //
+  // Exactly-once is asserted FIRST, and the subtraction is asserted to have
+  // changed the message, so a replace that silently matched nothing cannot
+  // quietly re-pin the golden — the same non-vacuity guard the run-delta
+  // subtraction above carries.
+  expect(message.split(MARGIN_MEANING_INSTRUCTION)).toHaveLength(2);
+  const withoutMargin = message.replace(`\n\n${MARGIN_MEANING_INSTRUCTION}`, '');
+  expect(withoutMargin).not.toBe(message);
+  message = withoutMargin;
   const marker = `\n\n${GRAPH_CONTEXT_INSTRUCTION}\n\n${DISPLAY_GRAPH_INSTRUCTION}\n\n${RECENT_CHANGES_INSTRUCTION}`;
   const jsonStart = message.indexOf('{');
   const jsonEnd = message.indexOf(marker);
