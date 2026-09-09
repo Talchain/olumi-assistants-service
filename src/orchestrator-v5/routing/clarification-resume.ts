@@ -46,7 +46,9 @@
 
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
-import type { ElicitTargetBaselinePending, PendingAction } from '../session/pending-action.js';
+import type { ElicitTargetBaselinePending, PendingAction, SetGoalTargetPending } from '../session/pending-action.js';
+import { findSoleLiveGoalTargetPending } from '../session/pending-action.js';
+import { runExtraction } from '../context/cqe/extract-quantities.js';
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
@@ -743,4 +745,96 @@ export function tryBaselineElicitationResume(input: {
     return { matched: false, skip_reason: 'not_an_answer' };
   }
   return { matched: true, pending, targetLabel: liveLabel };
+}
+
+
+/**
+ * ⭐⭐ THE GOAL-TARGET ANSWER RESUMER — the sibling of
+ * {@link tryBaselineElicitationResume}, deliberately separate from it.
+ *
+ * Baseline asks "where is it now" and its answer is a PERCENT, which is why
+ * `classifyElicitedBaselineAnswer` is percent-shaped. A goal target is "what
+ * counts as success", and the person's own units are whatever their brief used
+ * — £20k, 5,000 signups, 92%. Routing a currency answer through the percent
+ * classifier would be two questions under one name, so this uses the SHARED
+ * quantity extractor the deterministic value-update route already uses. No
+ * second parser is introduced, and no writer: the caller replays the resolved
+ * tuple through the canonical `add_constraint` lifecycle.
+ *
+ * ⚠ A GOAL MINIMUM IS NOT A CHURN MAXIMUM. An answer stating a ceiling is
+ *   REFUSED, not stamped: ISL computes `P(samples >= threshold)`, so recording
+ *   a ceiling as a `>=` target inverts the person's meaning. The caller asks the
+ *   precise missing question and must not claim an edit.
+ */
+export type GoalTargetResumeDispatch =
+  | { readonly matched: false; readonly skip_reason:
+      | 'no_pending_question'
+      | 'graph_diverged'
+      | 'target_missing' }
+  | {
+      readonly matched: false;
+      readonly skip_reason: 'unreadable_answer';
+      readonly pending: SetGoalTargetPending;
+      readonly reason: 'no_amount' | 'several_amounts' | 'ceiling_not_minimum' | 'degraded_parse';
+    }
+  | {
+      readonly matched: true;
+      readonly pending: SetGoalTargetPending;
+      readonly goalNodeId: string;
+      readonly value: number;
+      readonly unit?: string;
+    };
+
+export function tryGoalTargetElicitationResume(input: {
+  readonly message: string;
+  readonly pendingActions: readonly PendingAction[];
+  readonly nowMs: number;
+  readonly currentGraphHash?: string;
+  readonly graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined;
+}): GoalTargetResumeDispatch {
+  const pending = findSoleLiveGoalTargetPending(input.pendingActions, input.nowMs);
+  if (pending === null) return { matched: false, skip_reason: 'no_pending_question' };
+  // Mutating kind: a missing hash on either side is a conflict (fail closed),
+  // the same rule the baseline sibling applies.
+  if (graphHashConflicts(pending, input.currentGraphHash)) {
+    return { matched: false, skip_reason: 'graph_diverged' };
+  }
+  const goalId = pending.action.goal_node_id;
+  const goal = input.graphNodes?.find((n) => n.id === goalId);
+  if (goal === undefined) return { matched: false, skip_reason: 'target_missing' };
+
+  const extraction = runExtraction(input.message);
+  if (extraction.summary.degraded) {
+    return { matched: false, skip_reason: 'unreadable_answer', pending, reason: 'degraded_parse' };
+  }
+  const amounts = extraction.results.filter(
+    (r) => typeof r.value === 'number' && Number.isFinite(r.value),
+  );
+  if (amounts.length === 0) {
+    return { matched: false, skip_reason: 'unreadable_answer', pending, reason: 'no_amount' };
+  }
+  if (amounts.length > 1) {
+    return { matched: false, skip_reason: 'unreadable_answer', pending, reason: 'several_amounts' };
+  }
+  const amount = amounts[0]!;
+  if (amount.comparator === 'at_most') {
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      reason: 'ceiling_not_minimum',
+    };
+  }
+  // The answer's own unit, else the one the question already established.
+  // Never guessed: an absent unit stays absent and the writer's existing cap
+  // doctrine decides what that means.
+  const unit =
+    typeof amount.unit === 'string' && amount.unit.length > 0 ? amount.unit : pending.action.unit;
+  return {
+    matched: true,
+    pending,
+    goalNodeId: goalId,
+    value: amount.value as number,
+    ...(unit !== undefined ? { unit } : {}),
+  };
 }

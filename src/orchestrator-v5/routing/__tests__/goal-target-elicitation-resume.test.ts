@@ -1,0 +1,133 @@
+/**
+ * ⭐⭐ THE GOAL-TARGET ANSWER, RESOLVED INTO THE TUPLE THE CANONICAL WRITER TAKES.
+ *
+ * Built on the sibling the independent review named: `elicit_target_baseline`
+ * (`turn-executor.ts:5948-6045`) is the existing numeric-answer route — typed
+ * chip first, then this, then generic factor parsing — with pending
+ * parse/liveness/hash and the SAME `add_constraint` lifecycle. This is its
+ * target-side twin, kept separate on purpose.
+ *
+ * ⛔ TWO CORRECTIONS I OWE, BOTH FROM THE REVIEW AND BOTH KEPT HERE:
+ *   · my pending-kind census stopped at line 400 of `pending-action.ts` and
+ *     missed `clarify_v2_round`, `elicit_target_baseline`,
+ *     `elicit_option_effect`, `elicit_effect_target`, `elicit_edit_target` and
+ *     `proposed_concept`. A truncated enumeration is not an enumeration, and it
+ *     is the second time I have made that exact error;
+ *   · `readiness-summary.ts:30` deliberately QUARANTINES
+ *     `goal_threshold_missing` and preserves ready-without-threshold. Nothing
+ *     here revives it: offering a clarification is not changing admission, and
+ *     a targetless draft stays analysable.
+ *
+ * The percent classifier is deliberately NOT reused — baseline answers are
+ * percents, a goal target is in the person's own units (£20k, 5,000 signups,
+ * 92%) — so this uses the shared CQE extractor the deterministic value-update
+ * route already uses. No second parser, and no writer: the resolved tuple is
+ * replayed through the canonical `add_constraint` lifecycle.
+ *
+ * Not run locally; hosted CI is the only execution.
+ */
+import { describe, expect, it } from 'vitest';
+
+import { tryGoalTargetElicitationResume } from '../clarification-resume.js';
+
+const NOW = Date.parse('2026-09-09T08:00:00.000Z');
+const GRAPH_HASH = 'hash-goal-answer';
+const NODES = [
+  { id: 'g-revenue', label: 'Reach £20k MRR within 12 months' },
+  { id: 'f-churn', label: 'Pro Plan Churn Rate' },
+];
+
+function pending(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'pa-goal-1',
+    action: {
+      kind: 'set_goal_target',
+      goal_node_id: 'g-revenue',
+      question: 'What value counts as success for this goal?',
+      ...(overrides.action as Record<string, unknown> | undefined),
+    },
+    expires_at_turn_count: 3,
+    expires_at_iso: new Date(NOW + 600_000).toISOString(),
+    preconditions: { graph_hash: GRAPH_HASH },
+    ...overrides,
+  };
+}
+
+function resume(message: string, pendings: readonly unknown[], hash: string | undefined = GRAPH_HASH) {
+  return tryGoalTargetElicitationResume({
+    message,
+    pendingActions: pendings as never,
+    nowMs: NOW,
+    ...(hash === undefined ? {} : { currentGraphHash: hash }),
+    graphNodes: NODES,
+  });
+}
+
+describe('a goal-target answer resolves to the writer tuple, and nothing else does', () => {
+  it('⭐ POSITIVE — "£20k" answers the question and yields goal, value and unit', () => {
+    const result = resume('£20k', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.goalNodeId).toBe('g-revenue');
+    expect(result.value).toBe(20000);
+    expect(result.unit).toBe('£');
+  });
+
+  it('a bare number answers it too, taking the unit the question established', () => {
+    const result = resume('20000', [pending({ action: { unit: '£' } })]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+    expect(result.unit).toBe('£');
+  });
+
+  it('⭐ CEILING — "keep it under 4%" is refused, never stamped as a success minimum', () => {
+    // A goal minimum is not a churn maximum. ISL computes P(samples >= t), so
+    // recording a ceiling as a >= target would invert the person's meaning.
+    const result = resume('keep it under 4%', [pending()]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('unreadable_answer');
+  });
+
+  it('SEVERAL AMOUNTS — the product asks again rather than choosing one', () => {
+    const result = resume('somewhere between £20k and £30k', [pending()]);
+    expect(result.matched).toBe(false);
+  });
+
+  it('NO PENDING — an ordinary quantity turn is untouched', () => {
+    // The route is additive: with no live question, every existing lane keeps
+    // its behaviour, so a price or an unrelated factor answer is unaffected.
+    const result = resume('£59', []);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('no_pending_question');
+  });
+
+  it('COMPETING QUESTION — a second number-asking pending blocks the bare answer', () => {
+    // Reuses `PENDING_KIND_CLAIMS_BARE_NUMBER`: liveness, then claimants, then
+    // identity. A competing ask must not be counted out of existence.
+    const competitor = {
+      id: 'pa-baseline',
+      action: { kind: 'elicit_target_baseline', target_id: 'f-churn' },
+      expires_at_turn_count: 3,
+      expires_at_iso: new Date(NOW + 600_000).toISOString(),
+    };
+    const result = resume('20000', [pending(), competitor]);
+    expect(result.matched).toBe(false);
+  });
+
+  it('GRAPH DIVERGED — a moved model refuses rather than applying a stale answer', () => {
+    const result = resume('£20k', [pending()], 'a-different-hash');
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('graph_diverged');
+  });
+
+  it('TARGET MISSING — the goal is gone, so nothing is resolved', () => {
+    const result = resume('£20k', [pending({ action: { goal_node_id: 'g-deleted' } })]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    expect(result.skip_reason).toBe('target_missing');
+  });
+});

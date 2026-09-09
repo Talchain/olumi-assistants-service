@@ -276,6 +276,26 @@ export type PendingActionAction =
        */
       readonly cap?: number;
     }
+  | {
+      /**
+       * ⭐ A GOAL TARGET THE PRODUCT ASKED FOR AND THE PERSON HAS NOT YET GIVEN.
+       *
+       * The mirror of `set_factor_value`: there the CHANGE is decided and the
+       * TARGET is being asked for; here the target (this goal) is decided and
+       * the VALUE is. Named apart for that reason — folding them into one kind
+       * would be two questions under one name, and the resumer would have to
+       * guess which half the person just answered.
+       *
+       * Bound to the specific goal AND the sentence actually asked, so a resume
+       * cannot attach an answer to a question the person never saw.
+       */
+      readonly kind: 'set_goal_target';
+      readonly goal_node_id: string;
+      /** The exact question put to the user, for the receipt and the audit. */
+      readonly question: string;
+      /** The unit already established, when one was. Never guessed. */
+      readonly unit?: string;
+    }
   | { readonly kind: 'run_analysis' }
   | { readonly kind: 'what_would_flip' }
   | {
@@ -1168,6 +1188,7 @@ export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean>
   elicit_effect_target: true, // "which of these does your number belong to?"
   elicit_edit_target: true, // "which factor, edge, option or value?"
   set_factor_value: true, // a held quantity awaiting a target; "12" re-states it
+  set_goal_target: true, // "what value counts as success?" — a bare "20000" answers it
   clarify_v2_round: true, // a clarify round may offer numbered choices
   proposed_concept: true, // the two-stage clarifier offers a choice
   // The asks a bare number CANNOT be answering: each expects a confirmation or
@@ -1200,6 +1221,40 @@ export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean>
  * Liveness via the shared predicate; `null` in every other case, so every
  * caller fails closed by construction.
  */
+/** The goal-target elicitation pending, narrowed. */
+export type SetGoalTargetPending = PendingAction & {
+  readonly action: {
+    readonly kind: 'set_goal_target';
+    readonly goal_node_id: string;
+    readonly question: string;
+    readonly unit?: string;
+  };
+};
+
+/**
+ * The goal-target twin of {@link findSoleLiveElicitBaselinePending}, and the
+ * same three-step order for the same reason: LIVENESS, then CLAIMANTS, then
+ * IDENTITY. Filtering to the kind first would count competing number-asking
+ * questions out of existence before they could block a bare answer.
+ *
+ * ⚠ A GOAL TARGET IS NOT A BASELINE. They are separate kinds, resolved by
+ *   separate resumers, because "what does success look like" and "where is it
+ *   now" are different questions — folding them together would make the
+ *   resumer guess which one a bare number answered.
+ */
+export function findSoleLiveGoalTargetPending(
+  pendings: readonly PendingAction[] | undefined,
+  nowMs: number,
+): SetGoalTargetPending | null {
+  const claimants = filterLivePendingActions(pendings ?? [], nowMs).filter(
+    (pa) => PENDING_KIND_CLAIMS_BARE_NUMBER[pa.action.kind],
+  );
+  if (claimants.length !== 1) return null;
+  const sole = claimants[0]!;
+  if (sole.action.kind !== 'set_goal_target') return null;
+  return sole as SetGoalTargetPending;
+}
+
 export function findSoleLiveElicitBaselinePending(
   pendings: readonly PendingAction[] | undefined,
   nowMs: number,
