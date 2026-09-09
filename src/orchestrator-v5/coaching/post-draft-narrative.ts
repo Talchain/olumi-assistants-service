@@ -771,8 +771,13 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
   // stated and the product declined to enforce outranks a coaching suggestion,
   // and the core block is the one the word-budget ladder sheds LAST.
+  // Promote the first direction clarification to open the reply. Moved, not
+  // duplicated: it is dropped from the core bullets below. With none, the
+  // narrative is byte-identical to before.
+  const [promotedDirectionBullet = null, ...remainingDirectionBullets] = directionBullets;
+  const leadClarification = promotedDirectionBullet;
   const coreBullets = [
-    ...directionBullets,
+    ...remainingDirectionBullets,
     ...(tradeOffBullet ? [tradeOffBullet] : []),
     ...(assumptionBullet ? [assumptionBullet] : []),
   ];
@@ -782,8 +787,8 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     ...additionalBullets,
   ]);
   const weighingBlockDirectionOnly =
-    directionBullets.length > 0
-      ? renderBulletSection('What the model is weighing', directionBullets)
+    remainingDirectionBullets.length > 0
+      ? renderBulletSection('What the model is weighing', remainingDirectionBullets)
       : null;
 
   // Brief-completeness advisory (own droppable block). Only the enum is read;
@@ -797,6 +802,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     weighingBlockCore,
     weighingBlockDirectionOnly,
     completenessBlock,
+    leadClarification,
     nextStep,
     droppedFigureNotice,
   });
@@ -822,7 +828,12 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       // word-budget ladder can shed the whole weighing block, and a count of
       // bullets that were composed but not served is the optimism this
       // telemetry exists to catch.
-      direction_clarifications_surfaced: sectioned.includedWeighing ? directionBullets.length : 0,
+      // Counts what was SERVED. The promoted line leads the reply and is
+      // therefore surfaced whether or not the weighing block survived the word
+      // budget; the remainder is surfaced only inside that block.
+      direction_clarifications_surfaced:
+        (leadClarification !== null ? 1 : 0) +
+        (sectioned.includedWeighing ? remainingDirectionBullets.length : 0),
     },
   };
 }
@@ -2079,6 +2090,13 @@ interface SectionedNarrativeInput {
   readonly weighingBlockDirectionOnly: string | null;
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
+  /**
+   * The one stated-limit clarification promoted ahead of the confirm sentence,
+   * or `null` when the draft has none. Not new copy: the first
+   * `pickDirectionClarifications` line, MOVED — it is removed from the weighing
+   * block so the person reads it once.
+   */
+  readonly leadClarification: string | null;
   readonly nextStep: string;
   /**
    * The stated figures the model did not carry, or `null` when there are none
@@ -2125,7 +2143,15 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     includeOptions: boolean,
     includeCompleteness: boolean,
   ): string => {
-    const blocks: string[] = [input.confirm];
+    // ⭐ A stated limit the product did not enforce LEADS — before the confirm
+    // sentence, not after it. Measured on native `3d5ce286…`; full narrative in
+    // `output/olumi-delivery-heartbeat/F361-FIRST-RESPONSE-20260909.md`.
+    // Null when the draft has no such clarification, so the assembly is then
+    // byte-identical to before.
+    const blocks: string[] =
+      input.leadClarification !== null && input.leadClarification.length > 0
+        ? [input.leadClarification, input.confirm]
+        : [input.confirm];
     if (includeOptions && input.optionsBlock !== null) {
       blocks.push(input.optionsBlock);
     }
