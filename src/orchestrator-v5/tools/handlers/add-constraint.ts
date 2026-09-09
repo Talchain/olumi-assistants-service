@@ -826,7 +826,7 @@ export function createAddConstraintHandler(): HandlerFn {
       // mint. The receipt below asks the one question; `__elicit_baseline` on
       // the outcome tells the executor to persist the pending question in the
       // same commit. The constraint commit itself is NEVER touched.
-      const elicitBaseline = mintEligible && !mintedBaseline;
+      const elicitBaseline = false;
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
