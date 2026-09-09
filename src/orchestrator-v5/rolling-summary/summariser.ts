@@ -18,6 +18,7 @@ import { config } from '../../config/index.js';
 
 import {
   DEFAULT_SUMMARY_MODEL,
+  SUMMARY_HARD_CAP_CHARS,
   SUMMARY_TARGET_MAX_CHARS,
   SUMMARY_TARGET_MIN_CHARS,
 } from './summary-types.js';
@@ -35,7 +36,25 @@ export const SUMMARISER_SYSTEM_PROMPT = [
   'OPEN: <unanswered questions or pending intents; "(none)" if none> [tN]',
   '',
   'Rules:',
+  // ⚠ THE CEILING IS STATED RATHER THAN HIDDEN. The model was told a target of
+  // 800-1400 and then judged against a 1600-char hard reject it was never
+  // shown, so a pass that overshot its target a little had no way to know it
+  // had crossed a line that DISCARDS the whole update and keeps the previous
+  // summary. Witnessed on staging scenario 8a8721ae (2026-09-08): applied sizes
+  // 702 -> 975 -> 1229 -> 1460, then fourteen of twenty passes rejected
+  // over_cap, the last spending 9,559 ms and 615 output tokens before keeping
+  // the old summary.
+  //
+  // ⚠ AND THE CONTRACT ITSELF IS UNCHANGED. 1600, 800-1400 and the 200-char
+  // reservation summary-types.ts describes (for [tN] stamps + slot labels) all
+  // stand — that reservation is deliberate design, not an accidental unit slip.
+  // An earlier revision of this branch discounted the stamps from the cap on
+  // the argument that they never reach the consumer; that argument is FALSE
+  // (inject.ts's stampFor re-renders provenance, in a LONGER form) and it was
+  // withdrawn. This line states the existing contract to the party expected to
+  // meet it; it does not alter it.
   `- Keep the whole summary between ${SUMMARY_TARGET_MIN_CHARS} and ${SUMMARY_TARGET_MAX_CHARS} characters. Never exceed the length — drop the least important detail instead.`,
+  `- The hard limit is ${SUMMARY_HARD_CAP_CHARS} characters of output, counting the labels and the [tN] citations. Go over it and your whole summary is discarded and the previous one is kept, so nothing you wrote this turn is recorded. Compress the least important wording to stay inside it — never drop a citation, and never drop a constraint, to save length.`,
   '- After each CONSTRAINTS / RESOLVED / OPEN entry, cite the turn(s) it came from as [t3] or [t3, t7], using the [tN] labels shown in the input. FRAME does not need a citation.',
   '- Preserve constraints the user stated long ago even if they were not repeated recently — that is the whole point of this summary.',
   '- Write plain prose. Do NOT include probabilities, percentages, scores, or any numeric analysis values — those live elsewhere. Never invent facts the conversation does not contain.',
