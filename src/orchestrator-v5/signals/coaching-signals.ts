@@ -587,18 +587,6 @@ export function detectCoachingSignal(
     // re-derives the permission: it arrives already computed by the shared
     // `applyCoachingSignal` helper, from ONE derivation (CLAUDE.md trap #12).
     const leaderWithheld = !input.mayNameLeadingOption;
-    // A completed, entitled comparison may still be provisional. Keep a
-    // useful next step, but do not turn comparison frequencies into a leader
-    // designation. This is the producer decision, before compose/commit; the
-    // headline and analysis-result block remain the qualified result's own.
-    if (!leaderWithheld && input.admissionPermitsLeaderNaming === false) {
-      const first = !hasPriorRunAnalysisShownToUser(input.priorFacts);
-      return {
-        signal_id: first ? 'FIRST_ANALYSIS_COMPLETE' : 'RERUN_ANALYSIS_COMPLETE',
-        coaching_text: `${first ? 'Your first analysis is ready.' : 'This was a re-run.'} `
-          + 'Explore the comparison and the assumptions shaping it before acting on the result.',
-      };
-    }
 
     // ⭐⭐ THE QUESTION THIS BRANCH ASKS IS ABOUT THE USER, NOT ABOUT THE SERVER:
     // "has a result ever been PUT IN FRONT OF THIS USER before this turn?"
@@ -633,6 +621,16 @@ export function detectCoachingSignal(
       // (v5.run_analysis.constraint_unevaluated /
       // .constraint_identity_unresolved) already count these turns.
       if (leaderWithheld) return null;
+      // A provisional comparison remains useful. Make its FIRST-run nudge
+      // about exploring the comparison/assumptions rather than "the leader".
+      // Do not apply this to reruns: their actual delta, attribution and inert
+      // edit explanations below must survive, with the existing wire caveat.
+      if (input.admissionPermitsLeaderNaming === false) {
+        return {
+          signal_id: 'FIRST_ANALYSIS_COMPLETE',
+          coaching_text: 'Your first analysis is ready. Explore the comparison and the assumptions shaping it before acting on the result.',
+        };
+      }
       return {
         signal_id: 'FIRST_ANALYSIS_COMPLETE',
         coaching_text: COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}),
