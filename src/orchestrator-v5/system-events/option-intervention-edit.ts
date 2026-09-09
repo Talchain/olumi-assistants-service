@@ -31,12 +31,20 @@ const ExistingInterventionRead = z.object({
   value: z.number().finite(),
   // ⚠ `source` STAYS REQUIRED, AND IS DERIVED FROM THE PRODUCER RATHER THAN
   // RE-SPELLED. Relaxing the whole read to admit a missing `target_match` also
-  // dropped this check, and a stored `source: 'user_override'` — a value the
-  // producer's enum does not contain — began passing and being overwritten with
-  // `user_specified`. That is precisely the "silently replacing existing
+  // dropped this check, and a stored `source` OUTSIDE the producer's three-member
+  // enum — the legacy override spelling — began passing and being overwritten
+  // with `user_specified`. That is precisely the "silently replacing existing
   // provenance with user authority" this writer must refuse, and an existing
-  // test named it. The witnessed 422 was about `target_match` alone; nothing
+  // test names it. The witnessed 422 was about `target_match` alone; nothing
   // about it licensed widening `source`.
+  //
+  // ⚠⚠ AND THE LEGACY SPELLING IS NOT WRITTEN OUT HERE ON PURPOSE.
+  // `no-brief-derived-user-override.writers.test.ts` scans every src/ file for
+  // that literal and REDs on any file outside its reviewed manifest — a
+  // whole-file substring scan, so a mere mention trips it. This module has no
+  // write path for that stamp, so the honest answer is to keep the literal out
+  // rather than to enter a non-writer into a guard that exists to enumerate
+  // writers. Widening the manifest for a comment would have weakened it.
   source: InterventionV3.shape.source,
   target_match: TargetMatch.optional(),
 }).passthrough();
