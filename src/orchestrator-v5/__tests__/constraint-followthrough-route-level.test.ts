@@ -310,10 +310,28 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
     const cards = renderDirectionClarifications([item!]);
     expect(cards).toHaveLength(1);
     expect(cards[0]!.action_type).toBe('add_constraint');
-    // ⚠ `action_type` is a single-member literal type
-    // (`DirectionStrengthenItem.action_type: 'add_constraint'`), so that line
-    // cannot fail under any type-safe mutation. The assertion below is the one
-    // that DISCRIMINATES: this copy exists only on the sixth-reason branch.
+    // ⚠⚠ NEITHER OF THE TWO OBVIOUS ASSERTIONS DISCRIMINATES HERE, AND A MUTANT
+    // PROVED IT AFTER I HAD CLAIMED OTHERWISE IN WRITING.
+    //
+    //   · `action_type` is a single-member literal type
+    //     (`DirectionStrengthenItem.action_type: 'add_constraint'`), so no
+    //     type-safe mutation can fail it. I knew that and said so.
+    //   · `detail` containing "not being enforced" is ALSO shared. I called
+    //     this "the one that DISCRIMINATES" and was wrong: the direction branch
+    //     reads "...so it is not being enforced yet. Add it as a constraint to
+    //     make it binding." Inverting the branch discriminator left BOTH
+    //     assertions green while five other suites REDded.
+    //
+    // ⭐ THE LABEL IS THE ONLY THING THAT SEPARATES THE TWO BRANCHES in copy a
+    // user sees: the sixth reason asks WHICH PART OF THE MODEL a limit applies
+    // to; the five direction reasons ask which DIRECTION it points. Asserting
+    // the label is what makes this test bind to the `target_unmatched` branch
+    // rather than to "some clarification card was rendered".
+    expect(cards[0]!.label).toContain('Say which part of the model');
+    expect(cards[0]!.label).not.toContain('Confirm the direction');
+    // Kept, now honestly labelled as a shared-copy assertion rather than a
+    // discriminating one: it pins that the card tells the user the limit is NOT
+    // in force, which both branches must do and neither may quietly drop.
     expect(cards[0]!.detail).toContain('not being enforced');
   });
 
