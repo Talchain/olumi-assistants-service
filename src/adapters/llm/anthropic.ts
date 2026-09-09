@@ -23,7 +23,13 @@ import type { LLMAdapter, DraftGraphArgs, DraftGraphResult, SuggestOptionsArgs, 
 import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from "./errors.js";
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
-import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import {
+  CEE_MINTED_GOAL_FIELDS,
+  normaliseDraftResponse,
+  ensureControllableFactorBaselines,
+  stripModelAuthoredGoalThreshold,
+  type GoalThresholdStripResult,
+} from "./normalisation.js";
 import { isUsableDraftDocument } from "./draft-document-acceptance.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
@@ -87,8 +93,14 @@ import {
   mergeCompletionClaims,
   RECORDS_COMPLETION_MAX_TOKENS,
   RECORDS_COMPLETION_WALL_MS,
+  canonicalText,
+  type DraftRecordSet,
   type DraftInferenceClaim,
+  type RecordProjection,
 } from '../../cee/draft/records/index.js';
+import { bindStatedItemToBrief } from '../../cee/provenance/brief-binding.js';
+import { isAmountStatedInBrief } from '../../cee/provenance/stated-amounts.js';
+import { goalValueIsATarget } from '../../cee/draft/records/projector.js';
 import { DRAFT_ATTACHMENT_MAX_BYTES, type BuiltDraftAttachment } from './draft-attachment.js';
 import { reconcileDraftOptionFraming } from '../../cee/draft/records/option-framing.js';
 
@@ -126,6 +138,191 @@ export type DraftArgs = {
    */
   attachment?: BuiltDraftAttachment;
 };
+
+/**
+ * Exported so a test can assert `{fields the projector mints} ⊆ {fields
+ * protected}`. Deriving this from the scrub's list proves the two copies agree
+ * and can NEVER prove the list is complete (trap 12d) — a future projector
+ * target field named outside the `goal_threshold` prefix would be silently
+ * stripped with no red anywhere. The union assertion in
+ * `draft-by-records-wire.test.ts` is what notices that.
+ */
+export const RECORDS_PROJECTOR_GOAL_TARGET_FIELDS = CEE_MINTED_GOAL_FIELDS.filter(
+  (field) => field.startsWith('goal_threshold'),
+);
+
+export type ProjectedGoalTargetIssue = {
+  statedItemIndex: number;
+  reason: 'target_unrepresented' | 'unit_ambiguous' | 'denominator_degenerate';
+};
+
+type ProjectedGoalTargetScrubResult = {
+  stripped: GoalThresholdStripResult;
+  /**
+   * Targets that could not be safely attested and were therefore LEFT TO THE
+   * EXISTING SCRUB, which deletes them exactly as it does today. Observability
+   * only — never a refusal.
+   *
+   * The existing scrub IS the fail-closed policy for an unattestable target:
+   * the draft still succeeds and the goal is label-only, so the user's number
+   * survives as prose in the label. Escalating this to a thrown draft turned a
+   * silent degradation into a non-retryable HTTP 400 whose recovery copy tells
+   * the user to "describe what success looks like" — which is precisely what
+   * they did, and what triggered it. Two responses to one harm class (`cannot
+   * attest this target`) with opposite severity is trap 21; this keeps the one
+   * the rest of the function already uses.
+   */
+  unprotected: ProjectedGoalTargetIssue[];
+};
+
+/**
+ * Apply the legacy draft ingress scrub without deleting a target that this
+ * request's records projector just derived from an independently verified
+ * target record.
+ *
+ * The exemption is intentionally narrower than "projected" or "stated": the
+ * projector also represents unverified model transcriptions, and duplicate
+ * goals can carry a later record's value on a survivor whose provenance belongs
+ * to the first record. Each protected value therefore has to bind on its OWN
+ * quote + value + unit against the brief, then match the stated projector-owned
+ * node by source quote and typed target tuple. The survivor's `brief_binding`
+ * is deliberately not reused as target attestation: after duplicate collapse it
+ * describes the first record, which may be a separately unverified baseline.
+ * Target-role interpretation delegates to the projector's own predicate; a
+ * second local rule would otherwise let the projector mint an optional-role
+ * target only for this scrub to delete it again.
+ * Baseline fields are never protected; the records projector does not mint
+ * them, and leaving them outside this derived `goal_threshold*` set keeps the
+ * existing anti-fabrication scrub intact.
+ *
+ * The fields are hidden from the existing scrub rather than restored from a
+ * second derivation. That keeps the projector as the sole numeric authority and
+ * keeps `GoalThresholdStripResult` truthful: its telemetry reports only fields
+ * that remain deleted after this function returns.
+ */
+export function scrubProjectedDraftGoalTargets(args: {
+  rawJson: unknown;
+  records: DraftRecordSet;
+  projection: RecordProjection;
+  brief: string;
+}): ProjectedGoalTargetScrubResult {
+  const rawNodes =
+    args.rawJson !== null && typeof args.rawJson === 'object'
+      ? (args.rawJson as { nodes?: unknown }).nodes
+      : undefined;
+  if (!Array.isArray(rawNodes)) {
+    return {
+      stripped: stripModelAuthoredGoalThreshold(args.rawJson),
+      unprotected: [{ statedItemIndex: -1, reason: 'target_unrepresented' }],
+    };
+  }
+
+  const trustedNodes = new Set<Record<string, unknown>>();
+  const unprotected: ProjectedGoalTargetIssue[] = [];
+
+  args.records.stated_items.forEach((item, index) => {
+    if (
+      item.kind !== 'goal'
+      || !goalValueIsATarget(item.role)
+      || typeof item.value !== 'number'
+      || !Number.isFinite(item.value)
+    ) return;
+
+    if (bindStatedItemToBrief({
+      quote: item.source_quote,
+      value: item.value,
+      unit: item.unit,
+      brief: args.brief,
+    }) !== 'verified') return;
+
+    // `bindStatedItemToBrief` accepts equivalent percent spellings, while the
+    // projector's cap authority currently recognises only the exact `%` unit.
+    // An omitted, incompatible, aliased, or padded unit can therefore turn an
+    // 88% target into 88 / 110 = 0.8. Keep the projector as the sole numeric
+    // authority and refuse that unsafe tuple instead of canonicalising it here.
+    if (
+      item.unit !== '%'
+      && isAmountStatedInBrief(item.value, '%', item.source_quote)
+    ) {
+      unprotected.push({ statedItemIndex: index, reason: 'unit_ambiguous' });
+      return;
+    }
+
+    const sourceQuote = canonicalText(item.source_quote);
+    const matchingNodes = (rawNodes as unknown[]).filter(
+      (candidate): candidate is Record<string, unknown> => {
+        if (candidate === null || typeof candidate !== 'object') return false;
+        const node = candidate as Record<string, unknown>;
+        const nodeId = typeof node.id === 'string' ? node.id : undefined;
+        const provenance = nodeId === undefined ? undefined : args.projection.provenance[nodeId];
+        return node.kind === 'goal'
+          && provenance?.provenance_class === 'stated'
+          && typeof provenance.source_quote === 'string'
+          && canonicalText(provenance.source_quote) === sourceQuote
+          && node.goal_threshold_raw === item.value
+          && (item.unit === undefined || node.goal_threshold_unit === item.unit);
+      },
+    );
+
+    if (matchingNodes.length === 0) {
+      unprotected.push({ statedItemIndex: index, reason: 'target_unrepresented' });
+      return;
+    }
+
+    // Only a COMPLETE and SOUND tuple is worth protecting. The soundness test is
+    // the cap module's own (`existingCap > raw`, goal-threshold-cap.ts): a cap at
+    // or below the target forces `goal_threshold >= 1.0` — "what is the
+    // probability of hitting the maximum of the scale" — which that module's
+    // rule 3 guard names as forbidden. Its rule 1 returns 100 for ANY '%' target
+    // with 0 < raw <= 100 and runs BEFORE that test, so a 100% target mints
+    // cap === raw === 100. At base every target was stripped, so retention is
+    // what makes the pair reachable, and retention is where it is excluded.
+    //
+    // Written against the module's SPEC predicate (`cap > raw`), not against the
+    // 100% case that exposed it: a cap BELOW raw is worse still and an
+    // equality-only test would miss it.
+    const soundNodes = matchingNodes.filter((node) => {
+      const cap = node.goal_threshold_cap;
+      const raw = node.goal_threshold_raw;
+      return typeof cap === 'number' && Number.isFinite(cap)
+        && typeof raw === 'number' && Number.isFinite(raw)
+        && cap > raw;
+    });
+    if (soundNodes.length === 0) {
+      unprotected.push({ statedItemIndex: index, reason: 'denominator_degenerate' });
+      return;
+    }
+    for (const node of soundNodes) trustedNodes.add(node);
+  });
+
+  const protectedFields = new Map<
+    Record<string, unknown>,
+    Array<readonly [string, unknown]>
+  >();
+  for (const node of trustedNodes) {
+    const fields = RECORDS_PROJECTOR_GOAL_TARGET_FIELDS.flatMap((field) =>
+      field in node && node[field] !== undefined
+        ? [[field, node[field]] as const]
+        : [],
+    );
+    protectedFields.set(node, fields);
+    for (const [field] of fields) delete node[field];
+  }
+
+  let stripped: GoalThresholdStripResult;
+  try {
+    stripped = stripModelAuthoredGoalThreshold(args.rawJson);
+  } finally {
+    for (const [node, fields] of protectedFields) {
+      for (const [field, value] of fields) node[field] = value;
+    }
+  }
+
+  return {
+    stripped: stripped!,
+    unprotected,
+  };
+}
 
 // PERF 2.1 - Anthropic prompt caching:
 // Extract static system instructions into Anthropic system text blocks and (optionally)
@@ -2189,37 +2386,45 @@ export async function draftGraphWithAnthropic(
         .filter(Boolean)
       : [];
 
-    // ── ⭐⭐ NO `stripModelAuthoredGoalThreshold` HERE, AND THAT IS THE POINT ──
-    //
-    // ROADMAP 2.281's ingress strip deletes `CEE_MINTED_GOAL_FIELDS` from every
-    // node by KEY PRESENCE ALONE — no provenance, no origin, no node-id set. Its
-    // stated premise is that "at this seam no legitimate, attested threshold can
-    // exist yet: anything present was written by the model".
-    //
-    // THAT PREMISE IS FALSE ON THIS PATH, and has been since the records
-    // cutover put a CEE MINT above it. `rawJson` at this line is not the model's
-    // JSON — it is `activeProjection.graph`, built by `projectDraftRecords`
-    // a few lines up, and `applyStatedGoalTarget` (records/projector.ts) is the
-    // only writer of the goal quad in it. So the strip removed 100 % CEE-minted
-    // values here and 0 % model-authored ones: a founder's stated
-    // "Reach £30k MRR Within 18 Months" was extracted correctly and then
-    // deleted, leaving the canvas reading "No target set".
-    //
-    // A model-authored threshold CANNOT reach this line to be stripped:
-    //   · a GRAPH-shaped response is refused outright by the seam above
-    //     (`seam.ok === false` → typed throw), never normalised into a graph;
-    //   · a RECORD-shaped one is rebuilt field-by-field in `records/seam.ts`
-    //     from a grammar that declares no `goal_*` field at all (swept with a
-    //     contrast control: `goal_threshold|goal_baseline` → 0 in
-    //     `records/grammar.ts` + `instruction.ts`, `unit|value` → 16/10), and the
-    //     projector never spreads record fields onto a node.
-    //
-    // ⚠ THE STRIP IS NOT DEAD AND MUST NOT BE DELETED. `openai.ts:628` keeps it,
-    // and there it is load-bearing: that path sends no records grammar, has no
-    // projection seam, and its `rawJson` IS the model's own graph. The defect was
-    // CALL-SITE-SCOPED, not function-scoped — see the discriminating pair in
-    // `__tests__/projector-goal-target-survives-draft.test.ts`, whose arm (b)
-    // REDs if the OpenAI site is ever removed too.
+    // The legacy raw-graph draft path needed an unconditional scrub because the
+    // model could write CEE-owned target fields directly. This Anthropic path is
+    // now different: immediately above, a deterministic records projector may
+    // have minted those same fields from a brief-verified target record. Apply
+    // the same scrub to everything EXCEPT that narrowly attested
+    // tuple. Unverified transcriptions and every baseline field remain subject
+    // to the existing deletion policy.
+    const goalTargetScrub = scrubProjectedDraftGoalTargets({
+      rawJson,
+      records: activeRecords,
+      projection: activeProjection,
+      brief: args.brief,
+    });
+    if (goalTargetScrub.unprotected.length > 0) {
+      // WARN, never a throw. The draft continues and the existing scrub deletes
+      // the unattestable tuple, which is byte-for-byte the pre-existing
+      // behaviour: a successful draft with a label-only goal, the user's number
+      // still present as prose in the label. Refusing here produced a
+      // non-retryable HTTP 400 (`CEE_LLM_VALIDATION_FAILED` →
+      // `llm_schema_invalid` → "Provide a clearer, more specific decision
+      // brief… Describe what success looks like") for output that IS
+      // schema-valid — `unit` is an unconstrained, non-required string in the
+      // records grammar and no instruction asks for one spelling over another,
+      // so the model's free choice of "percent" over "%" decided whether the
+      // user got a graph or an accusation.
+      log.warn({
+        event: 'cee.draft.verified_goal_target_left_unprotected',
+        issues: goalTargetScrub.unprotected,
+      }, '[Anthropic] a verified numeric goal target had no safe typed carrier — left to the existing scrub, draft continues');
+    }
+    const strippedGoal = goalTargetScrub.stripped;
+    if (strippedGoal.nodeIds.length > 0) {
+      log.info({
+        event: "cee.draft.model_authored_goal_threshold_stripped",
+        node_ids: strippedGoal.nodeIds,
+        fields: strippedGoal.fields,
+        structured_outputs_enabled: structuredOutputsEnabled,
+      }, "Discarded an unattested goal-threshold contract from the draft (2.281)");
+    }
     const normalised = normaliseDraftResponse(rawJson);
 
     // Pipeline checkpoint: post_adapter_normalisation (after normaliseDraftResponse)
