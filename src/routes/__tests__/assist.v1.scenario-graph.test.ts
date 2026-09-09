@@ -135,6 +135,7 @@ vi.mock("../../orchestrator/user-identity.js", async (importOriginal) => {
 
 import scenarioGraphRoute from "../assist.v1.scenario-graph.js";
 import { computeGraphIdentityHash } from "../../orchestrator-v5/context/graph-identity.js";
+import { computeAnalysisAffectingGraphHash } from "../../orchestrator-v5/context/graph-hash.js";
 import { resolveCeeRateLimit } from "../../cee/config/limits.js";
 
 /** A graph with no positional keys anywhere — the shape `scenarios.graph` holds today. */
@@ -267,6 +268,59 @@ describe("THE IDENTITY ANCHOR — pin (4)", () => {
     expect(hash.graph_schema_version).toBe("graph_v3");
     expect(hash.normaliser_version).toBe("1");
     expect(hash.value).toMatch(/^[0-9a-f]{64}$/);
+    await app.close();
+  });
+});
+
+/**
+ * ⭐⭐ THE WRITE PRECONDITION — the base a manual edit must send.
+ *
+ * A manual edit is a compare-and-set: the writer refuses unless
+ * `computeAnalysisAffectingGraphHash(persistedGraph)` equals the base the client
+ * sent. Until this field existed that base reached a client ONLY on a turn
+ * response, so a RELOAD — which restores the graph without any turn — left every
+ * first edit refused. Witnessed natively on 2026-09-09: a restored scenario, a
+ * mounted editor, and a Save that honestly sent nothing.
+ */
+describe("THE WRITE PRECONDITION — the base a manual edit sends back", () => {
+  it("exposes the analysis-affecting hash, byte-equal to the writer's own authority", async () => {
+    const app = await buildApp();
+    const res = await read(app, SCENARIO);
+
+    // Bound to the AUTHORITY's output on the same bytes, never to a literal — a
+    // literal would bless a divergent reimplementation the day the projection
+    // changes, which is the one failure this field cannot afford.
+    expect(res.json().graph_hash).toEqual(
+      computeAnalysisAffectingGraphHash(GRAPH_NO_LAYOUT as never),
+    );
+    await app.close();
+  });
+
+  it("⚠ is NOT the identity hash — the two answer different questions", async () => {
+    // On an UNCHANGED graph a wrong choice still MATCHES, so substituting one
+    // for the other would surface only once someone edited. identity.v1 asks
+    // "is this the same graph object?" over a normalised projection; this asks
+    // "may a write be applied to the graph as the analysis sees it?".
+    const app = await buildApp();
+    const body = (await read(app, SCENARIO)).json();
+
+    expect(body.graph_hash).not.toEqual(body.graph_identity_hash);
+    expect(body.graph_hash).not.toEqual(body.graph_identity_hash?.value);
+    // Different widths, which is the cheapest visible proof they are different
+    // projections rather than two spellings of one.
+    expect(body.graph_identity_hash.value).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.graph_hash).not.toMatch(/^[0-9a-f]{64}$/);
+    await app.close();
+  });
+
+  it("is null when there is no graph — a hash of nothing is a base that matches nothing", async () => {
+    loadGraphAndBriefText.mockResolvedValue({ graph: null, briefText: null });
+
+    const app = await buildApp();
+    const res = await read(app, SCENARIO);
+
+    expect(res.json().graph_present).toBe(false);
+    expect(res.json().graph_hash).toBeNull();
     await app.close();
   });
 });

@@ -214,6 +214,7 @@ import {
   resolveVerifiedIdentityOrRefuse,
 } from "../orchestrator/route-v2-preflight.js";
 import { computeGraphIdentityHash } from "../orchestrator-v5/context/graph-identity.js";
+import { computeAnalysisAffectingGraphHash } from "../orchestrator-v5/context/graph-hash.js";
 import { getSessionStore } from "../orchestrator-v5/session/index.js";
 import { resolveCeeRateLimit } from "../cee/config/limits.js";
 import { buildErrorV1 } from "../utils/errors.js";
@@ -534,6 +535,46 @@ export default async function route(app: FastifyInstance) {
         // to, and a hash of nothing would be a false anchor.
         graph_identity_hash: graphPresent
           ? computeGraphIdentityHash(graph as GraphStateIngress)
+          : null,
+        // ⭐⭐ THE WRITE PRECONDITION FOR THE GRAPH THIS RESPONSE CARRIES.
+        //
+        // A manual edit is a compare-and-set: `option_intervention_edit` (and its
+        // siblings) send a base hash, and the writer refuses unless
+        // `computeAnalysisAffectingGraphHash(persistedGraph)` equals it. Until
+        // now that base reached a client ONLY on a turn response, so a RELOAD —
+        // which restores the graph without any turn — left the client with no
+        // base and every first edit refused as `needs_fresh_base`. Root hit
+        // exactly that natively: a restored scenario, a mounted editor, and a
+        // Save that honestly sent nothing. The refusal was correct; the missing
+        // precondition was the defect.
+        //
+        // ⚠⚠ IT IS NOT `graph_identity_hash`, AND THE TWO MUST NEVER BE
+        // SUBSTITUTED. identity.v1 answers "is this the same graph object?" over
+        // a normalised projection; this answers "may a write be applied to the
+        // graph as the analysis sees it?". They differ in projection, in width
+        // and in purpose — and on an UNCHANGED graph a wrong choice still
+        // matches, so the mistake would surface only once someone edited.
+        //
+        // ⚠ DERIVED HERE, FROM THE VERY BYTES THIS RESPONSE CARRIES — the same
+        // discipline `graph_identity_hash`, `layout_present` and `not_modelled`
+        // already follow, and for the same reason: a value taken from anywhere
+        // else is a hand-maintained mirror that starts lying the moment the
+        // graph moves. It is deliberately NOT threaded out of
+        // `readScenarioAnalysis`, which computes the identical hash internally:
+        // that helper answers "not answered" for a graph with no analysis and
+        // swallows its own failures, so the write base would inherit an
+        // unrelated precondition and vanish exactly when a never-analysed
+        // scenario is the one being edited.
+        //
+        // ⚠ THE SAME KEY THE TURN RESPONSE USES, deliberately. `applyV5State`
+        // already stamps `store.lastServerGraphHash` from a turn's top-level
+        // `graph_hash`; one concept keeps one name across both carriers, and the
+        // client adopts it by the same rule rather than learning a second one.
+        //
+        // `null` when the graph is absent — there is nothing to write against,
+        // and a hash of nothing would be a base that matches nothing.
+        graph_hash: graphPresent
+          ? computeAnalysisAffectingGraphHash(graph as GraphStateIngress)
           : null,
         layout_present: detectLayout(graphPresent ? graph : null),
         // ROADMAP 2.973 — what of the brief did NOT reach the model.
