@@ -1,8 +1,7 @@
 /**
- * Native-scale admission at the real factor_value_edit route and canonical commit seam.
+ * Scale guard at the real factor_value_edit route and canonical commit seam.
  *
- * These are source-derived contract controls; retained native carrier provenance is
- * documented per case. This test does not itself mount or drive a browser. The
+ * These are constructed contract fixtures, not deployed UI captures. The
  * store below reloads only graphs handed to append; it is an in-process
  * persistence witness, not a Supabase/browser/wire or UI-reachability claim.
  * Valid edits also pass that reloaded graph to the production run_analysis
@@ -12,7 +11,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { PLoTClient } from '../../../src/orchestrator/plot-client.js';
 import type { HandlerInvocation } from '../../../src/orchestrator-v5/tools/registry.js';
-import nativeCarrier from './fixtures/native-factor-scale-carrier.json';
 import { computeAnalysisAffectingGraphHash } from '../../../src/orchestrator-v5/context/graph-hash.js';
 
 type ObservedState = {
@@ -37,7 +35,7 @@ type Graph = {
   options: Array<Record<string, unknown>>;
 };
 
-const TARGET_ID = nativeCarrier.event.target_id;
+const TARGET_ID = 'f-edited';
 const NEIGHBOUR_ID = 'f-untouched';
 const SCENARIO_ID = '66666666-6666-4666-8666-666666666666';
 const TURN_ID = '77777777-7777-4777-8777-777777777777';
@@ -161,7 +159,7 @@ function expectSameNumber(actual: number, intended: number): void {
   else expect(Math.abs((actual - intended) / intended)).toBeLessThan(1e-12);
 }
 
-async function expectRerunUsesReloadedValue(intended: number, allowed = true): Promise<void> {
+async function expectRerunUsesReloadedValue(intended: number): Promise<void> {
   const reloaded = await loadGraphMock();
   const handler = createRunAnalysisHandler({
     plotClient: { run: plotRunMock, validatePatch: validatePatchMock } as unknown as PLoTClient,
@@ -174,7 +172,7 @@ async function expectRerunUsesReloadedValue(intended: number, allowed = true): P
     kind: 'message', scenario_id: SCENARIO_ID, turn_id: TURN_ID,
     message: 'run analysis', turn_class: 'decide', stage: 'analyse',
   };
-  const run = handler({
+  await handler({
     context: {
       session_id: SCENARIO_ID, stage: 'analyse', request_id: 'scale-guard-rerun',
       entity_registry: { option_ids: [], goal_id: null }, capabilities: {},
@@ -184,12 +182,6 @@ async function expectRerunUsesReloadedValue(intended: number, allowed = true): P
     },
     payload, requestId: 'scale-guard-rerun', signal: new AbortController().signal, orientationText: '',
   } as unknown as HandlerInvocation);
-  if (!allowed) {
-    await expect(run).rejects.toMatchObject({ name: 'HandlerInvocationFailedError' });
-    expect(plotRunMock).not.toHaveBeenCalled();
-    return;
-  }
-  await run;
   expect(plotRunMock).toHaveBeenCalledTimes(1);
   const sent = plotRunMock.mock.calls[0]![0] as {
     graph: Graph; options: Array<{ id?: string; option_id?: string; interventions: Record<string, number> }>;
@@ -239,34 +231,23 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
 
   const refusals = [
     {
-      name: 'retained native .85 carrier refuses on the exact recorded 100000-frame target',
-      graph: () => {
-        const graph = graphFor({ value: 0.5 }, 100000);
-        graph.nodes = graph.nodes.map((node) => node.id === TARGET_ID
-          ? structuredClone(nativeCarrier.before_node) : node);
-        return graph;
-      },
-      event: nativeCarrier.event,
-    },
-    {
-      name: 'bare 0.85 cannot choose an amount basis from a standalone 200000 frame and stored currency',
-      graph: () => graphFor({ value: 0.5, unit: '£' }, 200000),
-      event: { value: 0.85, field: 'value' },
-    },
-    {
-      name: 'unitless stored frame also cannot silently divide bare 0.85 by 100000',
-      graph: () => graphFor({ value: 0.5 }, 100000),
-      event: { value: 0.85, field: 'value' },
-    },
-    {
-      name: 'a stored raw/model pair does not establish the basis of a new bare ratio',
-      graph: () => graphFor({ value: 0.5, raw_value: 100000, unit: '£' }, 200000),
+      name: 'contradictory stored frame and observed pair refuse even when fallback would preserve the number',
+      graph: () => graphFor({ value: 0.5, raw_value: 50000, unit: '£' }, 1000000),
       event: { value: 0.85 },
     },
     {
-      name: 'whitespace wire unit does not make an ambiguous ratio an explicit amount',
-      graph: () => graphFor({ value: 0.5, unit: '£' }, 200000),
-      event: { value: 0.85, unit: ' ' },
+      name: 'bare 0.85 on frame-only 100000 refuses the observed 100000x transformation',
+      graph: () => graphFor({ value: 0.5 }, 100000), event: { value: 0.85 },
+    },
+    {
+      name: 'tiny inconsistent structured pair refuses a 1000x mismatch below the old absolute tolerance',
+      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
+      event: { value: 8.5e-7, raw_value: 0.000085, unit: '£' },
+    },
+    {
+      name: 'exact zero cannot silently replace a stated tiny nonzero model value',
+      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
+      event: { value: 8.5e-10, raw_value: 0, unit: '£' },
     },
   ];
 
@@ -293,101 +274,163 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
   });
 
   const validEdits = [
-    ...[
-      { input: 20000, model: 0.4 },
-      { input: 5000, model: 0.1 },
-      { input: 40000, model: 0.8 },
-    ].map(({ input, model }) => ({
-      name: `current UI raw-basis carrier ${input}/${input} stays canonical ${model} on frame 50000`,
-      graph: () => graphFor({ value: 0.5, raw_value: 25000, unit: '£' }, 50000),
-      event: { value: input, raw_value: input, unit: '£', field: 'value' },
-      intended: model, raw: input,
-    })),
-    ...[
-      // ⚠⚠ `1` AND `2` USED TO SIT IN THIS TABLE AND NO LONGER DO — Paul ruled
-      // that class on 2026-09-07 (REFUSE AND ASK), and the ask now claims them.
-      // They are re-pinned below rather than deleted: what this table asserts
-      // is that a raw amount on a frame is NOT rescaled, and that is still true
-      // of every row left in it. The rows that moved are the ones where a
-      // magnitude rung actually FITS the 50000 frame (1 -> 1 thousand,
-      // 2 -> 2 thousand), i.e. where the user genuinely had a choice.
-      //
-      // The four that remain are untouched by the ruling and prove the ask did
-      // NOT widen: 20000/5000/40000 admit no rung (x1000 overflows the frame),
-      // and 100000 is an honest OVER-frame edit. With one reading available
-      // there is nothing to ask, so they keep the deployed accept.
-      { input: 20000, model: 0.4 },
-      { input: 5000, model: 0.1 },
-      { input: 40000, model: 0.8 },
-      { input: 100000, model: 2 },
-    ].map(({ input, model }) => ({
-      name: `raw amount ${input} on the actual 50000 frame remains canonical ${model}`,
-      graph: () => graphFor({ value: 0.5, unit: '£' }, 50000),
-      event: { value: input, field: 'value' }, intended: model, raw: input, rerunAllowed: model <= 1,
-    })),
+    {
+      name: 'coherent capless recorded frame accepts an explicitly supplied zero',
+      graph: () => graphFor({ value: 0.5, raw_value: 50000, unit: '£' }, 100000),
+      event: { value: 0, raw_value: 0, unit: '£' }, intended: 0, raw: 0,
+    },
     {
       name: 'explicit unit-interval contract accepts model 0.85 unchanged',
       graph: () => graphFor({ value: 0.5, raw_value: 0.5, cap: 1 }),
       event: { value: 0.85 }, intended: 0.85, raw: 0.85,
     },
     {
-      name: 'a capped factor preserves the explicit model-only carrier',
-      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
-      event: { value: 0.85 }, intended: 0.85, raw: 85000,
-    },
-    {
-      name: 'small model input on a capped factor still authorises raw 0.85',
-      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
-      event: { value: 0.0000085 }, intended: 0.0000085, raw: 0.85,
-    },
-    {
-      name: 'explicit 12 percent stays canonical 0.12',
+      name: 'explicit 12 percent becomes canonical 0.12 without a 100x error',
       graph: () => graphFor({ value: 0.4, raw_value: 40, cap: 100, unit: '%' }),
       event: { value: 0.12, raw_value: 12, unit: '%' }, intended: 0.12, raw: 12,
     },
     {
-      name: 'explicit raw 0.85 pounds remains a legitimate tiny amount on a 200000 frame',
-      graph: () => graphFor({ value: 0.5, raw_value: 100000, unit: '£' }, 200000),
-      event: { value: 0.85, raw_value: 0.85, unit: '£' }, intended: 0.00000425, raw: 0.85,
+      name: 'explicit £85000 on cap 100000 becomes canonical 0.85',
+      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
+      event: { value: 0.85, raw_value: 85000, unit: '£' }, intended: 0.85, raw: 85000,
     },
     {
-      name: 'explicit raw 0.85 without a redundant wire unit still declares the raw basis',
-      graph: () => graphFor({ value: 0.5, raw_value: 100000, unit: '£' }, 200000),
-      event: { value: 0.85, raw_value: 0.85 }, intended: 0.00000425, raw: 0.85,
+      name: 'legitimate tiny £0.85 remains canonical 0.0000085 with honest user attribution',
+      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
+      event: { value: 0.0000085, raw_value: 0.85, unit: '£' }, intended: 0.0000085, raw: 0.85,
     },
     {
-      name: 'zero on a framed factor does not need a guessed scale',
-      graph: () => graphFor({ value: 0.5, unit: '£' }, 200000),
-      event: { value: 0 }, intended: 0, raw: 0,
+      name: 'legitimate tiny counterpart £0.000085 remains canonical 8.5e-10',
+      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
+      event: { value: 8.5e-10, raw_value: 0.000085, unit: '£' }, intended: 8.5e-10, raw: 0.000085,
+    },
+    {
+      name: 'fully specified zero remains a valid zero',
+      graph: () => graphFor({ value: 0.4, raw_value: 40000, cap: 100000, unit: '£' }),
+      event: { value: 0, raw_value: 0, unit: '£' }, intended: 0, raw: 0,
+    },
+    {
+      name: 'ordinary one-third floating point roundoff still accepts the coherent pair',
+      graph: () => graphFor({ value: 0.5, raw_value: 1.5, cap: 3, unit: '£' }),
+      event: { value: 0.3333333333333333, raw_value: 1, unit: '£' }, intended: 1 / 3, raw: 1,
     },
   ];
 
-  // ⭐ THE RULED CLASS, RE-PINNED HERE RATHER THAN DELETED FROM THE RECORD.
-  // These two rows used to assert #1280's accept in the table above ("raw
-  // amount 1 on the actual 50000 frame remains canonical 0.00002"). Paul ruled
-  // on 2026-09-07 that this class must ASK: a bare 1 or 2 on a 50000 frame has
-  // a second reading the frame can hold (1 thousand / 2 thousand), so choosing
-  // one silently is the harm he reported — a number you set becoming something
-  // you did not mean. Keeping the cases visible, with the assertion moved to
-  // the ruled answer, is what stops the class going quiet.
-  it.each([
-    { input: 1, asked: 'Did you mean 1 or 1 thousand?' },
-    { input: 2, asked: 'Did you mean 2 or 2 thousand?' },
-  ])('bare $input on a 50000 frame now ASKS instead of committing a guess', async ({ input, asked }) => {
-    persisted = graphFor({ value: 0.5, unit: '£' }, 50000);
+  // ⚠⚠ RESOLVED KNOWN DIVERGENCE — ONE INPUT CLASS, TWO SHIPPED ANSWERS,
+  // SETTLED BY PAUL ON 2026-09-07: **REFUSE AND ASK.**
+  //
+  // ⭐ THE HISTORY BELOW IS KEPT DELIBERATELY AND MUST NOT BE TIDIED AWAY. It
+  // is the record of what this product actually did and why the question
+  // reached a decision at all (CLAUDE.md trap 14b — a record of shipped
+  // behaviour is EVIDENCE, and rewriting it leaves the suite agreeing with a
+  // history that never happened). What changed is the ASSERTION, which now
+  // pins the ruled answer instead of the live one; the account of the
+  // disagreement is unchanged.
+  //
+  // The class: a bare value >= 1, no `raw_value`, no `unit`, on a CAPLESS
+  // factor with a resolvable `scale_frame`.
+  //   · This PR (#1272, authored 31 Aug 13:40) asserted REFUSE — "the guard is
+  //     not a small-number ban": 2 on a 100000 frame is an unverifiable
+  //     100000x transformation, so do not guess.
+  //   · #1280 (merged 31 Aug 18:06, DEPLOYED) asserted ACCEPT — capless amount
+  //     editors send raw magnitudes in `value`, so 2 on a 50000 frame is the
+  //     raw amount 2 and canonically 0.00004. Its own suite pins exactly that.
+  // Both were defensible; they could not both hold. The conflict lane declined
+  // to invent a third rule and escalated instead, which is how the question
+  // finally reached Paul — the APPROVE on #1272 was bound to a head whose base
+  // did NOT contain #1280, so no reviewer had ever adjudicated it.
+  //
+  // ⭐ HIS RULING WAS NEITHER: guessing produces the harm he reported (a number
+  // you set becoming something you did not mean) and blocking leaves a dead
+  // end, so the product ASKS — "8 thousand or 8 million?" — and lets the user
+  // keep hold of their own number.
+  it('bare 2 on a frame-only 100000 factor REFUSES AND ASKS which magnitude was meant', async () => {
+    persisted = graphFor({ value: 0.5 }, 100000);
     const before = await loadGraphMock();
-    const body = await edit({ value: input, field: 'value' });
-    expect(committedGraphs(), 'the ask commits nothing').toEqual([]);
-    expect(await loadGraphMock()).toEqual(before);
-    expect(body.assistant_text).toContain(asked);
-    // The factor carries '£' even though the event did not, so the chips must
-    // read as money — prefix, not suffix.
-    expect(body.suggested_actions?.map((a) => a.label)).toEqual([
-      `£${input}`, `£${input} thousand`,
+    const body = await edit({ value: 2 });
+
+    // REFUSE: the ask is worthless if the guess already landed.
+    expect(committedGraphs(), 'the ruled answer commits no canonical graph').toEqual([]);
+    expect(await loadGraphMock(), 'the whole prior model survives').toEqual(before);
+    expect(observedState(await loadGraphMock()).source).toBe('cee_inference');
+
+    // ASK: the question, and a chip per reading.
+    expect(body.assistant_text).toMatch(/haven't changed anything/i);
+    expect(body.assistant_text).toContain('Did you mean 2 or 2 thousand?');
+    expect(body.suggested_actions?.map((a) => a.id)).toEqual([
+      'chip_prompt_scale_ask_as_typed',
+      'chip_prompt_scale_ask_thousand',
+    ]);
+    expect(body.suggested_actions?.map((a) => a.label)).toEqual(['2', '2 thousand']);
+    // The chip names the factor, so the replay turn can find it, and states the
+    // amount in full digits so the magnitude is no longer in doubt.
+    expect(body.suggested_actions?.map((a) => a.message)).toEqual([
+      'Set Recurring platform licence cost to 2.',
+      'Set Recurring platform licence cost to 2000.',
     ]);
   });
 
-  for (const { name, graph, event, intended, raw, ...control } of validEdits) it(name, async () => {
+  // ⭐ THE LOWER BOUNDARY OF THE ASK, and it is here because a mutant widening
+  // the predicate from `>= 1` to `>= 0` SURVIVED the first version of this
+  // suite. Zero is the only input class that widening adds — the sub-1 basis
+  // guard already claims everything else below 1 and explicitly excludes zero —
+  // so with no zero case the boundary was unpinned in exactly one direction.
+  //
+  // Setting a factor to zero is an ordinary thing to want, it is not ambiguous
+  // in scale (zero is zero on every frame), and the ask must not swallow it.
+  it('a bare zero on a frame-only factor still commits — the ask does not claim it', async () => {
+    persisted = graphFor({ value: 0.5 }, 100000);
+    const body = await edit({ value: 0 });
+    expect(committedGraphs(), 'zero is not scale-ambiguous').toHaveLength(1);
+    expectSameNumber(observedState(await loadGraphMock()).value, 0);
+    expect(body.assistant_text).not.toMatch(/Did you mean/i);
+  });
+
+  // ⭐⭐ THE ORDER PIN. Four guards share one `── the scale ──` block and their
+  // sequence is load-bearing: `resolveScaleFrame` internally calls
+  // `checkPairCoherence` and returns `undefined` on `incoherent`, so #1272's
+  // incoherent-pair predicate is a STRICT SUBSET of #1280's unresolved-frame
+  // predicate. Put the broader one first and the narrower becomes unreachable
+  // dead code UNDER A FULLY GREEN SUITE — nothing else in this file would say
+  // so, because each guard's own case still refuses, just with the wrong voice.
+  //
+  // This binds each case to the copy only ITS guard emits, from one shared
+  // fixture family, so ANY reordering turns at least one row red. The ask is
+  // included because it is the newest member and the same swap would silently
+  // hand its class to the sub-1 guard or to #1280's accept.
+  it.each([
+    {
+      what: 'incoherent stored frame vs pair — #1272 guard, must run FIRST',
+      graph: () => graphFor({ value: 0.5, raw_value: 50000, unit: '£' }, 1000000),
+      event: { value: 0.85 },
+      expected: /recorded scale is inconsistent/i,
+    },
+    {
+      what: 'stored frame present but unresolvable — #1280 unresolved-frame guard',
+      graph: () => graphFor({ value: 0.5, raw_value: 0.5 }, 0.5),
+      event: { value: 0.85 },
+      expected: /can't verify this factor's recorded scale/i,
+    },
+    {
+      what: 'bare sub-1 on a resolvable frame — #1280 basis guard',
+      graph: () => graphFor({ value: 0.5 }, 100000),
+      event: { value: 0.85 },
+      expected: /model-scale proportion or an amount/i,
+    },
+    {
+      what: 'bare >=1 on a resolvable frame — the scale ask',
+      graph: () => graphFor({ value: 0.5 }, 100000),
+      event: { value: 2 },
+      expected: /Did you mean 2 or 2 thousand\?/,
+    },
+  ])('guard order: $what', async ({ graph, event, expected }) => {
+    persisted = graph();
+    const body = await edit(event);
+    expect(committedGraphs()).toEqual([]);
+    expect(body.assistant_text).toMatch(expected);
+  });
+
+  for (const { name, graph, event, intended, raw } of validEdits) it(name, async () => {
     persisted = graph();
     const before = await loadGraphMock();
     const body = await edit(event);
@@ -400,8 +443,6 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
     expect(observed.source).toBe('user_override');
     expect(observed.cap).toBe(observedState(before).cap);
     expect(observed.unit).toBe(observedState(before).unit);
-    expect(reloaded.nodes.find((node) => node.id === TARGET_ID)?.scale_frame)
-      .toBe(before.nodes.find((node) => node.id === TARGET_ID)?.scale_frame);
     expect(observedState(reloaded, NEIGHBOUR_ID)).toEqual(observedState(before, NEIGHBOUR_ID));
     expect(body.blocks).toContainEqual(expect.objectContaining({
       type: 'graph_patch', status: 'applied', operation: 'set_factor_value', target_id: TARGET_ID,
@@ -410,6 +451,6 @@ describe('POST /orchestrate/v2/turn — refuse ambiguous scale without launderin
     expect(body.blocks.some((block) => block.type === 'analysis_result')).toBe(false);
     expect(llmChatMock).not.toHaveBeenCalled();
     expect(plotRunMock).not.toHaveBeenCalled();
-    await expectRerunUsesReloadedValue(intended, !('rerunAllowed' in control) || control.rerunAllowed);
+    await expectRerunUsesReloadedValue(intended);
   });
 });

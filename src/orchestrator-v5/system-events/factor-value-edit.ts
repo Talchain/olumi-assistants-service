@@ -47,7 +47,13 @@ import { HandlerInvocationFailedError } from '../tools/handler-errors.js';
 import { getDefaultRegistry, resolveHandler, type HandlerInvocation } from '../tools/registry.js';
 import { mergeMutatedGraphForPersistence } from '../tools/handlers/d1-shared/apply-graph-mutation.js';
 import { canonicaliseUnitForDisplay } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
-import { resolveScaleFrame } from '../tools/handlers/d1-shared/scale-frame.js';
+import { checkPairCoherence, resolveScaleFrame } from '../tools/handlers/d1-shared/scale-frame.js';
+import {
+  buildScaleAskChips,
+  buildScaleAskOptions,
+  composeScaleAskQuestion,
+} from './scale-ask.js';
+import type { SuggestedAction } from '../compose/types.js';
 import { buildRescaleCapPendingActions } from '../session/rescale-cap-pending.js';
 import type { PendingAction } from '../session/pending-action.js';
 import { verifyAppliedFrom } from '../../collab/apply-verification.js';
@@ -86,6 +92,17 @@ function lookupOrUndefined(graph: GraphV3T): GraphLookup | undefined {
  * behaves the same at 0.3 and at 3e6.
  */
 const SCALE_CONSISTENCY_TOLERANCE = 1e-6;
+
+function scaleValuesAgree(actual: unknown, expected: number): boolean {
+  if (typeof actual !== 'number' || !Number.isFinite(actual) || !Number.isFinite(expected)) {
+    return false;
+  }
+  if (actual === expected) return true;
+  // No absolute floor: near-zero values can still disagree by orders of
+  // magnitude. Exact zero only agrees with zero; ordinary division may round.
+  return Math.abs(actual - expected) / Math.max(Math.abs(actual), Math.abs(expected))
+    <= SCALE_CONSISTENCY_TOLERANCE;
+}
 
 export type FactorValueEditResult =
   | {
@@ -151,6 +168,11 @@ function refuse(
   payload: SystemEventTurnPayload,
   reason: string,
   assistantText: string,
+  // A refusal MAY carry chips. The default keeps every existing caller
+  // byte-identical: a refusal that offers nothing is still the right answer
+  // wherever the product genuinely has no route to offer. The scale ask below
+  // is the one class on this seam where it does.
+  suggestedActions: readonly SuggestedAction[] = [],
 ): FactorValueEditResult {
   return {
     kind: 'refused',
@@ -160,7 +182,7 @@ function refuse(
       response_version: 2,
       assistant_text: assistantText,
       blocks: [],
-      suggested_actions: [],
+      suggested_actions: [...suggestedActions],
       insights: [],
       stage_indicator: payload.stage,
     },
@@ -237,8 +259,7 @@ function resolveUserUnitInput(args: {
     // never asked for; picking the wrong one would persist a 10x error. So:
     // fail LOUD. This is the boundary check that would have caught the defect.
     const expected = cap !== undefined ? rawValue / cap : rawValue;
-    const scale = Math.max(1, Math.abs(expected));
-    if (Math.abs(value - expected) > SCALE_CONSISTENCY_TOLERANCE * scale) {
+    if (!scaleValuesAgree(value, expected)) {
       return {
         ok: false,
         issue:
@@ -416,6 +437,32 @@ export async function applyFactorValueEdit(
     value: observed?.value,
     raw_value: observed?.raw_value,
   }) : undefined;
+
+  // ⚠ ORDER IS LOAD-BEARING, AND IT IS THE ONLY THING KEEPING THIS GUARD ALIVE.
+  // `resolveScaleFrame` CALLS `checkPairCoherence` and returns `undefined` on
+  // `incoherent`, and `incoherent` requires a stored frame > 1 — so every input
+  // that reaches here also satisfies the broader unresolved-frame refusal
+  // below. Put that one first and this becomes dead code, silently deleting the
+  // distinction. Two refusals, two questions (this estate's signature defect is
+  // collapsing them): "do the factor's own two carriers CONTRADICT each other?"
+  // is not "can a frame be DERIVED at all?", and the contradiction deserves the
+  // copy that names it. Without a cap, contradictory frame/pair records must
+  // not degrade into identity scaling: equal input/output numbers would then
+  // hide an unknown conversion. Uses the existing scale authority, and — like
+  // its neighbour — refuses WITHOUT selecting a winner.
+  if (factorCap === undefined && checkPairCoherence({
+    storedFrame: targetNode.scale_frame,
+    value: observed?.value,
+    raw_value: observed?.raw_value,
+  }) === 'incoherent') {
+    return refuse(
+      payload,
+      'scale_inconsistent',
+      `This factor's recorded scale is inconsistent, so I haven't changed anything. ` +
+        `Please clarify its scale before changing the value.`,
+    );
+  }
+
   if (factorCap === undefined && targetNode.scale_frame !== undefined && factorFrame === undefined) {
     return refuse(
       payload,
@@ -442,6 +489,72 @@ export async function applyFactorValueEdit(
         `for this factor. Please state the amount and its unit, or clarify the scale. ` +
         `I haven't changed anything.`,
     );
+  }
+
+  // ⭐ THE SCALE ASK — PAUL'S RULING, 2026-09-07: REFUSE **AND ASK**.
+  //
+  // The >= 1 twin of the sub-1 refusal directly above, and deliberately its
+  // exact predicate with only the magnitude test flipped: one input class, one
+  // guard prefix, so the two cannot drift into disagreeing about which edits
+  // they cover. Where that one says "I can't tell WHICH BASIS this is on" and
+  // stops, this one says "the basis is settled — WHICH MAGNITUDE did you mean?"
+  // and offers the readings. A value >= 1 cannot be a unit-interval proportion,
+  // so the only open question is the multiplier.
+  //
+  // ⚠ ORDER IS LOAD-BEARING HERE TOO, AND FOR A SECOND REASON. The sub-1 guard
+  // must keep running FIRST: the two predicates partition on |value| and a swap
+  // would be invisible to any test that only checks one side. It is pinned by a
+  // test asserting BOTH sides from one shared fixture.
+  //
+  // ⚠ THIS SUPERSEDES #1280's ACCEPT FOR THIS CLASS ONLY. Everything #1280
+  // covers outside `factorFrame !== undefined` with a bare, unitless, raw-less
+  // value >= 1 is untouched — capped factors, verified panel beliefs, edits
+  // carrying a raw_value or a unit, and every sub-1 case.
+  //
+  // ⭐⭐ FEWER THAN TWO READINGS IS NOT AMBIGUITY, AND MUST NOT BE REFUSED.
+  // `buildScaleAskOptions` always returns the literal reading, so a
+  // single-option list means every magnitude rung was ruled out by the factor's
+  // own frame and the literal is the ONLY thing the number can mean. There is
+  // nothing to ask and nothing being guessed, so this falls through to the
+  // existing accept.
+  //
+  // ⚠ THIS WAS A REAL DEFECT IN THE FIRST VERSION OF THIS GUARD, caught by
+  // #1280's own suite: `100000` on a `50000` frame is an honest over-frame edit
+  // (`scale-frame.ts` documents that state explicitly), no rung fits, and the
+  // guard refused it with no question attached — a DEAD END, which is precisely
+  // the half of the ruling that says blocking is not an acceptable answer
+  // either. Four of #1280's six frame cases are in this class and keep their
+  // deployed behaviour unchanged.
+  if (
+    factorFrame !== undefined && appliedProvenance === undefined &&
+    effectiveRawValue === undefined && canonicaliseUnitForDisplay(effectiveUnit) === undefined &&
+    Math.abs(effectiveValue) >= 1
+  ) {
+    const options = buildScaleAskOptions({ value: effectiveValue, frame: factorFrame });
+    const question = composeScaleAskQuestion(options);
+    if (question.length > 0) {
+      log.warn(
+        {
+          event: 'v5.system_event.factor_value_edit.scale_ask',
+          request_id: requestId,
+          scenario_id: payload.scenario_id,
+          target_id: event.target_id,
+          option_count: options.length,
+        },
+        'factor_value_edit — bare magnitude ambiguous; asking rather than guessing',
+      );
+      return refuse(
+        payload,
+        'scale_ask',
+        `I can't tell what scale ${effectiveValue} is on for this factor, so I ` +
+          `haven't changed anything. ${question}`,
+        buildScaleAskChips({
+          options,
+          factorLabel: targetNode.label,
+          unit: factorUnit,
+        }),
+      );
+    }
   }
 
   const resolved = resolveUserUnitInput({
@@ -656,6 +769,48 @@ export async function applyFactorValueEdit(
       payload,
       'merged_graph_invalid',
       `I couldn't save that change. I haven't changed anything.`,
+    );
+  }
+
+  // The existing writer can read a scale_frame that the cap-only input adapter
+  // cannot invert. Never commit that disagreement as user-authored knowledge:
+  // discard the isolated candidate before its graph, attribution or success
+  // facts reach the store. This checks the actual conversion without choosing
+  // a replacement scale.
+  //
+  // ⚠ THE DOMAIN IS EXPLICIT BECAUSE #1280 CHANGED THIS GUARD'S PREMISE.
+  // This block was written when `event.value` declared MODEL scale on every
+  // path, so it compared the committed model value against it unscoped. Since
+  // #1280 that premise holds ONLY where a model DIVISOR is known — a capped
+  // factor, or a server-verified panel belief inverted with the factor's own
+  // frame. For a capless amount editor `value` carries a RAW magnitude BY
+  // DESIGN and the handler divides it by the frame, so `modelValue` is
+  // `value / frame` and the comparison can never agree: unscoped, this refuses
+  // that entire class rather than a defect in it (measured on this merge — 11
+  // of #1280's accept cases went red, every one of them capless).
+  //
+  // Nothing is weakened by the scoping. The capless class is policed ahead of
+  // the merge by the two refusals above — an unresolvable frame, and a bare
+  // sub-1 value whose basis nothing establishes — and that second one is what
+  // closes this PR's own reported `.85`-on-frame-100000 signature.
+  const modelScaleDeclared = factorCap !== undefined || appliedProvenance !== undefined;
+  const modelValue = mergedParse.data.nodes.find((n) => n.id === event.target_id)
+    ?.observed_state?.value;
+  if (modelScaleDeclared && !scaleValuesAgree(modelValue, effectiveValue)) {
+    log.warn(
+      {
+        event: 'v5.system_event.factor_value_edit.scale_ambiguous',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        target_id: event.target_id,
+      },
+      'factor_value_edit — candidate contradicts the declared scale; no graph written',
+    );
+    return refuse(
+      payload,
+      'scale_ambiguous',
+      `I couldn't confirm the scale of that value, so I haven't changed anything. ` +
+        `Please tell me the amount and unit you mean.`,
     );
   }
 
