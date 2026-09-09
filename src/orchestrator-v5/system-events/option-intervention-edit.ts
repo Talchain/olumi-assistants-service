@@ -1,7 +1,53 @@
 import { CANONICAL_ID_REGEX } from '../../cee/utils/id-normalizer.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
-import { GraphV3, InterventionV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { z } from 'zod';
+import { GraphV3, InterventionV3, TargetMatch, type GraphV3T } from '../../schemas/cee-v3.js';
+
+/**
+ * ⭐⭐ WHAT THIS WRITER NEEDS TO READ OFF AN EXISTING ENTRY — deliberately NOT
+ * the producer's `InterventionV3`.
+ *
+ * `InterventionV3` is the shape the encoder EMITS, and it requires
+ * `target_match`. Using it to VALIDATE stored state made every brief-extracted
+ * option uneditable: real persisted entries look like
+ * `{ value: 1, source: 'brief_extraction', display_value: 'Very high (1)' }`,
+ * so the parse failed on a field the writing path never wrote (witnessed
+ * 2026-09-09 10:25, request `6ec75b90`, 422 `invalid_existing_intervention`).
+ *
+ * A producer schema is not a reader contract. This declares only what is
+ * actually consumed here — the value being replaced, and the stated target when
+ * one exists — and keeps `.passthrough()` so every other persisted field
+ * survives untouched.
+ *
+ * ⚠ `target_match` OPTIONAL HERE IS NOT A WEAKENING, and the encoder is the
+ * proof: `encode-option-interventions.ts:165-175` already treats a missing
+ * `target_match` as ordinary and synthesises `{node_id: fac, match_type:
+ * 'exact_id'}` from the canonical KEY. The write path has always held that the
+ * key is the identity; only this read disagreed. A target that IS stated is
+ * still checked, and a mismatch still refuses.
+ */
+const ExistingInterventionRead = z.object({
+  value: z.number().finite(),
+  // ⚠ `source` STAYS REQUIRED, AND IS DERIVED FROM THE PRODUCER RATHER THAN
+  // RE-SPELLED. Relaxing the whole read to admit a missing `target_match` also
+  // dropped this check, and a stored `source` OUTSIDE the producer's three-member
+  // enum — the legacy override spelling — began passing and being overwritten
+  // with `user_specified`. That is precisely the "silently replacing existing
+  // provenance with user authority" this writer must refuse, and an existing
+  // test names it. The witnessed 422 was about `target_match` alone; nothing
+  // about it licensed widening `source`.
+  //
+  // ⚠⚠ AND THE LEGACY SPELLING IS NOT WRITTEN OUT HERE ON PURPOSE.
+  // `no-brief-derived-user-override.writers.test.ts` scans every src/ file for
+  // that literal and REDs on any file outside its reviewed manifest — a
+  // whole-file substring scan, so a mere mention trips it. This module has no
+  // write path for that stamp, so the honest answer is to keep the literal out
+  // rather than to enter a non-writer into a guard that exists to enumerate
+  // writers. Widening the manifest for a comment would have weakened it.
+  source: InterventionV3.shape.source,
+  target_match: TargetMatch.optional(),
+}).passthrough();
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { assertIngressGraphNumericBounds, floorGraphSigmaForCompute } from '../../validators/numeric-bounds.js';
 import { parseEditGraphResponse, buildAppliedChanges } from '../../orchestrator/tools/edit-graph.js';
@@ -305,8 +351,51 @@ export function prepareOptionInterventionEdit(input: OptionInterventionEditInput
     return refuse('noncanonical_intervention_source');
   }
   if (existing !== undefined) {
-    const entry = InterventionV3.safeParse(existing);
-    if (!entry.success || entry.data.target_match.node_id !== factor.id) {
+    /**
+     * ⭐⭐⭐ THIS READ USED THE PRODUCER'S SCHEMA AS A READER CONTRACT, AND THAT
+     * IS WHAT WALLED THE FIRST MANUAL SAVE.
+     *
+     * WITNESSED 2026-09-09 10:25 UTC, request `6ec75b90`: an ordinary restored
+     * example, a valid write base (`206a2073d0976287` from the real graph read),
+     * no chat and no analysis — and the Save returned 422
+     * `system_event_refused_no_write` / `invalid_existing_intervention`. Nothing
+     * was written. The user typed a number into a mounted control and the system
+     * refused it.
+     *
+     * The cause is one line: `InterventionV3.safeParse(existing)`.
+     * `InterventionV3.target_match` is REQUIRED (`schemas/cee-v3.ts:454`), and
+     * the graph the estate actually persists does not carry it — the restored
+     * entry read back was
+     * `{ value: 1, source: 'brief_extraction', display_value: 'Very high (1)' }`.
+     * So the parse failed on a field the WRITING path never produces, and every
+     * option in every brief-extracted example was uneditable.
+     *
+     * ⚠ THE GUARD'S PURPOSE IS ANTI-RETARGETING, AND IT IS KEPT. What it must
+     * establish is that the entry being overwritten really addresses THIS
+     * factor. `target_match` is one way to know that — it is not the only one,
+     * and it is absent from real data. The canonical KEY is the other, and it
+     * has ALREADY been established four lines above: `mergeInterventionSourceObjects`
+     * proved this entry is the canonical source for `factor.id`, refusing
+     * otherwise. Demanding `target_match` on top adds nothing about retargeting
+     * and rejects legitimate stored state.
+     *
+     * So the requirement is narrowed to what the writer actually needs and what
+     * the data can attest:
+     *   · `value` must be a finite number — it is the thing being compared and
+     *     replaced, and without it there is no no-op check;
+     *   · `target_match`, WHEN PRESENT, must still name this factor. A stated
+     *     mismatch is still a refusal, unchanged.
+     *
+     * ⚠ THIS IS NOT A BYPASS. Nothing downstream is relaxed: the referee, the
+     * scope check, the postimage hash verification and the commit guard are
+     * untouched, and a genuinely unreadable entry still refuses below.
+     */
+    const entry = ExistingInterventionRead.safeParse(existing);
+    if (!entry.success) {
+      return refuse('invalid_existing_intervention');
+    }
+    const statedTarget = entry.data.target_match?.node_id;
+    if (statedTarget !== undefined && statedTarget !== factor.id) {
       return refuse('invalid_existing_intervention');
     }
     // This adapter records changed values, not adoption/confirmation. A repeat

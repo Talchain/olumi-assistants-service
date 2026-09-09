@@ -611,3 +611,215 @@ describe('option-intervention transaction — real commit, serialized store boun
     expect(persistence.durableGraph()).toEqual(before);
   });
 });
+
+/**
+ * ⭐⭐⭐ THE SHAPE THE ESTATE ACTUALLY PERSISTS — the class this whole suite
+ * omitted, and the reason a witnessed manual Save was refused.
+ *
+ * Every fixture above builds interventions through `intervention()`, which
+ * always writes `target_match`. The graph a restored example actually returns
+ * does not: request 144 on 2026-09-09 read back
+ * `{ value: 1, source: 'brief_extraction', display_value: 'Very high (1)' }`.
+ * So the corpus could not see that `InterventionV3.safeParse` — whose
+ * `target_match` is REQUIRED — refuses real stored state. Root's first manual
+ * Save returned 422 `invalid_existing_intervention` with nothing written
+ * (request `6ec75b90`, valid write base, no chat and no analysis first).
+ *
+ * A corpus that omits a class the contract admits cannot certify the code over
+ * that class (CLAUDE.md trap 22). These cases supply it.
+ */
+describe('an existing intervention persisted WITHOUT target_match', () => {
+  /** The restored entry verbatim, minus the value under test. */
+  function persistedByBriefExtraction(value: number) {
+    return { value, source: 'brief_extraction', display_value: `Very high (${value})` };
+  }
+
+  function graphWithPersistedEntry(entry: Record<string, unknown>) {
+    const graph = canonicalGraph();
+    const option = graph.nodes.find(node => node.id === 'option')!;
+    (option as { interventions: Record<string, unknown> }).interventions.factor = entry;
+    return projectGraphForPersistence(graph);
+  }
+
+  it('⭐ is EDITABLE — the first manual Save prepares a write, it is not refused', () => {
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(1));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    expect(candidate.kind).toBe('candidate');
+  });
+
+  it('⭐ and the write it prepares still satisfies the postimage scope check', () => {
+    // The encoder fills `source: user_specified` and synthesises `target_match`
+    // from the canonical key, so accepting the preimage does not move the
+    // refusal to `mutation_scope_mismatch` one step later.
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(1));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    if (candidate.kind !== 'candidate') throw new Error('Expected a candidate');
+    const written = candidate.graph.nodes.find(node => node.id === 'option')?.interventions?.factor;
+    expect(written).toMatchObject({ value: 0.75, source: 'user_specified' });
+    expect((written as { target_match?: { node_id?: string } })?.target_match?.node_id).toBe('factor');
+  });
+
+  it('an unchanged value is still a no-op, not a new user-authored measurement', () => {
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(0.4));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.4 }), persistedGraph: before,
+    });
+    expect(candidate.kind).toBe('unchanged');
+  });
+
+  it('⚠ REFUSAL RETAINED: a STATED target naming another node still refuses', () => {
+    // The anti-retargeting guarantee is the point of the check and is untouched.
+    const before = graphWithPersistedEntry({
+      value: 1, source: 'brief_extraction',
+      target_match: { node_id: 'other_factor', match_type: 'exact_id', confidence: 'high' },
+    });
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    expect(candidate).toMatchObject({ kind: 'refused', reason: 'invalid_existing_intervention' });
+  });
+
+  it('⚠ REFUSAL RETAINED: an entry with no usable value refuses at the SOURCE guard', () => {
+    // ⚠ THIS ASSERTED `invalid_existing_intervention` AND THAT REASON IS
+    // UNREACHABLE HERE — an independent review derived it from the source and it
+    // is correct. `hasFiniteInterventionValue` (analysis-ready-helper:299)
+    // rejects an entry with no numeric `value`, so
+    // `mergeInterventionSourceObjects(option)[factor.id]` is `undefined`, which
+    // differs from the supplied object and trips the CANONICAL-SOURCE guard
+    // three lines EARLIER than the reader.
+    //
+    // The refusal is corrected rather than the guard relaxed: the earlier gate
+    // is the stronger one, and an unusable entry never reaching the reader is
+    // the right order. What matters to the user is unchanged — refused, and
+    // nothing written.
+    const before = graphWithPersistedEntry({ source: 'brief_extraction', display_value: 'Very high' });
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75 }), persistedGraph: before,
+    });
+    expect(candidate).toMatchObject({ kind: 'refused', reason: 'noncanonical_intervention_source' });
+    // A refusal writes nothing and appends nothing.
+    expect(candidate).not.toHaveProperty('graph');
+    expect(candidate).not.toHaveProperty('operations');
+  });
+
+  it('⚠ BEFORE ANALYSIS TOO — the witnessed arm had never run one', () => {
+    // Root's stop was a saved example with no analysis and no chat. Nothing in
+    // this path may require either.
+    const before = graphWithPersistedEntry(persistedByBriefExtraction(1));
+    const candidate = applyOptionInterventionEdit({
+      ...inputFor(before, { modelValue: 0.75, hasExistingAnalysis: false, freshness: 'none' }),
+      persistedGraph: before,
+    });
+    expect(candidate.kind).toBe('candidate');
+  });
+});
+
+/**
+ * ⭐⭐ NARROW THE CONTAINER, THEN SELECT THE KEY — in that order.
+ *
+ * `GraphStateIngressSchema` returns `NodeContentSchema`, which declares only
+ * id/kind/label; every passthrough field, `interventions` included, arrives as
+ * `unknown`. `.interventions!.factor` is therefore a property access ON UNKNOWN,
+ * and an `as Record<string, unknown>` written AFTER `.factor` types the RESULT
+ * of an access that was already invalid — it cannot be the narrowing.
+ *
+ * ⚠ THIS IS A RUNTIME CHECK, NOT A CAST. If the option ever comes back without
+ * an intervention container, the test fails here by name instead of reporting a
+ * confusing `undefined` mismatch several assertions later.
+ */
+function interventionsOfOption(graph: { nodes: ReadonlyArray<{ id: string }> }): Record<string, unknown> {
+  const node = graph.nodes.find(candidate => candidate.id === 'option');
+  if (node === undefined) throw new Error('The graph under test has no option node');
+  const container: unknown = (node as { interventions?: unknown }).interventions;
+  if (container === null || typeof container !== 'object' || Array.isArray(container)) {
+    throw new Error('The option carries no intervention container');
+  }
+  return container as Record<string, unknown>;
+}
+
+/**
+ * ⭐⭐⭐ THE NEWLY ADMITTED POPULATION THROUGH THE REAL STORE, COMMIT AND COLD
+ * READ — because the scope guard structurally cannot see what this asserts.
+ *
+ * `optionInterventionPostimageIsScoped` restores the WHOLE selected cell before
+ * comparing, so it proves no OTHER cell moved and says nothing about whether
+ * this cell kept its own fields. Admitting entries without `target_match` made
+ * their metadata reachable for the first time, and the reconstruction was
+ * dropping it. Only the committed object can show that.
+ */
+describe('a no-target entry keeps its unrelated metadata through commit', () => {
+  /**
+   * ⚠ `reasoning` IS NOT IN HERE, AND MY FIRST VERSION HAD IT WRONG.
+   *
+   * It reads like the person's own prose, so I asserted it survived. It does
+   * not: `InterventionV3` documents `reasoning` as "Explanation for
+   * transparency" — an explanation OF THE VALUE — and PR #276's CASE 4 already
+   * pinned it as stale value-descriptive metadata that a value override drops.
+   * My assertion contradicted a reviewed, green expectation, and the honest
+   * repair is to correct MY test rather than graduate THEIRS.
+   *
+   * The line is not "derived vs prose". It is: does the field make a claim
+   * ABOUT THE VALUE? `evidence_refs` points at a research note; it says nothing
+   * about the magnitude, so it survives a value change.
+   */
+  const RETAINED = {
+    evidence_refs: ['research-note-7'],
+  };
+  const STALE_REASONING = 'Recruiting capacity constrains this assumption';
+
+  function persistedWithMetadata() {
+    const graph = canonicalGraph();
+    const option = graph.nodes.find(node => node.id === 'option')!;
+    (option as { interventions: Record<string, unknown> }).interventions.factor = {
+      value: 1, source: 'brief_extraction', display_value: 'Very high (1)',
+      reasoning: STALE_REASONING, ...RETAINED,
+    };
+    return projectGraphForPersistence(graph);
+  }
+
+  it('⭐ commits the new value and RETAINS the additive evidence reference', async () => {
+    const before = persistedWithMetadata();
+    const persistence = jsonStore(before);
+    const result = await executeOptionInterventionEdit(
+      inputFor(before, { modelValue: 0.75 }), persistence.fresh(),
+    );
+    expect(result.kind).toBe('committed');
+
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    const entry = interventionsOfOption(cold).factor as Record<string, unknown>;
+
+    expect(entry).toMatchObject({ value: 0.75, source: 'user_specified', ...RETAINED });
+  });
+
+  it('⚠ and DROPS the display derived from the old value — no stale representation', async () => {
+    // "Very high (1)" beside a committed 0.75 would be the product contradicting
+    // itself on screen. A carried-through field must not be a value-derived one.
+    const before = persistedWithMetadata();
+    const persistence = jsonStore(before);
+    await executeOptionInterventionEdit(inputFor(before, { modelValue: 0.75 }), persistence.fresh());
+
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    const entry = interventionsOfOption(cold).factor as Record<string, unknown>;
+
+    expect(entry.display_value).not.toBe('Very high (1)');
+    // Same class, one sentence further down the card: a justification written
+    // for the OLD value beside a committed 0.75 is the product contradicting
+    // itself in prose rather than in a number.
+    expect(entry.reasoning).not.toBe(STALE_REASONING);
+  });
+
+  it('⚠ and leaves the untouched neighbour byte-identical', async () => {
+    const before = persistedWithMetadata();
+    const persistence = jsonStore(before);
+    await executeOptionInterventionEdit(inputFor(before, { modelValue: 0.75 }), persistence.fresh());
+
+    const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
+    const neighbourBefore = interventionsOfOption(before).other_factor;
+    const neighbourAfter = interventionsOfOption(cold).other_factor;
+    expect(neighbourAfter).toEqual(neighbourBefore);
+  });
+});
