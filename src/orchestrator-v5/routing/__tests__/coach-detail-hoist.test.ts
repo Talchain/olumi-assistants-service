@@ -69,10 +69,24 @@ describe('a coach turn that hoists its detail is folded on the first pass', () =
 });
 
 describe('the fold is narrow — everything else keeps byte-identical passthrough', () => {
-  it('⭐ EXECUTE IS UNREACHABLE — a hoisted detail on an execute turn is not folded', () => {
-    // The load-bearing boundary. This coercion must never touch a turn that
-    // carries mutation authority; the execute branch keeps its own class-(d)
-    // strip and this helper is not on its path.
+  it('⭐ EXECUTE IS UNREACHABLE — an execute turn carrying BOTH a shape and a root detail is not folded', () => {
+    // ⛔ THIS TEST PREVIOUSLY COULD NOT FAIL, AND THE INDEPENDENT REVIEW PROVED
+    // IT BY MUTANT: calling the helper unconditionally BEFORE the intent branch
+    // left 49/49 green, this case included. Its fixture carried NO
+    // `answer_shape`, and the helper returns without folding whenever the shape
+    // is absent — so it was inert on that input whether or not the execute
+    // branch could reach it. The title, its comment and the PR body all named a
+    // verification the test did not perform.
+    //
+    // What discriminates is a fixture on which the helper WOULD fold if it ran:
+    // an execute turn carrying BOTH a plain-object `answer_shape` and a root
+    // `detail`. Under the reachability mutant the fold fires and
+    // `coach_detail_hoist` appears; at this head the execute branch takes the
+    // turn and it does not. The assertion is now on the coercion REASON, which
+    // is the thing that differs.
+    //
+    // This is the load-bearing boundary: the coercion must never touch a turn
+    // that carries mutation authority.
     const { value, coercions } = coerceFirstPassToolCall({
       intent_class: 'execute',
       action: {
@@ -81,11 +95,65 @@ describe('the fold is narrow — everything else keeps byte-identical passthroug
         parameters: [],
         cited_context_fields: [],
       },
+      answer_shape: { headline: 'H', bullets: [] },
       detail: DETAIL,
     });
-    const out = value as Record<string, unknown>;
-    expect(coercions.map((c) => c.reason)).not.toContain('coach_detail_hoist');
-    expect((out.answer_shape as unknown) ?? null).toBeNull();
+    expect(
+      coercions.map((c) => c.reason),
+      'the coach fold reached an EXECUTE turn — the authority boundary is open',
+    ).not.toContain('coach_detail_hoist');
+    // And the prose did not arrive in the shape by any other route.
+    const shape = (value as Record<string, unknown>).answer_shape as
+      | Record<string, unknown>
+      | undefined;
+    expect(shape?.detail).toBeUndefined();
+  });
+
+  it('CONTROL — the SAME fixture on a coach turn IS folded, so the case above discriminates', () => {
+    // Without this, the assertion above would pass on a helper that never folds
+    // anything. Identical shape and root detail; only `intent_class` differs.
+    const { value, coercions } = coerceFirstPassToolCall({
+      intent_class: 'coach',
+      coaching_mode: 'reframe',
+      answer_shape: { headline: 'H', bullets: [] },
+      detail: DETAIL,
+    });
+    expect(coercions.map((c) => c.reason)).toContain('coach_detail_hoist');
+    expect(
+      ((value as Record<string, unknown>).answer_shape as Record<string, unknown>).detail,
+    ).toBe(DETAIL);
+  });
+
+  it('⭐ A NON-STRING SHAPE DETAIL IS ALSO POPULATED — the claim was overstated and is now true', () => {
+    // ⛔ MY GUARD WAS STRING-TYPED AND MY COMMENT SAID "never overwrites a
+    // populated detail". False for a non-string one: `detail: 42` fell through
+    // the string test and was overwritten. Found by the independent review,
+    // measured. Such a shape fails `AnswerShapeSchema`, so the fold was
+    // silently converting a REPAIR into an accepted answer — a behaviour I
+    // never reasoned about, which is why the guard was tightened rather than
+    // the comment softened.
+    for (const detail of [42, null, { nested: true }, ['a']]) {
+      const input = seq16Shaped({ answer_shape: { headline: 'H', bullets: [], detail } });
+      const { value, coercions } = coerceFirstPassToolCall(input);
+      expect(coercions, JSON.stringify(detail)).toHaveLength(0);
+      expect(value, JSON.stringify(detail)).toBe(input);
+    }
+  });
+
+  it('CONTRAST — an ABSENT or blank detail is a genuinely empty slot and IS filled', () => {
+    // The other side of the tightening: over-refusing here would silently undo
+    // the capability, and nothing else in the file would notice.
+    for (const shape of [
+      { headline: 'H', bullets: [] },
+      { headline: 'H', bullets: [], detail: '' },
+      { headline: 'H', bullets: [], detail: '   ' },
+    ]) {
+      const { value, coercions } = coerceFirstPassToolCall(seq16Shaped({ answer_shape: shape }));
+      expect(coercions.map((c) => c.reason), JSON.stringify(shape)).toContain('coach_detail_hoist');
+      expect(
+        ((value as Record<string, unknown>).answer_shape as Record<string, unknown>).detail,
+      ).toBe(DETAIL);
+    }
   });
 
   it('⭐ A POPULATED SHAPE DETAIL WINS — the model is not overruled', () => {

@@ -1206,10 +1206,22 @@ function coerceCoachDetailHoist(toolInput: Record<string, unknown>): {
   }
   const shape = toolInput.answer_shape;
   if (!isPlainObject(shape)) return { value: toolInput, coercions: [] };
+  // ⛔ THE GUARD WAS STRING-TYPED, AND MY COMMENT CLAIMED MORE THAN IT DID.
+  // "Never overwrites a populated `answer_shape.detail`" was false for a
+  // NON-STRING one: a shape carrying `detail: 42` or `detail: null` fell
+  // through the string test and was overwritten by the root string. Found by
+  // the independent review, measured, not argued.
+  //
+  // Tightened rather than documented, because the behaviour it produced was
+  // one I never reasoned about: such a shape fails `AnswerShapeSchema`, so the
+  // fold was silently converting a REPAIR into an accepted answer. Only an
+  // ABSENT or blank-string detail is now an empty slot; anything else — of any
+  // type — leaves the input untouched and the turn repairs exactly as it did
+  // before this coercion existed.
   const existing = shape.detail;
-  if (typeof existing === 'string' && existing.trim().length > 0) {
-    // Both populated: the shape wins and the root key is left alone, so the
-    // turn still repairs rather than this helper silently choosing for it.
+  const slotIsEmpty =
+    existing === undefined || (typeof existing === 'string' && existing.trim().length === 0);
+  if (!slotIsEmpty) {
     return { value: toolInput, coercions: [] };
   }
   // `delete` on a shallow copy rather than a rest-destructure: the discarded
