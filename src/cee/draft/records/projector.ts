@@ -3311,6 +3311,28 @@ function projectOnce(
         // `Direct causal value …` prefix that `transforms/analysis-ready.ts:833`
         // turns into a NON-WAIVABLE `ambiguous_value` refusal — an honest estimate
         // is disclosed, not refused (trap 23).
+        //
+        // ⚠⚠ THE RECEIPT ASSERTS ONLY WHAT THE GUARD ESTABLISHES, AND THAT IS
+        // NARROWER THAN IT FIRST READ. `bindDirectStatedMagnitude` has TWO early
+        // returns — `from_stated` absent, and `from_stated` present but pointing at
+        // a NON-OPTION stated item — and `!isDirectStatedOption` is true for BOTH.
+        // An earlier draft of this sentence also claimed the effect "cites no
+        // stated figure", which the guard does NOT establish: a claim whose
+        // `from_stated` names a `figure` cites one. Since this `reasoning` is
+        // provenance carried to the wire (`schema-v3.ts:1277`) and this class
+        // previously produced NO entry at all, that would have replaced SILENCE
+        // with a sentence that can be FALSE — the lie direction this module's
+        // doctrine at :1738-1752 exists to prevent. Found in review.
+        //
+        // ⚠ AND THE SECOND CLASS IS NOT GIVEN ITS OWN BRANCH ON PURPOSE. Probing
+        // `from_stated` at a `figure`, a `goal` and a `constraint` produced ZERO
+        // option→factor edges in every case — the ref resolves to a non-option
+        // node, so it never reaches this loop. Three probes are not a proof of
+        // unreachability, which is exactly why the SENTENCE is narrowed rather
+        // than the class special-cased: a branch for a case that cannot be
+        // constructed is a branch no test can kill, the same "guard that cannot
+        // fail" shape this pass already deleted once (see the `undefined` note
+        // below). Narrow the claim; do not add unreachable code to justify it.
         const binding =
           directBinding !== undefined
             ? directBinding
@@ -3318,7 +3340,7 @@ function projectOnce(
               ? ({
                   raw_value: setsTo,
                   source: "cee_hypothesis",
-                  reasoning: `Olumi estimate via edge ${edge.id}; this option\u2192factor effect arrives from a claim that is not a direct stated option and cites no stated figure`,
+                  reasoning: `Olumi estimate via edge ${edge.id}; this option\u2192factor effect is not bound to a stated option record`,
                 } as const)
               : undefined;
         candidate = {

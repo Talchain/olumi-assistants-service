@@ -287,6 +287,20 @@ describe("the provenance invariant holds on the MERGE path", () => {
     expect(detail!.raw_value).toBe(0.59);
   });
 
+  it("⭐ THE RECEIPT ASSERTS ONLY WHAT THE GUARD ESTABLISHES", () => {
+    // Found in review. `!isDirectStatedOption` is true for TWO classes —
+    // `from_stated` absent, AND `from_stated` naming a NON-OPTION stated item.
+    // The second DOES cite a stated item, so a receipt claiming the effect
+    // "cites no stated figure" would be unestablished by its own guard. This
+    // `reasoning` is provenance carried to the wire (`schema-v3.ts:1277`), and
+    // this class previously produced NO entry at all — so an over-claim here
+    // replaces SILENCE with a sentence that can be FALSE, which is strictly
+    // worse. Pinned by its exact tail so the clause cannot creep back.
+    const detail = (detailsOf(graph, mergedId) ?? {})[valueId];
+    expect(detail!.reasoning).toMatch(/is not bound to a stated option record$/);
+    expect(detail!.reasoning).not.toMatch(/cites no stated figure/);
+  });
+
   it("⭐ the receipt does NOT trip the consumer's ambiguous_value refusal", () => {
     // Same reasoning as the fourth case above, derived from the consumer's own
     // bytes: reusing that prefix would swap a visible refusal for a blocked user.
