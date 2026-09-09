@@ -91,11 +91,13 @@ describe("a stated goal target, from the decoder to the persisted-target reader"
     expect(afterDecoder.raw, `decoder did not bind the stated target: ${JSON.stringify(afterDecoder)}`).toBe(20000);
     expect(afterDecoder.normalised).toBeCloseTo(afterDecoder.raw / afterDecoder.cap, 12);
 
-    // The heuristic's trigger condition must genuinely hold, or the sweep hop
-    // below proves nothing about the keep.
-    decodedGoal.label = GOAL_LABEL_DIGIT_FREE;
-    expect(/\d/.test(decodedGoal.label)).toBe(false);
-    expect(Number.isInteger(afterDecoder.raw)).toBe(true);
+    // ⚠ THE DECODER'S OWN LABEL IS LEFT ALONE. My first cut overwrote it with a
+    //   digit-free string to activate the sweep heuristic, and the resulting red
+    //   was then a property of MY MUTATION, not of the receiving path — the
+    //   independent review named that and it is right. The unmodified output is
+    //   the normal-path case; the relabelled one is characterised separately
+    //   below, and asserts what actually happens rather than failing the gate.
+    expect(typeof decodedGoal.label).toBe("string");
 
     // HOP 2 — the real stages, in the order the pipeline runs them.
     const ctx = makeCtx(graph, BRIEF);
@@ -124,7 +126,33 @@ describe("a stated goal target, from the decoder to the persisted-target reader"
     expect(read!.unit).toBe("£");
   });
 
-  it("CONTRAST — a record with no stated value never acquires a target on the way through", async () => {
+  it("CONDITIONAL — a digit-free label makes the sweep strip a decoder-minted target", async () => {
+    // ⚠ THIS CASE MUTATES THE GRAPH, AND SAYS SO. No producer that relabels a
+    //   goal this way is exercised, so this is a boundary record, NOT evidence
+    //   about the native run — whose sweep made ZERO repairs
+    //   (`cee.threshold_sweep.completed`, `repair_count: 0`) and whose goal
+    //   label carried digits. It asserts what the composed path DOES under that
+    //   condition, so it documents the boundary instead of failing the gate.
+    const decoded = projectDraftRecords(RAW_RECORDS, BRIEF);
+    const graph = (decoded as { projection: { graph: any } }).projection.graph;
+    const goal = graph.nodes.find((n: any) => n.kind === "goal");
+    expect(goal.goal_threshold_raw).toBe(20000);
+
+    goal.label = GOAL_LABEL_DIGIT_FREE; // the mutation, stated plainly
+    const ctx = makeCtx(graph, BRIEF);
+    await runStageEnrich(ctx);
+    await runStageThresholdSweep(ctx);
+
+    const codes = (ctx.deterministicRepairs ?? []).map((r: any) => r.code);
+    const attested = ctx.enricherMintedGoalIds?.size ?? 0;
+    // Recorded, not asserted as a defect: unattested + round + digit-free is
+    // swept, which is the heuristic behaving exactly as its own contract says.
+    expect(attested).toBe(0);
+    expect(codes).toContain("GOAL_THRESHOLD_STRIPPED_NO_DIGITS");
+    expect(extractPersistedGoalTarget(ctx.graph)).toBeNull();
+  });
+
+  it("CONTRAST — the decoder does not manufacture a target from a valueless record", async () => {
     const decoded = projectDraftRecords(
       {
         stated_items: [
@@ -143,9 +171,20 @@ describe("a stated goal target, from the decoder to the persisted-target reader"
     await runStageEnrich(ctx);
     await runStageThresholdSweep(ctx);
 
-    // Nothing is invented from prose on the way through. If this ever returns a
-    // target, a stage is reading the brief as a source of values.
-    const read = extractPersistedGoalTarget(ctx.graph);
-    expect(read === null || read.value !== 20000).toBe(true);
+    // ⚠ SCOPED HONESTLY. This previously read
+    //   `read === null || read.value !== 20000`, which also passes on a
+    //   DIFFERENT wrongly-acquired target — it could not distinguish "no target"
+    //   from "some other target". And asserting `null` outright would be wrong
+    //   too: the enricher has a legitimate brief-derived mint, so a target
+    //   appearing later is not by itself unauthorised.
+    //
+    //   So the claim is made where it is checkable — at the DECODER, which must
+    //   not manufacture a target from a record that carried no value. What any
+    //   later stage legitimately mints is a different question and is not
+    //   claimed here.
+    const decodedGoal = graph.nodes.find((n: any) => n.kind === "goal");
+    expect(decodedGoal).toBeDefined();
+    expect(decodedGoal.goal_threshold_raw).toBeUndefined();
+    expect(decodedGoal.goal_threshold).toBeUndefined();
   });
 });
