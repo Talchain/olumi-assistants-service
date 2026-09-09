@@ -37,6 +37,7 @@ const GRAPH = {
   edges: [{ from: 'fac_eng', to: 'goal_revenue', strength: { mean: 0.4, std: 0.1 }, exists_probability: 0.9 }],
 } satisfies GraphStateIngress;
 const GRAPH_HASH = computeAnalysisAffectingGraphHash(GRAPH);
+if (GRAPH_HASH === null) throw new Error('The persisted discussion fixture must have a real graph hash.');
 const PRIOR_TURN = {
   id: '37fedec1-6d73-4f40-8854-201206f42dd5',
   scenario_id: SCENARIO,
@@ -54,7 +55,7 @@ const PRIOR_TURN = {
 } satisfies SessionTurnWithContent;
 const PRIOR_FACT = {
   fact_type: 'run_analysis', fact_version: 1, noop: false,
-  result: { scenario_id: SCENARIO, summary: 'Previous analysis', enrichment: { analysis_status: 'complete' }, graph_hash_at_run: GRAPH_HASH, computed_at: '2026-09-09T06:07:04.202Z' },
+  result: { scenario_id: SCENARIO, leading_option_id: null, summary: 'Previous analysis', enrichment: { analysis_status: 'complete' }, graph_hash_at_run: GRAPH_HASH, computed_at: '2026-09-09T06:07:04.202Z' },
 } satisfies HandlerFact;
 
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
