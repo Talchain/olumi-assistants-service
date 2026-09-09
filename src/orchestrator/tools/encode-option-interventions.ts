@@ -182,9 +182,25 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
  *                                  number does not inherit a prior estimate's
  *                                  confidence.
  */
+/**
+ * ⚠ `reasoning` IS ON THIS LIST DELIBERATELY, AND I HAD IT WRONG FIRST.
+ *
+ * It reads like unrelated prose, so my first version carried it through. It is
+ * not: `InterventionV3` documents it as *"Explanation for transparency"* — an
+ * explanation OF THE VALUE — and PR #276's CASE 4 already pinned it as stale
+ * value-descriptive metadata that a value override must drop. A justification
+ * for 0.9 sitting beside a committed 0.55 is the same defect as a stale
+ * `display_value`, one sentence further down the card.
+ *
+ * The line this list draws is not "derived vs prose". It is: does the field
+ * make a claim ABOUT THE VALUE? `reasoning`, `display_value` and
+ * `value_confidence` do, so they go. `evidence_refs` and the person's own
+ * annotations do not, so they survive.
+ */
 const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
   'value', 'source', 'target_match',
   'display_value', 'raw_value', 'value_type', 'encoding_map', 'value_confidence',
+  'reasoning',
 ]);
 
 /**

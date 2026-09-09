@@ -752,21 +752,36 @@ function interventionsOfOption(graph: { nodes: ReadonlyArray<{ id: string }> }):
  * dropping it. Only the committed object can show that.
  */
 describe('a no-target entry keeps its unrelated metadata through commit', () => {
+  /**
+   * ⚠ `reasoning` IS NOT IN HERE, AND MY FIRST VERSION HAD IT WRONG.
+   *
+   * It reads like the person's own prose, so I asserted it survived. It does
+   * not: `InterventionV3` documents `reasoning` as "Explanation for
+   * transparency" — an explanation OF THE VALUE — and PR #276's CASE 4 already
+   * pinned it as stale value-descriptive metadata that a value override drops.
+   * My assertion contradicted a reviewed, green expectation, and the honest
+   * repair is to correct MY test rather than graduate THEIRS.
+   *
+   * The line is not "derived vs prose". It is: does the field make a claim
+   * ABOUT THE VALUE? `evidence_refs` points at a research note; it says nothing
+   * about the magnitude, so it survives a value change.
+   */
   const RETAINED = {
-    reasoning: 'Recruiting capacity constrains this assumption',
     evidence_refs: ['research-note-7'],
   };
+  const STALE_REASONING = 'Recruiting capacity constrains this assumption';
 
   function persistedWithMetadata() {
     const graph = canonicalGraph();
     const option = graph.nodes.find(node => node.id === 'option')!;
     (option as { interventions: Record<string, unknown> }).interventions.factor = {
-      value: 1, source: 'brief_extraction', display_value: 'Very high (1)', ...RETAINED,
+      value: 1, source: 'brief_extraction', display_value: 'Very high (1)',
+      reasoning: STALE_REASONING, ...RETAINED,
     };
     return projectGraphForPersistence(graph);
   }
 
-  it('⭐ commits the new value and RETAINS reasoning and additive evidence', async () => {
+  it('⭐ commits the new value and RETAINS the additive evidence reference', async () => {
     const before = persistedWithMetadata();
     const persistence = jsonStore(before);
     const result = await executeOptionInterventionEdit(
@@ -791,6 +806,10 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
     const entry = interventionsOfOption(cold).factor as Record<string, unknown>;
 
     expect(entry.display_value).not.toBe('Very high (1)');
+    // Same class, one sentence further down the card: a justification written
+    // for the OLD value beside a committed 0.75 is the product contradicting
+    // itself in prose rather than in a number.
+    expect(entry.reasoning).not.toBe(STALE_REASONING);
   });
 
   it('⚠ and leaves the untouched neighbour byte-identical', async () => {

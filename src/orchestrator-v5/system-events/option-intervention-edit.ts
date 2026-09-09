@@ -29,6 +29,15 @@ import { GraphV3, InterventionV3, TargetMatch, type GraphV3T } from '../../schem
  */
 const ExistingInterventionRead = z.object({
   value: z.number().finite(),
+  // ⚠ `source` STAYS REQUIRED, AND IS DERIVED FROM THE PRODUCER RATHER THAN
+  // RE-SPELLED. Relaxing the whole read to admit a missing `target_match` also
+  // dropped this check, and a stored `source: 'user_override'` — a value the
+  // producer's enum does not contain — began passing and being overwritten with
+  // `user_specified`. That is precisely the "silently replacing existing
+  // provenance with user authority" this writer must refuse, and an existing
+  // test named it. The witnessed 422 was about `target_match` alone; nothing
+  // about it licensed widening `source`.
+  source: InterventionV3.shape.source,
   target_match: TargetMatch.optional(),
 }).passthrough();
 import { mergeInterventionSourceObjects } from '../../orchestrator/tools/analysis-ready-helper.js';
