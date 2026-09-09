@@ -828,7 +828,12 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       // word-budget ladder can shed the whole weighing block, and a count of
       // bullets that were composed but not served is the optimism this
       // telemetry exists to catch.
-      direction_clarifications_surfaced: sectioned.includedWeighing ? directionBullets.length : 0,
+      // Counts what was SERVED. The promoted line leads the reply and is
+      // therefore surfaced whether or not the weighing block survived the word
+      // budget; the remainder is surfaced only inside that block.
+      direction_clarifications_surfaced:
+        (leadClarification !== null ? 1 : 0) +
+        (sectioned.includedWeighing ? remainingDirectionBullets.length : 0),
     },
   };
 }
