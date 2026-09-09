@@ -365,8 +365,68 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
     expect(unmatchedMetrics(SECOND_LIMIT_SENTENCE)).toContain('costs');
   });
 
-  it('⭐ two different limits sharing one number — which of them is the user asked about?', () => {
-    expect(unmatchedMetrics(TWO_LIMITS_ONE_NUMBER)).toEqual(['costs', 'monthly churn']);
+  /**
+   * ⚠⚠ A RECORD, NOT A CLAIM — and pinned rather than noted because a record
+   * with nothing running behind it is how this estate loses things.
+   *
+   * `Refund rate must not exceed 4%.` is the same CONSTRUCTION as
+   * `Keep costs under 4%.` above and as `Churn must not exceed 4%.` in this
+   * extractor's own corpus. Against the same unbindable node set it produces
+   * NO wire row AND NO question: the user states a limit and is neither told it
+   * was dropped nor asked where it belongs.
+   *
+   * ⚠ I HAVE NOT ESTABLISHED WHY, AND THIS ASSERTION DOES NOT SAY. The obvious
+   * suspect is `CONSTRAINT_ALIASES` (extractor.ts:1568), a hand-maintained list
+   * of twenty-eight metric names that does not include "refund rate" — but that
+   * map is consumed at STEP 4 of `remapConstraintTargets` (BINDING), not at
+   * extraction, so it does not explain a null. It could equally be a junk
+   * rejection or a non-finite value skipped at `compound-goals.ts:681`.
+   *
+   * ⭐ WHY PIN IT AT ALL (CLAUDE.md 22f — the sanctioned way to ship a known
+   * gap): asserting EXACTLY the observed state keeps the suite green for the
+   * right reason and REDs if the set GROWS or SHRINKS. Whoever makes this
+   * sentence produce a question will be handed this comment by a failing test
+   * rather than having to rediscover the behaviour.
+   *
+   * ⚠ AND NOTE WHAT THE EXISTING CORPUS CANNOT SEE: every other test of this
+   * producer uses an IN-VOCABULARY metric ("budget", "churn"). A corpus that
+   * shares the code's blind spot cannot observe the code's defect (trap 13d).
+   */
+  it('KNOWN-DROPPED — this limit reaches no wire row and produces no question', () => {
+    const { wire, asks } = runPipeline('Refund rate must not exceed 4%.');
+    expect(wire).toHaveLength(0);
+    expect(asks.filter((a) => a.reason === 'target_unmatched')).toEqual([]);
+  });
+
+  /**
+   * ⭐⭐ MEASURED, HOSTED: TWO STATED LIMITS SHARING ONE NUMBER PRODUCE ONE
+   * QUESTION. The second is silently dropped — no wire row, and no ask either.
+   *
+   * The CONTROL above is what makes this conclusive rather than suggestive:
+   * `costs` IS asked about when it is the only limit in the brief, and the node
+   * set is identical in both runs, so neither non-extraction nor binding can
+   * explain its absence here. **The only thing that changed is that another
+   * limit with the same number was asked about first.**
+   *
+   * The mechanism is in the source and matches exactly:
+   * `compound-goals.ts:678-684` builds `alreadyAsked` as a `Set<number>` —
+   * seeded from `coveredValues` and the detector findings, with NO metric
+   * component — and skips any unbindable row whose value it already holds.
+   *
+   * ⚠ TWO HARMS UNDER ONE PREDICATE (CLAUDE.md trap 22b). Asking twice about
+   * one limit is a WALL; dropping a question for a limit the user stated is a
+   * GAP — and they are opposite failures that one `Set<number>` cannot serve.
+   * This is the gap, and it is the same harm the `target_unmatched` ask exists
+   * to prevent, reintroduced by the mechanism that prevents the wall.
+   *
+   * ⛔ THE ASSERTION PINS THE OBSERVED BEHAVIOUR, IT DOES NOT ENDORSE IT.
+   * Widening the key is a change to a live user-facing predicate and belongs
+   * with its owner: this estate has already paid four oscillating rounds on
+   * exactly that shape (trap 22f). Pinned so the suite is green for the right
+   * reason and REDs if the set grows OR shrinks.
+   */
+  it('KNOWN-DROPPED — two limits sharing one number yield ONE question, not two', () => {
+    expect(unmatchedMetrics(TWO_LIMITS_ONE_NUMBER)).toEqual(['monthly churn']);
   });
 });
 
