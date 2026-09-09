@@ -173,6 +173,70 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
     expect(result.value).toBe(20000);
   });
 
+  it('⭐ BASELINE PLUS A TARGET QUESTION — the word is in the OTHER clause', () => {
+    // The review's counterexample. One currency amount, no other node's label,
+    // and the word `target` present — so a message-wide test accepted it. But
+    // the amount is a BASELINE in one clause and the target is a QUESTION in
+    // another. Presence of the word was never the relation.
+    const result = resume('Our baseline MRR is £12,000; what target should we choose?', [
+      pending(),
+    ]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    if (result.skip_reason !== 'unreadable_answer') {
+      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
+    }
+    expect(result.reason).toBe('not_a_target_answer');
+  });
+
+  it('⭐ DISCRIMINATING TWIN — the same words, with the target word in the AMOUNT\'s clause', () => {
+    // Same vocabulary, same two clauses, same single amount. The ONLY
+    // difference is which clause the amount sits in. Without this twin the
+    // case above could be passing because the sentence is long, or because it
+    // contains a question mark somewhere, rather than because of the binding.
+    const result = resume('What should we aim for? The target is £20,000.', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+  });
+
+  it('⭐ DISTINCT CHURN — "the churn target is 4%" is a guardrail wearing the word "target"', () => {
+    // E2(c). Assertion, target word and one amount all in ONE clause, and the
+    // message names no node's COMPLETE label — so every other gate passes.
+    // Only the SUBJECT distinguishes it: `churn` belongs to another node's
+    // label and not to the goal's. A goal minimum is not a churn maximum, and
+    // this is what keeps them apart when the guardrail is written as a target.
+    const result = resume('The churn target is 4%', [pending()]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    if (result.skip_reason !== 'unreadable_answer') {
+      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
+    }
+    expect(result.reason).toBe('not_a_target_answer');
+  });
+
+  it('⭐ CONTRAST — a token the GOAL shares is not foreign', () => {
+    // The goal is "Reach £20k MRR within 12 months", so `mrr` is its own token
+    // and cannot be evidence of another subject. Without this the gate above
+    // could be refusing any clause with a noun in it.
+    const result = resume('The MRR target is £20,000', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+  });
+
+  it('⭐ A QUESTION IS NOT AN ANSWER — a target clause ending in "?" refuses', () => {
+    // The affirmation and the amount are in the same clause here, so only the
+    // clause TERMINATOR distinguishes this from a genuine statement.
+    const result = resume('Should the target be £20,000?', [pending()]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    if (result.skip_reason !== 'unreadable_answer') {
+      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
+    }
+    expect(result.reason).toBe('not_a_target_answer');
+  });
+
   it('⭐ OTHER SUBJECT — a price named on another node is not the goal target', () => {
     // The reply carries exactly one amount and is plainly about something else.
     // `f-churn` is labelled 'Pro Plan Churn Rate'; naming it withdraws the

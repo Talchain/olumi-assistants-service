@@ -486,6 +486,117 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     ).toHaveLength(1);
   });
 
+  it('⭐ BASELINE PLUS A TARGET QUESTION — no goal write AND the question is NOT consumed', async () => {
+    // The review's second counterexample, at the real executor. The word
+    // `target` is present but sits in a QUESTION clause; the amount is a
+    // baseline in the other clause.
+    //
+    // WHY BOTH ASSERTIONS. The executor pre-route sets `consumedPendingAction`,
+    // and the mutation warrant is granted on `isConfirmResume` BEFORE the
+    // message is inspected — so a false eligibility match supplies the wrong
+    // target AND its authority to write, and no later classifier can undo that.
+    // "No write" alone would not catch a turn that spent the question.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(
+      payload('Our baseline MRR is £12,000; what target should we choose?'),
+      'req-goal-baseline-plus-question',
+      { routingAdapter: adapter, graphState: graph },
+    );
+
+    expect(chatWithTools).toHaveBeenCalled();
+    for (const g of committedGraphs()) {
+      expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
+    }
+
+    expect(appendCalls.length, 'the turn did not commit, so this case proves nothing').toBeGreaterThan(0);
+    const finalPendings = (appendCalls[appendCalls.length - 1]!.pending_actions ??
+      []) as PendingAction[];
+    expect(
+      finalPendings.filter((p) => p.action.kind === 'elicit_goal_target'),
+      'the goal-target question was consumed by a message that only ASKED about a target',
+    ).toHaveLength(1);
+  });
+
+  it('⭐ DISCRIMINATING TWIN — the same words with the target word in the AMOUNT\'s clause DO commit', async () => {
+    // Same vocabulary, same two clauses, same single amount, same question
+    // mark in the message. The ONLY difference is which clause carries the
+    // amount — so the case above cannot be passing on sentence length, on the
+    // presence of a `?`, or on anything but the binding.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(
+      payload('What should we aim for? The target is £20,000.'),
+      'req-goal-clause-twin',
+      { routingAdapter: adapter, graphState: graph },
+    );
+
+    expect(chatWithTools).not.toHaveBeenCalled();
+    const graphs = committedGraphs();
+    expect(graphs.length).toBeGreaterThan(0);
+    const goal = goalNodeOf(graphs[graphs.length - 1]);
+    expect(goal?.goal_threshold_raw).toBe(20000);
+    expect(goal?.goal_threshold_unit).toBe('£');
+  });
+
+  it('⭐ DISTINCT CHURN — "the churn target is 4%" makes no goal write and keeps the question', async () => {
+    // Addendum item 4's mixed-role case at the real receiver. Assertion, target
+    // word and one amount in one clause, no node's COMPLETE label named — so
+    // only the SUBJECT gate refuses it. A guardrail written as a "target" must
+    // not become the value every option is scored against.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('The churn target is 4%.'), 'req-goal-churn-target', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools).toHaveBeenCalled();
+    for (const g of committedGraphs()) {
+      expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
+    }
+    expect(appendCalls.length, 'the turn did not commit, so this case proves nothing').toBeGreaterThan(0);
+    const finalPendings = (appendCalls[appendCalls.length - 1]!.pending_actions ??
+      []) as PendingAction[];
+    expect(
+      finalPendings.filter((p) => p.action.kind === 'elicit_goal_target'),
+      'the goal-target question was consumed by a message about another subject',
+    ).toHaveLength(1);
+  });
+
+  it('⭐ MINIMUM — an explicit floor for the goal commits, so the ceiling control discriminates', async () => {
+    // The other half of addendum item 4's minimum-versus-maximum pair. Same
+    // fixture, same live question, opposite bound: this MUST write where
+    // "keep it under 4%" must not.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('At least £20,000 a month.'), 'req-goal-minimum', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools).not.toHaveBeenCalled();
+    const graphs = committedGraphs();
+    expect(graphs.length).toBeGreaterThan(0);
+    expect(goalNodeOf(graphs[graphs.length - 1])?.goal_threshold_raw).toBe(20000);
+  });
+
   it('NO QUESTION — the same bare amount with no live pending is just a message', async () => {
     // The route is ADDITIVE. This is the control that proves the positive
     // above is the question doing the work, not the message shape.

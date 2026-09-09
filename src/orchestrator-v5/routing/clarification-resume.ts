@@ -60,6 +60,8 @@ import {
 import {
   ANSWER_HEDGE_WORDS,
   classifyElicitedBaselineAnswer,
+  clauseAround,
+  labelWordSet,
 } from '../../cee/factor-extraction/stated-level.js';
 
 /**
@@ -859,29 +861,132 @@ function wordsBesidesTheAmount(message: string): readonly string[] {
 }
 
 /**
+ * Where the amount SITS in the raw message, so its clause can be found.
+ *
+ * CQE's `span_start`/`span_end` are offsets into its NORMALISED text, which can
+ * disagree with the raw message on separators, so they are deliberately not
+ * used here: a span miss would silently move the clause window. `raw_text` is
+ * matched first (it is the bytes CQE actually read); a first-digit fallback
+ * covers a normalisation-only difference. `-1` means the relation cannot be
+ * established, and the caller then refuses.
+ */
+function amountIndexIn(message: string, rawText: unknown): number {
+  if (typeof rawText === 'string' && rawText.length > 0) {
+    const at = message.toLowerCase().indexOf(rawText.toLowerCase());
+    if (at >= 0) return at;
+  }
+  const digit = /\d/.exec(message);
+  return digit === null ? -1 : digit.index;
+}
+
+/**
  * Is this message eligible to ANSWER the live goal-target question?
  *
  * Pure over `(message, amount)` where `amount` is CQE's own already-extracted
  * result. See the call site for the two eligibility routes and why the gate is
  * positive.
+ *
+ * ⛔ ROUTE 2 WAS ONCE "A TARGET WORD ANYWHERE IN THE MESSAGE", AND THAT WAS THE
+ * SAME DEFECT ONE LEVEL IN. The review's counterexample:
+ *
+ *     "Our baseline MRR is £12,000; what target should we choose?"
+ *
+ * One currency amount, no other node's label, and the word `target` present —
+ * so it qualified. But the amount is a BASELINE in one clause and the target is
+ * a QUESTION in another. Presence of the word was never the relation; the
+ * relation is that the affirmation and the amount belong to the SAME ASSERTED
+ * ANSWER. Nothing was added to an exclusion list to fix it — the test moved
+ * from the message to the clause carrying the amount.
+ *
+ * ⚠ WHY THIS ONE MATTERED MORE THAN A WRONG NUMBER. The executor pre-route sets
+ * `consumedPendingAction`, and `detectMutationWarrant({isConfirmResume:true})`
+ * grants `confirm_resume` BEFORE inspecting the message, with the commit floor
+ * treating the consumed ref as authority. A false eligibility match therefore
+ * supplies both the wrong target AND its mutation warrant, and no later
+ * discussion classifier can undo that premise. Eligibility here is an
+ * AUTHORITY decision, not a parsing convenience.
  */
 function isEligibleGoalTargetAnswer(
   message: string,
-  amount: { readonly comparator?: string | null },
+  amount: { readonly comparator?: string | null; readonly raw_text?: unknown },
+  foreignLabelTokens: ReadonlySet<string>,
 ): boolean {
   const words = wordsBesidesTheAmount(message);
   // ROUTE 1 — the message IS the amount (plus hedges). The question named the
-  // goal, so a reply carrying nothing else can only be answering it.
+  // goal, so a reply carrying nothing else can only be answering it. Left
+  // exactly as reviewed: this path has no clause problem, because there is no
+  // second clause to borrow an affirmation from.
   const hedges = new Set(ANSWER_HEDGE_WORDS);
   if (words.every((w) => hedges.has(w))) return true;
-  // ROUTE 2a — CQE itself read a FLOOR. "at least £20,000" is a target by the
-  // extractor's own reading, not by ours.
+
+  // ROUTE 2 — longer prose. Everything below is scoped to the ONE CLAUSE that
+  // carries the amount, using `stated-level.ts`'s existing boundary rules
+  // (shared, not re-implemented: its decimal-point and abbreviation handling is
+  // exactly what a second scanner would drift on).
+  const at = amountIndexIn(message, amount.raw_text);
+  if (at < 0) return false;
+  const { clause, terminator } = clauseAround(message, at);
+  // A clause that ENDS IN '?' is asking, not answering. "What target should we
+  // choose?" cannot license a write however many target words it contains.
+  if (terminator === '?') return false;
+  const lowerClause = clause.toLowerCase();
+
+  const clauseWords = lowerClause.match(/[a-z']+/g) ?? [];
+
+  // ⭐ E2(c) — SUBJECT. Same-clause affirmation is not enough on its own: "the
+  // CHURN target is 4%" carries an assertion, a target word and one amount in
+  // one clause, and names no node's COMPLETE label, so F6 and every test above
+  // pass — while the number belongs to a different subject entirely. A goal
+  // minimum is not a churn maximum, and this is the gate that keeps them apart
+  // when the user writes the guardrail as a "target".
+  //
+  // The rule is DERIVED from the graph, not from a word list: a token that
+  // belongs to some other node's label and NOT to the goal's own label is
+  // foreign, so the clause is talking about something else. Tokens the goal
+  // shares are never foreign — "the REVENUE target is £20,000" binds even when
+  // a factor is called "Revenue growth" — and the folding is
+  // `stated-level.ts`'s own `labelWordSet`, so this cannot drift from the
+  // subject binding that module already performs.
+  if (clauseWords.some((w) => foreignLabelTokens.has(w))) return false;
+
+  // ROUTE 2a — CQE itself read a FLOOR on THIS amount. The comparator is a
+  // property of the extracted quantity, so it is already bound to it; the
+  // clause and subject checks above still apply, so a floor inside a question,
+  // or about another node, refuses.
   if (amount.comparator === 'at_least') return true;
-  // ROUTE 2b — the message uses target language.
-  const lower = message.toLowerCase();
-  if (GOAL_TARGET_PHRASES.some((phrase) => lower.includes(phrase))) return true;
+
+  // ROUTE 2b — the amount's OWN clause uses target language.
+  if (GOAL_TARGET_PHRASES.some((phrase) => lowerClause.includes(phrase))) return true;
   const vocabulary = new Set(GOAL_TARGET_LANGUAGE);
-  return words.some((w) => vocabulary.has(w));
+  return clauseWords.some((w) => vocabulary.has(w));
+}
+
+/**
+ * Label tokens that belong to some NON-goal node and NOT to the goal — the
+ * evidence E2(c) tests a clause against.
+ *
+ * Singular-folded through `labelWordSet` on both sides, so "churn rates" and
+ * "Churn rate" agree. Tokens shorter than four characters are excluded: they
+ * collide with ordinary English ("pro", "new", "top") and a gate that refuses
+ * everything is the same defect as one that refuses nothing.
+ */
+function foreignLabelTokensFor(
+  nodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined,
+  goalId: string,
+  goalLabel: string,
+): ReadonlySet<string> {
+  const goalTokens = labelWordSet(goalLabel);
+  const foreign = new Set<string>();
+  for (const n of nodes ?? []) {
+    if (n.id === goalId) continue;
+    if (typeof n.label !== 'string') continue;
+    for (const token of labelWordSet(n.label)) {
+      if (token.length < 4) continue;
+      if (goalTokens.has(token)) continue;
+      foreign.add(token);
+    }
+  }
+  return foreign;
 }
 
 export type GoalTargetResumeDispatch =
@@ -1034,7 +1139,13 @@ export function tryGoalTargetElicitationResume(input: {
   // NOT A SECOND PARSER: the amount, its unit and its comparator are all CQE's
   // own output, already extracted above. This decides ELIGIBILITY over that
   // output; it never re-reads the number.
-  if (!isEligibleGoalTargetAnswer(input.message, amount)) {
+  if (
+    !isEligibleGoalTargetAnswer(
+      input.message,
+      amount,
+      foreignLabelTokensFor(input.graphNodes, goalId, goalLabel),
+    )
+  ) {
     return {
       matched: false,
       skip_reason: 'unreadable_answer',
