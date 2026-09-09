@@ -1242,16 +1242,6 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // bytes; without an interpretation rule the model can mistake the reduced
   // projection for proof that the omitted facts do not exist. Under-budget
   // packs carry neither the marker nor this instruction.
-  // ⭐⭐ WHAT `margin` MEANS. Emitted by the SAME condition that serialises it,
-  // so the number and its definition cannot travel apart — the mechanism
-  // `DISPLAY_GRAPH_INSTRUCTION` and `PROVISIONAL_FIGURES_INSTRUCTION` already
-  // use, not a new policy or a word rule.
-  if (
-    (llmFacing.analysis as { readonly margin?: unknown } | null | undefined)?.margin !== undefined &&
-    (llmFacing.analysis as { readonly margin?: unknown } | null | undefined)?.margin !== null
-  ) {
-    parts.push('', MARGIN_MEANING_INSTRUCTION);
-  }
   if (llmFacing.context_budget !== undefined) {
     parts.push('', CONTEXT_BUDGET_INSTRUCTION);
   }
@@ -1259,6 +1249,29 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   // packs and legacy omission is normalised above, so an empty projection can
   // never silently license a no-edits claim.
   parts.push('', RECENT_CHANGES_INSTRUCTION);
+  // ⭐⭐ WHAT `margin` MEANS. Emitted by the SAME condition that serialises it,
+  // so the number and its definition cannot travel apart — the mechanism
+  // `DISPLAY_GRAPH_INSTRUCTION` and `PROVISIONAL_FIGURES_INSTRUCTION` already
+  // use, not a new policy or a word rule.
+  //
+  // ⚠ PLACED AFTER `RECENT_CHANGES_INSTRUCTION` ON PURPOSE. My first cut put it
+  //   before, which SPLIT the contiguous
+  //   `GRAPH_CONTEXT + DISPLAY_GRAPH + RECENT_CHANGES` span that
+  //   `route-with-tool-use.focus.spec.ts`'s golden helper locates as one marker
+  //   — its `indexOf` returned -1 and the historical golden could not be
+  //   subtracted (hosted `102305473428`). Ordering carries no contract here, and
+  //   preserving a control pinned to a HISTORICAL artefact is strictly better
+  //   than re-pinning it to accommodate a new block.
+  //
+  // `llmFacing.analysis` IS the display-safe analysis: the model-facing
+  // projection drops the raw `analysis` and surfaces `display_analysis` under
+  // that key (`model-facing-context-pack.ts`). `margin` is one of its members.
+  if (
+    (llmFacing.analysis as { readonly margin?: unknown } | null | undefined)?.margin !== undefined &&
+    (llmFacing.analysis as { readonly margin?: unknown } | null | undefined)?.margin !== null
+  ) {
+    parts.push('', MARGIN_MEANING_INSTRUCTION);
+  }
   // Coaching Context Pack v1 (CEE_COACHING_CONTEXT_PROMPT_ENABLED): a narrow,
   // additive receive-vs-author instruction, appended ONLY when the deterministic
   // `coaching_context` pack was injected (flag on). Flag-off → the field is

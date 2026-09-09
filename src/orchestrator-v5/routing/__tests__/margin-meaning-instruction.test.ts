@@ -31,12 +31,19 @@ import type { ContextPack } from '../../context/context-pack-assembler.js';
 
 const USER_MESSAGE = 'What should we look at first?';
 
-function packWith(analysis: unknown): ContextPack {
+/**
+ * ⚠ `display_analysis`, NOT `analysis`. The model-facing projection DROPS the
+ *   raw `analysis` and surfaces `display_analysis` under the `analysis` key
+ *   (`model-facing-context-pack.ts`). My first fixture set `analysis`, so the
+ *   field never reached `llmFacing` and the positive control failed on hosted
+ *   `102305473428` for a fixture reason, not a code one.
+ */
+function packWith(displayAnalysis: unknown): ContextPack {
   return {
     version: '2.0',
     scenario_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     stage: 'analyse',
-    analysis,
+    display_analysis: displayAnalysis,
   } as unknown as ContextPack;
 }
 
