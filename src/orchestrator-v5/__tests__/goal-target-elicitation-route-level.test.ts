@@ -725,25 +725,35 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     expect(goal?.goal_threshold as number).toBeCloseTo(0.92, 10);
   });
 
-  it("⭐ THE CAPABILITY IS PRESERVED — prose the pre-route declines still commits by the ORDINARY route", async () => {
-    // The contrast that keeps the coverage decision honest. "The target is
-    // £20,000." is a genuine goal statement that this pre-route deliberately
-    // does NOT claim — and a refusal assertion alone would leave open whether
-    // the user simply lost the capability.
+  it('⭐ THE CAPABILITY IS PRESERVED — an explicit instruction the pre-route declines commits by the ORDINARY route', async () => {
+    // The contrast that keeps the coverage decision honest. This pre-route
+    // deliberately claims only bare scalars, and a refusal assertion alone
+    // would leave open whether the user simply lost the capability.
     //
-    // Here the same message, with the same live question, reaches the router,
-    // which emits the ordinary `add_constraint` tool call, and the canonical
-    // writer commits the tuple. Declining is a routing decision, not a loss.
+    // ⚠ THE WORDING MATTERS, AND MY FIRST VERSION OF THIS CASE HAD IT WRONG. It
+    // used the DECLARATIVE "The target is £20,000." and expected an immediate
+    // commit. The source disproves that: a declarative statement carries no
+    // mutation signal, so `detectMutationWarrant` grants none and the executor
+    // DEMOTES the proposal into the offer/confirmation channel — a
+    // model-supplied `intent_class: execute` is intentionally insufficient
+    // authority. The next case asserts that actual behaviour.
+    //
+    // An explicit INSTRUCTION does carry the signal, so this is the shape that
+    // legitimately commits without the pre-route: the message reaches the
+    // router, the ordinary `add_constraint` tool call runs, and the canonical
+    // writer stamps the tuple. Declining a bare-scalar-only gate is a routing
+    // decision, not a lost capability.
     const graph = graphWithTargetlessGoal();
     mockedPersistedGraph = graph;
     const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
     mockedPendingActions = [goalTargetPending(liveHash)];
     const { adapter, chatWithTools } = goalTargetToolCallAdapter();
 
-    await runTurnExecutor(payload('The target is £20,000.'), 'req-goal-ordinary-route', {
-      routingAdapter: adapter,
-      graphState: graph,
-    });
+    await runTurnExecutor(
+      payload('Set the monthly recurring revenue target to £20,000.'),
+      'req-goal-ordinary-route',
+      { routingAdapter: adapter, graphState: graph },
+    );
 
     // The pre-route declined, so the turn went to the router.
     expect(chatWithTools).toHaveBeenCalled();
@@ -755,6 +765,46 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     const cap = goal?.goal_threshold_cap as number;
     expect(cap).toBeGreaterThan(20000);
     expect(goal?.goal_threshold as number).toBeCloseTo(20000 / cap, 10);
+  });
+
+  it('⭐ A DECLARATIVE STATEMENT IS OFFERED, NOT APPLIED — no write, and the confirmation channel is armed', async () => {
+    // The twin of the case above, and the one that pins the policy rather than
+    // asking to be exempted from it. "The target is £20,000." reaches the
+    // router with the same tool call, but carries no mutation signal — so the
+    // warrant is refused and the proposal is DEMOTED to the propose-confirm
+    // channel instead of executing.
+    //
+    // Asserted BOTH ways, because either alone is misleading: nothing is
+    // written (the policy held), AND the change is offered rather than dropped
+    // (silently discarding a change the user did want would be its own defect,
+    // which is why that branch offers rather than refuses).
+    //
+    // ⚠ This case does NOT claim the declarative wording completes the
+    // capability. Following the confirmation through the resume boundary to a
+    // committed value is a separate control and is not asserted here; the
+    // capability claim rests on the explicit-instruction case above.
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = goalTargetToolCallAdapter();
+
+    await runTurnExecutor(payload('The target is £20,000.'), 'req-goal-declarative', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools).toHaveBeenCalled();
+    for (const g of committedGraphs()) {
+      expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
+    }
+    expect(appendCalls.length, 'the turn did not commit, so this case proves nothing').toBeGreaterThan(0);
+    const finalPendings = (appendCalls[appendCalls.length - 1]!.pending_actions ??
+      []) as PendingAction[];
+    expect(
+      finalPendings.filter((p) => p.action.kind === 'apply_proposed_change'),
+      'the change was neither applied nor offered — a change the user wanted was dropped',
+    ).not.toHaveLength(0);
   });
 
   it('NO QUESTION — the same bare amount with no live pending is just a message', async () => {
