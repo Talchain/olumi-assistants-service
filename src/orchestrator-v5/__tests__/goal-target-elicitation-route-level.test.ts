@@ -430,19 +430,14 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     }
   });
 
-  it('CURRENT BASELINE — "our current MRR is £12,000" is a report, not a target', async () => {
-    // The counterexample the independent review traced at the source. It has
-    // exactly one finite non-ceiling currency amount and names no other node's
-    // label, so every gate except the ROLE gate passes it — and binding it
-    // would record where the person already IS as the value success is
-    // measured against.
+  it('⭐ CURRENT LEVEL — "our current MRR is £12,000" is a report, not a target', async () => {
     const graph = graphWithTargetlessGoal();
     mockedPersistedGraph = graph;
     const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
     mockedPendingActions = [goalTargetPending(liveHash)];
     const { adapter, chatWithTools } = directAnswerAdapter();
 
-    await runTurnExecutor(payload('Our current MRR is £12,000.'), 'req-goal-baseline', {
+    await runTurnExecutor(payload('Our current MRR is £12,000.'), 'req-goal-current', {
       routingAdapter: adapter,
       graphState: graph,
     });
@@ -451,6 +446,44 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     for (const g of committedGraphs()) {
       expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
     }
+  });
+
+  it('⭐ BASELINE REPORT — no goal write AND the question is NOT consumed', async () => {
+    // The independent review's counterexample, at the real executor. It has one
+    // currency amount, no ceiling, no other node's complete label and no
+    // present-state marker — so the negative list this gate replaced could not
+    // have caught it, and POSITIVE eligibility is what refuses it.
+    //
+    // TWO ASSERTIONS, because either alone would be too weak: no goal write
+    // (the person's baseline must not become the value success is scored
+    // against), AND the question survives (a refusal must leave the product
+    // still waiting for a real answer, not silently having spent its ask).
+    const graph = graphWithTargetlessGoal();
+    mockedPersistedGraph = graph;
+    const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
+    mockedPendingActions = [goalTargetPending(liveHash)];
+    const { adapter, chatWithTools } = directAnswerAdapter();
+
+    await runTurnExecutor(payload('Our baseline MRR is £12,000.'), 'req-goal-baseline-report', {
+      routingAdapter: adapter,
+      graphState: graph,
+    });
+
+    expect(chatWithTools).toHaveBeenCalled();
+    for (const g of committedGraphs()) {
+      expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
+    }
+
+    // NOT CONSUMED. `commitTurn` always writes `pending_actions`, so the last
+    // commit's list is the authoritative answer to "is the question still
+    // live?" — carry-forward keeps a surviving prior, consumption removes it.
+    expect(appendCalls.length, 'the turn did not commit, so this case proves nothing').toBeGreaterThan(0);
+    const finalPendings = (appendCalls[appendCalls.length - 1]!.pending_actions ??
+      []) as PendingAction[];
+    expect(
+      finalPendings.filter((p) => p.action.kind === 'elicit_goal_target'),
+      'the goal-target question was consumed by a message that did not answer it',
+    ).toHaveLength(1);
   });
 
   it('NO QUESTION — the same bare amount with no live pending is just a message', async () => {

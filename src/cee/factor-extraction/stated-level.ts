@@ -90,71 +90,51 @@ const PRESENT_STATE_QUALIFIERS: readonly string[] = [
 const QUALIFIER_ALT = `(?:${PRESENT_STATE_QUALIFIERS.join("|")})`;
 
 /**
- * ⭐⭐ THE TENSE-BEARING SUBSET — "does this message REPORT WHERE THINGS STAND?"
+ * ⭐⭐ THE TENSE-BEARING SUBSET, and the HEDGES that are left when you remove it.
  *
- * A THIRD question in this module, named apart from the two above rather than
- * folded into them (CLAUDE.md trap 21):
- *   · `extractStatedCurrentLevels` asks "what present-state PERCENT does this
- *     text state, and about what subject?" — it BINDS a value, so it is
- *     percent-only and grammar-complete;
- *   · `classifyElicitedBaselineAnswer` asks "is this an ATTEMPTED answer to the
- *     baseline question?";
- *   · THIS asks only "is this message reporting a CURRENT LEVEL rather than
- *     naming a target?" It never binds anything. Its only power is to REFUSE.
+ * ⛔ AN EARLIER VERSION OF THIS BLOCK EXPORTED `reportsPresentState`, A
+ * PREDICATE THAT ASKED "does this message REPORT a current level?" AND WAS
+ * USED TO REFUSE A GOAL-TARGET ANSWER. It is withdrawn, and the reason is the
+ * finding rather than a tidy-up: a finite list of markers returning FALSE is
+ * not affirmative evidence that a message IS a target answer. "Our baseline
+ * MRR is £12,000." carries no marker at all and is still a baseline report.
+ * The polarity was wrong — a refusal cannot license a bind — and the consumer
+ * now decides eligibility POSITIVELY. What survives here is the VOCABULARY,
+ * because that part was sound and is single-sourced.
  *
- * WHY IT IS NOT THE QUALIFIER LIST ITSELF. `PRESENT_STATE_QUALIFIERS` mixes two
- * kinds of word: TENSE markers ("currently", "now", "presently", "today",
- * "still") and HEDGES ("at", "around", "about", "roughly", "right"). The hedges
- * are the right thing to allow BETWEEN a verb and a number and the wrong thing
- * to read as evidence of tense — "at" alone appears in "£20k at minimum", which
- * is a target, not a report. So this set is the tense-bearing members plus the
- * adjectival/phrasal forms of the same idea, and the tense-bearing membership is
- * DERIVED from the shared list in `stated-level-present-state.test.ts` rather
- * than mirrored here.
+ * `PRESENT_STATE_QUALIFIERS` mixes two kinds of word, and the two are useful
+ * in opposite directions:
+ *   · TENSE markers ("currently", "now", "presently", "today", "still") say
+ *     WHEN, so a message carrying one is talking about the present;
+ *   · HEDGES ("at", "around", "about", "roughly") say only HOW PRECISELY, so
+ *     they are answer furniture — "about £20k" is still just the amount.
  *
- * FAILURE DIRECTION, stated because it is the whole safety argument: a member
- * added here can only cause a REFUSAL, and a refusal leaves the message to the
- * ordinary lanes untouched. Over-refusal costs coverage; it cannot mint a
- * wrong value. That is the same trade this module already takes.
+ * Both sets below are DERIVED from that one list rather than restated beside
+ * it (CLAUDE.md trap 12): `ANSWER_HEDGE_WORDS` is the list MINUS the tense
+ * members, so a word added to the shared list lands in exactly one of them and
+ * cannot silently appear in both.
  */
-export const PRESENT_STATE_REPORT_MARKERS: readonly string[] = [
-  // Tense-bearing members of PRESENT_STATE_QUALIFIERS (pinned as a subset in
-  // the companion test, so a change to that list is visible here).
+export const PRESENT_STATE_TENSE_WORDS: readonly string[] = [
   "currently",
   "now",
   "presently",
   "today",
   "still",
-  // The adjectival form of "currently", which the qualifier list does not carry
-  // because it never appears between a verb and a number ("our CURRENT MRR is
-  // £12,000" — the word sits in the SUBJECT).
-  "current",
-  // Phrasal equivalents. Multi-word members are matched as phrases.
-  "right now",
-  "at the moment",
-  "at present",
-  "so far",
-  "to date",
-  "as it stands",
-  "as things stand",
 ];
 
 /**
- * Does this message REPORT a present state rather than name a target?
+ * The qualifier list with the tense words removed — the words that may sit
+ * around a bare amount without making it anything other than that amount.
  *
- * Word-boundary matched, case-insensitive, phrases matched literally. Pure and
- * total; any non-string is `false` (an unreadable message is not evidence of
- * anything, and the caller's other gates still apply).
+ * `right` is subtracted explicitly on top of the tense set: on its own it is a
+ * hedge ("right around 20k"), but its dominant use in an answer is "right
+ * now", which is tense. A hedge misclassified as tense costs coverage; a tense
+ * word misclassified as a hedge would let a baseline report through as a bare
+ * answer, so the asymmetry is deliberate.
  */
-export function reportsPresentState(text: string | null | undefined): boolean {
-  if (typeof text !== "string" || text.trim() === "") return false;
-  const lower = text.toLowerCase();
-  return PRESENT_STATE_REPORT_MARKERS.some((marker) =>
-    marker.includes(" ")
-      ? lower.includes(marker)
-      : new RegExp(`\\b${marker}\\b`, "i").test(lower),
-  );
-}
+export const ANSWER_HEDGE_WORDS: readonly string[] = PRESENT_STATE_QUALIFIERS.filter(
+  (w) => !PRESENT_STATE_TENSE_WORDS.includes(w) && w !== "right",
+);
 
 /**
  * What may sit between the verb and the number — the closed qualifier

@@ -58,8 +58,8 @@ import {
   findSoleLiveGoalTargetPending,
 } from '../session/pending-action.js';
 import {
+  ANSWER_HEDGE_WORDS,
   classifyElicitedBaselineAnswer,
-  reportsPresentState,
 } from '../../cee/factor-extraction/stated-level.js';
 
 /**
@@ -781,6 +781,106 @@ export function tryBaselineElicitationResume(input: {
  *   a ceiling as a `>=` target inverts the person's meaning. The caller asks the
  *   precise missing question and must not claim an edit.
  */
+/**
+ * ⭐ THE TARGET-LANGUAGE VOCABULARY — closed, and POSITIVE.
+ *
+ * Membership licenses a bind on a prose answer; absence refuses one. That
+ * polarity is the whole point: every word missing from this list costs
+ * COVERAGE (the message falls through to the ordinary lanes, exactly as it did
+ * before this route existed), and no word missing from it can cause a wrong
+ * write. The negative list this replaces had the opposite property.
+ *
+ * Deliberately excludes bare aspiration words that also read as reports
+ * ("expect", "forecast", "projected") — a forecast is a prediction of where
+ * things will land, not a criterion for success, and the two are worth keeping
+ * apart. "Minimum"/"at least" are here because they name a FLOOR, which is
+ * what `goal_threshold` is; no ceiling word appears, and a ceiling is refused
+ * upstream by the comparator gate regardless.
+ */
+const GOAL_TARGET_LANGUAGE: readonly string[] = [
+  // Nouns that name the thing being set.
+  'target',
+  'targets',
+  'goal',
+  'goals',
+  'objective',
+  'objectives',
+  'success',
+  'successful',
+  'threshold',
+  'minimum',
+  'benchmark',
+  // Verbs of intent — what the person means to bring about.
+  'aim',
+  'aims',
+  'aiming',
+  'hit',
+  'reach',
+  'reaching',
+  'achieve',
+  'achieving',
+  'want',
+  'wants',
+  'need',
+  'needs',
+  'get',
+];
+
+/** Multi-word target phrases, matched literally on the lowercased message. */
+const GOAL_TARGET_PHRASES: readonly string[] = [
+  'at least',
+  'or more',
+  'or above',
+  'or better',
+  'no less than',
+  'counts as success',
+];
+
+/**
+ * Strip every numeric token — the amount, its currency mark, its magnitude
+ * suffix and its percent sign — so what remains is the message's WORDS.
+ *
+ * ⚠ NOT A PARSER, and it must not become one. It reads no value and decides
+ * no unit; CQE has already done both, and its result is what the caller binds.
+ * This exists only to answer "is there anything here BESIDES the amount?", and
+ * it is deliberately written against the raw message rather than CQE's
+ * normalised spans because the two can disagree on separators ("£20,000" vs
+ * `20000`) and a span miss would silently reclassify a bare answer as prose.
+ */
+function wordsBesidesTheAmount(message: string): readonly string[] {
+  const withoutNumbers = message.replace(
+    /[£$€]?\s?\d[\d,. ]*\s*(?:%|k\b|m\b|bn\b|b\b|thousand|million|billion)?/gi,
+    ' ',
+  );
+  return withoutNumbers.toLowerCase().match(/[a-z']+/g) ?? [];
+}
+
+/**
+ * Is this message eligible to ANSWER the live goal-target question?
+ *
+ * Pure over `(message, amount)` where `amount` is CQE's own already-extracted
+ * result. See the call site for the two eligibility routes and why the gate is
+ * positive.
+ */
+function isEligibleGoalTargetAnswer(
+  message: string,
+  amount: { readonly comparator?: string | null },
+): boolean {
+  const words = wordsBesidesTheAmount(message);
+  // ROUTE 1 — the message IS the amount (plus hedges). The question named the
+  // goal, so a reply carrying nothing else can only be answering it.
+  const hedges = new Set(ANSWER_HEDGE_WORDS);
+  if (words.every((w) => hedges.has(w))) return true;
+  // ROUTE 2a — CQE itself read a FLOOR. "at least £20,000" is a target by the
+  // extractor's own reading, not by ours.
+  if (amount.comparator === 'at_least') return true;
+  // ROUTE 2b — the message uses target language.
+  const lower = message.toLowerCase();
+  if (GOAL_TARGET_PHRASES.some((phrase) => lower.includes(phrase))) return true;
+  const vocabulary = new Set(GOAL_TARGET_LANGUAGE);
+  return words.some((w) => vocabulary.has(w));
+}
+
 export type GoalTargetResumeDispatch =
   | { readonly matched: false; readonly skip_reason:
       | 'no_pending_question'
@@ -796,7 +896,7 @@ export type GoalTargetResumeDispatch =
         | 'ceiling_not_minimum'
         | 'degraded_parse'
         | 'names_other_subject'
-        | 'reports_current_level';
+        | 'not_a_target_answer';
     }
   | {
       readonly matched: true;
@@ -855,37 +955,6 @@ export function tryGoalTargetElicitationResume(input: {
       reason: 'ceiling_not_minimum',
     };
   }
-  // ⭐⭐ THE ROLE GATE — one amount is not enough; it must be a TARGET, not a
-  // REPORT OF WHERE THINGS STAND.
-  //
-  // The counterexample this closes, traced at the source by the independent
-  // review rather than found by me: with the question live, "Our current MRR is
-  // £12,000." carries exactly one finite, non-ceiling currency amount and names
-  // no other node's label. Every gate above passes it, and it would resolve
-  // `at_least 12000` on the goal — recording the person's CURRENT BASELINE as
-  // the value success is measured against. That is worse than refusing: the
-  // analysis would then score every option against the place they already are.
-  //
-  // ⚠ THE PREDICATE IS SINGLE-SOURCED, NOT MINTED HERE. `reportsPresentState`
-  // lives in `cee/factor-extraction/stated-level.ts` — the module that already
-  // owns "does this text assert a present state?" — and its marker set is the
-  // TENSE-BEARING subset of that module's existing closed
-  // `PRESENT_STATE_QUALIFIERS`, pinned as a subset by its own test. This is
-  // deliberately NOT a blacklist grown one counterexample at a time, and it is
-  // not a second parser: it decides ROLE, never value.
-  //
-  // A GENUINE TARGET STILL BINDS, which is the half that makes this safe to
-  // add: "£20k", "The target is £20,000", "we need to hit £20,000 by year end"
-  // carry no tense marker at all. Only a message that says WHERE THINGS ARE is
-  // withdrawn, and a withdrawal leaves the ordinary lanes untouched.
-  if (reportsPresentState(input.message)) {
-    return {
-      matched: false,
-      skip_reason: 'unreadable_answer',
-      pending,
-      reason: 'reports_current_level',
-    };
-  }
   // ⭐ THE SUBJECT GATE — one amount is not enough; it must not be ABOUT
   // something else in the model.
   //
@@ -921,6 +990,53 @@ export function tryGoalTargetElicitationResume(input: {
       skip_reason: 'unreadable_answer',
       pending,
       reason: 'names_other_subject',
+    };
+  }
+  // ⭐⭐ POSITIVE ANSWER ELIGIBILITY — the message must EXPRESS a target, and
+  // the absence of a refusal marker is not that expression.
+  //
+  // ⛔ THIS REPLACES A NEGATIVE MARKER LIST, AND THE POLARITY WAS THE DEFECT.
+  // The previous gate refused a message that carried a present-state marker
+  // ("currently", "today"). The independent review's counterexample carries
+  // none: "Our baseline MRR is £12,000." has one currency amount, no ceiling,
+  // no other node's label and no marker — so it bound `at_least 12000` on the
+  // goal and consumed the question, recording a REPORTED BASELINE as the value
+  // success is measured against. A finite list returning FALSE was never
+  // affirmative evidence of a target answer, and no amount of adding words to
+  // it would have made it one.
+  //
+  // TWO WAYS TO BE ELIGIBLE, and nothing else is:
+  //
+  //   1. A WHOLE-MESSAGE SCALAR ANSWER inherits the live question's goal. The
+  //      question named the goal; a reply that is JUST the amount can only be
+  //      answering it. "£20k", "20000", "£20,000.", "about £20k" all qualify —
+  //      `about` is answer furniture, not content, and the hedge vocabulary is
+  //      `ANSWER_HEDGE_WORDS`, DERIVED from `stated-level.ts`'s existing closed
+  //      qualifier list minus its tense members, so a word cannot be a hedge
+  //      here and a tense marker there.
+  //
+  //   2. LONGER PROSE must AFFIRMATIVELY express a goal-target answer: either
+  //      CQE itself read a floor (`comparator === 'at_least'` — "at least
+  //      £20,000", "£20k or more"), or the message uses target language from a
+  //      closed vocabulary ("the target is £20,000", "we need to hit £20,000").
+  //      Everything else falls through UNCHANGED, which is the pre-existing
+  //      behaviour and costs nothing.
+  //
+  // FAILURE DIRECTION. This gate can only REFUSE, and a refusal leaves the
+  // message to the ordinary lanes exactly as before. Widening the target
+  // vocabulary later can only add coverage; it can never mint a wrong value.
+  // That is the opposite of the list it replaces, where every missing word was
+  // a silent wrong write.
+  //
+  // NOT A SECOND PARSER: the amount, its unit and its comparator are all CQE's
+  // own output, already extracted above. This decides ELIGIBILITY over that
+  // output; it never re-reads the number.
+  if (!isEligibleGoalTargetAnswer(input.message, amount)) {
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      reason: 'not_a_target_answer',
     };
   }
   // The answer's own unit, else the one the question already established.

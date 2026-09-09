@@ -90,31 +90,69 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
     expect(result.skip_reason).toBe('unreadable_answer');
   });
 
-  it('⭐ CURRENT BASELINE — "our current MRR is £12,000" is a report, not a target', () => {
-    // The independent review's source-traced counterexample: one finite,
-    // non-ceiling currency amount, naming no other node's label. Only the ROLE
-    // gate withdraws it, and binding it would record where the person already
-    // is as the value success is measured against.
+  it('⭐ CURRENT LEVEL — "our current MRR is £12,000" is a report, not a target', () => {
+    // One finite non-ceiling currency amount, naming no other node's label.
+    // Only POSITIVE eligibility withdraws it: the message is not the amount
+    // alone, and it uses no target language.
     const result = resume('Our current MRR is £12,000.', [pending()]);
     expect(result.matched).toBe(false);
     if (result.matched) return;
-    // Narrowed by the discriminant before reading `reason`: only the
-    // `unreadable_answer` arm carries one, so a bare `expect` would not
-    // typecheck (and would read a field the other arms do not have).
     if (result.skip_reason !== 'unreadable_answer') {
       throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
     }
-    expect(result.reason).toBe('reports_current_level');
+    expect(result.reason).toBe('not_a_target_answer');
   });
 
-  it('CONTRAST — a STATED TARGET of the same shape still binds', () => {
-    // The half that proves the gate above discriminates ROLE rather than
-    // sentence length or the presence of a copula.
+  it('⭐ BASELINE REPORT — "our baseline MRR is £12,000" carries no marker and is still refused', () => {
+    // The independent review's counterexample against the NEGATIVE list this
+    // gate replaced. It carries no present-state marker at all, which is
+    // exactly why a marker list could never have caught it: absence of a
+    // refusal signal was never evidence of a target answer.
+    const result = resume('Our baseline MRR is £12,000.', [pending()]);
+    expect(result.matched).toBe(false);
+    if (result.matched) return;
+    if (result.skip_reason !== 'unreadable_answer') {
+      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
+    }
+    expect(result.reason).toBe('not_a_target_answer');
+  });
+
+  it('CONTRAST — a STATED TARGET of the same sentence shape still binds', () => {
+    // The half that proves the gate discriminates ROLE rather than sentence
+    // length or the presence of a copula: same "<subject> is <amount>" shape,
+    // target language present.
     const result = resume('The target is £20,000.', [pending()]);
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.value).toBe(20000);
     expect(result.unit).toBe('£');
+  });
+
+  it('CONTRAST — an intent sentence with no target NOUN still binds', () => {
+    const result = resume('We need to hit £20,000 by year end.', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+  });
+
+  it("CONTRAST — CQE's own floor reading is enough, with no target vocabulary at all", () => {
+    // "at least" names a FLOOR, which is what `goal_threshold` is. It is
+    // reachable by BOTH prose routes (CQE's own `comparator: 'at_least'` and
+    // the phrase list), so this case is deliberately over-determined: it pins
+    // the behaviour without asserting which route carried it.
+    const result = resume('at least £20,000 a month', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+  });
+
+  it('HEDGED BARE ANSWER — "about £20k" is still just the amount', () => {
+    // `about` is answer furniture, from `ANSWER_HEDGE_WORDS` (derived from
+    // stated-level's closed qualifier list minus its tense members).
+    const result = resume('about £20k', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
   });
 
   it('⭐ OTHER SUBJECT — a price named on another node is not the goal target', () => {
@@ -135,10 +173,11 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
     expect(result.reason).toBe('names_other_subject');
   });
 
-  it('CONTRAST — the same shape naming NO other node still binds', () => {
-    // Without this the gate above could be refusing on the sentence's length
-    // or its verb rather than on the subject it names.
-    const result = resume('It is 20000', [pending({ action: { unit: '£' } })]);
+  it('CONTRAST — the same claim naming NO other node binds when it names a target', () => {
+    // Without this the subject gate above could be refusing on the sentence's
+    // length or its verb rather than on the node it names. Target language is
+    // present in both, so the ONLY difference is the named subject.
+    const result = resume('Our target is 20000', [pending({ action: { unit: '£' } })]);
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.value).toBe(20000);
