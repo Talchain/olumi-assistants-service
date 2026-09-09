@@ -23,6 +23,10 @@ import { run } from "./runner.js";
 import { score } from "./scorer.js";
 import { generate } from "./reporter.js";
 import {
+  generateOrchestratorSummary,
+  type OrchestratorScoredResult,
+} from "./orchestrator-summary.js";
+import {
   readModels,
   readBriefs,
   readPrompt,
@@ -1257,11 +1261,6 @@ interface OrchestratorRunArgs {
   };
 }
 
-interface OrchestratorScoredResult extends GenericScoredResult {
-  judgeResult?: JudgeResult;
-  conversationHistory?: string;
-}
-
 async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
   const { promptContent, models, modelsDir, casesDir, resultsDir, caseFilter, judge, profile, zone1Only, opts } = args;
 
@@ -1753,86 +1752,6 @@ async function runOrchestrator(args: OrchestratorRunArgs): Promise<void> {
   }
 }
 
-function generateOrchestratorSummary(
-  results: OrchestratorScoredResult[],
-  config: RunConfig,
-  promptHash: string,
-  judgeActive: boolean
-): string {
-  const lines: string[] = [];
-  lines.push(`# Orchestrator Evaluator — Run Summary\n`);
-  lines.push(`Run ID: \`${config.run_id}\``);
-  lines.push(`Prompt: \`${config.prompt_file}\` (${promptHash})`);
-  lines.push(`Judge: ${judgeActive ? "enabled" : "disabled"}\n`);
-
-  // Structural scores table
-  lines.push("## Structural Scores\n");
-  const dimKeys = Object.keys(results[0]?.score.dimensions ?? {});
-  lines.push(`| Model | Case | Overall | ${dimKeys.join(" | ")} | Latency |`);
-  lines.push(`| --- | --- | --- | ${dimKeys.map(() => "---").join(" | ")} | --- |`);
-
-  for (const r of results) {
-    const dims = Object.values(r.score.dimensions).map((v) => {
-      if (v === null) return "—";
-      if (typeof v === "boolean") return v ? "✓" : "✗";
-      return typeof v === "number" ? v.toFixed(3) : String(v);
-    });
-    lines.push(
-      `| ${r.model.id} | ${r.fixture_id} | ${r.score.overall?.toFixed(3) ?? "—"} | ${dims.join(" | ")} | ${r.response.latency_ms}ms |`
-    );
-  }
-
-  if (judgeActive) {
-    const judgeDimKeys = [
-      "scientific_polymath", "causal_mechanism", "coaching_over_telling",
-      "grounded_quantification", "warm_directness", "appropriate_brevity",
-      "constructive_challenge", "elicitation_quality", "session_coherence",
-    ];
-
-    lines.push("\n## Judge Qualitative Scores\n");
-    lines.push(`| Model | Case | Weighted Avg | ${judgeDimKeys.join(" | ")} | Impression |`);
-    lines.push(`| --- | --- | --- | ${judgeDimKeys.map(() => "---").join(" | ")} | --- |`);
-
-    for (const r of results) {
-      const jr = r.judgeResult;
-      if (!jr || jr.judge_error) {
-        lines.push(`| ${r.model.id} | ${r.fixture_id} | ERROR | ${judgeDimKeys.map(() => "—").join(" | ")} | ${jr?.judge_error ?? "no judge"} |`);
-        continue;
-      }
-      const dimScores = judgeDimKeys.map((k) => {
-        const d = jr.scores[k as keyof typeof jr.scores];
-        return d ? `${d.score}/5` : "—";
-      });
-      lines.push(
-        `| ${r.model.id} | ${r.fixture_id} | ${jr.weighted_average.toFixed(3)} | ${dimScores.join(" | ")} | ${jr.overall_impression.slice(0, 80)}... |`
-      );
-    }
-
-    // Per-model averages
-    const modelIds = [...new Set(results.map((r) => r.model.id))];
-    lines.push("\n## Per-Model Averages\n");
-    lines.push(`| Model | Structural | Qualitative | ${judgeDimKeys.join(" | ")} |`);
-    lines.push(`| --- | --- | --- | ${judgeDimKeys.map(() => "---").join(" | ")} |`);
-
-    for (const mid of modelIds) {
-      const mr = results.filter((r) => r.model.id === mid && r.judgeResult && !r.judgeResult.judge_error);
-      if (mr.length === 0) continue;
-      const avgStruct = mr.reduce((s, r) => s + (r.score.overall ?? 0), 0) / mr.length;
-      const avgQual = mr.reduce((s, r) => s + (r.judgeResult?.weighted_average ?? 0), 0) / mr.length;
-      const dimAvgs = judgeDimKeys.map((k) => {
-        const sum = mr.reduce((s, r) => {
-          const d = r.judgeResult?.scores[k as keyof typeof r.judgeResult.scores];
-          return s + (d?.score ?? 0);
-        }, 0);
-        return (sum / mr.length).toFixed(1);
-      });
-      lines.push(`| ${mid} | ${avgStruct.toFixed(3)} | ${avgQual.toFixed(3)} | ${dimAvgs.join(" | ")} |`);
-    }
-  }
-
-  lines.push("");
-  return lines.join("\n");
-}
 
 // =============================================================================
 // Generic summary generator
