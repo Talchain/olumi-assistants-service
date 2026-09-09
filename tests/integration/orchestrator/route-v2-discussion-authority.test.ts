@@ -203,7 +203,12 @@ describe('lean native discussion respects explicit no-change authority at both e
     expect(res.statusCode, res.body).toBe(200);
     expect(routeReceiver).toHaveBeenCalledTimes(1);
     expect(handlerReceiver.mock.calls.map(([id]) => id)).toEqual(['explain_from_structure']);
-    expect(res.json().assistant_text).toContain('available Living Model structure');
+    expect(append.mock.calls.flatMap(([write]) => write.handler_facts)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        fact_type: 'explain_from_structure', noop: true,
+        result: expect.objectContaining({ answer_source: 'deterministic_fallback' }),
+      }),
+    ]));
     expect(res.json().assistant_text).not.toContain('platform reliability');
     expect(wroteGraph()).toBe(false);
   });
