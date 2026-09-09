@@ -186,11 +186,18 @@ function deriveValue(rec: RawIntervention, factor: Dict | undefined): number | u
  * ⚠ `reasoning` IS ON THIS LIST DELIBERATELY, AND I HAD IT WRONG FIRST.
  *
  * It reads like unrelated prose, so my first version carried it through. It is
- * not: `InterventionV3` documents it as *"Explanation for transparency"* — an
- * explanation OF THE VALUE — and PR #276's CASE 4 already pinned it as stale
- * value-descriptive metadata that a value override must drop. A justification
- * for 0.9 sitting beside a committed 0.55 is the same defect as a stale
- * `display_value`, one sentence further down the card.
+ * not, and **PR #276's CASE 4 is the load-bearing evidence** — that reviewed case
+ * already pinned `reasoning` as stale value-descriptive metadata a value override
+ * must drop. A justification for 0.9 sitting beside a committed 0.55 is the same
+ * defect as a stale `display_value`, one sentence further down the card.
+ *
+ * ⚠ The producer's docstring is NOT strong enough to carry this on its own, and
+ * I originally leaned on it. `cee-v3.ts:457` says only "Explanation for
+ * transparency" — unqualified — while its neighbours `value_confidence`
+ * ("Confidence in the value itself") and `display_value` DO bind themselves to
+ * the value explicitly. **This producer says so when it means it**, so the
+ * silence is evidence against my reading, not for it. The precedent decides;
+ * the docstring merely fails to contradict it.
  *
  * The line this list draws is not "derived vs prose". It is: does the field
  * make a claim ABOUT THE VALUE? `reasoning`, `display_value` and
@@ -210,9 +217,23 @@ const VALUE_DERIVED_OR_OWNED_KEYS: ReadonlySet<string> = new Set([
  * ⚠⚠ THE PRESERVATION HALF IS NEW, AND IT EXISTS BECAUSE ADMITTING A POPULATION
  * MADE IT REACHABLE. Entries persisted without `target_match` used to be refused
  * outright, so nothing of theirs could be lost. Now that they are editable, this
- * reconstruction was silently dropping their `reasoning` and any additive
- * evidence/provenance every time a value changed — the intervention contract is
- * `.passthrough()`, so those fields are legal and were simply not rebuilt.
+ * reconstruction was silently dropping their additive evidence and provenance
+ * every time a value changed — the intervention contract is `.passthrough()`, so
+ * those fields are legal and were simply not rebuilt.
+ *
+ * ⚠ `reasoning` IS NOT IN THAT SET, AND THE DISTINCTION IS THE WHOLE POINT.
+ * An earlier version of this comment named it alongside the evidence, twenty
+ * lines above the list that now deliberately drops it — the code and its
+ * justification disagreeing in the same file. `reasoning` is value-descriptive
+ * (PR #276's CASE 4 pinned it as stale metadata a value override must drop), so
+ * dropping it is the fix, not the defect.
+ *
+ * ⚠ AND THE CONSEQUENCE, STATED RATHER THAN LEFT TO BE DISCOVERED: this function
+ * supplies no replacement, so a value edit DELETES the explanation rather than
+ * refreshing it. That is deliberate — a justification written for the old value
+ * is false beside the new one, and there is nothing here that could author a
+ * true one. If the product should instead PROMPT for a fresh explanation, that
+ * is a capability decision, not a change to make quietly inside this writer.
  *
  * ⚠ AND THE SCOPE GUARD CANNOT SEE IT. `optionInterventionPostimageIsScoped`
  * restores the WHOLE selected cell before comparing, so it proves only that no
