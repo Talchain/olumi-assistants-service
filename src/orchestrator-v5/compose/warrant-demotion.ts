@@ -35,6 +35,7 @@ import type { ProposalAction } from '../routing/types.js';
 import type { ProposedChange, ProposedChangeIntent } from '../types/proposed-change.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';
 import { buildResidualConstraintDisclosure } from '../routing/mutation-warrant.js';
+import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../tools/handlers/set-factor-value.js';
 
 /**
  * Chip copy per intent.
@@ -105,6 +106,96 @@ export function isProductMintedOfferCopy(message: string): boolean {
 /** Read a named parameter off a proposal action. */
 function param(action: ProposalAction, name: string): ProposalAction['parameters'][number] | undefined {
   return action.parameters.find((p) => p.name === name);
+}
+
+/** A graph node, as far as the target-kind precondition needs to read one. */
+export interface TargetKindLookupNode {
+  readonly id?: unknown;
+  readonly kind?: unknown;
+}
+
+/**
+ * ⭐⭐ TARGET-KIND PRECONDITION — do not offer a chip the resumer must refuse.
+ *
+ * ── THE WITNESS (deployed staging, 1 Sep 2026) ────────────────────────────
+ * A user asked to raise "Engineering Overstretch" to 75%. Turn 1 said
+ * "Nothing has been changed. I want to confirm this with you before I edit the
+ * model" and offered **"Set this value"**. Turn 2, on confirming: "I could not
+ * update that value because the target or value was not valid" — naming
+ * neither. Turn 3 finally told the truth: it is a `risk`, and no operation
+ * sets a value on one directly.
+ *
+ * THE TRUTH WAS AVAILABLE AT TURN 1. The node's kind is in the graph this
+ * branch already holds; only the offer never looked. Turn 2's opaque error and
+ * turn 3's late truth are both DOWNSTREAM of a promise that could not be kept
+ * — the user reached the handler only because the product invited them to.
+ * Improving turn 2's wording would leave the invitation in place.
+ *
+ * ── WHY HERE, AND WHY IT IS NOT A NEW IDEA ────────────────────────────────
+ * The demotion gate in `turn-executor.ts` ALREADY carries a sibling
+ * precondition — the registry-executable check — whose stated reason is that
+ * "a chip would promise a change the resumer could never honour". This is the
+ * same rule; that check asked whether the HANDLER exists and never whether the
+ * TARGET is one it accepts. This function sits beside it, deliberately, rather
+ * than inside `buildWarrantDemotion`, so the two preconditions read as the
+ * pair they are.
+ *
+ * ── DERIVED, NOT MIRRORED ─────────────────────────────────────────────────
+ * The capability comes from each handler's OWN exported authority
+ * (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS`), never from a list re-spelled
+ * here. A kind added to or removed from that constant moves this gate in the
+ * same commit, with no second list to remember (CLAUDE.md trap 12). The gate
+ * is therefore general over the whole node-kind domain — a guard that
+ * special-cased `risk` would leave the identical defect one kind along.
+ *
+ * ── SCOPE, STATED NARROWLY ────────────────────────────────────────────────
+ * Only `set_factor_value` is gated. `add_constraint` accepts four kinds
+ * (factor / outcome / goal / risk) and rejecting decision / action / option at
+ * offer time would need its own refusal copy naming its own working route —
+ * a separate change with no witness behind it, deliberately not made here.
+ * `adjust_edge_strength` targets an EDGE, so no node-kind authority applies;
+ * it is absent from the map and never gated.
+ *
+ * ── FAIL-OPEN ON IGNORANCE, NEVER ON KNOWLEDGE ────────────────────────────
+ * Returns non-null ONLY on positive knowledge that the resolved target's kind
+ * is one the handler rejects. An unresolvable target, an empty graph, or an
+ * intent with no node-kind authority all return null and leave the offer
+ * exactly as it is today. Suppressing a legitimate edit would be a worse
+ * defect than the one this closes, and confirm-before-write must survive
+ * untouched.
+ */
+const TARGET_KIND_AUTHORITY: Partial<Record<ProposedChangeIntent, ReadonlySet<string>>> = {
+  set_factor_value: new Set(SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS),
+};
+
+export function findUnsupportedOfferTargetKind(
+  action: ProposalAction,
+  graphNodes: readonly TargetKindLookupNode[],
+): { readonly nodeKind: string; readonly label: string } | null {
+  if (!isProposedChangeActionType(action.handler_id)) return null;
+  const accepted = TARGET_KIND_AUTHORITY[action.handler_id];
+  if (accepted === undefined) return null;
+
+  const targetId = action.entity.id;
+  if (typeof targetId !== 'string' || targetId.length === 0) return null;
+
+  const targetNode = graphNodes.find(
+    (n) => typeof n.id === 'string' && n.id === targetId,
+  );
+  // Target not in the graph we hold: we do not KNOW the kind, so we do not
+  // refuse. Fail-open is the safe direction here (see header).
+  if (targetNode === undefined) return null;
+
+  const nodeKind = targetNode.kind;
+  if (typeof nodeKind !== 'string' || nodeKind.length === 0) return null;
+  if (accepted.has(nodeKind)) return null;
+
+  const rawLabel = action.entity.label;
+  const label =
+    typeof rawLabel === 'string' && rawLabel.trim().length > 0
+      ? rawLabel.trim()
+      : targetId;
+  return { nodeKind, label };
 }
 
 /**
