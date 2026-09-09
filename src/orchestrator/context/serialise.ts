@@ -60,8 +60,11 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
  * Compact a graph for the edit_graph LLM prompt.
  *
  * More fields than compactGraph() because the LLM needs category, effect_direction,
- * and strength_std to produce valid PatchOperations. Still strips data payloads,
- * positions, and other heavy fields.
+ * and strength_std to produce valid PatchOperations. Option configuration and
+ * target value/scale data must also survive: a factor's observed state is NOT
+ * an option's intervention or permission to copy it. Preserve source fields,
+ * not a derived default/scale. The existing graph budget still bounds the
+ * rendered section; unrelated data payloads and positions remain excluded.
  */
 export function editCompactGraph(graph: GraphV3T): EditCompactGraph {
   const nodes: EditCompactNode[] = graph.nodes.map((node) => {
@@ -72,6 +75,34 @@ export function editCompactGraph(graph: GraphV3T): EditCompactGraph {
       kind: node.kind,
     };
     if (category) result.category = category;
+    if (node.kind === 'factor' || node.kind === 'option') {
+      if (node.description !== undefined) result.description = node.description;
+    }
+    if (node.kind === 'factor') {
+      if (node.observed_state !== undefined) {
+        const { value, raw_value, baseline, unit, cap, source, extractionType,
+          factor_type, uncertainty_drivers, std, confidence } = node.observed_state;
+        result.observed_state = { value, raw_value, baseline, unit, cap, source,
+          extractionType, factor_type, uncertainty_drivers, std, confidence };
+      }
+      if (node.scale_frame !== undefined) result.scale_frame = node.scale_frame;
+      if (node.encoding_map !== undefined) result.encoding_map = node.encoding_map;
+      if (node.factor_type !== undefined) result.factor_type = node.factor_type;
+      if (node.uncertainty_drivers !== undefined) result.uncertainty_drivers = node.uncertainty_drivers;
+    }
+    if (node.kind === 'option') {
+      if (node.is_baseline !== undefined) result.is_baseline = node.is_baseline;
+      if (node.interventions !== undefined) {
+        result.interventions = Object.fromEntries(Object.entries(node.interventions).map(([id, input]: [string, unknown]) => {
+          // Preserve legacy scalar/null entries as supplied; do not turn an
+          // unknown configuration into an empty bundle or certify its scale.
+          if (input === null || typeof input !== 'object' || Array.isArray(input)) return [id, input];
+          const fields = new Set(['value', 'raw_value', 'unit', 'source', 'value_confidence',
+            'reasoning', 'value_type', 'encoding_map', 'target_match']);
+          return [id, Object.fromEntries(Object.entries(input).filter(([key]) => fields.has(key)))];
+        }));
+      }
+    }
     return result;
   });
 

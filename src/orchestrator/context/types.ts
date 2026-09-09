@@ -5,6 +5,8 @@
  * Full graph is sent to PLoT; compact graph is for LLM context only.
  */
 
+import type { ObservedStateV3T } from '../../schemas/cee-v3.js';
+
 // ============================================================================
 // Compact Graph (for LLM context, not for PLoT)
 // ============================================================================
@@ -59,6 +61,18 @@ export interface EditCompactNode {
   label: string;
   kind: string;
   category?: string;
+  description?: string;
+  observed_state?: Pick<ObservedStateV3T,
+    'value' | 'raw_value' | 'baseline' | 'unit' | 'cap' | 'source' |
+    'extractionType' | 'factor_type' | 'uncertainty_drivers' | 'std' | 'confidence'>;
+  /** Existing explicit frame, never inferred from one observed pair. */
+  scale_frame?: number;
+  encoding_map?: Record<string, string>;
+  factor_type?: string;
+  uncertainty_drivers?: string[];
+  is_baseline?: boolean;
+  /** NodeV3's existing mirror also permits scalar/partial legacy entries. */
+  interventions?: Record<string, unknown>;
 }
 
 export interface EditCompactEdge {
