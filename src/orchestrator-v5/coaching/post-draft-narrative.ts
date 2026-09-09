@@ -771,8 +771,23 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
   // stated and the product declined to enforce outranks a coaching suggestion,
   // and the core block is the one the word-budget ladder sheds LAST.
+  // ⭐⭐ PROMOTE THE FIRST DIRECTION CLARIFICATION AHEAD OF THE INVENTORY.
+  //
+  // The measured failure (native `3d5ce286…`, CEE `a03ead1a`): a first response
+  // that opened "I've built a first model", listed the options, and only then
+  // reached the limit the person had actually stated. This section's own
+  // comment already ranks that line above a coaching suggestion; it was simply
+  // below a change inventory.
+  //
+  // It is MOVED, not duplicated: the promoted bullet is removed from the core
+  // list, so the reader sees it exactly once. With no direction clarification
+  // the slot is null, the core list is unchanged, and the assembled narrative is
+  // byte-identical to before — which is why every draft without a dropped limit,
+  // including the served #1395 cases, does not move.
+  const [promotedDirectionBullet = null, ...remainingDirectionBullets] = directionBullets;
+  const leadClarification = promotedDirectionBullet;
   const coreBullets = [
-    ...directionBullets,
+    ...remainingDirectionBullets,
     ...(tradeOffBullet ? [tradeOffBullet] : []),
     ...(assumptionBullet ? [assumptionBullet] : []),
   ];
@@ -782,8 +797,8 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     ...additionalBullets,
   ]);
   const weighingBlockDirectionOnly =
-    directionBullets.length > 0
-      ? renderBulletSection('What the model is weighing', directionBullets)
+    remainingDirectionBullets.length > 0
+      ? renderBulletSection('What the model is weighing', remainingDirectionBullets)
       : null;
 
   // Brief-completeness advisory (own droppable block). Only the enum is read;
@@ -797,6 +812,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     weighingBlockCore,
     weighingBlockDirectionOnly,
     completenessBlock,
+    leadClarification,
     nextStep,
     droppedFigureNotice,
   });
@@ -2079,6 +2095,16 @@ interface SectionedNarrativeInput {
   readonly weighingBlockDirectionOnly: string | null;
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
+  /**
+   * ⭐ The ONE stated-limit clarification promoted ahead of the change
+   * inventory, or `null` when the draft has none.
+   *
+   * Not a new sentence: it is the first `pickDirectionClarifications` line —
+   * the carrier that already exists for "you stated a limit and the product did
+   * not enforce it" — rendered on its own so it can lead. When it is non-null
+   * it is REMOVED from the weighing block below, so the person reads it once.
+   */
+  readonly leadClarification: string | null;
   readonly nextStep: string;
   /**
    * The stated figures the model did not carry, or `null` when there are none
@@ -2126,6 +2152,31 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     includeCompleteness: boolean,
   ): string => {
     const blocks: string[] = [input.confirm];
+    // ⭐⭐ A STATED LIMIT THE PRODUCT DID NOT ENFORCE LEADS — BEFORE THE
+    // INVENTORY, NOT AFTER IT.
+    //
+    // Measured on the fresh pricing draft, native request
+    // `3d5ce286-9804-4a59-ad4e-d6921d31141f` (9 Sep 2026, CEE `a03ead1a`): the
+    // first thing the person read was "I've built a first model", then the
+    // option list, and only then anything about the limit they had stated.
+    // Their brief said "keeping monthly churn under 4%"; the server captured
+    // ZERO constraints for it. The one line that says so was composed — it is a
+    // direction clarification, and the weighing section's own comment already
+    // ranks it: "A limit the user stated and the product declined to enforce
+    // outranks a coaching suggestion." It was simply BELOW a change inventory.
+    //
+    // ⚠ THIS INTEGRATES THE EXISTING CARRIER RATHER THAN ADDING ONE. No new
+    //   sentence is invented, nothing is asserted about the limit's meaning, and
+    //   an unbound constraint stays honestly unbound — the promoted text is the
+    //   same `pickDirectionClarifications` line, moved.
+    //
+    // ⚠ NARROW BY CONSTRUCTION. When there is no such clarification the slot is
+    //   null and the assembly is byte-identical to before, so every draft
+    //   without a dropped limit — including the served #1395 cases — is
+    //   unchanged.
+    if (input.leadClarification !== null && input.leadClarification.length > 0) {
+      blocks.push(input.leadClarification);
+    }
     if (includeOptions && input.optionsBlock !== null) {
       blocks.push(input.optionsBlock);
     }
