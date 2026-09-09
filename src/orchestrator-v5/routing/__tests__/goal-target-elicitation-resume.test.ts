@@ -1,28 +1,27 @@
 /**
- * ⭐⭐ THE GOAL-TARGET ANSWER, RESOLVED INTO THE TUPLE THE CANONICAL WRITER TAKES.
+ * ⭐⭐ THE GOAL-TARGET ANSWER RESOLVER — ONE typed way in, and nothing else.
  *
- * Built on the sibling the independent review named: `elicit_target_baseline`
- * (`turn-executor.ts:5948-6045`) is the existing numeric-answer route — typed
- * chip first, then this, then generic factor parsing — with pending
- * parse/liveness/hash and the SAME `add_constraint` lifecycle. This is its
- * target-side twin, kept separate on purpose.
+ * `tryGoalTargetElicitationResume` decides whether a message may ANSWER the
+ * recorded goal-target question. Because the executor grants the mutation
+ * warrant on `isConfirmResume` before inspecting the message, a match supplies
+ * both the target and its licence to write — so this is an AUTHORITY decision
+ * and every doubtful case must refuse.
  *
- * ⛔ TWO CORRECTIONS I OWE, BOTH FROM THE REVIEW AND BOTH KEPT HERE:
- *   · my pending-kind census stopped at line 400 of `pending-action.ts` and
- *     missed `clarify_v2_round`, `elicit_target_baseline`,
- *     `elicit_option_effect`, `elicit_effect_target`, `elicit_edit_target` and
- *     `proposed_concept`. A truncated enumeration is not an enumeration, and it
- *     is the second time I have made that exact error;
- *   · `readiness-summary.ts:30` deliberately QUARANTINES
- *     `goal_threshold_missing` and preserves ready-without-threshold. Nothing
- *     here revives it: offering a clarification is not changing admission, and
- *     a targetless draft stays analysable.
+ * ⛔ FOUR ROUNDS OF PROSE PREDICATES, EACH REFUTED BY A COUNTEREXAMPLE:
+ *   b56f54a7  one amount, no other full label       → says nothing about ROLE
+ *   690b8735  + no present-state marker             → "Our baseline MRR is £12,000."
+ *   35ed6e22  + a target word anywhere              → the word was in another clause
+ *   de9010fe  + target word in the amount's clause  → "Our baseline MRR for choosing
+ *                                                      a target is £12,000."
+ * CLAUDE.md trap 22f: four reversals is proof the approach is wrong. The gate
+ * now keeps ONLY what is typed — the message must be the quantity CQE read,
+ * plus hedges — and everything richer falls through to the ordinary receiver.
  *
- * The percent classifier is deliberately NOT reused — baseline answers are
- * percents, a goal target is in the person's own units (£20k, 5,000 signups,
- * 92%) — so this uses the shared CQE extractor the deterministic value-update
- * route already uses. No second parser, and no writer: the resolved tuple is
- * replayed through the canonical `add_constraint` lifecycle.
+ * ⚠ THE COVERAGE THIS DELIBERATELY GIVES UP is pinned below as its own case, so
+ * it stays a decision rather than becoming an accident: "The target is £20,000."
+ * no longer binds HERE. It is not lost to the user — an explicit goal statement
+ * still reaches the canonical writer by its ordinary route; it simply does not
+ * ride the pre-route's pre-granted warrant.
  *
  * Not run locally; hosted CI is the only execution.
  */
@@ -37,19 +36,31 @@ const NODES = [
   { id: 'f-churn', label: 'Pro Plan Churn Rate' },
 ];
 
+/**
+ * ⛔ THE HELPER THAT SILENTLY DISARMED THREE OF ITS OWN CONTROLS.
+ *
+ * It used to spread `...overrides` AFTER the nested `action`, so
+ * `pending({ action: { unit: 'GBP' } })` REPLACED the whole action with
+ * `{ unit: 'GBP' }` — no `kind`, no `goal_node_id`, no `question`. Every case
+ * built that way refused for the wrong reason and proved nothing about the
+ * branch it named. Found by the independent review in the hosted failures, not
+ * by me. `action` is now destructured out and merged, and the caller-visible
+ * shape is unchanged.
+ */
 function pending(overrides: Record<string, unknown> = {}) {
+  const { action: actionOverride, ...rest } = overrides;
   return {
     id: 'pa-goal-1',
+    ...rest,
     action: {
       kind: 'elicit_goal_target',
       goal_node_id: 'g-revenue',
       question: 'What value counts as success for this goal?',
-      ...(overrides.action as Record<string, unknown> | undefined),
+      ...(actionOverride as Record<string, unknown> | undefined),
     },
     expires_at_turn_count: 3,
     expires_at_iso: new Date(NOW + 600_000).toISOString(),
     preconditions: { graph_hash: GRAPH_HASH },
-    ...overrides,
   };
 }
 
@@ -63,216 +74,131 @@ function resume(message: string, pendings: readonly unknown[], hash: string | un
   });
 }
 
-describe('a goal-target answer resolves to the writer tuple, and nothing else does', () => {
+/** Narrow to the refusal arm that carries a `reason`, then read it. */
+function refusalReason(result: ReturnType<typeof resume>): string {
+  if (result.matched) throw new Error('expected a refusal, got a match');
+  if (result.skip_reason !== 'unreadable_answer') {
+    throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
+  }
+  return result.reason;
+}
+
+describe('the quantity CQE read, plus hedges — and nothing else', () => {
   it('⭐ POSITIVE — "£20k" answers the question and yields goal, value and unit', () => {
     const result = resume('£20k', [pending()]);
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.goalNodeId).toBe('g-revenue');
     expect(result.value).toBe(20000);
-    expect(result.unit).toBe('£');
+    // ⚠ `GBP`, not `£`. CQE normalises currency tokens
+    // (`context/cqe/rules.ts` `normaliseCurrencyUnit`), so the canonical
+    // representation reaching the writer is the ISO code. My earlier
+    // expectation of the display symbol was wrong about the producer, and the
+    // fix belongs here — NOT in currency handling, which is correct.
+    expect(result.unit).toBe('GBP');
   });
 
   it('a bare number answers it too, taking the unit the question established', () => {
-    const result = resume('20000', [pending({ action: { unit: '£' } })]);
+    const result = resume('20000', [pending({ action: { unit: 'GBP' } })]);
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.value).toBe(20000);
-    expect(result.unit).toBe('£');
+    expect(result.unit).toBe('GBP');
   });
 
-  it('⭐ CEILING — "keep it under 4%" is refused, never stamped as a success minimum', () => {
-    // A goal minimum is not a churn maximum. ISL computes P(samples >= t), so
-    // recording a ceiling as a >= target would invert the person's meaning.
-    const result = resume('keep it under 4%', [pending()]);
-    expect(result.matched).toBe(false);
-    if (result.matched) return;
-    expect(result.skip_reason).toBe('unreadable_answer');
-  });
-
-  it('⭐ CURRENT LEVEL — "our current MRR is £12,000" is a report, not a target', () => {
-    // One finite non-ceiling currency amount, naming no other node's label.
-    // Only POSITIVE eligibility withdraws it: the message is not the amount
-    // alone, and it uses no target language.
-    const result = resume('Our current MRR is £12,000.', [pending()]);
-    expect(result.matched).toBe(false);
-    if (result.matched) return;
-    if (result.skip_reason !== 'unreadable_answer') {
-      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
-    }
-    expect(result.reason).toBe('not_a_target_answer');
-  });
-
-  it('⭐ BASELINE REPORT — "our baseline MRR is £12,000" carries no marker and is still refused', () => {
-    // The independent review's counterexample against the NEGATIVE list this
-    // gate replaced. It carries no present-state marker at all, which is
-    // exactly why a marker list could never have caught it: absence of a
-    // refusal signal was never evidence of a target answer.
-    const result = resume('Our baseline MRR is £12,000.', [pending()]);
-    expect(result.matched).toBe(false);
-    if (result.matched) return;
-    if (result.skip_reason !== 'unreadable_answer') {
-      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
-    }
-    expect(result.reason).toBe('not_a_target_answer');
-  });
-
-  it('CONTRAST — a STATED TARGET of the same sentence shape still binds', () => {
-    // The half that proves the gate discriminates ROLE rather than sentence
-    // length or the presence of a copula: same "<subject> is <amount>" shape,
-    // target language present.
-    const result = resume('The target is £20,000.', [pending()]);
-    expect(result.matched).toBe(true);
-    if (!result.matched) return;
-    expect(result.value).toBe(20000);
-    expect(result.unit).toBe('£');
-  });
-
-  it('CONTRAST — an intent sentence with no target NOUN still binds', () => {
-    const result = resume('We need to hit £20,000 by year end.', [pending()]);
-    expect(result.matched).toBe(true);
-    if (!result.matched) return;
-    expect(result.value).toBe(20000);
-  });
-
-  it("CONTRAST — CQE's own floor reading is enough, with no target vocabulary at all", () => {
-    // "at least" names a FLOOR, which is what `goal_threshold` is. It is
-    // reachable by BOTH prose routes (CQE's own `comparator: 'at_least'` and
-    // the phrase list), so this case is deliberately over-determined: it pins
-    // the behaviour without asserting which route carried it.
-    const result = resume('at least £20,000 a month', [pending()]);
-    expect(result.matched).toBe(true);
-    if (!result.matched) return;
-    expect(result.value).toBe(20000);
-  });
-
-  it('⭐ A BARE VERB IS NOT INTENT — "we get £12,000 a month" is a report', () => {
-    // Self-caught while writing the vocabulary: `get` was briefly a member, and
-    // it makes this present-tense report eligible. The phrase `get to` is an
-    // intent; the bare verb is not. Two words apart, opposite roles — which is
-    // why the vocabulary carries the phrase and not the verb, and why
-    // `benchmark` is absent too (an industry benchmark is someone else's
-    // number, not this team's criterion).
-    const result = resume('We get £12,000 a month.', [pending()]);
-    expect(result.matched).toBe(false);
-  });
-
-  it('CONTRAST — "get to £20,000" IS intent and binds', () => {
-    const result = resume('We want to get to £20,000.', [pending()]);
-    expect(result.matched).toBe(true);
-    if (!result.matched) return;
-    expect(result.value).toBe(20000);
-  });
-
-  it('HEDGED BARE ANSWER — "about £20k" is still just the amount', () => {
-    // `about` is answer furniture, from `ANSWER_HEDGE_WORDS` (derived from
-    // stated-level's closed qualifier list minus its tense members).
+  it('HEDGED — "about £20k" is still just the amount', () => {
+    // `about` is answer furniture, from `ANSWER_HEDGE_WORDS` (derived in
+    // `stated-level.ts` from its closed qualifier list minus the tense words).
     const result = resume('about £20k', [pending()]);
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.value).toBe(20000);
   });
 
-  it('⭐ BASELINE PLUS A TARGET QUESTION — the word is in the OTHER clause', () => {
-    // The review's counterexample. One currency amount, no other node's label,
-    // and the word `target` present — so a message-wide test accepted it. But
-    // the amount is a BASELINE in one clause and the target is a QUESTION in
-    // another. Presence of the word was never the relation.
-    const result = resume('Our baseline MRR is £12,000; what target should we choose?', [
-      pending(),
-    ]);
-    expect(result.matched).toBe(false);
-    if (result.matched) return;
-    if (result.skip_reason !== 'unreadable_answer') {
-      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
-    }
-    expect(result.reason).toBe('not_a_target_answer');
-  });
-
-  it('⭐ DISCRIMINATING TWIN — the same words, with the target word in the AMOUNT\'s clause', () => {
-    // Same vocabulary, same two clauses, same single amount. The ONLY
-    // difference is which clause the amount sits in. Without this twin the
-    // case above could be passing because the sentence is long, or because it
-    // contains a question mark somewhere, rather than because of the binding.
-    const result = resume('What should we aim for? The target is £20,000.', [pending()]);
+  it('PUNCTUATION is not content — "£20,000." binds', () => {
+    const result = resume('£20,000.', [pending()]);
     expect(result.matched).toBe(true);
     if (!result.matched) return;
     expect(result.value).toBe(20000);
   });
+});
 
-  it('⭐ DISTINCT CHURN — "the churn target is 4%" is a guardrail wearing the word "target"', () => {
-    // E2(c). Assertion, target word and one amount all in ONE clause, and the
-    // message names no node's COMPLETE label — so every other gate passes.
-    // Only the SUBJECT distinguishes it: `churn` belongs to another node's
-    // label and not to the goal's. A goal minimum is not a churn maximum, and
-    // this is what keeps them apart when the guardrail is written as a target.
-    const result = resume('The churn target is 4%', [pending()]);
-    expect(result.matched).toBe(false);
-    if (result.matched) return;
-    if (result.skip_reason !== 'unreadable_answer') {
-      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
-    }
-    expect(result.reason).toBe('not_a_target_answer');
+describe('every richer message falls through — the four refuted predicates', () => {
+  it('⭐ ROUND 4 — "our baseline MRR FOR CHOOSING A TARGET is £12,000"', () => {
+    // The counterexample that ended the prose approach: one clause, no `?`, no
+    // foreign token, and the word `target` — while £12,000 is explicitly the
+    // baseline informing an UNDECIDED target.
+    expect(refusalReason(resume('Our baseline MRR for choosing a target is £12,000.', [pending()]))).toBe(
+      'not_a_target_answer',
+    );
   });
 
-  it('⭐ CONTRAST — a token the GOAL shares is not foreign', () => {
-    // The goal is "Reach £20k MRR within 12 months", so `mrr` is its own token
-    // and cannot be evidence of another subject. Without this the gate above
-    // could be refusing any clause with a noun in it.
-    const result = resume('The MRR target is £20,000', [pending()]);
-    expect(result.matched).toBe(true);
-    if (!result.matched) return;
-    expect(result.value).toBe(20000);
+  it('⭐ ROUND 3 — the target word in a DIFFERENT clause', () => {
+    expect(
+      refusalReason(resume('Our baseline MRR is £12,000; what target should we choose?', [pending()])),
+    ).toBe('not_a_target_answer');
   });
 
-  it('⭐ A QUESTION IS NOT AN ANSWER — a target clause ending in "?" refuses', () => {
-    // The affirmation and the amount are in the same clause here, so only the
-    // clause TERMINATOR distinguishes this from a genuine statement.
-    const result = resume('Should the target be £20,000?', [pending()]);
-    expect(result.matched).toBe(false);
-    if (result.matched) return;
-    if (result.skip_reason !== 'unreadable_answer') {
-      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
-    }
-    expect(result.reason).toBe('not_a_target_answer');
+  it('⭐ ROUND 2 — a baseline report carrying no present-state marker', () => {
+    expect(refusalReason(resume('Our baseline MRR is £12,000.', [pending()]))).toBe(
+      'not_a_target_answer',
+    );
   });
 
-  it('⭐ OTHER SUBJECT — a price named on another node is not the goal target', () => {
-    // The reply carries exactly one amount and is plainly about something else.
-    // `f-churn` is labelled 'Pro Plan Churn Rate'; naming it withdraws the
-    // bind. The bound is deliberate and stated at the gate: this refuses
-    // answers that NAME ANOTHER NODE, it does not try to decide aboutness from
-    // prose alone.
-    const result = resume('Pro Plan Churn Rate is 4 percent', [pending()]);
-    expect(result.matched).toBe(false);
-    if (result.matched) return;
-    // Narrowed by the discriminant before reading `reason`: only the
-    // `unreadable_answer` arm carries one, so a bare `expect` would not
-    // typecheck (and would read a field the other arms do not have).
-    if (result.skip_reason !== 'unreadable_answer') {
-      throw new Error(`expected unreadable_answer, got ${result.skip_reason}`);
-    }
-    expect(result.reason).toBe('names_other_subject');
+  it('⭐ ROUND 1 — a current-level report', () => {
+    expect(refusalReason(resume('Our current MRR is £12,000.', [pending()]))).toBe(
+      'not_a_target_answer',
+    );
   });
 
-  it('CONTRAST — the same claim naming NO other node binds when it names a target', () => {
-    // Without this the subject gate above could be refusing on the sentence's
-    // length or its verb rather than on the node it names. Target language is
-    // present in both, so the ONLY difference is the named subject.
-    const result = resume('Our target is 20000', [pending({ action: { unit: '£' } })]);
-    expect(result.matched).toBe(true);
-    if (!result.matched) return;
-    expect(result.value).toBe(20000);
+  it('⭐ DISTINCT CHURN — a guardrail wearing the word "target"', () => {
+    // A goal minimum is not a churn maximum. Retained from the previous round
+    // because the harm is real; it now refuses for the general reason rather
+    // than through a subject-token test.
+    expect(refusalReason(resume('The churn target is 4%', [pending()]))).toBe(
+      'not_a_target_answer',
+    );
+  });
+
+  it('a question about the target is not an answer to it', () => {
+    expect(refusalReason(resume('Should the target be £20,000?', [pending()]))).toBe(
+      'not_a_target_answer',
+    );
+  });
+
+  it('⚠ THE COVERAGE GIVEN UP, PINNED — "The target is £20,000." no longer binds HERE', () => {
+    // Recorded as a decision, not an accident. This is a genuine goal statement
+    // and the gate declines it, because no test over prose survived four
+    // rounds. The user does not lose the capability: the ordinary receiver
+    // still routes an explicit goal statement to the canonical writer. What it
+    // loses is the pre-route's PRE-GRANTED mutation warrant, which is exactly
+    // the authority that made a false match dangerous.
+    //
+    // If this ever starts binding again, someone has reopened the class.
+    expect(refusalReason(resume('The target is £20,000.', [pending()]))).toBe(
+      'not_a_target_answer',
+    );
+  });
+});
+
+describe('the fences, unchanged', () => {
+  it('⭐ CEILING — "keep it under 4%" is never a success minimum', () => {
+    // ISL computes P(samples >= t), so recording a ceiling as a >= target would
+    // invert the person's meaning.
+    expect(refusalReason(resume('keep it under 4%', [pending()]))).toBe('ceiling_not_minimum');
+  });
+
+  it('⭐ OTHER SUBJECT — a reply naming another node is refused before eligibility', () => {
+    expect(refusalReason(resume('Pro Plan Churn Rate is 4 percent', [pending()]))).toBe(
+      'names_other_subject',
+    );
   });
 
   it('SEVERAL AMOUNTS — the product asks again rather than choosing one', () => {
-    const result = resume('somewhere between £20k and £30k', [pending()]);
-    expect(result.matched).toBe(false);
+    expect(resume('somewhere between £20k and £30k', [pending()]).matched).toBe(false);
   });
 
   it('NO PENDING — an ordinary quantity turn is untouched', () => {
-    // The route is additive: with no live question, every existing lane keeps
-    // its behaviour, so a price or an unrelated factor answer is unaffected.
     const result = resume('£59', []);
     expect(result.matched).toBe(false);
     if (result.matched) return;
@@ -280,16 +206,15 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
   });
 
   it('COMPETING QUESTION — a second number-asking pending blocks the bare answer', () => {
-    // Reuses `PENDING_KIND_CLAIMS_BARE_NUMBER`: liveness, then claimants, then
-    // identity. A competing ask must not be counted out of existence.
+    // Liveness, then claimants, then identity. A competing ask must not be
+    // counted out of existence.
     const competitor = {
       id: 'pa-baseline',
       action: { kind: 'elicit_target_baseline', target_id: 'f-churn' },
       expires_at_turn_count: 3,
       expires_at_iso: new Date(NOW + 600_000).toISOString(),
     };
-    const result = resume('20000', [pending(), competitor]);
-    expect(result.matched).toBe(false);
+    expect(resume('20000', [pending(), competitor]).matched).toBe(false);
   });
 
   it('GRAPH DIVERGED — a moved model refuses rather than applying a stale answer', () => {

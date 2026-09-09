@@ -410,16 +410,8 @@ function isRealBoundary(text: string, at: number): boolean {
  * The full clause containing `index` — text between the nearest REAL
  * boundaries on each side — and the boundary character that terminates it
  * (undefined at end-of-text).
- *
- * ⭐ EXPORTED (2026-09-09) so the goal-target answer gate can scope its
- * affirmation test to the clause CARRYING the amount rather than to the whole
- * message. Both callers need the same notion of "clause", and a second
- * boundary scanner beside this one would be the hand-maintained mirror this
- * repo keeps paying for (CLAUDE.md trap 12) — `isRealBoundary`'s decimal-point
- * and abbreviation rules in particular are exactly the kind of detail a copy
- * drifts on.
  */
-export function clauseAround(
+function clauseAround(
   text: string,
   index: number,
 ): { readonly clause: string; readonly terminator: string | undefined } {
@@ -505,16 +497,8 @@ function singularise(word: string): string {
   return word;
 }
 
-/**
- * The label's word set, lowercased and singular-folded.
- *
- * ⭐ EXPORTED (2026-09-09) so the goal-target answer gate can ask its SUBJECT
- * question — "does this clause name a token belonging to some OTHER node?" —
- * with the same folding this module's own subject binding uses. A second
- * tokeniser beside this one would drift on exactly the details that matter
- * (the `-ss`/`-us`/`-is` singular guard, the non-alphanumeric split).
- */
-export function labelWordSet(label: string): Set<string> {
+/** The label's word set, lowercased and singular-folded. */
+function labelWordSet(label: string): Set<string> {
   return new Set(
     label
       .toLowerCase()

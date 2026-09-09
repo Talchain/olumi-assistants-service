@@ -313,7 +313,12 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     const cap = goal!.goal_threshold_cap as number;
     const normalised = goal!.goal_threshold as number;
     expect(raw).toBe(20000);
-    expect(goal!.goal_threshold_unit).toBe('£');
+    // ⚠ `GBP`, not `£`. CQE normalises currency tokens
+    // (`context/cqe/rules.ts` `normaliseCurrencyUnit`), so the canonical
+    // representation reaching the writer is the ISO code. My earlier
+    // expectation of the display symbol was wrong about the producer; the fix
+    // belongs in the expectation, NOT in currency handling.
+    expect(goal!.goal_threshold_unit).toBe('GBP');
     // Cap doctrine rule 3 — 25% headroom on a non-percent target, and never
     // `cap === raw` (which would force goal_threshold = 1.0 and kill the
     // probability spread).
@@ -522,11 +527,15 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     ).toHaveLength(1);
   });
 
-  it('⭐ DISCRIMINATING TWIN — the same words with the target word in the AMOUNT\'s clause DO commit', async () => {
-    // Same vocabulary, same two clauses, same single amount, same question
-    // mark in the message. The ONLY difference is which clause carries the
-    // amount — so the case above cannot be passing on sentence length, on the
-    // presence of a `?`, or on anything but the binding.
+  it("⭐ ROUND-4 COUNTEREXAMPLE — \"baseline MRR FOR CHOOSING A TARGET\" makes no write and keeps the question", async () => {
+    // The independent review's final counterexample, at the real receiver. One
+    // clause, no `?`, no other node's label, and the word `target` — while
+    // £12,000 is explicitly the baseline informing an UNDECIDED target.
+    //
+    // BOTH assertions, because either alone is too weak: the pre-route sets
+    // `consumedPendingAction` and the warrant is granted on `isConfirmResume`
+    // BEFORE the message is inspected, so a false match spends the question as
+    // well as writing the wrong value.
     const graph = graphWithTargetlessGoal();
     mockedPersistedGraph = graph;
     const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
@@ -534,24 +543,31 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     const { adapter, chatWithTools } = directAnswerAdapter();
 
     await runTurnExecutor(
-      payload('What should we aim for? The target is £20,000.'),
-      'req-goal-clause-twin',
+      payload('Our baseline MRR for choosing a target is £12,000.'),
+      'req-goal-round4',
       { routingAdapter: adapter, graphState: graph },
     );
 
-    expect(chatWithTools).not.toHaveBeenCalled();
-    const graphs = committedGraphs();
-    expect(graphs.length).toBeGreaterThan(0);
-    const goal = goalNodeOf(graphs[graphs.length - 1]);
-    expect(goal?.goal_threshold_raw).toBe(20000);
-    expect(goal?.goal_threshold_unit).toBe('£');
+    expect(chatWithTools).toHaveBeenCalled();
+    for (const g of committedGraphs()) {
+      expect(goalNodeOf(g)?.goal_threshold_raw).toBeUndefined();
+    }
+    expect(appendCalls.length, 'the turn did not commit, so this case proves nothing').toBeGreaterThan(0);
+    const finalPendings = (appendCalls[appendCalls.length - 1]!.pending_actions ??
+      []) as PendingAction[];
+    expect(
+      finalPendings.filter((p) => p.action.kind === 'elicit_goal_target'),
+      'the goal-target question was consumed by a message that named no target',
+    ).toHaveLength(1);
   });
 
   it('⭐ DISTINCT CHURN — "the churn target is 4%" makes no goal write and keeps the question', async () => {
-    // Addendum item 4's mixed-role case at the real receiver. Assertion, target
-    // word and one amount in one clause, no node's COMPLETE label named — so
-    // only the SUBJECT gate refuses it. A guardrail written as a "target" must
-    // not become the value every option is scored against.
+    // Addendum item 4's mixed-role case at the real receiver. A guardrail
+    // written as a "target" must not become the value every option is scored
+    // against. It carries one amount, no node's COMPLETE label, and the word
+    // `target` — every predicate I tried across four rounds accepted some
+    // version of this shape. It now refuses for the general reason: the message
+    // is not the quantity CQE read plus hedges.
     const graph = graphWithTargetlessGoal();
     mockedPersistedGraph = graph;
     const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
@@ -576,17 +592,19 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     ).toHaveLength(1);
   });
 
-  it('⭐ MINIMUM — an explicit floor for the goal commits, so the ceiling control discriminates', async () => {
-    // The other half of addendum item 4's minimum-versus-maximum pair. Same
-    // fixture, same live question, opposite bound: this MUST write where
-    // "keep it under 4%" must not.
+  it('⭐ MINIMUM — the committed constraint is a FLOOR, so the ceiling control discriminates', async () => {
+    // The other half of the minimum-versus-maximum pair. Same fixture, same
+    // live question: a scalar answer commits, and what it commits is `at_least`
+    // on the goal — the opposite bound to "keep it under 4%", which commits
+    // nothing. Asserting the OPERATOR is what makes the pair meaningful; a
+    // value alone would not distinguish a floor from a ceiling.
     const graph = graphWithTargetlessGoal();
     mockedPersistedGraph = graph;
     const liveHash = computeAnalysisAffectingGraphHash(graph as never)!;
     mockedPendingActions = [goalTargetPending(liveHash)];
     const { adapter, chatWithTools } = directAnswerAdapter();
 
-    await runTurnExecutor(payload('At least £20,000 a month.'), 'req-goal-minimum', {
+    await runTurnExecutor(payload('£20,000'), 'req-goal-minimum', {
       routingAdapter: adapter,
       graphState: graph,
     });
@@ -594,7 +612,14 @@ describe('ANSWER — the reply reaches the canonical writer and the value is COM
     expect(chatWithTools).not.toHaveBeenCalled();
     const graphs = committedGraphs();
     expect(graphs.length).toBeGreaterThan(0);
-    expect(goalNodeOf(graphs[graphs.length - 1])?.goal_threshold_raw).toBe(20000);
+    const committed = graphs[graphs.length - 1]!;
+    expect(goalNodeOf(committed)?.goal_threshold_raw).toBe(20000);
+    const constraints = ((committed as unknown as Record<string, unknown>).goal_constraints ??
+      []) as Array<Record<string, unknown>>;
+    expect(
+      constraints.some((c) => c.node_id === 'g-revenue' && c.operator === '>='),
+      'the goal constraint is not recorded as a floor',
+    ).toBe(true);
   });
 
   it('NO QUESTION — the same bare amount with no live pending is just a message', async () => {
@@ -687,7 +712,7 @@ describe('JOINED — turn 1 emits the question, turn 2 answers it through the re
     const cap = goal?.goal_threshold_cap as number;
     const normalised = goal?.goal_threshold as number;
     expect(raw).toBe(20000);
-    expect(goal?.goal_threshold_unit).toBe('£');
+    expect(goal?.goal_threshold_unit).toBe('GBP');
     expect(cap).toBeGreaterThan(raw);
     expect(normalised).toBeCloseTo(raw / cap, 10);
   });

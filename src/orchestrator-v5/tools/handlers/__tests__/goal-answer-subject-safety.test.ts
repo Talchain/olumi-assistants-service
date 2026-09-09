@@ -125,17 +125,34 @@ describe('the answer to a target question sets the goal target, and only that', 
     expect(goal.goal_threshold).toBeUndefined();
   });
 
-  it('NEGATIVE — an option price answer never becomes the goal target', async () => {
+  it('NEGATIVE — an option price answer is REFUSED by kind, and mutates nothing', async () => {
+    // ⛔ THIS CASE ASSERTED THE WRONG OUTCOME AND WAS FOUND BY HOSTED CI, NOT BY
+    // ME. It awaited a successful result and read `outcome.mutated_graph`; the
+    // handler actually THROWS `ENTITY_KIND_MISMATCH`, because `o-launch` is an
+    // option and `add_constraint` does not accept that kind. So the assertion
+    // never ran and the case proved nothing.
+    //
+    // The refusal is the correct behaviour and is now what is asserted. The
+    // writer's accepted node kinds are deliberately NOT broadened to make this
+    // fixture resolve — the typed refusal IS the protection, one layer below
+    // the resolver's own subject gate.
     const handler = createAddConstraintHandler();
-    const outcome = await handler(
-      buildInvocation(
-        buildD1Fixture(),
-        proposal({ entityId: 'o-launch', entityKind: 'node', constraintType: 'at_least', value: 59, unit: '£' }),
-        'Raise the Pro plan price to £59',
+    const fixture = buildD1Fixture();
+    const before = goalOf(fixture);
+    expect(before.goal_threshold_raw, 'the fixture already carried a target').toBeUndefined();
+
+    await expect(
+      handler(
+        buildInvocation(
+          fixture,
+          proposal({ entityId: 'o-launch', entityKind: 'node', constraintType: 'at_least', value: 59, unit: '£' }),
+          'Raise the Pro plan price to £59',
+        ),
       ),
-    );
-    const goal = goalOf(outcome.mutated_graph);
-    expect(goal.goal_threshold_raw).toBeUndefined();
+    ).rejects.toThrow(/ENTITY_KIND_MISMATCH|entity kind/i);
+
+    // And the graph handed in is untouched — a throw must not have mutated it.
+    expect(goalOf(fixture).goal_threshold_raw).toBeUndefined();
   });
 
   it('NEGATIVE — a "keep below" answer on the goal stamps no target (minimisation doctrine)', async () => {

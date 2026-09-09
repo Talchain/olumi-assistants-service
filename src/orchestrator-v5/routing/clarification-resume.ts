@@ -60,8 +60,6 @@ import {
 import {
   ANSWER_HEDGE_WORDS,
   classifyElicitedBaselineAnswer,
-  clauseAround,
-  labelWordSet,
 } from '../../cee/factor-extraction/stated-level.js';
 
 /**
@@ -784,209 +782,93 @@ export function tryBaselineElicitationResume(input: {
  *   precise missing question and must not claim an edit.
  */
 /**
- * ⭐ THE TARGET-LANGUAGE VOCABULARY — closed, and POSITIVE.
+ * The words of the message that are NOT the quantity CQE read.
  *
- * Membership licenses a bind on a prose answer; absence refuses one. That
- * polarity is the whole point: every word missing from this list costs
- * COVERAGE (the message falls through to the ordinary lanes, exactly as it did
- * before this route existed), and no word missing from it can cause a wrong
- * write. The negative list this replaces had the opposite property.
+ * ⚠ NOT A PARSER, and it must not become one. It reads no value, decides no
+ * unit and carries no magnitude vocabulary of its own: `raw_text` is the exact
+ * bytes the extractor matched, INCLUDING any comparator phrase and magnitude
+ * suffix it bound, so removing it leaves the message's remaining words with no
+ * word list involved. The trailing digit pass only catches a second numeral the
+ * extractor did not claim (the caller has already refused messages with more
+ * than one amount, so this is defensive).
  *
- * Deliberately excludes bare aspiration words that also read as reports
- * ("expect", "forecast", "projected") — a forecast is a prediction of where
- * things will land, not a criterion for success, and the two are worth keeping
- * apart. "Minimum"/"at least" are here because they name a FLOOR, which is
- * what `goal_threshold` is; no ceiling word appears, and a ceiling is refused
- * upstream by the comparator gate regardless.
+ * ⛔ A PREVIOUS VERSION SPELLED OUT THE LONG-FORM MAGNITUDE WORDS, which put
+ * this file inside the magnitude-alphabet guard's scan — correctly, because
+ * that WAS a fifth hand-written magnitude list, the exact thing that guard
+ * exists to stop. Deriving the strip from `raw_text` REMOVES the vocabulary
+ * rather than relabelling it as incidental, which is why this file is not in
+ * that guard's REVIEWED manifest: it no longer spells any of those words at
+ * all. The short suffixes left in the fallback pattern are single letters, not
+ * an alphabet. (Stated without spelling them, so this comment cannot itself
+ * trip the scan — the guard reads file CONTENT, prose included.)
  */
-const GOAL_TARGET_LANGUAGE: readonly string[] = [
-  // Nouns that name the thing being set.
-  'target',
-  'targets',
-  'goal',
-  'goals',
-  'objective',
-  'objectives',
-  'success',
-  'successful',
-  'threshold',
-  'minimum',
-  // Verbs of intent — what the person means to bring about.
-  'aim',
-  'aims',
-  'aiming',
-  'hit',
-  'reach',
-  'reaching',
-  'achieve',
-  'achieving',
-  'want',
-  'wants',
-  'need',
-  'needs',
-];
-
-/** Multi-word target phrases, matched literally on the lowercased message. */
-const GOAL_TARGET_PHRASES: readonly string[] = [
-  'at least',
-  'or more',
-  'or above',
-  'or better',
-  'no less than',
-  'counts as success',
-  // Phrase, never the bare verb: "we GET £12,000 a month" is a report, while
-  // "get TO £20,000" is an intent. Two words apart, opposite roles — the same
-  // reason `benchmark` is absent (an industry benchmark is someone else's
-  // number, not this team's criterion).
-  'get to',
-];
-
-/**
- * Strip every numeric token — the amount, its currency mark, its magnitude
- * suffix and its percent sign — so what remains is the message's WORDS.
- *
- * ⚠ NOT A PARSER, and it must not become one. It reads no value and decides
- * no unit; CQE has already done both, and its result is what the caller binds.
- * This exists only to answer "is there anything here BESIDES the amount?", and
- * it is deliberately written against the raw message rather than CQE's
- * normalised spans because the two can disagree on separators ("£20,000" vs
- * `20000`) and a span miss would silently reclassify a bare answer as prose.
- */
-function wordsBesidesTheAmount(message: string): readonly string[] {
-  const withoutNumbers = message.replace(
-    /[£$€]?\s?\d[\d,. ]*\s*(?:%|k\b|m\b|bn\b|b\b|thousand|million|billion)?/gi,
-    ' ',
-  );
-  return withoutNumbers.toLowerCase().match(/[a-z']+/g) ?? [];
-}
-
-/**
- * Where the amount SITS in the raw message, so its clause can be found.
- *
- * CQE's `span_start`/`span_end` are offsets into its NORMALISED text, which can
- * disagree with the raw message on separators, so they are deliberately not
- * used here: a span miss would silently move the clause window. `raw_text` is
- * matched first (it is the bytes CQE actually read); a first-digit fallback
- * covers a normalisation-only difference. `-1` means the relation cannot be
- * established, and the caller then refuses.
- */
-function amountIndexIn(message: string, rawText: unknown): number {
+function wordsBesidesTheAmount(message: string, rawText: unknown): readonly string[] {
+  let residue = message;
   if (typeof rawText === 'string' && rawText.length > 0) {
-    const at = message.toLowerCase().indexOf(rawText.toLowerCase());
-    if (at >= 0) return at;
+    const at = residue.toLowerCase().indexOf(rawText.toLowerCase());
+    if (at >= 0) residue = `${residue.slice(0, at)} ${residue.slice(at + rawText.length)}`;
   }
-  const digit = /\d/.exec(message);
-  return digit === null ? -1 : digit.index;
+  residue = residue.replace(/[£$€]?\s?\d[\d,. ]*\s*(?:%|k|m|bn|b)?/gi, ' ');
+  return residue.toLowerCase().match(/[a-z']+/g) ?? [];
 }
 
 /**
- * Is this message eligible to ANSWER the live goal-target question?
+ * ⭐⭐ IS THIS MESSAGE ELIGIBLE TO ANSWER THE LIVE GOAL-TARGET QUESTION?
  *
- * Pure over `(message, amount)` where `amount` is CQE's own already-extracted
- * result. See the call site for the two eligibility routes and why the gate is
- * positive.
+ * ⛔ THIS PREDICATE HAD FOUR ROUNDS AND THE FIFTH WAS NOT ANOTHER WINDOW.
+ * Each version accepted a message that was not an answer, and each repair
+ * narrowed the same idea one notch:
  *
- * ⛔ ROUTE 2 WAS ONCE "A TARGET WORD ANYWHERE IN THE MESSAGE", AND THAT WAS THE
- * SAME DEFECT ONE LEVEL IN. The review's counterexample:
+ *   b56f54a7  one amount and no other node's full label
+ *             → said nothing about the amount's ROLE.
+ *   690b8735  plus: no present-state marker
+ *             → a list returning FALSE is not evidence of a target;
+ *               "Our baseline MRR is £12,000." carries no marker.
+ *   35ed6e22  plus: a target word anywhere in the message
+ *             → the amount was a baseline in a DIFFERENT clause.
+ *   de9010fe  plus: the target word in the amount's own clause, and a subject
+ *             gate
+ *             → "Our baseline MRR for choosing a target is £12,000." satisfies
+ *               all of it, and £12,000 is the baseline informing an UNDECIDED
+ *               target.
  *
- *     "Our baseline MRR is £12,000; what target should we choose?"
+ * CLAUDE.md trap 22f: two reversals on one predicate is a signal, four is proof
+ * the approach is wrong, and "one more rule" is the sunk-cost fallacy wearing
+ * engineering clothes. The exit it prescribes — and the one the independent
+ * review sanctioned — is to STOP GUESSING FROM PROSE and keep only what is
+ * typed.
  *
- * One currency amount, no other node's label, and the word `target` present —
- * so it qualified. But the amount is a BASELINE in one clause and the target is
- * a QUESTION in another. Presence of the word was never the relation; the
- * relation is that the affirmation and the amount belong to the SAME ASSERTED
- * ANSWER. Nothing was added to an exclusion list to fix it — the test moved
- * from the message to the clause carrying the amount.
+ * SO THERE IS EXACTLY ONE WAY IN, and it involves no vocabulary at all:
  *
- * ⚠ WHY THIS ONE MATTERED MORE THAN A WRONG NUMBER. The executor pre-route sets
- * `consumedPendingAction`, and `detectMutationWarrant({isConfirmResume:true})`
- * grants `confirm_resume` BEFORE inspecting the message, with the commit floor
- * treating the consumed ref as authority. A false eligibility match therefore
- * supplies both the wrong target AND its mutation warrant, and no later
- * discussion classifier can undo that premise. Eligibility here is an
- * AUTHORITY decision, not a parsing convenience.
+ *   THE MESSAGE IS THE QUANTITY CQE READ, PLUS HEDGES.
+ *
+ * The recorded question named the goal, and F1-F3 (sole live claimant, matching
+ * graph hash, goal still present) are that question's identity. A reply that
+ * carries nothing but the amount can only be answering it, because there is no
+ * second clause to borrow an affirmation from and no second subject to attribute
+ * the amount to. `raw_text` does the work: whatever the extractor bound to the
+ * quantity — a currency mark, a magnitude suffix, an `at least` — is part of
+ * what it read, so no list here decides anything.
+ *
+ * EVERYTHING RICHER FALLS THROUGH UNCHANGED to the ordinary receiver. That is a
+ * deliberate loss of coverage, not an oversight: an explicit goal statement
+ * still reaches the canonical writer by its ordinary route, and a message this
+ * gate cannot certify becomes coaching rather than a silent mutation.
+ *
+ * ⚠ WHY THE BAR IS THIS HIGH — the review's authority trace, which is the part
+ * I had underweighted. The executor pre-route sets `consumedPendingAction`, and
+ * `detectMutationWarrant({ isConfirmResume: true })` grants `confirm_resume`
+ * BEFORE the message is inspected, with the commit floor treating the consumed
+ * ref as authority. A false match therefore supplies the wrong target AND its
+ * licence to write, and no later classifier can undo that premise. Eligibility
+ * here is an AUTHORITY decision, not a parsing convenience.
  */
 function isEligibleGoalTargetAnswer(
   message: string,
-  amount: { readonly comparator?: string | null; readonly raw_text?: unknown },
-  foreignLabelTokens: ReadonlySet<string>,
+  amount: { readonly raw_text?: unknown },
 ): boolean {
-  const words = wordsBesidesTheAmount(message);
-  // ROUTE 1 — the message IS the amount (plus hedges). The question named the
-  // goal, so a reply carrying nothing else can only be answering it. Left
-  // exactly as reviewed: this path has no clause problem, because there is no
-  // second clause to borrow an affirmation from.
   const hedges = new Set(ANSWER_HEDGE_WORDS);
-  if (words.every((w) => hedges.has(w))) return true;
-
-  // ROUTE 2 — longer prose. Everything below is scoped to the ONE CLAUSE that
-  // carries the amount, using `stated-level.ts`'s existing boundary rules
-  // (shared, not re-implemented: its decimal-point and abbreviation handling is
-  // exactly what a second scanner would drift on).
-  const at = amountIndexIn(message, amount.raw_text);
-  if (at < 0) return false;
-  const { clause, terminator } = clauseAround(message, at);
-  // A clause that ENDS IN '?' is asking, not answering. "What target should we
-  // choose?" cannot license a write however many target words it contains.
-  if (terminator === '?') return false;
-  const lowerClause = clause.toLowerCase();
-
-  const clauseWords = lowerClause.match(/[a-z']+/g) ?? [];
-
-  // ⭐ E2(c) — SUBJECT. Same-clause affirmation is not enough on its own: "the
-  // CHURN target is 4%" carries an assertion, a target word and one amount in
-  // one clause, and names no node's COMPLETE label, so F6 and every test above
-  // pass — while the number belongs to a different subject entirely. A goal
-  // minimum is not a churn maximum, and this is the gate that keeps them apart
-  // when the user writes the guardrail as a "target".
-  //
-  // The rule is DERIVED from the graph, not from a word list: a token that
-  // belongs to some other node's label and NOT to the goal's own label is
-  // foreign, so the clause is talking about something else. Tokens the goal
-  // shares are never foreign — "the REVENUE target is £20,000" binds even when
-  // a factor is called "Revenue growth" — and the folding is
-  // `stated-level.ts`'s own `labelWordSet`, so this cannot drift from the
-  // subject binding that module already performs.
-  if (clauseWords.some((w) => foreignLabelTokens.has(w))) return false;
-
-  // ROUTE 2a — CQE itself read a FLOOR on THIS amount. The comparator is a
-  // property of the extracted quantity, so it is already bound to it; the
-  // clause and subject checks above still apply, so a floor inside a question,
-  // or about another node, refuses.
-  if (amount.comparator === 'at_least') return true;
-
-  // ROUTE 2b — the amount's OWN clause uses target language.
-  if (GOAL_TARGET_PHRASES.some((phrase) => lowerClause.includes(phrase))) return true;
-  const vocabulary = new Set(GOAL_TARGET_LANGUAGE);
-  return clauseWords.some((w) => vocabulary.has(w));
-}
-
-/**
- * Label tokens that belong to some NON-goal node and NOT to the goal — the
- * evidence E2(c) tests a clause against.
- *
- * Singular-folded through `labelWordSet` on both sides, so "churn rates" and
- * "Churn rate" agree. Tokens shorter than four characters are excluded: they
- * collide with ordinary English ("pro", "new", "top") and a gate that refuses
- * everything is the same defect as one that refuses nothing.
- */
-function foreignLabelTokensFor(
-  nodes: ReadonlyArray<{ id?: unknown; label?: unknown }> | undefined,
-  goalId: string,
-  goalLabel: string,
-): ReadonlySet<string> {
-  const goalTokens = labelWordSet(goalLabel);
-  const foreign = new Set<string>();
-  for (const n of nodes ?? []) {
-    if (n.id === goalId) continue;
-    if (typeof n.label !== 'string') continue;
-    for (const token of labelWordSet(n.label)) {
-      if (token.length < 4) continue;
-      if (goalTokens.has(token)) continue;
-      foreign.add(token);
-    }
-  }
-  return foreign;
+  return wordsBesidesTheAmount(message, amount.raw_text).every((w) => hedges.has(w));
 }
 
 export type GoalTargetResumeDispatch =
@@ -1100,52 +982,18 @@ export function tryGoalTargetElicitationResume(input: {
       reason: 'names_other_subject',
     };
   }
-  // ⭐⭐ POSITIVE ANSWER ELIGIBILITY — the message must EXPRESS a target, and
-  // the absence of a refusal marker is not that expression.
+  // ⭐⭐ ANSWER ELIGIBILITY — ONE typed route, no vocabulary.
   //
-  // ⛔ THIS REPLACES A NEGATIVE MARKER LIST, AND THE POLARITY WAS THE DEFECT.
-  // The previous gate refused a message that carried a present-state marker
-  // ("currently", "today"). The independent review's counterexample carries
-  // none: "Our baseline MRR is £12,000." has one currency amount, no ceiling,
-  // no other node's label and no marker — so it bound `at_least 12000` on the
-  // goal and consumed the question, recording a REPORTED BASELINE as the value
-  // success is measured against. A finite list returning FALSE was never
-  // affirmative evidence of a target answer, and no amount of adding words to
-  // it would have made it one.
+  // The message must be the quantity CQE read, plus hedges. The full reasoning,
+  // including the four rounds this replaces and why prose could not settle it,
+  // is on `isEligibleGoalTargetAnswer`. Everything richer falls through
+  // UNCHANGED to the ordinary receiver — an explicit goal statement still
+  // reaches the canonical writer by its ordinary route, and a message this gate
+  // cannot certify becomes coaching rather than a silent mutation.
   //
-  // TWO WAYS TO BE ELIGIBLE, and nothing else is:
-  //
-  //   1. A WHOLE-MESSAGE SCALAR ANSWER inherits the live question's goal. The
-  //      question named the goal; a reply that is JUST the amount can only be
-  //      answering it. "£20k", "20000", "£20,000.", "about £20k" all qualify —
-  //      `about` is answer furniture, not content, and the hedge vocabulary is
-  //      `ANSWER_HEDGE_WORDS`, DERIVED from `stated-level.ts`'s existing closed
-  //      qualifier list minus its tense members, so a word cannot be a hedge
-  //      here and a tense marker there.
-  //
-  //   2. LONGER PROSE must AFFIRMATIVELY express a goal-target answer: either
-  //      CQE itself read a floor (`comparator === 'at_least'` — "at least
-  //      £20,000", "£20k or more"), or the message uses target language from a
-  //      closed vocabulary ("the target is £20,000", "we need to hit £20,000").
-  //      Everything else falls through UNCHANGED, which is the pre-existing
-  //      behaviour and costs nothing.
-  //
-  // FAILURE DIRECTION. This gate can only REFUSE, and a refusal leaves the
-  // message to the ordinary lanes exactly as before. Widening the target
-  // vocabulary later can only add coverage; it can never mint a wrong value.
-  // That is the opposite of the list it replaces, where every missing word was
-  // a silent wrong write.
-  //
-  // NOT A SECOND PARSER: the amount, its unit and its comparator are all CQE's
-  // own output, already extracted above. This decides ELIGIBILITY over that
-  // output; it never re-reads the number.
-  if (
-    !isEligibleGoalTargetAnswer(
-      input.message,
-      amount,
-      foreignLabelTokensFor(input.graphNodes, goalId, goalLabel),
-    )
-  ) {
+  // FAILURE DIRECTION: this gate can only REFUSE, so it can never mint a wrong
+  // value; it can only decline to claim a turn.
+  if (!isEligibleGoalTargetAnswer(input.message, amount)) {
     return {
       matched: false,
       skip_reason: 'unreadable_answer',
