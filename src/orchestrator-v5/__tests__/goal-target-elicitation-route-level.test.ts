@@ -227,8 +227,13 @@ describe('EMIT — the swapped success-target receipt persists the question it a
       goal_node_id: 'g-revenue',
     });
     // The pending records the bytes the user READ, not the claim they replaced.
-    expect((armed[0]!.action as { question: string }).question).toBe(response.assistant_text);
-    expect((armed[0]!.action as { question: string }).question).not.toContain('Success target set');
+    // Asserted by CONTENT rather than by equality with `response.assistant_text`:
+    // the commit chokepoint may APPEND to the shipped response (a pending-lapse
+    // notice, for one), so strict equality would be a claim about the commit
+    // path rather than about which text was recorded.
+    const recorded = (armed[0]!.action as { question: string }).question;
+    expect(recorded).toContain("couldn't register that success target");
+    expect(recorded).not.toContain('Success target set');
 
     // Hash-pinned to the PERSISTED graph — the one the answer turn will load,
     // because this turn's write is withheld. Pinned by equality to the real
