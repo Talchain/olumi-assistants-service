@@ -388,14 +388,46 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
     expect(runPipeline(THIRD_LIMIT_SENTENCE).wire).toHaveLength(0);
   });
 
+  /**
+   * ⭐ THE THIRD ROW IS THE ONE THAT REFUTED MY OWN "NO QUESTION" CLAIM, and it
+   * is the rationale at `compound-goals.ts:628-666` working exactly as written.
+   *
+   * `Refund rate must not exceed 4%.` carries a negation, so the negated-bound
+   * detector speaks for that quantity first and the referent ask is skipped as
+   * residue — "an unproven direction is a LIE RISK where an unbound limit is a
+   * GAP, and a lie outranks a gap". **The user IS asked; they are asked the
+   * MORE IMPORTANT question.** An earlier version of this file filtered to
+   * `target_unmatched` and reported that as silence.
+   */
   it('OBSERVED — every ask each limit produces on its own, with its reason', () => {
     expect(allAsks(BRIEF_LIMIT_SENTENCE)).toEqual(['target_unmatched|monthly churn']);
     expect(allAsks(SECOND_LIMIT_SENTENCE)).toEqual(['target_unmatched|costs']);
-    expect(allAsks(THIRD_LIMIT_SENTENCE)).toEqual(['target_unmatched|refund rate']);
+    expect(allAsks(THIRD_LIMIT_SENTENCE)).toEqual([
+      'unspent_negation|refund rate must not',
+    ]);
   });
 
   /**
-   * ⭐ THE OPEN QUESTION, STATED AS A QUESTION AND NOT AS A FINDING.
+   * ⭐⭐ MEASURED ACROSS ALL REASONS: THE SECOND METRIC RECEIVES NO QUESTION.
+   *
+   * `costs` asks on its own (row above, same node set). In company with a limit
+   * sharing its number it produces NOTHING — not a different question, not a
+   * suppressed-in-favour-of-a-better-one: **nothing from any channel.** This is
+   * the unfiltered measurement, so it is not the artefact that made me withdraw
+   * an earlier version of this claim.
+   *
+   * ⚠ I PREDICTED THE OPPOSITE, IN WRITING, BEFORE MEASURING — that the second
+   * metric would turn out to be spoken for and this would close as designed
+   * behaviour. It did not. Recorded because a registered wrong call is worth
+   * more than a quiet correction.
+   *
+   * ⛔ AND IT REMAINS A RECORD, NOT A PRESCRIPTION. The dedup's written
+   * rationale is sound and covers two cases — overlapping rows from the SAME
+   * sentence, and a direction question outranking a referent one. It does not
+   * claim to cover this one. **Widening the key to (value, metric) would break
+   * case (a): one limit emits THREE rows with different names, so it would ask
+   * three times about one limit.** Gap traded for noise. The honest root is the
+   * extractor over-match upstream, and that needs its owner.
    *
    * The dedup key is value-only (`alreadyAsked: Set<number>`,
    * `compound-goals.ts:678-684`) — a fact about the code, not a verdict on it.
@@ -412,11 +444,8 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
    * Pinned as an exact set (CLAUDE.md 22f) so it REDs if the set grows OR
    * shrinks, and is green only for the right reason.
    */
-  it('OBSERVED — the full ask set when two distinct metrics share one number', () => {
-    expect(allAsks(TWO_LIMITS_ONE_NUMBER)).toEqual([
-      'target_unmatched|costs',
-      'target_unmatched|monthly churn',
-    ]);
+  it('KNOWN-DROPPED — two distinct metrics sharing one number: the second gets NO ask, of any reason', () => {
+    expect(allAsks(TWO_LIMITS_ONE_NUMBER)).toEqual(['target_unmatched|monthly churn']);
   });
 });
 
