@@ -2218,6 +2218,39 @@ export async function dispatchEditGraph(
   // `decideNoOpRecovery` call to suppress its parallel proposal
   // branches so the wire response carries one chip set, not two.
   let proposalEarlyEmitted = false;
+  /**
+   * ⭐⭐ THE ADD-RISK CLARIFIER ACTUALLY ANSWERED THIS TURN.
+   *
+   * Measured on request `b0d541a9-1631-4604-9546-f089dbb916cc` (8 Sep 2026,
+   * CEE `0f1cbc6b`): "Please can you add it as a risk?" produced
+   * `add_risk_clarified`, and then `no_op_recovery` fired `proposal_stage_one`
+   * with `rewrote_text: true`, replacing that specific clarification with the
+   * generic "one of these" kind chooser. Zero LLM calls, zero operations,
+   * 12 nodes / 21 edges unchanged. The person asked for a risk, was asked back
+   * which kind of thing they meant, and clicking "Add as risk" repeated it.
+   *
+   * PR #212 already established that the recovery's `proposal_stage_*` ladder
+   * must not fire when this turn has ALREADY given a deterministic answer — but
+   * it keys on `proposalEarlyEmitted`, which only the pre-LLM continuation
+   * intercept sets. The add-risk fast path is the SIBLING deterministic answer
+   * (the intercept lives in its `else`: "Add-risk still wins"), so it answered
+   * the turn and left the flag false. Same contract, one path short.
+   *
+   * ⚠ ANSWERED, NOT MATCHED — and the distinction is the whole point. There is
+   *   already a `deterministicAddRiskAttempted` for "the classifier matched";
+   *   keying on that would suppress the ladder on turns the clarifier began and
+   *   did not finish. This is set only where the clarification is actually
+   *   returned to the user.
+   *
+   * ⚠ SCOPE: it is OR-ed into the existing flag at the recovery call site ONLY.
+   *   `proposalEarlyEmitted` keeps its own meaning everywhere else (chip
+   *   counting, `llm_calls_used`, the V4 no-op branch), and every other recovery
+   *   branch — `analytical_*`, `vague_edit`, `explore_factor*`, `ambiguous` —
+   *   still runs as defence-in-depth, exactly as PR #212 requires. A genuinely
+   *   ambiguous agreement, where the add-risk classifier did NOT answer, still
+   *   reaches Stage 1 unchanged.
+   */
+  let addRiskClarifierAnswered = false;
   // PR #216 review follow-up: set true when the pre-LLM intercept
   // already emitted a `V5ProposalContinuationInvalidated` event for an
   // expired / diverged pending. The recovery block re-runs the same
@@ -2449,6 +2482,9 @@ export async function dispatchEditGraph(
           },
           'V5 edit_graph add_risk clarification returned without graph mutation',
         );
+        // The clarification has been returned to the user: this turn is
+        // answered, so the recovery ladder must not re-open Stage 1 over it.
+        addRiskClarifierAnswered = true;
         emit(TelemetryEvents.V5EditGraphAddRiskClarified, {
           request_id: requestId,
           scenario_id: payload.scenario_id,
@@ -3898,7 +3934,12 @@ export async function dispatchEditGraph(
         // intercept already emitted Stage 1 / Stage 2 chips. Without
         // this guard both layers fire and the wire response carries
         // 6 chips instead of 3.
-        proposalAlreadyEmittedInThisTurn: proposalEarlyEmitted,
+        // ⭐ OR-ed with the add-risk clarifier's ANSWERED marker — see its
+        //   declaration. Both are "this turn already answered deterministically",
+        //   which is the question this flag was introduced to answer; keying on
+        //   only one of the two paths is what let `proposal_stage_one` overwrite
+        //   a specific risk clarification with the generic kind chooser.
+        proposalAlreadyEmittedInThisTurn: proposalEarlyEmitted || addRiskClarifierAnswered,
         // R10 — when the V4 no-op branch preserved a scrubbed clarifying
         // question, the recovery layer must stay inert (no vague-edit clobber).
         noOpClarificationPreserved: editResult.noOpClarificationPreserved === true,
