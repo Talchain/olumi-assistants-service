@@ -74,9 +74,18 @@ describe("a stated goal target binds only where the projector is entitled to bin
       claims: [],
     } as never);
     expect(goal).toBeDefined();
-    expect(goal!["goal_threshold_raw"]).toBe(20000);
-    // Co-mint invariant: ISL scores `goal_threshold - baseline`, so a threshold
-    // separated from its denominator returns a wrong probability silently.
+    // ⚠ VALUES, NOT JUST FIELD NAMES. Counting five non-undefined keys proves
+    //   nothing about whether they agree — the independent review named this,
+    //   and a co-mint whose parts disagree is the silent-wrong-probability case
+    //   the invariant exists for. ISL scores `goal_threshold - baseline`, so
+    //   `normalised === raw / cap` is the assertion that matters.
+    const raw = goal!["goal_threshold_raw"] as number;
+    const cap = goal!["goal_threshold_cap"] as number;
+    expect(raw).toBe(20000);
+    expect(typeof cap).toBe("number");
+    expect(goal!["goal_threshold"]).toBeCloseTo(raw / cap, 12);
+    expect(goal!["goal_threshold_unit"]).toBe("£");
+    expect(goal!["goal_threshold_frame"]).toBe("level");
     expect(mintedFieldCount(goal)).toBe(5);
   });
 
@@ -91,9 +100,17 @@ describe("a stated goal target binds only where the projector is entitled to bin
     expect(goal).toBeDefined();
     expect(goal!["goal_threshold_raw"]).toBeUndefined();
     expect(mintedFieldCount(goal)).toBe(0);
-    // The statement is preserved — the figure is not erased from the record's
-    // own quote just because it did not bind.
-    expect(String(goal!["provenance"] ?? "")).toBeDefined();
+    // ⛔ THE VACUOUS ASSERTION, REPLACED. This read
+    //   `expect(String(goal.provenance ?? "")).toBeDefined()`, which passes even
+    //   when provenance is missing entirely — `String(undefined ?? "")` is a
+    //   defined empty string. It asserted nothing, and the independent review
+    //   caught it. Retention is now checked against the actual text: the user's
+    //   own quote, carrying their figure, must survive the refusal to bind.
+    const provenance = goal!["provenance"] as { source_quote?: unknown } | undefined;
+    expect(provenance).toBeDefined();
+    expect(typeof provenance!.source_quote).toBe("string");
+    expect(provenance!.source_quote as string).toContain("£20k");
+    expect(String(goal!["label"] ?? "")).not.toHaveLength(0);
   });
 
   it("DISCUSSION ONLY — a figure with no record value is never invented into a target", () => {
