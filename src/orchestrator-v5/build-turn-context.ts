@@ -2580,7 +2580,7 @@ export async function loadPersistedGraph(
  * needs `prior_facts` to decide whether `set_factor_value` appends its staleness
  * narrative ("This makes the last analysis stale."). It lives HERE, beside the
  * other persisted-read helpers, because the state-write invariant
- * (`scripts/ci/check-state-write-invariant.sh`) allows `SessionStore` imports in
+ * (`scripts/validate-state-write-invariant.sh`) allows `SessionStore` imports in
  * exactly three places — `session/`, `commit.ts` and this file — and a dispatch
  * module reaching for the store directly is precisely what that gate exists to
  * stop. Keeping the read on this side of the chokepoint is the point.
