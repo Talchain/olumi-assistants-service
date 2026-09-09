@@ -114,8 +114,22 @@ const UNBINDABLE_NODES = [
  * Two limits, two metrics, ONE number. Neither binds to a node above, so both
  * reach the ask channel — where the dedupe is keyed on the value alone.
  */
-const REFUND_LIMIT_SENTENCE = 'Refund rate must not exceed 4%.';
-const TWO_LIMITS_ONE_NUMBER = `${BRIEF_LIMIT_SENTENCE} ${REFUND_LIMIT_SENTENCE}`;
+/**
+ * ⚠ THE SECOND METRIC IS IN THE EXTRACTOR'S OWN VOCABULARY, AND THAT IS NOT
+ * COSMETIC. My first choice was "refund rate", and the positive control
+ * returned `[]` for it on its own — so the combined result could not be read.
+ * `CONSTRAINT_ALIASES` (extractor.ts:1568) is a hand-maintained list of
+ * TWENTY-EIGHT metric names, and every existing test of this producer uses one
+ * of them ("budget", "churn"). `costs` is on the list; "refund rate" is not.
+ *
+ * ⚠⚠ WHETHER AN OFF-VOCABULARY METRIC IS SILENTLY DROPPED IS A SEPARATE AND
+ * LARGER QUESTION THAN THIS FILE'S. The alias map is consumed at step 4 of
+ * `remapConstraintTargets` (BINDING), not at extraction, so the `[]` above is
+ * NOT yet explained — it could be non-extraction, a junk rejection, or a null
+ * value. It is recorded, not concluded, and it is not tested here.
+ */
+const SECOND_LIMIT_SENTENCE = 'Keep costs under 4%.';
+const TWO_LIMITS_ONE_NUMBER = `${BRIEF_LIMIT_SENTENCE} ${SECOND_LIMIT_SENTENCE}`;
 
 /**
  * The answer-turn graph. `r-churn` satisfies every `mintEligible` conjunct
@@ -338,16 +352,21 @@ describe('STEP 1 — the drop produces a card that points at add_constraint', ()
    * extractor — `Churn must not exceed 4%.` is in its own corpus verbatim — so
    * a null result cannot be blamed on a phrasing this producer never handles.
    */
-  it('CONTROL — each limit, alone, is asked about', () => {
+  it('CONTROL — each limit, alone, reaches no wire row and IS asked about', () => {
+    const churn = runPipeline(BRIEF_LIMIT_SENTENCE);
+    const second = runPipeline(SECOND_LIMIT_SENTENCE);
+    // ⚠ BOTH HALVES, so a null ask can be told apart from a limit that BOUND.
+    // Without the wire assertion, an empty ask list is ambiguous between "the
+    // limit was dropped and not asked about" and "the limit bound to a node and
+    // needed no ask" — and only the first is a defect.
+    expect(churn.wire).toHaveLength(0);
+    expect(second.wire).toHaveLength(0);
     expect(unmatchedMetrics(BRIEF_LIMIT_SENTENCE)).toContain('monthly churn');
-    expect(unmatchedMetrics(REFUND_LIMIT_SENTENCE)).toContain('refund rate');
+    expect(unmatchedMetrics(SECOND_LIMIT_SENTENCE)).toContain('costs');
   });
 
   it('⭐ two different limits sharing one number — which of them is the user asked about?', () => {
-    expect(unmatchedMetrics(TWO_LIMITS_ONE_NUMBER)).toEqual([
-      'monthly churn',
-      'refund rate',
-    ]);
+    expect(unmatchedMetrics(TWO_LIMITS_ONE_NUMBER)).toEqual(['costs', 'monthly churn']);
   });
 });
 
