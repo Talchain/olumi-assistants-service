@@ -637,13 +637,7 @@ describe('an existing intervention persisted WITHOUT target_match', () => {
   function graphWithPersistedEntry(entry: Record<string, unknown>) {
     const graph = canonicalGraph();
     const option = graph.nodes.find(node => node.id === 'option')!;
-    // ⚠ `as unknown as` DELIBERATELY, AND NOT AS A CONVENIENCE. `interventions`
-    // is typed as the producer's record, and the whole point of this fixture is
-    // to install a shape that record does NOT describe — the one the estate
-    // actually persists. A single-step assertion is the TS2352 the ratchet
-    // caught; widening the baseline instead would have hidden the fixture's own
-    // reason for existing.
-    (option as unknown as { interventions: Record<string, unknown> }).interventions.factor = entry;
+    (option as { interventions: Record<string, unknown> }).interventions.factor = entry;
     return projectGraphForPersistence(graph);
   }
 
@@ -725,6 +719,29 @@ describe('an existing intervention persisted WITHOUT target_match', () => {
 });
 
 /**
+ * ⭐⭐ NARROW THE CONTAINER, THEN SELECT THE KEY — in that order.
+ *
+ * `GraphStateIngressSchema` returns `NodeContentSchema`, which declares only
+ * id/kind/label; every passthrough field, `interventions` included, arrives as
+ * `unknown`. `.interventions!.factor` is therefore a property access ON UNKNOWN,
+ * and an `as Record<string, unknown>` written AFTER `.factor` types the RESULT
+ * of an access that was already invalid — it cannot be the narrowing.
+ *
+ * ⚠ THIS IS A RUNTIME CHECK, NOT A CAST. If the option ever comes back without
+ * an intervention container, the test fails here by name instead of reporting a
+ * confusing `undefined` mismatch several assertions later.
+ */
+function interventionsOfOption(graph: { nodes: ReadonlyArray<{ id: string }> }): Record<string, unknown> {
+  const node = graph.nodes.find(candidate => candidate.id === 'option');
+  if (node === undefined) throw new Error('The graph under test has no option node');
+  const container: unknown = (node as { interventions?: unknown }).interventions;
+  if (container === null || typeof container !== 'object' || Array.isArray(container)) {
+    throw new Error('The option carries no intervention container');
+  }
+  return container as Record<string, unknown>;
+}
+
+/**
  * ⭐⭐⭐ THE NEWLY ADMITTED POPULATION THROUGH THE REAL STORE, COMMIT AND COLD
  * READ — because the scope guard structurally cannot see what this asserts.
  *
@@ -743,8 +760,7 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
   function persistedWithMetadata() {
     const graph = canonicalGraph();
     const option = graph.nodes.find(node => node.id === 'option')!;
-    // Same double assertion, same reason — see `graphWithPersistedEntry`.
-    (option as unknown as { interventions: Record<string, unknown> }).interventions.factor = {
+    (option as { interventions: Record<string, unknown> }).interventions.factor = {
       value: 1, source: 'brief_extraction', display_value: 'Very high (1)', ...RETAINED,
     };
     return projectGraphForPersistence(graph);
@@ -759,7 +775,7 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
     expect(result.kind).toBe('committed');
 
     const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
-    const entry = cold.nodes.find(node => node.id === 'option')!.interventions!.factor as Record<string, unknown>;
+    const entry = interventionsOfOption(cold).factor as Record<string, unknown>;
 
     expect(entry).toMatchObject({ value: 0.75, source: 'user_specified', ...RETAINED });
   });
@@ -772,7 +788,7 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
     await executeOptionInterventionEdit(inputFor(before, { modelValue: 0.75 }), persistence.fresh());
 
     const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
-    const entry = cold.nodes.find(node => node.id === 'option')!.interventions!.factor as Record<string, unknown>;
+    const entry = interventionsOfOption(cold).factor as Record<string, unknown>;
 
     expect(entry.display_value).not.toBe('Very high (1)');
   });
@@ -783,8 +799,8 @@ describe('a no-target entry keeps its unrelated metadata through commit', () => 
     await executeOptionInterventionEdit(inputFor(before, { modelValue: 0.75 }), persistence.fresh());
 
     const cold = GraphStateIngressSchema.parse(await persistence.fresh().loadGraph(SCENARIO_ID));
-    const neighbourBefore = before.nodes.find(node => node.id === 'option')!.interventions!.other_factor;
-    const neighbourAfter = cold.nodes.find(node => node.id === 'option')!.interventions!.other_factor;
+    const neighbourBefore = interventionsOfOption(before).other_factor;
+    const neighbourAfter = interventionsOfOption(cold).other_factor;
     expect(neighbourAfter).toEqual(neighbourBefore);
   });
 });
