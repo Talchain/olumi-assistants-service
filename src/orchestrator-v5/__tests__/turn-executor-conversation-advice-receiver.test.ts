@@ -9,6 +9,7 @@ import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
 import { PROVISIONAL_FIGURES_INSTRUCTION } from '../routing/route-with-tool-use.js';
 import { WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS } from '../context/withheld-leader-projection.js';
+import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import nativeResearch from './fixtures/contextual-research-native-2026-09-08.json';
 vi.mock('../coaching/draft-coaching-log.js', async () => {
   const actual = await vi.importActual<
@@ -585,7 +586,21 @@ describe('conversation advice reaches contextual reasoning', () => {
    */
   const CAPTURED_MODE = 'quantified_provisional';
 
-  /** The captured fact, with only `near_tie` varied — or robustness removed. */
+  /**
+   * The captured fact, with only `near_tie` varied — or robustness removed.
+   *
+   * ⛔ MY FIRST CUT SPREAD THE UI-CAPTURED `analysis_result` STRAIGHT IN, so the
+   *    fact carried `type` and `computed_against_hash` — fields the strict
+   *    `RunAnalysisResult` does not have. The durable reconciler rejected it,
+   *    the prompt came back with `analysis: null`, and every assertion about
+   *    leader members or the qualifier failed for a reason that had nothing to
+   *    do with the product. The independent reviewer traced it; I had read the
+   *    failures as evidence about the code.
+   *
+   *    The captured fields are now PROJECTED into the existing schema and parsed
+   *    by it, so a shape the reconciler would reject cannot reach the executor
+   *    silently again.
+   */
   function researchFact(separation: 'separated' | 'near_tie' | 'unavailable'): Record<string, unknown> {
     const enrichment = JSON.parse(
       JSON.stringify(nativeResearch.analysis_result.enrichment),
@@ -595,18 +610,60 @@ describe('conversation advice reaches contextual reasoning', () => {
       const robustness = enrichment['robustness'] as { near_tie: { is_tie: boolean } };
       robustness.near_tie.is_tie = separation === 'near_tie';
     }
-    return {
+    return RunAnalysisHandlerFactSchema.parse({
       fact_type: 'run_analysis',
       fact_version: 1,
       noop: false,
       result: {
-        ...nativeResearch.analysis_result,
-        enrichment,
         scenario_id: nativeResearch.source.scenario_id,
+        // The capture names this `computed_against_hash`; the fact's field is
+        // `graph_hash_at_run`. Mapped, not spread.
         graph_hash_at_run: nativeResearch.analysis_result.computed_against_hash,
         computed_at: nativeResearch.analysis_state.run_state.computed_at,
+        leading_option_id: nativeResearch.analysis_result.leading_option_id,
+        summary: nativeResearch.analysis_result.summary,
+        win_probabilities: nativeResearch.analysis_result.win_probabilities,
+        constraint_verdict: {
+          may_name_leading_option: true,
+          constraint_verdict_state: 'evaluated_feasible',
+        },
+        enrichment,
       },
-    };
+    }) as unknown as Record<string, unknown>;
+  }
+
+  /**
+   * The serialised analysis object inside the routing ContextPack — the ONLY
+   * scope in which a withheld-member check means anything.
+   *
+   * ⛔ My first cut searched the WHOLE prompt for `"options"`, which is a
+   *    generic key the graph and readiness sections also carry, so the near-tie
+   *    cases failed on an unrelated match. Fails loudly if no analysis object is
+   *    found, so it can never pass by looking at nothing.
+   */
+  function serialisedAnalysis(prompt: string): string {
+    for (const key of ['"analysis"', '"display_analysis"']) {
+      const at = prompt.indexOf(`${key}: `);
+      if (at < 0) continue;
+      const rest = prompt.slice(at + key.length + 2);
+      if (rest.startsWith('null')) return 'null';
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let i = 0; i < rest.length; i++) {
+        const c = rest[i]!;
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (c === '\\') escaped = true;
+          else if (c === '"') inString = false;
+          continue;
+        }
+        if (c === '"') inString = true;
+        else if (c === '{') depth++;
+        else if (c === '}' && --depth === 0) return rest.slice(0, i + 1);
+      }
+    }
+    throw new Error('serialisedAnalysis: no analysis object found in the routing prompt');
   }
 
   async function receiveWith(
@@ -651,7 +708,12 @@ describe('conversation advice reaches contextual reasoning', () => {
       `the executor derived a different admission from the captured persisted graph than the ` +
         `historical capture; actual=${JSON.stringify(mode)}. Report this rather than relaxing it.`,
     ).toBe(CAPTURED_MODE);
-    // Caveat, not withhold: the qualification reaches the coach.
+    // Caveat, not withhold: a real comparison reaches the coach…
+    const analysis = serialisedAnalysis(prompt);
+    expect(analysis).not.toBe('null');
+    expect(analysis).toContain('leading_option');
+    // …and the qualification travels with it, from the one condition that
+    // emits both.
     expect(prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
     // ⚠ WHAT IS DELIBERATELY *NOT* ASSERTED HERE, AND WHY. My first cut also
     //   required `"leading_option"` in this prompt. Hosted run 102274777493
@@ -660,8 +722,6 @@ describe('conversation advice reaches contextual reasoning', () => {
     //   rather than reworded: the ordering claim is made where it is measurable
     //   — as an ABSENCE in the negative cases below, bound to the projection's
     //   own exported member list. The pairwise difference between this prompt
-    //   and those is what discriminates, and it is asserted there.
-    expect(prompt).not.toBe('');
     // The qualitative context this whole capability is about is still there.
     expect(prompt).toContain('two-person data team');
     expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
@@ -682,8 +742,9 @@ describe('conversation advice reaches contextual reasoning', () => {
     // projection's OWN exported list, so a renamed member cannot slip past a
     // hand-typed key (which is exactly how the first cut of this file went
     // wrong — see the note in the separated case).
+    const analysis = serialisedAnalysis(prompt);
     for (const member of WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS) {
-      expect(prompt).not.toContain(`"${member}"`);
+      expect(analysis).not.toContain(`"${member}"`);
     }
     // And the model is NOT told the options are separable.
     expect(prompt).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
@@ -706,6 +767,9 @@ describe('conversation advice reaches contextual reasoning', () => {
     // After eviction the two disagreed. Same fact, no hot window, same answer.
     const evicted = await receiveWith('separated', { emptyHotWindow: true });
     expect(evicted.mode).toBe(CAPTURED_MODE);
+    const analysis = serialisedAnalysis(evicted.prompt);
+    expect(analysis).not.toBe('null');
+    expect(analysis).toContain('leading_option');
     expect(evicted.prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
     // The eviction case must land on the SAME side as the separated case, and
     // the negative cases above prove that side is distinguishable.
