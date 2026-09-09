@@ -1456,8 +1456,32 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
       qualify('turn-executor.ts', 'coachGuarded.assistant_text'),
       qualify('turn-executor.ts', 'converseGuarded.assistant_text'),
     ]);
+    // ⚠ RECONCILED TO THE INTENTIONAL TERNARY (#1401), OBLIGATION UNCHANGED.
+    //   The gate used to read `modelFacingClaimSafety: mayNameLeadingOptionForRun`
+    //   and this pin matched that literal. The corrected gate opens with the
+    //   NEGATION — entitlement is still the FIRST branch, and failing it still
+    //   withholds — because two further outcomes now sit behind it: a
+    //   `qualified` state for an entitled, separated, exactly-provisional run,
+    //   and a `withheld` state when the admission ACTIVELY CAPS a run that does
+    //   not qualify (previously that fell through to `permitted`, handing the
+    //   coach an ordering the final wire arm withholds).
+    //
+    //   So the pin names the entitlement-first branch AND the two outcomes that
+    //   must not vanish. A revert to a single boolean, or a silent return of the
+    //   permissive fall-through, breaks one of them.
     expect(source).toContain(
+      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
+    );
+    expect(source).toContain("status: 'qualified'");
+    expect(source).toContain('admissionWithholdsLeaderNaming');
+    // Drift control, same idiom as the `PIN` test above: removing the negation
+    // must be visible to this assertion rather than passing on a substring.
+    const REVERTED = source.replace(
+      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
       'modelFacingClaimSafety: mayNameLeadingOptionForRun',
+    );
+    expect(REVERTED).not.toContain(
+      'modelFacingClaimSafety: !mayNameLeadingOptionForRun',
     );
     // Non-vacuity, same rationale as the gated check above. `gated_by_input`
     // asserts something about the PACK, so the evidence is the projection call

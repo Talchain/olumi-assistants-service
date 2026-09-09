@@ -7,6 +7,9 @@ import type { ChatWithToolsArgs, ChatWithToolsResult } from '../../adapters/llm/
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import { GraphStateIngressSchema } from '../boundary/request-extensions.js';
 import { OLUMI_ACTION_TOOL_NAME } from '../routing/tool-schema.js';
+import { PROVISIONAL_FIGURES_INSTRUCTION } from '../routing/route-with-tool-use.js';
+import { WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS } from '../context/withheld-leader-projection.js';
+import { RunAnalysisHandlerFactSchema } from '@talchain/schemas/orchestrator';
 import nativeResearch from './fixtures/contextual-research-native-2026-09-08.json';
 vi.mock('../coaching/draft-coaching-log.js', async () => {
   const actual = await vi.importActual<
@@ -554,5 +557,234 @@ describe('conversation advice reaches contextual reasoning', () => {
     expect(graph.nodes.find(node => node.id === 'fac_data_team_capacity')).toEqual(expect.objectContaining({
       observed_state: expect.objectContaining({ value: 0.7 }),
     }));
+  });
+
+  /**
+   * ⭐⭐ THE RECEIVING COUNTERPARTS, ON THE REAL PATH AND THE REAL ADMISSION.
+   *
+   * The independent review of #1401 asked for these three and was right that
+   * nothing weaker settles it: a control that re-states the producer's own
+   * expression cannot see the gate change or the wrong fact collection, and a
+   * control that INJECTS the desired admission proves only that the injection
+   * worked.
+   *
+   * So: `useCapturedResearchScenario()` supplies the actual 19-node/39-edge
+   * persisted graph, the 491-character brief and the captured run fact from
+   * `fixtures/contextual-research-native-2026-09-08.json`. NOTHING here injects
+   * `analysis_ready`, mocks the mode reader, or passes a
+   * `modelFacingClaimSafety` — the real executor derives readiness from that
+   * persisted graph, and the first assertion reads the ACTUAL derived mode back
+   * off the result.
+   *
+   * ⚠ IF DERIVATION HAS MOVED SINCE THE CAPTURE, THAT ASSERTION FAILS LOUDLY AND
+   *   REPORTS THE ACTUAL VALUE. It is deliberately not softened to a range or a
+   *   truthy check: a fake green here would certify the whole population on an
+   *   admission the product no longer produces.
+   *
+   * The three cases vary ONLY the selected fact's separation signal, which is
+   * what the corrected receiving decision reads.
+   */
+  const CAPTURED_MODE = 'quantified_provisional';
+
+  /**
+   * The captured fact, with only `near_tie` varied — or robustness removed.
+   *
+   * ⛔ MY FIRST CUT SPREAD THE UI-CAPTURED `analysis_result` STRAIGHT IN, so the
+   *    fact carried `type` and `computed_against_hash` — fields the strict
+   *    `RunAnalysisResult` does not have. The durable reconciler rejected it,
+   *    the prompt came back with `analysis: null`, and every assertion about
+   *    leader members or the qualifier failed for a reason that had nothing to
+   *    do with the product. The independent reviewer traced it; I had read the
+   *    failures as evidence about the code.
+   *
+   *    The captured fields are now PROJECTED into the existing schema and parsed
+   *    by it, so a shape the reconciler would reject cannot reach the executor
+   *    silently again.
+   */
+  function researchFact(separation: 'separated' | 'near_tie' | 'unavailable'): Record<string, unknown> {
+    const enrichment = JSON.parse(
+      JSON.stringify(nativeResearch.analysis_result.enrichment),
+    ) as Record<string, unknown>;
+    if (separation === 'unavailable') delete enrichment['robustness'];
+    else {
+      const robustness = enrichment['robustness'] as { near_tie: { is_tie: boolean } };
+      robustness.near_tie.is_tie = separation === 'near_tie';
+    }
+    return RunAnalysisHandlerFactSchema.parse({
+      fact_type: 'run_analysis',
+      fact_version: 1,
+      noop: false,
+      result: {
+        scenario_id: nativeResearch.source.scenario_id,
+        // The capture names this `computed_against_hash`; the fact's field is
+        // `graph_hash_at_run`. Mapped, not spread.
+        graph_hash_at_run: nativeResearch.analysis_result.computed_against_hash,
+        computed_at: nativeResearch.analysis_state.run_state.computed_at,
+        leading_option_id: nativeResearch.analysis_result.leading_option_id,
+        summary: nativeResearch.analysis_result.summary,
+        win_probabilities: nativeResearch.analysis_result.win_probabilities,
+        constraint_verdict: {
+          may_name_leading_option: true,
+          constraint_verdict_state: 'evaluated_feasible',
+        },
+        enrichment,
+      },
+    }) as unknown as Record<string, unknown>;
+  }
+
+  /**
+   * The serialised analysis object inside the routing ContextPack — the ONLY
+   * scope in which a withheld-member check means anything.
+   *
+   * ⛔ My first cut searched the WHOLE prompt for `"options"`, which is a
+   *    generic key the graph and readiness sections also carry, so the near-tie
+   *    cases failed on an unrelated match. Fails loudly if no analysis object is
+   *    found, so it can never pass by looking at nothing.
+   */
+  function serialisedAnalysis(prompt: string): string {
+    for (const key of ['"analysis"', '"display_analysis"']) {
+      const at = prompt.indexOf(`${key}: `);
+      if (at < 0) continue;
+      const rest = prompt.slice(at + key.length + 2);
+      if (rest.startsWith('null')) return 'null';
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let i = 0; i < rest.length; i++) {
+        const c = rest[i]!;
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (c === '\\') escaped = true;
+          else if (c === '"') inString = false;
+          continue;
+        }
+        if (c === '"') inString = true;
+        else if (c === '{') depth++;
+        else if (c === '}' && --depth === 0) return rest.slice(0, i + 1);
+      }
+    }
+    throw new Error('serialisedAnalysis: no analysis object found in the routing prompt');
+  }
+
+  async function receiveWith(
+    separation: 'separated' | 'near_tie' | 'unavailable',
+    options: { readonly emptyHotWindow?: boolean } = {},
+  ): Promise<{ prompt: string; mode: unknown }> {
+    const state = useCapturedResearchScenario();
+    // ⚠ PER-TURN COUNTERS, RESET PER TURN. `expectNoCanonicalAuthorityWrite`
+    //   asserts exactly ONE durable append for THIS turn, but `mockState`
+    //   accumulates across runs and `beforeEach` only fires between TESTS. The
+    //   eviction case deliberately runs two turns in one test to compare their
+    //   receiving sides, so the second inherited the first's write and read as
+    //   `expected 2 to be 1` (hosted `102288443301`). That is fixture scoping,
+    //   not a product write — the invariant itself is unchanged and still runs
+    //   on every turn.
+    mockState.appendWrites = [];
+    mockState.invalidationCalls = 0;
+    mockState.storeDraftGraphCalls = 0;
+    const fact = researchFact(separation);
+    // The DURABLE selected fact is the one the prompt's analysis comes from.
+    mockState.newestAnalysisFact = fact;
+    mockState.scenarioAnalysisFactsOverride = [fact];
+    // The bounded hot window is a DIFFERENT collection; emptying it is the
+    // eviction case the corrected read has to survive.
+    mockState.priorFacts = options.emptyHotWindow === true ? [] : [fact];
+    const adapter = recordingRoutingAdapter('Discussion from the receiving adapter.');
+    const result = await runTurnExecutor(
+      { ...mkPayload(nativeResearch.message), scenario_id: nativeResearch.source.scenario_id },
+      `captured-research-receiving-${separation}${options.emptyHotWindow === true ? '-evicted' : ''}`,
+      { routingAdapter: adapter, ...state },
+    );
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expectNoCanonicalAuthorityWrite();
+    // ⚠ Read through `unknown`: `TurnExecutorRunResult.analysisReady` is typed
+    //   structurally and does not declare `analysis_admission`, which is what
+    //   put this file in the typecheck ratchet on hosted run 102274777454.
+    const admission = (
+      result.analysisReady as unknown as
+        | { readonly analysis_admission?: { readonly permitted_analysis_mode?: unknown } }
+        | undefined
+    )?.analysis_admission;
+    return {
+      prompt: capturedRoutingPrompt(adapter),
+      mode: admission?.permitted_analysis_mode,
+    };
+  }
+
+  it('(receiving 1) separated + the ACTUAL captured provisional admission is qualified, figures kept', async () => {
+    const { prompt, mode } = await receiveWith('separated');
+    // Read back, never injected. Loud on disagreement, with the actual value.
+    expect(
+      mode,
+      `the executor derived a different admission from the captured persisted graph than the ` +
+        `historical capture; actual=${JSON.stringify(mode)}. Report this rather than relaxing it.`,
+    ).toBe(CAPTURED_MODE);
+    // Caveat, not withhold: a real comparison reaches the coach…
+    const analysis = serialisedAnalysis(prompt);
+    expect(analysis).not.toBe('null');
+    expect(analysis).toContain('leading_option');
+    // …and the qualification travels with it, from the one condition that
+    // emits both.
+    expect(prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    // ⚠ WHAT IS DELIBERATELY *NOT* ASSERTED HERE, AND WHY. My first cut also
+    //   required `"leading_option"` in this prompt. Hosted run 102274777493
+    //   showed it absent on this path even when permitted, so the assertion was
+    //   a guess about the pack's member names, not a measurement. It is removed
+    //   rather than reworded: the ordering claim is made where it is measurable
+    //   — as an ABSENCE in the negative cases below, bound to the projection's
+    //   own exported member list. The pairwise difference between this prompt
+    // The qualitative context this whole capability is about is still there.
+    expect(prompt).toContain('two-person data team');
+    expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
+  });
+
+  /**
+   * ⚠ TWO EXPLICIT CASES, NOT `it.each`. The tuple form inferred the callback
+   *   parameter as bare `string`, which does not satisfy the narrow separation
+   *   union — that is what put this file in the typecheck ratchet
+   *   (`102280852099`, and `102274777454` before it). An `as const` dance around
+   *   `it.each` would work too; two named tests are clearer and cannot regress
+   *   the same way.
+   */
+  async function expectHeld(separation: 'near_tie' | 'unavailable'): Promise<void> {
+    const { prompt, mode } = await receiveWith(separation);
+    expect(mode).toBe(CAPTURED_MODE);
+    // #1254's population: no ordering member reaches the coach. Bound to the
+    // projection's OWN exported list, so a renamed member cannot slip past a
+    // hand-typed key (which is exactly how the first cut of this file went
+    // wrong — see the note in the separated case).
+    const analysis = serialisedAnalysis(prompt);
+    for (const member of WITHHELD_DROPPED_DISPLAY_ANALYSIS_MEMBERS) {
+      expect(analysis).not.toContain(`"${member}"`);
+    }
+    // And the model is NOT told the options are separable.
+    expect(prompt).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    // Ordinary discussion is untouched — this is not a blanket suppression.
+    expect(prompt).toContain('two-person data team');
+    expect(prompt).toContain(JSON.stringify(nativeResearch.brief_text));
+  }
+
+  it('(receiving 2a) a near tie: no ordering and no false qualifier reach the coach', async () => {
+    await expectHeld('near_tie');
+  });
+
+  it('(receiving 2b) no computed separation: no ordering and no false qualifier reach the coach', async () => {
+    await expectHeld('unavailable');
+  });
+
+  it('(receiving 3) an EMPTY hot window with the same durable fact keeps the same interpretation', async () => {
+    // The collection defect: separation used to be read from the bounded hot
+    // window while the prompt's analysis comes from the durable selected fact.
+    // After eviction the two disagreed. Same fact, no hot window, same answer.
+    const evicted = await receiveWith('separated', { emptyHotWindow: true });
+    expect(evicted.mode).toBe(CAPTURED_MODE);
+    const analysis = serialisedAnalysis(evicted.prompt);
+    expect(analysis).not.toBe('null');
+    expect(analysis).toContain('leading_option');
+    expect(evicted.prompt).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    // The eviction case must land on the SAME side as the separated case, and
+    // the negative cases above prove that side is distinguishable.
+    const held = await receiveWith('near_tie');
+    expect(held.prompt).not.toContain(PROVISIONAL_FIGURES_INSTRUCTION);
   });
 });

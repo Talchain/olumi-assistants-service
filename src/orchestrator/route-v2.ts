@@ -1660,6 +1660,19 @@ async function sendFinalised200(
     // `compose/__tests__/leader-roster-fallback.test.ts` RED if that stops
     // being true.
     analysisReady: ctx.analysisReady,
+    // ⭐ READ, NOT RE-DERIVED. `composeLeaderClaim` remains the sole author of
+    // the separation question; this threads the value it ALREADY published on
+    // the very body being enforced, so the enforcer and every structured
+    // consumer read one interpretation rather than two. Absent field ⇒ absent
+    // operand ⇒ today's behaviour exactly.
+    separationEstablished:
+      (
+        wireBody as {
+          readonly analysis_state?: {
+            readonly leader_claim?: { readonly separation?: unknown };
+          };
+        }
+      ).analysis_state?.leader_claim?.separation === 'separated',
   });
   if (wireEnforcement.changed) {
     let projected: import('@talchain/schemas/boundary').OlumiResponse =
