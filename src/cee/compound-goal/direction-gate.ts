@@ -1931,7 +1931,7 @@ export function renderDirectionClarifications(
     // was never in doubt — so a `target_unmatched` record routed through it
     // would ask the user to settle a question their brief already settled. The
     // five direction reasons keep byte-identical copy; only the sixth diverts.
-    it.reason === 'target_unmatched'
+    it.reason !== 'target_unmatched'
       ? {
           id: `${DIRECTION_CLARIFICATION_ID_PREFIX}${n + 1}`,
           label:
