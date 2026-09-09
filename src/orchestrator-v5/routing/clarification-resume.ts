@@ -809,7 +809,6 @@ const GOAL_TARGET_LANGUAGE: readonly string[] = [
   'successful',
   'threshold',
   'minimum',
-  'benchmark',
   // Verbs of intent — what the person means to bring about.
   'aim',
   'aims',
@@ -823,7 +822,6 @@ const GOAL_TARGET_LANGUAGE: readonly string[] = [
   'wants',
   'need',
   'needs',
-  'get',
 ];
 
 /** Multi-word target phrases, matched literally on the lowercased message. */
@@ -834,6 +832,11 @@ const GOAL_TARGET_PHRASES: readonly string[] = [
   'or better',
   'no less than',
   'counts as success',
+  // Phrase, never the bare verb: "we GET £12,000 a month" is a report, while
+  // "get TO £20,000" is an intent. Two words apart, opposite roles — the same
+  // reason `benchmark` is absent (an industry benchmark is someone else's
+  // number, not this team's criterion).
+  'get to',
 ];
 
 /**

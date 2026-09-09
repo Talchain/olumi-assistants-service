@@ -146,6 +146,24 @@ describe('a goal-target answer resolves to the writer tuple, and nothing else do
     expect(result.value).toBe(20000);
   });
 
+  it('⭐ A BARE VERB IS NOT INTENT — "we get £12,000 a month" is a report', () => {
+    // Self-caught while writing the vocabulary: `get` was briefly a member, and
+    // it makes this present-tense report eligible. The phrase `get to` is an
+    // intent; the bare verb is not. Two words apart, opposite roles — which is
+    // why the vocabulary carries the phrase and not the verb, and why
+    // `benchmark` is absent too (an industry benchmark is someone else's
+    // number, not this team's criterion).
+    const result = resume('We get £12,000 a month.', [pending()]);
+    expect(result.matched).toBe(false);
+  });
+
+  it('CONTRAST — "get to £20,000" IS intent and binds', () => {
+    const result = resume('We want to get to £20,000.', [pending()]);
+    expect(result.matched).toBe(true);
+    if (!result.matched) return;
+    expect(result.value).toBe(20000);
+  });
+
   it('HEDGED BARE ANSWER — "about £20k" is still just the amount', () => {
     // `about` is answer furniture, from `ANSWER_HEDGE_WORDS` (derived from
     // stated-level's closed qualifier list minus its tense members).
