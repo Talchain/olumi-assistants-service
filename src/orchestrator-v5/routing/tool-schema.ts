@@ -1005,7 +1005,12 @@ export type FirstPassCoercionReason =
   // Class (e) — a MISSING / INVALID-TYPE intent_class on a FORCED pill turn,
   // defaulted to 'execute' (the #628 assert-execute guard still backstops
   // semantics). Fires only when the parse context is a forced pill.
-  | 'missing_intent_class_forced';
+  | 'missing_intent_class_forced'
+  // Class (f) — the COACH-BRANCH DETAIL HOIST. A non-execute turn that put its
+  // `detail` prose at the ROOT instead of inside `answer_shape`. Folded in
+  // rather than stripped, because on a coaching turn that prose IS the answer.
+  // See `coerceCoachDetailHoist`.
+  | 'coach_detail_hoist';
 
 /**
  * A single coercion applied to a routing tool call before the strict Zod
@@ -1135,6 +1140,10 @@ function recoverStrayAnswerText(value: unknown): string | undefined {
  *       An answer-looking stray value is LIFTED into `explanation.answer_text`
  *       first (same content-preserving rule as (a)); the stripped key NAME is
  *       carried on the coercion (structural, R-004-safe).
+ *   (f) NON-EXECUTE only: a top-level `detail` string on a turn whose
+ *       `answer_shape.detail` is empty is FOLDED into the shape instead of
+ *       costing a repair. Coaching content, never authority — see
+ *       `coerceCoachDetailHoist`.
  *   (e) FORCED pills only (`opts.forced`): a MISSING / INVALID-TYPE
  *       `intent_class` is defaulted to 'execute' so the turn enters the
  *       execute-branch coercions above instead of paying a repair. A
@@ -1146,6 +1155,74 @@ function recoverStrayAnswerText(value: unknown): string | undefined {
  * `action`) is left untouched by everything above and still fails the strict
  * parse → REPAIR_ONCE path intact.
  */
+/**
+ * ⭐⭐ CLASS (f) — THE COACH-BRANCH DETAIL HOIST, folded rather than stripped.
+ *
+ * MEASURED, on the existing paid comparison run rather than imagined: 1 of 18
+ * records (`seq16`, candidate arm) put its `detail` prose at the ROOT of the
+ * tool call instead of inside `answer_shape`. `RawToolCallSchema` is `.strict()`
+ * and `detail` is not one of its six keys, so the root produced
+ * `unrecognized_keys`, the parse failed, and the turn went to REPAIR_ONCE — a
+ * SECOND LLM call whose only job was to move one field. If that repair also
+ * fails the turn ends in `RoutingError('schema_repair_failed')` and the person
+ * gets no answer at all.
+ *
+ * The control in the same run is `seq4`, which put the identical prose INSIDE
+ * `answer_shape.detail` and was accepted and delivered in full — so the two
+ * records differ by field position and nothing else. That is the whole
+ * evidence base, and it is why this is a fold and not a guess.
+ *
+ * ⚠ WHY FOLD, WHERE THE EXECUTE BRANCH STRIPS. Class (d) discards an unknown
+ * top-level key because on an EXECUTE turn the answer is a deterministic
+ * receipt and stray prose is noise. On a COACH turn the prose IS the product:
+ * `deriveAnswerTextFromShape` joins headline, bullets and detail, so a
+ * discarded `detail` is the reasoning the person asked for, deleted. Stripping
+ * here would turn a repair tax into silent content loss, which is worse.
+ *
+ * ⚠ WHAT THIS DELIBERATELY DOES NOT DO, because a coercion on this branch is
+ * one step from a parser that invents authority:
+ *   · it moves ONE named key whose name already exists in the target schema.
+ *     No general strip, no other key, no rename, no inference;
+ *   · it never overwrites a populated `answer_shape.detail` — a model that
+ *     filled both keeps what it put in the shape;
+ *   · it never CREATES an `answer_shape`. Without one there is no headline,
+ *     and inventing a shape around orphaned prose would be manufacturing an
+ *     answer structure the model did not author;
+ *   · it is unreachable from the execute branch (the caller returns here only
+ *     for non-execute, non-forced turns), so it can never affect a mutation's
+ *     authority. That is the load-bearing boundary of this change.
+ *
+ * Returns the SAME OBJECT REFERENCE when it does not apply, so the
+ * byte-identical non-execute passthrough that every other coach turn relies on
+ * is preserved by construction rather than by care.
+ */
+function coerceCoachDetailHoist(toolInput: Record<string, unknown>): {
+  value: unknown;
+  coercions: FirstPassCoercion[];
+} {
+  const hoisted = toolInput.detail;
+  if (typeof hoisted !== 'string' || hoisted.trim().length === 0) {
+    return { value: toolInput, coercions: [] };
+  }
+  const shape = toolInput.answer_shape;
+  if (!isPlainObject(shape)) return { value: toolInput, coercions: [] };
+  const existing = shape.detail;
+  if (typeof existing === 'string' && existing.trim().length > 0) {
+    // Both populated: the shape wins and the root key is left alone, so the
+    // turn still repairs rather than this helper silently choosing for it.
+    return { value: toolInput, coercions: [] };
+  }
+  // `delete` on a shallow copy rather than a rest-destructure: the discarded
+  // binding an omit would create is an unused variable, and silencing one with
+  // an underscore is a lint convention, not a reason.
+  const rest: Record<string, unknown> = { ...toolInput };
+  delete rest.detail;
+  return {
+    value: { ...rest, answer_shape: { ...shape, detail: hoisted } },
+    coercions: [{ reason: 'coach_detail_hoist' }],
+  };
+}
+
 export function coerceFirstPassToolCall(
   toolInput: unknown,
   opts?: { forced?: boolean },
@@ -1167,9 +1244,11 @@ export function coerceFirstPassToolCall(
   const forcedDefault = opts?.forced === true && intentMissingOrInvalidType;
 
   if (!forcedDefault && rawIntent !== 'execute') {
-    // Non-execute and not a forced default: byte-identical passthrough — the
-    // pre-fix contract for every coach/converse/clarify turn is unchanged.
-    return { value: toolInput, coercions: [] };
+    // Non-execute and not a forced default. Byte-identical passthrough EXCEPT
+    // for one named, content-preserving fold — see `coerceCoachDetailHoist`.
+    // Every other coach/converse/clarify turn keeps the pre-fix contract, and
+    // the helper returns the SAME OBJECT REFERENCE when it does not apply.
+    return coerceCoachDetailHoist(toolInput);
   }
 
   const coercions: FirstPassCoercion[] = [];
