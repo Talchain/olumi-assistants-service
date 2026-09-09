@@ -184,6 +184,7 @@ describe('dial A — the recorded-ask window', () => {
     expect(askKinds.sort()).toEqual([
       'elicit_edit_target',
       'elicit_effect_target',
+      'elicit_goal_target',
       'elicit_option_effect',
       'elicit_target_baseline',
     ]);
@@ -409,8 +410,8 @@ describe('dial B — a user who has genuinely moved on, at the same distance', (
 // ⭐⭐ THE CLAIMANT SET MOVES AS ONE — the class this suite could not see.
 //
 // Added after an adversarial review found that the widening MANUFACTURED a new
-// stale-hijack. `PENDING_KIND_CLAIMS_BARE_NUMBER` has SEVEN true members;
-// `PENDING_KIND_IS_RECORDED_ASK` widens FOUR. The three left behind still claim
+// stale-hijack. `PENDING_KIND_CLAIMS_BARE_NUMBER` has EIGHT true members;
+// `PENDING_KIND_IS_RECORDED_ASK` widens FIVE. The three left behind still claim
 // a bare number and still expire at 2 turns — so the competitor vanishes from
 // under the ambiguity gate at `repair-value-binding.ts:514-518`, and the older
 // ask WINS a number the user typed for the newer, expired question.

@@ -46,12 +46,23 @@
 
 import type { GraphLookup } from './validator.js';
 import { bigramDice } from './validator.js';
-import type { ElicitTargetBaselinePending, PendingAction } from '../session/pending-action.js';
+import type {
+  ElicitTargetBaselinePending,
+  ElicitGoalTargetPending,
+  PendingAction,
+} from '../session/pending-action.js';
+import { runExtraction } from '../context/cqe/extract-quantities.js';
+import { preNormalise } from '../context/cqe/pre-normalise.js';
+import { mapCqeQuantityToProposalValue } from './deterministic-value-update.js';
 import {
   filterLivePendingActions,
   findSoleLiveElicitBaselinePending,
+  findSoleLiveGoalTargetPending,
 } from '../session/pending-action.js';
-import { classifyElicitedBaselineAnswer } from '../../cee/factor-extraction/stated-level.js';
+import {
+  ANSWER_HEDGE_WORDS,
+  classifyElicitedBaselineAnswer,
+} from '../../cee/factor-extraction/stated-level.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
@@ -286,6 +297,14 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // between ask and answer fails closed (a diverged graph may carry a
   // CHANGED row, and replaying the persisted value would overwrite it).
   elicit_target_baseline: 'mutating',
+  // The swapped success-target receipt's own question. MUTATING, and not
+  // merely fail-closed-by-default: answering it replays `add_constraint` on
+  // the goal, which stamps `goal_threshold_raw`/`_unit`/`_cap` and the
+  // normalised `goal_threshold` onto the goal node. A graph change between
+  // the ask and the answer can remove or replace that goal, and it can also
+  // register a target through another route — either way the answer must not
+  // land on a graph the question was not asked about.
+  elicit_goal_target: 'mutating',
 };
 
 const MUTATING_KINDS: ReadonlySet<PendingAction['action']['kind']> = new Set(
@@ -743,4 +762,292 @@ export function tryBaselineElicitationResume(input: {
     return { matched: false, skip_reason: 'not_an_answer' };
   }
   return { matched: true, pending, targetLabel: liveLabel };
+}
+
+
+/**
+ * ⭐⭐ THE GOAL-TARGET ANSWER RESUMER — the sibling of
+ * {@link tryBaselineElicitationResume}, deliberately separate from it.
+ *
+ * Baseline asks "where is it now" and its answer is a PERCENT, which is why
+ * `classifyElicitedBaselineAnswer` is percent-shaped. A goal target is "what
+ * counts as success", and the person's own units are whatever their brief used
+ * — £20k, 5,000 signups, 92%. Routing a currency answer through the percent
+ * classifier would be two questions under one name, so this uses the SHARED
+ * quantity extractor the deterministic value-update route already uses. No
+ * second parser is introduced, and no writer: the caller replays the resolved
+ * tuple through the canonical `add_constraint` lifecycle.
+ *
+ * ⚠ A GOAL MINIMUM IS NOT A CHURN MAXIMUM. An answer stating a ceiling is
+ *   REFUSED, not stamped: ISL computes `P(samples >= threshold)`, so recording
+ *   a ceiling as a `>=` target inverts the person's meaning. The caller asks the
+ *   precise missing question and must not claim an edit.
+ */
+/**
+ * The words of the message that are NOT the numeric value token.
+ *
+ * ⛔ THIS USED TO SUBTRACT `raw_text`, AND THAT WAS A FALSE READING OF THE
+ * EXTRACTOR'S CONTRACT. CQE does not promise that a match contains only the
+ * scalar: an instruction pattern matches the WHOLE message, verb and subject
+ * included, and `makeResult` assigns that whole string to `raw_text`. So
+ * "Set churn to 4%" left an EMPTY residue, `.every()` on an empty array is
+ * true, and a scoped factor edit was accepted as the revenue goal's answer —
+ * with the pre-route's warrant behind it. Found by the independent review at
+ * the producer's bytes.
+ *
+ * `span_start`/`span_end` are the contract that actually says what is scalar:
+ * absolute offsets, in CQE-normalised coordinates, of the NUMERIC VALUE TOKEN
+ * alone (`extract-quantities.ts` `locateValueTokenSpan`). Subtracting the span
+ * leaves the instruction and its subject standing, which is the point — the
+ * words a scoped edit carries are exactly what must disqualify it.
+ *
+ * The widening around the span is POSITIONAL, not a vocabulary: a currency
+ * mark or whitespace immediately left, a percent sign and at most two letters
+ * immediately right ("£20k" → "£", "k"). No word list, and nothing that could
+ * grow one counterexample at a time.
+ *
+ * Returns `null` when the extractor emitted no span — a match with no digit
+ * token ("double it") — so the caller fails closed rather than treating an
+ * unlocatable value as a bare answer.
+ */
+function wordsBesidesTheValueToken(
+  message: string,
+  amount: { readonly span_start?: unknown; readonly span_end?: unknown },
+): readonly string[] | null {
+  const spanStart = amount.span_start;
+  const spanEnd = amount.span_end;
+  if (typeof spanStart !== 'number' || typeof spanEnd !== 'number') return null;
+  // Same coordinate space the spans are expressed in.
+  const text = preNormalise(message).text;
+  if (spanStart < 0 || spanEnd > text.length || spanStart >= spanEnd) return null;
+  let start = spanStart;
+  while (start > 0 && /[£$€\s]/.test(text[start - 1] as string)) start -= 1;
+  // A percent sign and/or a short unit suffix ("£20k" → "k", "92%" → "%"),
+  // matched POSITIONALLY in one pass.
+  //
+  // ⚠ Written as one regex rather than a per-character equality scan on
+  // purpose: that spelling is the shape `unit-scale-class.test.ts` pins as a
+  // KNOWN-UNMIGRATED unit-equality site, and this is a CHARACTER scan, not a
+  // unit comparison. Adding this file to that set would have recorded it as
+  // something it is not — the honest fix is to stop matching the pattern.
+  const trailing = /^%?[A-Za-z]{0,2}(?![A-Za-z])/.exec(text.slice(spanEnd));
+  const end = spanEnd + (trailing === null ? 0 : trailing[0].length);
+  const residue = `${text.slice(0, start)} ${text.slice(end)}`;
+  return residue.toLowerCase().match(/[a-z']+/g) ?? [];
+}
+
+/**
+ * ⭐⭐ IS THIS MESSAGE ELIGIBLE TO ANSWER THE LIVE GOAL-TARGET QUESTION?
+ *
+ * ⛔ FIVE ROUNDS, AND ONLY THE LAST TWO WERE ABOUT THE RIGHT THING.
+ *
+ *   b56f54a7  one amount, no other full label   → said nothing about ROLE
+ *   690b8735  + no present-state marker         → "Our baseline MRR is £12,000."
+ *   35ed6e22  + a target word anywhere          → the word was in another clause
+ *   de9010fe  + that word in the amount's clause → "…for choosing a target is
+ *                                                  £12,000."
+ *   f4fa9d7c  the message IS what CQE read      → `raw_text` can BE the whole
+ *                                                  instruction ("Set churn to 4%")
+ *
+ * The first four were prose predicates and CLAUDE.md trap 22f applies to them:
+ * four reversals is proof the approach is wrong. The fifth was not a prose
+ * predicate — it was a wrong belief about a data contract, and the repair is to
+ * read the contract that exists.
+ *
+ * THE RULE, and it involves no vocabulary at all:
+ *
+ *   THE MESSAGE IS THE VALUE TOKEN, PLUS HEDGES.
+ *
+ * The recorded question named the goal, and F1-F3 (sole live claimant, matching
+ * graph hash, goal still present) are that question's identity. A reply that
+ * carries nothing but the number can only be answering it — there is no verb to
+ * make it an instruction, no second clause to borrow an affirmation from, and no
+ * second subject to attribute the amount to.
+ *
+ * EVERYTHING RICHER FALLS THROUGH UNCHANGED to the ordinary receiver, including
+ * every scoped edit. That is a deliberate loss of coverage: an explicit goal
+ * statement still reaches the canonical writer by its ordinary route, and a
+ * message this gate cannot certify becomes coaching or an ordinary edit rather
+ * than a silent mutation of the goal.
+ *
+ * ⚠ WHY THE BAR IS THIS HIGH — the authority trace. The executor pre-route sets
+ * `consumedPendingAction`, and `detectMutationWarrant({ isConfirmResume: true })`
+ * grants `confirm_resume` BEFORE the message is inspected, with the commit floor
+ * treating the consumed ref as authority. A false match supplies the wrong target
+ * AND its licence to write, and no later classifier can undo that premise.
+ */
+function isEligibleGoalTargetAnswer(
+  message: string,
+  amount: { readonly span_start?: unknown; readonly span_end?: unknown },
+): boolean {
+  const words = wordsBesidesTheValueToken(message, amount);
+  if (words === null) return false;
+  const hedges = new Set(ANSWER_HEDGE_WORDS);
+  return words.every((w) => hedges.has(w));
+}
+
+export type GoalTargetResumeDispatch =
+  | { readonly matched: false; readonly skip_reason:
+      | 'no_pending_question'
+      | 'graph_diverged'
+      | 'target_missing' }
+  | {
+      readonly matched: false;
+      readonly skip_reason: 'unreadable_answer';
+      readonly pending: ElicitGoalTargetPending;
+      readonly reason:
+        | 'no_amount'
+        | 'several_amounts'
+        | 'ceiling_not_minimum'
+        | 'degraded_parse'
+        | 'names_other_subject'
+        | 'not_a_target_answer';
+    }
+  | {
+      readonly matched: true;
+      readonly pending: ElicitGoalTargetPending;
+      readonly goalNodeId: string;
+      /**
+       * The goal's CURRENT label, read from the live graph rather than from
+       * the pending. The replay proposal's entity carries it, and a label
+       * copied out of the question would be the graph's label as it was when
+       * the question was asked — a rename between ask and answer would then
+       * ship a stale name on a resolved-by-id entity.
+       */
+      readonly goalLabel: string;
+      readonly value: number;
+      readonly unit?: string;
+    };
+
+export function tryGoalTargetElicitationResume(input: {
+  readonly message: string;
+  readonly pendingActions: readonly PendingAction[];
+  readonly nowMs: number;
+  readonly currentGraphHash?: string;
+  readonly graphNodes: ReadonlyArray<{ id?: unknown; label?: unknown; kind?: unknown }> | undefined;
+}): GoalTargetResumeDispatch {
+  const pending = findSoleLiveGoalTargetPending(input.pendingActions, input.nowMs);
+  if (pending === null) return { matched: false, skip_reason: 'no_pending_question' };
+  // Mutating kind: a missing hash on either side is a conflict (fail closed),
+  // the same rule the baseline sibling applies.
+  if (graphHashConflicts(pending, input.currentGraphHash)) {
+    return { matched: false, skip_reason: 'graph_diverged' };
+  }
+  const goalId = pending.action.goal_node_id;
+  const goal = input.graphNodes?.find((n) => n.id === goalId);
+  if (goal === undefined) return { matched: false, skip_reason: 'target_missing' };
+  const goalLabel = typeof goal.label === 'string' ? goal.label : '';
+
+  const extraction = runExtraction(input.message);
+  if (extraction.summary.degraded) {
+    return { matched: false, skip_reason: 'unreadable_answer', pending, reason: 'degraded_parse' };
+  }
+  const amounts = extraction.results.filter(
+    (r) => typeof r.value === 'number' && Number.isFinite(r.value),
+  );
+  if (amounts.length === 0) {
+    return { matched: false, skip_reason: 'unreadable_answer', pending, reason: 'no_amount' };
+  }
+  if (amounts.length > 1) {
+    return { matched: false, skip_reason: 'unreadable_answer', pending, reason: 'several_amounts' };
+  }
+  const amount = amounts[0]!;
+  if (amount.comparator === 'at_most') {
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      reason: 'ceiling_not_minimum',
+    };
+  }
+  // ⭐ THE SUBJECT GATE — one amount is not enough; it must not be ABOUT
+  // something else in the model.
+  //
+  // The question is "what value counts as success for <goal>?", and a person
+  // may reply with a sentence that carries exactly one number and is plainly
+  // about a different thing: "the Pro tier is £59 a month", "Pro plan churn
+  // rate is 4%". Stamping either as the goal's success threshold would put a
+  // price or a guardrail into `goal_threshold_raw`, which is what ISL scores
+  // every option against.
+  //
+  // ⚠ AND THE BOUND, STATED RATHER THAN IMPLIED. This refuses answers that
+  // NAME ANOTHER NODE IN THE MODEL — a derivable, testable property. It does
+  // NOT attempt to decide from prose alone whether an arbitrary sentence is
+  // "about" the goal: a wider predicate over natural language is precisely the
+  // failure mode CLAUDE.md trap 22f records (four consecutive rounds, each
+  // fixing one direction and reopening the other). Where this gate cannot
+  // decide, the ordinary refusals above still apply and the message still
+  // reaches the ordinary lanes intact.
+  //
+  // Labels under three characters are skipped: a one- or two-character label
+  // matches almost any sentence, and a gate that refuses everything is the
+  // same defect as one that refuses nothing.
+  const lowerMessage = input.message.toLowerCase();
+  const namesOther = (input.graphNodes ?? []).some((n) => {
+    if (n.id === goalId) return false;
+    const label = typeof n.label === 'string' ? n.label.trim().toLowerCase() : '';
+    if (label.length < 3) return false;
+    return lowerMessage.includes(label);
+  });
+  if (namesOther) {
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      reason: 'names_other_subject',
+    };
+  }
+  // ⭐⭐ ANSWER ELIGIBILITY — ONE typed route, no vocabulary.
+  //
+  // The message must be the quantity CQE read, plus hedges. The full reasoning,
+  // including the four rounds this replaces and why prose could not settle it,
+  // is on `isEligibleGoalTargetAnswer`. Everything richer falls through
+  // UNCHANGED to the ordinary receiver — an explicit goal statement still
+  // reaches the canonical writer by its ordinary route, and a message this gate
+  // cannot certify becomes coaching rather than a silent mutation.
+  //
+  // FAILURE DIRECTION: this gate can only REFUSE, so it can never mint a wrong
+  // value; it can only decline to claim a turn.
+  if (!isEligibleGoalTargetAnswer(input.message, amount)) {
+    return {
+      matched: false,
+      skip_reason: 'unreadable_answer',
+      pending,
+      reason: 'not_a_target_answer',
+    };
+  }
+  // ⭐⭐ CROSS THE SCALE BOUNDARY THROUGH THE ESTABLISHED MAPPER.
+  //
+  // ⛔ THIS USED TO HAND CQE's OWN REPRESENTATION STRAIGHT TO THE WRITER, and
+  // for a percentage that is a silent scale error. CQE deliberately represents
+  // "92%" as `value: 0.92, unit: 'percentage'`, while `add_constraint` stores
+  // `params.value` in USER UNITS without conversion and its cap helper
+  // recognises the literal '%' and expects the RAW PERCENT NUMBER. Passing the
+  // pair through unchanged registered raw 0.92 / unit 'percentage', which falls
+  // to the non-percent cap rule — a target of 0.92 with a 1.15 denominator
+  // instead of 92 with 100. The number the person typed would be scored against
+  // the wrong scale, silently.
+  //
+  // `mapCqeQuantityToProposalValue` is the ESTABLISHED contract for this exact
+  // crossing (`deterministic-value-update.ts`), written for the sibling
+  // `set_factor_value` route and documenting the same double-normalisation
+  // hazard. Reusing it is single-sourcing one conversion; a second copy here
+  // would be the hand-maintained mirror this repo keeps paying for. It also
+  // maps `GBP` → `£`, which is the writer's user-unit spelling — so the unit
+  // reaching the graph is the display form BECAUSE the shared mapper says so,
+  // not because a test wanted a symbol.
+  //
+  // The pending's own unit is NOT mapped: it was captured from an already-
+  // registered target, so it is in writer units already. Never guessed — an
+  // absent unit on both sides stays absent, and the cap doctrine decides.
+  const mapped = mapCqeQuantityToProposalValue(amount);
+  const unit = mapped.unit !== undefined && mapped.unit.length > 0 ? mapped.unit : pending.action.unit;
+  return {
+    matched: true,
+    pending,
+    goalNodeId: goalId,
+    goalLabel,
+    value: mapped.value,
+    ...(unit !== undefined ? { unit } : {}),
+  };
 }

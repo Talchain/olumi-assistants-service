@@ -206,6 +206,8 @@ import {
 } from './compound-value-update-chain.js';
 import {
   decideGoalTargetReceipt,
+  extractPersistedGoalTarget,
+  findSoleGoalNode,
   formatGoalTargetNotSavedText,
 } from './compose/goal-target-receipt-guard.js';
 import {
@@ -216,6 +218,7 @@ import {
 import {
   tryBaselineElicitationResume,
   tryClarificationResume,
+  tryGoalTargetElicitationResume,
 } from './routing/clarification-resume.js';
 import { formatBaselineReask } from './tools/handlers/d1-shared/format-confirmation.js';
 import {
@@ -6160,6 +6163,129 @@ export async function runTurnExecutor(
             );
           }
           return finalizeRun();
+        }
+      }
+
+      // ⭐⭐ GOAL-TARGET ANSWER PRE-ROUTE — the receiving half of the
+      // `elicit_goal_target` question this executor persists at the receipt-swap
+      // site below (search `goalTargetAskChannel`).
+      //
+      // THE LOOP IT CLOSES, and it is the measured one. When a success-target
+      // registration claim is swapped for the honest fallback, the user reads
+      // "Tell me it again in one message, including the value and the goal it
+      // applies to". They then type "£20,000". Before this branch that answer
+      // reached the deterministic value-update parser below, which matches
+      // FACTORS by label — so the number either bound a factor the user was
+      // not talking about or fell through to the LLM with no referent at all.
+      // The question named a goal; the answer must reach THAT goal.
+      //
+      // WHY IT IS A SEPARATE BRANCH FROM THE BASELINE SIBLING ABOVE, rather
+      // than another arm of it. They are differently-shaped questions and the
+      // estate's chronic defect is merging such pairs (trap 21):
+      //   · baseline asks for a CURRENT LEVEL of a factor, is percent-framed,
+      //     and `classifyElicitedBaselineAnswer` is built around that scale;
+      //   · this asks for a SUCCESS THRESHOLD on a goal, in the goal's own
+      //     units (currency, count, months — anything the CQE can read), and a
+      //     ceiling ("no more than 5%") is a REFUSAL here, not an answer,
+      //     because ISL computes P(samples >= threshold).
+      // Folding them would need one classifier answering both, which is how
+      // four rounds were once lost on a single predicate (trap 22f).
+      //
+      // Placement is the baseline sibling's, for the same reasons: after the
+      // typed-chip mutation route (an explicit chip click outranks an inferred
+      // answer) and before the deterministic value-update parser (a bare
+      // "£20,000" carries a digit, and the answer must bind the QUESTION's
+      // goal, never a fuzzy factor match). `routingResult === undefined`
+      // guards the chip route; chip-click sources are excluded because their
+      // copy is canned, not an answer. Every non-match falls through SILENTLY
+      // — this is additive, so a lapsed, diverged, refused or ignored question
+      // leaves the flow exactly as it was.
+      //
+      // ⚠ NO RE-ASK ARM, deliberately, and this is the one place it diverges
+      // from the baseline sibling. R2918B re-asks on `unreadable_answer`
+      // because its classifier reserves that reason for messages SHAPED like a
+      // level answer. This helper's refusals include `several_amounts` and
+      // `ceiling_not_minimum`, which fire on ordinary sentences that merely
+      // contain numbers ("churn is 5% and revenue is £2m"), so a re-ask here
+      // would hijack turns that were never answering. Refuse and fall through:
+      // the ordinary lanes still get the message intact.
+      if (
+        routingResult === undefined &&
+        payload.source !== 'chip_click' &&
+        payload.source !== 'chip'
+      ) {
+        const goalTargetAnswer = tryGoalTargetElicitationResume({
+          message: payload.message,
+          pendingActions: context.most_recent_pending_actions ?? [],
+          nowMs: Date.now(),
+          ...(freshness?.current_graph_hash != null
+            ? { currentGraphHash: freshness.current_graph_hash }
+            : {}),
+          graphNodes: graphStateForTurn?.nodes,
+        });
+        if (goalTargetAnswer.matched) {
+          const pending = goalTargetAnswer.pending;
+          emit(TelemetryEvents.PendingActionMatched, {
+            request_id: requestId,
+            scenario_id: context.session_id,
+            pending_action_id: pending.id,
+            kind: 'elicit_goal_target',
+            chip_id: pending.chip_id,
+            candidate_count: 1,
+          });
+          // The SANCTIONED writer, reached the ordinary way. `add_constraint`
+          // with `constraint_type: 'at_least'` on a goal-kind entity is the
+          // one canonical success-target path (`isSuccessTargetTurn` →
+          // `stampGoalThreshold`, which writes goal_threshold_raw/_unit/_cap
+          // and the normalised goal_threshold from ONE derivation). No second
+          // parser, no second mutation path: this branch resolves the answer
+          // to (goal, value, unit) and hands those three to the existing
+          // STEP 2-7 lifecycle, which validates and executes them exactly as
+          // it would a Sonnet-routed dispatch.
+          //
+          // `entity.kind` is 'goal' rather than the baseline sibling's 'node':
+          // the validation registry accepts goal entities on add_constraint,
+          // and the handler's own target lookup is by id, so naming the kind
+          // truthfully costs nothing and keeps the proposal readable in logs.
+          const replayProposal: ProposalAction = {
+            handler_id: 'add_constraint',
+            entity: {
+              id: goalTargetAnswer.goalNodeId,
+              kind: 'goal',
+              label: goalTargetAnswer.goalLabel,
+              resolution_status: 'resolved',
+              resolution_method: 'id_match',
+            },
+            parameters: [
+              { name: 'constraint_type', value: 'at_least', source: 'user_explicit' },
+              { name: 'value', value: goalTargetAnswer.value, source: 'user_explicit' },
+              ...(goalTargetAnswer.unit !== undefined
+                ? [{ name: 'unit', value: goalTargetAnswer.unit, source: 'user_explicit' as const }]
+                : []),
+            ],
+            cited_context_fields: ['graph.nodes'],
+          };
+          routingResult = {
+            type: 'tool_call',
+            proposal: { intent_class: 'execute', action: replayProposal },
+            orientationText: '',
+            rawResult: {
+              content: [],
+              stop_reason: 'tool_use',
+              usage: { input_tokens: 0, output_tokens: 0 },
+              model: 'deterministic-goal-target-elicitation-resume',
+              latencyMs: 0,
+            },
+            llmCallCount: 0,
+            droppedActions: [],
+          };
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+          // Consume the question — it has been answered. A successful mint
+          // also moves the graph hash, which invalidates it independently;
+          // this is the explicit, hash-independent guard.
+          consumedPendingAction = pending;
         }
       }
 
@@ -12780,6 +12906,20 @@ export async function runTurnExecutor(
       // via the STEP 7 catch (STATE_COMMIT_FAILED), so together the
       // formatGoalTargetSet class ships only on a durable commit whose
       // graph carries the threshold.
+      //
+      // ⭐⭐ AND THE SWAP NOW ASKS A QUESTION IT CAN HEAR THE ANSWER TO.
+      // The fallback copy ends "Tell me it again in one message, including the
+      // value and the goal it applies to" — a solicitation, which until now
+      // was persisted nowhere. `goalTargetAskChannel` carries the referent
+      // this turn can name (the sole goal in the PERSISTED graph, fail-closed
+      // on plurality) down to the commit site below, which arms it as a
+      // `elicit_goal_target` pending in the SAME commit as the copy the user
+      // read. The receiving branch is the goal-target answer pre-route.
+      let goalTargetAskChannel: {
+        readonly goal_node_id: string;
+        readonly question: string;
+        readonly unit?: string;
+      } | null = null;
       {
         const goalReceiptDecision = decideGoalTargetReceipt({
           assistantText: composedOk.assistant_text,
@@ -12808,6 +12948,38 @@ export async function runTurnExecutor(
             ...composedOk,
             assistant_text: formatGoalTargetNotSavedText(context.persistedGraph ?? null),
           };
+          // Arm the question against the PERSISTED graph, never the withheld
+          // commit graph: the write below is withheld on this path, so the
+          // graph the next turn loads — and hashes — is this one. Binding the
+          // referent to a graph that is about to be discarded would fail the
+          // answer turn's divergence gate every time.
+          //
+          // The `question` field stores the bytes the user actually read
+          // (assigned above, so this reads the swapped text, not the claim it
+          // replaced). It is the record of what was asked; the resume binds on
+          // the goal id, so a copy revision can never silently change which
+          // goal an answer lands on.
+          {
+            const askGoal = findSoleGoalNode(context.persistedGraph ?? null);
+            if (askGoal !== null) {
+              // Unit carried from a SURVIVING registered target when there is
+              // one — the copy names it ("your previous target of 15% is still
+              // registered"), so a bare "20" in reply means 20 of that same
+              // unit. With nothing surviving there is no unit to carry, and
+              // none is invented: the answer must supply its own or the
+              // writer's existing cap doctrine decides.
+              const survivingForUnit = extractPersistedGoalTarget(
+                context.persistedGraph ?? null,
+              );
+              goalTargetAskChannel = {
+                goal_node_id: askGoal.id,
+                question: composedOk.assistant_text,
+                ...(survivingForUnit?.unit !== undefined
+                  ? { unit: survivingForUnit.unit }
+                  : {}),
+              };
+            }
+          }
           // ROADMAP 1.19(b) — swap-vs-commit: swapping the TEXT for the
           // honest fallback while still persisting the graph this turn's
           // (unbacked) mutation produced would commit junk — the exact
@@ -13007,10 +13179,64 @@ export async function runTurnExecutor(
       // same front-of-list precedence when present (it is this turn's own
       // question; flip proposals cannot co-occur with an add_constraint
       // turn, so the two heads never compete).
+      // The swapped success-target receipt's own question (see
+      // `goalTargetAskChannel` above), armed in the SAME commit as the copy
+      // the user read — the 2.918 pattern, applied to the goal seam.
+      //
+      // ⚠ HASHED AGAINST THE PERSISTED GRAPH, not `llmGraphHash`. The swap
+      // withholds this turn's graph write, so the graph the answer turn loads
+      // is the persisted one; `llmGraphHash` is derived from the mutated graph
+      // when a handler produced one, which on this path is precisely the graph
+      // being discarded. Arming with that hash would make the answer turn's
+      // divergence gate fail closed on every single answer — a question that
+      // can never be answered is worse than no question at all.
+      //
+      // Fail-closed on an unavailable hash, the same posture as the baseline
+      // elicitation and the add-risk clarify: no hash, no pending. The copy
+      // still ships and a full-sentence restatement still routes through the
+      // ordinary LLM path; only the elliptical carry is (safely) unavailable.
+      const goalTargetAskPendingForCommit: PendingAction | undefined = (() => {
+        if (goalTargetAskChannel === null) return undefined;
+        const persistedHash = ((): string | null => {
+          try {
+            return (
+              computeAnalysisAffectingGraphHash(
+                (context.persistedGraph as GraphStateIngress | null | undefined) ?? undefined,
+              ) ?? null
+            );
+          } catch {
+            return null;
+          }
+        })();
+        if (persistedHash === null) {
+          log.warn(
+            { request_id: requestId, scenario_id: context.session_id },
+            'V5 goal-target elicitation — graph hash unavailable; no pending question persisted (fail-closed)',
+          );
+          return undefined;
+        }
+        const askedAtIso = new Date().toISOString();
+        return {
+          id: randomUUID(),
+          scenario_id: context.session_id,
+          // Server-only pending (no rendered chip). STABLE by design: a
+          // re-ask supersedes its predecessor by key in carry-forward rather
+          // than consuming another of the column's three slots.
+          chip_id: 'chip_elicit_goal_target',
+          action: { kind: 'elicit_goal_target', ...goalTargetAskChannel },
+          preconditions: { graph_hash: persistedHash },
+          expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+          expires_at_iso: new Date(
+            Date.parse(askedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+          ).toISOString(),
+          emitted_at_iso: askedAtIso,
+        };
+      })();
       const pendingForCommit =
-        flipProposalPending || elicitPendingForCommit
+        flipProposalPending || elicitPendingForCommit || goalTargetAskPendingForCommit
           ? [
               ...(elicitPendingForCommit ? [elicitPendingForCommit] : []),
+              ...(goalTargetAskPendingForCommit ? [goalTargetAskPendingForCommit] : []),
               ...(flipProposalPending ? [flipProposalPending] : []),
               ...(proposalPendingForCommit ?? []),
             ].slice(0, 3)

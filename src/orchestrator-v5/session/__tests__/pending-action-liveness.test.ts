@@ -200,6 +200,19 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
           offered_targets: [{ node_id: 'fac_hiring_cost', label: 'Hiring and Salary Cost' }],
         },
       };
+    case 'elicit_goal_target':
+      // The swapped success-target receipt's own question (server-only;
+      // carries the goal it names plus the bytes the user actually read, so a
+      // bare "£20,000" on the next turn has a referent to bind to).
+      return {
+        ...base,
+        action: {
+          kind,
+          goal_node_id: 'goal_revenue',
+          question:
+            "I couldn't register that success target, so the model still has no target for the analysis to score against.",
+        },
+      };
     case 'proposed_concept':
       return {
         ...base,
@@ -252,6 +265,9 @@ describe('derivePendingActivity — single ORIENT-time pending tally, per kind',
     // proposals, so they must contribute ZERO here while still counting live.
     ['elicit_effect_target', 0],
     ['elicit_edit_target', 0],
+    // Same reasoning again: a bare "yes" answers no "what value counts as
+    // success?" question. An elicitation, never a proposal.
+    ['elicit_goal_target', 0],
     ['run_analysis', 0],
     ['what_would_flip', 0],
   ])('a single live %s → confirmationExpectingLiveCount %d, but always counted live', (kind, expected) => {
