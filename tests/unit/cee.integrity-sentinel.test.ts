@@ -1383,10 +1383,17 @@ describe("CIL Phase 0.2: Sentinel integrity checks", () => {
       expect(result.defaulted_edge_ids).toEqual(["fac_price->out_revenue"]);
     });
 
-    it("⭐ the FLAT parse-stage path sees the marker too — where the enricher's edges arrive first", () => {
-      // detectStrengthDefaultsV1 runs in the parse stage, BEFORE the V3
-      // transform. A marker read only on the nested side would have left this
-      // stage blind, which is why the accessor is passed by both entry points.
+    it("the FLAT path honours the marker too — so the two paths cannot drift", () => {
+      // ⚠ NOT because enrichment edges reach the parse stage — THEY DO NOT.
+      // `runStageParse` (unified-pipeline/index.ts:946) runs BEFORE
+      // `runStageEnrich` (:1009), so detectStrengthDefaultsV1 sees the LLM's
+      // draft graph and never an enrichment-created edge. The first version of
+      // this test said the opposite and was wrong.
+      //
+      // It is pinned because a marker honoured on the nested side and ignored
+      // on the flat one is exactly the divergence the shared core exists to
+      // prevent — and it would stay invisible until some future producer marked
+      // an edge before parse.
       const edges = [
         { from: "fac_price", to: "out_revenue", strength_mean: 0.5, strength_std: 0.2, defaulted: true },
         { from: "fac_demand", to: "out_revenue", strength_mean: 0.5, strength_std: 0.2, defaulted: true },

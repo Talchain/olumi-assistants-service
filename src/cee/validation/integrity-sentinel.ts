@@ -652,9 +652,16 @@ export function detectStrengthDefaultsV1(
       }
       return undefined;
     },
-    // The flat path sees the producer's marker FIRST — this is the stage the
-    // enricher's edges pass through before the V3 transform, so a marker read
-    // only on the nested side would have left the parse stage still blind.
+    // ⚠ NOT BECAUSE ENRICHMENT EDGES REACH HERE — THEY DO NOT, AND I CLAIMED
+    // OTHERWISE FIRST. `runStageParse` (unified-pipeline/index.ts:946) runs
+    // BEFORE `runStageEnrich` (:1009), so this entry point sees the LLM's draft
+    // graph and never an enrichment-created edge.
+    //
+    // The accessor is passed here so the two paths CANNOT DRIFT — which is the
+    // stated reason this shared core exists at all. A marker honoured on one
+    // side and ignored on the other is precisely the divergence the core was
+    // written to prevent, and it would be invisible until some future producer
+    // marked an edge before parse.
     (edge) => edge.defaulted,
   );
 
