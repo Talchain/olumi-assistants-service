@@ -238,7 +238,10 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
-import { isBoundedNonMutationAnalyticalRequest } from '../orchestrator-v5/routing/mutation-warrant.js';
+import {
+  hasExplicitNoModelChangeIntent,
+  isBoundedNonMutationAnalyticalRequest,
+} from '../orchestrator-v5/routing/mutation-warrant.js';
 import {
   PROPOSAL_CONFIRM_PATTERN,
   SHORT_CONFIRM_PATTERN,
@@ -4908,6 +4911,11 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // ────────────────────────────────────────────────────────────────
     const boundedNonMutationAnalytical =
       isBoundedNonMutationAnalyticalRequest(ingress.message);
+    // Authority is independent of the bounded analytical vocabulary: an
+    // ordinary reminder may explicitly refuse an edit without matching it.
+    // Reuse the scoped veto so an affirmative edit followed by "don't change
+    // anything else" remains eligible. Do not derive authority from selection.
+    const modelChangeRefused = hasExplicitNoModelChangeIntent(ingress.message);
     const analyticalQuestionDetected =
       isAnalyticalQuestion(ingress.message) || boundedNonMutationAnalytical;
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
@@ -5088,6 +5096,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // value-update gate keeps `set X to Y` / `increase X by N` on the
     // deterministic D1 path (value-update-gate.ts).
     const editVerbCandidate =
+      !modelChangeRefused &&
       positiveEditRegexHit &&
       !negativeEditRegexHit &&
       !valueUpdatePhrasingHit &&
@@ -5215,7 +5224,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // shared bounded classifier owns the turn, every legacy edit intercept
     // stands down; the normal router gets exactly one chance to answer it.
     const bypassEditHandling =
-      proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical;
+      proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical || modelChangeRefused;
 
     // ══════════════════════════════════════════════════════════════════════
     // ⭐⭐ ROADMAP 2.1353 — THE TWO EDIT-CLARIFY INTERCEPTS MUST REMEMBER ASKING.
@@ -6052,6 +6061,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // is an edit-lane intent in its own right, on exactly the same footing
         // as 2.1261's bare-value bind: the pre-route's gates ARE its gates.
         answeredAskClaim) &&
+      !modelChangeRefused &&
       !proposalConfirmSuppressed &&
       // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
       // mutation chip_click (source==='chip_click' with a defined, non-readiness
