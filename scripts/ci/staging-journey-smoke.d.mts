@@ -14,6 +14,12 @@
  * declaration can only make types imprecise, never make a broken journey pass.
  */
 
+/**
+ * THE USER'S ROUTE. Named once so the gate and its guards cannot hold two
+ * different opinions about which path is under test.
+ */
+export declare const TURN_PATH: string;
+
 /** Minimum node count for a drafted graph to count as usable. */
 export declare const MIN_NODES: number;
 
@@ -108,3 +114,32 @@ export declare function assertPromptProvenance(
   diagnostics: Array<Pick<ReturnType<typeof extractDiagnostics>, "exit_path" | "prompt_identity_count"> | null>,
   bodies?: readonly unknown[],
 ): string[];
+
+/**
+ * REPORTS ONLY — never asserts. The error-envelope fields that tell a drafting
+ * failure's causes apart: the orchestrator's STRING `error` vs the proxy's
+ * OBJECT `error.code`, the reason, the violation code, the repair-skip reason,
+ * retryability, whether a recovery suggestion was offered, and both clocks.
+ * Shared by the per-turn log line AND both failure paths, so the alarm and the
+ * diagnostic can never describe the same turn differently. A body with no error
+ * envelope reports `absent(no-error-envelope)` — absent is never printed as
+ * empty, for the same reason `readinessDiagnosis` refuses to.
+ */
+export declare function draftErrorDiagnosis(body: unknown): string;
+
+/**
+ * The proxy error code on a body, or `null` when the proxy did not refuse.
+ * Reads `error.code`: the proxy's `error` is an OBJECT and the orchestrator's is
+ * a STRING, so the code is read rather than the field's stringification.
+ */
+export declare function proxyFailureCode(body: unknown): string | null;
+
+/**
+ * PROXY-LAYER DELIVERY — assert the response was DELIVERED, not merely
+ * generated. A proxy refusal means the model may be perfectly fine and the user
+ * still received nothing, which is a different failure with a different action
+ * from a generation failure.
+ * @param label names the turn in every message.
+ * @returns failure messages; an empty array means the proxy handed it over.
+ */
+export declare function assertProxyDelivered(body: unknown, label?: string): string[];
