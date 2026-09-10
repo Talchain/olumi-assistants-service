@@ -263,18 +263,30 @@ describe('Integration with Loader', () => {
   });
 });
 
-describe('Decision Review Fallback Prompt (v11.1)', () => {
+describe('Decision Review Fallback Prompt (v11.2)', () => {
   beforeEach(() => {
     registerAllDefaultPrompts();
   });
 
+  // Race framing (2026-09-10): v11.1 -> v11.2. The registered default's bytes
+  // changed again — the prompt no longer asks for a contest between the user's
+  // options ("came out ahead", "why it leads" / "what would make it lead",
+  // "overtakes"), it asks for each option's OWN standing, and it now states the
+  // ban explicitly. See src/prompts/__tests__/decision-review-race-framing.test.ts.
+  //
   // F3 (2026-08-10): v11 -> v11.1. The registered default's bytes changed (the
   // margin instruction now forbids stating the distance between two options),
   // so the label had to move or it would name two different prompts. NOT 'v12'
   // — that label is poisoned in the adjacent PMS lineage; see the note at the
   // constant's declaration in src/prompts/defaults.ts.
-  it('exports DECISION_REVIEW_PROMPT_VERSION as v11.1', () => {
-    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11.1');
+  //
+  // ⚠ THIS IS THE THIRD PLACE THE LABEL LIVES (src/prompts/defaults.ts,
+  // src/prompts/estate.ts DEFAULT_PROMPT_VERSIONS, and here). It sits under
+  // tests/, which `tsconfig.build.json` excludes and a src-scoped spec run never
+  // reaches, so a bump that misses it is green everywhere except the required
+  // check. Move all three in the same commit.
+  it('exports DECISION_REVIEW_PROMPT_VERSION as v11.2', () => {
+    expect(DECISION_REVIEW_PROMPT_VERSION).toBe('v11.2');
   });
 
   it('decision_review prompt is registered', () => {
