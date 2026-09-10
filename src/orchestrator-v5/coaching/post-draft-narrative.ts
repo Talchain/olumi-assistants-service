@@ -74,6 +74,10 @@ import { composeDroppedFigureNotice } from '../../cee/context-integrity/brief-au
 
 import { isDirectionClarificationId } from '../../cee/compound-goal/direction-gate.js';
 import { UNAUTHORED_DECISION_LABEL } from '../../cee/draft/records/objective-label.js';
+// ⭐ ONE OWNER for "does this string assert brief extraction". Shared with the
+// `schema-v3.ts` withdrawal and with both producers in `enricher.ts`, so a
+// reworded marker cannot leave this picker matching the old spelling.
+import { assertsBriefExtraction } from '../../cee/factor-extraction/brief-extraction-claim.js';
 
 import {
   assertsAnalysisOutcome,
@@ -2187,13 +2191,61 @@ function collectLabels(nodes: readonly NodeLite[], kind: string): string[] {
   return out;
 }
 
+/**
+ * ⭐⭐ A FILL STRING IS AN ABSENCE OF A CANDIDATE, NOT A CANDIDATE.
+ *
+ * WIRE-WITNESSED 10 Sep 2026 on served build `ecfc086`, on 2 of 4 non-ready
+ * turns, both `assumption_source: uncertainty_driver`:
+ *
+ *     • Assumption to check: Extracted from brief — confirm value
+ *
+ * That is CEE's own provenance marker, served to the user verbatim as the
+ * thing they should go and check. It is not something a person can act on.
+ *
+ * ⛔ WHY IT IS REFUSED HERE AND NOT IN {@link driverIsServable}. That gate
+ * answers *"is this sentence safe to say"* — three conjuncts about grammar,
+ * analysis assertions and copy quality, and the marker legitimately clears all
+ * three (36 chars, asserts nothing, gate-admitted; the em dash is a repairable
+ * STYLE offence since RC4, not a rejection). Refusing it there would answer a
+ * DIFFERENT question with the safety gate's voice (trap 21) and would cost two
+ * things that matter:
+ *
+ *   - a real driver sitting BESIDE the marker would be lost, because the gate
+ *     sees only the one string this picker already chose;
+ *   - the turn would report `fallback_reason: 'gate_rejected'`, telling ops a
+ *     candidate was refused on its content when in truth there was none.
+ *
+ * Skipping here keeps `driverIsServable`'s three conjuncts untouched and
+ * load-bearing, and lets the existing fallback fire for the honest reason.
+ *
+ * ⚠ THE PREDICATE IS THE ESTATE'S EXISTING ONE, DELIBERATELY. `brief-
+ * extraction-claim.ts` is already "the one place this claim is spelled", and
+ * `schema-v3.ts` already withdraws it — from `v3Node.uncertainty_drivers`, the
+ * TOP-LEVEL field. This picker reads `observed_state.uncertainty_drivers`, and
+ * the two carriers are DISJOINT BY CONSTRUCTION at `schema-v3.ts:360`: a
+ * factor with a value puts its drivers in `observed_state` and leaves the
+ * top-level field undefined, while only a valueless factor carries the
+ * top-level one. The enricher always writes a `value` beside the claim
+ * (`enricher.ts:1323`, `:1423`), so the existing withdrawal could never fire
+ * on the nodes carrying it. Importing the shared predicate rather than
+ * spelling a second placeholder list keeps one owner for the question "does
+ * this string assert brief extraction" — a hand-written list here would be the
+ * fourth copy of a string whose copies have already drifted once.
+ *
+ * ⚠ IT IS A PREFIX TEST, NOT A SUBSTRING ONE. A genuine driver that merely
+ * mentions the brief ("the timeline stated in the brief may already be out of
+ * date") is untouched, and is pinned as such.
+ */
 function pickUncertaintyDriver(nodes: readonly NodeLite[]): string | null {
   for (const n of nodes) {
     if (n.kind !== 'factor') continue;
     const drivers = n.observed_state?.uncertainty_drivers;
     if (!drivers || drivers.length === 0) continue;
     for (const d of drivers) {
-      if (typeof d === 'string' && d.trim().length > 0) return d.trim();
+      if (typeof d !== 'string' || d.trim().length === 0) continue;
+      // SKIP, not abort: a real driver may sit behind the marker.
+      if (assertsBriefExtraction(d)) continue;
+      return d.trim();
     }
   }
   return null;
