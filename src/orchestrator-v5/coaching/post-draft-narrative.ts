@@ -97,7 +97,18 @@ function gatedFragmentText(candidate: string): string | null {
   return gated.accept ? (gated.text ?? candidate) : null;
 }
 
-const MAX_WORDS = 140;
+/**
+ * The word ceiling `assembleSectionedNarrative` spends on CONTENT (the fixed
+ * footers are spliced afterwards and are deliberately not priced against it).
+ *
+ * ⭐ EXPORTED SO GUARDS DERIVE IT RATHER THAN MIRROR IT. A test that hardcodes
+ * `140` keeps passing when the budget moves and quietly stops exercising the
+ * over-budget case it was written for — which is exactly what happened to the
+ * first "the word budget sheds the inventory before it sheds the limit" test on
+ * #1428: its fixture returned at rung 1 and both new rungs could be deleted
+ * with it still green.
+ */
+export const MAX_WORDS = 140;
 const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
 const MAX_NAMED_OPTIONS = 4;
@@ -142,9 +153,19 @@ const PROVISIONAL_FRAMING_SENTENCE =
  * open the reply with two hedges in a row. It is the CLOSING frame instead,
  * placed BEFORE the call to action so the reader still ends on the next step.
  * It states what the thing is; it does not apologise for it.
+ *
+ * ── ⛔ ONE SENTENCE WAS REMOVED, AND THE FACT ABOVE IS NOT WITHDRAWN ────────
+ * It read: "Ask me again and you would get a different one." Everything
+ * measured above still holds — nothing here claims the variance went away, and
+ * no mechanism changed. What changed is what the product SAYS about it.
+ * Reviewed on the served build by the product owner: an invitation to re-roll
+ * reads as a property being OFFERED, and it sits against the stated position
+ * that this reasoning layer is to be made as deterministic as it can be. The
+ * surviving half is the honesty that was not objected to, and it is quoted
+ * VERBATIM by `handlers/chip-click-dispatch.ts` — so it stays exactly as is.
  */
 export const MODEL_VARIANCE_NOTE =
-  'This is one of several models I could build from your brief: a starting point to argue with, not an answer. Ask me again and you would get a different one.';
+  'This is one of several models I could build from your brief: a starting point to argue with, not an answer.';
 
 /**
  * Cap on EXTRA "check" bullets surfaced in the weighing section beyond the
@@ -771,9 +792,31 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
   // stated and the product declined to enforce outranks a coaching suggestion,
   // and the core block is the one the word-budget ladder sheds LAST.
-  // Promote the first direction clarification to open the reply. Moved, not
-  // duplicated: it is dropped from the core bullets below. With none, the
-  // narrative is byte-identical to before.
+  //
+  // ⛔ THE FIRST ONE NO LONGER OPENS THE REPLY — IT SITS DIRECTLY BENEATH IT.
+  // #1409 promoted it AHEAD of the confirm sentence, and the product owner's
+  // objection on the served build was exactly that: the first message began by
+  // reporting the product's own failure before it had said what it built. The
+  // reader is told what exists, then what to settle.
+  //
+  // ⚠⚠ WHAT IS *NOT* WITHDRAWN IS THE DEDICATED SLOT, AND THE FIRST ATTEMPT AT
+  // THIS FIX LOST IT. Moving the line into the coaching section put it inside
+  // the word-budget ladder for the first time, and `assembleSectionedNarrative`
+  // has a rung that sheds the whole weighing block — so on inputs that overrun,
+  // the question DISAPPEARED and the option inventory came back in its place.
+  // Measured by execution on one unresolved 4% limit plus a `missing_value`
+  // next step: at three outstanding effect values the limit is served; at four
+  // it is gone (see `first-response-stated-limit-order.test.ts`, which pins the
+  // pair). `assistant_text` is the ONLY carrier for a direction clarification
+  // (`tests/integration/orchestrator/route-v2-direction-clarification-served.test.ts`),
+  // so shedding the block is not a demotion — the user is told nothing at all.
+  //
+  // So the promotion STAYS, and only its POSITION changes: the first
+  // clarification is spliced immediately AFTER the confirm sentence, present at
+  // every rung of the ladder including the terminal one, exactly as it was
+  // before #1409's position was objected to. Moved, not duplicated: it is
+  // dropped from the core bullets below. With none, the narrative is
+  // byte-identical to before.
   const [promotedDirectionBullet = null, ...remainingDirectionBullets] = directionBullets;
   const leadClarification = promotedDirectionBullet;
   const coreBullets = [
@@ -828,9 +871,10 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       // word-budget ladder can shed the whole weighing block, and a count of
       // bullets that were composed but not served is the optimism this
       // telemetry exists to catch.
-      // Counts what was SERVED. The promoted line leads the reply and is
-      // therefore surfaced whether or not the weighing block survived the word
-      // budget; the remainder is surfaced only inside that block.
+      // Counts what was SERVED. The promoted line sits in its own slot beneath
+      // the confirm sentence and is therefore surfaced whether or not the
+      // weighing block survived the word budget; the remainder is surfaced only
+      // inside that block.
       direction_clarifications_surfaced:
         (leadClarification !== null ? 1 : 0) +
         (sectioned.includedWeighing ? remainingDirectionBullets.length : 0),
@@ -2091,10 +2135,17 @@ interface SectionedNarrativeInput {
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
   /**
-   * The one stated-limit clarification promoted ahead of the confirm sentence,
-   * or `null` when the draft has none. Not new copy: the first
-   * `pickDirectionClarifications` line, MOVED — it is removed from the weighing
-   * block so the person reads it once.
+   * The one stated-limit clarification promoted into its own slot directly
+   * BENEATH the confirm sentence, or `null` when the draft has none. Not new
+   * copy: the first `pickDirectionClarifications` line, MOVED — it is removed
+   * from the weighing block so the person reads it once.
+   *
+   * ⭐⭐ IT IS OUTSIDE EVERY SHED. `tryAssemble` emits it at every rung of the
+   * ladder, including the terminal one that takes no budget check, so no input
+   * can reach the user without it. That is the whole point of the slot: the
+   * weighing block IS sheddable, `assistant_text` is the only carrier, and a
+   * clarification that rides inside a sheddable block is a question the user
+   * simply never sees.
    */
   readonly leadClarification: string | null;
   readonly nextStep: string;
@@ -2129,10 +2180,24 @@ interface SectionedNarrativeResult {
  *   1. full (extra check bullet + completeness + options)
  *   2. drop the extra check bullet (weighing core)
  *   3. drop the completeness advisory
+ *   3b. reduce the weighing block to the stated-limit clarifications alone
  *   4. drop the whole weighing block
  *   5. drop options too (confirm + next-step only)
  *
- * The confirm sentence and next-step nudge are load-bearing and never drop.
+ * ⭐⭐ THE LADDER IS MONOTONE, AND THAT IS A PROPERTY TO PRESERVE, NOT A
+ * COINCIDENCE. Every rung serves a STRICT SUBSET of the rung above it, so
+ * "one rung down" always means "strictly less content". A rung that sheds one
+ * block while RE-ADDING another breaks that — and it is not a cosmetic
+ * breakage: the first attempt at #1428 inserted a rung that dropped the option
+ * inventory to keep the stated-limit clarifications, above a rung that dropped
+ * the clarifications and put the inventory back. Adding a single word to the
+ * next-step nudge then flipped a served limit question into a served option
+ * list, with the user's limit silently gone. Measured, and pinned as a
+ * discriminating pair in `first-response-stated-limit-order.test.ts`.
+ *
+ * The confirm sentence, the promoted stated-limit clarification and the
+ * next-step nudge are load-bearing and never drop — they sit outside the
+ * ladder in `tryAssemble`, so no rung can shed them.
  * When there is no extra bullet and no completeness block, `weighingBlock ===
  * weighingBlockCore` and `completenessBlock === null`, so rungs 1-3 collapse
  * to the original two-outcome behaviour (output is byte-identical to before).
@@ -2143,15 +2208,19 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     includeOptions: boolean,
     includeCompleteness: boolean,
   ): string => {
-    // ⭐ A stated limit the product did not enforce LEADS — before the confirm
-    // sentence, not after it. Measured on native `3d5ce286…`; full narrative in
-    // `output/olumi-delivery-heartbeat/F361-FIRST-RESPONSE-20260909.md`.
-    // Null when the draft has no such clarification, so the assembly is then
-    // byte-identical to before.
-    const blocks: string[] =
-      input.leadClarification !== null && input.leadClarification.length > 0
-        ? [input.leadClarification, input.confirm]
-        : [input.confirm];
+    // ⭐ WHAT WAS BUILT COMES FIRST, AND THE STATED LIMIT COMES SECOND.
+    //
+    // The confirm sentence opens the reply: a first message that begins by
+    // reporting the product's own failure was the owner's objection to #1409's
+    // ordering. The clarification keeps its dedicated slot immediately beneath
+    // it — highest-ranked line in the reply after the model itself, and, by
+    // being emitted here rather than inside the weighing block, present at
+    // EVERY rung including the terminal one. See the note on
+    // `leadClarification` for what shipping it inside the ladder cost.
+    const blocks: string[] = [input.confirm];
+    if (input.leadClarification !== null && input.leadClarification.length > 0) {
+      blocks.push(input.leadClarification);
+    }
     if (includeOptions && input.optionsBlock !== null) {
       blocks.push(input.optionsBlock);
     }

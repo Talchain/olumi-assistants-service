@@ -2854,7 +2854,7 @@ describe('the provisional opener claims only what the product did', () => {
  */
 describe('every draft says the model is one of several the system could build', () => {
   const NOTE =
-    'This is one of several models I could build from your brief: a starting point to argue with, not an answer. Ask me again and you would get a different one.';
+    'This is one of several models I could build from your brief: a starting point to argue with, not an answer.';
 
   const authoredGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
   const provisionalGraph = makeGraph([
@@ -2872,6 +2872,32 @@ describe('every draft says the model is one of several the system could build', 
    */
   it('PIN: the shipped constant is exactly the copy pinned here', () => {
     expect(MODEL_VARIANCE_NOTE).toBe(NOTE);
+  });
+
+  /**
+   * ⭐⭐ THE NOTE STATES WHAT THE ARTEFACT IS. IT NO LONGER ADVERTISES
+   * NON-DETERMINISM AS A FEATURE.
+   *
+   * The sentence removed read: "Ask me again and you would get a different
+   * one." The measured variance behind it is unchanged and is still described
+   * in the constant's own docstring — this is a change to what the product
+   * SAYS, not a claim that the variance went away. Reviewed by the product
+   * owner on the served build: an invitation to re-roll the model reads as a
+   * property being offered, and it sits against the stated position that the
+   * reasoning layer is to be as deterministic as it can be made.
+   *
+   * ⚠ THE CONTRAST IS LOAD-BEARING. The surviving half is the honesty the
+   * owner did not object to, and `chip-click-dispatch.ts` quotes it VERBATIM,
+   * so a bare "does not contain" assertion could pass on a note that had been
+   * gutted entirely. Both directions are asserted here.
+   */
+  it('PIN: the note makes no non-determinism offer, and keeps the honest half', () => {
+    expect(MODEL_VARIANCE_NOTE).not.toContain('Ask me again');
+    expect(MODEL_VARIANCE_NOTE).not.toContain('a different one');
+    // CONTRAST — the half that survives, quoted verbatim elsewhere in the tree.
+    expect(MODEL_VARIANCE_NOTE).toContain(
+      'a starting point to argue with, not an answer',
+    );
   });
 
   it('the deterministic sectioned narrative carries the note', () => {
