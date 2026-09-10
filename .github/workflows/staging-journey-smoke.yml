@@ -83,12 +83,19 @@ jobs:
       - name: Drive the live user journey
         env:
           SMOKE_BASE_URL: ${{ vars.STAGING_ASSIST_BASE_URL || 'https://cee-staging.onrender.com' }}
-          # OWNER ACTION REQUIRED: this repository secret does not exist yet.
-          # `cee-diagnostics.yml` already expects the same name. It must hold
-          # the staging value of ASSIST_API_KEY (see .env.staging.local).
-          # If it is missing the script exits 2 and the run goes RED — a
-          # missing secret must never read as a pass.
-          SMOKE_API_KEY: ${{ secrets.STAGING_ASSIST_API_KEY }}
+          # THE BROWSER ORIGIN. The gate drives POST /proxy/v5/turn — the route
+          # the deployed UI bundle actually calls (it bakes the absolute host
+          # https://cee-staging.onrender.com/proxy/v5/turn, so Netlify is not in
+          # the drafting path). That route validates `Origin` against the Render
+          # dashboard value BROWSER_PROXY_ALLOWED_ORIGINS and injects the service
+          # key itself, so NO API KEY IS SENT — `SMOKE_API_KEY` is gone rather
+          # than left unused, because dead config is the mirror this repo keeps
+          # paying for.
+          #
+          # It is passed EXPLICITLY, not defaulted inside the script: if this
+          # origin stops being admitted, every browser user is blocked, and the
+          # gate must go red rather than invent an origin that still works.
+          SMOKE_ORIGIN: ${{ vars.STAGING_UI_ORIGIN || 'https://staging--olumi.netlify.app' }}
           SMOKE_EXPECT_SHA: ${{ github.event.inputs.expect_sha || github.sha }}
         # `shell: bash` is LOAD-BEARING, not cosmetic. GitHub's default Linux
         # shell is `bash -e {0}` WITHOUT pipefail, so `node ... | tee` would

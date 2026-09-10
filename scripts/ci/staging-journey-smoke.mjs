@@ -38,15 +38,69 @@
  * There is deliberately NO fixture mode on the CLI: CI always drives real HTTP.
  * A smoke test against mocks proves nothing about a deployed service.
  *
+ * THE ROUTE. This gate drives `POST /proxy/v5/turn` — the route a real user's
+ * BROWSER takes — not the internal `/orchestrate/v2/turn` it used to drive.
+ *
+ * DERIVED AT THE DEPLOYED BUNDLE, 10 Sep 2026 (UI 52b5cc93, 72 chunks crawled
+ * from the entry asset): the shipped client bakes an ABSOLUTE host —
+ * `const e = "https://cee-staging.onrender.com/proxy/v5/turn"` in
+ * `assets/ReactFlowGraph-*.js` — so the browser goes straight to CEE and
+ * NETLIFY IS NOT IN THE DRAFTING PATH AT ALL. `/bff/cee/draft-graph` appears
+ * ZERO times in those 72 chunks (contrast control: `cee-staging.onrender.com`
+ * appears 6 times, so the sweep could see). Any diagnosis that routes a
+ * drafting failure through a Netlify edge timeout is describing a path the
+ * product does not use.
+ *
+ * WHY THE ROUTE MATTERS — three failure modes only a USER can hit
+ * ---------------------------------------------------------------
+ * "Generation succeeded server-side" and "the response reached the user" are
+ * DIFFERENT CLAIMS, and the internal route can only ever answer the first.
+ * `/proxy/v5/turn` (src/routes/proxy-v5-turn.ts) adds three seams that sit
+ * between a finished model and a user's screen, and the old target was blind
+ * to all three:
+ *
+ *   · 403 PROXY_ORIGIN_REJECTED  — the proxy validates `Origin` against
+ *     BROWSER_PROXY_ALLOWED_ORIGINS, a Render dashboard value. If it drifts,
+ *     EVERY browser user is refused while the internal route stays perfectly
+ *     healthy. Measured 10 Sep: no Origin → 403, `https://evil.example` → 403,
+ *     `https://olumi.netlify.app` (production) → 403,
+ *     `https://staging--olumi.netlify.app` → admitted.
+ *   · 504 PROXY_UPSTREAM_TIMEOUT — the proxy races `app.inject()` against
+ *     BROWSER_PROXY_TIMEOUT_MS and, when the timer wins, returns 504 while the
+ *     internal request RUNS ON to completion. That is precisely the shape
+ *     "CEE logged draft_graph.succeeded but the user got nothing" — and the
+ *     internal route reports a healthy 200 for exactly that turn.
+ *   · 502 PROXY_INTERNAL_NON_JSON / PROXY_INTERNAL_ERROR — the proxy parses
+ *     and RE-SERIALISES the body. A response that cannot survive that hop
+ *     never reaches the browser however well it was generated.
+ *
+ * The proxy injects the service key itself (`x-olumi-assist-key` never leaves
+ * the process), so this gate sends NO key — it presents exactly what the
+ * deployed browser presents: `Content-Type`, `Accept` and `Origin`.
+ *
+ * WIRE WITNESS, 10 Sep 2026, build 8449e54: this route returned HTTP 200 in
+ * 66.6s carrying 13 nodes, 4 options and 1,140 characters of reply prose. A
+ * response is NOT being cut on the browser's path, and any budget shorter than
+ * ~70s would red a healthy product.
+ *
  * USAGE
  *   node scripts/ci/staging-journey-smoke.mjs
  * ENV
  *   SMOKE_BASE_URL   (required) e.g. https://cee-staging.onrender.com
- *   SMOKE_API_KEY    (required) value for the X-Olumi-Assist-Key header
+ *   SMOKE_ORIGIN     (required) the browser origin to present, e.g.
+ *                    https://staging--olumi.netlify.app. Required, not
+ *                    defaulted: a gate that invents its own origin would pass
+ *                    while every real browser was being refused.
  *   SMOKE_EXPECT_SHA (optional) commit expected to be serving; enables Phase 1
  *   SMOKE_FRESHNESS_TIMEOUT_MS (default 900000 = 15 min)
  *   SMOKE_TURN_TIMEOUT_MS      (default 180000 = 3 min)
  */
+
+/**
+ * THE USER'S ROUTE. Named here, once, so the gate and its guards cannot hold
+ * two different opinions about which path is under test. See the header.
+ */
+export const TURN_PATH = "/proxy/v5/turn";
 
 export const MIN_NODES = 4;
 export const MIN_OPTIONS = 2;
@@ -234,14 +288,32 @@ export function assertHealthyFrame(body) {
   const f = [];
   if (!body || typeof body !== "object") return ["turn 1: response body was not a JSON object"];
   if (typeof body.assistant_text !== "string" || body.assistant_text.trim().length === 0) {
-    f.push("turn 1: assistant_text was empty — the user would see a blank reply");
+    // The TRIGGER is unchanged: no assistant_text on the wire is still a
+    // failure. The MESSAGE is now confined to what the wire shows. It used to
+    // read "the user would see a blank reply" — a claim about a UI this gate
+    // never drives, and the specific sentence that got a true red read as a
+    // product outage on 10 Sep 2026, when the same body carried a user-facing
+    // recovery suggestion in `details.recovery`. Naming what DID ride with the
+    // empty reply is the difference between "no model and no way forward" and
+    // "no model, with a stated fix".
+    const suggestion =
+      typeof body?.details?.recovery?.suggestion === "string" && body.details.recovery.suggestion.trim().length > 0
+        ? "present"
+        : "absent";
+    f.push(
+      `turn 1: assistant_text was empty — the response carried no reply prose ` +
+        `(details.recovery.suggestion=${suggestion})`,
+    );
   }
   const exit = body?._diagnostic_trace?.exit_path;
   if (typeof exit !== "string" || exit.length === 0) {
     f.push("turn 1: _diagnostic_trace.exit_path missing — cannot tell which path served this turn");
   }
   if (exit === "draft_graph_error") {
-    f.push("turn 1: exit_path was draft_graph_error");
+    // ONE predicate. This branch used to say only that it happened, while
+    // `assertHealthyDraft` — reached on the turn that no longer drafts —
+    // printed the violation code. Both now read the same function.
+    f.push(`turn 1: exit_path was draft_graph_error — ${draftErrorDiagnosis(body)}`);
   }
   return f;
 }
@@ -262,13 +334,11 @@ export function assertHealthyDraft(body, label = "turn 2") {
 
   const exit = body?._diagnostic_trace?.exit_path;
   if (exit === "draft_graph_error") {
-    // Surface the real reason — this is the message an on-call engineer reads first.
-    const d = body.details ?? {};
-    f.push(
-      `${label}: exit_path=draft_graph_error` +
-        (d.violation_code ? ` violation_code=${d.violation_code}` : "") +
-        (d.reason ? ` reason=${d.reason}` : ""),
-    );
+    // Surface the real reason — this is the message an on-call engineer reads
+    // first. Shared with `assertHealthyFrame` so the two turns can never give
+    // different answers to "why did drafting fail"; the ad-hoc two-field copy
+    // that used to live here was the second predicate for one concept.
+    f.push(`${label}: exit_path=draft_graph_error — ${draftErrorDiagnosis(body)}`);
   }
 
   const g = body.draft_graph;
@@ -695,6 +765,96 @@ function log(msg) {
 }
 
 /**
+ * THE DRAFT-FAILURE DIAGNOSIS LINE — why this exists, and what it is for.
+ *
+ * `readinessDiagnosis` (above) exists because a whole diagnosis session went
+ * into a source trace to answer a question the response body answers directly.
+ * THE SAME DEFECT WAS LIVE ONE BLOCK OVER, on the failure this alarm reds for
+ * most often.
+ *
+ * A `draft_graph_error` 500 carries a COMPLETE machine-readable diagnosis:
+ * `error`, `details.reason`, `details.violation_code`, `details.repair_skip_reason`,
+ * `details.recovery.suggestion`, and `_diagnostic_trace.retry.{timed_out,error_type}`
+ * plus `benchmarking.total_duration_ms`. The gate printed NONE of it on the
+ * turn that actually drafts, so its red read as "the server fell over".
+ *
+ * Measured (10 Sep 2026): run 809 on build 8449e54 reported only
+ * `exit_path=draft_graph_error` at 40.5s. A reader took that to mean the
+ * product had returned a blank reply and no model, went to CEE's own logs,
+ * found `cee.draft_graph.succeeded` with a full option/factor census, and
+ * concluded the ALARM was lying. The alarm was not lying — it was MUTE. The
+ * committed capture of this exact failure class
+ * (tests/unit/ci/fixtures/live-turn2-draft-500-e22f8a6.json, 40,768ms,
+ * `timed_out: false`) shows what the log withheld: the model DID produce a
+ * graph and CEE's own egress validator refused it —
+ * `reason=draft_graph_cee_graph_invalid`, `violation_code=OPTIONS_IDENTICAL`,
+ * `repair_skip_reason=options_identical_unrepairable_by_llm` — with a
+ * user-facing recovery suggestion on the wire. "Our validator refused a graph
+ * for a nameable reason" and "the server fell over" are different facts and
+ * they were being printed identically.
+ *
+ * WHY THE FIELDS BELOW, SPECIFICALLY
+ *   · `error` / `details.reason`      → which producer refused, in its own words.
+ *   · `details.violation_code`        → WHICH rule. OPTIONS_IDENTICAL is a
+ *                                       stochastic model outcome on a binary
+ *                                       brief; an infrastructure fault is not.
+ *   · `details.repair_skip_reason`    → whether the repair path was even tried,
+ *                                       or declined this class outright.
+ *   · `details.retryable`             → whether a retry could have helped. The
+ *                                       gate drives one shot; without this, a
+ *                                       reader cannot tell a hard refusal from
+ *                                       a transient.
+ *   · `recovery.suggestion` present   → whether the refusal carried anything a
+ *                                       user could act on. This is the field
+ *                                       that separates "no model, and no way
+ *                                       forward" from "no model, with a stated
+ *                                       fix" — and the gate never printed it.
+ *   · `retry.timed_out` / `error_type`→ SETTLES the timeout hypothesis on every
+ *                                       future run instead of costing another
+ *                                       investigation. It was asked, and
+ *                                       answered wrongly, about this very run.
+ *   · `total_duration_ms`             → the server's OWN clock, next to the
+ *                                       client's. Two clocks disagreeing is
+ *                                       how a proxy cut is told from a refusal.
+ *
+ * NOTHING HERE IS AN ASSERTION. Like `readinessDiagnosis`, this function only
+ * reports; it cannot pass or fail a run. It is deliberately shared by the
+ * per-turn log line AND both failure paths, so the alarm and the diagnostic can
+ * never describe the same turn differently — the one-concept-ONE-predicate rule
+ * the rest of this file is built on. Before this existed the frame turn and the
+ * draft turn had two different answers to "why did drafting fail": turn 2
+ * printed the violation code and turn 1 printed nothing, and #1002 had already
+ * moved drafting onto turn 1 — so every real drafting failure landed on the
+ * mute branch.
+ *
+ * ABSENT IS NEVER PRINTED AS EMPTY, for the same reason `readinessDiagnosis`
+ * refuses to: a body with no error envelope and a body whose envelope has no
+ * reason are different facts.
+ */
+export function draftErrorDiagnosis(body) {
+  const d = body?.details;
+  const retry = body?._diagnostic_trace?.retry;
+  const durationMs = body?._diagnostic_trace?.benchmarking?.total_duration_ms;
+  const hasEnvelope = (body && typeof body === "object" && body.error !== undefined) || (d && typeof d === "object");
+  if (!hasEnvelope) return "absent(no-error-envelope)";
+  const q = (v) => (typeof v === "string" ? JSON.stringify(v) : v === undefined ? "absent" : String(v));
+  const suggestion =
+    typeof d?.recovery?.suggestion === "string" && d.recovery.suggestion.trim().length > 0 ? "present" : "absent";
+  // ONE FIELD NAME, TWO PRODUCERS. The orchestrator's `error` is a STRING
+  // ("INTERNAL_ERROR"); the browser proxy's is an OBJECT ({code, message, …}).
+  // Stringifying blindly printed `error=[object Object]` on every proxy
+  // refusal — caught by RUNNING this against staging with a disallowed origin,
+  // not by reading it. Read the code, never the field's stringification.
+  const errName = typeof body?.error === "string" ? body.error : body?.error?.code;
+  return (
+    `error=${q(errName)} reason=${q(d?.reason)} violation_code=${q(d?.violation_code)} ` +
+    `repair_skip_reason=${q(d?.repair_skip_reason)} retryable=${q(d?.retryable ?? body?.retryable)} ` +
+    `recovery_suggestion=${suggestion} timed_out=${q(retry?.timed_out)} error_type=${q(retry?.error_type)} ` +
+    `server_total_duration_ms=${q(durationMs)}`
+  );
+}
+
+/**
  * Describe the model on a turn, UNAMBIGUOUSLY.
  *
  * The old line printed `nodes=${body?.draft_graph?.nodes?.length ?? 0}` beside
@@ -716,14 +876,81 @@ function graphLine(body) {
   return `${graph} analysis_ready.options=${opts}`;
 }
 
-async function postTurn(base, key, payload, timeoutMs) {
+/**
+ * PROXY-LAYER DELIVERY — did the response actually reach the caller?
+ *
+ * The three codes below are emitted by the proxy ITSELF, never by the
+ * orchestrator, and each means "the model may be perfectly fine and the user
+ * still got nothing". They are reported separately from the journey assertions
+ * because the ACTION is different: a 403 is a configuration drift that blocks
+ * every browser, a 504 is a delivery cut on a turn the server may have
+ * completed, and a 502 is a response that could not survive re-serialisation.
+ * Collapsing them into "turn 1: HTTP 504 (expected 200)" is how a delivery
+ * failure gets mistaken for a generation failure — the confusion this gate was
+ * repaired to end.
+ *
+ * NOTE THE SHAPE DIFFERENCE, and why it is handled explicitly: the proxy's
+ * `error` is an OBJECT (`{code, message, source, request_id}`) while the
+ * orchestrator's is a STRING (`"INTERNAL_ERROR"`). Two producers, one field
+ * name — read the code, never the field's stringification.
+ */
+export const PROXY_FAILURE_CODES = new Set([
+  "PROXY_ORIGIN_REJECTED",
+  "PROXY_UPSTREAM_TIMEOUT",
+  "PROXY_INTERNAL_ERROR",
+  "PROXY_INTERNAL_NON_JSON",
+  "PROXY_UNSUPPORTED_MEDIA_TYPE",
+]);
+
+/** The proxy error code on a body, or null when the proxy did not refuse. */
+export function proxyFailureCode(body) {
+  const code = body?.error?.code;
+  return typeof code === "string" && PROXY_FAILURE_CODES.has(code) ? code : null;
+}
+
+/**
+ * Assert the response was DELIVERED, not merely generated.
+ * @returns {string[]} failure messages; empty means the proxy handed it over.
+ */
+export function assertProxyDelivered(body, label = "turn 1") {
+  const code = proxyFailureCode(body);
+  if (!code) return [];
+  const e = body.error ?? {};
+  const detail =
+    `${label}: the BROWSER PROXY refused to deliver this turn — ${code}` +
+    (typeof e.message === "string" ? ` (${e.message})` : "") +
+    (e.upstream_duration_ms !== undefined ? ` upstream_duration_ms=${e.upstream_duration_ms}` : "");
+  if (code === "PROXY_ORIGIN_REJECTED") {
+    return [
+      `${detail} — BROWSER_PROXY_ALLOWED_ORIGINS no longer admits this origin, so EVERY browser user is ` +
+        `blocked while the internal route stays healthy.`,
+    ];
+  }
+  if (code === "PROXY_UPSTREAM_TIMEOUT") {
+    return [
+      `${detail} — the proxy timer beat the internal route. The model may have been generated ` +
+        `successfully and the user still received nothing; CEE's own log will say "succeeded".`,
+    ];
+  }
+  return [`${detail} — the response did not survive the hop to the browser.`];
+}
+
+async function postTurn(base, origin, payload, timeoutMs) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   const started = Date.now();
   try {
-    const res = await fetch(`${base}/orchestrate/v2/turn`, {
+    // EXACTLY what the deployed browser sends: no service key (the proxy
+    // injects its own and it never leaves the process), and the Origin the
+    // proxy validates against. Sending a key here would be theatre — the proxy
+    // forwards only an allowlist of request headers and would drop it.
+    const res = await fetch(`${base}${TURN_PATH}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Olumi-Assist-Key": key },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Origin: origin,
+      },
       body: JSON.stringify(payload),
       signal: ac.signal,
     });
@@ -776,13 +1003,13 @@ async function waitForBuild(base, expectSha, timeoutMs) {
 
 async function main() {
   const base = (process.env.SMOKE_BASE_URL ?? "").replace(/\/$/, "");
-  const key = process.env.SMOKE_API_KEY ?? "";
+  const origin = (process.env.SMOKE_ORIGIN ?? "").trim().replace(/\/$/, "");
   const expectSha = process.env.SMOKE_EXPECT_SHA ?? "";
   const freshnessTimeout = Number(process.env.SMOKE_FRESHNESS_TIMEOUT_MS ?? 900000);
   const turnTimeout = Number(process.env.SMOKE_TURN_TIMEOUT_MS ?? 180000);
 
-  if (!base || !key) {
-    log("FATAL: SMOKE_BASE_URL and SMOKE_API_KEY are required.");
+  if (!base || !origin) {
+    log("FATAL: SMOKE_BASE_URL and SMOKE_ORIGIN are required.");
     // Fail closed. A missing secret must never read as a pass.
     process.exit(2);
   }
@@ -792,7 +1019,7 @@ async function main() {
   }
 
   log(`# CEE staging live-journey smoke`);
-  log(`target: ${base}`);
+  log(`target: ${base}${TURN_PATH}  (origin ${origin || "(none)"})`);
 
   const failures = [];
 
@@ -823,7 +1050,7 @@ async function main() {
   log(`\n### Turn 1 — frame`);
   const t1 = await postTurn(
     base,
-    key,
+    origin,
     {
       kind: "message",
       turn_id: uuid(),
@@ -846,13 +1073,15 @@ async function main() {
   // there were eight, carried the answer and never printed it.
   log(`    ${draftGraphCensus(t1.body)}`);
   log(`    readiness: ${readinessDiagnosis(t1.body)}`);
+  log(`    draft_error: ${draftErrorDiagnosis(t1.body)}`);
+  failures.push(...assertProxyDelivered(t1.body, "turn 1"));
   if (t1.status !== 200) failures.push(`turn 1: HTTP ${t1.status} (expected 200)`);
   failures.push(...assertHealthyFrame(t1.body));
 
   log(`\n### Turn 2 — draft (accept defaults)`);
   const t2 = await postTurn(
     base,
-    key,
+    origin,
     {
       kind: "message",
       turn_id: uuid(),
@@ -875,6 +1104,8 @@ async function main() {
   );
   log(`    ${draftGraphCensus(t2.body)}`);
   log(`    readiness: ${readinessDiagnosis(t2.body)}`);
+  log(`    draft_error: ${draftErrorDiagnosis(t2.body)}`);
+  failures.push(...assertProxyDelivered(t2.body, "turn 2"));
   if (t2.status !== 200) failures.push(`turn 2: HTTP ${t2.status} (expected 200)`);
 
   // Assert over the JOURNEY, not over turn 2. See assertHealthyJourney.
