@@ -1365,3 +1365,76 @@ describe("10 Sep — the gate drives the route a REAL USER takes, and proves DEL
     expect(proxyFailureCode({ error: { code: "PROXY_UPSTREAM_TIMEOUT" } })).toBe("PROXY_UPSTREAM_TIMEOUT");
   });
 });
+
+describe("the .d.mts type mirror cannot silently fall behind the .mjs", () => {
+  /**
+   * WHY THIS EXISTS, and why it is DERIVED rather than a second list.
+   *
+   * The declaration file is a HAND-WRITTEN MIRROR of the .mjs exports — its own
+   * header says so. On 10 Sep 2026 that caveat cost a CI red: four exports the
+   * spec imports landed in the .mjs with no declaration, and the required gate
+   * COULD NOT SEE IT. `pnpm typecheck` runs `tsconfig.build.json`, which
+   * EXCLUDES test files; only the separate `Typecheck Drift (ratchet)` job runs
+   * the full `tsc --noEmit`. So a green local gate and four TS2305s are fully
+   * consistent, which is how this shipped.
+   *
+   * THE RULE IS KEYED ON WHAT THE SPEC IMPORTS, not on "every export must be
+   * declared" — deliberately. `PROXY_FAILURE_CODES` is exported and NOT
+   * declared, on the stated ground that the mirror's header claims every export
+   * it declares is exercised at runtime by this spec, and declaring an
+   * unexercised one would make that claim false. That omission is legitimate
+   * and this guard must not fight it. What it must catch is the defect that
+   * actually happened: a symbol this spec IMPORTS with no declaration behind it.
+   * If PROXY_FAILURE_CODES is ever imported here, this guard reds until it is
+   * declared — no exception list to maintain, and none written down.
+   */
+  const SPEC = "tests/unit/ci/staging-journey-smoke.test.ts";
+  const MJS = "scripts/ci/staging-journey-smoke.mjs";
+  const DTS = "scripts/ci/staging-journey-smoke.d.mts";
+  const read = (f: string) => readFileSync(resolve(REPO_ROOT, f), "utf8");
+
+  /** Names this spec imports from the gate module. */
+  const specImports = (): string[] => {
+    const block = read(SPEC).match(/import\s*\{([^}]*)\}\s*from\s*"[^"]*staging-journey-smoke\.mjs"/);
+    if (!block) throw new Error(`could not find the ${MJS} import block in ${SPEC}`);
+    return block[1]
+      .split(",")
+      .map((s) => s.trim().split(/\s+as\s+/)[0].trim())
+      .filter((s) => s.length > 0)
+      .sort();
+  };
+  const mjsExports = () =>
+    [...read(MJS).matchAll(/^export (?:const|function) ([A-Za-z_][A-Za-z0-9_]*)/gm)].map((m) => m[1]).sort();
+  const dtsDeclares = () =>
+    [...read(DTS).matchAll(/^export declare (?:const|function) ([A-Za-z_][A-Za-z0-9_]*)/gm)].map((m) => m[1]).sort();
+
+  it("POSITIVE CONTROL: all three parsers see names, and see the SAME known name", () => {
+    // Without this, an empty-vs-empty comparison would agree perfectly while
+    // reading nothing — a guard that cannot fail is the theatre this file hunts.
+    expect(specImports().length).toBeGreaterThan(10);
+    expect(mjsExports().length).toBeGreaterThan(10);
+    expect(dtsDeclares().length).toBeGreaterThan(10);
+    for (const names of [specImports(), mjsExports(), dtsDeclares()]) {
+      expect(names).toContain("assertHealthyFrame");
+    }
+    // …and a DISCRIMINATION the parsers must actually be making: the .mjs
+    // exports at least one name the spec does not import. If this ever reads
+    // equal, the three parsers have collapsed onto one another.
+    expect(mjsExports().length).toBeGreaterThan(specImports().length);
+  });
+
+  it("every symbol this spec imports from the gate is declared in the .d.mts", () => {
+    const declared = dtsDeclares();
+    const missing = specImports().filter((n) => !declared.includes(n));
+    expect(
+      missing,
+      `imported by ${SPEC} but NOT declared in ${DTS} — this is the 10 Sep TS2305 defect: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("nothing is declared in the .d.mts that the .mjs does not export", () => {
+    const exported = mjsExports();
+    const phantom = dtsDeclares().filter((n) => !exported.includes(n));
+    expect(phantom, `declared in ${DTS} but NOT exported from ${MJS}: ${phantom.join(", ")}`).toEqual([]);
+  });
+});
