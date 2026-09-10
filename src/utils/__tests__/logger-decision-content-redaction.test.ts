@@ -28,6 +28,7 @@ import {
   REDACT_PATHS,
   createLoggerConfig,
   decisionContentRedactPaths,
+  isDecisionContentField,
   redactCensor,
   sha8,
 } from "../logger-config.js";
@@ -77,6 +78,29 @@ describe("decision-content redaction at the pino boundary", () => {
       expect(line).not.toContain(SENTINEL);
       expect(line).toMatch(DIGEST_RE);
     }
+  });
+
+  it("IDENTITY: `system_prompt` is in the content class and is redacted at depths 0, 1 and 2 — while its SHAPE twins are deliberately NOT", () => {
+    // Bound by the exact field NAME, not by a value predicate: this test
+    // must RED if `system_prompt` leaves DECISION_CONTENT_FIELDS, which
+    // the list-derived coverage test above cannot see (a derived guard
+    // proves agreement, never completeness).
+    expect(isDecisionContentField("system_prompt")).toBe(true);
+
+    const { logger, lines } = protectedLogger();
+    logger.info({ system_prompt: SENTINEL });
+    logger.info({ ctx: { system_prompt: SENTINEL } });
+    logger.info({ a: { b: { system_prompt: SENTINEL } } });
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).not.toContain(SENTINEL);
+      expect(line).toMatch(DIGEST_RE);
+    }
+
+    // Discriminating twin: the shape-only fields carry no bytes and are
+    // the detection surface for a leak, so they must pass through intact.
+    expect(isDecisionContentField("system_prompt_sha256")).toBe(false);
+    expect(isDecisionContentField("system_prompt_chars")).toBe(false);
   });
 
   it("POSITIVE CONTROL: the pre-fix config (credential paths only) leaks the sentinel at every depth", () => {

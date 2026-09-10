@@ -93,6 +93,10 @@ import { isReplayedTurnSource } from '../orchestrator-v5/routing/turn-source-aut
 import { emit, log, TelemetryEvents } from '../utils/telemetry.js';
 import { config } from '../config/index.js';
 import { debugFieldRequested, type OlumiResponseWithDebugFields } from './debug-fields.js';
+import {
+  getTurnDebugPromptCaptures,
+  promptCaptureMayRideTheWire,
+} from '../orchestrator-v5/debug/turn-debug-store.js';
 import type { TurnTimingsBlock, V5TurnTimings } from '../orchestrator-v5/telemetry/turn-timings.js';
 import type {
   V5DiagnosticExitPath,
@@ -1117,13 +1121,20 @@ async function sendFinalised200(
     // is the sole authority, and the strict `OlumiResponseSchema` must not see
     // an unknown key.
     const hasGroundedSelection = '_grounded_selection' in asRecord;
+    // HARNESS VISIBILITY — `_prompt_capture` is READ FROM THE TURN-DEBUG
+    // STORE at the re-attach gate below, never body-attached by any dispatch
+    // path. Stripped defensively anyway (same defence-in-depth posture as
+    // `_context_summary`): the re-attach gate is the sole authority, and the
+    // strict `OlumiResponseSchema` must not see an unknown key.
+    const hasPromptCapture = '_prompt_capture' in asRecord;
     if (
       !hasTimings &&
       !hasTrace &&
       !hasContextSummary &&
       !hasReasoning &&
       !hasAnswerShape &&
-      !hasGroundedSelection
+      !hasGroundedSelection &&
+      !hasPromptCapture
     ) {
       return { timings: undefined, diagnosticTrace: undefined, body: candidateFinalised };
     }
@@ -1136,6 +1147,7 @@ async function sendFinalised200(
     delete cloned._reasoning;
     delete cloned._answer_shape;
     delete cloned._grounded_selection;
+    delete cloned._prompt_capture;
     return {
       timings: hasTimings ? timings : undefined,
       diagnosticTrace: hasTrace ? diagnosticTrace : undefined,
@@ -1754,6 +1766,50 @@ async function sendFinalised200(
     };
     // Re-finalise: the spread breaks WeakSet membership (finaliser Mechanism B).
     wireBody = finaliseV5Response(augmented, finaliserContext);
+  }
+  // ═══════════════════════════════════════════════════════════════════════════
+  // HARNESS VISIBILITY — re-attach `_prompt_capture` post-validation.
+  //
+  // Single-flag gating (`CEE_TURN_DEBUG_ENABLED`, default FALSE, forced off in
+  // production), same re-attach shape as `_context_summary` / `_reasoning`.
+  //
+  // READ FROM THE STORE, NOT THREADED. Every sibling sidecar above rides a
+  // `ctx` member that some dispatch path had to remember to populate — the
+  // failure mode `prompt-attribution.ts` documents at length: "a call the
+  // builder was never told about is invisible by construction, and silently
+  // so". The capture is written at the prompt-resolution seam keyed by the
+  // same request id this route already holds, so reading it back here needs no
+  // threading and cannot be silently skipped by a dispatch path that forgot.
+  //
+  // NO TIE-CHECK, for the reason `_grounded_selection` gives directly above:
+  // this describes a fact fixed BEFORE the model replied — which prompt bytes
+  // went out — and no downstream prose rewrite can make it untrue.
+  //
+  // Empty array ⇒ attach nothing, so a turn that made no LLM call stays
+  // byte-identical on the wire rather than carrying an empty diagnostic.
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ⛔ PRODUCTION HARD-STOP, and it is NOT belt-and-braces. Unlike
+  // `CEE_OBSERVABILITY_RAW_IO` — the estate's other raw-prompt flag, declared
+  // `createEnvEnforcedBoolean(..., "CEE_OBSERVABILITY_RAW_IO")` so prod forces
+  // it false — `turnDebugEnabled` is a plain `booleanString.default(false)`
+  // (`config/index.ts:1156`) with NO prod enforcement. Before this change that
+  // flag exposed CQE counters and a trace shape; it now decides whether prompt
+  // BYTES ride the wire, so the same env value carries a materially larger
+  // consequence than it did when it was declared. Refuse in prod at the
+  // attach site rather than trust an operator never to set it there.
+  //
+  // The admin route is deliberately NOT gated this way: it is admin-key
+  // gated, so the same bytes stay reachable to an operator who holds the key.
+  if (egress.ok && promptCaptureMayRideTheWire()) {
+    const promptCaptures = getTurnDebugPromptCaptures(requestId);
+    if (promptCaptures.length > 0) {
+      const augmented: OlumiResponseWithDebugFields = {
+        ...wireBody,
+        _prompt_capture: promptCaptures,
+      };
+      // Re-finalise: the spread breaks WeakSet membership (finaliser Mechanism B).
+      wireBody = finaliseV5Response(augmented, finaliserContext);
+    }
   }
   // ═══════════════════════════════════════════════════════════════════════════
   // T1 claim safety, LAYER 3 — THE SINGLE EGRESS SCAN. (ROADMAP 1.272 E1.)
