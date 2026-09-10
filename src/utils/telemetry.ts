@@ -2490,7 +2490,8 @@ export const TelemetryEvents = {
   //   coaching_summary_reject_reason: GateRejectReason | null,
   //   coaching_summary_style_rewritten: boolean,   // RC4: em/en dash
   //                                                // rewritten in place
-  //   fallback_reason: 'gate_rejected' | 'no_candidate' | null,
+  //   fallback_reason: 'gate_rejected' | 'readiness_gated' | 'no_candidate'
+  //                    | null,
   //   strengthen_items_count: number,
   //   bias_findings_count: number,
   //   coaching_bias_signals_count: number }.
