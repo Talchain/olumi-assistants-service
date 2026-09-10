@@ -98,6 +98,7 @@ import {
   WITHHELD_RUN_IDENTITY_CONFLICT,
 } from './compose/analysis-state-v1.js';
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
+import { projectEvidenceAssessment } from './compose/project-evidence-assessment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
 import { buildRunDelta } from './coaching/build-run-delta.js';
 import { selectRunAnalysisFact } from './context/freshness.js';
@@ -321,9 +322,12 @@ export function finaliseV5Response(
   // option_id → label resolution works even when graph is unavailable
   // (the finaliser doesn't carry the V3 graph; analysis_ready.options
   // covers most enrichment-prose label needs in practice).
-  const scrubbed = debugEnabled
-    ? ceeTraceClean
-    : sanitiseEnrichmentBlocks(ceeTraceClean, ctx.analysisReady ?? null);
+  const scrubbed = attachEvidenceAssessment(
+    debugEnabled
+      ? ceeTraceClean
+      : sanitiseEnrichmentBlocks(ceeTraceClean, ctx.analysisReady ?? null),
+    ceeTraceClean,
+  );
   // Mission 3 transport recovery: a legacy/unparseable graph reload derives
   // an honest 'unknown' freshness verdict but builds no structural readiness
   // payload, and freshness can only ride the wire inside analysis_ready.
@@ -486,6 +490,49 @@ function attachAnalysisState(
     blocks: projectAnalysisBlocksForRunBinding(response.blocks, analysisState),
     analysis_state: analysisState,
   };
+}
+
+/**
+ * ⭐ CARRY THE EVIDENCE ASSESSMENT ACROSS THE TRANSPORT BAN.
+ *
+ * ⚠ TWO RESPONSES, AND WHICH ONE EACH ARGUMENT IS MATTERS.
+ * The projection is DERIVED FROM `source` — the response as it stood BEFORE the
+ * Tier-3 deletion, because that is the only place `m1_coaching` still exists —
+ * and ATTACHED TO `out`, the response as it will ship, so nothing it carries can
+ * be rewritten by the prose walker on its way past. Reading the scrubbed copy
+ * instead would silently derive from a subtree that had already been removed and
+ * emit nothing, on exactly the deployments where this is needed.
+ *
+ * ⛔ AND IT SITS OUTSIDE THE DEBUG BRANCH ON PURPOSE. The deletion above runs
+ * only when turn debug is OFF. A projection placed inside that arm would be
+ * present only when the thing it compensates for was absent.
+ *
+ * Blocks are left byte-identical where the projection declines (`null`), so the
+ * consumer's honest refusal is preserved rather than replaced by a weaker claim.
+ */
+function attachEvidenceAssessment(out: OlumiResponse, source: OlumiResponse): OlumiResponse {
+  const outRecord = out as unknown as Record<string, unknown>;
+  const outBlocks = Array.isArray(outRecord.blocks)
+    ? (outRecord.blocks as Array<Record<string, unknown>>)
+    : null;
+  if (!outBlocks || outBlocks.length === 0) return out;
+
+  const sourceRecord = source as unknown as Record<string, unknown>;
+  const sourceBlocks = Array.isArray(sourceRecord.blocks)
+    ? (sourceRecord.blocks as Array<Record<string, unknown>>)
+    : [];
+
+  let mutated = false;
+  const next = outBlocks.map((block, index) => {
+    if (block == null || typeof block !== 'object') return block;
+    const assessment = projectEvidenceAssessment(sourceBlocks[index]?.enrichment);
+    if (assessment === null) return block;
+    const enrichment = (block.enrichment ?? {}) as Record<string, unknown>;
+    mutated = true;
+    return { ...block, enrichment: { ...enrichment, evidence_assessment: assessment } };
+  });
+  if (!mutated) return out;
+  return { ...outRecord, blocks: next } as OlumiResponse;
 }
 
 function sanitiseEnrichmentBlocks(
