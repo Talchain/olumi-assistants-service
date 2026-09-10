@@ -373,6 +373,39 @@ describe("a stated constraint that names what it limits", () => {
   });
 
   /**
+   * ⭐ THE UNIT CLASSIFIER DOES NOT FALSE-POSITIVE ON ORDINARY UNIT WORDS.
+   *
+   * The canonical currency map holds two purely alphabetic symbols (`CHF`,
+   * `kr`). Affix-matching those would classify a unit word ending in them as
+   * currency — a FALSE REFUSAL, which costs a user their stated limit for no
+   * reason. Bound to a unit the model plausibly emits.
+   */
+  it("a % limit still binds to a node whose unit merely ENDS in a currency symbol's letters", () => {
+    const p = project({
+      stated_items: [
+        { kind: "goal", source_quote: "grow net revenue", role: "target" },
+        // "kundkr" ends in "kr", the Swedish krona symbol in the canonical map.
+        { kind: "figure", source_quote: "churn is 6.2 kundkr", value: 6.2, unit: "kundkr" },
+        {
+          kind: "constraint",
+          source_quote: "keeping monthly churn under 4%",
+          value: 4,
+          unit: "%",
+          direction: "ceiling",
+          applies_to_stated: 1,
+        },
+      ],
+      claims: [
+        { claim_kind: "causal_link", label: "churn erodes revenue", from_stated: 1, to_stated: 0, effect: "negative" },
+      ],
+    });
+    // The target's unit is unclassifiable, so nothing is PROVEN to mismatch and
+    // the gate must not refuse — `unknown` means "I cannot tell", never "wrong".
+    expect(p.dropped.map((d) => d.reason)).not.toContain("constraint_target_unit_mismatch");
+    expect(p.goalConstraints).toHaveLength(1);
+  });
+
+  /**
    * ⭐⭐ A BOUND ROW NEVER NAMES A NODE THE GRAPH DOES NOT CARRY.
    *
    * ⚠ THIS CASE EXISTS BECAUSE THE CLAIM IT PINS WAS FALSE WHEN FIRST WRITTEN.

@@ -2193,7 +2193,20 @@ function constraintUnitFamily(unit: string | undefined): ConstraintUnitFamily {
   if (token.length === 0) return "unknown";
   if (classifyUnitScaleClass(token) !== "unknown") return "percent";
   for (const [symbol, code] of Object.entries(CURRENCY_SYMBOL_TO_CODE)) {
-    if (token === symbol || token.startsWith(symbol) || token.endsWith(symbol)) return "currency";
+    // ⚠ AN ALPHABETIC SYMBOL MATCHES ONLY EXACTLY. The canonical map holds two
+    // that are pure letters (`CHF`, `kr`), and prefix/suffix matching on those
+    // would classify any unit word that happens to end in them as currency.
+    // That direction produces a FALSE REFUSAL rather than a false binding — the
+    // safe direction — but it costs a user their stated limit for no reason, so
+    // it is closed rather than tolerated. Symbols carrying a non-letter (`£`,
+    // `$`, `A$`, `NZ$`…) keep affix matching, because that is how they actually
+    // appear against a number.
+    const alphabeticOnly = /^[A-Za-z]+$/.test(symbol);
+    if (alphabeticOnly) {
+      if (token.toLowerCase() === symbol.toLowerCase()) return "currency";
+    } else if (token === symbol || token.startsWith(symbol) || token.endsWith(symbol)) {
+      return "currency";
+    }
     if (token.toUpperCase() === code) return "currency";
   }
   return "unknown";
