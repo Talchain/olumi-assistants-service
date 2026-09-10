@@ -18,7 +18,21 @@ const CANONICAL_DECISION_REVIEW = readFileSync(
   join(REPO_ROOT, 'Prompts', 'canonical', 'decision_review.txt'),
   'utf-8',
 );
-const NOW = new Date('2026-08-15T12:00:00.000Z');
+// ⚠ THIS WAS A FIXED DATE ('2026-08-15') AND IT IS A CONTROL PINNED TO A MOVING
+// REFERENCE. Any promotion report generated after that instant reads FUTURE_DATED,
+// so the gate blocks for a reason that has nothing to do with what these tests
+// assert: the v16 promotion RED-ed two cases here whose subjects are HASH_MISMATCH
+// and EVAL_FAILED. Nothing in this file is a future-skew control, so nothing needs
+// the clock held still.
+//
+// The real clock cannot go stale, is what CI and the runtime both experience, and
+// RED-s only when the committed evidence GENUINELY expires — which is a true alarm
+// and the entire point of an expiry window. (The sibling pin in
+// tools/orchestrator-eval/__tests__/promotion-gate.test.ts had the same defect and
+// took the same fix; deriving `now` from the report was tried there and rejected,
+// because it makes the report zero days old by construction and the freshness
+// window stops being measurable at all.)
+const NOW = new Date();
 
 function currentReport(): PromotionEvidenceReport {
   const report = loadRuntimePromotionReports(REPO_ROOT).find(

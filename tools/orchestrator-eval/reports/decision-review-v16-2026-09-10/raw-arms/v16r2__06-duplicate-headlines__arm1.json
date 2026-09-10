@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "06-duplicate-headlines",
+  "arm": 1,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 17140,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1480,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 14.4,
+  "text": "{\n  \"narrative_summary\": \"Self Serve Funnel produced the best outcome in 41% of runs of this model. The link from Customer Acquisition Cost to New Revenue is a fragility worth checking before acting.\",\n  \"story_headlines\": {\n    \"opt_selfserve\": \"Self Serve Funnel produced the best outcome where acquisition cost stays contained relative to revenue gained.\",\n    \"opt_paid\": \"Paid Acquisition would need acquisition cost to move much more favourably to produce the best outcome.\",\n    \"opt_partner\": \"Partner Channel would need a stronger revenue contribution modelled before it produces the best outcome.\",\n    \"opt_outbound\": \"Outbound Sales would need a materially lower acquisition cost path to produce the best outcome.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 64% of variations, a moderate level based on current estimates.\",\n    \"primary_risk\": \"The link from Customer Acquisition Cost to New Revenue is the main source of fragility here.\",\n    \"stability_factors\": [\n      \"Self Serve Funnel's own modelled outcome stays ahead across a fair range of assumptions\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Customer Acquisition Cost to New Revenue could shift which option this model points to\"\n    ]\n  },\n  \"readiness_rationale\": \"The comparison is settled enough to act on, though Customer Acquisition Cost is worth confirming since it could shift the picture.\",\n  \"evidence_enhancements\": {\n    \"fac_cac\": {\n      \"specific_action\": \"Pull actual blended acquisition cost from the last full quarter of channel spend and revenue data.\",\n      \"rationale\": \"This factor's relationship to revenue is the main source of fragility in this comparison.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the current acquisition cost yourself before checking the actual figure.\"\n    }\n  },\n  \"scenario_contexts\": {\n    \"edge_cac_growth\": {\n      \"trigger_description\": \"If Customer Acquisition Cost rises well beyond current levels relative to New Revenue gained...\",\n      \"consequence\": \"...then this model points to Paid Acquisition rather than Self Serve Funnel.\"\n    }\n  },\n  \"flip_thresholds\": [\n    {\n      \"factor_id\": \"fac_cac\",\n      \"factor_label\": \"Customer Acquisition Cost\",\n      \"current_display\": \"420 GBP\",\n      \"flip_display\": \"610 GBP\",\n      \"narrative\": \"If Customer Acquisition Cost moves from 420 GBP to 610 GBP, this model points to a different option.\"\n    }\n  ],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Customer Acquisition Cost to New Revenue assumes current market conditions hold across all four bets.\",\n    \"The comparison assumes each option's modelled outcome range reflects realistic execution, not best-case delivery.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"Ten months in, how would you feel about having chosen Self Serve Funnel if Customer Acquisition Cost had risen sharply?\",\n      \"principle\": \"10-10-10 (Welch)\",\n      \"applies_because\": \"The options are close enough on these numbers that the emotional weight of the choice over time is worth checking directly.\"\n    },\n    {\n      \"question\": \"What would need to be true about Paid Acquisition for you to switch away from Self Serve Funnel?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"Naming the specific conditions that would flip the comparison tests how firm the current reading really is.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"This failed because Customer Acquisition Cost climbed well past expectations, eroding New Revenue faster than Self Serve Funnel's model assumed.\",\n    \"warning_signs\": [\n      \"Acquisition cost per new customer creeping upward each month\",\n      \"New Revenue growth flattening despite steady spend\"\n    ],\n    \"mitigation\": \"Set an acquisition cost checkpoint partway through the quarter before committing the full budget.\",\n    \"grounded_in\": [\"edge_cac_growth\", \"fac_cac\"],\n    \"review_trigger\": \"Reconvene if acquisition cost trends materially above plan before the quarter's midpoint.\"\n  }\n}"
+}

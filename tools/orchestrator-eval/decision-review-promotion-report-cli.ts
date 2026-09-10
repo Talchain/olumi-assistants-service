@@ -38,7 +38,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const LIVE_CAPTURE = join(
   HERE,
   'reports',
-  'decision-review-v15-2026-07-31',
+  'decision-review-v16-2026-09-10',
   'live-capture-report.json',
 );
 const OUT_DIR = join(HERE, 'reports', 'promotion');
@@ -59,63 +59,84 @@ if (capture.servedHash !== servedSha16) {
 }
 
 const report = buildDecisionReviewPromotionReport(capture, {
-  candidateLabel: 'served_v15',
+  candidateLabel: 'served_v16',
   promptSha16: servedSha16,
   // Provenance is a REQUIRED input, not a literal inside the builder — this CLI
   // states the corpus IT reads, and any other caller states its own.
   evidenceSource:
-    'fix-decision-review-v15 lane: n=21 = 7 committed fixtures x 3 independent arms, OFFLINE against ' +
-    'fixtures (zero staging traffic), scored by the shipped 19-dimension pack — ' +
-    'reports/decision-review-v15-2026-07-31/live-capture-report.json. Raw per-call model text, ' +
-    'latency and token counts: PHASE0-EVIDENCE-2026-07-28/fix-decision-review-v15-artifacts/runs-final2/.',
-  model: 'gpt-4.1',
+    'decision-review-v16 lane, 2026-09-10: n=21 = 7 committed fixtures x 3 independent arms, ' +
+    'OFFLINE against fixtures (zero staging traffic), claude-sonnet-5 with thinking DISABLED and ' +
+    'provider-default sampling, scored by the shipped 20-dimension pack — ' +
+    'reports/decision-review-v16-2026-09-10/live-capture-report.json. Raw per-call model text, ' +
+    'latency and token counts: reports/decision-review-v16-2026-09-10/raw-arms/.',
+  model: 'claude-sonnet-5',
   // Pinned to the capture date, not "now": the outputs are frozen, so the report
   // is a frozen observation. (The gate's expiry window is measured against this.)
-  generatedAt: '2026-07-31T00:00:00.000Z',
+  generatedAt: '2026-09-10T00:00:00.000Z',
   extraEvidence: {
     baseline_compared:
-      'PMS row 14 (b4f15305c2bb32e9) at the same n, same fixtures, same scorer: 7/21 clean outputs, ' +
-      '18 failing dimension-observations. This prompt: 21/21 clean, 0 failing.',
+      'LIKE-FOR-LIKE, same 7 fixtures, same model, same day, same scorer. v15 arms vs the v15 ' +
+      'contract: 17/21 parsed, 16/17 clean (1 no_internal_term_leak). v15 arms vs the v16 contract: ' +
+      '17/21 parsed, 3/17 clean. This prompt: 21/21 parsed, 21/21 clean. The 4 unparsed v15 arms are ' +
+      "the eval pack's own extractor (run.ts extractDecisionReviewOutput); the RUNTIME extractor " +
+      '(extractJsonFromResponse) recovers all 21, so this is NOT a claim that v15 fails to parse in ' +
+      'production.',
+    baseline_caveat_the_incumbent_also_blocks:
+      'THE COMMITTED v15 PASS REPORT IS gpt-4.1, JULY. Re-measured on 2026-09-10 against the model ' +
+      'that actually serves this task (CEE_MODEL_DECISION_REVIEW=claude-sonnet-5, derived from the ' +
+      'Render dashboard, not from YAML), the SERVED v15 prompt ALSO scores BLOCK. So the question ' +
+      'this report answers is not "is v16 good enough where v15 was" — no prompt in this lineage had ' +
+      'a passing measurement on the current model until this one.',
     contract_parity:
-      'The DERIVED scoring contract is byte-identical across row 14 and row 15 — same 10 banned terms, ' +
-      'same 21 internal-vocabulary terms, same em-dash ban, same 4 tone rows ' +
-      '(parseServedTerminologyContract / parseToneTable). The measuring instrument did not move.',
+      'THE MEASURING INSTRUMENT DID MOVE, and it moved in the tightening direction only. Banned ' +
+      'lexicon 10 -> 34 terms; internal vocabulary unchanged at 21; em-dash ban unchanged; 4 tone ' +
+      'rows unchanged. The v15 FLOOR IS FULLY PRESERVED, derived rather than asserted: every v15 ' +
+      'banned term, every v15 internal-vocabulary term and every v15 tone-row forbidden phrasing is ' +
+      'present in this prompt (parseServedTerminologyContract / parseToneTable, run against both). ' +
+      'That floor check is what caught the one guard the first draft of this rewrite dropped ' +
+      '("clear lead" at the close_call tone row), and it is why the check now covers the TONE TABLE ' +
+      'and not only the lexicon.',
     sampling_posture:
-      'provider DEFAULT sampling, and that IS production for this model: invoke.ts:505 passes ' +
-      'temperature 0 but buildModelParams (adapters/llm/openai.ts:155-198) drops it on the ' +
-      'requiresMaxCompletionTokens branch that gpt-4.1 takes.',
+      'claude-sonnet-5, max_tokens 8192, thinking explicitly DISABLED, provider-default sampling, ' +
+      'system = the canonical export verbatim. All 21 completions non-empty with stop_reason ' +
+      'end_turn; an empty completion is a hard error in the harness, never a skipped sample.',
     caveat_in_sample:
-      'THE 21/21 IS IN-SAMPLE. Nothing was held out: the three prompt iterations were each tuned ' +
-      'against these same 7 fixtures, so this measures compliance on the corpus that shaped it. ' +
-      'The out-of-sample check is the live witness on real staging turns, recorded separately.',
+      'THE 21/21 IS IN-SAMPLE. Nothing was held out: this prompt was iterated against these same 7 ' +
+      'fixtures, so this measures compliance on the corpus that shaped it. There is NO out-of-sample ' +
+      'live witness for v16 — the v15 report carried one; this one does not, and that gap is not ' +
+      'filled by anything in this commit.',
+    caveat_the_gate_cannot_certify_the_goal:
+      "THE MOST IMPORTANT LIMITATION, AND IT BOUNDS THE 21/21. This revision exists to remove RACE " +
+      'FRAMING, and the scorer CANNOT measure most of it. The banned lexicon is derived from ' +
+      'DOUBLE-QUOTED tokens in the prompt, so the 34 quoted phrases are enforced — but FORM 1 ' +
+      'deliberately leaves the bare words lead / leads / leading / ahead / behind / margin UNQUOTED ' +
+      '(they can occur inside a factor label that must be copied verbatim), and FORMS 2, 3 and 4 ' +
+      '(ordinals and idioms, comparison-as-a-quantity, position-as-subject) carry no quotable token ' +
+      'at all. Measured on these same 21 arms: ZERO contain a quoted banned race phrase (the pack ' +
+      'agrees, 0 failures), while FIVE contain a genuine unquoted breach — "close the gap on these ' +
+      'numbers" (r1/05, r3/06), "stays ahead across a fair range" (r1/06), "to lead here" (r2/03), ' +
+      '"to lead the comparison" (r2/06). Adjudicated by sense: the other hits on those words are ' +
+      'ordinary English or factor labels ("Operating Margin", "ahead of launch", "engineering ' +
+      'leads", an evidence "gap"), which is exactly why a word list cannot settle this and why ' +
+      'quoting the bare words would fire on labels the prompt orders copied verbatim. SO: 21/21 ' +
+      'clean means clean against the QUOTED subset. It is NOT evidence that race framing is gone. ' +
+      'v16 measurably reduces it against v15 (14 of 17 v15 arms breach the QUOTED list alone); the ' +
+      'residual is unmeasured by construction. Rowed rather than patched: adding terms per ' +
+      'construction is the oscillation this estate has already paid for four times on one predicate.',
     caveat_unit_branch:
-      'The flip-threshold contract has two branches. The unitless [0,1] -> percentage branch is ' +
-      'measured on 3 fixtures x 3 arms; the unit-bearing -> verbatim-with-unit branch is measured on ' +
-      'ONE fixture (06, fac_cac, 420/610 GBP) x 3 arms. Before this lane the unit branch was measured ' +
-      'by NOTHING. One fixture is coverage, not confidence.',
-    live_witness_out_of_sample:
-      'THE OUT-OF-SAMPLE CHECK, AND IT IS NOT CLEAN — recorded here rather than beside the report, ' +
-      'because a corpus caveat that lives in a separate document is a caveat nobody reads. Three real ' +
-      'turns were driven against the DEPLOYED service on the live path ' +
-      '(POST /assist/v1/decision-review, cee-staging, PMS-resolved prompt, real model config, ' +
-      'SCIENCE_CLAIMS injected and responseFormat json_object — two things the offline harness does ' +
-      'NOT do), then scored with this same shipped scorer. Result: 47 measured dimension-rows across ' +
-      'the three turns, ONE failure. Clean on every defect this prompt revision targeted — zero ' +
-      'readiness echoes, zero em dashes, zero bare probability decimals, and BOTH flip branches ' +
-      'correct on the wire ("35%"/"62%" unitless, "420 GBP"/"610 GBP" unit-bearing). The one failure ' +
-      'is no_banned_lexicon on 01-clear-winner: pre_mortem said "customer wins" and "win rates" — ' +
-      'wins/win rate as ordinary business English, not as the banned "which option wins" sense. Same ' +
-      'homonym class E1 already documented for "edge", and the matcher cannot tell the senses apart ' +
-      'by construction. NOT a user-harm defect and NOT a regression against v14 (which was never ' +
-      'witnessed on this path), but it IS a real scored failure that n=21 offline did not surface, ' +
-      'and it means this report should be read as: clean in-sample, one known-class homonym ' +
-      'out-of-sample. Rowed for a considered fix (prompt-side hardening vs scorer-side sense ' +
-      'disambiguation is a design call, not a one-liner). Captures: ' +
-      'PHASE0-EVIDENCE-2026-07-28/fix-decision-review-v15-artifacts/witness/.',
+      'The flip-threshold contract has two branches. The unitless [0,1] -> percentage branch and the ' +
+      'unit-bearing -> verbatim-with-unit branch (06, fac_cac, 420/610 GBP) are both exercised, the ' +
+      'latter on ONE fixture x 3 arms. One fixture is coverage, not confidence.',
+    revert_anchor_closes:
+      'PROMOTING THIS CLOSES THE REVERT ANCHOR. Replacing the committed promotion report means the ' +
+      'v15 prompt then reads BLOCK / HASH_MISMATCH against the gate, so staging CANNOT be re-pinned ' +
+      'to version 15 from the admin API. The only revert is `git revert` of this commit plus a ' +
+      'redeploy. This is a deliberate, stated cost of the promotion, not an oversight.',
   },
   note:
-    'FIRST report to clear the gate on its own evidence rather than a grandfather entry. The v14 ' +
-    'grandfather entry is REMOVED in the same commit: the ratchet tightens.',
+    'v16 promotion evidence. Read the caveat_the_gate_cannot_certify_the_goal entry before ' +
+    'treating the clean score as proof that race framing is gone: it is not, and the report says ' +
+    'so by name.',
 });
 
 mkdirSync(OUT_DIR, { recursive: true });

@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "07-single-option",
+  "arm": 3,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 16518,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 764,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 7.8,
+  "text": "{\n  \"narrative_summary\": \"Renew for One Year produced the best outcome in 77% of runs of this model. Platform Cost is sensitive to Query Load Growth, which is worth firming up before acting.\",\n  \"story_headlines\": {\n    \"opt_renew\": \"Renew for One Year holds up well as Query Load Growth feeds directly into Platform Cost.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 88% of variations, based on current estimates of the underlying factors.\",\n    \"primary_risk\": \"Query Load Growth is the main uncertainty behind Platform Cost in this model.\",\n    \"stability_factors\": [\n      \"The result holds across most plausible variations tested in this model.\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Query Load Growth to Platform Cost is not yet firmly evidenced, at a moderate confidence level.\"\n    ]\n  },\n  \"readiness_rationale\": \"This decision is settled enough to act on, though Query Load Growth is the one gap still worth closing given its link to Platform Cost.\",\n  \"evidence_enhancements\": {\n    \"fac_query_load\": {\n      \"specific_action\": \"Pull actual query volume trends from warehouse usage logs over the last two to three quarters.\",\n      \"rationale\": \"Platform Cost moves with Query Load Growth, so a firmer read on the trend sharpens this comparison.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate the expected growth rate before looking at the usage logs.\"\n    }\n  },\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Query Load Growth to Platform Cost assumes current usage patterns continue.\",\n    \"The brief frames this as a renewal decision rather than a comparison against alternative platforms.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would make you switch away from renewing given how Query Load Growth feeds Platform Cost?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"The comparison sits at a high share of runs in this model's favour, so it is worth actively probing what would overturn it.\"\n    }\n  ]\n}"
+}
