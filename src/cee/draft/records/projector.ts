@@ -2248,6 +2248,15 @@ function nodeDeclaredUnit(node: ProjectedNode): string | undefined {
 interface StatedConstraintBinding {
   readonly statedIndex: number;
   readonly nodeId: string;
+  /**
+   * ⭐ THE ORIGINAL NODE OBJECT, held so it can be PUT BACK.
+   *
+   * The ordering rule's failure behaviour is PRESERVE THE ORIGINAL — not crash,
+   * and above all not silently discard, which is the defect being repaired. A
+   * postcondition cannot restore what it did not keep, so the carrier is held
+   * from the moment it is minted rather than reconstructed later from parts.
+   */
+  readonly node: ProjectedNode;
   readonly quote: string;
   readonly operator: ">=" | "<=";
   readonly value: number;
@@ -2274,6 +2283,8 @@ function projectOnce(
    * reason `causal_link` endpoints are resolved in pass 3 rather than inline.
    */
   const statedConstraintBindings: StatedConstraintBinding[] = [];
+  /** Bindings that actually produced a row — the only carriers a withdrawal could be licensed by. */
+  const boundCarriers: StatedConstraintBinding[] = [];
   const goalConstraints: GoalConstraintT[] = [];
   /** edge id → the model's stated option→factor intervention level (`sets_to`). */
   const setsToByEdgeId = new Map<string, number>();
@@ -2619,6 +2630,7 @@ function projectOnce(
         statedConstraintBindings.push({
           statedIndex: index,
           nodeId: id,
+          node,
           quote,
           operator,
           value: item.value,
@@ -3217,6 +3229,9 @@ function projectOnce(
       // reference was a refusal, not an inference.
       provenance: "explicit",
     });
+    // The carrier this bind would license a later lane to withdraw. Tracked so
+    // the postcondition below can police that withdrawal — see pass 2d.
+    boundCarriers.push(binding);
 
     // ⛔⛔ THE STANDALONE CONSTRAINT NODE IS *NOT* WITHDRAWN, AND THAT IS THE
     // WHOLE ORDERING CONSTRAINT OF THIS CHANGE.
@@ -4186,6 +4201,52 @@ function projectOnce(
     // obligation is not parked in this comment: the invariant test "NO SILENT
     // LOSS INVARIANT" is written against the rule, so it REDs the moment a
     // removal happens without a disclosure.
+  }
+
+  // ── Pass 2d: THE ORDERING RULE, MADE EXECUTABLE ──────────────────────────
+  //
+  // ⛔⛔ NOTHING IS REMOVED UNLESS IT IS DISCLOSED. Stated as an invariant a few
+  // lines up is a comment; stated here it is a POSTCONDITION THAT ACTS.
+  //
+  // ⚠ WHY A COMMENT WAS NOT ENOUGH, and it is this estate's most expensive
+  // defect class. The rule "a node carrying a user-stated limit may only be
+  // removed once that limit is carried somewhere a consumer reads" is exactly
+  // the kind of rule a later author, holding a green suite and a plausible
+  // reason, removes in one line. A HAND-MAINTAINED RULE DRIFTS SILENTLY AND THE
+  // DRIFT ALWAYS READS AS GREEN (trap 12). So the rule is derived and enforced
+  // from the projection itself on every single run.
+  //
+  // ⭐ THE FAILURE BEHAVIOUR IS PRESERVE, NOT CRASH AND NOT DISCARD. Throwing
+  // here would turn a representation bug into a dead draft — trading a silent
+  // loss for a loud total one, which is the same trade the seam's
+  // `not_a_record_set` was making over an optional field. So an undisclosed
+  // withdrawal is UNDONE: the original node goes back, exactly the object that
+  // was minted, with its operator, value and unit.
+  //
+  // ⭐ AND IT DOES NOT BLOCK A LEGITIMATE FUTURE WITHDRAWAL — it prices it. Once
+  // `goalConstraints` genuinely reaches a consumer, a lane may withdraw the
+  // standalone node, and this postcondition lets that through THE MOMENT the
+  // withdrawal is accompanied by a `dropped` entry the user can read. Removal is
+  // permitted; UNDISCLOSED removal is not.
+  //
+  // ⚠ WHAT IT DELIBERATELY DOES NOT DO: it does not second-guess the
+  // connectivity prune. A constraint the prune withdraws is already disclosed by
+  // the prune (measured: `{ label, reason: "unconnected_to_goal", value, unit }`),
+  // so it satisfies the rule and is left alone. Restoring those would put
+  // unconnected nodes back on the graph — a different defect wearing this fix's
+  // clothes.
+  const disclosedNodeIds = new Set(dropped.map((d) => d.node_id));
+  for (const carrier of boundCarriers) {
+    const stillPresent = nodes.some((n) => n.id === carrier.nodeId);
+    if (stillPresent || disclosedNodeIds.has(carrier.nodeId)) continue;
+    // An undisclosed withdrawal. PRESERVE THE ORIGINAL — the node object that
+    // was minted, and the provenance entry that belongs to it. Provenance is
+    // taken FROM THE NODE rather than from a second held copy, because the two
+    // are the same object by construction (`provenance[id] = prov` and
+    // `node.provenance = prov`) and a second copy is a mirror that could drift.
+    nodes.push(carrier.node);
+    nodeIds.add(carrier.nodeId);
+    if (carrier.node.provenance !== undefined) provenance[carrier.nodeId] = carrier.node.provenance;
   }
 
   // ── meta: derived, in node-emission order (never Set-iteration order).

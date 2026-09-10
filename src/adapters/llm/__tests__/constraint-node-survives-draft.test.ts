@@ -124,7 +124,9 @@ afterAll(async () => {
 afterEach(() => { h.bodies = []; });
 
 /** Drives the REAL `AnthropicAdapter.draftGraph` — the method `parse.ts` calls. */
-async function draft(responseText: string): Promise<{ nodes: AnyNode[] }> {
+type DraftOut = { nodes: AnyNode[]; result: Record<string, unknown> };
+
+async function draft(responseText: string): Promise<DraftOut> {
   h.payload.text = responseText;
   const result = await new AnthropicAdapter('claude-sonnet-4-6').draftGraph(
     { brief: BRIEF, docs: [], seed: 1 },
@@ -133,7 +135,7 @@ async function draft(responseText: string): Promise<{ nodes: AnyNode[] }> {
   expect(h.bodies.length, 'no request body captured — the adapter never called the SDK').toBeGreaterThanOrEqual(1);
   const graph = (result as unknown as { graph: { nodes: AnyNode[] } }).graph;
   expect(graph, 'the adapter returned no graph').toBeDefined();
-  return graph;
+  return { nodes: graph.nodes, result: result as unknown as Record<string, unknown> };
 }
 
 /**
@@ -203,6 +205,40 @@ describe('⛔ the node carrying a user-stated limit survives the real draft path
    * into a THROWN `anthropic_response_invalid_schema` — the entire draft lost
    * over an enhancement field. It must now degrade to absence.
    */
+  /**
+   * ⭐⭐ COEXISTENCE — THE SPECIFIC HAZARD OF "PRESERVE WHILE YOU CARRY".
+   *
+   * While the standalone node is preserved AND a bound row is minted, the same
+   * user limit exists in TWO representations at once. That is the correct state
+   * for this step of the sequence, but it creates a hazard the old splice did
+   * not have: a consumer that reads both would count the limit TWICE — and a
+   * limit applied twice is a wrong answer that looks like a careful one.
+   *
+   * ⭐ WHY IT IS SAFE TODAY, ASSERTED RATHER THAN ARGUED: only ONE of the two
+   * representations reaches the caller at all. The bound row lives on
+   * `RecordProjection.goalConstraints`, which the adapter does not carry, so
+   * what a consumer receives holds the limit exactly once. This guard REDs the
+   * moment a carrier lane makes the row travel WITHOUT retiring the node — which
+   * is precisely the transition where double-counting becomes reachable, and the
+   * point at which someone must look at it.
+   */
+  it('COEXISTENCE — the limit reaches the caller EXACTLY ONCE, never counted twice', async () => {
+    const out = await draft(recordSet({ applies_to_claim: 0 }));
+
+    // Representation 1 — the node. Exactly one.
+    expect(limitNodes(out), 'the limit must be present, and present once').toHaveLength(1);
+    const limitId = limitNodes(out)[0]!.id;
+
+    // Representation 2 — a bound row travelling alongside it. There must be
+    // none, because a consumer reading both would apply the limit twice.
+    const rows = (out.result.goal_constraints ?? []) as Array<{ node_id?: string }>;
+    const duplicates = rows.filter((r) => r.node_id === limitId);
+    expect(
+      duplicates,
+      'the same limit is travelling as BOTH a node and a bound row — a consumer reading both counts it twice',
+    ).toHaveLength(0);
+  });
+
   it('a malformed `applies_to_claim: "0"` no longer kills the whole draft', async () => {
     const graph = await draft(recordSet({ applies_to_claim: '0' }));
     expect(limitNodes(graph), 'the limit must still be on the graph').toHaveLength(1);
