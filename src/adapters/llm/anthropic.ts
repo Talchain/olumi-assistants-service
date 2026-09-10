@@ -24,6 +24,7 @@ import { UpstreamTimeoutError, UpstreamHTTPError, UpstreamNonJsonError } from ".
 import { makeIdempotencyKey } from "./idempotency.js";
 import { generateDeterministicLayout } from "../../utils/layout.js";
 import { normaliseDraftResponse, ensureControllableFactorBaselines } from "./normalisation.js";
+import { contentDigest } from "../../utils/redaction.js";
 import { isUsableDraftDocument } from "./draft-document-acceptance.js";
 import { captureCheckpoint, type PipelineCheckpoint } from "../../cee/pipeline-checkpoints.js";
 import { getMaxTokensFromConfig } from "./router.js";
@@ -905,7 +906,11 @@ export async function draftGraphWithAnthropic(
       cache_age_ms: promptMeta.cache_age_ms,
       instance_id: promptMeta.instance_id,
       structured_outputs_enabled: structuredOutputsEnabled,
-      system_prompt_preview: systemText.slice(0, 200),
+      // Digest the assembled system prompt — never place it on the wire
+      // verbatim (see contentDigest). The diagnostic survives as a
+      // correlatable hash + length; `system_prompt_chars` below is
+      // already the right shape-only form and is unchanged.
+      system_prompt_preview: contentDigest(systemText),
       system_prompt_chars: systemText.length,
     }, "[CEE_PROMPT_DEBUG] draft_graph prompt delivery");
   }

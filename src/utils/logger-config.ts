@@ -188,6 +188,19 @@ export const DECISION_CONTENT_FIELDS = [
   // correlated and DETECTED — redacting them would remove the
   // detection surface and add no privacy.
   "system_prompt",
+  // camelCase twin, on the same convention as `userMessage`,
+  // `assistantText`, `answerText` and `orientationText` above. This is
+  // not merely a parameter name: `turn-debug-store.ts` declares
+  // `readonly systemPrompt: string` (PromptCaptureInput) and the
+  // draft_graph seam builds an object literal with that key carrying
+  // the served bytes (`cee/unified-pipeline/stages/parse.ts:268`), so a
+  // spread of that object into `log.*` would put the prompt on the wire
+  // under this name. PROSPECTIVE, not a live leak — swept at f9ee43a9
+  // with a contrast control and no site logs it today; turn-debug-store
+  // states the rule only as a COMMENT (:491), i.e. a hand-maintained
+  // mirror, and listing it here makes it mechanical. Same shape-twin
+  // ruling as above: `systemPromptSha256` / `systemPromptChars` stay OFF.
+  "systemPrompt",
 ] as const;
 
 export type DecisionContentField = (typeof DECISION_CONTENT_FIELDS)[number];
