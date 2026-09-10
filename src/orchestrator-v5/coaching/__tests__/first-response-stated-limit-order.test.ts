@@ -144,6 +144,29 @@ const SMALL_GRAPH = {
 };
 const SMALL_BRIEF =
   'Grow MRR while keeping monthly churn under 4%. Raise price or hold price?';
+const SMALL_TWO_DIRECTION_ITEMS = renderDirectionClarifications([
+  {
+    metric_text: 'monthly churn',
+    amount_text: '4%',
+    value: 4,
+    unit: '%',
+    reason: 'target_unmatched',
+    question: 'Which part of the model should this apply to?',
+    options: ['Churn rate', 'Overall churn'],
+  },
+  {
+    metric_text: 'acquisition cost',
+    amount_text: '£320',
+    value: 320,
+    unit: 'GBP',
+    reason: 'target_unmatched',
+    question: 'Which part of the model should this apply to?',
+    options: ['Blended CAC', 'Paid CAC'],
+  },
+]);
+const SMALL_TWO_BRIEF =
+  'Grow MRR while keeping monthly churn under 4% and acquisition cost under £320. Raise price or hold price?';
+
 const SMALL_DIRECTION_ITEMS = renderDirectionClarifications([
   {
     metric_text: 'monthly churn',
@@ -456,6 +479,49 @@ describe('the first response opens with the model, and still asks about the stat
    * i.e. growing the fixed content ADDED a block. Nothing about that is
    * cosmetic: it is how #1428's first head lost the user's limit question.
    */
+  /**
+   * ⭐⭐ THE SECOND CLARIFICATION KEEPS #1409's RANK — AND IT IS THE *SECOND*
+   * ONE, NOT THE FIRST AGAIN.
+   *
+   * On a draft short enough for the direction-only rung to fire, both limits
+   * are served: the first in its promoted slot, the second at the HEAD of the
+   * coaching section, ahead of the ordinary bullets. Building that rung's
+   * block from ALL the direction bullets instead of the remainder repeats the
+   * promoted line, blows the rung's budget and drops the second limit
+   * altogether — invisible on every over-budget fixture in this file, which is
+   * why this short one exists.
+   */
+  it('⭐ both limits are served on a short draft — promoted slot, then the head of the coaching section', () => {
+    const built = build({
+      graph: SMALL_GRAPH as never,
+      briefText: SMALL_TWO_BRIEF,
+      strengthenItems: SMALL_TWO_DIRECTION_ITEMS,
+    });
+    const text = built.text;
+    expect(
+      SMALL_TWO_DIRECTION_ITEMS,
+      'PRECONDITION: two clarifications were composed',
+    ).toHaveLength(2);
+    // The promoted slot carries the FIRST.
+    expect(text.split('\n\n')[1]).toContain(LIMIT_MARKER);
+    expect(text.split('\n\n')[1]).toContain('4%');
+    expect(text.split('\n\n')[1], 'the promoted slot is the first item, not the second').not.toContain(
+      '£320',
+    );
+    // The coaching section carries the SECOND, at its head.
+    const section = coachingSection(text);
+    expect(
+      section,
+      'PRECONDITION: the direction-only rung must fire here, or nothing below is exercised',
+    ).not.toBeNull();
+    const bullets = section!.split('\n').slice(1);
+    expect(bullets[0]).toMatch(/^• Limit to confirm: /);
+    expect(bullets[0]).toContain('£320');
+    // Exactly two, and the telemetry says two — not the promoted line twice.
+    expect(text.split(LIMIT_MARKER).length - 1).toBe(2);
+    expect(built.telemetry.direction_clarifications_surfaced).toBe(2);
+  });
+
   it('⭐ MONOTONE with two clarifications — growing the next step never ADDS a block back', () => {
     const rows = [0, 1, 2, 3, 4, 6, 12].map((n) => {
       const text = build({
