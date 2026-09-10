@@ -171,9 +171,9 @@
       "note": "Grounded, plain-language, coherent. Should PASS every dimension.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Enter European Market comes out ahead by about 44 percentage points over Delay to Next Year. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
+        "narrative_summary": "Enter European Market produced the best outcome in 72% of runs of this model. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
         "story_headlines": {
-          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"
         },
         "robustness_explanation": {
@@ -204,7 +204,7 @@
             "factor_label": "Competitive Intensity",
             "current_display": "35%",
             "flip_display": "62%",
-            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
+            "narrative": "If Competitive Intensity moves from 35% to 62%, this model points to a different option."
           }
         ],
         "bias_findings": [
@@ -240,7 +240,7 @@
       "output": {
         "narrative_summary": "Enter European Market is the clear winner and wins by about 44 percentage points, so it is the best choice here. Competitive intensity is the main fragility.",
         "story_headlines": {
-          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"
         },
         "robustness_explanation": {
@@ -271,7 +271,7 @@
             "factor_label": "Competitive Intensity",
             "current_display": "35%",
             "flip_display": "62%",
-            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
+            "narrative": "If Competitive Intensity moves from 35% to 62%, this model points to a different option."
           }
         ],
         "bias_findings": [
@@ -305,9 +305,9 @@
       "note": "Narrates 0.72 / 0.28 as bare decimals where the prompt requires \"72%\".",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Enter European Market comes out ahead with a probability of 0.72 against 0.28 for Delay to Next Year. Competitive intensity is the main fragility.",
+        "narrative_summary": "Enter European Market produced the best outcome with a probability of 0.72 in runs of this model. Competitive intensity is the main fragility.",
         "story_headlines": {
-          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"
         },
         "robustness_explanation": {
@@ -338,7 +338,7 @@
             "factor_label": "Competitive Intensity",
             "current_display": "35%",
             "flip_display": "62%",
-            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
+            "narrative": "If Competitive Intensity moves from 35% to 62%, this model points to a different option."
           }
         ],
         "bias_findings": [
@@ -372,9 +372,9 @@
       "note": "99.4% is within no input value's ±10% band — the runtime grounding rule must catch it.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Enter European Market comes out ahead by about 44 percentage points over Delay to Next Year. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
+        "narrative_summary": "Enter European Market produced the best outcome in 72% of runs of this model. Competitive intensity is the main fragility, though the ordering holds in about 91% of runs.",
         "story_headlines": {
-          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"
         },
         "robustness_explanation": {
@@ -405,7 +405,7 @@
             "factor_label": "Competitive Intensity",
             "current_display": "35%",
             "flip_display": "62%",
-            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
+            "narrative": "If Competitive Intensity moves from 35% to 62%, this model points to a different option."
           }
         ],
         "bias_findings": [
@@ -441,7 +441,7 @@
       "output": {
         "narrative_summary": "   ",
         "story_headlines": {
-          "opt_expand": "Comes out ahead on growth and holds across the simulated range",
+          "opt_expand": "Enter European Market holds on growth across the simulated range",
           "opt_wait": "Protects near term spend but gives up the growth window"
         },
         "robustness_explanation": {
@@ -472,7 +472,7 @@
             "factor_label": "Competitive Intensity",
             "current_display": "35%",
             "flip_display": "62%",
-            "narrative": "If Competitive Intensity moves from 35% to 62%, the leading option changes."
+            "narrative": "If Competitive Intensity moves from 35% to 62%, this model points to a different option."
           }
         ],
         "bias_findings": [

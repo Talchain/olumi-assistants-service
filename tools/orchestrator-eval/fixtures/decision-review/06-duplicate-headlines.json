@@ -163,12 +163,12 @@
       "note": "Four distinct, option-specific headlines. Should PASS.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Self Serve Funnel comes out ahead by about 14 percentage points over Paid Acquisition. Customer acquisition cost is the input that moves all four bets.",
+        "narrative_summary": "Self Serve Funnel produced the best outcome in 41% of runs of this model. Customer acquisition cost is the input that moves all four bets.",
         "story_headlines": {
           "opt_selfserve": "Ahead because acquisition cost bites it least",
           "opt_paid": "Close behind, most exposed to acquisition cost",
           "opt_partner": "Middling return with a narrow spread",
-          "opt_outbound": "Trails on every measure examined"
+          "opt_outbound": "Outbound Sales needs a large cost fall on every measure examined"
         },
         "robustness_explanation": {
           "summary": "The ordering holds in about 64% of runs, with acquisition cost driving most of the movement.",
@@ -206,7 +206,7 @@
             "factor_label": "Customer Acquisition Cost",
             "current_display": "420 GBP",
             "flip_display": "610 GBP",
-            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, the leading option changes."
+            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, this model points to a different option."
           }
         ]
       }
@@ -216,7 +216,7 @@
       "note": "All four headlines identical — the 1.121 dedupe-collision defect at its source field.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Self Serve Funnel comes out ahead by about 14 percentage points over Paid Acquisition. Customer acquisition cost is the input that moves all four bets.",
+        "narrative_summary": "Self Serve Funnel produced the best outcome in 41% of runs of this model. Customer acquisition cost is the input that moves all four bets.",
         "story_headlines": {
           "opt_selfserve": "A load bearing assumption",
           "opt_paid": "A load bearing assumption",
@@ -259,7 +259,7 @@
             "factor_label": "Customer Acquisition Cost",
             "current_display": "420 GBP",
             "flip_display": "610 GBP",
-            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, the leading option changes."
+            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, this model points to a different option."
           }
         ]
       }
@@ -269,12 +269,12 @@
       "note": "primary_risk names a risk no other section mentions, breaking the prompt COHERENCE rule.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Self Serve Funnel comes out ahead by about 14 percentage points over Paid Acquisition. Customer acquisition cost is the input that moves all four bets.",
+        "narrative_summary": "Self Serve Funnel produced the best outcome in 41% of runs of this model. Customer acquisition cost is the input that moves all four bets.",
         "story_headlines": {
           "opt_selfserve": "Ahead because acquisition cost bites it least",
           "opt_paid": "Close behind, most exposed to acquisition cost",
           "opt_partner": "Middling return with a narrow spread",
-          "opt_outbound": "Trails on every measure examined"
+          "opt_outbound": "Outbound Sales needs a large cost fall on every measure examined"
         },
         "robustness_explanation": {
           "summary": "The ordering holds in about 64% of runs, with acquisition cost driving most of the movement.",
@@ -312,7 +312,7 @@
             "factor_label": "Customer Acquisition Cost",
             "current_display": "420 GBP",
             "flip_display": "610 GBP",
-            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, the leading option changes."
+            "narrative": "If Customer Acquisition Cost moves from 420 GBP to 610 GBP, this model points to a different option."
           }
         ]
       }

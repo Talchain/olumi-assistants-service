@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "07-single-option",
+  "arm": 2,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 16518,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1189,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 12.7,
+  "text": "{\n  \"narrative_summary\": \"Renew for One Year produced the best outcome in 77% of runs of this model. That result rests on Query Load Growth, which drives Platform Cost, so how that growth plays out is worth watching.\",\n  \"story_headlines\": {\n    \"opt_renew\": \"Renew for One Year holds up because Platform Cost stays manageable across most modelled query growth paths.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 88% of variations, and overall confidence in this comparison sits at 74%.\",\n    \"primary_risk\": \"Query Load Growth feeding into Platform Cost is the main thing that could change this picture.\",\n    \"stability_factors\": [\n      \"The result stays consistent across most of the modelled range for Query Load Growth.\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Query Load Growth to Platform Cost is the one relationship that could shift the outcome if growth runs higher than modelled.\"\n    ]\n  },\n  \"readiness_rationale\": \"This comparison is settled enough to act on: Renew for One Year holds up strongly, though Query Load Growth is not yet fully evidence-backed and is worth firming up before you close it out.\",\n  \"evidence_enhancements\": {\n    \"fac_query_load\": {\n      \"specific_action\": \"Pull recent query volume trends from warehouse usage logs to firm up the growth estimate before renewing.\",\n      \"rationale\": \"Platform Cost is directly driven by this factor, so a better read on growth sharpens the whole comparison.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate expected query growth yourself before checking the usage logs.\"\n    }\n  },\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Query Load Growth to Platform Cost assumes current pricing and scaling behaviour continue unchanged.\",\n    \"The brief frames this as a renewal decision, taking as given that a one-year term is the right horizon to evaluate.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would make you switch away from renewing given how Query Load Growth is currently assumed to behave?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"Renew for One Year produced the best outcome in a large share of runs, so it is worth actively probing what would overturn that.\"\n    },\n    {\n      \"question\": \"This renewal failed because Query Load Growth ran well past what was modelled. What early signs would have shown that?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The comparison is settled enough to act on, which is exactly when a pre-mortem on the main fragility is most useful.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"This renewal failed because Query Load Growth rose faster than modelled, pushing Platform Cost well past what was budgeted for the year.\",\n    \"warning_signs\": [\n      \"Monthly query volume trending noticeably above the growth path assumed in this model.\",\n      \"Platform Cost invoices creeping toward the upper end of the modelled range early in the term.\"\n    ],\n    \"mitigation\": \"Set a usage checkpoint partway through the term to catch faster than expected query growth early.\",\n    \"grounded_in\": [\n      \"fac_query_load\"\n    ],\n    \"review_trigger\": \"Reconvene if query volume growth clearly outpaces the modelled path before the term is out.\"\n  }\n}"
+}

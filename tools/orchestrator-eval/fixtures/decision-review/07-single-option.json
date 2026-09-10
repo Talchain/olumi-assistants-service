@@ -96,7 +96,7 @@
       "note": "One headline, no comparative framing, no scenario_contexts. Should PASS.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Renew for One Year comes out ahead in about 77% of simulations. Query load growth is the input that could move platform cost against it.",
+        "narrative_summary": "Renew for One Year produced the best outcome in about 77% of runs of this model. Query load growth is the input that could move platform cost against it.",
         "story_headlines": {
           "opt_renew": "Holds up in most runs, sensitive to query load growth"
         },
@@ -132,7 +132,7 @@
       "note": "Emits a headline for an option id the run never contained.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Renew for One Year comes out ahead in about 77% of simulations. Query load growth is the input that could move platform cost against it.",
+        "narrative_summary": "Renew for One Year produced the best outcome in about 77% of runs of this model. Query load growth is the input that could move platform cost against it.",
         "story_headlines": {
           "opt_renew": "Holds up in most runs",
           "opt_switch": "An option the run never contained"
@@ -169,7 +169,7 @@
       "note": "Drops readiness_rationale and decision_quality_prompts — the runtime shape check must reject it.",
       "source": "recorded",
       "output": {
-        "narrative_summary": "Renew for One Year comes out ahead in about 77% of simulations. Query load growth is the input that could move platform cost against it.",
+        "narrative_summary": "Renew for One Year produced the best outcome in about 77% of runs of this model. Query load growth is the input that could move platform cost against it.",
         "story_headlines": {
           "opt_renew": "Holds up in most runs, sensitive to query load growth"
         },

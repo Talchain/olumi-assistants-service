@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "05-constraint-infeasible",
+  "arm": 2,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 16883,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 1196,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 12.4,
+  "text": "{\n  \"narrative_summary\": \"Launch in March produced the best outcome in 69% of runs of this model, but it breaches the constraint that shipping cannot happen before the audit closes, so it is not available; Launch in June is the feasible option. The link from Audit Completion to Annual Recurring Revenue is sensitive to your assumptions, worth checking before acting.\",\n  \"story_headlines\": {\n    \"opt_march\": \"Launch in March scores well here but breaches the audit constraint, so it is not available.\",\n    \"opt_june\": \"Launch in June is the feasible option once the audit constraint is applied.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 68% of variations, a moderate level given the constraint that rules out one option entirely.\",\n    \"primary_risk\": \"The link from Audit Completion to Annual Recurring Revenue is sensitive to your assumptions, worth checking before acting.\",\n    \"stability_factors\": [\n      \"Early Demand shows a reasonably firm relationship to Annual Recurring Revenue on current estimates.\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Audit Completion to Annual Recurring Revenue could shift the outcome if audit timing changes.\"\n    ]\n  },\n  \"readiness_rationale\": \"This decision is not settled enough to act on: the option this model otherwise favours is barred because it cannot ship before the audit closes, leaving Launch in June as the only option that fits your own constraint.\",\n  \"evidence_enhancements\": {},\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The brief's constraint that shipping cannot happen before the audit closes is treated as fixed and non-negotiable.\",\n    \"The link from Audit Completion to Annual Recurring Revenue assumes current audit timing estimates hold.\",\n    \"The link from Early Demand to Annual Recurring Revenue assumes current market conditions hold.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"This failed because the audit closed later than expected and Launch in June still faced weaker demand than modelled. What signs would show that early?\",\n      \"principle\": \"Pre-mortem (Klein)\",\n      \"applies_because\": \"The option this model otherwise favours is barred by a stated constraint, and the feasible option carries its own uncertainty worth stress-testing before committing.\"\n    },\n    {\n      \"question\": \"How will choosing Launch in June feel in 10 minutes, 10 months, and 10 years given the audit constraint that ruled out the alternative?\",\n      \"principle\": \"10-10-10 (Welch)\",\n      \"applies_because\": \"The result is close on these numbers once the barred option is set aside, so weighing the choice across different time horizons helps clarify what matters.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"This failed because Launch in June shipped as planned but Early Demand came in weaker than modelled, and Annual Recurring Revenue fell short despite the audit constraint being satisfied.\",\n    \"warning_signs\": [\n      \"Early signals of Early Demand tracking below the modelled range\",\n      \"Audit timing slipping further and compressing the launch window\"\n    ],\n    \"mitigation\": \"Set an early checkpoint on demand signals shortly after launch to confirm the modelled range is holding.\",\n    \"grounded_in\": [\n      \"edge_audit_arr\"\n    ],\n    \"review_trigger\": \"Reconvene if audit completion timing shifts before the planned launch window.\"\n  }\n}"
+}

@@ -1,0 +1,24 @@
+{
+  "prompt_version": "v16r",
+  "fixture": "07-single-option",
+  "arm": 1,
+  "model": "claude-sonnet-5",
+  "stop_reason": "end_turn",
+  "usage": {
+    "input_tokens": 16518,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 980,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global"
+  },
+  "latency_s": 10.7,
+  "text": "{\n  \"narrative_summary\": \"Renew for One Year produced the best outcome in 77% of runs of this model. The link from Query Load Growth to Platform Cost is worth checking, since growth in query load pushes cost upward.\",\n  \"story_headlines\": {\n    \"opt_renew\": \"Renew for One Year holds up because query load growth, while a cost pressure, does not overturn the result.\"\n  },\n  \"robustness_explanation\": {\n    \"summary\": \"The ordering holds in about 88% of variations, a well supported result based on current estimates.\",\n    \"primary_risk\": \"Query Load Growth pushing up Platform Cost faster than expected is the main thing to watch.\",\n    \"stability_factors\": [\n      \"The result holds across most modelled variations on current estimates.\"\n    ],\n    \"fragility_factors\": [\n      \"The link from Query Load Growth to Platform Cost: faster growth than modelled would raise cost.\"\n    ]\n  },\n  \"readiness_rationale\": \"The comparison is settled enough to act on: query load growth is the one open factor, and it is not evidence-backed to a high degree yet.\",\n  \"evidence_enhancements\": {\n    \"fac_query_load\": {\n      \"specific_action\": \"Pull recent query volume trends from platform usage logs and project growth over the next contract term.\",\n      \"rationale\": \"This factor has the clearest link to platform cost in the model, so firming it up sharpens the cost picture.\",\n      \"evidence_type\": \"internal_data\",\n      \"decision_hygiene\": \"Estimate expected query growth yourself before checking the usage logs.\"\n    }\n  },\n  \"scenario_contexts\": {},\n  \"flip_thresholds\": [],\n  \"bias_findings\": [],\n  \"key_assumptions\": [\n    \"The link from Query Load Growth to Platform Cost assumes current usage patterns and pricing structures continue.\",\n    \"The decision assumes a one-year renewal is the only contract structure being weighed here.\"\n  ],\n  \"decision_quality_prompts\": [\n    {\n      \"question\": \"What would make you switch away from Renew for One Year given how Query Load Growth affects Platform Cost?\",\n      \"principle\": \"Consider-the-opposite\",\n      \"applies_because\": \"The option this model points to holds a strong share of runs, so it is worth naming what would change that.\"\n    }\n  ],\n  \"pre_mortem\": {\n    \"failure_scenario\": \"The renewal was signed but Query Load Growth rose faster than modelled, pushing Platform Cost well above what was planned for.\",\n    \"warning_signs\": [\n      \"Query volume trending noticeably above recent baselines\",\n      \"Monthly platform cost reports drifting past budget expectations\"\n    ],\n    \"mitigation\": \"Set a query load checkpoint partway through the contract term to catch early cost drift.\",\n    \"grounded_in\": [\n      \"fac_query_load\"\n    ],\n    \"review_trigger\": \"Reconvene if query load growth outpaces projections before the next planning cycle.\"\n  }\n}"
+}
