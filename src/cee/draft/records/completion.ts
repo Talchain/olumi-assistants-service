@@ -655,6 +655,32 @@ export function enumerateCompletionAsk(
       //
       // `refusal_rule` is read from the producer rather than inferred from the
       // kind pair, so this stays true if the gate's internals move (trap 12).
+      // ⭐ A STATED LIMIT NAMED A TARGET THE PROJECTOR REFUSED TO BIND IT TO.
+      //
+      // These two are DELIBERATELY NOT folded into `unresolved_reference` above.
+      // That kind means "the reference did not resolve"; these mean it resolved
+      // PERFECTLY and the target was still wrong — a different question with a
+      // different repair (trap 21), and the copy has to say which or the model
+      // will re-emit the same index. The limit itself is NOT lost: it is on the
+      // graph in the user's own words, with its own threshold. What is being
+      // asked for is the binding.
+      case "constraint_target_not_measurable":
+        push({
+          kind: "unresolved_reference",
+          detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} is not a measured quantity, so it cannot carry a threshold; point this limit at the factor or outcome it bounds`,
+          // NON-BLOCKING BY CONSTRUCTION, same as every reason above it: the
+          // refusal withheld a BINDING, and the graph the validator is handed is
+          // exactly the graph it would have been handed without the reference.
+          validatorCode: null,
+        });
+        break;
+      case "constraint_target_unit_mismatch":
+        push({
+          kind: "unresolved_reference",
+          detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} measures a different quantity from this limit, so binding it would change what the limit means; point it at the node measured in the same unit`,
+          validatorCode: null,
+        });
+        break;
       case "ref_kind_illegal":
         push({
           kind: "illegal_shape",

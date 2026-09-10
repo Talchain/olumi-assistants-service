@@ -63,6 +63,14 @@ const StatedItemWire = z.object({
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
   // `option` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
+  // ⭐ `constraint` only — WHAT THE LIMIT APPLIES TO. Typed by namespace, the
+  // same shape as the `claims[]` endpoints below. `.int()` because these index
+  // an array: a fractional index is not a near-miss of a valid one, and letting
+  // it through would push the refusal down to the projector where it would have
+  // to be named `unparseable_ref` — a reason the grammar otherwise makes
+  // unreachable.
+  applies_to_stated: z.number().int().optional(),
+  applies_to_claim: z.number().int().optional(),
 }).passthrough();
 
 const InferenceClaimWire = z.object({
@@ -210,6 +218,8 @@ export function projectDraftRecords(
       ...(item.role !== undefined ? { role: item.role } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
       ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
+      ...(item.applies_to_stated !== undefined ? { applies_to_stated: item.applies_to_stated } : {}),
+      ...(item.applies_to_claim !== undefined ? { applies_to_claim: item.applies_to_claim } : {}),
     })),
     claims: parsed.data.claims.map((claim) => ({
       claim_kind: claim.claim_kind,
