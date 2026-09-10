@@ -142,9 +142,19 @@ const PROVISIONAL_FRAMING_SENTENCE =
  * open the reply with two hedges in a row. It is the CLOSING frame instead,
  * placed BEFORE the call to action so the reader still ends on the next step.
  * It states what the thing is; it does not apologise for it.
+ *
+ * ── ⛔ ONE SENTENCE WAS REMOVED, AND THE FACT ABOVE IS NOT WITHDRAWN ────────
+ * It read: "Ask me again and you would get a different one." Everything
+ * measured above still holds — nothing here claims the variance went away, and
+ * no mechanism changed. What changed is what the product SAYS about it.
+ * Reviewed on the served build by the product owner: an invitation to re-roll
+ * reads as a property being OFFERED, and it sits against the stated position
+ * that this reasoning layer is to be made as deterministic as it can be. The
+ * surviving half is the honesty that was not objected to, and it is quoted
+ * VERBATIM by `handlers/chip-click-dispatch.ts` — so it stays exactly as is.
  */
 export const MODEL_VARIANCE_NOTE =
-  'This is one of several models I could build from your brief: a starting point to argue with, not an answer. Ask me again and you would get a different one.';
+  'This is one of several models I could build from your brief: a starting point to argue with, not an answer.';
 
 /**
  * Cap on EXTRA "check" bullets surfaced in the weighing section beyond the
@@ -771,13 +781,17 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   // ⭐ DIRECTION BULLETS LEAD THE SECTION AND SIT IN THE CORE. A limit the user
   // stated and the product declined to enforce outranks a coaching suggestion,
   // and the core block is the one the word-budget ladder sheds LAST.
-  // Promote the first direction clarification to open the reply. Moved, not
-  // duplicated: it is dropped from the core bullets below. With none, the
-  // narrative is byte-identical to before.
-  const [promotedDirectionBullet = null, ...remainingDirectionBullets] = directionBullets;
-  const leadClarification = promotedDirectionBullet;
+  //
+  // ⛔ THEY NO LONGER OPEN THE REPLY, AND POSITION IS NOT PRIORITY. #1409
+  // promoted the first one ahead of the confirm sentence. Its ranking argument
+  // stands and is implemented here — the clarification is the FIRST bullet of
+  // the coaching section, it is protected from the word budget by rungs 3b/3c
+  // below, and nothing about it is dropped. What was withdrawn is opening the
+  // reply with it: reviewed on the served build by the product owner, the first
+  // message then began by reporting the product's own failure before it had
+  // said what it built. The reader is told what exists, then what to settle.
   const coreBullets = [
-    ...remainingDirectionBullets,
+    ...directionBullets,
     ...(tradeOffBullet ? [tradeOffBullet] : []),
     ...(assumptionBullet ? [assumptionBullet] : []),
   ];
@@ -787,8 +801,8 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     ...additionalBullets,
   ]);
   const weighingBlockDirectionOnly =
-    remainingDirectionBullets.length > 0
-      ? renderBulletSection('What the model is weighing', remainingDirectionBullets)
+    directionBullets.length > 0
+      ? renderBulletSection('What the model is weighing', directionBullets)
       : null;
 
   // Brief-completeness advisory (own droppable block). Only the enum is read;
@@ -802,7 +816,6 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
     weighingBlockCore,
     weighingBlockDirectionOnly,
     completenessBlock,
-    leadClarification,
     nextStep,
     droppedFigureNotice,
   });
@@ -828,12 +841,12 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
       // word-budget ladder can shed the whole weighing block, and a count of
       // bullets that were composed but not served is the optimism this
       // telemetry exists to catch.
-      // Counts what was SERVED. The promoted line leads the reply and is
-      // therefore surfaced whether or not the weighing block survived the word
-      // budget; the remainder is surfaced only inside that block.
+      // Counts what was SERVED. Every direction bullet lives inside the
+      // weighing block again, and the ladder's direction-only rungs keep that
+      // block alive ahead of the option inventory — so a served count is the
+      // block's survival, not a separate slot.
       direction_clarifications_surfaced:
-        (leadClarification !== null ? 1 : 0) +
-        (sectioned.includedWeighing ? remainingDirectionBullets.length : 0),
+        sectioned.includedWeighing ? directionBullets.length : 0,
     },
   };
 }
@@ -2090,13 +2103,6 @@ interface SectionedNarrativeInput {
   readonly weighingBlockDirectionOnly: string | null;
   /** Brief-completeness advisory line, or null when absent / `complete`. */
   readonly completenessBlock: string | null;
-  /**
-   * The one stated-limit clarification promoted ahead of the confirm sentence,
-   * or `null` when the draft has none. Not new copy: the first
-   * `pickDirectionClarifications` line, MOVED — it is removed from the weighing
-   * block so the person reads it once.
-   */
-  readonly leadClarification: string | null;
   readonly nextStep: string;
   /**
    * The stated figures the model did not carry, or `null` when there are none
@@ -2129,6 +2135,9 @@ interface SectionedNarrativeResult {
  *   1. full (extra check bullet + completeness + options)
  *   2. drop the extra check bullet (weighing core)
  *   3. drop the completeness advisory
+ *   3b. reduce the weighing block to the stated-limit clarifications alone
+ *   3c. the same, with options dropped — the clarification outranks the
+ *       inventory, which the canvas already shows
  *   4. drop the whole weighing block
  *   5. drop options too (confirm + next-step only)
  *
@@ -2143,15 +2152,10 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
     includeOptions: boolean,
     includeCompleteness: boolean,
   ): string => {
-    // ⭐ A stated limit the product did not enforce LEADS — before the confirm
-    // sentence, not after it. Measured on native `3d5ce286…`; full narrative in
-    // `output/olumi-delivery-heartbeat/F361-FIRST-RESPONSE-20260909.md`.
-    // Null when the draft has no such clarification, so the assembly is then
-    // byte-identical to before.
-    const blocks: string[] =
-      input.leadClarification !== null && input.leadClarification.length > 0
-        ? [input.leadClarification, input.confirm]
-        : [input.confirm];
+    // ⭐ WHAT WAS BUILT COMES FIRST. A stated limit the product did not enforce
+    // is the highest-ranked COACHING line and leads that section, but it does
+    // not open the reply — see the ranking note in `buildPostDraftNarrative`.
+    const blocks: string[] = [input.confirm];
     if (includeOptions && input.optionsBlock !== null) {
       blocks.push(input.optionsBlock);
     }
@@ -2239,6 +2243,19 @@ function assembleSectionedNarrative(input: SectionedNarrativeInput): SectionedNa
   // position.
   if (input.weighingBlockDirectionOnly !== null) {
     text = tryAssemble(input.weighingBlockDirectionOnly, true, false);
+    if (countWords(text) <= MAX_WORDS) {
+      return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
+    }
+    // Rung 3c — the same, with the option inventory dropped.
+    //
+    // ⭐⭐ THIS RUNG DISCHARGES THE GUARANTEE THE OLD LEAD SLOT CARRIED. While
+    // the clarification sat ahead of the confirm sentence it was outside every
+    // rung and could not be shed at all. Returning it to the coaching section
+    // would otherwise have exposed it to the budget for the first time — a
+    // silent loss bought with a position fix, which is the trade this estate
+    // keeps making by accident. The options are ALSO on the user's canvas; the
+    // question about their limit is not anywhere else.
+    text = tryAssemble(input.weighingBlockDirectionOnly, false, false);
     if (countWords(text) <= MAX_WORDS) {
       return { text: withNote(text), includedWeighingExtra: false, includedCompleteness: false, includedWeighing: true };
     }
