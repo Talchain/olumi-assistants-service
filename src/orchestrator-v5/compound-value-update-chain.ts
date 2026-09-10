@@ -280,22 +280,30 @@ export function preflightCompoundBatch(
 // Receipt
 // ---------------------------------------------------------------------------
 
-/** User-facing clause per refusal reason. Phrasing deliberately avoids the
+/** User-facing SENTENCE per refusal reason. Phrasing deliberately avoids the
  *  state-mutation denial forms the egress guard rewrites ("no change",
- *  "nothing changed"). */
-function refusalClause(reason: CompoundPartRefusalReason, plural: boolean): string {
+ *  "nothing changed").
+ *
+ *  ⚠ A COMPLETE SENTENCE, NOT A CLAUSE (Paul's no-em-dash ruling, 2026-09-10).
+ *  This used to return a lower-case fragment that the caller bolted onto the
+ *  named factors with an em dash. The ruling is to split into sentences or cut,
+ *  so the reason now stands on its own and the caller simply concatenates. The
+ *  `target_unresolved` wording also changed shape ("There isn't a factor I can
+ *  match it to confidently") because the old fragment began "I couldn't match",
+ *  which stutters directly after the caller's own "I couldn't set X." lead. */
+function refusalSentence(reason: CompoundPartRefusalReason, plural: boolean): string {
   const factors = plural ? 'those factors' : 'that factor';
   switch (reason) {
     case 'unit_incompatible':
     case 'unit_unresolved':
-      return `the value's unit doesn't match how ${plural ? 'they are' : 'it is'} measured`;
+      return `The value's unit doesn't match how ${plural ? 'they are' : 'it is'} measured.`;
     case 'not_a_factor':
-      return `${plural ? "they aren't factors" : "it isn't a factor"} I can set a value on`;
+      return `${plural ? "They aren't factors" : "It isn't a factor"} I can set a value on.`;
     case 'target_unresolved':
-      return `I couldn't match ${plural ? 'them' : 'it'} to ${plural ? 'factors' : 'a factor'} confidently`;
+      return `There ${plural ? "aren't factors" : "isn't a factor"} I can match ${plural ? 'them' : 'it'} to confidently.`;
     case 'value_invalid':
     case 'execute_invalid':
-      return `that value isn't valid for ${factors}`;
+      return `That value isn't valid for ${factors}.`;
   }
 }
 
@@ -345,7 +353,7 @@ export function buildCompoundReceiptText(
     }
     for (const [reason, labels] of groups) {
       const plural = labels.length > 1;
-      text = `${text} I couldn't set ${joinNames(labels)} — ${refusalClause(reason, plural)}.`.trim();
+      text = `${text} I couldn't set ${joinNames(labels)}. ${refusalSentence(reason, plural)}`.trim();
     }
   }
 
