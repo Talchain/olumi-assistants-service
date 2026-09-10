@@ -42,6 +42,7 @@ import {
   type DraftRecordSet,
 } from "./grammar.js";
 import { projectRecordsToGraph, type RecordProjection } from "./projector.js";
+import { log } from "../../../utils/telemetry.js";
 
 /**
  * The CEE-INTERNAL validator for what came back off the wire.
@@ -226,6 +227,53 @@ export function projectDraftRecords(
       ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };
+  // ⭐⭐ THE WIRE HISTOGRAM — the first telemetry this directory has ever carried.
+  //
+  // Derived, not asserted: before this line `src/cee/draft/records/` emitted
+  // ZERO events and made ZERO log calls (contrast control in the same sweep:
+  // the sibling `unified-pipeline/stages/` carries 42 `event:` lines, 24 in
+  // `parse.ts` alone). So the model's RAW claim-kind mix — how many `risk` and
+  // `outcome` claims actually crossed the wire — was never recorded anywhere,
+  // and every census downstream is taken at least one transform later.
+  //
+  // ⚠ WHY THAT MATTERS AND WHY A LATER COUNT CANNOT SUBSTITUTE. "The model
+  // emitted one risk" and "the model emitted three and something dropped two"
+  // produce an IDENTICAL post-projection graph. Without a count taken HERE,
+  // at the first point the response is structurally readable, those two are
+  // indistinguishable and any repair aimed at either is aimed by inference.
+  //
+  // ⛔ KINDS AND COUNTS ONLY — NEVER THE USER'S WORDS. This seam holds
+  // `source_quote` and `label`, which are the user's own text and the model's
+  // prose about it. Both stay out of the log by construction: every value below
+  // is a grammar ENUM or an integer. A histogram cannot leak a brief.
+  //
+  // ⚠ NO `request_id`, AND ITS ABSENCE IS MEASURED RATHER THAN OVERLOOKED:
+  // `projectDraftRecords` receives none (its only parameters are `rawJson` and
+  // `brief`), `log` is a bare pino instance with no ambient request context
+  // (`utils/telemetry.ts:33`), and `DraftArgs` at the live call site
+  // (`adapters/llm/anthropic.ts:1977`) carries no request identifier either.
+  // Threading one is a signature change through another lane's file, so it is
+  // deliberately NOT done here — correlate by `time` against the adjacent
+  // pipeline events, which do carry it.
+  const claimKinds: Record<string, number> = {};
+  for (const claim of records.claims) {
+    claimKinds[claim.claim_kind] = (claimKinds[claim.claim_kind] ?? 0) + 1;
+  }
+  const statedKinds: Record<string, number> = {};
+  for (const item of records.stated_items) {
+    statedKinds[item.kind] = (statedKinds[item.kind] ?? 0) + 1;
+  }
+  log.info(
+    {
+      event: "cee.draft.records.wire_histogram",
+      claim_kinds: claimKinds,
+      stated_kinds: statedKinds,
+      claim_count: records.claims.length,
+      stated_count: records.stated_items.length,
+    },
+    "Draft record set accepted at the seam",
+  );
+
   return { ok: true, records, projection: projectRecordsToGraph(records, brief) };
 }
 
