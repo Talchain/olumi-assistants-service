@@ -36,6 +36,12 @@
 /**
  * Per-sub-prompt versions. Bump the individual constant on any content change.
  *
+ * ALL FOUR moved to `-v3` for the race-framing repair (2026-09-10): R1's and R3's own
+ * bodies changed (own-standing wording instead of 'came out ahead' / 'overtakes', and a
+ * non-contest flip-threshold template), and R2/R4 changed because
+ * {@link SHARED_VOICE_AND_GROUNDING} — injected into every sub-prompt — gained the explicit
+ * ban on framing the options as a race.
+ *
  * ALL FOUR moved to `-v2` for F3 (2026-08-10). R1's own body changed (the
  * narrative sentence-1 instruction now requires the leading option's OWN win
  * probability instead of the distance to the runner-up), and the other three
@@ -43,10 +49,10 @@
  * sub-prompt — gained the ban on stating that distance. Leaving R2-R4 at `-v1`
  * would have three version labels naming two different prompts each.
  */
-export const DECOMPOSE_R1_HEADLINE_VERSION = 'b1-r1-v2';
-export const DECOMPOSE_R2_DRIVER_VERSION = 'b1-r2-v2';
-export const DECOMPOSE_R3_FRAGILITY_VERSION = 'b1-r3-v2';
-export const DECOMPOSE_R4_CALIBRATION_VERSION = 'b1-r4-v2';
+export const DECOMPOSE_R1_HEADLINE_VERSION = 'b1-r1-v3';
+export const DECOMPOSE_R2_DRIVER_VERSION = 'b1-r2-v3';
+export const DECOMPOSE_R3_FRAGILITY_VERSION = 'b1-r3-v3';
+export const DECOMPOSE_R4_CALIBRATION_VERSION = 'b1-r4-v3';
 
 /** Composite version string stamped on the composed review for provenance. */
 export const DECOMPOSE_COMPOSITE_VERSION = [
@@ -79,6 +85,7 @@ NUMBERS (grounding — a downstream validator re-checks this and will reject the
 - Percentages and decimals are equivalent (0.77 = 77%). Do not round aggressively (76.8% → "about 77%" is fine; "roughly 80%" is a violation).
 - Quote values that carry a unit with the unit exactly as given ("16000 GBP"); do not add currency symbols, commas, or "k"/"m" abbreviations the unit does not already contain.
 - Do not state counts in prose ("three factors", "two edges") unless that exact count is itself an input value.
+- NEVER frame the options as a race. These are the reader's own options, not competitors, and this review reports on them; it does not crown one. NEVER write, in any string you emit: "wins", "beats", "overtakes", "trails", "leads", "comes out ahead", "becomes the leading option", "takes the lead". NEVER call an option a "winner", "runner-up", "front-runner" or "loser". NEVER rank options by position words ("first", "second", "top", "next best"): the ordinal is the race frame without the vocabulary. State an option's OWN standing instead, which is checkable against the inputs: "{label} produced the best outcome in {N}% of runs of this model". win_probability is the share of simulated runs in which that option's outcome was best. It is NOT the probability of achieving the reader's goal, so never write that it is. (winner and runner_up are INPUT field names you read; they are never words you write.)
 
 OUTPUT:
 - Return ONLY a single JSON object. No markdown fences, no preamble, no commentary outside the JSON.
@@ -117,13 +124,13 @@ If readiness and headline_type disagree, take the MORE cautious tone.
 <OUTPUT_CONTRACT>
 {
   "narrative_summary": "string — 2 to 4 sentences.
-     Sentence 1: name winner.label and the key driver (DRIVER_HINT.factor_label if present; else winner's leading position). Always state winner.win_probability as a percentage — '{winner.label} came out ahead in {N}% of runs of this model' (0.61 → 'came out ahead in 61% of runs of this model') — and NEVER the distance to the runner-up. For a close_call, frame it as a narrow lead in WORDS and give the same number. If runner_up is null, omit all comparative framing. ⚠ Never write 'leads by N percentage points', 'by a margin of N points', or 'a lead of N percentage points'.
+     Sentence 1: name winner.label and the key driver (DRIVER_HINT.factor_label if present; else winner.win_probability alone). Always state winner.win_probability as a percentage — '{winner.label} produced the best outcome in {N}% of runs of this model' (0.61 → 'produced the best outcome in 61% of runs of this model') — and NEVER the distance to the runner-up. For a close_call, say in WORDS that the options are close and give the same number. If runner_up is null, omit all comparative framing. ⚠ Never write 'leads by N percentage points', 'by a margin of N points', or 'a lead of N percentage points'.
      Sentence 2: the primary stability or fragility, from STABILITY_HINT (reference the fragile edge as from_label → to_label if present).
      Sentence 3-4: the readiness caveat, if readiness is not 'ready'. Omit if ready.",
   "story_headlines": {
      "<option_id>": "string, 15 words or fewer"
-     // EXACTLY one entry per OPTION_COMPARISON option_id — no extras, no omissions. Match keys to winner.id / runner_up.id; do not re-rank.
-     // Leading option: 'why it leads'. Runner-up: 'what would make it lead'. Others: a distinctive positioning angle. Do not restate statistics.
+     // EXACTLY one entry per OPTION_COMPARISON option_id — no extras, no omissions. Match keys to winner.id / runner_up.id; do not re-rank, and never write a position word ('leading', 'runner-up', 'second', 'next best') into the text.
+     // winner.id entry: the specific strength of THAT option on the model's numbers. runner_up.id entry: what would have to be true for THAT option to produce the best outcome. Others: a distinctive positioning angle. Do not restate statistics.
   },
   "readiness_rationale": "string — explain WHY readiness is what it is, referencing the driver or the stability signal in plain terms."
 }
@@ -199,7 +206,7 @@ ${SHARED_VOICE_AND_GROUNDING}
   "scenario_contexts": {
      "<edge_id>": {
         "trigger_description": "string — 'If [condition using from_label / to_label]…'. Avoid numerals unless they appear in the brief.",
-        "consequence": "string — MUST name BOTH the resolved alternative-winner label AND winner.label exactly, e.g. '…then [alternative label] overtakes [winner.label]'."
+        "consequence": "string — MUST name BOTH the resolved alternative-winner label AND winner.label exactly, e.g. '…then the model points to [alternative label] rather than [winner.label]'."
      }
      // Selection: keep only FRAGILE_EDGES that have an alternative_winner_label OR an alternative_winner_id resolvable via OPTION_COMPARISON. Rank by marginal_switch_probability (fallback switch_probability). Take up to 3. Keys MUST be edge_ids from FRAGILE_EDGES. Do not restate switch probabilities in prose — use 'could flip if…'. If none qualify, emit {}.
   },
@@ -209,7 +216,7 @@ ${SHARED_VOICE_AND_GROUNDING}
         "factor_label": "string",
         "current_display": "string — the DISPLAY form of current_value. TWO CASES, and only two. (1) The value carries a unit: quote it verbatim with the unit appended ('16000 GBP', '800 customers'). (2) The value carries no unit and lies between 0 and 1: it is probability-like, so use the PERCENTAGE form ('35%', never '0.35'). A bare decimal here is a banned raw decimal and discards the card.",
         "flip_display": "string — the DISPLAY form of flip_value, same two cases, same rule",
-        "narrative": "string — 1-2 sentences: 'If [factor_label] moves from [current_display] to [flip_display], the result changes.' Restate the values in the SAME display form used in those two fields, never the raw input value. Use the label, never the id."
+        "narrative": "string — 1-2 sentences: 'If [factor_label] moves from [current_display] to [flip_display], the model points to a different option.' Restate the values in the SAME display form used in those two fields, never the raw input value. Use the label, never the id. ⚠ NEVER write that an option 'becomes the leading option', 'takes the lead' or 'overtakes' another: say which option the model points to, and nothing about a ranking changing hands."
      }
      // Take the first 2 FLIP_THRESHOLD_DATA entries (in order) whose flip_value is not null. Never invent a unit the input did not carry, and never convert between units. If none qualify, emit [] (do not omit).
   ],

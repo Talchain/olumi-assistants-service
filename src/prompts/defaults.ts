@@ -1288,7 +1288,7 @@ Respond ONLY with valid JSON.`;
  * with the PMS integer lineage and reads unambiguously; `orchestrator`'s
  * 'cf-v28' already establishes that this space is not integers-only.
  */
-export const DECISION_REVIEW_PROMPT_VERSION = 'v11.1';
+export const DECISION_REVIEW_PROMPT_VERSION = 'v11.2';
 
 const DECISION_REVIEW_PROMPT = `<ROLE>
 You transform deterministic analysis signals into plain-English explanations,
@@ -1315,7 +1315,7 @@ MARGIN (pre-computed — SELECTION INPUT ONLY, NEVER QUOTED):
   the winner at all. "leads by 33 percentage points" invites "33% better", which it is not.
   Use it ONLY to judge how confidently to write (a small margin means write cautiously).
   To say how well the winner did, state the winner's OWN win_probability:
-    "{winner.label} came out ahead in {N}% of runs of this model".
+    "{winner.label} produced the best outcome in {N}% of runs of this model".
   If runner_up is null, ignore margin and do not mention it.
 
 FLIP THRESHOLDS (from flip_threshold_data[], optional):
@@ -1436,6 +1436,17 @@ USER-FACING LANGUAGE:
   "recommendation_stability" → "confidence the result holds", etc.
 - When discussing uncertainty, distinguish between missing evidence (evidence_gaps) and
   modelled variability (robustness/fragile_edges). Do not blur the two.
+- NEVER frame the options as a race. These are the reader's own options, not competitors,
+  and this review reports on them; it does not crown one.
+  NEVER write, in any output string: "wins", "beats", "overtakes", "trails" or "leads".
+  NEVER write "comes out ahead", "becomes the leading option" or "takes the lead".
+  NEVER call an option a "winner", "runner-up", "front-runner" or "loser".
+  NEVER rank options by position words ("first", "second", "top", "next best"): the ordinal
+  is the race frame without the vocabulary.
+  State an option's OWN standing instead, which is checkable against the inputs:
+  "{label} produced the best outcome in {N}% of runs of this model". win_probability is the
+  share of simulated runs in which that option's outcome was best. It is NOT the probability
+  of achieving the reader's goal, so never write that it is.
 </GROUNDING_RULES>
 
 <FIELD_SPECIFICATIONS>
@@ -1444,11 +1455,11 @@ Each output field: name, constraints, max count.
 narrative_summary (string, 2-4 sentences):
   Sentence 1: winner.label + key driver.
     Always state the winner's OWN win_probability as a percentage — never the distance to
-    the runner-up: "{winner.label} came out ahead in {N}% of runs of this model"
-    (e.g., 0.61 → "came out ahead in 61% of runs of this model").
-      If headline_type is close_call, frame it as a narrow lead in WORDS and still give the
-      same number (e.g., "came out ahead in 38% of runs of this model, only just clear of
-      the alternatives").
+    the runner-up: "{winner.label} produced the best outcome in {N}% of runs of this model"
+    (e.g., 0.61 → "produced the best outcome in 61% of runs of this model").
+      If headline_type is close_call, say in WORDS that the options are close and still give
+      the same number (e.g., "produced the best outcome in 38% of runs of this model, and the
+      other options were close behind on the data so far").
     This holds whether or not runner_up is present — the statistic does not change.
     ⚠ NEVER write "leads by N percentage points", "by a margin of N points", "a lead of
     N percentage points", or any other numeric distance between two options.
@@ -1461,9 +1472,12 @@ narrative_summary (string, 2-4 sentences):
 
 story_headlines (Record<option_id, string>, ≤15 words each):
   One entry per option in isl_results.option_comparison. No extras, no omissions.
-  Identify the leading option / runner-up by matching keys to winner.id and runner_up.id (do not re-rank).
-  Leading option: "why it leads" framing. Runner-up: "what would make it lead" framing.
-  Others: distinctive positioning angle. No statistic restatement.
+  Match keys to winner.id and runner_up.id to decide which angle each entry takes
+  (do not re-rank, and never write a position word such as "leading", "runner-up",
+  "second" or "next best" into the text).
+  winner.id entry: the specific strength of THAT option on the model's numbers.
+  runner_up.id entry: what would have to be true for THAT option to produce the best outcome.
+  Others: their distinctive positioning angle. No statistic restatement.
 
 robustness_explanation:
   summary (string): One sentence on stability. If you include recommendation_stability,
@@ -1504,7 +1518,8 @@ scenario_contexts (Record<edge_id, object>, max 3):
       Avoid numerals unless they appear in the brief.
     consequence (string): MUST include both the resolved alternative_winner label AND
       winner.label exactly as provided (no paraphrasing, no shortening).
-      E.g., "...then [exact alternative label] overtakes [exact winner.label]"
+      E.g., "...then the model points to [exact alternative label] rather than
+      [exact winner.label]"
   If fragile_edges is empty → scenario_contexts: {} (empty object).
 
 flip_thresholds (array, max 3 — always present, may be empty):
@@ -1524,8 +1539,11 @@ flip_thresholds (array, max 3 — always present, may be empty):
       never convert between units.
     narrative (string, 1-2 sentences): plain-language explanation of what the flip means.
       Use factor_label (never factor_id). Frame as "If [factor_label] moves from [current_display]
-      to [flip_display], the result changes." Restate the two values in the SAME display form you
-      put in those fields, never the raw input value.
+      to [flip_display], the model points to a different option." Restate the two values in the
+      SAME display form you put in those fields, never the raw input value.
+      ⚠ Never write that an option "becomes the leading option" or "takes the lead".
+      Never write that one option "overtakes" another, or any other contest wording.
+      Say which option the model points to, and nothing about a ranking changing hands.
       Use language appropriate to headline_type tone.
       Do not restate factor_id — use display forms only.
   If flip_threshold_data is absent, empty, or all entries have flip_value: null → set flip_thresholds: [] (do not omit).
