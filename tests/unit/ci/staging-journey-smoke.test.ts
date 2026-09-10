@@ -31,6 +31,10 @@ import {
   carriedDraftGraph,
   readyOptionCount,
   readinessDiagnosis,
+  draftErrorDiagnosis,
+  assertProxyDelivered,
+  proxyFailureCode,
+  TURN_PATH,
   draftGraphCensus,
   assertNoUnrequestedAnalysisRefusal,
   READINESS_PRODUCING_EXIT_PATHS,
@@ -1112,5 +1116,252 @@ describe("C-2 — a conversational turn answered with an ANALYSIS REFUSAL is its
     expect(block).toContain('label: "turn 2", body: t2.body, requestedAnalysis: false');
     // And the result must actually reach `failures`, or the call is decorative.
     expect(src).toContain("failures.push(\n    ...assertNoUnrequestedAnalysisRefusal(");
+  });
+});
+
+describe("10 Sep intermittent — the draft-failure diagnosis discriminates a refusal from a fault", () => {
+  /**
+   * PRECONDITION PIN (trap 13b). Every test below is only meaningful if this
+   * fixture really is the failure class in question. Asserted here so a fixture
+   * edit reds THIS test by name rather than quietly hollowing out the rest.
+   */
+  it("PRECONDITION: the committed 500 capture really is an egress refusal, not a timeout", () => {
+    expect(BROKEN_DRAFT.details.violation_code).toBe("OPTIONS_IDENTICAL");
+    expect(BROKEN_DRAFT.details.reason).toBe("draft_graph_cee_graph_invalid");
+    expect(BROKEN_DRAFT._diagnostic_trace.retry.timed_out).toBe(false);
+    expect(BROKEN_DRAFT._diagnostic_trace.benchmarking.total_duration_ms).toBe(40768);
+    expect(typeof BROKEN_DRAFT.details.recovery.suggestion).toBe("string");
+  });
+
+  /**
+   * DEFECT PIN. #1002 moved drafting to TURN 1, so `assertHealthyFrame` is the
+   * branch every real drafting failure now lands on — and it said only that it
+   * happened. Run 809 (build 8449e54, 10 Sep 2026) printed exactly
+   * `turn 1: exit_path was draft_graph_error` and nothing else, and that mute
+   * line was read as "the server returned a blank reply and no model".
+   */
+  it("DEFECT PIN: the FRAME turn's draft failure names the violation, not just that it happened", () => {
+    const failures = assertHealthyFrame(BROKEN_DRAFT).join(" ");
+    expect(failures).toContain("draft_graph_error");
+    expect(failures).toContain("OPTIONS_IDENTICAL");
+    expect(failures).toContain("draft_graph_cee_graph_invalid");
+    expect(failures).toContain("timed_out=false");
+  });
+
+  /**
+   * ONE CONCEPT, ONE PREDICATE — the rule the rest of this file is built on.
+   * Before this fix the two turns answered "why did drafting fail" differently:
+   * turn 2 printed a two-field summary, turn 1 printed nothing.
+   */
+  it("ONE PREDICATE: frame and draft describe the SAME failure identically", () => {
+    const diagnosis = draftErrorDiagnosis(BROKEN_DRAFT);
+    expect(diagnosis.length).toBeGreaterThan(0);
+    expect(assertHealthyFrame(BROKEN_DRAFT).join(" ")).toContain(diagnosis);
+    expect(assertHealthyDraft(BROKEN_DRAFT).join(" ")).toContain(diagnosis);
+  });
+
+  /**
+   * DISCRIMINATION, not merely output (trap 20's corollary: keep at least one
+   * probe whose expected answer DIFFERS — a blind instrument can fake
+   * agreement, never a discrimination it is not making). These three bodies
+   * are three genuinely different facts and must read three different ways.
+   */
+  it("DISCRIMINATES an egress refusal from a timeout from a body with no error envelope", () => {
+    const refusal = draftErrorDiagnosis(BROKEN_DRAFT);
+    const timedOut = draftErrorDiagnosis({
+      error: "UPSTREAM_TIMEOUT",
+      details: { reason: "draft_graph_llm_timeout", retryable: true },
+      _diagnostic_trace: {
+        retry: { timed_out: true, error_type: "AbortError" },
+        benchmarking: { total_duration_ms: 120_001 },
+      },
+    });
+    const noEnvelope = draftErrorDiagnosis({ assistant_text: "Before I draft…" });
+
+    expect(refusal).toContain("timed_out=false");
+    expect(refusal).toContain('violation_code="OPTIONS_IDENTICAL"');
+    expect(timedOut).toContain("timed_out=true");
+    expect(timedOut).toContain('error_type="AbortError"');
+    expect(timedOut).toContain("server_total_duration_ms=120001");
+    expect(noEnvelope).toBe("absent(no-error-envelope)");
+
+    expect(new Set([refusal, timedOut, noEnvelope]).size).toBe(3);
+  });
+
+  /**
+   * The field that separates "no model, and no way forward" from "no model,
+   * with a stated fix". It was on the wire on 10 Sep and never printed.
+   */
+  it("reports whether a user-actionable recovery suggestion rode with the refusal", () => {
+    expect(draftErrorDiagnosis(BROKEN_DRAFT)).toContain("recovery_suggestion=present");
+
+    const stripped = structuredClone(BROKEN_DRAFT);
+    delete stripped.details.recovery;
+    expect(draftErrorDiagnosis(stripped)).toContain("recovery_suggestion=absent");
+
+    const blank = structuredClone(BROKEN_DRAFT);
+    blank.details.recovery.suggestion = "   ";
+    expect(draftErrorDiagnosis(blank)).toContain("recovery_suggestion=absent");
+  });
+
+  /**
+   * ABSENT IS NEVER PRINTED AS EMPTY — the same rule `readinessDiagnosis`
+   * already carries. A body with no envelope and an envelope with no reason are
+   * different facts; collapsing two facts into one symbol has cost this estate
+   * a diagnosis before.
+   */
+  it("NEVER collapses an absent envelope into an empty one", () => {
+    expect(draftErrorDiagnosis({ assistant_text: "…" })).toBe("absent(no-error-envelope)");
+    const emptyEnvelope = draftErrorDiagnosis({ error: "INTERNAL_ERROR" });
+    expect(emptyEnvelope).not.toContain("absent(no-error-envelope)");
+    expect(emptyEnvelope).toContain("reason=absent");
+    expect(emptyEnvelope).toContain('error="INTERNAL_ERROR"');
+  });
+
+  /**
+   * The message change is a change of WORDS, never of TRIGGER. The same empty
+   * reply still fails, and a healthy reply still passes.
+   */
+  it("the empty-reply trigger is unchanged — same condition still fails, a real reply still passes", () => {
+    const empty = assertHealthyFrame({ assistant_text: "  ", _diagnostic_trace: { exit_path: "clarify_v2" } });
+    expect(empty.join(" ")).toContain("assistant_text was empty");
+    expect(empty.join(" ")).toContain("details.recovery.suggestion=absent");
+    expect(
+      assertHealthyFrame({ assistant_text: "Before I draft…", _diagnostic_trace: { exit_path: "clarify_v2" } }),
+    ).toEqual([]);
+  });
+
+  /**
+   * CALL-SITE PIN, the technique this file already uses on the workflow YAML.
+   * Without it the whole fix could be reverted at the call site with every test
+   * above still green: the function would be correct and nothing would print it.
+   */
+  it("CALL-SITE PIN: the CLI prints the draft-failure diagnosis on BOTH turns, healthy or not", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("log(`    draft_error: ${draftErrorDiagnosis(t1.body)}`)");
+    expect(src).toContain("log(`    draft_error: ${draftErrorDiagnosis(t2.body)}`)");
+    // …and the ad-hoc second copy of the concept must not come back.
+    expect(src).not.toContain("` violation_code=${d.violation_code}`");
+    expect(src).not.toContain('f.push("turn 1: exit_path was draft_graph_error")');
+  });
+});
+
+describe("10 Sep — the gate drives the route a REAL USER takes, and proves DELIVERY not just generation", () => {
+  /**
+   * "Generation succeeded server-side" and "the response reached the user" are
+   * DIFFERENT CLAIMS. The gate used to drive the internal `/orchestrate/v2/turn`,
+   * which can only ever answer the first. Derived at the deployed UI bundle
+   * (52b5cc93, 72 chunks): the shipped client bakes
+   * `https://cee-staging.onrender.com/proxy/v5/turn`, so that is the user's route.
+   */
+  it("ROUTE PIN: the gate targets the browser proxy, never the internal route", () => {
+    expect(TURN_PATH).toBe("/proxy/v5/turn");
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("fetch(`${base}${TURN_PATH}`");
+    // The superseded internal target must not come back as a fetch target.
+    expect(src).not.toContain("fetch(`${base}/orchestrate/v2/turn`");
+  });
+
+  it("CALL-SITE PIN: it presents a browser Origin and no service key", () => {
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain("Origin: origin");
+    // The proxy injects the key itself; sending one would be theatre, and a
+    // dead env var is the hand-maintained mirror this repo keeps paying for.
+    expect(src).not.toContain("X-Olumi-Assist-Key");
+    expect(src).not.toContain("SMOKE_API_KEY");
+    // Delivery is asserted on BOTH turns, before the journey assertions.
+    expect(src).toContain('assertProxyDelivered(t1.body, "turn 1")');
+    expect(src).toContain('assertProxyDelivered(t2.body, "turn 2")');
+  });
+
+  it("WORKFLOW PIN: the origin is passed explicitly and is the deployed staging UI", () => {
+    // Located the same way the silencing guards locate it — a NAMED throw if
+    // the step is gone, never an unrelated "cannot read properties of
+    // undefined" that reads like an unrelated test bug.
+    const job = parse(readFileSync(WORKFLOW_PATH, "utf8")).jobs.journey;
+    const step = job.steps.find(
+      (s: any) => typeof s.run === "string" && s.run.includes("staging-journey-smoke.mjs"),
+    );
+    if (!step) throw new Error("the smoke step (running staging-journey-smoke.mjs) is gone from the workflow");
+    const env = step.env;
+    const originExpr = String(env.SMOKE_ORIGIN);
+    expect(originExpr).toContain("staging--olumi.netlify.app");
+    // Not defaulted inside the script: if this origin stops being admitted,
+    // every browser user is blocked and the gate must go red rather than
+    // invent an origin that still works.
+    expect(env.SMOKE_API_KEY, "SMOKE_API_KEY is no longer read by the gate").toBeUndefined();
+  });
+
+  /**
+   * DISCRIMINATION. Four genuinely different facts, four different answers.
+   * A 504 here is the exact shape of "CEE logged draft_graph.succeeded and the
+   * user still got nothing" — the claim that started this repair.
+   */
+  it("DISCRIMINATES origin rejection, delivery timeout, a non-JSON hop, and a delivered turn", () => {
+    const rejected = assertProxyDelivered(
+      { error: { code: "PROXY_ORIGIN_REJECTED", message: "Origin not allowed", source: "proxy" } },
+      "turn 1",
+    ).join(" ");
+    const timedOut = assertProxyDelivered(
+      {
+        error: {
+          code: "PROXY_UPSTREAM_TIMEOUT",
+          message: "The model generation service did not respond within 125s. Please try again.",
+          upstream_duration_ms: 125_003,
+          source: "proxy",
+        },
+      },
+      "turn 1",
+    ).join(" ");
+    const nonJson = assertProxyDelivered(
+      { error: { code: "PROXY_INTERNAL_NON_JSON", message: "…", source: "proxy" } },
+      "turn 1",
+    );
+
+    expect(rejected).toContain("PROXY_ORIGIN_REJECTED");
+    expect(rejected).toContain("EVERY browser user is blocked");
+    expect(timedOut).toContain("PROXY_UPSTREAM_TIMEOUT");
+    expect(timedOut).toContain("upstream_duration_ms=125003");
+    expect(timedOut).toContain("the user still received nothing");
+    expect(nonJson.length).toBe(1);
+    expect(nonJson.join(" ")).toContain("did not survive the hop");
+
+    // …and a real delivered turn is silent. Without this the check would be a
+    // guard that fires on everything, which is a guard that means nothing.
+    expect(assertProxyDelivered(HEALTHY_DRAFT, "turn 1")).toEqual([]);
+    expect(new Set([rejected, timedOut, nonJson.join(" ")]).size).toBe(3);
+  });
+
+  /**
+   * TWIN — the two `error` fields are DIFFERENT PRODUCERS under one name (the
+   * proxy's is an OBJECT with a `code`, the orchestrator's is a STRING). A
+   * generation failure must NOT be reported as a delivery failure: they need
+   * different actions, and conflating them is the confusion this repair ends.
+   */
+  it("TWIN: an orchestrator-side failure is NOT reported as a delivery failure", () => {
+    expect(BROKEN_DRAFT.error).toBe("INTERNAL_ERROR"); // precondition: a STRING
+    expect(proxyFailureCode(BROKEN_DRAFT)).toBeNull();
+    expect(assertProxyDelivered(BROKEN_DRAFT, "turn 1")).toEqual([]);
+    // …while the generation half still fails it, loudly and by name.
+    expect(assertHealthyFrame(BROKEN_DRAFT).join(" ")).toContain("OPTIONS_IDENTICAL");
+  });
+
+  /**
+   * FOUND BY RUNNING IT, not by reading it: with a disallowed origin the
+   * diagnosis line printed `error=[object Object]` on both turns. One field
+   * name, two producers — the orchestrator's `error` is a STRING, the proxy's
+   * is an OBJECT with a `code`.
+   */
+  it("the diagnosis names the proxy's error CODE, never [object Object]", () => {
+    const line = draftErrorDiagnosis({ error: { code: "PROXY_ORIGIN_REJECTED", message: "Origin not allowed" } });
+    expect(line).toContain('error="PROXY_ORIGIN_REJECTED"');
+    expect(line).not.toContain("[object Object]");
+    // TWIN: the string-shaped producer is unchanged.
+    expect(draftErrorDiagnosis(BROKEN_DRAFT)).toContain('error="INTERNAL_ERROR"');
+  });
+
+  it("an unrecognised error code is not silently swallowed as a proxy failure", () => {
+    expect(proxyFailureCode({ error: { code: "SOMETHING_ELSE" } })).toBeNull();
+    expect(proxyFailureCode({ error: { code: "PROXY_UPSTREAM_TIMEOUT" } })).toBe("PROXY_UPSTREAM_TIMEOUT");
   });
 });
