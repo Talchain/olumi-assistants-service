@@ -177,6 +177,17 @@ export const DECISION_CONTENT_FIELDS = [
   "summary_text",
   "coaching_text",
   "headline",
+  // Assembled AI prompt text (turn-debug prompt capture, #1435). The
+  // captured SYSTEM half is Olumi-authored only because ONE call site
+  // resolves it with no variables — that is a property of the call
+  // site, not of the field NAME. A second capture seam resolving WITH
+  // variables would put interpolated user text under this same name,
+  // so it joins the list now (fail-safe direction). Only the bytes
+  // field is listed: `system_prompt_sha256` and `system_prompt_chars`
+  // are shape-only, non-reversible, and are what lets a leak be
+  // correlated and DETECTED — redacting them would remove the
+  // detection surface and add no privacy.
+  "system_prompt",
 ] as const;
 
 export type DecisionContentField = (typeof DECISION_CONTENT_FIELDS)[number];
