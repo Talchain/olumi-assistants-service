@@ -4527,11 +4527,49 @@ export class AnthropicAdapter implements LLMAdapter {
       }
     );
 
+    // ⚠ THIS LITERAL IS A NARROWING, AND IT IS SILENT. It names the keys that
+    // survive the adapter hop; anything `draftGraphWithAnthropic` returns under
+    // another name is discarded HERE, one hop before its reader. TypeScript
+    // cannot catch the loss — every one of these fields is `?: unknown` on
+    // `DraftGraphResult`, so a short literal typechecks clean. A field added to
+    // the direct function's return MUST be added here too, or it is dark.
+    //
+    // `record_disclosures` was dark for exactly that reason from 2026-02-18
+    // (when `coaching` was added on its own) until this line. It is the
+    // projector's record of what it REFUSED to assert — an unstated constraint
+    // direction, a target that is not a threshold, a withdrawn duplicate — and
+    // its readers (`parse.ts` -> `ctx.recordDisclosures` -> `optionFramingRecovery`,
+    // then `package.ts`'s wire key and `optionFramingWarnings`) had been
+    // receiving `undefined` on every draft. The user was shown a graph quietly
+    // weaker than their brief and told nothing.
+    //
+    // ⛔ THE THREE SIBLINGS ON `DraftGraphResult` ARE ABSENT ON PURPOSE. They
+    // are not dropped here; they are NOT PRODUCED, and a carrier for them would
+    // be an empty one:
+    //   · `topology_plan`   — deleted from the draft grammar unconditionally
+    //     (`cee/draft/anthropic-graph-schema.ts` v11). Top-level
+    //     `additionalProperties: false` makes the key unemittable.
+    //   · `causal_claims`   — removed from the grammar with `coaching` in v12
+    //     (lean-draft contract, ROADMAP 1.197); re-produced by the post-draft
+    //     coaching pass, never by this adapter. (`coaching`'s spread below is
+    //     vestigial for the same reason, and is left alone deliberately.)
+    //   · `goal_constraints` — killed TWO hops earlier and unreachable from
+    //     here: the draft emits a RECORD SET whose grammar declares no `goal_*`
+    //     field, and the `rawJson` replacement above hands the parser
+    //     `activeProjection.graph`, an explicit literal of version/default_seed/
+    //     nodes/edges/meta. Adding it here would repair nothing while reading
+    //     as a repair.
+    // Guarded by `draft-adapter-projection-hop.test.ts`, whose R2 REDs if any
+    // of the three ever starts arriving — that is the signal to re-derive
+    // before minting a carrier, not to mint one.
     return {
       graph: result.graph,
       rationales: result.rationales,
       usage: result.usage,
       ...((result as any).coaching ? { coaching: (result as any).coaching } : {}),
+      ...((result as any).record_disclosures
+        ? { record_disclosures: (result as any).record_disclosures }
+        : {}),
       ...(result.debug ? { debug: result.debug } : {}),
       ...(result.meta ? { meta: result.meta } : {}),
     };
