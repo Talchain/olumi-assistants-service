@@ -101,6 +101,14 @@ export async function adminTurnDebugRoutes(app: FastifyInstance): Promise<void> 
       // recorded them; absent for clean success-path turns.
       route_failure_type: result.route_failure_type ?? null,
       freshness_summary: result.freshness_summary ?? null,
+      // HARNESS VISIBILITY — the served prompt BYTES plus the identity that
+      // says which prompt and which model. Returned whole and unredacted:
+      // this route is admin-key gated, and the bytes are Olumi-authored
+      // instructions with no user content (the capture seam records the
+      // user's half as a count and a digest only). Spread verbatim rather
+      // than re-listed field by field — a hand-copied field list here would
+      // silently drop whatever `PromptCaptureRecord` gains next.
+      prompt_captures: (result.prompt_captures ?? []).map((c) => ({ ...c })),
     });
   });
 
