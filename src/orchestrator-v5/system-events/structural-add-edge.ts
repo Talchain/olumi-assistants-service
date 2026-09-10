@@ -97,6 +97,7 @@ type StructuralAddEdgeEvent = Extract<
 >;
 
 export interface StructuralAddEdgeBaseHashConflict {
+  readonly recovery_action: 'refresh_and_reconfirm';
   readonly conflict_category: typeof BASE_HASH_DIVERGED;
   readonly expected_base_graph_hash: string | null;
 }
@@ -230,7 +231,11 @@ export function applyStructuralAddEdge(
       payload,
       BASE_HASH_DIVERGED,
       `The model has changed since you drew that connection, so I haven't added it. Reload it and draw it again.`,
-      { conflict_category: BASE_HASH_DIVERGED, expected_base_graph_hash: currentBaseHash },
+      {
+        recovery_action: 'refresh_and_reconfirm',
+        conflict_category: BASE_HASH_DIVERGED,
+        expected_base_graph_hash: currentBaseHash,
+      },
     );
   }
 

@@ -102,7 +102,18 @@ describe('reader-only refusal — the capability denial must be true', () => {
     // because the fixture stopped reaching the branch rather than because the
     // property holds. If a writer lands and these become 'mutating', this REDs
     // here first and names why.
-    expect(READER_ONLY_KINDS.length).toBeGreaterThan(0);
+    // ⚠⚠ THIS WAS `toBeGreaterThan(0)` AND IT HAD TO CHANGE, because the set is
+    // now EMPTY — `structural_add_edge` was the last reader-only kind and left
+    // when its writer landed. Every kind `SYSTEM_EVENT_HANDLING` declares now has
+    // a writer or a defined non-writer posture.
+    //
+    // ⛔ ASSERTED EXACTLY, NOT DELETED. An empty set is the healthy reading TODAY
+    // and will stop being one the moment a contract version adds a kind CEE
+    // cannot yet write: that kind must land reader-first, and this REDs then, by
+    // name, so its refusal copy gets adjudicated instead of being parked. The
+    // opposite treatment — dropping the pin because it currently has nothing to
+    // say — is how this file would decay into agreeing with whatever is current.
+    expect(READER_ONLY_KINDS).toEqual([]);
     for (const kind of Object.keys(READER_ONLY_CHAT_ROUTE_OPS)) {
       expect(SYSTEM_EVENT_HANDLING[kind as keyof typeof SYSTEM_EVENT_HANDLING]).toBe(
         'reader_only_refusal',
@@ -110,7 +121,20 @@ describe('reader-only refusal — the capability denial must be true', () => {
     }
   });
 
-  describe('DIRECTION A — a capability we HAVE must not be denied', () => {
+  /**
+   * ⚠ DORMANT WHILE THE TABLE IS EMPTY, AND SKIPPED RATHER THAN FAKED.
+   *
+   * `it.each([])` is an error in vitest, and the obvious workaround — feeding it
+   * a placeholder kind — makes the block run its real assertions against a kind
+   * that does not exist, which is a failing test dressed as coverage. It is
+   * skipped explicitly instead, so the suite reports "skipped" rather than
+   * quietly passing over a block that has nothing to check.
+   *
+   * The emptiness itself is NOT unguarded: the exact-table pin below REDs the
+   * moment a kind is parked reader-only, which is what re-arms this block.
+   */
+  describe.skipIf(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).length === 0)(
+    'DIRECTION A — a capability we HAVE must not be denied', () => {
     it.each(Object.keys(READER_ONLY_CHAT_ROUTE_OPS))(
       '⭐ %s scopes the denial to the canvas and names the chat route',
       (kind) => {
@@ -190,9 +214,11 @@ describe('reader-only refusal — the capability denial must be true', () => {
     });
 
     it('⭐ the route table is EXACT — it REDs if it grows or shrinks', () => {
-      expect(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).sort()).toEqual([
-        'structural_add_edge',
-      ]);
+      // Empty, and pinned exactly so it REDs if it GROWS (a kind parked
+      // reader-only without adjudicating its copy) as loudly as it did when it
+      // shrank. See the precondition above for why emptiness is asserted rather
+      // than the pin being removed.
+      expect(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).sort()).toEqual([]);
     });
   });
 
