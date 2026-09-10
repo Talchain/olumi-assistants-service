@@ -4075,13 +4075,50 @@ function projectOnce(
     }
   }
 
+  // ── Pass 2c: a bound limit whose TARGET did not survive ──────────────────
+  //
+  // ⚠⚠ CAUGHT BY PROBING MY OWN CLAIM, AND IT WAS FALSE. Pass 2b's note says the
+  // bound `node_id` is on the graph "by construction" because it was minted in
+  // the same pass. That is true AT BIND TIME and NOT true at the end: the
+  // connectivity prune runs AFTER, and it withdraws a `factor` that never
+  // reaches the goal. Measured — a constraint bound to an unconnected factor
+  // left a row naming a node the graph no longer carried.
+  //
+  // ⭐ WHY THAT IS THE WORST CASE AND NOT A COSMETIC ONE. Binding WITHDREW the
+  // standalone constraint node. So an orphan row means the limit is gone from
+  // the graph AND gone from the constraint list — the user's stated limit
+  // vanishes with nothing but a downstream `llm_dropped` warn to show for it,
+  // which is precisely the silent-loss failure this whole change exists to end.
+  //
+  // The row is therefore reconciled against the FINAL node set and, where the
+  // target is gone, DISCLOSED with the same reason the target itself carries.
+  // `unconnected_to_goal` is honest here and is deliberately not turned into a
+  // question: `enumerateCompletionAsk` already declines to ask about it, on the
+  // measured ground that asking is pressure to invent a causal link.
+  const survivingNodeIds = new Set(nodes.map((n) => n.id));
+  const boundLimits: GoalConstraintT[] = [];
+  for (const row of goalConstraints) {
+    if (survivingNodeIds.has(row.node_id)) {
+      boundLimits.push(row);
+      continue;
+    }
+    dropped.push({
+      claim_index: -1,
+      claim_kind: "stated_item",
+      label: row.source_quote ?? row.node_id,
+      node_id: row.node_id,
+      reason: "unconnected_to_goal",
+    });
+  }
+
   // ── meta: derived, in node-emission order (never Set-iteration order).
   const hasIncoming = new Set(edges.map((e) => e.to));
   const hasOutgoing = new Set(edges.map((e) => e.from));
 
   return {
     optionClaimIndexById,
-    goalConstraints,
+    // Reconciled against the final node set — see pass 2c.
+    goalConstraints: boundLimits,
     graph: {
       version: "1",
       // The frozen default (`schemas/graph.ts` `default_seed: 17`). A projector

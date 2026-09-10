@@ -373,6 +373,55 @@ describe("a stated constraint that names what it limits", () => {
   });
 
   /**
+   * ⭐⭐ A BOUND ROW NEVER NAMES A NODE THE GRAPH DOES NOT CARRY.
+   *
+   * ⚠ THIS CASE EXISTS BECAUSE THE CLAIM IT PINS WAS FALSE WHEN FIRST WRITTEN.
+   * The binder's own note said the target is on the graph "by construction"
+   * because it was minted in the same pass — true at bind time, and NOT true at
+   * the end, because the connectivity prune runs afterwards and withdraws a
+   * factor that never reaches the goal.
+   *
+   * It is the worst case available rather than a tidiness one: binding WITHDREW
+   * the standalone constraint node, so an orphan row means the user's stated
+   * limit is gone from the graph AND from the constraint list, leaving only a
+   * downstream warn — exactly the silent loss this change exists to end.
+   */
+  it("a bound limit whose target is pruned is DISCLOSED, never left as an orphan row", () => {
+    const p = project({
+      stated_items: [
+        { kind: "goal", source_quote: "grow net revenue", role: "target" },
+        {
+          kind: "constraint",
+          source_quote: "keeping monthly churn under 4%",
+          value: 4,
+          unit: "%",
+          direction: "ceiling",
+          applies_to_claim: 0,
+        },
+      ],
+      // The churn factor is never linked to the goal, so the prune withdraws it.
+      claims: [{ claim_kind: "factor", label: "Subscriber Churn Rate" }],
+    });
+
+    // PRECONDITION PINNED IN-TEST (trap 13b): this fixture really does lose the
+    // target. Without this the assertion below could pass because the target
+    // survived, which would prove nothing about the reconciliation.
+    expect(p.graph.nodes.some((n) => n.label === "Subscriber Churn Rate")).toBe(false);
+
+    // Every row names a node the graph actually carries.
+    const ids = new Set(p.graph.nodes.map((n) => n.id));
+    for (const row of p.goalConstraints) expect(ids.has(row.node_id)).toBe(true);
+    expect(p.goalConstraints).toHaveLength(0);
+
+    // And the loss is DISCLOSED against the user's own words, not silent.
+    const disclosed = p.dropped.find(
+      (d) => d.claim_kind === "stated_item" && d.label === "keeping monthly churn under 4%",
+    );
+    expect(disclosed, "a limit whose target was pruned must be disclosed").toBeDefined();
+    expect(disclosed!.reason).toBe("unconnected_to_goal");
+  });
+
+  /**
    * ⭐ AN INDEX THAT REACHES NOTHING IS THE MODEL'S ERROR AND IS DISCLOSED AS
    * ONE — through the SAME resolver, and the SAME existing ask case, as a
    * causal-link endpoint. No new machinery, which was the point of reusing the
