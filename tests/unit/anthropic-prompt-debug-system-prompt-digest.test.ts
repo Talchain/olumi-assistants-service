@@ -113,6 +113,17 @@ describe("cee.prompt_debug — assembled system prompt never reaches pino verbat
     );
   });
 
+  it("DEMONSTRATION (why the source guard forbids headChars): the head option leaks the prompt verbatim", () => {
+    // This is the measured basis for the `headChars` assertion in the
+    // source guard — a surviving mutant, demonstrated rather than
+    // asserted equivalent. redactLogMessage removes PII patterns; an
+    // assembled system prompt is prose, so it passes through intact.
+    const leaky = contentDigest(SYSTEM_TEXT, { headChars: 200 });
+    expect(JSON.stringify(leaky)).toContain(PROMPT_SENTINEL);
+    // Whereas the shape-only form used at the call site carries no head.
+    expect(contentDigest(SYSTEM_TEXT)).not.toHaveProperty("head");
+  });
+
   it("SOURCE GUARD: the real call site wraps system_prompt_preview in contentDigest and takes no raw slice", () => {
     // Positive control for the source reader itself: if this file cannot
     // even FIND the field, every assertion below is vacuous.
@@ -122,6 +133,14 @@ describe("cee.prompt_debug — assembled system prompt never reaches pino verbat
     const valueExpr = match![1];
     expect(valueExpr).toContain("contentDigest(");
     expect(valueExpr).not.toContain(".slice(");
+    // `contentDigest` IS NOT UNCONDITIONALLY SAFE. With `headChars > 0`
+    // it emits a `head` — and `redactLogMessage` scrubs PII PATTERNS,
+    // not prose, so the prompt text survives verbatim (measured: see the
+    // demonstration test below). "Wrapped in contentDigest" is therefore
+    // NOT the property we want here; SHAPE-ONLY is. A mutant that swaps
+    // the call for `contentDigest(systemText, { headChars: 200 })`
+    // survived every other assertion in this file until this line.
+    expect(valueExpr).not.toContain("headChars");
     // And the module must actually import the helper it uses.
     expect(ANTHROPIC_SRC).toMatch(
       /import\s*\{[^}]*\bcontentDigest\b[^}]*\}\s*from\s*["'][^"']*utils\/redaction\.js["']/,
