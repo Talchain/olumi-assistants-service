@@ -163,34 +163,54 @@ describe("a stated constraint that names what it limits", () => {
     // this same pass satisfies it BY CONSTRUCTION.
     expect(p.graph.nodes.map((n) => n.id)).toContain(row.node_id);
 
-    // The limit lives ON the quantity now, so the standalone constraint node is
-    // withdrawn rather than left beside it saying the same thing twice.
+    // ⚠⚠ THE CONSTRAINT NODE IS ABSENT HERE, AND THE REASON IS THE PRUNE, NOT
+    // THE BINDING. This line used to be commented "the limit lives ON the
+    // quantity now, so the standalone constraint node is withdrawn" — that
+    // explanation is false at this tip: the binding no longer withdraws
+    // anything (see the ordering rule in `projector.ts` pass 2b). In THIS
+    // fixture the constraint is never linked to the goal, so the connectivity
+    // pass removes it exactly as it would with no reference at all.
+    //
+    // ⭐ AND THAT IS PINNED RATHER THAN ASSERTED, against a projection taken in
+    // the SAME RUN — otherwise this assertion would keep passing for a reason
+    // nobody had checked, which is how the false comment survived in the first
+    // place.
+    const sameRecordsNoRef = project(churnRecords({}));
+    expect(sameRecordsNoRef.graph.nodes.filter((n) => n.kind === "constraint")).toHaveLength(0);
     expect(p.graph.nodes.filter((n) => n.kind === "constraint")).toHaveLength(0);
+    // The binding itself removed NOTHING: same graph, with or without the field.
+    expect(p.graph).toEqual(sameRecordsNoRef.graph);
     // …and nothing was disclosed as refused, because nothing was refused.
     expect(p.dropped.map((d) => d.reason)).not.toContain("ambiguous_ref");
   });
 
   /**
-   * ⭐ CASE 1b — THE REFERENCE SURVIVES INTO THE EDGE PASS.
+   * ⭐ CASE 1b — A REFERENCE INTO THE CONSTRAINT IS NEVER TURNED INTO A DROPPED
+   * ONE.
    *
-   * The stated index is REPOINTED at the target when the constraint node is
-   * withdrawn. Without that, a `causal_link` into the constraint would report
-   * `ref_out_of_range` — blaming the model for OUR sequencing decision. This is
-   * the discriminating half: the edge must still exist and must land on the
-   * churn node.
+   * ⚠⚠ RESTATED. This case used to pin the REPOINT that accompanied the removal
+   * of the constraint node: with the node withdrawn, a `causal_link` into it
+   * would have reported `ref_out_of_range` unless its stated index were
+   * repointed at the target. Both the withdrawal and the repoint are gone (see
+   * the ordering rule in `projector.ts` pass 2b), so the property is now
+   * established the plain way — THE NODE IS STILL THERE, so the model's link
+   * resolves onto it exactly as it does today.
+   *
+   * The guard is kept rather than deleted because the property it protects is
+   * unchanged and it is the half that would RED if a future splice were
+   * re-enabled without restoring the repoint.
    */
-  it("CASE 1b — the withdrawn constraint node does not turn a good reference into a dropped one", () => {
-    // The model drew a link FROM the constraint (stated_items[1]) to the goal —
-    // and that constraint node is withdrawn by the binding. If the stated index
-    // were not repointed at the target, this link would report
-    // `ref_out_of_range`, blaming the model for OUR sequencing decision.
+  it("CASE 1b — a good reference into the constraint stays good", () => {
+    // The model drew a link FROM the constraint (stated_items[1]) to the goal.
     const p = project(churnRecords({ applies_to_claim: 0 }, { linkToGoal: true }));
-    const churnId = idOfLabel(p, "Subscriber Churn Rate");
+    const constraintNode = p.graph.nodes.find((n) => n.kind === "constraint");
 
     expect(p.dropped.map((d) => d.reason)).not.toContain("ref_out_of_range");
-    // The reference resolved onto the node that now carries the limit.
-    expect(p.graph.edges.some((e) => e.from === churnId)).toBe(true);
-    expect(p.goalConstraints[0]!.node_id).toBe(churnId);
+    // The node the reference names is on the graph, and the edge starts there.
+    expect(constraintNode, "the constraint the model linked must still exist").toBeDefined();
+    expect(p.graph.edges.some((e) => e.from === constraintNode!.id)).toBe(true);
+    // …and it still carries the user's limit, by its parts.
+    expect((constraintNode!.observed_state as { value?: number }).value).toBe(4);
   });
 
   /**
@@ -468,5 +488,261 @@ describe("a stated constraint that names what it limits", () => {
     expect(refusal, "an out-of-range applies_to must be disclosed").toBeDefined();
     expect(refusal!.to_ref).toBe("claims[99]");
     expectIndistinguishableFromNoReference(p, baseline);
+  });
+});
+
+/**
+ * ⛔⛔ THE ORDERING CONSTRAINT — the repair this block exists to pin.
+ *
+ * ── WHAT WAS MEASURED, AND IT WAS DESTRUCTIVE ─────────────────────────────
+ * The binding pass originally SPLICED the standalone `constraint` node out of
+ * the graph on the stated ground that "the limit now lives ON the quantity it
+ * bounds". It does not. The row is written to `RecordProjection.goalConstraints`
+ * — a SIBLING of `.graph` — and the live draft path copies only `.graph`
+ * (`adapters/llm/anthropic.ts`, `rawJson = { ...activeProjection.graph }`).
+ * Contrast-controlled sweep: the sibling `.dropped` is read by 12 non-test
+ * files; `RecordProjection.goalConstraints` is read by NONE outside
+ * `projector.ts`. (`ctx.goalConstraints` in `unified-pipeline` is a
+ * DIFFERENTLY-SCOPED FIELD OF THE SAME NAME with many readers — the two are not
+ * connected, and conflating them is what made the splice look safe.)
+ *
+ * A/B on the projection, two arms differing in ONE key, the constraint LINKED
+ * to the goal so the connectivity prune is not the variable:
+ *   without the field → 3 nodes, incl. `constraint` "keeping monthly churn
+ *                        under 4%" with `observed_state.value 4`, `unit "%"`,
+ *                        `operator "<="`
+ *   with    the field → 2 nodes. THAT NODE IS GONE. `dropped` EMPTY.
+ *                        `graph.goal_constraints` undefined.
+ * The user's stated limit left the product with nothing disclosed.
+ *
+ * ── THE RULE ──────────────────────────────────────────────────────────────
+ * ⛔ A NODE CARRYING A USER-STATED LIMIT MAY ONLY BE REMOVED ONCE THAT LIMIT IS
+ * DEMONSTRABLY CARRIED SOMEWHERE A CONSUMER READS. Until then, KEEP THE NODE.
+ *
+ * These guards are written against THE RULE, not against the shape of today's
+ * code (trap 13d), so they stay load-bearing when a later lane makes
+ * `goalConstraints` reach a reader and re-enables the splice: at that moment
+ * the last guard below REDs unless the removal is disclosed.
+ */
+describe("⛔ a stated limit is never removed before its carrier is read", () => {
+  /**
+   * ⚠⚠ THE FIXTURE LINKS **BOTH** THE CONSTRAINT AND ITS TARGET TO THE GOAL,
+   * AND FINDING OUT WHY COST A MEASUREMENT — the same one the reviewer's first
+   * attempt got wrong in the other direction.
+   *
+   * `churnRecords({...}, { linkToGoal: true })` links the CONSTRAINT to the goal
+   * and, in doing so, drops the factor→goal link — so the TARGET is unconnected
+   * and the connectivity prune withdraws it. That fixture only ever bound at all
+   * because the removed splice REPOINTED the constraint's stated index onto the
+   * factor, which is what gave the factor its edge. Measuring the removal with
+   * it would therefore measure THE PRUNE, not the change, and the arms would
+   * agree for a reason that has nothing to do with the binding.
+   *
+   * A compliant draft links both: the instruction tells the model to link a
+   * stated constraint to the goal, and a factor that drives the goal carries its
+   * own link. So this is what a real draft looks like, not a convenience — and
+   * with it the two arms below differ in EXACTLY ONE KEY.
+   */
+  const bothLinked = (constraintExtras: Record<string, unknown>) => ({
+    stated_items: [
+      { kind: "goal", source_quote: "grow net revenue", role: "target" },
+      {
+        kind: "constraint",
+        source_quote: "keeping monthly churn under 4%",
+        value: 4,
+        unit: "%",
+        direction: "ceiling",
+        ...constraintExtras,
+      },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "Subscriber Churn Rate" },
+      { claim_kind: "causal_link", label: "the churn limit bears on revenue", from_stated: 1, to_stated: 0, effect: "negative" },
+      { claim_kind: "causal_link", label: "churn erodes revenue", from_claim: 0, to_stated: 0, effect: "negative" },
+    ],
+  });
+
+  /**
+   * ⭐⭐ THE STRONGEST STATEMENT OF "INERT", AND THE ONE THE PR BODY CLAIMS.
+   *
+   * A SUCCESSFUL bind must leave the graph byte-identical to the same record
+   * set with no reference at all. Compared against a projection taken IN THE
+   * SAME RUN, never a snapshot (trap 12b).
+   *
+   * ⚠ Note this is the BOUND case. The pre-existing additivity comparator only
+   * ever ran on REFUSALS — which is exactly why the destruction sat under a
+   * fully green suite: every guard pointed at the paths where nothing happened.
+   */
+  it("NO SILENT LOSS — a SUCCESSFUL bind leaves the graph byte-identical to the same records with no reference", () => {
+    const bound = project(bothLinked({ applies_to_claim: 0 }));
+    const baseline = project(bothLinked({}));
+
+    // The bind really did happen — the precondition is PINNED in-test, so this
+    // cannot pass because nothing bound (trap 13b).
+    expect(bound.goalConstraints, "precondition: this fixture must actually bind").toHaveLength(1);
+
+    expect(bound.graph).toEqual(baseline.graph);
+    expect(bound.provenance).toEqual(baseline.provenance);
+    expect(bound.dropped).toEqual(baseline.dropped);
+  });
+
+  /**
+   * ⭐ THE SAME PROPERTY STATED AT THE USER'S LEVEL — the limit, by its parts.
+   * Bound by IDENTITY to the minted node id, never by "some node with a 4".
+   */
+  it("NO SILENT LOSS — the node carrying the user's limit survives the bind with label, operator, value and unit intact", () => {
+    const baseline = project(bothLinked({}));
+    const carrier = baseline.graph.nodes.find((n) => n.kind === "constraint");
+    expect(carrier, "precondition: the baseline must carry a constraint node").toBeDefined();
+
+    const bound = project(bothLinked({ applies_to_claim: 0 }));
+    expect(bound.goalConstraints, "precondition: this fixture must actually bind").toHaveLength(1);
+
+    const survivor = bound.graph.nodes.find((n) => n.id === carrier!.id);
+    expect(survivor, "the node carrying the user's stated limit must survive the bind").toBeDefined();
+    expect(survivor!.label).toBe("keeping monthly churn under 4%");
+    expect((survivor!.data as { operator?: string }).operator).toBe("<=");
+    expect((survivor!.observed_state as { value?: number }).value).toBe(4);
+    expect((survivor!.observed_state as { metadata?: { unit?: string } }).metadata!.unit).toBe("%");
+  });
+
+  /**
+   * ⭐⭐ THE INVARIANT, WRITTEN AGAINST THE RULE AND NOT AGAINST THE CODE.
+   *
+   * For EVERY record set that binds: the node the user's limit arrived on is
+   * still on the graph, OR its disappearance is disclosed in `dropped` against
+   * the user's own words. This is the guard that survives a future splice —
+   * re-enable one without a disclosure and this REDs.
+   *
+   * ⭐ What would have to be true for this to pass while the property fails?
+   * That no fixture in the table actually binds. So each one asserts its own
+   * bind first, and the table asserts a non-zero size.
+   */
+  it("NO SILENT LOSS INVARIANT — every bound limit is on the graph as a node, or is disclosed", () => {
+    const fixtures: Array<[string, unknown]> = [
+      // The happy path: both linked, the row survives reconciliation.
+      ["both linked", bothLinked({ applies_to_claim: 0 })],
+      // ⭐ THE CASE THE REMOVED SPLICE DESTROYED. The constraint reaches the
+      // goal so its node survives the prune, but the TARGET does not — so the
+      // bound row is reconciled away by pass 2c. Under the old splice the
+      // user's limit was gone from the graph AND from the row, with nothing
+      // disclosed. Under the ordering rule the node is simply still there.
+      ["constraint linked, target pruned", churnRecords({ applies_to_claim: 0 }, { linkToGoal: true })],
+    ];
+    expect(fixtures.length).toBeGreaterThan(0);
+
+    for (const [name, records] of fixtures) {
+      const p = project(records);
+      // The carrier id is DERIVED from the same record set with the reference
+      // removed, so it is the real minted id and not a literal that can drift.
+      const withoutRef = project(name.startsWith("both") ? bothLinked({}) : churnRecords({}, { linkToGoal: true }));
+      const carrier = withoutRef.graph.nodes.find((n) => n.kind === "constraint");
+
+      // ⚠ The precondition here is that a BIND WAS ATTEMPTED, not that a row
+      // survived: in the unlinked fixture the target is legitimately pruned, and
+      // the invariant is about the USER'S LIMIT, which must be on the graph or
+      // disclosed either way. Pinned by the same-run baseline carrying a node.
+      expect(carrier, `${name}: precondition — the baseline must mint a carrier`).toBeDefined();
+
+      const stillOnGraph = carrier !== undefined && p.graph.nodes.some((n) => n.id === carrier.id);
+      const disclosed = p.dropped.some(
+        (d) => d.label === "keeping monthly churn under 4%" || d.node_id === carrier?.id,
+      );
+      expect(
+        stillOnGraph || disclosed,
+        `${name}: the user's stated limit vanished from the graph with NOTHING disclosed`,
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * ⛔ THE SECOND BLOCK — a malformed OPTIONAL reference killed the whole draft.
+ *
+ * ⚠⚠ A PREMISE HANDED TO THIS REPAIR WAS THAT `"0"` IS TREATED AS ABSENT BY A
+ * FALSY CHECK. MEASURED, AND IT IS NOT. There is no falsy special-case
+ * anywhere: `"1"`, `0.5` and `null` refuse identically to `"0"`. The mechanism
+ * is `z.number().int().optional()` on the item, and ONE item's type error fails
+ * the WHOLE `DraftRecordSetWire.safeParse`, which the seam turns into
+ * `not_a_record_set` — a hard failure of the entire draft.
+ *
+ * ⭐ WHY THESE TWO FIELDS AND NOT THE REFERENCE FAMILY (trap 21 — the two
+ * answer different questions). `from_claim`/`to_claim` are LOAD-BEARING
+ * STRUCTURE: a malformed one means an edge the model intended cannot be built,
+ * and refusing is right. `applies_to_*` is an OPTIONAL ENHANCEMENT whose
+ * ABSENCE is defined as byte-identical to today, so the honest degradation for
+ * a malformed one is exactly that absence — never the loss of the whole draft.
+ * The contrast control below pins that the rule was NOT widened to the family.
+ */
+describe("a malformed optional reference degrades to absence, never to a dead draft", () => {
+  const withAppliesTo = (v: unknown) => ({
+    stated_items: [
+      { kind: "goal", source_quote: "grow net revenue", role: "target" },
+      {
+        kind: "constraint",
+        source_quote: "keeping monthly churn under 4%",
+        value: 4,
+        unit: "%",
+        direction: "ceiling",
+        applies_to_claim: v,
+      },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "Subscriber Churn Rate" },
+      // Both linked, so neither the constraint node nor its target is removed by
+      // the connectivity prune — otherwise this block would be measuring the
+      // prune rather than the seam's tolerance.
+      { claim_kind: "causal_link", label: "the churn limit bears on revenue", from_stated: 1, to_stated: 0, effect: "negative" },
+      { claim_kind: "causal_link", label: "churn erodes revenue", from_claim: 0, to_stated: 0, effect: "negative" },
+    ],
+  });
+
+  /** ⭐ THE PINNED CASE, spelled out on its own so it can never be generalised away. */
+  it('applies_to_claim: "0" — the draft SURVIVES, and the field is simply absent', () => {
+    const r = projectDraftRecords(withAppliesTo("0"), BRIEF);
+    expect(r.ok, 'a string "0" in an optional enhancement field must not kill the draft').toBe(true);
+    if (!r.ok) return;
+    // Degraded to ABSENCE: nothing bound, exactly as if the model had said nothing.
+    expect(r.records.stated_items[1]!.applies_to_claim).toBeUndefined();
+    expect(r.projection.goalConstraints).toHaveLength(0);
+    // And the user's limit is still on the graph.
+    expect(r.projection.graph.nodes.filter((n) => n.kind === "constraint")).toHaveLength(1);
+  });
+
+  it("the whole malformed value space degrades to absence, not to a refusal", () => {
+    for (const bad of ["0", "1", 0.5, null, "abc", true, {}, []]) {
+      const r = projectDraftRecords(withAppliesTo(bad), BRIEF);
+      expect(r.ok, `applies_to_claim: ${JSON.stringify(bad)} must not kill the draft`).toBe(true);
+      if (r.ok) expect(r.records.stated_items[1]!.applies_to_claim).toBeUndefined();
+    }
+  });
+
+  /** ⭐ THE DISCRIMINATING HALF — a well-formed value still binds. */
+  it("a WELL-FORMED value still binds, so the tolerance did not swallow the field", () => {
+    const r = projectDraftRecords(withAppliesTo(0), BRIEF);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.records.stated_items[1]!.applies_to_claim).toBe(0);
+    expect(r.projection.goalConstraints).toHaveLength(1);
+  });
+
+  /**
+   * ⭐⭐ CONTRAST CONTROL — the load-bearing reference family is UNCHANGED.
+   * If this ever passes, the tolerance was widened past the two fields it was
+   * scoped to, and a malformed causal-link endpoint is being swallowed.
+   */
+  it("CONTRAST CONTROL — a malformed load-bearing `from_claim` still refuses the record set", () => {
+    const r = projectDraftRecords(
+      {
+        stated_items: [{ kind: "goal", source_quote: "grow net revenue", role: "target" }],
+        claims: [
+          { claim_kind: "factor", label: "Subscriber Churn Rate" },
+          { claim_kind: "causal_link", label: "churn erodes revenue", from_claim: "0", to_stated: 0, effect: "negative" },
+        ],
+      },
+      BRIEF,
+    );
+    expect(r.ok, "the reference family must keep refusing — this rule is scoped to applies_to_*").toBe(false);
+    if (!r.ok) expect(r.reason).toBe("not_a_record_set");
   });
 });

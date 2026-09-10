@@ -733,10 +733,24 @@ export interface RecordProjection {
    *
    * A stated `constraint` that names what it limits (`applies_to_stated` /
    * `applies_to_claim`) and survives every safety gate becomes a row here,
-   * carrying the TARGET's node id. Downstream this reaches
-   * `ctx.llmGoalConstraints` and is merged by the EXISTING
-   * `runCompoundGoals` machinery — the LLM-over-regex precedence, the
-   * direction gate and the V3 egress are all reused, not rebuilt.
+   * carrying the TARGET's node id.
+   *
+   * ⛔⛔ THIS FIELD HAS NO CONSUMER YET, AND SAYING SO IS THE POINT. An earlier
+   * version of this comment said the row "reaches `ctx.llmGoalConstraints` and
+   * is merged by the EXISTING `runCompoundGoals` machinery". THAT IS FALSE at
+   * this tip and was falsified by sweeping for it: the live draft path copies
+   * only `.graph` (`adapters/llm/anthropic.ts`,
+   * `rawJson = { ...activeProjection.graph }`), and this field is read by NO
+   * non-test file outside this one. Contrast control in the same sweep: the
+   * sibling `.dropped` is read by 12. `ctx.goalConstraints` in
+   * `unified-pipeline` IS real and IS widely read — it is a DIFFERENT FIELD
+   * THAT HAPPENS TO SHARE THE NAME, and nothing joins the two. Believing the
+   * two were one channel is what made removing the user's constraint node look
+   * safe (trap 21).
+   *
+   * ⭐ So this field is the ARTEFACT the carrier lane needs, produced and
+   * proven, and nothing more. It changes no user-visible byte, which is
+   * precisely why nothing may be taken away on the strength of it.
    *
    * ⭐ WHY THIS CANNOT NAME A NODE THAT DOES NOT EXIST. The id is the one the
    * projector MINTED for the target in this same pass, so the merge's
@@ -3204,17 +3218,59 @@ function projectOnce(
       provenance: "explicit",
     });
 
-    // The limit now lives ON the quantity it bounds, so the standalone
-    // constraint node is withdrawn rather than left beside it saying the same
-    // thing twice. The stated index is REPOINTED at the target — the same
-    // mechanism the duplicate-goal collapse above uses — so any `causal_link`
-    // that referenced this constraint resolves onto the node that now carries
-    // it instead of failing as an out-of-range reference.
-    const at = nodes.findIndex((n) => n.id === binding.nodeId);
-    if (at >= 0) nodes.splice(at, 1);
-    nodeIds.delete(binding.nodeId);
-    delete provenance[binding.nodeId];
-    statedIdByIndex.set(binding.statedIndex, target.id);
+    // ⛔⛔ THE STANDALONE CONSTRAINT NODE IS *NOT* WITHDRAWN, AND THAT IS THE
+    // WHOLE ORDERING CONSTRAINT OF THIS CHANGE.
+    //
+    // ⚠⚠ WHAT WAS HERE BEFORE, AND WHY IT WAS DESTRUCTIVE — MEASURED, NOT
+    // ARGUED. This block used to splice the constraint node out of `nodes` and
+    // repoint the stated index, on the stated ground that "the limit now lives
+    // ON the quantity it bounds". IT DOES NOT. The row above is written to
+    // `RecordProjection.goalConstraints`, a SIBLING of `.graph` — and the live
+    // draft path copies ONLY `.graph` (`adapters/llm/anthropic.ts`,
+    // `rawJson = { ...activeProjection.graph }`). Contrast-controlled sweep of
+    // the same tree: the sibling `.dropped` is read by 12 non-test files;
+    // `RecordProjection.goalConstraints` is read by NONE outside this file.
+    // (`ctx.goalConstraints` in `unified-pipeline` is a DIFFERENTLY-SCOPED FIELD
+    // OF THE SAME NAME with many readers, and nothing joins the two — conflating
+    // them is exactly what made the removal look safe. Trap 21: two names, two
+    // questions.)
+    //
+    // A/B on this projector, two arms differing in ONE key, the constraint
+    // LINKED to the goal so the connectivity prune is not the variable:
+    //   without the field → 3 nodes, incl. `constraint` "keeping monthly churn
+    //                        under 4%" carrying `observed_state.value 4`,
+    //                        `unit "%"`, `operator "<="`
+    //   with    the field → 2 nodes. THAT NODE IS GONE. `dropped` EMPTY.
+    //                        `graph.goal_constraints` undefined.
+    // The user's own stated limit left the product with nothing disclosed — the
+    // precise silent loss this change exists to end, manufactured by the change
+    // itself.
+    //
+    // ⛔ THE RULE, and it is an ORDERING rule rather than a better splice:
+    // A NODE CARRYING A USER-STATED LIMIT MAY ONLY BE REMOVED ONCE THAT LIMIT IS
+    // DEMONSTRABLY CARRIED SOMEWHERE A CONSUMER READS. Until then, KEEP THE NODE.
+    //
+    // So the row is still MINTED above — the grammar, the reference resolution
+    // and every safety gate are exactly as designed, and the artefact the
+    // carrier lane needs exists — but nothing is taken away. The change is
+    // therefore genuinely additive: the graph a user receives is byte-identical
+    // to the one they receive today, which is what "inert until the carrier
+    // lands" has to MEAN. Pinned, not asserted, by a same-run byte comparison in
+    // `__tests__/constraint-applies-to-binding.test.ts` ("NO SILENT LOSS — a
+    // SUCCESSFUL bind leaves the graph byte-identical to the same records with
+    // no reference").
+    //
+    // ⭐ WHEN THE CARRIER LANDS (`goalConstraints` carried across
+    // `anthropic.ts` alongside `.graph`, reaching `ctx.goalConstraints`), the
+    // removal becomes correct — AND IT MUST ARRIVE WITH A DISCLOSURE. That is
+    // not left to a comment anyone must remember: the invariant test
+    // "NO SILENT LOSS INVARIANT — every bound limit is on the graph as a node,
+    // or is disclosed" is written against the RULE rather than against today's
+    // code, so re-enabling a splice without disclosing REDs it.
+    //
+    // No repoint is needed while the node stays: a `causal_link` into this
+    // constraint still resolves onto the constraint itself, exactly as it does
+    // today, so no good reference is turned into a dropped one.
   }
 
   const kindAtLinkTime = new Map(nodes.map((n) => [n.id, n.kind as string]));
@@ -4111,17 +4167,25 @@ function projectOnce(
   const survivingNodeIds = new Set(nodes.map((n) => n.id));
   const boundLimits: GoalConstraintT[] = [];
   for (const row of goalConstraints) {
-    if (survivingNodeIds.has(row.node_id)) {
-      boundLimits.push(row);
-      continue;
-    }
-    dropped.push({
-      claim_index: -1,
-      claim_kind: "stated_item",
-      label: row.source_quote ?? row.node_id,
-      node_id: row.node_id,
-      reason: "unconnected_to_goal",
-    });
+    if (survivingNodeIds.has(row.node_id)) boundLimits.push(row);
+    // ⭐ NO DISCLOSURE IS PUSHED HERE, AND THAT IS A MEASUREMENT RATHER THAN AN
+    // OMISSION. Pass 2b no longer withdraws the standalone constraint node, so
+    // the user's stated limit is NOT lost when its target is pruned — it is
+    // still on the graph as its own node, carrying its operator, value and
+    // unit. And in the case where the constraint is itself unconnected, the
+    // connectivity prune ALREADY discloses it, more richly than this loop could:
+    // measured on this projector with no reference at all, `dropped` carries
+    // `{ label: "keeping monthly churn under 4%", reason: "unconnected_to_goal",
+    // value: 4, unit: "%" }`. A second entry for the same event would be a
+    // duplicate, and an entry claiming the limit was lost while it sits on the
+    // graph would be false — confident wrongness is worse than silence, and
+    // here silence is not even the alternative.
+    //
+    // ⛔ WHAT MUST COME BACK WITH A FUTURE SPLICE. Re-enable the withdrawal in
+    // pass 2b and this branch becomes a REAL loss that MUST be disclosed. That
+    // obligation is not parked in this comment: the invariant test "NO SILENT
+    // LOSS INVARIANT" is written against the rule, so it REDs the moment a
+    // removal happens without a disclosure.
   }
 
   // ── meta: derived, in node-emission order (never Set-iteration order).
