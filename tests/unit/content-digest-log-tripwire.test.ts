@@ -41,7 +41,8 @@ const BOOL_PREFIX_RE = /^(has|is|should|can|did|was|are|were|will|no)_/;
 const EXPECTED_UNROUTED = new Set<string>([
   // Owned by other lanes in this merge window — the call-site swap is owed at the
   // merge-window (tracked in the PR body). Do NOT edit those files from this lane.
-  "adapters/llm/anthropic.ts::system_prompt_preview",
+  // (`system_prompt_preview` was retired from this set when its call site was
+  // converted to contentDigest — Direction 2 below is what forced the removal.)
   "adapters/llm/anthropic.ts::raw_output_sample",
   "orchestrator/tools/edit-graph.ts::raw_preview",
   // Structural graph metadata: the logged value is `{ id, category }` node fields behind

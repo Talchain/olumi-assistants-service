@@ -103,6 +103,57 @@ describe("decision-content redaction at the pino boundary", () => {
     expect(isDecisionContentField("system_prompt_chars")).toBe(false);
   });
 
+  it("IDENTITY: `systemPrompt` (the camelCase twin) is in the content class and is redacted at depths 0, 1 and 2 — while ITS shape twins are deliberately NOT", () => {
+    // WHY THE TWIN IS NEEDED, derived at the bytes and not from the
+    // parameter name alone: `turn-debug-store.ts` declares
+    // `readonly systemPrompt: string` (PromptCaptureInput) and the
+    // draft_graph seam BUILDS AN OBJECT LITERAL with that key carrying
+    // the served bytes (`cee/unified-pipeline/stages/parse.ts:268`,
+    // `systemPrompt: draftPromptSnapshot.content`). A spread of that
+    // object into any `log.*` call would put the prompt bytes on the
+    // wire under the camelCase name. The list's own convention already
+    // carries camelCase twins for exactly this reason — `userMessage`,
+    // `assistantText`, `answerText`, `orientationText`.
+    //
+    // SCOPE, stated precisely: this is PROSPECTIVE, not a live leak.
+    // Swept at f9ee43a9 with a contrast control — no site logs
+    // `systemPrompt` today; every occurrence is a function parameter,
+    // the in-memory store literal above (which never reaches pino), or
+    // a test. turn-debug-store.ts:491 states the rule as a COMMENT
+    // ("Do not pass `systemPrompt` … to `log.*`"), i.e. a
+    // hand-maintained mirror; this listing makes it mechanical.
+    //
+    // Bound by the exact field NAME, not by a value predicate: this
+    // test must RED if `systemPrompt` leaves DECISION_CONTENT_FIELDS,
+    // which the list-derived coverage test above cannot see (a derived
+    // guard proves agreement, never completeness).
+    expect(isDecisionContentField("systemPrompt")).toBe(true);
+
+    const { logger, lines } = protectedLogger();
+    logger.info({ systemPrompt: SENTINEL });
+    logger.info({ ctx: { systemPrompt: SENTINEL } });
+    logger.info({ a: { b: { systemPrompt: SENTINEL } } });
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).not.toContain(SENTINEL);
+      expect(line).toMatch(DIGEST_RE);
+    }
+
+    // NEGATIVE PIN (discriminating twin, same ruling as `system_prompt`
+    // above): the camelCase shape-only fields carry no bytes and are the
+    // detection surface for a leak, so they must pass through intact. A
+    // future blanket add of the whole `systemPrompt*` family REDs here.
+    expect(isDecisionContentField("systemPromptSha256")).toBe(false);
+    expect(isDecisionContentField("systemPromptChars")).toBe(false);
+
+    // And the shape twins really do survive the protected logger — the
+    // negative pin above is about the LIST; this is about the WIRE.
+    const shape = protectedLogger();
+    shape.logger.info({ systemPromptSha256: "abc123", systemPromptChars: 4096 });
+    expect(shape.lines.join("")).toContain("abc123");
+    expect(shape.lines.join("")).toContain("4096");
+  });
+
   it("POSITIVE CONTROL: the pre-fix config (credential paths only) leaks the sentinel at every depth", () => {
     const { logger, lines } = preFixLogger();
     for (const field of DECISION_CONTENT_FIELDS) {
