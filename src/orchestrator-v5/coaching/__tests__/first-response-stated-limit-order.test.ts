@@ -125,6 +125,38 @@ const TWO_PRODUCER_DIRECTION_ITEMS = renderDirectionClarifications([
 ]);
 
 /**
+ * ⭐ A DRAFT SMALL ENOUGH THAT THE COACHING SECTION ACTUALLY SURVIVES.
+ *
+ * The F1 fixtures above are all over budget by construction, so on every one of
+ * them the weighing block is shed and a defect that only shows up INSIDE that
+ * block is invisible. This one is deliberately short — a two-word goal, two
+ * short options, no readiness blockers — and lands with ~41 words of slack, so
+ * the block is served and can be inspected. Measured at the bytes: 99 words of
+ * priced content against a 140-word budget.
+ */
+const SMALL_GRAPH = {
+  nodes: [
+    { id: 'g1', kind: 'goal', provenance: 'from_brief', label: 'Grow MRR' },
+    { id: 'o1', kind: 'option', label: 'Raise price' },
+    { id: 'o2', kind: 'option', label: 'Hold price' },
+  ],
+  edges: [],
+};
+const SMALL_BRIEF =
+  'Grow MRR while keeping monthly churn under 4%. Raise price or hold price?';
+const SMALL_DIRECTION_ITEMS = renderDirectionClarifications([
+  {
+    metric_text: 'monthly churn',
+    amount_text: '4%',
+    value: 4,
+    unit: '%',
+    reason: 'target_unmatched',
+    question: 'Which part of the model should this apply to?',
+    options: ['Churn rate', 'Overall churn'],
+  },
+]);
+
+/**
  * `missing_value` readiness blockers in the shape `deriveMissingEffectPairs`
  * reads (`option_id` + `option_label` + `factor_id` + `factor_label`, deduped
  * on the pair). The COUNT is what lengthens the next-step nudge:
@@ -212,6 +244,48 @@ describe('the first response opens with the model, and still asks about the stat
     const detail = PRODUCER_DIRECTION_ITEMS[0]!.detail;
     const firstSentence = detail.split('. ')[0]!;
     expect(text.split(firstSentence)).toHaveLength(2);
+  });
+
+  /**
+   * ⭐⭐ MOVED, NOT DUPLICATED — CHECKED WHERE IT CAN ACTUALLY BE SEEN.
+   *
+   * The assertion above is real but weak on its own: every other fixture in
+   * this file is over budget, the weighing block is shed on all of them, and a
+   * promoted line that ALSO remained in the coaching bullets would therefore be
+   * invisible to them. This draft is short enough that the block survives, so
+   * the "removed from the core bullets" half of the move is observable — and
+   * putting it back is what a tidy-up would do.
+   *
+   * It is also the only fixture here on which the weighing block is served at
+   * all, so it doubles as the pin that a stated limit does not COST the reader
+   * the ordinary coaching.
+   */
+  it('⭐ where the coaching section survives, it carries the OTHER bullets and not the limit again', () => {
+    const built = build({
+      graph: SMALL_GRAPH as never,
+      briefText: SMALL_BRIEF,
+      strengthenItems: SMALL_DIRECTION_ITEMS,
+    });
+    const text = built.text;
+    // PRECONDITION: the promoted line is served, in its own slot.
+    expect(text.split('\n\n')[1]).toContain(LIMIT_MARKER);
+    // PRECONDITION, and the one that makes this fixture worth having: the block
+    // is genuinely served here. If a change pushes this draft over budget the
+    // block is shed and this test would silently stop checking anything.
+    const section = coachingSection(text);
+    expect(
+      section,
+      'PRECONDITION: this fixture must stay inside the budget, or nothing below is exercised',
+    ).not.toBeNull();
+    expect(section!.split('\n').length, 'the section must carry at least one bullet').toBeGreaterThan(1);
+    // THE CLAIM: the limit is not repeated inside it.
+    expect(section, 'the promoted line must be removed from the core bullets').not.toContain(
+      LIMIT_MARKER,
+    );
+    // DERIVED CROSS-CHECK: the reader sees it exactly once, and the telemetry
+    // agrees with the text rather than with a constant.
+    expect(text.split(LIMIT_MARKER).length - 1).toBe(1);
+    expect(built.telemetry.direction_clarifications_surfaced).toBe(1);
   });
 
   it('the limit is raised as a question, never asserted as captured', () => {
@@ -363,6 +437,57 @@ describe('the first response opens with the model, and still asks about the stat
     // MONOTONE: once shed, the inventory does not come back.
     const firstShed = rows.findIndex((r) => !r.inventory);
     expect(rows.slice(firstShed).some((r) => r.inventory)).toBe(false);
+  });
+
+  /**
+   * ⭐⭐⭐ MONOTONICITY, ON THE INPUT CLASS THAT CAN ACTUALLY BREAK IT.
+   *
+   * The sweep above uses ONE clarification, so `weighingBlockDirectionOnly` is
+   * null and the direction-only rungs are never entered — it cannot see a rung
+   * inserted between them and "drop the whole weighing block". TWO
+   * clarifications can, and this is the pair that measured the first attempt's
+   * flip: with a rung that drops the inventory to keep both limits sitting
+   * ABOVE a rung that drops a limit and puts the inventory back, ONE extra
+   * outstanding effect value took the reply from
+   *
+   *     no inventory · two limits served
+   * to  INVENTORY BACK · one limit served
+   *
+   * i.e. growing the fixed content ADDED a block. Nothing about that is
+   * cosmetic: it is how #1428's first head lost the user's limit question.
+   */
+  it('⭐ MONOTONE with two clarifications — growing the next step never ADDS a block back', () => {
+    const rows = [0, 1, 2, 3, 4, 6, 12].map((n) => {
+      const text = build({
+        graph: { nodes: [GOAL, OPTION_A, OPTION_B, FACTOR], edges: [] } as never,
+        analysisReady: {
+          status: 'needs_user_input',
+          blockers: missingEffectValueBlockers(n),
+        } as never,
+        strengthenItems: TWO_PRODUCER_DIRECTION_ITEMS,
+      }).text;
+      return {
+        n,
+        inventory: text.includes(INVENTORY_MARKER),
+        limits: text.split(LIMIT_MARKER).length - 1,
+      };
+    });
+
+    // PRECONDITION: at least the promoted line is served at every length —
+    // without this the monotonicity claim below could hold vacuously on a
+    // reply that serves nothing at all.
+    expect(rows.filter((r) => r.limits < 1).map((r) => r.n)).toEqual([]);
+
+    // MONOTONE, both observables: once gone, gone.
+    const inventoryReturned = rows.some(
+      (r, i) => i > 0 && r.inventory && !rows[i - 1]!.inventory,
+    );
+    expect(
+      inventoryReturned,
+      'the option inventory came BACK as the next step grew — the ladder is non-monotone',
+    ).toBe(false);
+    const limitsRose = rows.some((r, i) => i > 0 && r.limits > rows[i - 1]!.limits);
+    expect(limitsRose, 'a limit came BACK as the next step grew').toBe(false);
   });
 
   it('telemetry counts the promoted line as SERVED even when the weighing block is shed', () => {
