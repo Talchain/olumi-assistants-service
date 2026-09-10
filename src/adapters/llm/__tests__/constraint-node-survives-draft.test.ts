@@ -35,6 +35,8 @@
  */
 import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 
+import { projectDraftRecords } from '../../../cee/draft/records/seam.js';
+
 const h = vi.hoisted(() => ({
   bodies: [] as Array<Record<string, unknown>>,
   payload: { text: '' },
@@ -152,6 +154,59 @@ async function draft(responseText: string): Promise<DraftOut> {
 const LIMIT_QUOTE = 'keeping monthly churn under 4%';
 const limitNodes = (g: { nodes: AnyNode[] }) => g.nodes.filter((n) => n.label === LIMIT_QUOTE);
 
+/** The bound row the projector mints — the contract's `GoalConstraintT` shape. */
+type BoundRow = {
+  node_id?: string;
+  source_quote?: string;
+  value?: number;
+  unit?: string;
+  operator?: string;
+};
+
+const travellingRows = (out: DraftOut): readonly BoundRow[] =>
+  (out.result.goal_constraints ?? []) as BoundRow[];
+
+/**
+ * ⛔⛔ A GUARD THAT COUNTED ZERO IN THE HAZARD STATE — repaired 2026-09-10
+ * after review, and the repair is the point of this block.
+ *
+ * The coexistence guard used to find the double representation by filtering the
+ * travelling rows on `row.node_id === limitId`, where `limitId` is the
+ * CONSTRAINT NODE's id. A bound row is keyed on the TARGET's id: that is the
+ * entire meaning of "a stated limit binds to the node the model says it
+ * limits". THOSE TWO IDS CAN NEVER BE EQUAL, so the filter yielded zero whether
+ * or not double-counting was happening. Measured by simulating the carrier lane
+ * below: one limit node on the graph, one bound row travelling with the same
+ * value, the same unit and the same source quote as the node's label, and the
+ * old predicate counted 0.
+ *
+ * It was not a fixture accident that could be fixed with a better payload. It
+ * was structural, so no payload could ever have made it fire.
+ *
+ * ⚠ A guard that counts zero in the hazard state is worse than no guard: the
+ * next lane inherits "guarded" from a merge that says so.
+ *
+ * ⭐ THE REPAIR matches on the axes that DO coincide where the ids never can —
+ * the user's own words and the value. The node's `label` IS the source quote
+ * (its id is the content hash minted from that quote), and the row's
+ * `source_quote` is that same quote, bounded to 200 chars by the projector. So
+ * the match binds by IDENTITY — the limit the user actually stated — and never
+ * by "some row carrying a 4", which another constraint could satisfy (trap 19).
+ */
+function sameLimitTravellingTwice(
+  nodes: readonly AnyNode[],
+  rows: readonly BoundRow[],
+): BoundRow[] {
+  const limits = nodes.filter((n) => n.label === LIMIT_QUOTE);
+  return rows.filter((row) =>
+    limits.some(
+      (n) =>
+        row.source_quote === n.label &&
+        row.value === (n.observed_state as { value?: number } | undefined)?.value,
+    ),
+  );
+}
+
 describe('⛔ the node carrying a user-stated limit survives the real draft path', () => {
   /**
    * ⭐ THE CONTROL ARM — and it is a PRECONDITION, not a nicety. If the limit
@@ -227,16 +282,80 @@ describe('⛔ the node carrying a user-stated limit survives the real draft path
 
     // Representation 1 — the node. Exactly one.
     expect(limitNodes(out), 'the limit must be present, and present once').toHaveLength(1);
-    const limitId = limitNodes(out)[0]!.id;
 
     // Representation 2 — a bound row travelling alongside it. There must be
     // none, because a consumer reading both would apply the limit twice.
-    const rows = (out.result.goal_constraints ?? []) as Array<{ node_id?: string }>;
-    const duplicates = rows.filter((r) => r.node_id === limitId);
     expect(
-      duplicates,
+      sameLimitTravellingTwice(out.nodes, travellingRows(out)),
       'the same limit is travelling as BOTH a node and a bound row — a consumer reading both counts it twice',
     ).toHaveLength(0);
+  });
+
+  /**
+   * ⭐⭐ THE GUARD BITES IN THE HAZARD STATE — and until this test existed, it
+   * did not. This is the pin that makes the assertion above worth its comment.
+   *
+   * The state simulated here is the carrier lane's landing, exactly: the bound
+   * rows travelling to the caller, the standalone node LEFT IN PLACE. That is
+   * the transition where double-counting becomes reachable, and the one the
+   * coexistence guard exists to catch.
+   *
+   * ⚠ THE ROWS ARE NOT HAND-TYPED. They come from the real projector on the
+   * SAME record set the adapter just drafted from — the artefact `anthropic.ts`
+   * would copy alongside `.graph` when the carrier lands. A fixture written
+   * here would encode this author's model of the projector rather than the
+   * projector (trap 16-inverse), and it is precisely a self-authored shape
+   * that let the old predicate look correct.
+   */
+  it('THE GUARD BITES — with the carrier lane simulated, the coexistence predicate REDs', async () => {
+    const out = await draft(recordSet({ applies_to_claim: 0 }));
+    const r = projectDraftRecords(JSON.parse(recordSet({ applies_to_claim: 0 })), BRIEF);
+    if (!r.ok) throw new Error(`seam refused: ${r.reason}: ${r.detail}`);
+    const carried = r.projection.goalConstraints as unknown as readonly BoundRow[];
+
+    // Preconditions, pinned in-test, so a green result cannot come from an
+    // empty arm on either side (trap 13b).
+    expect(carried.length, 'precondition: the projector must actually mint a bound row').toBe(1);
+    expect(limitNodes(out), 'precondition: the node must be left in place').toHaveLength(1);
+
+    // THE HAZARD STATE. One node, one row, the same limit. The repaired
+    // predicate must SEE it.
+    expect(
+      sameLimitTravellingTwice(out.nodes, carried),
+      'the repaired guard cannot see the double representation it exists to catch',
+    ).toHaveLength(1);
+
+    // ⭐ THE DISCRIMINATING TWIN. A row for a DIFFERENT limit that happens to
+    // carry the SAME value must NOT match. Without this case the source-quote
+    // conjunct is unguarded at rest: a mutant that drops it survives the whole
+    // file, and the predicate silently decays into "some row carrying a 4" —
+    // the value predicate another object satisfies (trap 19), which is the
+    // class of defect this repair exists to end. Measured: with this case
+    // present, dropping the conjunct REDs.
+    const differentLimitSameValue: BoundRow = {
+      ...carried[0]!,
+      source_quote: 'keeping refund rate under 4%',
+    };
+    expect(
+      sameLimitTravellingTwice(out.nodes, [differentLimitSameValue]),
+      'a different limit that shares the value must not read as the same limit travelling twice',
+    ).toHaveLength(0);
+
+    // ⛔ AND THE DEFECT ITSELF, PINNED. The predicate this replaced keyed the
+    // rows on the CONSTRAINT NODE's id; a bound row is keyed on the TARGET's —
+    // that is the whole point of "binds to the node the model says it limits".
+    // The two ids can never be equal, so the old filter read ZERO in exactly
+    // this state. Asserted rather than described, so the structural reason is
+    // measured and not a claim in a comment.
+    const limitId = limitNodes(out)[0]!.id;
+    expect(
+      carried.filter((row) => row.node_id === limitId),
+      'the id-keyed predicate counts zero even here — that is why it was replaced',
+    ).toHaveLength(0);
+    expect(
+      carried[0]!.node_id,
+      'the bound row must be keyed on the TARGET, not on the constraint node',
+    ).not.toBe(limitId);
   });
 
   it('a malformed `applies_to_claim: "0"` no longer kills the whole draft', async () => {
