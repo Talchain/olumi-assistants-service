@@ -76,6 +76,7 @@ import { isDirectionClarificationId } from '../../cee/compound-goal/direction-ga
 import { UNAUTHORED_DECISION_LABEL } from '../../cee/draft/records/objective-label.js';
 
 import {
+  assertsAnalysisOutcome,
   gateAssumptionFragment,
   gateCoachingCardBody,
   gateFullResponse,
@@ -443,10 +444,20 @@ export type AssumptionSource =
  * Coarse fallback category emitted alongside {@link AssumptionSource}.
  *   - `gate_rejected`: a higher-priority candidate existed but failed
  *     the copy-quality gate.
+ *   - `readiness_gated`: freeform LLM coaching candidates WERE present and
+ *     were never inspected, because typed readiness is not `ready`. This is
+ *     the SUPPRESSED-not-absent case.
  *   - `no_candidate`: no higher-priority candidate was available at all.
  *   - `null`: the highest-priority available source was used cleanly.
+ *
+ * ⭐⭐ WHY `readiness_gated` EXISTS. Until it did, a non-ready turn that
+ * suppressed real coaching reported `no_candidate` — i.e. *"there was nothing
+ * to serve"* — which is false, and which is exactly how the size of this
+ * discard stayed invisible. An honest label overwritten by a convenient one is
+ * `CLAUDE.md` trap 14, and the cost here was that nobody could measure the
+ * population. The two states are now distinguishable in telemetry.
  */
-export type FallbackReason = 'gate_rejected' | 'no_candidate' | null;
+export type FallbackReason = 'gate_rejected' | 'readiness_gated' | 'no_candidate' | null;
 
 /** Copy-gate failures plus a typed-readiness contradiction after acceptance. */
 export type CoachingSummaryRejectReason = GateRejectReason | 'readiness_conflict';
@@ -758,8 +769,44 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
 
   // Freeform coaching fragments can contain action copy that the fragment gate
   // is not designed to classify. For every non-ready or missing status, do not
-  // inspect those bytes at all: graph labels/trade-off, the fixed generic
-  // assumption and typed readiness recovery are the complete narrative.
+  // inspect those bytes at all: the LLM prose channels (strengthen items, bias
+  // findings, coaching bias signals) stay shut, exactly as before.
+  //
+  // ⭐⭐ WHAT CHANGED, AND WHAT DELIBERATELY DID NOT. A non-ready turn no
+  // longer serves the fixed-generic line UNCONDITIONALLY. It now takes the
+  // deterministic picker below, which can serve a factor-level uncertainty
+  // driver — the user's own graph annotation, bounded at two entries by
+  // `GraphV3`, carrying its own narrower validator — provided the copy does
+  // not ASSERT AN ANALYSIS OUTCOME.
+  //
+  // ⭐ THE PRINCIPLE, and it is the same one that moved direction
+  // clarifications out of this gate directly above: gate on what the copy
+  // CLAIMS, not on the phase the run is in. `analysis_ready.status` was never
+  // a statement about whether a sentence is true; it is a statement about
+  // whether a comparison can be prepared. Using it as a truth gate discards
+  // true, useful coaching on every turn that needs it most.
+  //
+  // ⛔ FAIL-CLOSED BY CONSTRUCTION, NOT BY ORDERING. `pickDeterministic-
+  // Assumption` does not TAKE `strengthenItems`, `analysisReady.bias_findings`
+  // or `coachingBiasSignals` as parameters at all, so no reordering, no future
+  // edit to the priority chain, and no gate regression can leak a freeform
+  // byte onto a non-ready turn through this call. A guard that depends on
+  // priority order is a guard that a refactor silently removes.
+  // ⚠ READS THE RAW INPUT, NOT `generalStrengthenItems`. That derived array is
+  // already emptied whenever `mayServeFreeformCoaching` is false, so asking it
+  // "was anything suppressed?" always answers no — the telemetry would report
+  // `no_candidate` on exactly the turns it exists to distinguish. Caught by the
+  // suite; it is the same shape as a probe reporting on itself.
+  const rawFreeformStrengthenCount = Array.isArray(strengthenItems)
+    ? strengthenItems.filter((i) => !isDirectionClarificationItem(i)).length
+    : 0;
+  const freeformCandidatesSuppressed =
+    !mayServeFreeformCoaching &&
+    (rawFreeformStrengthenCount > 0 ||
+      (Array.isArray(analysisReady?.bias_findings) &&
+        (analysisReady?.bias_findings?.length ?? 0) > 0) ||
+      (Array.isArray(coachingBiasSignals) && coachingBiasSignals.length > 0));
+
   const assumption: AssumptionPick = mayServeFreeformCoaching
     ? pickAssumption({
         nodes,
@@ -767,11 +814,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
         strengthenItems: generalStrengthenItems,
         coachingBiasSignals,
       })
-    : {
-        text: FIXED_GENERIC_ASSUMPTION,
-        source: 'deterministic_fallback',
-        fallbackReason: 'no_candidate',
-      };
+    : pickDeterministicAssumption({ nodes, freeformCandidatesSuppressed });
   const assumptionBullet = assumption.text ? toAssumptionBullet(assumption.text) : null;
 
   // One extra "check" bullet from the next unused coaching signal. Seed the
@@ -1515,6 +1558,90 @@ interface AssumptionPick {
  * candidate existed but failed) from `no_candidate` (nothing was
  * available at all, so we fell through to the generic).
  */
+/**
+ * The NON-READY assumption picker: deterministic sources only.
+ *
+ * Priority chain, deliberately a strict SUBSET of {@link pickAssumption}'s:
+ *   4. uncertainty_driver (grammar guard AND analysis-assertion guard)
+ *   5. fixed-generic
+ *
+ * ⛔ IT CANNOT REACH A FREEFORM CHANNEL. The LLM prose inputs are not
+ * parameters of this function. That is the point: the exclusion is structural,
+ * so it survives a refactor of the priority order, which a `status === 'ready'`
+ * check inside a shared chain would not.
+ *
+ * ⭐ THE EXTRA GUARD IS THE WHOLE REASON THIS IS SAFE ON A NON-READY TURN.
+ * `validateUncertaintyDriver` is a grammar/jargon guard; it has nothing to say
+ * about whether a phrase presupposes a completed analysis, and the driver field
+ * is model-authored. {@link assertsAnalysisOutcome} is the missing precondition
+ * — see its own comment for why it is a deliberately generous closed list and
+ * why over-blocking is free here.
+ *
+ * A driver that trips EITHER guard is dropped whole and the fixed-generic line
+ * is served, which is byte-identical to this surface's previous behaviour on
+ * every non-ready turn. Nothing gets worse; some turns get better.
+ */
+/**
+ * ⛔⛔ THE THREE GUARDS AN UNCERTAINTY DRIVER MUST CLEAR — AND THE THIRD ONE
+ * WAS MISSING ON EVERY TURN, INCLUDING READY ONES.
+ *
+ * `validateUncertaintyDriver` is a GRAMMAR and JARGON guard: length, trailing
+ * punctuation, question shape, and a substring list of internal schema terms.
+ * It has no opinion about what the sentence CLAIMS. Priority 4 of
+ * {@link pickAssumption} called it and nothing else, so the driver was the one
+ * assumption source that never met `checkShared`'s premature-recommendation
+ * lexicon — the estate's standing "never name a leading option" rule.
+ *
+ * ⚠ MEASURED AT PRISTINE, NOT INFERRED. On a `ready` turn, a driver reading
+ * "the strongest option depends on how fast new hires ramp up" was SERVED, with
+ * `assumption_source: 'uncertainty_driver'`. The phrase is the eleventh
+ * alternate of `PREMATURE_RECOMMENDATION_REGEX`; it was simply never consulted
+ * on this path. This was found while adding the non-ready content gate below:
+ * the old phase gate had been masking it on non-ready turns, so opening that
+ * gate is what made it observable.
+ *
+ * The gate is used as a PREDICATE only. Accepted drivers keep their existing
+ * `cleanLeadIn` rendering, so ready-path copy is byte-identical for every
+ * driver that was legitimately servable before.
+ */
+function driverIsServable(driver: string): boolean {
+  if (!validateUncertaintyDriver(driver)) return false;
+  if (assertsAnalysisOutcome(driver)) return false;
+  return gateAssumptionFragment(driver).accept === true;
+}
+
+function pickDeterministicAssumption(input: {
+  readonly nodes: readonly NodeLite[];
+  readonly freeformCandidatesSuppressed: boolean;
+}): AssumptionPick {
+  const { nodes, freeformCandidatesSuppressed } = input;
+
+  const driver = pickUncertaintyDriver(nodes);
+  if (driver !== null) {
+    if (driverIsServable(driver)) {
+      return {
+        text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
+        source: 'uncertainty_driver',
+        fallbackReason: null,
+      };
+    }
+    // A driver existed and was refused on its content. That is a gate
+    // rejection, and it is reported as one even when freeform was ALSO
+    // suppressed: the nearest-miss candidate is the more useful signal.
+    return {
+      text: FIXED_GENERIC_ASSUMPTION,
+      source: 'deterministic_fallback',
+      fallbackReason: 'gate_rejected',
+    };
+  }
+
+  return {
+    text: FIXED_GENERIC_ASSUMPTION,
+    source: 'deterministic_fallback',
+    fallbackReason: freeformCandidatesSuppressed ? 'readiness_gated' : 'no_candidate',
+  };
+}
+
 function pickAssumption(input: {
   readonly nodes: readonly NodeLite[];
   readonly analysisReady: PostDraftAnalysisReadyLite | null | undefined;
@@ -1566,7 +1693,10 @@ function pickAssumption(input: {
   // Priority 4: uncertainty_driver (factor-level, with grammar guard).
   const driver = pickUncertaintyDriver(nodes);
   if (driver) {
-    if (validateUncertaintyDriver(driver)) {
+    // ⭐ ONE AUTHORITY FOR "may this driver be served", shared with the
+    // non-ready picker. Two copies of this decision is the twin-function defect
+    // this repo has paid for more than once.
+    if (driverIsServable(driver)) {
       return {
         text: `One assumption worth checking: ${cleanLeadIn(driver)}.`,
         source: 'uncertainty_driver',
@@ -2140,12 +2270,39 @@ interface SectionedNarrativeInput {
    * copy: the first `pickDirectionClarifications` line, MOVED — it is removed
    * from the weighing block so the person reads it once.
    *
-   * ⭐⭐ IT IS OUTSIDE EVERY SHED. `tryAssemble` emits it at every rung of the
-   * ladder, including the terminal one that takes no budget check, so no input
-   * can reach the user without it. That is the whole point of the slot: the
-   * weighing block IS sheddable, `assistant_text` is the only carrier, and a
-   * clarification that rides inside a sheddable block is a question the user
-   * simply never sees.
+   * ⭐⭐ IT IS OUTSIDE EVERY SHED — *WITHIN THE ASSEMBLER*. `tryAssemble` emits
+   * it at every rung of the ladder, including the terminal one that takes no
+   * budget check. That is the whole point of the slot: the weighing block IS
+   * sheddable, `assistant_text` is the only carrier, and a clarification that
+   * rides inside a sheddable block is a question the user simply never sees.
+   *
+   * ⛔⛔ THE SENTENCE THAT USED TO SIT HERE — *"so no input can reach the user
+   * without it"* — WAS FALSE, AND ITS FALSENESS IS WHY THE GAP BELOW WENT
+   * UNNOTICED. It stated a UNIVERSAL over all inputs while the evidence
+   * supports only a claim about the assembler's rungs. `buildPostDraftNarrative`
+   * has TWO returns that never reach `assembleSectionedNarrative` at all, so
+   * `leadClarification` is not composed on either:
+   *
+   *   · the verbatim `coachingSummary` shortcut — the MAJORITY path. Derived
+   *     at the committed corpus, not inherited: the 688-reply record in
+   *     `compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/`
+   *     carries 146 replies opening with the deterministic opener, so 542 of
+   *     688 (79%) took a non-deterministic path. On those replies a stated
+   *     limit the model did not carry is NOT surfaced by this slot.
+   *   · the graphless `nodes.length === 0` return.
+   *
+   * ⚠ THE GAP IS REAL AND IS DELIBERATELY NOT CLOSED HERE. Routing either
+   * return through the assembler would change what 542 of 688 replies say,
+   * which is a behavioural change far larger than a comment repair and needs
+   * its own measured lane. What is fixed here is the FALSE UNIVERSAL: a
+   * comment asserting a property that does not hold is how this stayed hidden,
+   * and an honest boundary is worth more than a confident one.
+   *
+   * ⚠ Scope note, stated precisely because the last version of this comment
+   * over-read its own evidence: the 542/688 figure is a count of replies that
+   * did not open with the deterministic opener. It bounds how often the
+   * shortcut path is taken. It is NOT a count of replies that lost a
+   * clarification, which nothing in this repo currently measures.
    */
   readonly leadClarification: string | null;
   readonly nextStep: string;

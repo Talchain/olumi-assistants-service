@@ -1193,7 +1193,30 @@ describe('buildPostDraftNarrative — gated-hybrid sources', () => {
 
 describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
   const actionCopy = 'run the analysis before committing to a route';
-  const baseGraph = makeGraph([GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY, FACTOR_CAPACITY]);
+  /**
+   * ⚠⚠ THE FIXTURE DELIBERATELY CARRIES NO UNCERTAINTY DRIVER, AND THAT IS A
+   * CHANGE. It used to use `FACTOR_QUALITY`, which carries a benign driver.
+   *
+   * This suite's subject is the FREEFORM channels — strengthen items, bias
+   * findings, coaching bias signals. A non-ready turn may now serve a
+   * DETERMINISTIC uncertainty driver (see
+   * `non-ready-coaching-content-gate.test.ts`), so a driver sitting in this
+   * fixture is a confound: it displaces the fixed-generic line these cases
+   * assert on, and it does so for a reason that has nothing to do with
+   * freeform exclusion. The driver is removed here and tested on its own.
+   *
+   * The freeform assertions below are UNCHANGED and still discriminate: each
+   * case supplies a freeform candidate, and none of it may reach the user.
+   */
+  const FACTOR_QUALITY_NO_DRIVER = {
+    id: FACTOR_QUALITY.id,
+    kind: FACTOR_QUALITY.kind,
+    label: FACTOR_QUALITY.label,
+    observed_state: { value: 0.5 },
+  };
+  const baseGraph = makeGraph(
+    [GOAL_NODE, OPTION_A, OPTION_B, FACTOR_QUALITY_NO_DRIVER, FACTOR_CAPACITY] as unknown as GraphV3T['nodes'],
+  );
   const fixedAssumption =
     "Assumption to check: whether the model's key inputs reflect your real delivery constraints";
   const typedRecovery =
@@ -1210,12 +1233,22 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     }],
   } as const;
 
+  /**
+   * ⭐ `expectedFallback` IS NEW, AND IT IS THE POINT OF THE TELEMETRY CHANGE.
+   * Every case below used to assert `no_candidate`, which was false for four of
+   * the five: a freeform candidate WAS present and was withheld. Reporting
+   * "there was nothing to serve" is how the size of this discard stayed
+   * invisible. `readiness_gated` now names the withheld case, and
+   * `gate_rejected` names the driver that was inspected and refused.
+   */
   const sourceCases: ReadonlyArray<{
     name: string;
     input: Parameters<typeof buildPostDraftNarrative>[0];
+    expectedFallback: 'readiness_gated' | 'gate_rejected';
   }> = [
     {
       name: 'strengthen detail',
+      expectedFallback: 'readiness_gated',
       input: {
         graph: baseGraph,
         strengthenItems: [{
@@ -1228,6 +1261,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     },
     {
       name: 'strengthen label',
+      expectedFallback: 'readiness_gated',
       input: {
         graph: baseGraph,
         strengthenItems: [{
@@ -1240,6 +1274,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     },
     {
       name: 'bias finding explanation',
+      expectedFallback: 'readiness_gated',
       input: {
         graph: baseGraph,
         analysisReady: {
@@ -1254,6 +1289,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     },
     {
       name: 'coaching bias signal detail',
+      expectedFallback: 'readiness_gated',
       input: {
         graph: baseGraph,
         coachingBiasSignals: [{ type: 'action_copy', detail: actionCopy }],
@@ -1261,6 +1297,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     },
     {
       name: 'uncertainty driver',
+      expectedFallback: 'gate_rejected',
       input: {
         graph: makeGraph([
           GOAL_NODE,
@@ -1276,7 +1313,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     },
   ];
 
-  it.each(sourceCases)('does not read $name bytes when typed readiness is non-ready', ({ input }) => {
+  it.each(sourceCases)('does not read $name bytes when typed readiness is non-ready', ({ input, expectedFallback }) => {
     const result = buildPostDraftNarrative({
       ...input,
       analysisReady: {
@@ -1292,7 +1329,7 @@ describe('buildPostDraftNarrative — non-ready freeform exclusion', () => {
     expect(result.text).toContain(fixedAssumption);
     expect(result.text.split('\n\n').at(-1)).toBe(typedRecovery);
     expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
-    expect(result.telemetry.fallback_reason).toBe('no_candidate');
+    expect(result.telemetry.fallback_reason).toBe(expectedFallback);
     expect(result.telemetry.additional_checks_surfaced).toBe(0);
     expect(result.telemetry.additional_check_source).toBeNull();
     expect(result.telemetry.direction_clarifications_surfaced).toBe(0);

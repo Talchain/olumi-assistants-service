@@ -132,6 +132,77 @@ const PREMATURE_RECOMMENDATION_REGEX = new RegExp(
 );
 
 /**
+ * ⭐⭐ THE ANALYSIS-ASSERTION CLASS — the precondition a PHASE GATE was
+ * standing in for.
+ *
+ * Post-draft coaching is composed on turns where `analysis_ready.status` may
+ * be anything. The real harm on a non-ready turn is not "model-authored bytes"
+ * as such: it is copy that PRESUPPOSES a completed analysis. A sentence like
+ * "run the analysis before committing to a route" tells the reader an analysis
+ * is the next gate; "the comparison shows capacity dominates" tells them one
+ * has already run. Neither is true on a turn that is not ready, and the second
+ * is a fabricated result.
+ *
+ * ⚠ WHY THIS IS A CLOSED LIST AND NOT A CLEVER PREDICATE. `CLAUDE.md` traps 22
+ * / 22b / 22d / 22f record four consecutive rounds of oscillation on ONE
+ * natural-language predicate in this repo, each round fixing one direction and
+ * reopening the other. That predicate guarded TWO OPPOSITE HARMS under one
+ * window, which is why no single rule could settle it.
+ *
+ * ⭐ THIS ONE GUARDS EXACTLY ONE HARM, AND ITS FAILURE MODE IS ASYMMETRIC.
+ * A candidate that trips this guard is DROPPED, and the caller falls back to
+ * the fixed-generic assumption — which is precisely what every non-ready turn
+ * serves today. So over-blocking costs nothing beyond the status quo, and
+ * under-blocking is the only real harm. That asymmetry is the whole argument
+ * for a deliberately GENEROUS list: when in doubt, add the term. Do not
+ * "tighten" this list to admit more copy without a measured reason, and never
+ * turn it into a two-sided window.
+ *
+ * PREDICATE ONLY — returns true when the text asserts or presupposes an
+ * analysis outcome. Callers drop; nothing is rewritten in place.
+ */
+const ANALYSIS_ASSERTION_REGEX = new RegExp(
+  [
+    // A completed or pending analysis named as an event.
+    '\\banalys(?:is|es|e|ed|ing|ze|zed|zing)\\b',
+    '\\bre-?run\\b',
+    '\\bsimulat(?:e|es|ed|ion|ions|ing)\\b',
+    '\\bmonte carlo\\b',
+    '\\bevpi\\b',
+    '\\bexpected value of (?:perfect )?information\\b',
+    '\\bsensitivity (?:analysis|run|sweep)\\b',
+    // Results language: a claim that an outcome is already known.
+    '\\bthe results?\\b',
+    '\\bresults? (?:show|shows|showed|indicate|indicates|suggest|suggests)\\b',
+    '\\bthe (?:model|comparison|simulation) (?:show|shows|showed|says|said|indicates|suggests|tells)\\b',
+    '\\bthe (?:outcome|output|verdict|score|scores|ranking|rankings)\\b',
+    '\\bonce (?:the|you) (?:analys|analyz|run|compare)',
+    '\\bafter (?:the|you) (?:analys|analyz|run)',
+    // Comparative outcomes between options.
+    '\\bout-?perform(?:s|ed|ing)?\\b',
+    '\\brank(?:s|ed|ing|ings)? (?:above|below|higher|lower|first|last)\\b',
+    '\\bscores? (?:higher|lower|better|worse)\\b',
+    '\\b(?:beats|dominates|edges out|comes out ahead|comes out on top)\\b',
+    '\\bahead of (?:option|the other)',
+    '\\bmore likely to succeed\\b',
+  ].join('|'),
+  'i',
+);
+
+/**
+ * True when `text` asserts or presupposes an analysis outcome.
+ *
+ * Exported so the post-draft builder can admit a candidate on a turn whose
+ * readiness is NOT `ready`, gated on what the copy actually CLAIMS rather than
+ * on the phase the run happens to be in. Also exported so unit tests can pin
+ * specific pass/fail fixtures directly.
+ */
+export function assertsAnalysisOutcome(text: string): boolean {
+  if (typeof text !== 'string') return true; // fail closed
+  return ANALYSIS_ASSERTION_REGEX.test(text);
+}
+
+/**
  * Markdown / bullet / numbered-list / header formatting. A coaching
  * summary should render as a single paragraph of prose; bullet-shaped
  * input is almost always either an LLM that ignored the format
