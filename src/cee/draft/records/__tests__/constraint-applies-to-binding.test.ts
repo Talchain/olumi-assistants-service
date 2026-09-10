@@ -727,6 +727,48 @@ describe("a malformed optional reference degrades to absence, never to a dead dr
   });
 
   /**
+   * ⭐⭐ THE TWIN FIELD, AND IT IS HERE BECAUSE A SURVIVING MUTANT EXPOSED THE
+   * GAP RATHER THAN BECAUSE THE PAIR LOOKED TIDY.
+   *
+   * Reverting the tolerance on `applies_to_claim` REDs three tests. Reverting
+   * it on `applies_to_stated` left 25/25 GREEN — so that half of the change was
+   * covered by NOTHING, and any later tidy-up could have deleted it in silence
+   * while the suite applauded. Asking "what would have to be true for the guard
+   * to pass while the property fails?" answers itself here: the property was
+   * only ever asserted for one of the two fields.
+   *
+   * With both pinned, the mutant pair now discriminates BY FIELD — revert one
+   * and only that field's case REDs — which is a strictly stronger statement
+   * than the single-sided version it replaces.
+   */
+  it('applies_to_stated: "0" — the twin field degrades to absence too', () => {
+    const records = {
+      stated_items: [
+        { kind: "goal", source_quote: "grow net revenue", role: "target" },
+        {
+          kind: "constraint",
+          source_quote: "keeping monthly churn under 4%",
+          value: 4,
+          unit: "%",
+          direction: "ceiling",
+          applies_to_stated: "0",
+        },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Subscriber Churn Rate" },
+        { claim_kind: "causal_link", label: "the churn limit bears on revenue", from_stated: 1, to_stated: 0, effect: "negative" },
+        { claim_kind: "causal_link", label: "churn erodes revenue", from_claim: 0, to_stated: 0, effect: "negative" },
+      ],
+    };
+    const r = projectDraftRecords(records, BRIEF);
+    expect(r.ok, 'a string "0" in `applies_to_stated` must not kill the draft either').toBe(true);
+    if (!r.ok) return;
+    expect(r.records.stated_items[1]!.applies_to_stated).toBeUndefined();
+    // …and the user's limit is still on the graph.
+    expect(r.projection.graph.nodes.filter((n) => n.kind === "constraint")).toHaveLength(1);
+  });
+
+  /**
    * ⭐⭐ CONTRAST CONTROL — the load-bearing reference family is UNCHANGED.
    * If this ever passes, the tolerance was widened past the two fields it was
    * scoped to, and a malformed causal-link endpoint is being swallowed.
