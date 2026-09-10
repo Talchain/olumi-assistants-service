@@ -117,6 +117,34 @@ const RACE_IDIOMS: readonly string[] = [
   'edges out',
   'pulls ahead',
   'leads the field',
+  // ⭐ 2026-09-10, added by review. Everything above is a LEADER vocabulary, so
+  // the corpus was blind to the same race stated from the BACK of the field.
+  // "close behind" reached the rewritten close_call exemplar in the monolith
+  // and not one member saw it. This is not a hypothetical family: the live-leak
+  // corpus in `orchestrator-v5/context/withheld-history-redaction.ts` records
+  // "…with Standardise on Dell XPS close behind at 34%" as a string that
+  // actually reached a user, and that module already redacts the family
+  // downstream. A prompt asking for it is asking for a string the wire strips.
+  'close behind',
+  'falls behind',
+  'lags behind',
+  'just behind',
+  'not far behind',
+  'trails',
+  'the front',
+  // ⭐ Pure ordinals. Both prompts state the ordinal ban in prose — "the ordinal
+  // is the race frame without the vocabulary" — and no member enforced it, so
+  // the ban was advice to the model and nothing to the repo. Bound to
+  // rank-bearing phrases, never to the bare words "first"/"second"/"top", which
+  // a prompt legitimately uses for sentence and list positions.
+  'the top option',
+  'the top-ranked option',
+  'second-best option',
+  'next best option',
+  'ranks first',
+  'ranks second',
+  'in first place',
+  'in second place',
 ];
 
 /** The ratified-correct, non-race statement of an option's OWN standing. */
@@ -157,17 +185,44 @@ describe('decision_review prompts do not ask for race framing', () => {
  * own NEVER: an idiom split across a line break would evade this reader, and a
  * guard that cannot see the string it names is worth nothing (trap 13).
  */
-const BAN_MARKER = /\bNEVER\b|\bNever\b|\bnever\b|\bDo not\b|\bdo not\b/;
+const BAN_MARKER = /\b(?:never|do not)\b/gi;
+
+/**
+ * ⭐ 2026-09-10, added by review: the marker must sit BEFORE the idiom.
+ *
+ * The predicate was looser than its name. `BAN_MARKER.test(line)` asks *does a
+ * prohibition appear anywhere on this line?*, which is not the question. An
+ * ordinary instruction line that ASKS for an idiom and then carries an
+ * unrelated prohibition — a length cap, a formatting rule, "do not exceed 15
+ * words" — was excused by its own trailing clause. Measured at the pristine
+ * tip: the whole file passed, 27 of 27, with such a line planted in the
+ * monolith. The reader reported an empty list about a prompt that was asking
+ * for the contest.
+ *
+ * So a line is a BAN LINE *for a given occurrence of a given idiom* only when a
+ * prohibition marker precedes that occurrence. An idiom quoted after its own
+ * NEVER is a ban; an idiom asked for, with a "do not" arriving later on the
+ * line, is the defect.
+ *
+ * This is why both prompts keep each quoted idiom on one line with its own
+ * NEVER in front of it: an idiom split across a line break, or trailing its
+ * prohibition, would evade this reader (trap 13).
+ */
+function occurrencesNotPrecededByABan(line: string): boolean {
+  const lower = line.toLowerCase();
+  const markerAt = [...line.matchAll(BAN_MARKER)].map((m) => m.index ?? 0);
+  return RACE_IDIOMS.some((idiom) => {
+    const needle = idiom.toLowerCase();
+    for (let at = lower.indexOf(needle); at !== -1; at = lower.indexOf(needle, at + 1)) {
+      if (!markerAt.some((mi) => mi < at)) return true;
+    }
+    return false;
+  });
+}
 
 /** Lines that mention a race idiom WITHOUT prohibiting it. Empty is the pass. */
 function idiomLinesThatAreNotBans(text: string): string[] {
-  return text
-    .split('\n')
-    .filter((line) => {
-      const lower = line.toLowerCase();
-      return RACE_IDIOMS.some((p) => lower.includes(p.toLowerCase()));
-    })
-    .filter((line) => !BAN_MARKER.test(line));
+  return text.split('\n').filter(occurrencesNotPrecededByABan);
 }
 
   it('the idiom reader is not blind — the monolith DOES quote idioms, all on ban lines', () => {
@@ -228,7 +283,65 @@ function idiomLinesThatAreNotBans(text: string): string[] {
 
   it('the corpus is non-trivial', () => {
     expect(RACE_INSTRUCTIONS.length).toBeGreaterThanOrEqual(9);
-    expect(RACE_IDIOMS.length).toBeGreaterThanOrEqual(9);
+    // Raised from 9 with the behind-family and ordinal members. A floor that
+    // trails the list it guards permits a silent shrink back to the blind
+    // corpus that let "close behind" through.
+    expect(RACE_IDIOMS.length).toBeGreaterThanOrEqual(24);
     expect(DECOMPOSED_PROMPTS.length).toBe(4);
+  });
+
+  /**
+   * The reader's own discrimination, pinned on synthetic lines.
+   *
+   * ⚠ These do NOT read a prompt. They read the predicate. A guard whose
+   * discriminating power is only ever exercised by today's prompt bytes stops
+   * discriminating the moment those bytes change, with no red anywhere
+   * (CLAUDE.md trap 13b) — and this reader's whole job is to tell an ASK from a
+   * BAN, so that distinction has to be asserted directly, in both directions.
+   */
+  describe('the ban reader tells an ASK from a BAN', () => {
+    it('an ASK is not excused by a prohibition that arrives later on the line', () => {
+      const asking =
+        '  Sentence 1: say the option "comes out ahead" on the model\u2019s numbers. Do not exceed 15 words.';
+      expect(idiomLinesThatAreNotBans(asking)).toEqual([asking]);
+    });
+
+    it('a real ban, marker before the idiom, still passes', () => {
+      expect(idiomLinesThatAreNotBans('  NEVER write "comes out ahead" in any output string.')).toEqual(
+        [],
+      );
+    });
+
+    it('a second, unrelated prohibition earlier on the line does not excuse a later ASK', () => {
+      // The nearest-marker case, kept honest: the guard admits a line whose
+      // idiom follows ANY marker, which is what makes the R3 flip-threshold
+      // line ("…never the raw input value. Use the label, never the id. ⚠ NEVER
+      // write that an option 'becomes the leading option'…") legitimately pass.
+      // Pinned so the admission is a recorded choice, not an accident.
+      const admitted =
+        "  Use the label, never the id. \u26a0 NEVER write that an option 'becomes the leading option'.";
+      expect(idiomLinesThatAreNotBans(admitted)).toEqual([]);
+    });
+
+    it('the behind-family members bite', () => {
+      const asking = '  e.g., "produced the best outcome in 38% of runs, the others close behind".';
+      expect(idiomLinesThatAreNotBans(asking)).toEqual([asking]);
+    });
+
+    it('the ordinal members bite', () => {
+      const asking = '  Name the top option and say what the next best option would need.';
+      expect(idiomLinesThatAreNotBans(asking)).toEqual([asking]);
+    });
+
+    it('compliant wording is not flagged — the reader is not a vocabulary sweep', () => {
+      // The discriminating half. A guard that REDs on the ratified-correct
+      // sentence would be pressure to weaken it back.
+      expect(
+        idiomLinesThatAreNotBans(
+          '  (e.g., "produced the best outcome in 38% of runs of this model, and the\n' +
+            '  options were close on the data so far").',
+        ),
+      ).toEqual([]);
+    });
   });
 });

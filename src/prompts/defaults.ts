@@ -1441,6 +1441,7 @@ USER-FACING LANGUAGE:
   NEVER write, in any output string: "wins", "beats", "overtakes", "trails" or "leads".
   NEVER write "comes out ahead", "becomes the leading option" or "takes the lead".
   NEVER call an option a "winner", "runner-up", "front-runner" or "loser".
+  NEVER write "close behind", "just behind", "not far behind", "falls behind", "lags behind" or "trails": the race frame read from the back of the field is still the race frame.
   NEVER rank options by position words ("first", "second", "top", "next best"): the ordinal
   is the race frame without the vocabulary.
   State an option's OWN standing instead, which is checkable against the inputs:
@@ -1459,7 +1460,8 @@ narrative_summary (string, 2-4 sentences):
     (e.g., 0.61 → "produced the best outcome in 61% of runs of this model").
       If headline_type is close_call, say in WORDS that the options are close and still give
       the same number (e.g., "produced the best outcome in 38% of runs of this model, and the
-      other options were close behind on the data so far").
+      options were close on the data so far").
+      NEVER write "close behind", "just behind" or "not far behind": stating where one option sits relative to another is the race frame read from the back of the field.
     This holds whether or not runner_up is present — the statistic does not change.
     ⚠ NEVER write "leads by N percentage points", "by a margin of N points", "a lead of
     N percentage points", or any other numeric distance between two options.
