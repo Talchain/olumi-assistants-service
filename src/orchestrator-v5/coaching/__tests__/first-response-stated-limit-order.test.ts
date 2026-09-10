@@ -65,6 +65,28 @@ const PRODUCER_DIRECTION_ITEMS = renderDirectionClarifications([
 
 const COACHING_HEADING = 'What the model is weighing';
 
+/** Two unresolved limits from one brief — enough content to force rung 3c. */
+const TWO_PRODUCER_DIRECTION_ITEMS = renderDirectionClarifications([
+  {
+    metric_text: 'monthly churn',
+    amount_text: '4%',
+    value: 4,
+    unit: '%',
+    reason: 'target_unmatched',
+    question: 'Which part of the model should the monthly churn limit apply to?',
+    options: ['Pro Plan Churn Rate', 'Overall churn'],
+  },
+  {
+    metric_text: 'customer acquisition cost',
+    amount_text: '£320',
+    value: 320,
+    unit: 'GBP',
+    reason: 'target_unmatched',
+    question: 'Which part of the model should the acquisition cost limit apply to?',
+    options: ['Blended CAC', 'Paid CAC'],
+  },
+]);
+
 function narrative(overrides: Partial<BuildPostDraftNarrativeInput>): string {
   return buildPostDraftNarrative({
     graph: { nodes: [GOAL, OPTION_A, OPTION_B], edges: [] } as never,
@@ -142,6 +164,39 @@ describe('the first response opens with the model, and still asks about the stat
     expect(text).toContain('one trade-off');
     expect(text).not.toContain('Options compared');
     expect(text).not.toContain("I've built a first");
+  });
+
+  /**
+   * ⭐⭐ RUNG 3c, EXERCISED. The option inventory is capped at four bullets, so
+   * options alone can never overrun the budget — this rung is reached by TWO
+   * unresolved limits in one brief, which is the real population it exists for
+   * (`MAX_DIRECTION_BULLETS` is 2). Without the rung the ladder falls straight
+   * to "drop the whole weighing block" and BOTH limits vanish, which is the
+   * silent loss that returning the line to the coaching section would otherwise
+   * have bought.
+   */
+  it('rung 3c — with two limits over budget, the options are shed and both limits stay', () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      id: `o${i + 3}`,
+      kind: 'option',
+      label: `Alternative pricing route number ${i + 1} with a deliberately long label`,
+    }));
+    const text = narrative({
+      graph: { nodes: [GOAL, OPTION_A, OPTION_B, ...many], edges: [] } as never,
+      strengthenItems: TWO_PRODUCER_DIRECTION_ITEMS,
+    });
+    // PRECONDITION PIN: this input really is over budget with the inventory in,
+    // so the assertions below are the ladder's doing and not a short fixture.
+    expect(text, 'the inventory must have been shed here').not.toContain(
+      'Options compared',
+    );
+    const section = coachingSection(text);
+    expect(section).not.toBeNull();
+    const bullets = section!.split('\n').slice(1);
+    expect(bullets).toHaveLength(2);
+    expect(bullets[0]).toContain('4%');
+    expect(bullets[1]).toContain('£320');
+    expect(text.indexOf("I've built a first")).toBe(0);
   });
 
   it('the word budget sheds the option inventory before it sheds the limit', () => {
