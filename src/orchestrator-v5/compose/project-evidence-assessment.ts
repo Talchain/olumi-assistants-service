@@ -26,8 +26,27 @@
  * truth — past the last gap it becomes a false statement about the user's
  * evidence, which is strictly worse than the refusal it replaces. Every branch
  * here therefore declines rather than shrinks: no array, no block; one
- * unlabellable gap, no block at all. Emitting a partial list is the one outcome
- * this module may never produce.
+ * unlabellable gap, no block at all.
+ *
+ * ⚠⚠ AND THE INVARIANT HERE WAS STATED TOO WIDELY. It read: "Emitting a partial
+ * list is the one outcome this module may never produce." That is FALSE, and a
+ * false invariant in a header is worse than none, because the next reader
+ * inherits it as settled.
+ *
+ * PLoT caps `evidence_gaps` at `evidence_gap_cap` (default 3) and leaves no
+ * residue, so a PARTIAL LIST CAN AND DOES ARRIVE HERE, and this module ships it.
+ * The true invariant is narrower and is the one worth keeping:
+ *
+ *     THIS MODULE NEVER TRUNCATES. What it receives it carries WHOLE, or it
+ *     declines entirely.
+ *
+ * ⭐ The safety argument survives, for a better reason than the original claim.
+ * A capped list cannot become a false ALL-CLEAR, because it is non-empty and the
+ * consumer renders it as "Evidence gaps" — an understatement, not a falsehood.
+ * And it cannot become a false COMPLETION claim either: "Evidence covered"
+ * requires a STATED CONFIDENCE PER GAP, and the shape below deliberately carries
+ * only an id and a label. The same allowlist-by-construction that keeps Tier-3
+ * numerics off the wire is what stops the producer's cap becoming a lie here.
  *
  * ⛔ NOT GATED ON DEBUG, DELIBERATELY. The Tier-3 deletion runs only when turn
  * debug is off. A projection that inherited that gating would be live exactly
