@@ -264,10 +264,12 @@ describe('O-1 F2 — span-based label↔quantity pairing', () => {
 // F12 — order symmetry + error discipline.
 // ---------------------------------------------------------------------------
 
-/** Extract the refused factor labels from the receipt ("I couldn't set X …"). */
+/** Extract the refused factor labels from the receipt ("I couldn't set X. …").
+ *  The reason used to be bolted on with an em dash; Paul's 2026-09-10 ruling
+ *  split it into its own sentence, so the label now runs to the full stop. */
 function refusedLabelsFrom(text: string): string[] {
   const out: string[] = [];
-  const re = /couldn'?t set ([^—.]+?) —/gi;
+  const re = /couldn'?t set ([^.]+?)\./gi;
   for (let m = re.exec(text); m !== null; m = re.exec(text)) {
     out.push(
       ...m[1]!
