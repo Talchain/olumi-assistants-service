@@ -106,6 +106,15 @@ const CODE_GUIDANCE = {
   DECISION_HAS_INCOMING: "the decision had incoming links, but nothing may precede it",
   OPTIONS_IDENTICAL:
     "two options carried the same intervention values, so there was nothing to compare",
+  // ⭐ BOTH WAYS OUT ARE NAMED, and that is deliberate. Attempt 2 is being told
+  // an option modelled no change; the honest repair depends on which the option
+  // actually is, and only the model can tell. Naming one route would push every
+  // deliberate do-nothing alternative into being restated as a change it is not
+  // — the fabrication direction, which is the worse of the two.
+  OPTION_NO_OP:
+    "an option set every factor it touches to the level that factor already has, " +
+    "so choosing it would change nothing — give it the level its own wording states, " +
+    "or, if it genuinely is the current arrangement, mark it `is_baseline: true`",
 } satisfies Partial<Record<ValidationErrorCode, string>>;
 
 /**

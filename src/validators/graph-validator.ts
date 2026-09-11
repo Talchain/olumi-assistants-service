@@ -14,6 +14,7 @@ import { isDirectedEdge } from "../schemas/graph.js";
 import { validatorNodePath } from "./violation-paths.js";
 import { isDecisionFreeShape } from "./decision-free-shape.js";
 import { factorHasExpressiblePrior } from "../cee/provenance/unquantified-factor.js";
+import { readIsBaseline, type BaselineFlagSurfaces } from "../cee/baseline-identity.js";
 import {
   type GraphValidationInput,
   type GraphValidationResult,
@@ -252,6 +253,62 @@ export function buildInterventionSignature(interventions: Record<string, number>
     .map(([factorId, value]) => `${factorId}:${value.toFixed(4)}`)
     .sort();
   return entries.join("|");
+}
+
+/**
+ * The resolution at which two model levels are THE SAME NUMBER.
+ *
+ * Half the 4-decimal quantum `buildInterventionSignature` canonicalises to,
+ * spelled numerically because this comparison must be SIGN-SYMMETRIC and
+ * `toFixed` is not: `(-0.00001).toFixed(4)` is `"-0.0000"` while
+ * `(0.00001).toFixed(4)` is `"0.0000"`. An invariant written with the same
+ * asymmetry as its neighbour is a guard agreeing with itself (trap 13d), and
+ * the intervention map is a bare `z.record(z.string(), z.number())`
+ * (`schemas/graph.ts:200`) — it admits negatives.
+ *
+ * ⚠ TWO DIFFERENT QUESTIONS AT ONE RESOLUTION, NOT ONE PREDICATE SHARED
+ * (trap 21). The signature above decides "are these two options the same as
+ * each other?"; this decides "is this option the same as the status quo?".
+ * They must not drift apart on what counts as the same number, so the
+ * agreement is ASSERTED in `__tests__/option-no-op-invariant.test.ts` rather
+ * than enforced by making one call the other.
+ */
+export const LEVEL_IDENTITY_EPSILON = 5e-5;
+
+/** Whether two model levels are indistinguishable at the identity resolution. */
+export function levelsAreIdentical(a: number, b: number): boolean {
+  return Math.abs(a - b) <= LEVEL_IDENTITY_EPSILON;
+}
+
+/**
+ * The level the ANALYSIS treats as "where this factor is today".
+ *
+ * ⭐ ONE READER, DERIVED FROM THE WIRE FIELD — not a second copy of the
+ * baseline. `FactorObservedState.value` is documented at `schemas/graph.ts:263`
+ * as *"The factor's current position on the model 0-1 scale (PLoT
+ * normalises)"*, and it is the field the run payload carries on the graph, so
+ * it is what the analysis compares an intervention against.
+ *
+ * `data.value` is the FALLBACK, not a rival: the projector's scale pass writes
+ * both (`projector.ts:3505-3506`) and `schema-v3.ts` rebuilds `observed_state`
+ * FROM `data`, so on a fully-projected graph they agree by construction. A
+ * graph that carries only one is still readable, and the precedence is pinned
+ * by a test rather than left to whichever happens to be present.
+ *
+ * Returns `undefined` when neither surface carries a finite number. That is
+ * NOT a no-op verdict: a factor the brief states no value for cannot prove an
+ * option changes nothing.
+ */
+export function readFactorBaselineLevel(node: NodeT): number | undefined {
+  const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
+  if (typeof observed?.value === "number" && Number.isFinite(observed.value)) {
+    return observed.value;
+  }
+  const data = node.data as { value?: unknown } | undefined;
+  if (typeof data?.value === "number" && Number.isFinite(data.value)) {
+    return data.value;
+  }
+  return undefined;
 }
 
 /**
@@ -966,6 +1023,102 @@ function validateSemantic(
         severity: "error",
         message: `Options have identical intervention signatures: ${optionIds.join(", ")}`,
         context: { optionIds, signature },
+      });
+    }
+  }
+
+  // ⭐⭐⭐ OPTION_NO_OP: a non-baseline option must actually change something.
+  //
+  // ── THE MEASURED DEFECT THIS CLOSES ───────────────────────────────────────
+  // Paul's session, 11 Sep 2026 (`olumi-debug-5b41f0eb-20260911.json`). The
+  // brief asked whether to raise the Pro plan price "from £49 to £59". Three
+  // options were drafted against a factor whose baseline is 0.49, and the
+  // first — labelled with the question sentence verbatim — carried
+  // `sets_to` 0.49. It modelled changing nothing. Raising the price hurts in
+  // that model, so the do-nothing arm had the least downside: ISL returned
+  // −0.0226 / −0.1358 / −0.0792, the user was shown 73.4% / 25.1% / 1.5%, and
+  // the assistant said *"increase the Pro plan price from £49 to £59 …
+  // currently leads"*. The product recommended raising the price while
+  // modelling not raising it, at `warnings_count: 0`.
+  //
+  // ── WRITTEN AGAINST THE SPEC, NOT AGAINST THE FAILURE MODE (trap 13d) ─────
+  // The phrasing that produced it is where we came in, not the property.
+  // Nothing here reads a label, a verb or a number in a sentence: a predicate
+  // over the wording would have to be right about natural language in both
+  // directions, and four consecutive rounds on one such predicate have already
+  // proved this estate cannot bound one (trap 22f). What an option DOES is
+  // decidable, so that is what is decided.
+  //
+  // ── NAMED APART FROM `OPTIONS_IDENTICAL` (trap 21) ────────────────────────
+  // That code answers *"are these two options the same as each other?"*; this
+  // answers *"is this option the same as the status quo?"*. Paul's graph
+  // raised neither: its three options were pairwise distinct, and the defect
+  // was invisible to a predicate that only ever compares options to siblings.
+  // Reconciling the two would lose exactly the case that shipped.
+  //
+  // ── WHY REFUSAL, AND NOT "DROP IT" OR "MARK IT THE BASELINE" ──────────────
+  // Dropping asserts *this alternative does not matter*; marking it baseline
+  // asserts *these words describe the status quo*. Both put words in the
+  // user's mouth about a sentence the user wrote, and this file's siblings
+  // refuse rather than guess for exactly that reason (`projector.ts:2250`
+  // *"DO NOT GUESS A DIRECTION. ASK"*; `objective-label.ts`'s refusal set;
+  // `utils/amount-range.ts`'s two refusals).
+  //
+  // ⭐ AND MARKING IT BASELINE WAS CHECKED AGAINST THE HARM, NOT REASONED
+  // ABOUT: it does not remove it. `analysable-option-gate.ts` HOLDS an
+  // `is_baseline` option at its factors' observed values and still submits it,
+  // so the same arm would still have been compared and still have won — now
+  // under a flag saying "current arrangement" while its label says "increase
+  // the price". A remedy that relabels the lie is not a remedy.
+  //
+  // Refusal claims only what is true: we could not build a model whose options
+  // differ from the status quo. It is not a dead end — the enforcement gate
+  // this feeds carries `retryable: true` with a recovery envelope, and
+  // `unified-pipeline/retry-directive.ts` tells attempt 2 both ways out.
+  for (const option of options) {
+    const data = option.data as OptionDataT | undefined;
+    const interventions = data?.interventions;
+    // No stated magnitude is a DIFFERENT question, with different owners
+    // (NO_EFFECT_PATH, OPTIONS_IDENTICAL). An absent map is not a no-op.
+    if (!interventions) continue;
+    const entries = Object.entries(interventions);
+    if (entries.length === 0) continue;
+
+    // The status quo is ALLOWED to equal the status quo. Read through the one
+    // authority for the two surfaces this flag can arrive on — the draft model
+    // emits them disagreeing in 5 of 30 measured samples, and a second copy of
+    // the reconciliation rule here is how the same option becomes a baseline on
+    // one code path and not on another (`cee/baseline-identity.ts`).
+    if (readIsBaseline(option as BaselineFlagSurfaces) === true) continue;
+
+    const matchedFactorIds: string[] = [];
+    let changesNothing = true;
+    for (const [factorId, level] of entries) {
+      const target = nodeMap.byId.get(factorId);
+      // A dangling or non-factor reference is INVALID_INTERVENTION_REF's
+      // question, raised below. Not ours, and not evidence of a no-op.
+      if (!target || target.kind !== "factor") { changesNothing = false; break; }
+      if (typeof level !== "number" || !Number.isFinite(level)) { changesNothing = false; break; }
+      const baseline = readFactorBaselineLevel(target);
+      // A factor the brief states no value for cannot prove an option changes
+      // nothing. Refusing to accuse is the safe direction here: a false
+      // OPTION_NO_OP withdraws a real alternative, which is the worse harm of
+      // the two this one predicate stands between (trap 22b).
+      if (baseline === undefined) { changesNothing = false; break; }
+      if (!levelsAreIdentical(level, baseline)) { changesNothing = false; break; }
+      matchedFactorIds.push(factorId);
+    }
+
+    if (changesNothing) {
+      issues.push({
+        code: "OPTION_NO_OP",
+        severity: "error",
+        message:
+          `Option "${option.id}" changes nothing: every factor it intervenes on is already at that level`,
+        path: `${validatorNodePath(option.id)}.data.interventions`,
+        // Ids only — no magnitudes, per the same rule `schema-v3.ts:1095`
+        // states for its own diagnostic.
+        context: { optionId: option.id, factorIds: matchedFactorIds },
       });
     }
   }
