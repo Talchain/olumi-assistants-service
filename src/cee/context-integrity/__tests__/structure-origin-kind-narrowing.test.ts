@@ -151,6 +151,65 @@ describe('resolveElement — kind narrowing may confirm a winner, never create o
   });
 
   /**
+   * ⭐ RED-KIND-3 — THE SECOND DISAGREEMENT SHAPE, AND IT WAS FOUND BY A
+   * SURVIVING MUTANT RATHER THAN BY INSPECTION.
+   *
+   * The witnessed case is the shape where the unnarrowed read has NO strict
+   * maximum (the factor TIES the option), so a containment that only checked
+   * `unnarrowed === null` caught it — and a mutant dropping the identity arm
+   * survived the whole corpus above, 5/5 green.
+   *
+   * That survivor is not equivalent, and this is the fixture that settles it
+   * rather than asserting it (trap 13c). Here the factor wins OUTRIGHT over the
+   * whole graph (3 tokens to the best option's 1), the kind filter excludes it,
+   * and a DIFFERENT node wins among the survivors. Both winners exist, both are
+   * strict maxima, and they disagree — so it is the identity arm, not the null
+   * arm, that must decline.
+   *
+   * Same defect class as the witness, reached by the other branch: the product
+   * would state provenance about an element the user did not ask about.
+   */
+  it('RED-KIND-3: declines when a node winning outright is excluded and another wins the narrowed set', () => {
+    const factor = {
+      id: 'n-factor-headcount-outright',
+      kind: 'factor',
+      label: 'Platform Team Headcount',
+      provenance: 'from_brief',
+      source_quote: 'the platform team is six',
+    };
+    const narrowedWinner = {
+      id: 'n-option-platform-rollout',
+      kind: 'option',
+      label: 'Platform Rollout',
+      provenance: 'ai_inferred',
+    };
+    const graph = {
+      nodes: [
+        factor,
+        narrowedWinner,
+        { id: 'n-option-sales-push', kind: 'option', label: 'Sales Push', provenance: 'ai_inferred' },
+      ],
+      edges: [],
+    };
+    const message =
+      'Where did the platform team headcount come from, and which of these options is affected?';
+
+    // PRECONDITION PIN: the factor is the outright winner of the WHOLE graph on
+    // this message. Without the option nodes there is nothing to narrow to, and
+    // it resolves and answers. So the decline below is the filter's doing.
+    expect(tryStructureOriginAnswer(message, { nodes: [factor], edges: [] })).toBe(
+      `"${factor.label}" came from your brief, not from me. You wrote: "${factor.source_quote}".`,
+    );
+
+    const answer = tryStructureOriginAnswer(message, graph);
+
+    expect(answer).toBeNull();
+    expect(answer).not.toBe(
+      `"${narrowedWinner.label}" was my suggestion, not something you wrote.`,
+    );
+  });
+
+  /**
    * ⭐ THE OPPOSITE-DIRECTION TWIN (trap 22b).
    *
    * A containment that declines on everything is not a fix, it is a deletion.
