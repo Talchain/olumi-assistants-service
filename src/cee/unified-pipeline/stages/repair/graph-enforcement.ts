@@ -38,7 +38,7 @@ import type { EdgeFormat } from "../../utils/edge-format.js";
 import { detectEdgeFormat, patchEdgeNumeric } from "../../utils/edge-format.js";
 import { config } from "../../../../config/index.js";
 import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
-import type { ValidatorPhase } from "../../../../validators/graph-validator.types.js";
+import type { ValidationErrorCode, ValidatorPhase } from "../../../../validators/graph-validator.types.js";
 import { CANONICAL_EDGE } from "../../../../validators/graph-validator.types.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
@@ -84,6 +84,139 @@ export function isEnforcementBlockedResult(
   const details = b.details;
   if (details === null || typeof details !== "object" || Array.isArray(details)) return false;
   return (details as Record<string, unknown>).last_phase === ENFORCEMENT_BLOCK_LAST_PHASE;
+}
+
+// ---------------------------------------------------------------------------
+// WHICH blocking code carried the block (2026-09-11, OPTION_NO_OP honest-copy)
+// ---------------------------------------------------------------------------
+//
+// ⚠ THE BLOCK SIGNATURE ABOVE IS DELIBERATELY CODE-BLIND, AND THAT IS STILL
+// RIGHT. Nothing below narrows it: the gate fires, and funds a retry, for
+// whatever the post-enforcement validator classifies as blocking — present or
+// future — exactly as before. What is added here is a SECOND, SEPARATE
+// question, asked only of an already-blocked result:
+//
+//   the signature answers  "should the server re-draft this?"
+//   this answers           "what do we tell the user went wrong?"
+//
+// Two questions, named apart rather than reconciled (trap 21) — and conflating
+// them is precisely the defect this closes. `OPTION_NO_OP` was folded into the
+// one post-enforcement class, so it inherited that class's CONNECTIVITY
+// sentence. Paul hit it live on 2026-09-11: a brief that stated its outcome
+// explicitly and named how each consideration bears on it was told to state its
+// outcome explicitly, for a failure that had nothing to do with connectivity.
+// The comment on `OPTIONS_IDENTICAL_RETRY_EXHAUSTED_SUGGESTION` in
+// draft-auto-retry.ts already forbids exactly this reuse, in terms; this is the
+// same rule applied to the class that was left carrying the lie.
+//
+// The reading is per-CODE, not per-class, because that is what the estate
+// already does one file over: `retry-directive.ts` distinguishes OPTION_NO_OP
+// from the topology codes INSIDE this same class, off this same codes-only
+// mirror. A parallel class would draw one distinction two different ways in two
+// adjacent files, and would force the class predicate to read a hand-list of
+// validator codes — which the block above exists to refuse.
+
+/** The one blocking code whose honest user-facing story is NOT connectivity.
+ *  `satisfies ValidationErrorCode` is the guard: if the validator renames or
+ *  drops the code, this fails TYPECHECK rather than silently ceasing to match
+ *  (the same device `retry-directive.ts` uses for its gloss table). */
+export const OPTION_NO_OP_VALIDATION_CODE = "OPTION_NO_OP" satisfies ValidationErrorCode;
+
+/**
+ * Read the producer's own codes-only mirror (`details.validation_error_codes`)
+ * off an emitted block body. Empty for an absent or malformed field — a copy
+ * decision is never worth a throw on the recovery path.
+ *
+ * ⚠ `retry-directive.ts` carries a private twin of this reader. It is NOT
+ * collapsed onto this export here on purpose: a concurrent P0 lane owns that
+ * file this session, and colliding with it would cost more than the duplicate.
+ * Collapsing the two is a named follow-up, not an oversight.
+ */
+export function readEnforcementBlockCodes(body: unknown): string[] {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return [];
+  const details = (body as Record<string, unknown>).details;
+  if (details === null || typeof details !== "object" || Array.isArray(details)) return [];
+  const codes = (details as Record<string, unknown>).validation_error_codes;
+  if (!Array.isArray(codes)) return [];
+  return codes.filter((c): c is string => typeof c === "string" && c.length > 0);
+}
+
+/**
+ * Was the WHOLE blocking finding `OPTION_NO_OP`?
+ *
+ * ⚠ "EVERY code", not "any code", and the asymmetry is the point. A block that
+ * ALSO carries a topology code genuinely had a topology failure, so the
+ * connectivity sentence is true of it and keeps it. Only a block whose entire
+ * finding is the no-op gets the no-op sentence. That is the conservative
+ * direction for THIS predicate: a false OPTION_NO_OP sentence would deny a
+ * connectivity failure that really happened, which is the worse of the two
+ * harms it stands between (trap 22b) — and it is the same direction the
+ * validator itself takes when it refuses to accuse without a baseline.
+ *
+ * Empty is false: no codes is not evidence of a no-op, and the pre-existing
+ * copy is what such a block already ships.
+ */
+export function isOptionNoOpOnlyBlock(codes: readonly string[]): boolean {
+  return codes.length > 0 && codes.every((c) => c === OPTION_NO_OP_VALIDATION_CODE);
+}
+
+/**
+ * Single-attempt recovery copy for a post-enforcement block.
+ *
+ * ⚠ NO FREQUENCY CLAIM IN THE `OPTION_NO_OP` VARIANT, and that is deliberate.
+ * The connectivity copy's "usually transient" / "usually succeeds" is earned:
+ * BASELINE measured 3/5 same-brief recoveries for that class. For OPTION_NO_OP
+ * — a code that first fired on 2026-09-11 — we have NO measured recovery rate
+ * at all, so asserting one would inherit a statistic from a population this
+ * user is not in. The variant therefore keeps the LEVER ("trying again may…")
+ * and drops the RATE, exactly as `RETRY_UNAFFORDABLE_SUGGESTION` does for its
+ * own unmeasured arm.
+ *
+ * ⚠ AND IT DESCRIBES WHAT WAS OBSERVED, NOT WHAT THE USER THOUGHT. A separate
+ * lane is repairing a data defect that binds a factor's recorded current level
+ * from the wrong slot, which can make a genuine option LOOK like a no-op. Until
+ * that lands, this copy may be describing our own data error. "…values that
+ * match the ones already recorded…" stays true in both worlds; "your option
+ * changes nothing" would not.
+ *
+ * Both ways out are named, for the reason `retry-directive.ts:109-113` gives:
+ * only the model can tell a mis-drafted alternative from a deliberate
+ * do-nothing arm, and naming one route pushes every genuine do-nothing option
+ * into being restated as a change it is not — the fabrication direction.
+ *
+ * Domain-neutral by ruling (2026-07-24, draft-honesty lane): name the KIND of
+ * differentiator, never invent a domain. No em dashes in product content
+ * (Paul, 2026-09-10).
+ */
+const CONNECTIVITY_BLOCK_RECOVERY = {
+  // No "be more specific" / "simplify" blame line: the brief is not
+  // the fault, and a vaguer brief makes the model INFER more, which is
+  // the cruel inversion documented in the 2026-07-23 firefight.
+  suggestion:
+    "Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.",
+  hints: [
+    "Retrying the same brief usually succeeds",
+    "If it keeps happening, state the outcome you are optimising for explicitly",
+    "Naming how each consideration affects that outcome helps the model connect them",
+  ],
+} as const;
+
+const OPTION_NO_OP_BLOCK_RECOVERY = {
+  suggestion:
+    "One of your options was drafted with values that match the ones already recorded for the factors it acts on, so it modelled no change and there was nothing to compare it against. Trying again may draft it differently.",
+  hints: [
+    "Say what that option changes: cost, time, scope, capacity or risk, whichever dimension the decision turns on",
+    "Or, if that option is meant to be the current arrangement, say so, and give the others something that differs from it",
+  ],
+} as const;
+
+/** The honest sentence for the codes this block actually carried. */
+export function selectEnforcementBlockRecovery(
+  codes: readonly string[],
+): { suggestion: string; hints: readonly string[] } {
+  return isOptionNoOpOnlyBlock(codes)
+    ? OPTION_NO_OP_BLOCK_RECOVERY
+    : CONNECTIVITY_BLOCK_RECOVERY;
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +804,10 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
         codes: errorCodes,
       }, `Enforcement blocked packaging: ${postValidationErrorCount} topology error(s) remain`);
 
+      // The user-facing sentence is chosen from the codes that actually
+      // blocked, not from the class alone. See selectEnforcementBlockRecovery.
+      const blockRecovery = selectEnforcementBlockRecovery(errorCodes);
+
       const errorBody = buildCeeErrorResponse(
         ENFORCEMENT_BLOCK_ERROR_CODE,
         `Graph failed post-enforcement validation (${postValidationErrorCount} topology error(s))`,
@@ -687,16 +824,8 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
           // is for the truncation-400 (see unified-pipeline/index.ts).
           retryable: true,
           recovery: {
-            // No "be more specific" / "simplify" blame line: the brief is not
-            // the fault, and a vaguer brief makes the model INFER more, which is
-            // the cruel inversion documented in the 2026-07-23 firefight.
-            suggestion:
-              "Part of the drafted decision model was left unconnected to your goal, so it was rejected instead of being shown to you — this is usually transient. Try again.",
-            hints: [
-              "Retrying the same brief usually succeeds",
-              "If it keeps happening, state the outcome you are optimising for explicitly",
-              "Naming how each consideration affects that outcome helps the model connect them",
-            ],
+            suggestion: blockRecovery.suggestion,
+            hints: [...blockRecovery.hints],
           },
           details: {
             validation_errors: revalidation.errors.map((e) => ({
