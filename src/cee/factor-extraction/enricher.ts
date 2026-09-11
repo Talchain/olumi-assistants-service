@@ -179,13 +179,87 @@ function computeNormalisationCap(rawValue: number): number {
  */
 function computeExtractedFactorCap(factor: {
   readonly value: number;
+  readonly baseline?: number;
   readonly rangeMax?: number;
 }): number {
+  // ⭐ THE STATED STARTING LEVEL IS A MAGNITUDE THE USER WROTE, so the ceiling
+  // covers it — this header's own rule ("the scale has to cover what the user
+  // wrote"), applied to the member it was missing rather than restated.
+  //
+  // It matters in ONE direction and only there: a DECREASE puts the stated
+  // level ABOVE the target. Measured at pristine, "cut the unit cost from £150
+  // to £90" yielded `{raw_value: 90, baseline: 150, cap: 100}` — so once the
+  // node carries its stated £150 it normalises to 1.5 and sits off the top of
+  // its own scale, which is the "baseline ABOVE its own cap" defect
+  // `index.ts:1075` already names on the goal path.
+  //
+  // An INCREASE is unaffected (the target is already the larger), and a factor
+  // with no stated baseline is untouched — `Math.max` over an absent member
+  // cannot move a ceiling.
+  const stated =
+    typeof factor.baseline === "number" && Number.isFinite(factor.baseline)
+      ? factor.baseline
+      : factor.value;
+  const withStated = Math.max(factor.value, stated);
   const ceiling =
     typeof factor.rangeMax === "number" && Number.isFinite(factor.rangeMax)
-      ? Math.max(factor.rangeMax, factor.value)
-      : factor.value;
+      ? Math.max(factor.rangeMax, withStated)
+      : withStated;
   return computeNormalisationCap(ceiling);
+}
+
+/**
+ * ⭐⭐ THE RAW MAGNITUDE THE FACTOR IS AT TODAY — the ONE answer, for all four
+ * of this file's node-construction sites.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
+ * A `from X to Y` brief is extracted as `{value: Y, baseline: X}`
+ * (`index.ts:2203/2227/2275`), so `value` holds the PROPOSED level — the
+ * type's own comment calls it *"Current or proposed value"*, two questions
+ * under one name (trap 21). Writing it into the node's current-level fields
+ * shows the user their target as the present state of their business: Paul's
+ * *"increase the Pro plan price from £49 to £59"* rendered as **£49 → shown as
+ * £59** on 5 of 6 drafts, measured on the deployed build 11 Sep.
+ *
+ * ── WHY THIS IS THE WRITER'S DEFECT AND NOT THE DISPLAY'S ──────────────────
+ * `synthesiseDisplayValue` documents itself as rendering *"a factor's current
+ * value"* and reads `raw_value` first; the records projector — the OTHER
+ * writer of the same pair — puts the CURRENT level there
+ * (`projector.ts:3503`), saying that is *"what keeps '£50,000' true on
+ * screen"*. Two writers of one pair disagreed about which level it holds. The
+ * display renders faithfully what it is given; this makes what it is given
+ * true, so every reader (display, the edit path's delta operators, the
+ * analysis, `OPTION_NO_OP`) is corrected at the definition site instead of
+ * each consumer growing a private opinion (trap 12).
+ *
+ * ── THE SCALE, AND WHY NO FRAME IS RESOLVED HERE ───────────────────────────
+ * This is the PRODUCER: `factor.value` and `factor.baseline` arrive from one
+ * regex match, in ONE unit system, both raw or both already-fractional. So
+ * there is nothing to reconcile and no divisor to choose — the number is
+ * returned as-is and the caller applies the SAME `cap` it was already about to
+ * apply to `factor.value`. `resolveScaleFrame` exists to RECOVER a frame
+ * downstream from a `{value, raw_value}` pair; reaching for it here would be
+ * the second opinion, not the reuse. What IS asserted, in
+ * `factor-current-level-is-the-stated-baseline.test.ts`, is that the pair this
+ * writes is one `resolveScaleFrame` recovers the same frame from — so #1453's
+ * `readFactorBaselineLevel` and `data.value` give ONE answer and the false
+ * `OPTION_NO_OP` cannot return.
+ *
+ * ── THE EQUAL CASE FALLS THROUGH, DELIBERATELY ─────────────────────────────
+ * Requiring the two to DIFFER keeps this to the case where `baseline` states
+ * something `value` does not, matching the precedence `graph-validator.ts`
+ * settled in #1453. A factor with no stated baseline — the majority path — is
+ * returned untouched.
+ */
+function statedCurrentRaw(factor: {
+  readonly value: number;
+  readonly baseline?: number;
+}): number {
+  return typeof factor.baseline === "number" &&
+    Number.isFinite(factor.baseline) &&
+    factor.baseline !== factor.value
+    ? factor.baseline
+    : factor.value;
 }
 
 /**
@@ -624,7 +698,10 @@ export function enrichGraphWithFactors(
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
           const factorData: FactorDataT = {
-            value: factor.value,
+            // ⭐ Where the factor IS, not where the brief proposes to move it.
+            // This writer stores no cap, so the stated level stays in its own
+            // units — `statedCurrentRaw`'s header has the derivation.
+            value: statedCurrentRaw(factor),
             baseline: factor.baseline,
             unit: factor.unit,
             // Include extraction metadata for value_std derivation
@@ -658,7 +735,8 @@ export function enrichGraphWithFactors(
     // Create new factor node
     const nodeId = generateFactorId(factor.label, factorsAdded);
     const factorData: FactorDataT = {
-      value: factor.value,
+      // ⭐ Where the factor IS — see `statedCurrentRaw`.
+      value: statedCurrentRaw(factor),
       baseline: factor.baseline,
       unit: factor.unit,
       // Include extraction metadata for value_std derivation
@@ -1293,16 +1371,21 @@ export async function enrichGraphWithFactorsAsync(
         }
         const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
         if (nodeIndex >= 0) {
-          // Apply normalisation for large non-percentage values
-          let normalizedValue = factor.value;
+          // Apply normalisation for large non-percentage values.
+          // ⭐ The level stored is where the factor IS, not where the brief
+          // proposes to move it (`statedCurrentRaw`). The cap is unchanged in
+          // kind and still covers every magnitude the user wrote, so the
+          // option's own target stays inside the scale.
+          const currentRaw = statedCurrentRaw(factor);
+          let normalizedValue = currentRaw;
           let rawValue: number | undefined;
           let cap: number | undefined;
 
-          if (factor.unit !== "%" && factor.value > 1) {
+          if (factor.unit !== "%" && currentRaw > 1) {
             // Large absolute value - normalise using cap
             cap = computeExtractedFactorCap(factor);
-            rawValue = factor.value;
-            normalizedValue = factor.value / cap;
+            rawValue = currentRaw;
+            normalizedValue = currentRaw / cap;
           }
 
           const inferredFactorType = inferFactorType(factor.unit, factor.label);
@@ -1379,26 +1462,29 @@ export async function enrichGraphWithFactorsAsync(
       continue;
     }
 
-    // Step 2: Apply normalisation for large non-percentage values
-    let normalizedValue = factor.value;
+    // Step 2: Apply normalisation for large non-percentage values.
+    // ⭐ See `statedCurrentRaw`: the node carries where the factor IS, and the
+    // brief's target reaches the analysis on the OPTION's intervention.
+    const currentRaw = statedCurrentRaw(factor);
+    let normalizedValue = currentRaw;
     let rawValue: number | undefined;
     let cap: number | undefined;
 
-    if (factor.unit !== "%" && factor.value > 1) {
+    if (factor.unit !== "%" && currentRaw > 1) {
       // Large absolute value - normalise using cap
       cap = computeExtractedFactorCap(factor);
-      rawValue = factor.value;
-      normalizedValue = factor.value / cap;
+      rawValue = currentRaw;
+      normalizedValue = currentRaw / cap;
 
       log.debug(
         {
           label: factor.label,
-          rawValue: factor.value,
+          rawValue: currentRaw,
           cap,
           normalizedValue,
           event: "cee.factor_enrichment.normalised",
         },
-        `Normalised factor value: ${factor.value} / ${cap} = ${normalizedValue}`
+        `Normalised factor value: ${currentRaw} / ${cap} = ${normalizedValue}`
       );
     }
 
