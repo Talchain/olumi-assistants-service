@@ -30,6 +30,10 @@ import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCap,
 } from "../../utils/goal-threshold-cap.js";
+import {
+  deriveGoalTargetFromLabel,
+  type GoalLabelTargetRefusal,
+} from "./goal-label-target.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -877,12 +881,26 @@ function qualifyExtractedFactors(
 }
 
 /**
- * THE ONE mint of `goal_threshold` on the draft path.
+ * THE ENRICHER'S mint of `goal_threshold` on the draft path.
+ *
+ * ⚠⚠ IT IS NOT THE ONLY ONE, AND AN EARLIER VERSION OF THIS DOC SAID IT WAS.
+ * `applyStatedGoalTarget` (`cee/draft/records/projector.ts:1312`) mints the
+ * same five fields from the model's STATED GOAL RECORD. That sibling read as
+ * absent because `stripModelAuthoredGoalThreshold` deleted its output before
+ * this function ever saw it — and **#1339 removed that strip on the Anthropic
+ * path**, so on that provider the projector now mints FIRST and this function
+ * is the fallback. The strip is deliberately retained on the OpenAI path
+ * (`adapters/llm/openai.ts`), where this remains the only surviving mint.
+ *
+ * The false premise was not a careless sentence: it was derived by a
+ * SINGLE-STAGE measurement (running `extractFactors` over the brief), which is
+ * structurally incapable of seeing a mint two stages upstream — CLAUDE.md trap
+ * 16-inverse, reachability within one stage is not reachability in the system.
  *
  * Mutates `enrichedGraph.nodes[goalNodeIndex]` in place (the caller owns the
  * clone) and returns whether it minted. Returns `false` — writing nothing —
- * when the goal node already carries a threshold, which is the pre-existing
- * "first writer wins" rule.
+ * when the goal node already carries an upstream target, which is the
+ * pre-existing "first writer wins" rule.
  *
  * ROADMAP 2.281 — extracted verbatim from the enrichment loop so the
  * factor-skip path can reach it. Every line of arithmetic and every stamped
@@ -895,7 +913,34 @@ function applyGoalTargetRedirect(
   collector?: CorrectionCollector,
 ): boolean {
   const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
-  if (currentGoalNode.goal_threshold !== undefined) return false;
+  // ⭐⭐ THE DEFERRAL TESTS THE FIELD AN UPSTREAM MINT *ALWAYS* WRITES.
+  //
+  // `applyStatedGoalTarget` writes `goal_threshold_raw` UNCONDITIONALLY but
+  // writes `goal_threshold`, `_cap` and `_frame` only when
+  // `resolveGoalThresholdCap` returns non-null — and that resolver returns
+  // `null` for any target that is not strictly positive. So a user who states a
+  // target of ZERO ("cut churn to zero", "break even") leaves a PARTIAL quad:
+  // raw and unit present, `goal_threshold` absent.
+  //
+  // Guarding on `goal_threshold` alone let that partial quad through, and this
+  // function then overwrote the user's stated zero with the CURRENT level
+  // stated in the same brief — measured, `goal_threshold_raw: 0` → `4`. A wrong
+  // threshold is a confident lie and an absent one is a gap; a lie outranks a
+  // gap, so the guard tests the conservation field rather than the convenient
+  // one. Written against the SPEC ("an upstream mint is deferred to"), not
+  // against the zero-target case that exposed it.
+  //
+  // ⚠ IT LIVES HERE, NOT IN THE LABEL ROUTE, DELIBERATELY. Both routes pass
+  // through this one point; gating only the caller would leave the factor route
+  // committing the identical harm through a door nothing watches (trap 22b).
+  // The behavioural delta is confined to the partial quad — a FULL upstream
+  // quad already returned false on the first conjunct.
+  if (
+    currentGoalNode.goal_threshold !== undefined ||
+    currentGoalNode.goal_threshold_raw !== undefined
+  ) {
+    return false;
+  }
 
   // ⭐⭐ AN UPSTREAM MINT THAT RESOLVED NO CAP STILL WROTE THE USER'S TARGET.
   //
@@ -1053,6 +1098,115 @@ function applyGoalTargetRedirect(
 }
 
 /**
+ * THE FALLBACK ROUTE INTO THE SAME MINT — the goal node's own label.
+ *
+ * ⭐ WHY A SECOND ROUTE EXISTS AT ALL. `isTargetGoalLabel` decides whether the
+ * user's stated target becomes typed data, and it decides it by asking whether
+ * a REGEX-INFERRED FACTOR LABEL contains one of four substrings. MEASURED at
+ * `f4c8f501` against the 3 Sep founder brief: 21 extracted factors, ZERO
+ * carrying any of the four words, and the £30,000 target extracted under the
+ * label `"Customer Count"`. The mint was not narrow for that brief — it was
+ * UNREACHABLE, and the target shipped as label prose with all four typed fields
+ * null. See `goal-label-target.ts` for the bundle reference and the argument.
+ *
+ * ⚠ IT IS A FALLBACK, NOT A SECOND AUTHOR. It runs only where the factor route
+ * minted nothing, and `applyGoalTargetRedirect` still returns false on a node
+ * that already carries an upstream target — `goal_threshold` OR the
+ * `goal_threshold_raw` that the projector's `applyStatedGoalTarget` always
+ * writes, including for the PARTIAL quad a stated target of zero leaves behind.
+ * So FIRST WRITER WINS is untouched, and it now holds against the sibling mint
+ * as well as against the factor route.
+ *
+ * ⚠ AND IT DOES NOT REOPEN #789. The number must be attested in the user's own
+ * brief before it is minted; the label only says WHICH quantity is the target.
+ *
+ * Returns the goal node id when it minted, otherwise `undefined`, and logs the
+ * REFUSAL REASON either way — a threshold that is absent because the figure was
+ * a model invention must be distinguishable in the logs from a scanner that
+ * stopped matching (CLAUDE.md trap 12).
+ */
+function mintGoalTargetFromGoalLabel(
+  enrichedGraph: GraphT,
+  goalNodeIndex: number,
+  brief: string,
+  collector?: CorrectionCollector,
+): string | undefined {
+  const goalNode = enrichedGraph.nodes[goalNodeIndex];
+  if (!goalNode) return undefined;
+
+  const derived = deriveGoalTargetFromLabel(goalNode.label, brief);
+  if (!derived.ok) {
+    logGoalLabelRefusal(goalNode.id, derived.refusal);
+    return undefined;
+  }
+
+  // A SYNTHESISED `ExtractedFactor`, so the label route and the factor route
+  // share one piece of arithmetic and one cap doctrine. Confidence is 1 because
+  // nothing here is inferred: the quantity was read deterministically from the
+  // label and matched deterministically in the brief.
+  const minted = applyGoalTargetRedirect(
+    enrichedGraph,
+    goalNodeIndex,
+    {
+      label: goalNode.label ?? "",
+      value: derived.target.value,
+      unit: derived.target.unit,
+      confidence: 1,
+      matchedText: derived.target.matchedText,
+      extractionType: "explicit",
+    },
+    collector,
+  );
+
+  if (!minted) {
+    // ⚠ THE ONE SILENT NON-MINT PATH, NOW LOUD. `derive` succeeded and
+    // `applyGoalTargetRedirect` still declined — first-writer-wins, a threshold
+    // is already on the node. This branch logged NOTHING, which made both
+    // "logs the REFUSAL REASON either way" above and "Fail loud on every
+    // non-mint, with the reason, never a silence" below false as written. It is
+    // a DIFFERENT reason from the derive-side refusals — the figure was read and
+    // attested, and the mint was refused downstream — so it carries its own
+    // name rather than being folded into `GoalLabelTargetRefusal`, which is the
+    // deriver's vocabulary and answers a different question (trap 21).
+    log.info(
+      {
+        event: "cee.factor_enrichment.goal_threshold_label_not_minted",
+        goalNodeId: goalNode.id,
+        reason: "redirect_declined_threshold_already_set",
+        label_span: derived.target.matchedText,
+        brief_span: derived.target.briefQuote,
+      },
+      "Goal target derived from the label but not minted: a threshold was already set",
+    );
+    return undefined;
+  }
+
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_threshold_from_label",
+      goalNodeId: goalNode.id,
+      label_span: derived.target.matchedText,
+      brief_span: derived.target.briefQuote,
+      unit: derived.target.unit,
+    },
+    "Goal target minted from the goal label, attested in the brief",
+  );
+  return enrichedGraph.nodes[goalNodeIndex].id;
+}
+
+/** Fail loud on every non-mint, with the reason, never a silence. */
+function logGoalLabelRefusal(goalNodeId: string, refusal: GoalLabelTargetRefusal): void {
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_threshold_label_refused",
+      goalNodeId,
+      refusal,
+    },
+    `Goal target not minted from the goal label: ${refusal}`,
+  );
+}
+
+/**
  * The goal-target redirect, run WITHOUT the factor side.
  *
  * ROADMAP 2.281 — the repair. `allOptionsHaveInterventions` is a sound reason
@@ -1083,7 +1237,6 @@ function mintGoalTargetOnly(
   const target = qualifyExtractedFactors(extractFactors(brief), minConfidence).find((f) =>
     isTargetGoalLabel(f.label),
   );
-  if (!target) return { graph, mintedGoalId: undefined };
 
   // Clone before writing — the skip path returns the caller's own graph object
   // when nothing is minted, and must not mutate it when something is.
@@ -1093,9 +1246,20 @@ function mintGoalTargetOnly(
     edges: [...graph.edges],
   };
 
-  const minted = applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector);
-  return minted
-    ? { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id }
+  // ⚠ NO EARLY RETURN ON `!target` ANY MORE. That return is what made the mint
+  // unreachable for the 3 Sep founder brief: `isTargetGoalLabel` matched none
+  // of its 21 extracted factor labels, so the skip path gave up before ever
+  // looking at the goal node — whose label carried the target in plain sight.
+  const minted = target
+    ? applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector)
+    : false;
+  if (minted) {
+    return { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id };
+  }
+
+  const fromLabel = mintGoalTargetFromGoalLabel(enrichedGraph, goalNodeIndex, brief, collector);
+  return fromLabel !== undefined
+    ? { graph: enrichedGraph, mintedGoalId: fromLabel }
     : { graph, mintedGoalId: undefined };
 }
 
@@ -1497,6 +1661,19 @@ export async function enrichGraphWithFactorsAsync(
     }
 
     factorsAdded++;
+  }
+
+  // ── THE FALLBACK: the goal node's own label ──────────────────────────────
+  // Runs only when the loop above minted nothing, so the factor route keeps
+  // precedence and FIRST WRITER WINS is unchanged. See
+  // `mintGoalTargetFromGoalLabel` for why the loop can miss an ordinary
+  // quantified target entirely.
+  if (goalThresholdsSet === 0 && goalNode && goalNodeIndex >= 0) {
+    const fromLabel = mintGoalTargetFromGoalLabel(enrichedGraph, goalNodeIndex, brief, collector);
+    if (fromLabel !== undefined) {
+      goalThresholdsSet++;
+      goalThresholdsMinted.push(fromLabel);
+    }
   }
 
   // Emit telemetry
