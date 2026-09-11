@@ -41,6 +41,7 @@ import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
 import type { ValidationErrorCode, ValidatorPhase } from "../../../../validators/graph-validator.types.js";
 import { CANONICAL_EDGE } from "../../../../validators/graph-validator.types.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { neutraliseNoOpOptions } from "./no-op-neutralisation.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 
 // ---------------------------------------------------------------------------
@@ -747,9 +748,18 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
   const bridgeResult = fixBridgeChaining(graph, format, requestId);
   const budgetResult = applyBudgetRescale(graph, format, requestId);
 
+  // ⭐ OPTION_NO_OP — CONSEQUENCE, NOT PREDICATE. Runs LAST of the repairs and
+  // immediately before the authoritative re-validation below, so it sees the
+  // final interventions: an earlier position could be invalidated by any repair
+  // that touches them. An option that changes nothing is de-configured rather
+  // than refused — it ships in the user's graph and the analysable-option gate
+  // excludes it from comparative ranking, so it can never be named a leader.
+  // See `no-op-neutralisation.ts` for why DROP and `is_baseline` were rejected.
+  const noOpResult = neutraliseNoOpOptions(graph, requestId);
+
   // Append repairs deterministically: canonicalise, then bridge, then budget
   // (matches call order).
-  const allRepairs = [...canonResult.repairs, ...bridgeResult.repairs, ...budgetResult.repairs];
+  const allRepairs = [...canonResult.repairs, ...bridgeResult.repairs, ...budgetResult.repairs, ...noOpResult.repairs];
   if (allRepairs.length > 0) {
     ctx.deterministicRepairs = [
       ...(ctx.deterministicRepairs ?? []),
@@ -866,6 +876,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     deterministic_enforcement: {
       ran: true,
       structural_edges_recanonicalised: canonResult.canonicalisedCount,
+      no_op_options_neutralised: noOpResult.neutralisedOptionIds.length,
       bridge_chains_removed: bridgeResult.removedCount,
       bridge_goal_edges_added: bridgeResult.goalEdgesAdded,
       nodes_rescaled: budgetResult.nodesRescaled,
