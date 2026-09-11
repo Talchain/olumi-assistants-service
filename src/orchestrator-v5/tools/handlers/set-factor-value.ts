@@ -52,6 +52,10 @@ import {
   formatValueWithUnit,
 } from './d1-shared/format-confirmation.js';
 import { normaliseFactorValue } from './d1-shared/normalise-factor-value.js';
+// ⭐ THE ANALYSIS SEAM'S OWN GATE, ASKED AT THE EDIT SEAM. Imported rather
+// than restated so the two cannot answer "is this factor's recorded scale
+// usable?" differently — see the derivation beside its call site below.
+import { findScaleIncoherentBaselineFactorIds } from '../plot-intervention-scale.js';
 import { renormaliseOptionInterventionsForCapChange } from './d1-shared/renormalise-interventions-for-cap-change.js';
 import { SET_FACTOR_VALUE_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 import { isSuccessfulRunAnalysisFact, selectRunAnalysisFact } from '../../context/freshness.js';
@@ -376,6 +380,91 @@ export function createSetFactorValueHandler(): HandlerFn {
     // resolve the LHS identically; only a `resolved` value is a usable LHS.
     const existing = resolveExistingRawValue(before);
 
+    // ── ⭐⭐ IS THERE A SCALE HERE FOR A DECLARATION TO OVERWRITE? ───────────
+    // (2026-09-11, the journey-witnessed dead end.)
+    //
+    // THE MEASURED LOOP. The analysis withholds and offers *"Review or set an
+    // estimate"*. The user sets a bare magnitude on a capless, unitless factor
+    // through the inline editor that button opens; the write is accepted as
+    // `{value: 250000, raw_value: 250000}`; every re-run then refuses at
+    // `findScaleIncoherentBaselineFactorIds` → `baseline_scale_unresolved`,
+    // whose copy asks for A RANGE. Supplying that range hit
+    // `cap_redeclares_scale`; supplying a unit hit `unit_redeclares_scale`.
+    // Both gates were sealed by `factorHasRecordedValue` — which the user's
+    // OWN accepted edit had just made true. The product asked for a range and
+    // then refused the range, and the loop had no exit the product ever named.
+    //
+    // ⭐ THE ANSWER IS THE ANALYSIS GATE'S, ASKED HERE RATHER THAN GUESSED.
+    // This calls the SAME function `run_analysis` calls
+    // (`plot-intervention-scale.ts`), so the edit seam cannot disagree with
+    // the analysis seam about which factors are unusable — the "one question,
+    // two seams, two answers" defect is removed by construction, not by a
+    // second predicate kept in step by hand (trap 12).
+    //
+    // ⚠ SCOPED TO THE PRE-EDIT GRAPH, DELIBERATELY. The question is "is the
+    // factor in the state the analysis is refusing RIGHT NOW?", which is a
+    // fact about recorded state, not about the number being proposed. Reading
+    // the post-edit graph would make the exemption a function of the
+    // proposal — i.e. an input could authorise itself.
+    //
+    // ⚠ AND WHAT THIS INHERITS FOR FREE, which is the reason to call the gate
+    // rather than restate its condition: every exemption the gate already
+    // makes. A factor with a recoverable pair frame, a capped factor, and the
+    // ratified ROUND-5 ASTRIDE-1 class (a factor whose own user-authored
+    // interventions are themselves outside [0,1] — a user working in their own
+    // raw scale, whose analysis COMPUTES today) are all absent from the gate's
+    // output, so none of them is ever admitted here. Blocking or rescaling
+    // that class was the round-4b defect that broke 102 legitimate tests; this
+    // change cannot reach it.
+    //
+    // Interventions come off the option nodes' own `data.interventions`
+    // (`schemas/graph.ts:OptionData`) — the USER/draft-authored levels. The
+    // gate's optional `synthesisedByOption` marker is deliberately not
+    // supplied: it exists to STOP a CEE-scaffolded value establishing a frame,
+    // and the scaffold's placeholders are minted at analysis time and are not
+    // in this graph. Omitting it therefore treats every intervention present
+    // as user-authored, which makes the factor MORE likely to be exempt and
+    // this admission LESS likely to fire — the conservative direction.
+    //
+    // ⚠⚠ AND THE CARRIER IS NODE-LEVEL, NOT `data.interventions` — measured,
+    // and it is the difference between reading the class and reading nothing.
+    // `schemas/cee-v3.ts:246` puts the bundle on the OPTION NODE
+    // (`z.record(string, z.any()).optional()`, values shaped `InterventionV3`,
+    // which is what the gate's own `extractNumericInterventionValue` is built
+    // for). Reading `data.interventions` returned `{}` for every option, which
+    // makes NOTHING self-framed, which names every capless raw baseline —
+    // i.e. it fails OPEN, admitting a declaration onto the round-5 class whose
+    // analysis computes today. Caught here by the discriminating twin in
+    // `set-factor-value-scale-declaration-clears-dead-end.test.ts`, not by
+    // inspection; an empty read and a genuine absence are indistinguishable
+    // without one (trap 13).
+    const optionNodes = graph.nodes.filter((n) => n.kind === 'option');
+    const optionInterventionObjects = optionNodes.map((n) => {
+      const interventions = (n as { interventions?: unknown }).interventions;
+      return interventions !== null && typeof interventions === 'object'
+        ? (interventions as Record<string, unknown>)
+        : {};
+    });
+    //
+    // ⭐ FAIL CLOSED WHEN THE CARRIER CANNOT BE READ. That node-level bundle is
+    // declared a COPY — cee-v3's own comment says `options[]` remains the
+    // canonical source for analysis — and it is optional, so a graph can carry
+    // options whose interventions simply are not on the nodes. In that state
+    // this handler cannot tell a self-framed factor from an incoherent one,
+    // and the two want opposite answers. So: options present but NO
+    // intervention bundle on any of them ⇒ the question is unanswerable here
+    // ⇒ no admission, today's refusal stands. A wrong refusal costs the user a
+    // turn; a wrong admission rescales a baseline whose analysis was working.
+    const interventionCarrierReadable =
+      optionNodes.length === 0
+      || optionInterventionObjects.some((o) => Object.keys(o).length > 0);
+    const factorRecordedScaleIsUnusable =
+      interventionCarrierReadable
+      && findScaleIncoherentBaselineFactorIds(
+        graph.nodes,
+        optionInterventionObjects,
+      ).includes(targetId);
+
     // Defense-in-depth parity (review follow-up). The handler pre-applies
     // the operator below and then calls `normaliseFactorValue` with the
     // POST-operator value — so guards that read the user's STATED right-hand
@@ -403,6 +492,11 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(before.raw_value !== undefined
         ? { factorObservedRawValue: before.raw_value }
         : {}),
+      // 2026-09-11 — the SECOND question the redeclaration gates need, derived
+      // above from the analysis gate itself. Threaded to BOTH runs of the
+      // predicate (AC.1 parity): a pre-check that admits what the execute-time
+      // re-check refuses is the disagreement this change exists to remove.
+      factorRecordedScaleIsUnusable,
       inputHasUnit: parsed.inputHasUnit,
     });
     if (!preEvaluation.ok) {
@@ -435,6 +529,7 @@ export function createSetFactorValueHandler(): HandlerFn {
       ...(before.raw_value !== undefined
         ? { factorObservedRawValue: before.raw_value }
         : {}),
+      factorRecordedScaleIsUnusable,
       // ⭐ THE FRAME COMES OFF THE NODE, NOT OFF `before`. `snapshotObservedState`
       // reads `observed_state`, and the whole point of the persisted frame is
       // the factor that HAS no observed_state — the one whose options carry

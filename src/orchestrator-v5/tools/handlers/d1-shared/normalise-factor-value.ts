@@ -56,6 +56,16 @@ export interface NormaliseInput {
   readonly factorObservedValue?: number;
   readonly factorObservedRawValue?: number;
   /**
+   * 2026-09-11 — "is there a SCALE here for a declaration to overwrite?",
+   * derived by the caller from the ANALYSIS GATE
+   * (`findScaleIncoherentBaselineFactorIds`). Threaded through verbatim so the
+   * execute-time re-check applies the same redeclaration rule set as the
+   * handler's `preEvaluation` (the AC.1 parity invariant). Absent ⇒ the gates
+   * behave exactly as they do today. See the field's doc on
+   * `EvaluateFactorValueProposalInput`.
+   */
+  readonly factorRecordedScaleIsUnusable?: boolean;
+  /**
    * The factor's persisted `scale_frame` (pass 3d's divisor), threaded from
    * the node by `set-factor-value.ts`. Present on every factor the draft
    * framed — INCLUDING one with no baseline of its own, which is precisely the
@@ -99,6 +109,7 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     factorUnit,
     factorObservedValue,
     factorObservedRawValue,
+    factorRecordedScaleIsUnusable,
     factorScaleFrame,
     inputHasUnit,
   } = input;
@@ -119,6 +130,9 @@ export function normaliseFactorValue(input: NormaliseInput): NormaliseResult {
     ...(factorUnit !== undefined ? { factorUnit } : {}),
     ...(factorObservedValue !== undefined ? { factorObservedValue } : {}),
     ...(factorObservedRawValue !== undefined ? { factorObservedRawValue } : {}),
+    ...(factorRecordedScaleIsUnusable !== undefined
+      ? { factorRecordedScaleIsUnusable }
+      : {}),
     inputHasUnit,
   });
 
