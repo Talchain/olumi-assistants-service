@@ -15,6 +15,10 @@ import { validatorNodePath } from "./violation-paths.js";
 import { isDecisionFreeShape } from "./decision-free-shape.js";
 import { factorHasExpressiblePrior } from "../cee/provenance/unquantified-factor.js";
 import { readIsBaseline, type BaselineFlagSurfaces } from "../cee/baseline-identity.js";
+// The estate's ONE owner of "what frame is this factor on?" — a leaf module
+// with no imports of its own. Consulted rather than re-derived so this file
+// cannot hold a private opinion about the divisor (trap 12).
+import { resolveScaleFrame } from "../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import {
   type GraphValidationInput,
   type GraphValidationResult,
@@ -280,14 +284,119 @@ export function levelsAreIdentical(a: number, b: number): boolean {
   return Math.abs(a - b) <= LEVEL_IDENTITY_EPSILON;
 }
 
+/** The three fields that between them say where a factor sits, on one surface. */
+type FactorLevelSurface = {
+  readonly value?: unknown;
+  readonly raw_value?: unknown;
+  readonly baseline?: unknown;
+};
+
+/** The number itself, or `undefined` for anything that is not a finite one. */
+function finiteOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * ⭐⭐ THE STATED CURRENT LEVEL — `baseline`, put onto the frame `value` is on.
+ *
+ * ── THE DEFECT ─────────────────────────────────────────────────────────────
+ * A `from X to Y` brief is extracted as `{value: Y, baseline: X}`
+ * (`factor-extraction/index.ts:2203`, measured by execution: Paul's price
+ * brief yields `{value: 59, baseline: 49, unit: "£"}`). `value` therefore
+ * holds the PROPOSED level and `baseline` holds the current one — the
+ * interface's own comment admits it, calling `value` *"Current or proposed
+ * value"*, which is two questions under one name (trap 21). The factor is born
+ * at its target, so an option that raises the price to £59 changes nothing and
+ * `OPTION_NO_OP` refuses a draft that is describing a real alternative. The
+ * check is right; the data is wrong.
+ *
+ * ── WHY `baseline` IS SAFE TO BELIEVE HERE ─────────────────────────────────
+ * Every writer that puts a number in `baseline` means the same thing by it —
+ * derived at the bytes across CEE staging `77d11382`, not inferred from the
+ * name. The regex from-to extractors write the FROM number
+ * (`index.ts:1851/2203/2227/2275`); the LLM factor extractor is instructed
+ * *"baseline: (optional) Starting value for from-to patterns"*
+ * (`llm-extractor.ts:78`); the structural-edit tool declares it to the model as
+ * *"The amount before any change, when it differs"*
+ * (`propose-structural-edit.ts:1029`). The draft prompt never asks for it at
+ * all — it says *"data.value is baseline (pre-intervention)"*
+ * (`defaults-v187.ts:420`) — and `anthropic-graph-schema.ts` declares no such
+ * property, so no LLM draft can write one.
+ *
+ * ── THE SCALE, WHICH IS THE WHOLE HAZARD ───────────────────────────────────
+ * `baseline` is in the units of the `value` it was written BESIDE: raw for a
+ * currency from-to (49 beside 59), already fractional for a percent one (0.85
+ * beside 0.95). The records projector reframes `value` afterwards
+ * (`projector.ts:3503` — `value: raw/frame`, `raw_value: raw`) and does not
+ * touch `baseline`, which is how `{value: 0.59, raw_value: 59, baseline: 49}`
+ * arises. Dividing is therefore mandatory where a frame exists and FORBIDDEN
+ * where one does not, and reading `baseline` raw against framed interventions
+ * would swap an inverted graph for a 100×-wrong one.
+ *
+ * The divisor is not re-derived here. `resolveScaleFrame` is the estate's one
+ * owner of *"what frame is this factor on?"* — stored `scale_frame` first, the
+ * `{value, raw_value}` pair second — and a private opinion about the frame is
+ * exactly the hand-maintained mirror of trap 12.
+ *
+ * ── WHY A BASELINE EQUAL TO `value` IS DELIBERATELY IGNORED ────────────────
+ * Goal and constraint-target writers stamp `{value: B, baseline: B}` in MODEL
+ * units beside a raw `raw_value` (`add-constraint.ts:906`, `schema-v3.ts:354`,
+ * `compound-goals.ts:844`) — there the two names carry one number and a frame
+ * IS recoverable from the pair, so dividing would be the 100× error. Requiring
+ * the two to DIFFER keeps this to the case where `baseline` states something
+ * `value` does not, and the equal case falls through to today's answer, which
+ * is already correct.
+ *
+ * ── FAILURE DIRECTION ──────────────────────────────────────────────────────
+ * Where no frame resolves, the baseline is returned in its own units. Against
+ * framed interventions that cannot match, so the verdict is "this option
+ * changes something" — the safe direction this predicate already documents
+ * ("Refusing to accuse is the safe direction here", trap 22b). It can withhold
+ * a no-op finding; it cannot manufacture one.
+ */
+function readStatedCurrentLevel(node: NodeT): number | undefined {
+  const observed = (node as { observed_state?: FactorLevelSurface }).observed_state;
+  const data = node.data as FactorLevelSurface | undefined;
+
+  // ONE SURFACE AT A TIME. `baseline` means what it means relative to the
+  // `value` written beside it, so pairing `observed_state.baseline` with
+  // `data.value` would compare two numbers from different writes.
+  const surface: FactorLevelSurface | undefined =
+    finiteOrUndefined(observed?.baseline) !== undefined
+      ? observed
+      : finiteOrUndefined(data?.baseline) !== undefined
+        ? data
+        : undefined;
+  if (surface === undefined) return undefined;
+
+  const baseline = finiteOrUndefined(surface.baseline);
+  const value = finiteOrUndefined(surface.value);
+  if (baseline === undefined || value === undefined) return undefined;
+  if (baseline === value) return undefined;
+
+  const frame = resolveScaleFrame({
+    storedFrame: (node as { scale_frame?: unknown }).scale_frame,
+    value,
+    raw_value: surface.raw_value,
+  });
+  return frame === undefined ? baseline : baseline / frame;
+}
+
 /**
  * The level the ANALYSIS treats as "where this factor is today".
  *
- * ⭐ ONE READER, DERIVED FROM THE WIRE FIELD — not a second copy of the
- * baseline. `FactorObservedState.value` is documented at `schemas/graph.ts:263`
- * as *"The factor's current position on the model 0-1 scale (PLoT
- * normalises)"*, and it is the field the run payload carries on the graph, so
- * it is what the analysis compares an intervention against.
+ * ⚠ TWO SENSES OF ONE WORD MEET IN THIS FUNCTION, AND THEY ARE NAMED APART
+ * (trap 21). This function's own "baseline" is *the level an intervention is
+ * compared against*; the FIELD `baseline` it now consults is *the level the
+ * user stated the factor is at today*. They are the same quantity only when the
+ * graph is not inverted, which is precisely the bug — so the stated level wins
+ * where it exists and says something the value does not.
+ *
+ * ⭐ PRECEDENCE, STATED: a stated current level
+ * (`readStatedCurrentLevel` — `baseline`, on `value`'s frame) first, then
+ * `FactorObservedState.value`, documented at `schemas/graph.ts:263` as *"The
+ * factor's current position on the model 0-1 scale (PLoT normalises)"* and
+ * carried by the run payload, then `data.value`.
  *
  * `data.value` is the FALLBACK, not a rival: the projector's scale pass writes
  * both (`projector.ts:3505-3506`) and `schema-v3.ts` rebuilds `observed_state`
@@ -295,11 +404,13 @@ export function levelsAreIdentical(a: number, b: number): boolean {
  * graph that carries only one is still readable, and the precedence is pinned
  * by a test rather than left to whichever happens to be present.
  *
- * Returns `undefined` when neither surface carries a finite number. That is
+ * Returns `undefined` when no surface carries a finite number. That is
  * NOT a no-op verdict: a factor the brief states no value for cannot prove an
  * option changes nothing.
  */
 export function readFactorBaselineLevel(node: NodeT): number | undefined {
+  const stated = readStatedCurrentLevel(node);
+  if (stated !== undefined) return stated;
   const observed = (node as { observed_state?: { value?: unknown } }).observed_state;
   if (typeof observed?.value === "number" && Number.isFinite(observed.value)) {
     return observed.value;
