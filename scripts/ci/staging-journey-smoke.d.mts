@@ -143,3 +143,69 @@ export declare function proxyFailureCode(body: unknown): string | null;
  * @returns failure messages; an empty array means the proxy handed it over.
  */
 export declare function assertProxyDelivered(body: unknown, label?: string): string[];
+
+/**
+ * REPORTS ONLY — never asserts. Classify ONE journey sample's outcome, so a
+ * rate becomes actionable: "3 of 5 failed" says look, "3 of 5 failed, all
+ * VIOLATION:OPTIONS_IDENTICAL" says where. Codes are read from the PRODUCER's
+ * own fields, most-specific first (threw → proxy → violation → reason → error →
+ * HTTP → assertions). `ok` is decided by the failure list, never by the code,
+ * so an unanticipated failure class reports `ASSERTIONS_FAILED` rather than
+ * passing.
+ */
+export declare function classifyJourneySample(
+  turns: ReadonlyArray<{ label?: string; status?: number; body?: unknown; threw?: string }>,
+  failures: readonly string[],
+): { ok: boolean; code: string };
+
+/**
+ * Aggregate samples into the numbers printed on EVERY run. `failureRate` is
+ * `null` when nothing was attempted — "no samples ran" and "no samples failed"
+ * are opposite facts and a 0 would print them identically.
+ */
+export declare function summariseSamples(samples: ReadonlyArray<{ ok?: boolean; code?: string }>): {
+  attempted: number;
+  ok: number;
+  failed: number;
+  failureRate: number | null;
+  byCode: Record<string, number>;
+};
+
+/**
+ * `1 - (1 - rate)^k` — P(this gate reds on a push) for k independent samples
+ * that must all deliver. Exported so the job output, the PR body and the test
+ * share one function rather than three copies of a number. Returns `null` on
+ * inputs that are not a usable (k, rate) pair.
+ */
+export declare function detectionProbability(k: number, failureRate: number): number | null;
+
+/**
+ * `1 - 0.5^(1/k)` — the true per-sample failure rate at which this gate is a
+ * coin flip. Below it, a given push is more likely missed than caught. This is
+ * the number that bounds what k buys.
+ */
+export declare function halfDetectionRate(k: number): number | null;
+
+/**
+ * THE FLOOR. Two separate failures, deliberately not one predicate: too few
+ * SAMPLES (the run is unmeasured, never healthy) and too few SUCCESSES. The
+ * floor is scaled to the samples actually taken and rounded up, so truncation
+ * can neither weaken it silently nor invert into a false red.
+ * @returns failure messages; an empty array means the run cleared the floor.
+ */
+export declare function assertSampleFloor(
+  summary: { attempted: number; ok: number; failed: number; byCode: Record<string, number> },
+  options: { floor: number; requested: number; minSamples: number },
+): string[];
+
+/**
+ * REPORTS ONLY — never asserts. The lines printed on every run, healthy or not:
+ * the census, the observed rate, the effective floor, the detection-power table
+ * and the blindness statement. A gate that only speaks when it fails teaches
+ * nobody what normal looks like, and the rate is the number that would have
+ * stopped the 11 Sep merge.
+ */
+export declare function samplingReport(
+  summary: { attempted: number; ok: number; failed: number; failureRate: number | null; byCode: Record<string, number> },
+  options: { floor: number; requested: number; minSamples: number },
+): string[];

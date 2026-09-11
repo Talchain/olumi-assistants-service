@@ -61,8 +61,19 @@ jobs:
   journey:
     name: Live user journey against deployed staging
     runs-on: ubuntu-latest
-    # Freshness poll (15 min) + two turns (~1 min) + headroom.
-    timeout-minutes: 25
+    # Freshness poll (15 min) + the SAMPLED journey (12 min budget) + headroom.
+    # The two maxima are effectively exclusive — a freshness poll that runs to
+    # its timeout means the deploy did not ship, and that path returns BEFORE
+    # Phase 2 — so this is headroom, not expected runner cost. A measured
+    # sample costs ~50-97s and k defaults to 5.
+    #
+    # This number is NOT hand-maintained against the script: a test derives the
+    # script's own SMOKE_FRESHNESS_TIMEOUT_MS and SMOKE_JOURNEY_BUDGET_MS
+    # defaults and REDS if their sum ever reaches it. Being killed by the job
+    # timeout is the worst failure available here — the process dies before the
+    # rate, the census and the floor verdict are printed, so a run that measured
+    # four healthy samples looks exactly like one that measured nothing.
+    timeout-minutes: 32
     steps:
       # SPARSE on purpose. This gate runs a dependency-free .mjs that reads NO
       # repository files (verified: zero `import` / `readFileSync` / `require(`
