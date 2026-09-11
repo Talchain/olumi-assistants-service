@@ -16,7 +16,7 @@
  * There, a Tier-3-denied quantity reached a surface as the pre-formatted display
  * string the producer had already written, under an explicit licence. Here a
  * NARROW, SEPARATE block is projected out of the subtree before deletion:
- * producer-written labels and the fact that the producer looked. The ban is
+ * producer-written labels, the ids that bind them, and the fact that the producer looked. The ban is
  * untouched, no Tier-3 numeric travels, and the enricher/fact path — which reads
  * the subtree's structured enums for the prompt — is not involved.
  *
@@ -37,6 +37,14 @@
 
 /** One gap as it reaches the wire: what the producer called it, and nothing else. */
 export interface ProjectedEvidenceGap {
+  /**
+   * ⚠ THE ID TRAVELS, AND THE NUMERICS DO NOT — that distinction IS the claim
+   * boundary. An id licenses nothing: it lets the consumer bind a gap to the
+   * factor it names by IDENTITY rather than keying on a label, which collides
+   * and would have the consumer fabricating a key. A VOI score is the thing a
+   * surface could author a claim from, and it stays behind the ban.
+   */
+  readonly factor_id: string;
   readonly factor_label: string;
 }
 
@@ -49,12 +57,25 @@ export interface EvidenceAssessment {
   readonly gaps: readonly ProjectedEvidenceGap[];
 }
 
-function usableLabel(gap: unknown): string | null {
-  if (gap == null || typeof gap !== 'object') return null;
-  const label = (gap as Record<string, unknown>).factor_label;
-  if (typeof label !== 'string') return null;
-  const trimmed = label.trim();
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * A gap is usable only when BOTH the id and the label are present. A gap with
+ * no id could not be bound by the consumer; a gap with no label could not be
+ * named to a user. Either way the answer would be incomplete, and an incomplete
+ * answer here is the false all-clear — so both are fail-closed conditions.
+ */
+function usableGap(gap: unknown): ProjectedEvidenceGap | null {
+  if (gap == null || typeof gap !== 'object') return null;
+  const record = gap as Record<string, unknown>;
+  const factor_id = nonEmptyString(record.factor_id);
+  const factor_label = nonEmptyString(record.factor_label);
+  if (factor_id === null || factor_label === null) return null;
+  return { factor_id, factor_label };
 }
 
 /**
@@ -75,10 +96,10 @@ export function projectEvidenceAssessment(enrichment: unknown): EvidenceAssessme
 
   const gaps: ProjectedEvidenceGap[] = [];
   for (const gap of raw) {
-    const factor_label = usableLabel(gap);
-    // One unnameable gap voids the whole answer — see the fail-closed note above.
-    if (factor_label === null) return null;
-    gaps.push({ factor_label });
+    const projected = usableGap(gap);
+    // One unusable gap voids the whole answer — see the fail-closed note above.
+    if (projected === null) return null;
+    gaps.push(projected);
   }
   return { assessed: true, gaps };
 }

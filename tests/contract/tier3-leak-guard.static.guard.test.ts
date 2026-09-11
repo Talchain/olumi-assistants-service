@@ -110,11 +110,17 @@ const ALLOWLIST = new Map<string, 'cage' | 'transport' | 'structured'>([
   // staging, 10 Sep 2026, two briefs, every run.
   //
   // WHAT IT MAY CARRY, and the list is exhaustive: `factor_label`, a string the
-  // PRODUCER already wrote, plus the fact that the producer looked. It carries
-  // NO `voi_score`, NO `evpi_percentage_points`, NO `influence`, and not even
-  // `factor_id`. Pinned by a test that serialises the emitted block and asserts
-  // each of those names is absent, so a later widening reds here rather than
-  // shipping.
+  // PRODUCER already wrote, the `factor_id` that binds it, and the fact that the
+  // producer looked. It carries NO `voi_score`, NO `evpi_percentage_points` and
+  // NO `influence`. Pinned by a test that serialises the emitted block and
+  // asserts each of those names is absent, so a later widening reds here rather
+  // than shipping.
+  //
+  // ⚠ THE ID TRAVELS AND THE NUMERICS DO NOT, AND THAT LINE IS DELIBERATE. An
+  // id licenses no claim; it lets the consumer bind a gap to its factor by
+  // IDENTITY rather than keying on a label, which collides and would have the
+  // consumer fabricating a key. A VOI score is the thing a surface could author
+  // a claim from, and it stays behind the ban.
   //
   // WHY NOT AN UN-BANDING. `m1_coaching` stays on TIER3_TRANSPORT_BANNED_FIELDS
   // and the finaliser still deletes the subtree; the enricher/fact path that

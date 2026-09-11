@@ -101,17 +101,34 @@ describe('the evidence assessment travels whole, or not at all', () => {
     setDebug(false);
     const a = assessment(finaliseV5Response(responseWith(TWO_GAPS), {}));
     expect(a?.assessed).toBe(true);
-    expect(a?.gaps).toEqual([{ factor_label: 'Repeat question volume' }, { factor_label: 'Agent capacity' }]);
+    expect(a?.gaps).toEqual([
+      { factor_id: 'f1', factor_label: 'Repeat question volume' },
+      { factor_id: 'f2', factor_label: 'Agent capacity' },
+    ]);
   });
 
-  it('carries NO Tier-3 numeric anywhere in the emitted block', () => {
+  /**
+   * ⚠ THE ID TRAVELS AND THE NUMERICS DO NOT, AND THAT IS THE BOUNDARY BEING
+   * PINNED. An earlier version of this case also banned `factor_id`, which was
+   * the wrong line to draw: an id licenses no claim, it lets the consumer bind
+   * a gap by IDENTITY instead of keying on a label that can collide. What must
+   * never travel is a quantity a surface could author a claim from.
+   */
+  it('carries NO Tier-3 NUMERIC, while the binding id does travel', () => {
     setDebug(false);
     const a = assessment(finaliseV5Response(responseWith(TWO_GAPS), {}));
     const serialised = JSON.stringify(a ?? {});
-    for (const banned of ['voi_score', 'evpi_percentage_points', 'influence', 'factor_id']) {
-      expect(serialised, `Tier-3 or internal key leaked: ${banned}`).not.toContain(banned);
+    for (const banned of ['voi_score', 'evpi_percentage_points', 'influence']) {
+      expect(serialised, `Tier-3 numeric leaked: ${banned}`).not.toContain(banned);
     }
-    expect(serialised).not.toMatch(/0\.7|0\.4|\b7\b/);
+    expect(serialised).not.toMatch(/0\.7|0\.4/);
+    expect(serialised).toContain('f1');
+  });
+
+  it('fails closed on a gap with a label but NO id — it could not be bound', () => {
+    setDebug(false);
+    const noId = { evidence_gaps: [{ factor_label: 'Repeat question volume', voi_score: 0.7 }] };
+    expect(assessment(finaliseV5Response(responseWith(noId), {}))).toBeUndefined();
   });
 
   /** A genuine, licensed all-clear: the producer looked and found nothing. */
@@ -146,8 +163,8 @@ describe('the evidence assessment travels whole, or not at all', () => {
     setDebug(false);
     for (const notAnArray of [
       'soon',
-      { f1: { factor_label: 'Repeat question volume' } },
-      new Set([{ factor_label: 'Repeat question volume' }]),
+      { f1: { factor_id: 'f1', factor_label: 'Repeat question volume' } },
+      new Set([{ factor_id: 'f1', factor_label: 'Repeat question volume' }]),
     ]) {
       let out: OlumiResponse | undefined;
       expect(
