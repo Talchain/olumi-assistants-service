@@ -245,6 +245,30 @@ describe('the evidence assessment travels whole, or not at all', () => {
     expect(assessment(finaliseV5Response(responseWith(mixed), {}))).toBeUndefined();
   });
 
+  /**
+   * ⭐ THE INVARIANT, STATED NARROWLY AND PINNED: THIS MODULE NEVER TRUNCATES.
+   *
+   * The header once claimed a partial list was an outcome this module could never
+   * produce. False — PLoT caps `evidence_gaps` and leaves no residue, so a partial
+   * list ARRIVES here and ships. What this module must never do is SHORTEN one
+   * further, because its own truncation is invisible to everyone downstream.
+   *
+   * The size is deliberately well above any plausible producer cap, so a silently
+   * introduced slice — the natural way this would regress — reds here rather than
+   * hiding inside a set small enough to survive it.
+   */
+  it('NEVER TRUNCATES — a large gap set ships whole, however far above any cap', () => {
+    setDebug(false);
+    const many = { evidence_gaps: Array.from({ length: 17 }, (_, i) => gap(`f${i}`, `Factor ${i}`, 0.5)) };
+    const a = assessment(finaliseV5Response(responseWith(many), {}));
+    expect(a?.gaps).toHaveLength(17);
+    // Order is the producer's and is not re-ranked here either: a reorder would
+    // be a silent editorial claim about which gap matters most.
+    expect((a!.gaps as Array<{ factor_label: string }>).map((g) => g.factor_label)).toEqual(
+      Array.from({ length: 17 }, (_, i) => `Factor ${i}`),
+    );
+  });
+
   /** ⭐ The projection is NOT gated on debug — the pair is the point. */
   it('is emitted with debug OFF, and the Tier-3 subtree is still deleted', () => {
     setDebug(false);
