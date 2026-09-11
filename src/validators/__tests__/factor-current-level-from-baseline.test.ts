@@ -145,6 +145,22 @@ describe("a factor's current level comes from its stated baseline", () => {
       );
       expect(level).toBeCloseTo(TRUE_LEVEL, 10);
     });
+
+    it("pairs the baseline with the value on ITS OWN surface, not the other one", () => {
+      // The two surfaces disagree: `observed_state` is framed, `data` is the
+      // un-reframed V1 carrier. A baseline read beside the WRONG surface's
+      // value resolves no frame and returns the raw 49 against framed
+      // interventions. Added because a cross-surface mutant survived the rest
+      // of this corpus — a survivor is a claim, and this is the fixture that
+      // settles it rather than an assertion that it was equivalent.
+      const level = readFactorBaselineLevel(
+        factorNode({
+          observed_state: { value: TARGET_LEVEL, raw_value: 59, baseline: 49 },
+          data: { value: 59, baseline: 49 },
+        }),
+      );
+      expect(level).toBeCloseTo(TRUE_LEVEL, 10);
+    });
   });
 
   describe("the twin: a baseline that must NOT be divided", () => {
