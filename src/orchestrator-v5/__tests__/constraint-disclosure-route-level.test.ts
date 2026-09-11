@@ -42,6 +42,7 @@ import type { ScenarioReader } from '../tools/handlers/run-analysis.js';
 // T1 layer 3 — the guard's own scanner, reused here as the (d)-assertion
 // instrument so the route test and the guard cannot drift apart.
 import { findLeaderClaims } from '../compose/leading-option-egress-guard.js';
+import { COACHING_TEXT } from '../signals/coaching-signals.js';
 
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
@@ -860,7 +861,14 @@ describe('withhold paths: the coaching tail must not presume a leading option', 
       plotResponse = plotEnvelope({ constraintKey: 'constraint_out_total_cost_max' });
       return runAnalysisTurn(app).then((turn) => {
         expect(turn.status).toBe(200);
-        expect(turn.coaching).toMatch(/explore the leading option/i);
+        // ⚠ REBOUND 2026-09-08 (race-framing ruling). This matched
+        // /explore the leading option/i — the copy's OLD race framing. The copy
+        // is now clean, so a phrase match would have gone RED and, worse, a
+        // paraphrase would prove only that the gate spares a sentence the test
+        // author wrote. Bind to the PRODUCER by identity instead: this control
+        // exists to prove coaching FIRED, not to police its wording, and it now
+        // follows any future reword automatically (CLAUDE.md trap 12/19).
+        expect(turn.coaching).toBe(COACHING_TEXT.FIRST_ANALYSIS_COMPLETE({}));
       });
     });
 

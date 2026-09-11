@@ -148,9 +148,12 @@ describe('applyNarrativeEgressGuard — array slots', () => {
     expect(out.rewrites[0].path).toBe('evidence[1]');
     expect(out.rewrites[1].path).toBe('evidence[2]');
     expect(resp.evidence[0]).toBe('Cost is the dominant factor.');
-    // RC4: both hits are rewritable lexicon — repaired in place.
-    expect(resp.evidence[1]).toBe('This leading option has high confidence.');
-    expect(resp.evidence[2]).toBe('The leading option stands out clearly.');
+    // RC4: "recommendation" is rewritable lexicon — repaired in place.
+    expect(resp.evidence[1]).toBe('This suggestion has high confidence.');
+    // ⚠ 2026-09-08 race-framing ruling: "the winner" is a RANK CLAIM with no
+    // content-preserving rewrite, so the slot is REPLACED, not laundered into
+    // "the leading option" (which is equally banned).
+    expect(resp.evidence[2]).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
   });
 
   it('preserves arrays whose elements are all clean', () => {
@@ -291,10 +294,11 @@ describe('applyNarrativeEgressGuard — coverage of banned phrase set', () => {
   // substitution), never nuked to the fallback — detection (the `hit`)
   // is unchanged.
   it.each([
-    ['headline', 'The recommendation is to expand.', /recommendation/i, 'The leading option is to expand.'],
+    ['headline', 'The recommendation is to expand.', /recommendation/i, 'The suggestion is to expand.'],
     ['headline', 'X is recommended.', /recommended/i, 'X is suggested.'],
-    ['headline', 'The winner is X.', /the\s+winner/i, 'The leading option is X.'],
-    ['headline', 'Winning option is X.', /winning\s+option/i, 'Leading option is X.'],
+    // ⚠ 'The winner is X.' and 'Winning option is X.' MOVED to the fatal table
+    // below (2026-09-08 race-framing ruling): they used to be rewritten into
+    // "The leading option is X.", i.e. one banned phrase into another.
   ])('rewrites %s containing banned phrase: %s', (path, raw, hitRe, expected) => {
     const resp = makeResponse();
     resp.headline = raw;
@@ -310,6 +314,10 @@ describe('applyNarrativeEgressGuard — coverage of banned phrase set', () => {
   });
 
   it.each([
+    // ⚠ RANK CLAIMS, RECLASSIFIED 2026-09-08. No content-preserving rewrite
+    // exists for them, so they take the fatal remedy like any other.
+    ['headline', 'The winner is X.', /the\s+winner/i],
+    ['headline', 'Winning option is X.', /winning\s+option/i],
     ['headline', 'The previous analysis still holds.', /previous analysis/i],
     ['headline', 'Showing a cached result for this query.', /cached result/i],
     ['headline', 'Nothing changed on the model.', /nothing changed/i],

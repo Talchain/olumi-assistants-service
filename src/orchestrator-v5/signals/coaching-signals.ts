@@ -128,13 +128,21 @@ const EDIT_HANDLER_IDS = new Set([
 /**
  * ⚠ EXPORTED 2026-07-31 (ROADMAP 2.149) SO A CANARY CAN USE THE PRODUCTION COPY.
  *
- * `FIRST_ANALYSIS_COMPLETE` is the sentence #755's first cut destroyed — it says
- * "explore the leading option", which trips the shared leader vocabulary and
- * DESIGNATES NOTHING. The wire gate has the same exposure at a new address, and
- * its canary must assert against THIS constant rather than a paraphrase: a
- * paraphrase proves the gate spares a sentence the test author wrote, which is
- * the one sentence that never changes. Reword the copy and the canary follows it
- * in the same commit (CLAUDE.md trap #12).
+ * `FIRST_ANALYSIS_COMPLETE` is the sentence #755's first cut destroyed. It used
+ * to say "explore the leading option", which trips the shared leader vocabulary
+ * while DESIGNATING NOTHING. Canaries must assert against THIS constant rather
+ * than a paraphrase: a paraphrase proves the gate spares a sentence the test
+ * author wrote, which is the one sentence that never changes. Reword the copy
+ * and the canary follows it in the same commit (CLAUDE.md trap #12).
+ *
+ * ⚠ AND THE HALF THAT CHANGED, 2026-09-08 (race-framing ruling). The copy no
+ * longer contains "the leading option", so it NO LONGER TRIPS the vocabulary.
+ * Any control that needed a tripping-but-honest sentence must pin the
+ * HISTORICAL literal instead of importing this constant — otherwise cleaning
+ * production copy silently hollows the control out (CLAUDE.md trap 12b: a
+ * control pinned to "whatever is deployed now" has an expiry date nobody wrote
+ * down). `__tests__/claim-safety-non-execute-exits-route-level.test.ts` was
+ * repaired that way in the same change.
  */
 export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   readonly factorLabel?: string;
@@ -171,7 +179,13 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
   HIGH_SENSITIVITY_EDIT: ({ factorLabel }) =>
     `You're editing ${factorLabel ?? 'a factor'}, which was one of the strongest drivers in the last analysis. Rerunning will show how this changes the picture.`,
   FIRST_ANALYSIS_COMPLETE: () =>
-    'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.',
+    // ⚠ REWORDED 2026-09-08 — THE RACE-FRAMING RULING. This read "explore the
+    // leading option ...". Olumi does not frame options as a race, and this
+    // sentence DESIGNATED NOTHING anyway, so the leader phrasing bought no
+    // information and cost the product its neutrality. The three questions
+    // (most likely outcome · best expected value · most robust) are answered
+    // by the result surfaces, not pre-empted by this nudge.
+    'Your first analysis is ready. Take a moment to explore how the options compare and the factors shaping the result before acting on it.',
   RERUN_ANALYSIS_COMPLETE: ({ runDelta, interveningChange, movementLicence, interveningChangeIsInert }) =>
     composeRerunText(
       runDelta ?? null,

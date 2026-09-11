@@ -600,8 +600,8 @@ describe('V5 coaching — validation chip + composer copy passes forbidden-phras
 
 // ============================================================================
 // RC4 proportionate remedies — the egress guard is REWRITE-FIRST for the
-// prescriptive lexicon ("recommendation"/"winner" class, per the prompt
-// TERMINOLOGY map) and FALLBACK-REPLACEMENT for everything else (denial,
+// rewritable prescriptive lexicon (the "recommendation" class) and
+// FALLBACK-REPLACEMENT for everything else (denial,
 // false-success, staleness, internal jargon — the fatal classes). The
 // 2026-07-15 session RCA (RC4) evidenced whole-block/response nuking as the
 // only remedy; a rewritable offence must now cost the user nothing.
@@ -615,19 +615,38 @@ describe('applyEgressForbiddenPhraseGuard — proportionate remedies (RC4)', () 
     expect(guarded.rewritten).toBe(true);
     expect(guarded.remedy).toBe('terminology_rewrite');
     expect(guarded.text).toBe(
-      'The leading option is to expand into the enterprise segment first.',
+      'The suggestion is to expand into the enterprise segment first.',
     );
     expect(guarded.hit).toMatch(/recommendation/i);
     expect(findForbiddenPhraseHit(guarded.text)).toBeNull();
   });
 
-  it('rewrites "the winner" / "winning option" prescriptions in place', () => {
-    const a = applyEgressForbiddenPhraseGuard('The winner is Hire a tech lead.');
-    expect(a.remedy).toBe('terminology_rewrite');
-    expect(a.text).toBe('The leading option is Hire a tech lead.');
-    const b = applyEgressForbiddenPhraseGuard('The winning option leads at 72%.');
-    expect(b.remedy).toBe('terminology_rewrite');
-    expect(b.text).toBe('The leading option leads at 72%.');
+  /**
+   * ⚠ BEHAVIOUR CHANGED 2026-09-08 — THE RACE-FRAMING RULING. This test used to
+   * assert `remedy === 'terminology_rewrite'` and an output of "The leading
+   * option is Hire a tech lead." That was the defect, pinned as correct: the
+   * guard swapped one BANNED phrase ("the winner") for ANOTHER ("the leading
+   * option"). Olumi must not frame options as a race at all.
+   *
+   * A rank claim has NO content-preserving rewrite — preserve the sentence and
+   * you preserve the ranking — so it is fatal-class, and the honest remedy is
+   * the whole-response replacement, exactly as for a denial phrase.
+   */
+  it('REPLACES the whole response for a rank claim, rather than rewriting it', () => {
+    for (const rankClaim of [
+      'The winner is Hire a tech lead.',
+      'The winning option leads at 72%.',
+      'These are the winners after re-analysis.',
+      'Option A has the winning probability.',
+      'Robust analysis points to the winning side.',
+    ]) {
+      const guarded = applyEgressForbiddenPhraseGuard(rankClaim);
+      expect(guarded.rewritten).toBe(true);
+      expect(guarded.remedy).toBe('fallback_replacement');
+      expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+      // The rank claim never survives into the shipped text.
+      expect(guarded.text).not.toMatch(/\bwinner|\bwinning|\bleading\s+option/i);
+    }
   });
 
   it('still REPLACES the whole response for a fatal-class denial phrase', () => {
@@ -771,7 +790,7 @@ describe('FORBIDDEN_USER_FACING_PHRASES — 2.213 does NOT false-positive', () =
 
 describe('2.213 remedy class — a choice directive has no safe rewrite', () => {
   // The RC4 rewrite-first machinery converts a rewritable LEXICON offence
-  // ("recommendation" → "leading option") in place. A choice directive is not
+  // ("recommendation" → "suggestion") in place. A choice directive is not
   // a vocabulary problem: swapping a noun leaves the product still telling the
   // user what to pick. So the doctrine set is deliberately FATAL-class — no
   // TERMINOLOGY_RULES entry — and takes the whole-response fallback.
