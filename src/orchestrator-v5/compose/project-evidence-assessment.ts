@@ -91,8 +91,32 @@ export function projectEvidenceAssessment(enrichment: unknown): EvidenceAssessme
   if (coaching == null || typeof coaching !== 'object') return null;
 
   const raw = (coaching as Record<string, unknown>).evidence_gaps;
-  // Silence is not an assessment. Only an ARRAY is the producer saying it looked.
   if (!Array.isArray(raw)) return null;
+
+  /**
+   * ⛔⛔ AN EMPTY ARRAY IS NOT AN ALL-CLEAR, AND THE FIRST VERSION OF THIS
+   * MODULE TREATED IT AS ONE. That was the exact harm the acceptance condition
+   * forbids, shipped by the module written to prevent it.
+   *
+   * The premise was "only an ARRAY is the producer saying it looked". Refuted at
+   * PLoT's bytes: `evidence_gaps` is produced by
+   * `safeCompute(() => computeEvidenceGaps(inputs), [], ...)`, which returns `[]`
+   * on ANY EXCEPTION, and `computeEvidenceGaps` itself returns `[]` when there
+   * are no factor sensitivities to assess. So `[]` has at least four producers —
+   * it crashed, there was nothing assessable, it genuinely found none, or the
+   * subtree never arrived — and only ONE of them licenses "No evidence gaps
+   * flagged".
+   *
+   * CEE already holds this position at a reviewed seam: the decision-review
+   * enricher and its invoke path both use `evidence_gaps.length > 0` as the
+   * real-data signal. Answering the same question with the opposite default here
+   * would be two seams disagreeing under one name (CLAUDE.md trap 21).
+   *
+   * So an empty list emits NOTHING and the consumer's honest "Evidence not
+   * assessed" stands. We lose the ability to say "assessed, and clear" — and we
+   * should, because on this wire we cannot tell that state from a crash.
+   */
+  if (raw.length === 0) return null;
 
   const gaps: ProjectedEvidenceGap[] = [];
   for (const gap of raw) {

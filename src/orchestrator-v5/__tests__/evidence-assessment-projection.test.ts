@@ -24,11 +24,14 @@
  * cannot carry the whole answer.
  *
  * ⛔ AND IT IS NOT GATED ON DEBUG, DELIBERATELY. The finaliser's Tier-3 deletion
- * runs only when `turnDebugEnabled` is false. Staging currently has it TRUE, so
- * the subtree is NOT being deleted there today — but that is a debug posture, not
- * a contract, and the same flag puts brief text into logs, so it is expected to be
- * turned off. A projection that inherited that gating would work on staging and
- * go dark the moment the flag moved. Both debug arms are pinned below.
+ * runs only when `turnDebugEnabled` is false, and staging currently has it TRUE
+ * — so the deletion is NOT what was producing "Evidence not assessed" there.
+ * That was a separate, UI-side gap: the live turn path never wrote the field the
+ * check reads. Both are real; only one was biting on staging, and this file
+ * previously implied the ban was the cause. The ban is still worth crossing
+ * because the debug flag is expected to be turned off (it puts brief text into
+ * logs), and a projection that inherited its gating would go dark exactly then.
+ * Both debug arms are pinned below.
  *
  * ⚠ CLAIM TYPE. These are assertions about the RESPONSE OBJECT the finaliser
  * returns. They say nothing about what any surface renders.
@@ -36,6 +39,7 @@
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
+type OlimiResponseAlias = OlumiResponse;
 
 import { finaliseV5Response } from '../response-finaliser.js';
 import { config } from '../../config/index.js';
@@ -88,12 +92,24 @@ describe('the evidence assessment travels whole, or not at all', () => {
    * ⛔⛔ THE ACCEPTANCE CONDITION. A happy path structurally cannot observe this
    * failure, which is why it is written first and against a GAP-BEARING payload.
    */
-  it('ACCEPTANCE — a run whose producer FOUND gaps never yields assessed-true beside an empty list', () => {
+  it('ACCEPTANCE — what ships carries EVERY gap the producer found, or nothing at all', () => {
+    /**
+     * ⚠ COUNT EQUALITY, NOT NON-EMPTINESS. The first version asserted only that
+     * the list was not empty, which passes on a SHORT list — and a short list is
+     * the same defect one step earlier, because it becomes the false all-clear
+     * the moment it drops the last gap. It also passed while the feature emitted
+     * nothing at all, so it could not tell a working projection from a dead one.
+     */
     for (const debug of [false, true]) {
       setDebug(debug);
-      const a = assessment(finaliseV5Response(responseWith(TWO_GAPS), {}));
-      const licensedAllClear = a?.assessed === true && (a?.gaps as unknown[])?.length === 0;
-      expect(licensedAllClear, `debug=${debug}: emitted a licensed all-clear on a run that found 2 gaps`).toBe(false);
+      for (const source of [TWO_GAPS, { evidence_gaps: [gap('f1', 'Only one', 0.5)] }]) {
+        const a = assessment(finaliseV5Response(responseWith(source), {}));
+        expect(a, `debug=${debug}: emitted nothing for a run that found gaps`).toBeDefined();
+        expect(
+          (a!.gaps as unknown[]).length,
+          `debug=${debug}: shipped a SHORT list — ${(a!.gaps as unknown[]).length} of ${source.evidence_gaps.length}`,
+        ).toBe(source.evidence_gaps.length);
+      }
     }
   });
 
@@ -131,12 +147,55 @@ describe('the evidence assessment travels whole, or not at all', () => {
     expect(assessment(finaliseV5Response(responseWith(noId), {}))).toBeUndefined();
   });
 
-  /** A genuine, licensed all-clear: the producer looked and found nothing. */
-  it('an EMPTY producer array is a real all-clear and is carried as one', () => {
+  /**
+   * ⛔⛔ AN EMPTY ARRAY EMITS NOTHING — this case was INVERTED in the first
+   * version and the inversion was the false all-clear itself.
+   *
+   * It asserted that `[]` is "a real all-clear and is carried as one". Refuted
+   * at PLoT's bytes: `safeCompute(..., [], ...)` yields `[]` on ANY exception,
+   * and `computeEvidenceGaps` yields `[]` when there is nothing assessable. An
+   * empty list therefore cannot distinguish "looked and found none" from
+   * "crashed", and the consumer renders assessed-with-empty as the licensed
+   * all-clear "No evidence gaps flagged".
+   *
+   * Emitting nothing keeps the honest refusal. Losing the genuine all-clear is
+   * the correct price: we cannot tell it from a crash on this wire.
+   */
+  it('an EMPTY producer array emits NOTHING — it cannot be told from a crash', () => {
     setDebug(false);
-    const a = assessment(finaliseV5Response(responseWith({ evidence_gaps: [] }), {}));
-    expect(a?.assessed).toBe(true);
-    expect(a?.gaps).toEqual([]);
+    for (const debug of [false, true]) {
+      setDebug(debug);
+      expect(
+        assessment(finaliseV5Response(responseWith({ evidence_gaps: [] }), {})),
+        `debug=${debug}: emitted a licensed all-clear from an empty list`,
+      ).toBeUndefined();
+    }
+  });
+
+  /**
+   * ⚠ BLOCK BINDING IS POSITIONAL, AND NOTHING EXERCISED IT. Every other case
+   * uses a single-block response, so an implementation that read block 0's
+   * enrichment for every block would pass the whole file. This pins that each
+   * block is projected from ITS OWN source enrichment.
+   */
+  it('binds each block to its OWN source enrichment, not to the first', () => {
+    setDebug(false);
+    const out = finaliseV5Response(
+      {
+        response_version: 2,
+        assistant_text: 'ok',
+        blocks: [
+          { type: 'analysis_result', enrichment: {} },
+          { type: 'analysis_result', enrichment: { m1_coaching: TWO_GAPS } },
+        ],
+      } as never as OlimiResponseAlias,
+      {},
+    );
+    const blocks = out.blocks as Array<Record<string, unknown>>;
+    const first = (blocks[0]!.enrichment as Record<string, unknown>).evidence_assessment;
+    const second = (blocks[1]!.enrichment as Record<string, unknown>).evidence_assessment;
+    expect(first, 'a block with no coaching must not inherit its sibling’s assessment').toBeUndefined();
+    expect((second as { gaps: unknown[] })?.gaps).toHaveLength(2);
   });
 
   it('emits NOTHING when the producer sent no coaching subtree — the honest refusal survives', () => {
