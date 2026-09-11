@@ -77,6 +77,7 @@ vi.mock("../../src/cee/validation/pipeline.js", () => ({
 
 import { applyDeterministicEnforcement } from "../../src/cee/unified-pipeline/stages/repair/graph-enforcement.js";
 import { gateAnalysableOptions } from "../../src/orchestrator-v5/tools/handlers/analysable-option-gate.js";
+import { extractQuantities } from "../../src/orchestrator-v5/context/cqe/extract-quantities.js";
 
 /** The factor baseline in Paul's session, on the model's 0-1 scale. */
 const BASELINE = 0.49;
@@ -327,6 +328,14 @@ const LABEL_CORPUS: readonly string[] = [
   "grow headcount from 40 to 80",                  // a from-to about a different quantity
   // — refused: ambiguous, two from-tos in one label —
   "increase price from £49 to £59 and headcount from 40 to 50",
+  // — refused: a from-to plus a trailing alternative (CQE returns two) —
+  "increase the Pro plan price from £49 to £59 or £64",
+  // — refused: a RANGE, not a transition (CQE: comparator `between`, value null) —
+  "hold the Pro plan price between £49 and £59",
+  // — refused: an English from-to CQE does not merge (two loose quantities) —
+  "take the Pro plan price from £49 up to £59",
+  // — refused: word-numbers are not merged into a from-to (CQE returns none) —
+  "increase the price from forty nine pounds to fifty nine pounds",
   // — refused: the stated target leaves the unit interval on this factor's frame —
   "increase the Pro plan price from £49 to £159",
   // — refused: no label to read —
@@ -446,5 +455,92 @@ describe("a repair that would re-open OPTIONS_IDENTICAL is declined", () => {
   it("the SAME option IS repaired once the colliding sibling is gone", () => {
     const graph = enforced();
     expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(STATED_TARGET, 10);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// ⭐⭐ THE ASSUMPTION THE PREDICATE RESTS ON, PINNED AT ITS SOURCE
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * `readStatedTransition` asks CQE four questions — `source`, `operator`, a
+ * finite `range_min`, a finite `value` — and a mutation kit found THREE of
+ * those conjuncts currently redundant: removing the `source` gate, the
+ * `operator` gate, or the empty-label gate left all 19 tests GREEN.
+ *
+ * An equivalent mutant must be DEMONSTRATED, never asserted (trap 13c), so
+ * each was settled by enumerating the producers at the bytes rather than by
+ * noting that a corpus failed to find one:
+ *
+ *   · `range_min` is emitted finite at exactly THREE sites in `cqe/rules.ts`
+ *     — P1 (`:338`) and P2 (`:389`), both `comparator: "between"` and both
+ *     passing NO `value` (measured null), and P11 (`:1028`), which hardcodes
+ *     `operator: 'set'`. So no result can carry a finite `range_min`, a finite
+ *     `value` AND a non-`set` operator.
+ *   · `compromise-backstop.ts:143,145` sets `operator: null` and
+ *     `range_min: null` UNCONDITIONALLY, so a `source: "compromise"` result
+ *     can never pass either of the other gates.
+ *   · `extractQuantities` returns zero results for `""`, `"   "` and
+ *     `"\t\n "` (measured), so the emptiness gate is subsumed by the
+ *     single-result requirement.
+ *
+ * The redundant conjuncts STAY — they fail closed, they are free, and CQE is
+ * a module this one does not own. What must not stay is an UNRECORDED
+ * assumption: these tests pin the derivation itself, so a CQE change that
+ * makes any conjunct load-bearing REDs here and tells the next session that
+ * the redundancy moved, instead of silently widening what gets repaired.
+ */
+describe("the CQE invariants the repair's redundant conjuncts rest on", () => {
+  it("a finite range_min always arrives with operator 'set' AND a finite value", () => {
+    const probes = [
+      "increase the price from £49 to £59",
+      "grow headcount from 40 to 80",
+      "raise margin from 85% to 95%",
+      "from 200k to 150k",
+      "hold the price between £49 and £59",
+      "keep headcount between 40 and 80",
+      "a price of 49-59",
+      "Cut costs by £10,000",
+      "Raise Price to £59",
+      "double the price from £49",
+    ];
+    for (const text of probes) {
+      for (const q of extractQuantities(text)) {
+        if (typeof q.range_min === "number" && Number.isFinite(q.range_min)
+          && typeof q.value === "number" && Number.isFinite(q.value)) {
+          expect(q.operator, `"${text}" carries a finite range_min and value`).toBe("set");
+        }
+      }
+    }
+  });
+
+  it("a `compromise` result never carries an operator or a range_min", () => {
+    const probes = [
+      "Move the launch from month 3 to month 6",
+      "set the price 49 to 59",
+      "we have 5 engineers and 3 designers",
+    ];
+    let compromiseSeen = 0;
+    for (const text of probes) {
+      for (const q of extractQuantities(text)) {
+        if (q.source !== "compromise") continue;
+        compromiseSeen += 1;
+        expect(q.operator, `"${text}"`).toBeNull();
+        expect(q.range_min, `"${text}"`).toBeNull();
+      }
+    }
+    // ⚠ POSITIVE CONTROL. Without it this test passes by seeing no compromise
+    // result at all — an absence assertion that never observed a presence
+    // (trap 13). The probes above are chosen to produce them.
+    expect(compromiseSeen).toBeGreaterThan(0);
+  });
+
+  it("an empty or whitespace label yields no quantities at all", () => {
+    for (const text of ["", "   ", "\t\n "]) {
+      expect(extractQuantities(text), JSON.stringify(text)).toHaveLength(0);
+    }
+    // POSITIVE CONTROL: the same call CAN return something, so the three zeros
+    // above are about the inputs and not about a broken probe.
+    expect(extractQuantities("from £49 to £59").length).toBe(1);
   });
 });

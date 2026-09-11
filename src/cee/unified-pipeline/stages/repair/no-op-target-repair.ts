@@ -66,6 +66,28 @@
  * That is the whole reason the delta case and the wrong-quantity case need no
  * judgement from me: CQE never reports them as a from-to `set`.
  *
+ * ⚠ THREE OF THE FOUR CONJUNCTS BELOW ARE CURRENTLY REDUNDANT, AND THEY STAY.
+ * A mutation kit found that removing the `source`, the `operator` or the
+ * empty-label gate leaves the whole suite green. Each was then settled by
+ * ENUMERATING THE PRODUCERS AT THE BYTES rather than by noting that a corpus
+ * failed to find a counter-example (an equivalent mutant must be demonstrated,
+ * never asserted — trap 13c):
+ *
+ *   · `range_min` is emitted finite at exactly three sites in `cqe/rules.ts` —
+ *     P1 (`:338`) and P2 (`:389`), both `comparator: "between"` and both
+ *     passing NO `value`, and P11 (`:1028`), which hardcodes `operator: 'set'`.
+ *     So no result carries a finite `range_min`, a finite `value` AND a
+ *     non-`set` operator.
+ *   · `compromise-backstop.ts:143,145` sets `operator: null` and
+ *     `range_min: null` UNCONDITIONALLY.
+ *   · `extractQuantities` returns nothing for an empty or whitespace string.
+ *
+ * They are kept because they fail CLOSED, they are free, and CQE is a module
+ * this one does not own — a new rule there must not silently widen what gets
+ * repaired. The derivation is pinned as its own tests in
+ * `cee.no-op-target-repair.test.ts`, so a CQE change that makes any of them
+ * load-bearing REDs there instead of passing unnoticed.
+ *
  * ## ⭐⭐ THE TARGET IS NEVER GUESSED — IT IS CORROBORATED
  *
  * The load-bearing conjunct is that **CQE's FROM value, put on the factor's
