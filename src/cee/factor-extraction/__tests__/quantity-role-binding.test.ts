@@ -98,11 +98,27 @@ describe("quantity identity at the real enrichment write", () => {
     expect(result.factorsEnhanced).toBe(1);
   });
 
+  /**
+   * ⚠ THE EXPECTED LEVEL MOVED 59 → 49, AND THAT IS THE POINT OF THE CHANGE,
+   * NOT A CASUALTY OF IT (`enricher.ts` `statedCurrentRaw`).
+   *
+   * This case is about ROLE BINDING — that the MRR amount cannot stamp the
+   * perception factor and the PRICE quantities land on the price node — and it
+   * pinned the level incidentally. The level it pinned was the brief's TARGET:
+   * Paul's *"from £49 to £59"* reached the canvas as *"£59"*, telling the user
+   * the price they are considering is the price they already charge.
+   *
+   * Everything this case is actually about is unchanged: the same node binds
+   * the same quantities, `baseline` still carries the stated 49, the cap is
+   * still 100, and the `value === raw_value / cap` invariant below still holds
+   * (0.49 = 49/100) — it is re-asserted, not relaxed. The full property has its
+   * own corpus in `factor-current-level-is-the-stated-baseline.test.ts`.
+   */
   it("positive counterpart: the same brief retains stated current and proposed prices and raw scale", async () => {
     const result = await enrichGraphWithFactorsAsync(model(), ORIGINAL_BRIEF);
     expect(result.extractionMode).toBe("regex-only");
     const price = FactorData.parse(node(result.graph, PRICE_ID).data);
-    expect(price).toMatchObject({ value: 0.59, baseline: 49, raw_value: 59, cap: 100, unit: "£", factor_type: "price", extractionType: "explicit", display_value: "£59" });
+    expect(price).toMatchObject({ value: 0.49, baseline: 49, raw_value: 49, cap: 100, unit: "£", factor_type: "price", extractionType: "explicit", display_value: "£49" });
     if (price.raw_value === undefined || price.cap === undefined) throw new Error("Price lost its raw scale");
     expect(price.value).toBe(price.raw_value / price.cap);
     expect(node(result.graph, GOAL_ID).goal_baseline).toBeUndefined();
