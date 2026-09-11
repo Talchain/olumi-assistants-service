@@ -511,13 +511,17 @@ function attachAnalysisState(
  * consumer's honest refusal is preserved rather than replaced by a weaker claim.
  */
 function attachEvidenceAssessment(out: OlumiResponse, source: OlumiResponse): OlumiResponse {
-  const outRecord = out as unknown as Record<string, unknown>;
+  // ⚠ SINGLE CASTS, MATCHING `sanitiseEnrichmentBlocks` BELOW. A double
+  // `as unknown as` is a forbidden boundary pattern in this repo and the
+  // containment ratchet blocks its growth — correctly, since the whole point of
+  // a boundary is that the compiler still has something to say at it.
+  const outRecord = out as Record<string, unknown>;
   const outBlocks = Array.isArray(outRecord.blocks)
     ? (outRecord.blocks as Array<Record<string, unknown>>)
     : null;
   if (!outBlocks || outBlocks.length === 0) return out;
 
-  const sourceRecord = source as unknown as Record<string, unknown>;
+  const sourceRecord = source as Record<string, unknown>;
   const sourceBlocks = Array.isArray(sourceRecord.blocks)
     ? (sourceRecord.blocks as Array<Record<string, unknown>>)
     : [];
