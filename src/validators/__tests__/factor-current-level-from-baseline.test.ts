@@ -146,6 +146,21 @@ describe("a factor's current level comes from its stated baseline", () => {
       expect(level).toBeCloseTo(TRUE_LEVEL, 10);
     });
 
+    it("uses the same denominator the enricher's cap path used", () => {
+      // A SECOND, INDEPENDENT WRITER of the same shape, at a different order of
+      // magnitude so the corpus is not only ever 49-beside-59:
+      // `enricher.ts:1301-1313` writes `{value: raw/cap, raw_value: raw,
+      // baseline: FROM, cap}` and does NOT divide the baseline. The divisor is
+      // carried by the pair, which is why the frame is asked for rather than
+      // assumed to be a stored `scale_frame`.
+      const level = readFactorBaselineLevel(
+        factorNode({
+          observed_state: { value: 300000 / 375000, raw_value: 300000, baseline: 200000, cap: 375000 },
+        }),
+      );
+      expect(level).toBeCloseTo(200000 / 375000, 10);
+    });
+
     it("pairs the baseline with the value on ITS OWN surface, not the other one", () => {
       // The two surfaces disagree: `observed_state` is framed, `data` is the
       // un-reframed V1 carrier. A baseline read beside the WRONG surface's
