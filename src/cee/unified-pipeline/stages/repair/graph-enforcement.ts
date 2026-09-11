@@ -42,6 +42,7 @@ import type { ValidatorPhase } from "../../../../validators/graph-validator.type
 import { CANONICAL_EDGE } from "../../../../validators/graph-validator.types.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
+import { DRAFT_NON_FATAL_CODES } from "./draft-non-fatal-codes.js";
 
 // ---------------------------------------------------------------------------
 // The fail-closed block signature (ROADMAP 2.1086)
@@ -49,11 +50,17 @@ import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 // These constants ARE the emission: the earlyReturn built at the bottom of
 // `applyDeterministicEnforcement` uses them directly, and the trigger below
 // reads the same bytes — so the auto-retry trigger cannot drift from the
-// producer (derive, don't mirror; trap 12). Note what is deliberately NOT
-// here: a list of validator codes. The gate fires iff
-// `validateGraphDeterministic(...).errors.length > 0` at phase
-// `post_enforcement`, so the retryable code set is whatever that validator
-// classifies as blocking — present or future — by construction.
+// producer (derive, don't mirror; trap 12).
+//
+// ⚠ AMENDED 11 Sep 2026. This note used to say "note what is deliberately NOT
+// here: a list of validator codes — the gate fires iff
+// `validateGraphDeterministic(...).errors.length > 0`". That is no longer
+// true, and leaving it would be the hand-maintained mirror this file's own
+// comments warn about. The gate now fires iff at least one post-enforcement
+// error remains AFTER subtracting `DRAFT_NON_FATAL_CODES` (its own module,
+// which states the measured 500 that made the subtraction necessary). Every
+// other code still blocks by construction, present or future — the set is a
+// deliberate, named, single-entry exception, not a general escape hatch.
 
 export const ENFORCEMENT_BLOCK_STATUS_CODE = 422;
 export const ENFORCEMENT_BLOCK_ERROR_CODE = "CEE_GRAPH_INVALID" as const;
@@ -639,8 +646,50 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
       requestId,
       phase: "post_enforcement" satisfies ValidatorPhase,
     });
-    postValidationErrorCount = revalidation.errors.length;
+    // ⭐ FATALITY IS DECIDED HERE, NOT BY THE VALIDATOR TIER (11 Sep 2026).
+    //
+    // `graph-validator.ts` reports what is TRUE of the graph; this gate
+    // decides what costs the user the draft. `DRAFT_NON_FATAL_CODES` is the
+    // named, single-authority set of findings that are reported and carried
+    // but never withhold the graph — see that module for the measured 500
+    // (`OPTION_NO_OP`, 3 failures in 10 attempts, 11 Sep) that made the
+    // distinction necessary.
+    //
+    // The split is computed ONCE and every downstream read below uses
+    // `blockingErrors`, so the count, the logged codes, the wire codes and
+    // the `earlyReturn` decision cannot disagree about which errors blocked.
+    const blockingErrors = revalidation.errors.filter(
+      (e) => !DRAFT_NON_FATAL_CODES.has(e.code),
+    );
+    const nonFatalErrors = revalidation.errors.filter(
+      (e) => DRAFT_NON_FATAL_CODES.has(e.code),
+    );
+    postValidationErrorCount = blockingErrors.length;
     postValidationWarningCount = revalidation.warnings.length;
+
+    // Carried, not swallowed. `ctx.pipelineOutcome.warnings` is the
+    // pipeline's own soft-degrade channel (`degraded: true` = the draft
+    // continues, per `options-identical-bypass.ts`'s note that `false`
+    // means a hard fail with no graph persisted). The finding also survives
+    // on `ctx.remainingViolations`, whose codes reach the client as
+    // `remaining_violation_codes` with the offending option id on the
+    // violation's `context`.
+    if (nonFatalErrors.length > 0) {
+      const nonFatalCodes = [...new Set(nonFatalErrors.map((e) => e.code))];
+      log.warn({
+        event: "cee.enforcement.non_fatal_validation_findings",
+        request_id: requestId,
+        non_fatal_count: nonFatalErrors.length,
+        codes: nonFatalCodes,
+      }, `Post-enforcement validation: ${nonFatalErrors.length} non-fatal finding(s) carried with the draft`);
+      for (const issue of nonFatalErrors) {
+        ctx.pipelineOutcome.warnings.push({
+          stage: "repair",
+          error: `${issue.code}: ${issue.message}`,
+          degraded: true,
+        });
+      }
+    }
 
     // Log non-blocking warnings independently so they are observable in dashboards
     // without being conflated with blocking errors.
@@ -654,7 +703,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
     }
 
     if (postValidationErrorCount > 0) {
-      const errorCodes = revalidation.errors.map((e) => e.code);
+      const errorCodes = blockingErrors.map((e) => e.code);
       log.warn({
         event: TelemetryEvents.CeeEnforcementPostValidationErrors,
         request_id: requestId,
@@ -699,7 +748,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
             ],
           },
           details: {
-            validation_errors: revalidation.errors.map((e) => ({
+            validation_errors: blockingErrors.map((e) => ({
               code: e.code,
               message: e.message,
               path: e.path,
@@ -711,7 +760,7 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
             // Diagnosing the 2026-08-06 failures (runs de79da/39cf53) cost a
             // Render-logs round-trip precisely because the wire carried no
             // codes. Derived from the same array, so the two cannot drift.
-            validation_error_codes: revalidation.errors.map((e) => e.code),
+            validation_error_codes: blockingErrors.map((e) => e.code),
             enforcement_repairs: allRepairs.length,
             last_phase: ENFORCEMENT_BLOCK_LAST_PHASE,
           },
