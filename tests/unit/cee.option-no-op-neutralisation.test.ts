@@ -118,7 +118,17 @@ function paulsGraph(): GraphT {
         label: "Pro Plan Monthly Price",
         category: "controllable",
         observed_state: { value: BASELINE, raw_value: 49 },
-        data: { value: BASELINE, raw_value: 49, extractionType: "explicit" },
+        // `factor_type` + `uncertainty_drivers` are required of a CONTROLLABLE
+        // factor at the `post_enforcement` phase (CONTROLLABLE_MISSING_DATA,
+        // `graph-validator.ts:842`). Present so a failure here is about the
+        // no-op consequence and never about a malformed fixture.
+        data: {
+          value: BASELINE,
+          raw_value: 49,
+          extractionType: "explicit",
+          factor_type: "price",
+          uncertainty_drivers: ["churn response"],
+        },
       },
       { id: "outcome_1", kind: "outcome", label: "MRR" },
       { id: "goal_1", kind: "goal", label: "£20k MRR" },
@@ -244,7 +254,11 @@ describe("OPTION_NO_OP consequence — the draft survives a no-op option", () =>
     const graph = paulsGraph();
     const factor = node(graph, "fac_price") as Record<string, unknown>;
     delete factor.observed_state;
-    factor.data = { extractionType: "explicit" };
+    factor.data = {
+      extractionType: "explicit",
+      factor_type: "price",
+      uncertainty_drivers: ["churn response"],
+    };
     expect(neutraliseNoOpOptions(graph).neutralisedOptionIds).toEqual([]);
   });
 
