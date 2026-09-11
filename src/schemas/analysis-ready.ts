@@ -409,6 +409,20 @@ export const AnalysisReadyPayload = z.object({
         intervened_factor_baselines_total: z.number(),
         intervened_factor_baselines_user_stated: z.number(),
         /**
+         * WHICH material parameters are not yet the user's — the actionable
+         * companion to the pair above, which say only HOW MANY.
+         *
+         * ⚠ `.optional()` because a payload captured before this field existed
+         * must still validate: this schema is replayed against stored fixtures,
+         * and a required member would retro-invalidate them. A consumer must
+         * therefore treat ABSENT ("this producer does not publish it") and
+         * EMPTY ("it publishes it and the set is empty") as different answers.
+         *
+         * ⚠ NOT a decomposition of the counts above — those include material
+         * EDGES, which have no node id. Read `.length`; never subtract.
+         */
+        material_parameters_awaiting_user_node_ids: z.array(z.string()).readonly().optional(),
+        /**
          * Has the user said what "good" means (a raw goal target)?
          *
          * ⚠ DELIBERATELY NOT A CONJUNCT of `permitted_analysis_mode`. It is a
