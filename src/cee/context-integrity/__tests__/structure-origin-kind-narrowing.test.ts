@@ -60,38 +60,43 @@ import { tryStructureOriginAnswer } from '../structure-origin-answer.js';
  * expectation FROM the node carrying the id, never from a copied string literal,
  * so a test that passes is a test that resolved THAT node (trap 19).
  */
-const FACTOR_HEADCOUNT = 'n-factor-platform-headcount';
-const OPTION_STATUS_QUO = 'n-option-status-quo';
-const OPTION_HIRE = 'n-option-hire';
+const FACTOR_HEADCOUNT = {
+  id: 'n-factor-platform-headcount',
+  kind: 'factor',
+  label: 'Platform Team Headcount',
+  provenance: 'from_brief',
+  source_quote: 'the platform team is six',
+} as const;
 
-const WITNESS_NODES = [
-  {
-    id: FACTOR_HEADCOUNT,
-    kind: 'factor',
-    label: 'Platform Team Headcount',
-    provenance: 'from_brief',
-    source_quote: 'the platform team is six',
-  },
-  {
-    id: OPTION_STATUS_QUO,
-    kind: 'option',
-    label: 'Keep Platform Team as-is (Status Quo)',
-    provenance: 'ai_inferred',
-  },
-  {
-    id: OPTION_HIRE,
-    kind: 'option',
-    label: 'Hire 4 more platform engineers',
-    provenance: 'ai_inferred',
-  },
-] as const;
+/** The element the witnessed reply actually spoke about. */
+const OPTION_STATUS_QUO = {
+  id: 'n-option-status-quo',
+  kind: 'option',
+  label: 'Keep Platform Team as-is (Status Quo)',
+  provenance: 'ai_inferred',
+} as const;
 
+const OPTION_HIRE = {
+  id: 'n-option-hire',
+  kind: 'option',
+  label: 'Hire 4 more platform engineers',
+  provenance: 'ai_inferred',
+} as const;
+
+const WITNESS_NODES = [FACTOR_HEADCOUNT, OPTION_STATUS_QUO, OPTION_HIRE];
 const WITNESS_GRAPH = { nodes: WITNESS_NODES, edges: [] };
 
-const nodeById = (id: string) => {
-  const found = WITNESS_NODES.find((n) => n.id === id);
-  if (found === undefined) throw new Error(`fixture has no node ${id}`);
-  return found;
+/**
+ * Asserts the node is the one carrying this id AND that it is actually in the
+ * graph under test. Every expectation below is built from the returned object,
+ * so a passing test is one that resolved THAT node — never a string literal that
+ * happens to match (trap 19).
+ */
+const inGraph = <T extends { id: string }>(node: T): T => {
+  if (!WITNESS_NODES.some((n) => n.id === node.id)) {
+    throw new Error(`fixture does not contain ${node.id}`);
+  }
+  return node;
 };
 
 /** The witness's challenge turn, VERBATIM. Its third sentence says "options". */
@@ -113,7 +118,7 @@ describe('resolveElement — kind narrowing may confirm a winner, never create o
    * resolves nothing at all, which is a guard agreeing with itself.
    */
   it('PRECONDITION: the factor IS resolvable on this exact message when no option node exists', () => {
-    const factor = nodeById(FACTOR_HEADCOUNT);
+    const factor = inGraph(FACTOR_HEADCOUNT);
     const answer = tryStructureOriginAnswer(WITNESS_CHALLENGE, { nodes: [factor], edges: [] });
 
     expect(answer).toBe(
@@ -144,7 +149,7 @@ describe('resolveElement — kind narrowing may confirm a winner, never create o
    * a label is satisfiable by any longer string that embeds it.
    */
   it('RED-KIND-2: the answer is not the canned sentence about the status-quo OPTION', () => {
-    const wrong = nodeById(OPTION_STATUS_QUO);
+    const wrong = inGraph(OPTION_STATUS_QUO);
     const answer = tryStructureOriginAnswer(WITNESS_CHALLENGE, WITNESS_GRAPH);
 
     expect(answer).not.toBe(`"${wrong.label}" was my suggestion, not something you wrote.`);
@@ -252,9 +257,9 @@ describe('resolveElement — kind narrowing may confirm a winner, never create o
    * the only one computed. Pins that the fix did not alter the no-narrowing path.
    */
   it('TWIN: unchanged when no kind word is typed and one element wins outright', () => {
-    const factor = nodeById(FACTOR_HEADCOUNT);
+    const factor = inGraph(FACTOR_HEADCOUNT);
     const graph = {
-      nodes: [factor, nodeById(OPTION_HIRE)],
+      nodes: [factor, inGraph(OPTION_HIRE)],
       edges: [],
     };
 
