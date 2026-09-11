@@ -368,17 +368,31 @@ export interface RunAdmission {
  *     it ONLY inside a branch guarded by `!optionId`, so the issue can never
  *     carry an `option_id`, so the second conjunct below can never hold. It was
  *     dead the moment it was written.
- *   - `MISSING_OPTION_CONNECTION` — requires `blocker_type: 'missing_connection'`,
- *     which NO producer in this repo emits. Sweep over `blocker_type:` writes:
- *     `missing_value` × 2 and `constraint_dropped` × 1 (the contrast reads
- *     non-zero, so the probe can see producers), `missing_connection` × 0.
+ *   - `MISSING_OPTION_CONNECTION` — ⚠⚠ THIS HALF HAS SINCE FLIPPED, AND THE OLD
+ *     TEXT IS CORRECTED RATHER THAN DELETED (trap 14). It read: "requires
+ *     `blocker_type: 'missing_connection'`, which NO producer in this repo
+ *     emits. Sweep over `blocker_type:` writes: `missing_value` × 2 and
+ *     `constraint_dropped` × 1 (the contrast reads non-zero, so the probe can
+ *     see producers), `missing_connection` × 0."
+ *
+ *     THAT IS NOW FALSE. `cee/transforms/analysis-ready.ts` mints an
+ *     option-scoped `missing_connection` for an option that reaches no factor —
+ *     the `needs_user_mapping` cell, which previously refused with NO blocker at
+ *     all and left the UI on its `unspecified` rung. The guard REDded, exactly
+ *     as it was built to, and the decision below was revisited.
+ *
+ *     REVISITED, AND DELIBERATELY UNCHANGED: `MISSING_OPTION_CONNECTION` stays
+ *     OUT of the set. Waiving it would LOOSEN a refusal, and the producing
+ *     change exists to make a refusal ARTICULATE, not weaker. The fail-safe
+ *     direction named below is the behaviour we want and now actually get.
  *
  * They are removed rather than kept-and-commented: an allowlist entry that can
  * never match reads as coverage it does not provide, and a branch no production
  * path can reach — kept alive by its own tests — is how a rule quietly stops
  * being enforced. Removal is also the FAIL-SAFE direction: if either code gains
  * a producer, the run refuses rather than silently waiving something new. The
- * two reachability facts are pinned by tests, so they RED if either changes.
+ * reachability facts are pinned by tests, so they RED if either changes — which
+ * is how the `missing_connection` flip above was caught rather than inherited.
  */
 const WAIVABLE_BY_EXCLUSION: ReadonlySet<string> = new Set<string>([
   'MISSING_OPTION_VALUE',
