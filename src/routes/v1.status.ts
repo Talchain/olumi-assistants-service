@@ -20,12 +20,13 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { getAdapter } from "../adapters/llm/router.js";
 import {
   resolveModelRoutingSnapshot,
-  buildEffectiveTaskModels,
+  buildStartupTaskModels,
 } from "../adapters/llm/model-routing-report.js";
 import { getStorageStats } from "../utils/share-storage.js";
 import { SERVICE_VERSION } from "../version.js";
 import { getPerformanceMetrics } from "../plugins/performance-monitoring.js";
 import { config } from "../config/index.js";
+import { STORE_MODEL_CONFIG_OUTRANKABLE_TASKS } from "../config/model-routing.js";
 
 // Track service uptime
 const SERVICE_START_TIME = Date.now();
@@ -100,12 +101,26 @@ interface StatusResponse {
   };
 
   /**
-   * THE MODELS REAL TURNS RUN ON — the per-task routing the product actually
-   * serves, as opposed to the untasked default reported in `llm` above.
+   * THE PER-TASK ROUTING THIS SERVICE RESOLVED AT STARTUP — not the untasked
+   * default reported in `llm` above, and NOT a statement about what any given
+   * turn runs on.
    *
    * Derived from `resolveModelRoutingSnapshot()`, the same adapter-free
    * projection that boot logs as `config.task_models` and that
    * `/admin/models/routing` serves, so this endpoint cannot drift from them.
+   *
+   * ⚠ WHAT IT CANNOT SEE. That projection reads env vars, providers.json and
+   * checked-in defaults — precedence ranks 3-6. A runtime prompt-store
+   * `modelConfig` pin (rank 2) is read by the CALL SITE, not the router, and
+   * outranks all of them; a client `model` in a request body (rank 1) outranks
+   * even that. Neither is visible here. Measured 2026-09-11 on the deployed
+   * service: this block reported draft_graph=claude-sonnet-5 while 26
+   * `model.resolution` events showed draft turns running claude-sonnet-4-6 via
+   * `resolution_source=store_model_config`.
+   *
+   * The field was called `effective_task_models`. It could not see what was
+   * effective, so it is now named for what it is and ships the list of tasks
+   * it cannot speak for. Same remedy as `llm.scope` one block up.
    *
    * Deliberately NOT the full `tasks[]` rows: those carry configuration key
    * NAMES (`CEE_MODEL_*`, `providers.json...`) and configuration-error
@@ -116,10 +131,22 @@ interface StatusResponse {
     /** Provider the untasked fallback would use — same value as /admin/models/routing. */
     default_provider: string;
     /**
-     * task id → resolved model id, for every task with an executable path
-     * that is not behind a default-off gate or a configuration error.
+     * task id → model id AS RESOLVED AT STARTUP, for every task with an
+     * executable path that is not behind a default-off gate or a
+     * configuration error. Ranks 1-2 are invisible to it — see
+     * `startup_task_models_unverified`.
      */
-    effective_task_models: Readonly<Record<string, string>>;
+    startup_task_models: Readonly<Record<string, string>>;
+    /**
+     * The subset of `startup_task_models` whose value a runtime prompt-store
+     * `modelConfig` pin can outrank, so the value above is UNVERIFIED for
+     * these tasks. Derived from `STORE_MODEL_CONFIG_OUTRANKABLE_TASKS`, which
+     * a source-scanning guard keeps equal to the live call sites.
+     *
+     * Authoritative answers for these tasks come from the per-request
+     * `model.resolution` log and `GET /admin/v1/turn-debug/:turn_id`.
+     */
+    startup_task_models_unverified: readonly string[];
   };
 
   // Share storage statistics
@@ -197,6 +224,8 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
       ? (perfMetrics.slowRequests / perfMetrics.totalRequests) * 100
       : 0;
 
+    const startupTaskModels = buildStartupTaskModels(modelRoutingSnapshot);
+
     const status: StatusResponse = {
       service: "assistants",
       version: SERVICE_VERSION,
@@ -222,7 +251,11 @@ export async function statusRoutes(app: FastifyInstance): Promise<void> {
 
       model_routing: {
         default_provider: modelRoutingSnapshot.default_provider,
-        effective_task_models: buildEffectiveTaskModels(modelRoutingSnapshot),
+        startup_task_models: startupTaskModels,
+        // Only tasks actually PRESENT in the projection are named: listing a
+        // task this block never reported would be a second inaccuracy.
+        startup_task_models_unverified: STORE_MODEL_CONFIG_OUTRANKABLE_TASKS
+          .filter((task) => Object.hasOwn(startupTaskModels, task)),
       },
 
       share: {

@@ -11,7 +11,7 @@ import {
 } from '../../src/config/model-routing.js';
 import { resolveTaskRouting } from '../../src/routes/admin.models.js';
 import {
-  buildEffectiveTaskModels,
+  buildStartupTaskModels,
   getReportedModelTasks,
   resolveModelRoutingSnapshot,
 } from '../../src/adapters/llm/model-routing-report.js';
@@ -47,7 +47,7 @@ describe('admin runtime model-routing authority', () => {
       expect(snapshot.tasks.some((row) => row.task === task)).toBe(true);
     }
 
-    const effective = buildEffectiveTaskModels(snapshot);
+    const effective = buildStartupTaskModels(snapshot);
     expect(effective).not.toHaveProperty('repair_graph');
     expect(effective).not.toHaveProperty('m2_graph_review');
     expect(effective).not.toHaveProperty('decision_review_decompose');
@@ -78,9 +78,9 @@ describe('admin runtime model-routing authority', () => {
     );
 
     expect(server).toContain('resolveModelRoutingSnapshot()');
-    expect(server).toContain('buildEffectiveTaskModels(modelRoutingSnapshot)');
+    expect(server).toContain('buildStartupTaskModels(modelRoutingSnapshot)');
     expect(server).toContain('logResolvedTaskModels(modelRoutingSnapshot)');
-    expect(server).not.toMatch(/const effectiveTaskModels\s*=\s*\{/);
+    expect(server).not.toMatch(/const startupTaskModels\s*=\s*\{/);
     expect(adminRoute).toContain('resolveModelRoutingSnapshot()');
     expect(adminRoute).not.toContain('resolveConfiguredRouterPlan');
     expect(report).not.toMatch(/\bgetAdapter(?:WithResolution)?\s*\(/);
@@ -122,7 +122,7 @@ describe('admin runtime model-routing authority', () => {
       source_key: 'TASK_MODEL_DEFAULTS.critique_graph',
     });
     expect(
-      buildEffectiveTaskModels(resolveModelRoutingSnapshot()),
+      buildStartupTaskModels(resolveModelRoutingSnapshot()),
     ).toHaveProperty('critique_graph');
   });
 
@@ -137,7 +137,7 @@ describe('admin runtime model-routing authority', () => {
       source: 'env_override',
       source_key: 'CEE_MODEL_CRITIQUE',
     });
-    expect(buildEffectiveTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
+    expect(buildStartupTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
       critique_graph: 'claude-sonnet-4-6',
     });
 
@@ -153,7 +153,7 @@ describe('admin runtime model-routing authority', () => {
       configuration_error: { code: 'MODEL_PROVIDER_MISMATCH' },
     });
     expect(
-      buildEffectiveTaskModels(resolveModelRoutingSnapshot()),
+      buildStartupTaskModels(resolveModelRoutingSnapshot()),
     ).not.toHaveProperty('critique_graph');
   });
 
@@ -181,7 +181,7 @@ describe('admin runtime model-routing authority', () => {
         },
       ],
     });
-    expect(buildEffectiveTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
+    expect(buildStartupTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
       critique_graph: PROVIDER_DEFAULT_MODELS.anthropic,
     });
   });
@@ -504,7 +504,7 @@ describe('admin runtime model-routing authority', () => {
       has_executable_path: true,
       runtime_availability: 'available',
     });
-    expect(buildEffectiveTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
+    expect(buildStartupTaskModels(resolveModelRoutingSnapshot())).toMatchObject({
       explain_diff: TASK_MODEL_DEFAULTS.explain_diff,
     });
   });

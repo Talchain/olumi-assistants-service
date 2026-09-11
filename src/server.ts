@@ -86,7 +86,7 @@ import { proxyV5TurnRoute } from "./routes/proxy-v5-turn.js";
 import proxyV5TurnStreamRoute from "./routes/proxy-v5-turn-stream.js";
 import { logResolvedTaskModels } from "./config/model-resolution-logger.js";
 import {
-  buildEffectiveTaskModels,
+  buildStartupTaskModels,
   resolveModelRoutingSnapshot,
 } from "./adapters/llm/model-routing-report.js";
 import { initializeAndSeedPrompts, getBraintrustManager, registerAllDefaultPrompts, getPromptStore, getPromptStoreStatus, isPromptStoreHealthy, isStoreBackendConfigured, initializePromptStore } from "./prompts/index.js";
@@ -305,9 +305,9 @@ export async function build() {
   // endpoint. Gated, inert/display and invalid rows remain visible in the full
   // snapshot but cannot be presented as effective serving assignments.
   const modelRoutingSnapshot = resolveModelRoutingSnapshot();
-  const effectiveTaskModels = buildEffectiveTaskModels(modelRoutingSnapshot);
+  const startupTaskModels = buildStartupTaskModels(modelRoutingSnapshot);
   log.info(
-    { event: 'config.task_models', ...effectiveTaskModels },
+    { event: 'config.task_models', ...startupTaskModels },
     'Effective task model assignments from shared routing authority',
   );
 
@@ -452,7 +452,7 @@ export async function build() {
     orchestrator_version: config.features.orchestratorV2 ? 'V2' : 'V1',
     diagnostic_trace: diagnosticTraceEnabled,
     streaming: config.features.orchestratorStreaming,
-    models: effectiveTaskModels,
+    models: startupTaskModels,
     deprecated_vars_detected: deprecationWarnings.length,
     dead_vars_detected: deadVarWarnings.length,
   }, 'Startup health summary');
