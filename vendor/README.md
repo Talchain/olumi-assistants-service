@@ -985,6 +985,22 @@ shasum -a 256 /path/to/olumi-assistants-service/vendor/talchain-schemas-<version
 # 6. pnpm install (reinstalls from the new tarball)
 # 7. Delete the old tarball and its .sha256 from vendor/
 # 8. Update the "Current contents" section of this README
+# 9. ⚠ REGENERATE THE COMMITTED CONTRACT SCHEMAS — THE STEP THIS LIST OMITTED
+#    UNTIL 0.55.0, AND THE ONLY ONE NO LOCAL GATE CATCHES.
+npx tsx scripts/export-schemas.ts   # then commit the contracts/ diff
+#    `contracts/*.schema.json` is GENERATED from the vendored package, and the
+#    required `check-schemas` job regenerates it and asserts
+#    `git diff --exit-code contracts/`. A pin bump that adds or changes any
+#    boundary member changes that output, so skipping this is a guaranteed red.
+#
+#    ⚠ WHY IT IS WORTH A NUMBERED STEP RATHER THAN A FOOTNOTE: `pnpm lint`,
+#    `pnpm typecheck` and `pnpm build` are ALL BLIND to it — the generated JSON
+#    is not part of the TypeScript program, so every local gate reads green
+#    while the contract sits stale. The 0.55.0 bump ran all three clean and
+#    still went red in CI on exactly this. The gate is correct; this list was
+#    short. (Steps 1-8 had been followed faithfully and were not enough — the
+#    classic shape: a procedure that is a hand-maintained mirror of what the
+#    build actually requires.)
 ```
 
 **Removal criterion:** delete this tarball + the vendor entry and switch
