@@ -14,13 +14,22 @@
  * first analysis: #1058's defect facing the other way (CLAUDE.md trap #21 — two
  * questions under one name, coincident until a change decouples them).
  *
- * ⭐ THAT WORLD IS NOW PRODUCTION, so this file no longer mocks anything. It
- * USED to inject the delivered posture over a production `false`; the constant
- * was flipped alongside UI #752 and the injection became a no-op — see the note
- * above the fixtures. The counterfactual moved to
- * `coaching-phantom-prior-run.test.ts`, which now carries the injected
- * PRE-DELIVERY posture. `vi.mock` is file-scoped and hoisted, which is why the
- * two postures live in two files rather than two `describe`s.
+ * ⭐⭐ THAT WORLD WAS PRODUCTION FOR THREE WEEKS AND IS NOW THE COUNTERFACTUAL
+ * AGAIN. The constant was flipped to `true` alongside UI #752, this file dropped
+ * its injection, and on 2026-09-11 the delivered posture was REFUTED on the
+ * deployed build — #1058's sentence, verbatim, on a first-ever analysis whose two
+ * prior runs had refused. The constant is now `false`, so this file re-acquires
+ * the injection and `coaching-phantom-prior-run.test.ts` is production again.
+ * `vi.mock` is file-scoped and hoisted, which is why the two postures live in two
+ * files rather than two `describe`s.
+ *
+ * ⚠ THE CASES BELOW ARE NOT HYPOTHETICAL, AND THAT IS WHY THEY STAY. They are
+ * exactly the cost the fail-closed posture charges: for every user whose browser
+ * DID receive the provisional result — the `delivered` outcome, the common one —
+ * their second analysis is now narrated as their first, and they lose the delta,
+ * the attribution and the inert-edit explanation. This file is the standing
+ * record of what that trade gives up, so a future session weighing the receipt
+ * can see the size of the prize rather than inferring it.
  *
  * ── WHY BOTH DIRECTIONS ARE HERE, NOT JUST THE INVERSION (trap 22b) ─────────
  * One direction alone lets the other through. A fix that makes an auto-run count
@@ -31,37 +40,62 @@
  * posture, so neither can be satisfied by the flag simply not applying.
  *
  * ── THE POSITIVE CONTROL (trap 13, and trap 12b) ───────────────────────────
- * The first test proves production really ships the delivered posture, so every
- * assertion below is about the shipped constant rather than an injected one.
- * ⚠ It deliberately does NOT rest on that constant alone: a control asserting
- * only the current value cannot fail once that value is the default — the way
- * the prompt-drift gate's three controls hollowed out. Its discriminating half
- * is the predicate's explicit parameter, which is real in both directions.
+ * The first test proves the injection really reaches the predicate production
+ * calls, AND asserts the contrast against the real module — so if the constant is
+ * ever flipped back to `true`, this file stops being a counterfactual and the
+ * control REDs rather than every case below quietly re-testing production.
+ * ⚠ It deliberately does NOT rest on the constant alone: a control asserting only
+ * the current value cannot fail once that value is the default — the way the
+ * prompt-drift gate's three controls hollowed out. Its discriminating half is the
+ * predicate's explicit parameter, which is real in both directions.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import type { SuccessfulHandlerOutcome } from '../../tools/handler-outcome.js';
+// ⚠ `AUTO_RUN_RESULT_REACHES_USER` and `hasUserSeenRunAnalysisResult` are NOT
+// imported here on purpose. The mock below injects the DELIVERED posture over
+// this module, so a file-level import of either would hand the tests the
+// injection back and let them agree with themselves (CLAUDE.md trap #13b). Every
+// test that needs the SHIPPED answer reaches for it with `vi.importActual`.
 import { buildAutoRunProvenance, RUN_PROVENANCE_ENRICHMENT_KEY } from '../../context/run-initiator.js';
 import { COACHING_TEXT, detectCoachingSignal } from '../coaching-signals.js';
 
-// ── no posture switch: THIS FILE IS PRODUCTION ──────────────────────────────
+// ── the posture switch: DELIVERED ───────────────────────────────────────────
 //
-// ⭐ IT USED TO CARRY ONE. Until the constant was flipped alongside UI #752 this
-// file injected `AUTO_RUN_RESULT_REACHES_USER: true` over a production `false`.
-// Production now ships `true`, so that injection would set a value to itself:
-// a no-op mock whose "positive control" could no longer fail, i.e. a control
-// decayed into a tautology by its own success (CLAUDE.md trap #12b, the exact
-// shape that hollowed out the prompt-drift gate's three controls). It is
-// REMOVED rather than left looking load-bearing, and the discrimination this
-// file needs now comes from the predicate's explicit parameter, which is real
-// in both directions.
+// ⭐ THIS MOCK IS NOT DECORATION — IT IS WHAT KEEPS THE INVERSION UNDER TEST
+// AFTER THE FAIL-CLOSED FLIP. `AUTO_RUN_RESULT_REACHES_USER` reads `false` in
+// production from 2026-09-11, so the re-run cases below no longer describe
+// production. They still describe a REACHABLE state — the `delivered` outcome of
+// `useProvisionalAnalysisDelivery`, which is the COMMON one — and they describe
+// the exact harm the fail-closed posture pays for: a genuine re-run narrated as a
+// first analysis. So the delivered posture is INJECTED here rather than deleted.
 //
-// The counterfactual moved with it: `coaching-phantom-prior-run.test.ts` now
-// carries the injected PRE-DELIVERY posture and its own positive control. The
-// two files have swapped roles; neither posture went unpinned.
+// ⚠⚠ THIS FILE AND `coaching-phantom-prior-run.test.ts` HAVE NOW SWAPPED ROLES
+// TWICE. That is the argument for keeping both: the constant is a posture, not a
+// derivation, and whichever way it points, the other direction is a live harm
+// somebody will meet. The day a per-turn DELIVERY RECEIPT lands, both files stop
+// being postures and become two halves of one derivation.
+//
+// `importOriginal`-spread so every other export stays REAL (CLAUDE.md trap #12:
+// a `vi.mock` factory REPLACES the module). `vi.mock` is file-scoped and
+// hoisted, which is why the two postures live in two files rather than two
+// `describe`s.
+//
+// ⚠ Tests below that need PRODUCTION semantics use `vi.importActual`, never the
+// file-level import, so they cannot read this injection back as if it were the
+// shipped answer.
+vi.mock('../../context/run-initiator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../context/run-initiator.js')>();
+  return {
+    ...actual,
+    AUTO_RUN_RESULT_REACHES_USER: true,
+    hasUserSeenRunAnalysisResult: (fact: HandlerFact): boolean =>
+      actual.hasUserSeenRunAnalysisResult(fact, true),
+  };
+});
 
 // ── fixtures (same carriers as the current-posture spec) ────────────────────
 
@@ -165,25 +199,34 @@ function editBranch(priorFacts: readonly HandlerFact[]) {
 // ── the control, then the two directions ────────────────────────────────────
 
 describe('once #1010 + UI #752 deliver the auto-run result, an auto-run IS a result the user saw', () => {
-  it('POSITIVE CONTROL: production ships the delivered posture, and the predicate still discriminates', async () => {
-    // No mock stands between this file and production any more, so this is a
-    // claim about the SHIPPED constant. It is not ceremony: every assertion
-    // below is meaningful only if this reads `true`, and if the constant is
-    // ever flipped back they must all fail rather than quietly change meaning.
-    const runInitiator = await import('../../context/run-initiator.js');
-    expect(runInitiator.AUTO_RUN_RESULT_REACHES_USER).toBe(true);
-    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR())).toBe(true);
+  it('POSITIVE CONTROL: the delivered posture actually reaches the predicate production calls', async () => {
+    // Without this, every re-run assertion below would pass or fail for reasons
+    // invisible here (CLAUDE.md trap #13: a probe with no positive control is
+    // vacuous). The injection must be observable AT the predicate, and it must
+    // DISCRIMINATE — so the contrast is asserted in the same test, against the
+    // REAL module.
+    const injected = await import('../../context/run-initiator.js');
+    const real = await vi.importActual<typeof import('../../context/run-initiator.js')>(
+      '../../context/run-initiator.js',
+    );
+    expect(injected.AUTO_RUN_RESULT_REACHES_USER).toBe(true);
+    expect(injected.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR())).toBe(true);
+    // …and the contrast: production ships the FAIL-CLOSED posture. If these two
+    // ever read the same value, this file has stopped being a counterfactual and
+    // every re-run case below is silently re-testing production.
+    expect(real.AUTO_RUN_RESULT_REACHES_USER).toBe(false);
+    expect(real.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR())).toBe(false);
 
     // ⭐ THE DISCRIMINATION, and it does NOT come from the constant. A control
     // that only asserts the current value cannot fail once that value is the
     // default (trap #12b). The explicit parameter is real in both directions,
     // so this pair bites whichever way the constant is set.
-    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), false)).toBe(false);
-    expect(runInitiator.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), true)).toBe(true);
+    expect(real.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), false)).toBe(false);
+    expect(real.hasUserSeenRunAnalysisResult(AUTO_RUN_PRIOR(), true)).toBe(true);
 
     // …and provenance is unmoved by either: the identical fact is still
     // correctly identified as auto-INITIATED. Two questions, one object.
-    expect(runInitiator.isAutoInitiatedRunAnalysisFact(AUTO_RUN_PRIOR())).toBe(true);
+    expect(real.isAutoInitiatedRunAnalysisFact(AUTO_RUN_PRIOR())).toBe(true);
   });
 
   // ── DIRECTION 1: the inversion this PR must not create ────────────────────

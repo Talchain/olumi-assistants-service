@@ -46,9 +46,11 @@
  * scenario read leg) returns no analysis at all. ⚠ THAT MEASUREMENT IS NOW
  * HISTORY, and is kept because it is the evidence #1058 rests on: CEE #1010
  * (producer) shipped the read leg and UI #752 (consumer) renders it, so the
- * auto-run's result DOES reach the user on the delivered path. See the delivery
- * section below for what that changed, and for the paths on which it still
- * does not.
+ * auto-run's result CAN reach the user, and does on the `delivered` outcome.
+ * ⚠⚠ "CAN" IS THE LOAD-BEARING WORD, and reading it as "does" is what re-opened
+ * #1058 on 2026-09-11: the hook has five outcomes and only one of them is
+ * delivery. See the delivery section below for why the constant is therefore
+ * fail-closed, and for the receipt that would answer the question properly.
  *
  * So any surface whose copy presupposes the user has already seen a result must
  * ask "was this run the USER's?", and that question needs an answer that cannot
@@ -220,45 +222,80 @@ export function isAutoInitiatedRunAnalysisFact(fact: HandlerFact): boolean {
  * through both dispatch paths — a different design from the one briefed, and the
  * scope-expansion rule says re-brief rather than expand.
  *
- * ⚠⚠ SO THIS CONSTANT NARROWS #1058 RATHER THAN CLOSING IT, and that must not be
- * forgotten because the common case now looks right. `useProvisionalAnalysisDelivery`
- * arms ONLY on a `running` verdict and gives up at 60 s, and UI #752 leaves
- * `hydrate/serverGraphHydration.ts` UNTOUCHED — so the BOOT path never applies
- * the analysis. A user who reloads or navigates away inside the ~20 s run sees
- * nothing, and this constant still asserts they saw it: their next manual run is
- * narrated "The result is unchanged", which is #1058's witnessed sentence. The
- * `deadline` / `aborted` / `unreadable` paths are the residual, they are pinned
- * by the counterfactual posture in `coaching-phantom-prior-run.test.ts`, and the
- * receipt above is what closes them.
+ * ⚠⚠ SO A `true` CONSTANT NARROWED #1058 RATHER THAN CLOSING IT, and the residual
+ * it left was WITNESSED ON THE DEPLOYED BUILD on 2026-09-11 — which is why the
+ * constant now reads `false`. `useProvisionalAnalysisDelivery` arms ONLY on a
+ * `running` verdict and gives up at 60 s, so a user who reloads or navigates away
+ * inside the ~20 s run sees nothing while the constant asserted they saw it:
+ * their next manual run was narrated "The result is unchanged", #1058's witnessed
+ * sentence, on a first-ever analysis. The `deadline` / `aborted` / `unreadable`
+ * paths are that residual, and the receipt above is what closes them properly.
+ *
+ * ⚠ ONE PREMISE IN THE SENTENCE ABOVE WAS STALE AND IS CORRECTED IN PLACE (2026-09-11).
+ * It read "UI #752 leaves `hydrate/serverGraphHydration.ts` UNTOUCHED". At the
+ * DEPLOYED UI build `b93904c9` that file is NOT untouched: it imports
+ * `applyBootAnalysisVerdict` / `applyBootLeaderClaimWithholding` at line 25.
+ * ⭐ THE CONCLUSION SURVIVES, and only the premise moved: `'running'` is in that
+ * file's BOOT-DECLINED set, and the file writes no analysis RESULTS at all
+ * (target 0; the contrast control `useCanvasStore` reads 9 in the same file, so
+ * the sweep is not blind). So the BOOT path still never applies the analysis, and
+ * the residual is unchanged. Recorded rather than silently deleted, because a
+ * future session reading the stale premise would conclude the residual had closed.
  */
 
 /**
  * Does a post-draft auto-run's RESULT reach the user?
  *
- * `true` at this tip. The delivery channel's both halves are live: CEE #1010
- * (`routes/scenario-graph-analysis-read.ts` — the read leg that returns the
- * analysis) and UI #752 (`canvas/hooks/useProvisionalAnalysisDelivery.ts` +
- * `canvas/hydrate/applyScenarioAnalysisRead.ts` — the consumer that renders it
- * without another turn).
+ * ⭐⭐ `false` — FAIL CLOSED. It read `true` from the flip that landed alongside
+ * UI #752, and that posture was REFUTED BY A SECOND WITNESS ON THE DEPLOYED
+ * BUILD, 2026-09-11: a journey witness saw a model's FIRST-EVER successful
+ * analysis open with "The result is unchanged: <option> still leads", when both
+ * prior runs had REFUSED and the panel had been reading "No analysis has run yet
+ * for this model". That is #1058's witnessed sentence, verbatim, twenty-three
+ * days after #1058 closed it.
  *
- * ⭐ THE LAND ORDER IS LOAD-BEARING AND IT IS UI-FIRST. Flipping this BEFORE
- * #752 is deployed re-opens #1058 for every user (a first-ever analysis narrated
- * as a re-run — witnessed on staging 2026-08-19). Flipping it after leaves the
- * inversion (a genuine re-run narrated as a first analysis), which under-claims
- * rather than fabricating a comparison. So: deploy UI #752, then this.
+ * ⭐ THIS CONSTANT IS AN ESTATE-WIDE CLAIM ABOUT A CHANNEL, NOT A PER-USER
+ * OBSERVATION, and that is the whole defect. The channel exists — CEE #1010
+ * (`routes/scenario-graph-analysis-read.ts`) and UI #752
+ * (`canvas/hooks/useProvisionalAnalysisDelivery.ts` +
+ * `canvas/hydrate/applyScenarioAnalysisRead.ts`) are both live — but "the channel
+ * can deliver" and "this user received it" are different questions, and only the
+ * first one is answerable here. The hook arms only on a `running` verdict, gives
+ * up at 60 s, and returns `delivered | already_held | deadline | aborted |
+ * unreadable`; the boot path applies no analysis at all. On every outcome but the
+ * first, `true` asserted a delivery that did not happen.
+ *
+ * ⭐ THE TRADE THIS INVERSION BUYS, PRICED RATHER THAN HIDDEN. `false` costs the
+ * re-run acknowledgement to users who genuinely DID see the provisional result:
+ * their second analysis is narrated as their first ("Your first analysis is
+ * ready") and they lose the delta, the attribution and the inert-edit
+ * explanation. That is a real loss and it is not rare. It is still the right side
+ * of the trade, and it is the estate's standing ruling: under-claiming tells a
+ * user less than we know, whereas over-claiming asserts a comparison against
+ * something they never saw — a fabrication about their own history, on the first
+ * screen of the product.
+ *
+ * ⚠ NEITHER POSTURE IS CORRECT; ONE IS MERELY SAFE. The real answer is the
+ * DELIVERY RECEIPT described in the block above — the UI naming, on its next
+ * request, the run whose result it actually applied. Until that exists this
+ * constant is a hand-maintained mirror of a per-user fact it cannot see
+ * (CLAUDE.md trap #12), which is why BOTH postures are pinned by test rather than
+ * left to be remembered: `coaching-phantom-prior-run.test.ts` is now production
+ * and `coaching-auto-run-delivered.test.ts` carries the injected counterfactual.
  */
-export const AUTO_RUN_RESULT_REACHES_USER = true;
+export const AUTO_RUN_RESULT_REACHES_USER = false;
 
 /**
  * Has this `run_analysis` fact's result been put in front of the user?
  *
  * FALSE for every non-`run_analysis` fact. TRUE for a user-initiated run — the
  * turn that ran it is the turn that displayed it. For an auto-initiated run the
- * answer is {@link AUTO_RUN_RESULT_REACHES_USER} — `true` since the delivery
- * channel's both halves went live. ⚠ That constant is an ESTATE-WIDE claim about
- * a channel, not a per-user observation: read its block for the `deadline` /
- * `aborted` paths on which it still overclaims, and for the receipt that would
- * make this a derivation.
+ * answer is {@link AUTO_RUN_RESULT_REACHES_USER} — `false`, fail-closed, after the
+ * delivered posture was refuted by a second deployed witness on 2026-09-11.
+ * ⚠ That constant is an ESTATE-WIDE claim about a channel, not a per-user
+ * observation, which is why it cannot be right in either direction: read its
+ * block for the cost `false` charges to users who genuinely were served, and for
+ * the delivery receipt that would make this a derivation instead of a posture.
  *
  * ⚠ SAYS NOTHING ABOUT WHETHER THE RUN PRODUCED ANYTHING. A `noop` fact did not
  * run, so nothing was displayed — but that is a different question again ("did

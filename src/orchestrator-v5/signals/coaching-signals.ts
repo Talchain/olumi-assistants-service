@@ -172,6 +172,15 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
     `You're editing ${factorLabel ?? 'a factor'}, which was one of the strongest drivers in the last analysis. Rerunning will show how this changes the picture.`,
   FIRST_ANALYSIS_COMPLETE: () =>
     'Your first analysis is ready. Take a moment to explore the leading option and the factors shaping it before acting on the result.',
+  // ⭐ The FIRST_ANALYSIS variant for a run whose admission caps DESIGNATION
+  // (#1412). It is {@link FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT}, named and
+  // exported below rather than inlined at its one call site, so specs can bind to
+  // it BY IDENTITY instead of re-typing the sentence — a copied literal in a spec
+  // is a hand-maintained mirror of the copy it is meant to pin (CLAUDE.md trap
+  // #12), and a substring assertion against it passes on a paraphrase.
+  // It deliberately does NOT get its own `signal_id`: the telemetry series must
+  // stay continuous across the cap, which is the same reasoning the withheld
+  // rerun arm uses for reusing RERUN_ANALYSIS_COMPLETE.
   RERUN_ANALYSIS_COMPLETE: ({ runDelta, interveningChange, movementLicence, interveningChangeIsInert }) =>
     composeRerunText(
       runDelta ?? null,
@@ -180,6 +189,23 @@ export const COACHING_TEXT: Record<CoachingSignalId, (ctx: {
       interveningChangeIsInert === true,
     ),
 };
+
+/**
+ * FIRST_ANALYSIS_COMPLETE's copy for a run whose admission caps DESIGNATION.
+ *
+ * The standard copy sends the reader to "the leading option". When
+ * `permitted_analysis_mode` sits below `comparative_leader` there is no
+ * designated leader to send them to, so the nudge points at the comparison and
+ * the assumptions instead. Same signal id, so the telemetry series is continuous
+ * across the cap.
+ *
+ * ⚠ EXPORTED SO SPECS BIND BY IDENTITY. It sits outside {@link COACHING_TEXT}
+ * because that Record is keyed by `CoachingSignalId` and this is a second copy
+ * for an EXISTING id, not a new signal — adding a key would break the
+ * one-id-one-entry property that makes a missing bank entry a compile error.
+ */
+export const FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT =
+  'Your first analysis is ready. Explore the comparison and the assumptions shaping it before acting on the result.';
 
 /**
  * PR2 L2 — how each kind of authored change is NAMED in the attribution
@@ -623,12 +649,66 @@ export function detectCoachingSignal(
       if (leaderWithheld) return null;
       // A provisional comparison remains useful. Make its FIRST-run nudge
       // about exploring the comparison/assumptions rather than "the leader".
-      // Do not apply this to reruns: their actual delta, attribution and inert
-      // edit explanations below must survive, with the existing wire caveat.
+      //
+      // ═══════════════════════════════════════════════════════════════════════
+      // ⭐⭐ WHY THIS CONJUNCT IS READ HERE AND DELIBERATELY *NOT* ON THE RERUN
+      // ARM BELOW. This is the only read of `admissionPermitsLeaderNaming` in
+      // the file, and a reviewer who notices that asymmetry is noticing a REAL
+      // one — so the reason is recorded here rather than left to be rediscovered
+      // (raised as a suspected defect on 2026-09-11 and settled at the bytes).
+      //
+      // ⚠ IT IS A RULING, NOT AN OVERSIGHT, AND IT HAS ALREADY OSCILLATED ONCE.
+      // #1412 (2026-09-09) shipped as five commits, and two of them are this
+      // decision being made and then reversed: "respect admission in first and
+      // rerun exploration", then "scope admission-aware exploration to first
+      // run". Widening it back is round 3 of a predicate that has already turned
+      // over once — CLAUDE.md trap 22f: count the rounds before writing one more
+      // rule.
+      //
+      // THE TWO ARMS ASK DIFFERENT QUESTIONS (trap 21), which is why one
+      // predicate cannot serve both:
+      //   FIRST-RUN arm  — composes a CALL TO ACTION ("explore the leading
+      //                    option"). Under a provisional cap there is no
+      //                    designated leader to send someone to explore, so the
+      //                    nudge is REDIRECTED to the comparison. Nothing is
+      //                    lost, because a nudge carries no finding.
+      //   RERUN arm      — composes a COMPLETED COMPARISON (the delta, its
+      //                    attribution, the inert-edit explanation). Suppressing
+      //                    that deletes a finding the person asked for. The
+      //                    admission caps DESIGNATION, not measurement.
+      //
+      // AND THE QUALIFICATION IS CARRIED, not dropped: on exactly this
+      // population — entitled turn, separation established, cap ===
+      // `quantified_provisional` — `enforceLeadingOptionClaimsAtWire`'s third arm
+      // PERMITS-WITH-CAVEAT (`compose/leading-option-wire-enforcement.ts`, the
+      // `separableProvisional` branch), and below that cap the same enforcer
+      // withholds outright. So the rerun sentence never ships an UNQUALIFIED
+      // designation, and a blanket conjunct here would re-apply #1254's
+      // non-separation rule to a separable run — the over-suppression that
+      // module's docstring calls the worse defect.
+      //
+      // ⭐ THE ASYMMETRY WAS ONLY EVER DANGEROUS VIA MISCLASSIFICATION, and that
+      // is what the 2026-09-11 witness actually caught. A FIRST-EVER run reaching
+      // the rerun arm skips this softening — but it skips it because the turn was
+      // misclassified by the phantom prior, not because the arm is wrong. The
+      // fix belongs at the classifier (`AUTO_RUN_RESULT_REACHES_USER`, now
+      // fail-closed in `context/run-initiator.ts`), not here: closing it here
+      // would leave the fabricated "The result is unchanged" comparison standing
+      // and merely strip the option's name off it.
+      //
+      // PINNED IN BOTH DIRECTIONS, so neither this ruling nor its reversal can
+      // happen silently:
+      //   · `handlers/__tests__/chip-click-dispatch-rerun-coaching.test.ts`
+      //     → "chip-click admission caps designation, not the completed
+      //       comparison" — #1412's own positive control, at the real consumer.
+      //   · `signals/__tests__/coaching-provisional-admission-branch-split.test.ts`
+      //     → the two arms asserted against ONE admission value in one file,
+      //       plus the misclassification case that made this look like a defect.
+      // ═══════════════════════════════════════════════════════════════════════
       if (input.admissionPermitsLeaderNaming === false) {
         return {
           signal_id: 'FIRST_ANALYSIS_COMPLETE',
-          coaching_text: 'Your first analysis is ready. Explore the comparison and the assumptions shaping it before acting on the result.',
+          coaching_text: FIRST_ANALYSIS_COMPLETE_PROVISIONAL_TEXT,
         };
       }
       return {
@@ -657,6 +737,14 @@ export function detectCoachingSignal(
     // which a "since you changed X" clause could survive a withheld leader
     // (CLAUDE.md trap 21, the #709/#737 shape this file already carries a
     // warning about).
+    // ⚠ ONE PERMISSION IS CONSULTED HERE, AND THE OTHER IS NOT — BY RULING.
+    // `leaderWithheld` (the TURN's entitlement) gates this arm;
+    // `admissionPermitsLeaderNaming` (the MODEL's designation cap) deliberately
+    // does not. The reasoning, the #1412 commits that made and then reversed
+    // that decision, the wire arm that carries the qualification instead, and
+    // both pinning specs are in the block on the first-run arm above. Read it
+    // before adding the second conjunct here: it has been proposed once and
+    // withdrawn once already.
     const rerun = leaderWithheld
       ? {
           delta: null,
@@ -904,8 +992,16 @@ function interveningEditIsInert(
  * — the one authority on run initiation AND delivery. The two are named apart
  * there: provenance is a permanent fact about the run, delivery is a fact about
  * the channel, and only the second one changes. See that module for why delivery
- * is a constant rather than a derivation today, for the deploy-ordering rule
- * (flip it with UI #752, not before), and for the fully-derived successor.
+ * is a constant rather than a derivation today, and for the fully-derived
+ * successor.
+ *
+ * ⚠ THE DEPLOY-ORDERING RULE THIS PARAGRAPH USED TO CARRY ("flip it with UI
+ * #752, not before") IS SUPERSEDED, 2026-09-11. Ordering was never the whole
+ * problem: the constant is an estate-wide claim about a CHANNEL and the question
+ * is per-USER, so no landing order makes it true. #752 shipped, the constant was
+ * flipped, and #1058's sentence was witnessed again on the deployed build. It is
+ * now FAIL-CLOSED, and the rule that replaces the ordering one is: this constant
+ * does not move again until a per-turn delivery receipt can answer it.
  *
  * ── (a) IS AN EXCLUSION, NOT A SUCCESS TEST ────────────────────────────────
  * A `noop: true` fact means the analysis did not run, so nothing was displayed.
