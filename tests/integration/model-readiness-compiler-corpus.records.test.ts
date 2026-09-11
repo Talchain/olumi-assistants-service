@@ -205,12 +205,42 @@ describe('typed-record Model Compiler + Readiness corpus', () => {
       for (const blocker of blockers) {
         expect(BLOCKER_TYPES.has(blocker.blocker_type)).toBe(true);
         expect(BLOCKER_ACTIONS.has(blocker.suggested_action)).toBe(true);
-        expect(blocker.factor_label.trim().length).toBeGreaterThan(0);
-        expect(nodeById.get(blocker.factor_id)?.kind).toBe('factor');
-        if (blocker.option_id) {
+
+        // ⭐ SCOPE-AWARE, AND THE INVARIANT IS STRONGER FOR IT.
+        //
+        // This block read `blocker.factor_label.trim()` and
+        // `nodeById.get(blocker.factor_id)` unguarded, i.e. it assumed EVERY
+        // blocker is factor-scoped. That held while `AnalysisBlocker` required
+        // `factor_id`/`factor_label` — a strictness the published wire contract
+        // never had, and which made an option-scoped refusal unrepresentable.
+        // Now that an option with no option→factor edge can be named, the
+        // unguarded reads are unsound for a row this corpus does not happen to
+        // produce (it still passes at runtime; the break was type-level).
+        //
+        // What actually has to hold is the schema's own rule — A BLOCKER NAMES
+        // AT LEAST ONE SCOPE — so that is asserted directly rather than implied
+        // by reading one of them. Each half is then checked where it applies,
+        // which is strictly more than before: the option half used to be
+        // checked only as a rider on the factor half.
+        expect(
+          blocker.factor_id !== undefined || blocker.option_id !== undefined,
+          `${recordCase.name}: blocker names neither an option nor a factor`,
+        ).toBe(true);
+
+        if (blocker.factor_id !== undefined) {
+          expect(blocker.factor_label?.trim().length).toBeGreaterThan(0);
+          expect(nodeById.get(blocker.factor_id)?.kind).toBe('factor');
+        }
+        if (blocker.option_id !== undefined) {
           expect(nodeById.get(blocker.option_id)?.kind).toBe('option');
-          expect(endpointPairs.has(`${blocker.option_id}::${blocker.factor_id}`)).toBe(true);
           expect(blocker.option_label?.trim().length).toBeGreaterThan(0);
+          // The endpoint-pair claim is about a PAIR, so it may only be made
+          // when both halves are present. A blocker scoped to an option alone
+          // is asserting that no such pair exists — checking one here would
+          // demand the very edge the blocker reports missing.
+          if (blocker.factor_id !== undefined) {
+            expect(endpointPairs.has(`${blocker.option_id}::${blocker.factor_id}`)).toBe(true);
+          }
         }
       }
     });
