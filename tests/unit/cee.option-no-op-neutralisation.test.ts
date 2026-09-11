@@ -278,7 +278,16 @@ describe("OPTION_NO_OP consequence — the draft survives a no-op option", () =>
   });
 
   // ── THE DEGENERATE CASE: EVERY NON-BASELINE OPTION IS A NO-OP ───────────
-  it("all-no-op still ships a graph, and every option ends unconfigured", () => {
+  //
+  // ⚠ AMENDED, not narrowed. `no-op-target-repair.ts` now runs immediately
+  // before neutralisation and writes the target an option's OWN LABEL states,
+  // so an all-no-op graph no longer necessarily ends all-unconfigured: an
+  // option whose label carries a corroborated `from X to Y` is REPAIRED
+  // instead. Both outcomes are pinned below, because the original expectation
+  // is still the right one for every option the repair declines — and a
+  // fixture rewritten to dodge the new behaviour would be a guard agreeing
+  // with itself (trap 13b).
+  it("all-no-op still ships a graph; the repairable option is rescued, the rest are unconfigured", () => {
     const graph = paulsGraph();
     for (const id of ["opt_59", "opt_54"]) {
       (node(graph, id).data as Record<string, unknown>).interventions = { fac_price: BASELINE };
@@ -286,13 +295,40 @@ describe("OPTION_NO_OP consequence — the draft survives a no-op option", () =>
     const ctx = makeCtx(graph);
     applyDeterministicEnforcement(ctx as never);
 
-    // Never a refusal on this predicate alone.
+    // Never a refusal on this predicate alone. UNCHANGED, and the acceptance
+    // condition of the whole file.
     expect(ctx.earlyReturn).toBeUndefined();
 
-    // All three neutralised, by id — so `run-analysis.ts` §2.5's
-    // `options_not_configured` guard owns the turn and says, in its own words,
-    // "doesn't say what it changes yet … it won't appear in the comparison
-    // until you tell me". That is an honest, actionable message; a 500 is not.
+    // `opt_noop` wears the user's own "from £49 to £59" sentence, and with the
+    // £59 sibling now itself a no-op there is no signature to collide with —
+    // so it is given the level it states rather than de-configured.
+    expect(interventionsOf(ctx.graph as GraphT, "opt_noop")).toEqual({ fac_price: 0.59 });
+
+    // The other two state no from-to, so they keep this file's original
+    // consequence, by id.
+    for (const id of ["opt_59", "opt_54"]) {
+      expect(interventionsOf(ctx.graph as GraphT, id)).toBeUndefined();
+    }
+  });
+
+  // The genuinely all-unconfigured path, preserved: no option's label states a
+  // transition, so nothing is repairable and `run-analysis.ts` §2.5's
+  // `options_not_configured` guard owns the turn — "doesn't say what it
+  // changes yet … it won't appear in the comparison until you tell me". That is
+  // an honest, actionable message; a 500 is not.
+  it("all-no-op with NO stated target in any label still ends every option unconfigured", () => {
+    const graph = paulsGraph();
+    for (const id of ["opt_59", "opt_54"]) {
+      (node(graph, id).data as Record<string, unknown>).interventions = { fac_price: BASELINE };
+    }
+    // Strip the only label carrying a from-to, so the repair has nothing to
+    // read. Bound by id, and the label is replaced rather than deleted so the
+    // node stays well-formed.
+    (node(graph, "opt_noop") as { label?: string }).label = "Option A";
+    const ctx = makeCtx(graph);
+    applyDeterministicEnforcement(ctx as never);
+
+    expect(ctx.earlyReturn).toBeUndefined();
     for (const id of ["opt_noop", "opt_59", "opt_54"]) {
       expect(interventionsOf(ctx.graph as GraphT, id)).toBeUndefined();
     }
