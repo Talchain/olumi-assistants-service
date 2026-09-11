@@ -1110,6 +1110,67 @@ export function buildAnalysisReadyPayload(
   }
   // === End unreachable controllable factor check ===
 
+  // === Unmapped option check — THE MIRROR OF THE ONE ABOVE ===
+  //
+  // ⭐⭐ THE REFUSAL MUST NAME A GAP WHENEVER IT HOLDS ONE, AND THIS WAS THE
+  // ONE CLASS THAT SHIPPED MUTE.
+  //
+  // The check above itemises a FACTOR that no option reaches. Its mirror — an
+  // OPTION that reaches no factor — was itemised NOWHERE, because the only
+  // other producer of option-scoped rows is the pair-scoped loop at :735, and
+  // that loop iterates `optionFactorAdj.get(option.id)`, which is EMPTY for
+  // exactly this option. Its body never runs, so no row is ever minted and
+  // `payload.blockers` stays absent while the payload status refuses.
+  //
+  // MEASURED CONSEQUENCE, which is why this is a P0 and not tidiness. The
+  // deployed UI composes its refusal sentence from these rows
+  // (`analysis_state.readiness.blockers` → `canRunAnalysis.actionableBlockers`
+  // → `composeBlockedReason.analysisBlockedSentences`). Handed an empty list it
+  // returns its floor rung — *"Olumi needs something more from this model
+  // before the next analysis. Ask in the chat and it will explain what is
+  // missing."* — which is the FIRST thing a fresh guest sees after pressing the
+  // board's "Run analysis" chip. On staging `needs_user_mapping` is the
+  // second-commonest readiness status, and its telemetry row reads
+  // `blockerCount: 0` beside `optionsNeedingMapping: 1`.
+  //
+  // ⛔ NOTHING IS INVENTED, AND THE STATUS IS THE PROOF.
+  // `computeAnalysisReadyStatusWithReason` returns `needs_user_mapping` from
+  // ONE cell: `interventionCount === 0` AND `connectedFactorCount === 0`
+  // (repair-authored edges already excluded, so the product cannot count its
+  // own wiring as the user's mapping). Every other zero-intervention option is
+  // `needs_encoding` — a DIFFERENT question with a different remedy. So this
+  // row restates a fact the verdict has already computed, at the scope the
+  // verdict computed it, and names no factor BECAUSE THERE IS NONE. Naming one
+  // would be the invention this module refuses everywhere else.
+  //
+  // ⚠ THE STATUS IS NOT TOUCHED. These rows are attached to `payload.blockers`
+  // AFTER the status decision below, exactly as the unreachable-factor rows
+  // are, and they are deliberately NOT folded into `dedupedBlockers` — that
+  // array drives `needs_user_input`, and promoting this class into it would
+  // change which question the repair flow puts to the user. The run is right
+  // to refuse; it was only wrong to refuse mutely.
+  //
+  // ⚠ THE PREDICATE IS THE STATUS, NOT EMPTINESS. `hasIncompleteOptions` above
+  // keeps its loose `interventions`-empty limb on purpose (see the counter
+  // comment at :1031) and this must not be "made consistent" with it: an
+  // emptiness test would also fire on every `needs_encoding` option, which IS
+  // connected and whose remedy is a magnitude, not a mapping. The interventions
+  // conjunct below is therefore a defensive restatement of the cell and never a
+  // widening of it.
+  const unmappedOptionBlockers: AnalysisBlockerT[] = [];
+  for (const opt of analysisOptions) {
+    if (opt.status !== "needs_user_mapping") continue;
+    if (Object.keys(opt.interventions ?? {}).length > 0) continue;
+    unmappedOptionBlockers.push({
+      option_id: opt.id,
+      option_label: opt.label,
+      blocker_type: "missing_connection" as const,
+      message: `Option "${opt.label}" has no effect values yet. Tell Olumi which factors it changes, and by how much.`,
+      suggested_action: "add_edge" as const,
+    });
+  }
+  // === End unmapped option check ===
+
   // Determine payload status (priority: needs_user_input > needs_user_mapping > needs_encoding > ready)
   let payloadStatus: AnalysisReadyStatusT;
   if (dedupedBlockers.length > 0) {
@@ -1169,6 +1230,14 @@ export function buildAnalysisReadyPayload(
     payload.blockers.push(...unreachableControllableBlockers);
   }
 
+  // Add the option-scoped mirror of the above, on the same terms: attached to
+  // the payload, never folded into `dedupedBlockers`, so the refusal gains a
+  // name without the status gaining a rung.
+  if (unmappedOptionBlockers.length > 0) {
+    if (!payload.blockers) payload.blockers = [];
+    payload.blockers.push(...unmappedOptionBlockers);
+  }
+
   // Emit telemetry with option status breakdown for observability
   emit(TelemetryEvents.AnalysisReadyBuilt ?? "cee.analysis_ready.built", {
     optionCount: analysisOptions.length,
@@ -1183,6 +1252,21 @@ export function buildAnalysisReadyPayload(
     // Task 2A+2B observability
     declinedFallbackCount: declinedFallbacks.length,
     blockerCount: dedupedBlockers.length,
+    // ⭐ A SEPARATE COUNTER, NOT A WIDENING OF `blockerCount`.
+    //
+    // `blockerCount` is `dedupedBlockers.length` and MUST stay that: it is the
+    // array that drives `needs_user_input`, and an operator reading it is
+    // asking "did the status escalate?". These rows deliberately do not
+    // escalate it, so folding them in would silently change what that number
+    // means for every historic comparison.
+    //
+    // It gets its own counter because the refusal this closes was diagnosed
+    // FROM this event — the `needs_user_mapping` row reading `blockerCount: 0`
+    // beside `optionsNeedingMapping: 1` is what made the gap visible. Without a
+    // counter of its own, an operator confirming this change landed would watch
+    // `blockerCount` and see no movement at all, which is exactly the
+    // un-observable ship this file's counter comment at :1031 was written about.
+    unmappedOptionBlockerCount: unmappedOptionBlockers.length,
   });
 
   // F15: Attach fallback metadata for trace surfacing. `fallback_count` is now
