@@ -190,6 +190,15 @@ function finiteOrUndefined(value: unknown): number | undefined {
  * loose numerals carry no operator and no positional meaning; `operator: "set"`
  * with a finite `range_min` is the shape ONLY P11 (`from X to Y`) emits.
  *
+ * ⚠ NOT WRAPPED IN A TRY, AND THAT IS DERIVED RATHER THAN ASSUMED. A throw
+ * here would reach the draft enforcement stage and could kill a turn, so it
+ * was checked at the producer: `extractQuantities` declares *"the contract
+ * says it never throws"* and implements it with a defence-in-depth catch that
+ * logs `cqe.extraction_failed` and returns an EMPTY result set
+ * (`extract-quantities.ts:275-291`). An empty set fails the single-result
+ * requirement below, so a CQE failure degrades to a decline — which is
+ * today's behaviour — rather than to an exception.
+ *
  * The single-result requirement is an AMBIGUITY refusal, not a parsing limit:
  * a label stating two transitions does not say which factor either belongs to,
  * and guessing is the failure mode this whole module exists to stop causing.
