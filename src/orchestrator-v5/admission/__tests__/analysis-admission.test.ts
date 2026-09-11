@@ -887,3 +887,93 @@ describe('semantic_signals is enough to hold a stricter opinion without a second
     }
   });
 });
+
+/**
+ * ⭐ WHICH PARAMETER WOULD LIFT THE FLOOR — the ids, not just the count.
+ *
+ * `SEMANTIC_REASON` already tells the user the refusal lifts once they "set a
+ * value on a factor one of the options changes, or somewhere on the chain from
+ * there to your goal". That sentence describes a SET, and until this field
+ * nothing but this module could compute it: materiality is reachability over
+ * `comparisonSubstrate`, and only the COUNTS crossed the wire. A consumer that
+ * mirrored the reachability would be a second authority on one question (trap
+ * 21) over a producer in another repo (trap 12), failing in the worst
+ * direction — naming a parameter CEE does not count, so the user sets it and
+ * nothing moves.
+ *
+ * ## Why the WORKED CAPTURE and not a fixture written here
+ *
+ * Same reason the materiality pair above uses it: a fixture the author writes
+ * encodes the author's model of the producer rather than the producer
+ * (CLAUDE.md trap 16 — "a fixture you wrote yourself is not evidence about the
+ * wire"). Its topology — three options all intervening on `fac_4day_adoption`,
+ * three exogenous roots they touch nowhere — is the product's own.
+ *
+ * ## Every expectation is derived from the capture's TOPOLOGY, not from the code
+ *
+ * Read off the fixture before this was implemented:
+ *   · `fac_4day_adoption` — all three `opt_* -> fac_4day_adoption` edges, so it
+ *     is intervened and therefore material; `observed_state.source:
+ *     'cee_inference'`, so the number is Olumi's. MUST be offered.
+ *   · `out_csat` — on the chain `fac_4day_adoption -> out_csat ->
+ *     goal_4day_success`, so material; `source: 'brief_extraction'`, the ONE
+ *     parameter this capture credits to the user. MUST NOT be offered.
+ *   · `fac_productivity` — reaches the goal but is downstream of no
+ *     intervention, so not material. MUST NOT be offered.
+ *
+ * The two exclusions fail for DIFFERENT reasons — one on authorship, one on
+ * materiality — so a single over-broad or over-narrow predicate cannot satisfy
+ * both. One inclusion alone would prove only that the array is non-empty.
+ */
+describe('the refusal names WHICH parameters are still Olumi’s', () => {
+  it('offers the intervened factor, and withholds the two that must not be offered', () => {
+    const graph = workedCapture();
+    const signals = censusConfidenceParameters(graph);
+
+    // PRECONDITIONS PINNED IN-TEST, so this cannot pass because the fixture
+    // quietly stopped reproducing the 1-of-N cell (CLAUDE.md trap 13b).
+    expect(signals.material_parameters_user_stated, 'the 1-of-N cell').toBe(1);
+    expect(nodeOf(graph, 'fac_4day_adoption').observed_state).toMatchObject({
+      source: 'cee_inference',
+    });
+    expect(nodeOf(graph, 'out_csat').observed_state).toMatchObject({
+      source: 'brief_extraction',
+    });
+
+    const offered = signals.material_parameters_awaiting_user_node_ids;
+
+    // Bound by IDENTITY, never by a count another member could satisfy.
+    expect(offered).toContain('fac_4day_adoption');
+    expect(offered, 'the user already authored this one').not.toContain('out_csat');
+    expect(offered, 'an exogenous root moves both arms equally').not.toContain(
+      'fac_productivity',
+    );
+  });
+
+  it('offers nothing once the floor is met by every material parameter', () => {
+    // OPPOSITE DIRECTION. Stamping the user on the offered factor must REMOVE it
+    // — this fails if the field is a static list of material ids that ignores
+    // authorship, which is the cheap way to make the test above pass.
+    const graph = workedCapture();
+    const before = censusConfidenceParameters(graph)
+      .material_parameters_awaiting_user_node_ids;
+    expect(before, 'precondition: it is offered before the stamp').toContain(
+      'fac_4day_adoption',
+    );
+
+    nodeOf(graph, 'fac_4day_adoption').observed_state = { value: 0, source: 'user' };
+
+    expect(
+      censusConfidenceParameters(graph).material_parameters_awaiting_user_node_ids,
+    ).not.toContain('fac_4day_adoption');
+  });
+
+  it('an unreadable graph offers nothing — absence is not a to-do list', () => {
+    expect(
+      censusConfidenceParameters(null).material_parameters_awaiting_user_node_ids,
+    ).toEqual([]);
+    expect(
+      censusConfidenceParameters('not a graph').material_parameters_awaiting_user_node_ids,
+    ).toEqual([]);
+  });
+});
