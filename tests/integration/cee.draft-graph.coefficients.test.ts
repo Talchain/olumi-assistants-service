@@ -125,7 +125,18 @@ vi.mock("../../src/utils/fixtures.js", () => ({
       { id: "goal_mrr", kind: "goal", label: "Increase MRR" },
       { id: "dec_pricing", kind: "decision", label: "Pricing strategy" },
       { id: "opt_increase", kind: "option", label: "Increase price", data: { interventions: { fac_price: 120 } } },
-      { id: "opt_maintain", kind: "option", label: "Maintain price", data: { interventions: { fac_price: 100 } } },
+      // "Maintain price" IS the current arrangement: it holds fac_price at the
+      // level fac_price already carries (100), so choosing it changes nothing.
+      // It must therefore DECLARE itself the baseline. Without the flag it is an
+      // option that models no change while presenting itself as an alternative —
+      // exactly what OPTION_NO_OP refuses (`validators/graph-validator.ts`), and
+      // exactly the shape that let the product recommend raising a price while
+      // modelling not raising it. The repo already settles this reading:
+      // `model-readiness-compiler-corpus.records.test.ts:120` marks "keeping the
+      // price at £49" `is_baseline: true`.
+      // ⚠ Do NOT "fix" a future OPTION_NO_OP here by moving the intervention off
+      // 100: that would make the label a lie, which is the worse direction.
+      { id: "opt_maintain", kind: "option", label: "Maintain price", is_baseline: true, data: { interventions: { fac_price: 100 } } },
       { id: "fac_price", kind: "factor", label: "Price", data: { value: 100, extractionType: "explicit" } },
       { id: "fac_demand", kind: "factor", label: "Demand", data: { value: 500, extractionType: "inferred" } },
       { id: "out_revenue", kind: "outcome", label: "Revenue" },
