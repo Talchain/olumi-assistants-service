@@ -121,30 +121,42 @@ describe('reader-only refusal — the capability denial must be true', () => {
     }
   });
 
-  /**
-   * ⚠ DORMANT WHILE THE TABLE IS EMPTY, AND SKIPPED RATHER THAN FAKED.
-   *
-   * `it.each([])` is an error in vitest, and the obvious workaround — feeding it
-   * a placeholder kind — makes the block run its real assertions against a kind
-   * that does not exist, which is a failing test dressed as coverage. It is
-   * skipped explicitly instead, so the suite reports "skipped" rather than
-   * quietly passing over a block that has nothing to check.
-   *
-   * The emptiness itself is NOT unguarded: the exact-table pin below REDs the
-   * moment a kind is parked reader-only, which is what re-arms this block.
-   */
-  describe.skipIf(Object.keys(READER_ONLY_CHAT_ROUTE_OPS).length === 0)(
-    'DIRECTION A — a capability we HAVE must not be denied', () => {
-    it.each(Object.keys(READER_ONLY_CHAT_ROUTE_OPS))(
-      '⭐ %s scopes the denial to the canvas and names the chat route',
-      (kind) => {
+  describe('DIRECTION A — a capability we HAVE must not be denied', () => {
+    /**
+     * ⚠⚠ THIS WAS A `describe.skipIf` AND THAT WAS THE WRONG ANSWER TWICE OVER.
+     *
+     * The table is empty today — `structural_add_edge` was the last reader-only
+     * kind and left when its writer landed — and `it.each([])` is an error in
+     * vitest. Skipping the block avoided the error and cost two things:
+     *
+     *   1. A SKIPPED TEST IS INVISIBLE COVERAGE, which is exactly what the
+     *      repo's skip inventory exists to stop. It was green on the base commit
+     *      and red on mine; the ratchet was right and I was wrong.
+     *   2. It also skipped the VERBATIM SENTENCE PINS below, which do not depend
+     *      on the table at all and were still doing real work.
+     *
+     * One always-running case with an explicit empty branch keeps every
+     * assertion live, reports honestly when there is nothing to iterate, and
+     * adds no skip. The emptiness is separately guarded by the exact-table pin,
+     * which REDs the moment a kind is parked reader-only.
+     */
+    it('⭐ every reader-only kind scopes its denial to the canvas and names the chat route', () => {
+      const kinds = Object.keys(READER_ONLY_CHAT_ROUTE_OPS);
+      if (kinds.length === 0) {
+        // Not a silent pass: states WHY there is nothing to iterate, so a reader
+        // of the output can tell "no kinds" from "no assertions".
+        expect(SYSTEM_EVENT_HANDLING).toBeDefined();
+        expect(kinds).toEqual([]);
+        return;
+      }
+      for (const kind of kinds) {
         const text = textFor(kind);
         // The denial is about the SURFACE, not the capability.
-        expect(text).toContain('canvas');
+        expect(text, `${kind} does not scope its denial to the canvas`).toContain('canvas');
         // And the route that works is named, so the user is not left stuck.
-        expect(text).toContain('in chat');
-      },
-    );
+        expect(text, `${kind} names no chat route`).toContain('in chat');
+      }
+    });
 
     it('⭐ THE WITNESSED FALSE SENTENCES — bound VERBATIM, by identity', () => {
       // Value predicates could be satisfied by a different sentence (trap 19);

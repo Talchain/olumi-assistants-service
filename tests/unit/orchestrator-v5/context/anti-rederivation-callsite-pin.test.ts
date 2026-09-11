@@ -243,7 +243,21 @@ const EXPECTED: Record<string, Record<string, number>> = {
     // succeeded and found nothing is `none`, a read that degraded is `unknown`,
     // and collapsing them would let a transport failure read as "never
     // analysed".
-    'src/orchestrator-v5/system-events/dispatch.ts': 6,
+    // 2026-09-11 structural_add_edge writer: 6 → 7 (+1 CALL, no new import) —
+    // `dispatchStructuralAddEdge` derives POST-COMMIT wire freshness against the
+    // persisted hash, which is the identical seam and the identical reason as
+    // the five system-event dispatchers already counted here: a structural edge
+    // add ALWAYS moves the analysis-affecting hash (a new edge changes the
+    // projected `edges` array), so a pre-derived frame value would describe the
+    // model as it was before the edit.
+    //
+    // ⚠ NOT A NEW KIND OF DEBT, and not a convenience bump. It is one more
+    // instance of a seam this table already approves for its five siblings; had
+    // it been written any other way it would have been inconsistent with them.
+    // No extra I/O: the same prior facts are re-projected against the committed
+    // hash, and the healthy-empty/degraded distinction is preserved exactly as
+    // the note above requires.
+    'src/orchestrator-v5/system-events/dispatch.ts': 7,
     // 2026-07-22 Lane C3: +2 (import + one call) — the typed add-option
     // transaction pre-route derives the PRE-edit frame freshness for its
     // referee gate against `computeAnalysisAffectingGraphHash(persistedGraph)`
