@@ -154,6 +154,102 @@ describe("decision-content redaction at the pino boundary", () => {
     expect(shape.lines.join("")).toContain("4096");
   });
 
+  it("IDENTITY: `statement` is in the content class and is redacted at depths 0, 1 and 2 — while its ADDRESS fields are deliberately NOT", () => {
+    // WHY, derived at the bytes: #1445 added the `finding_dissent` system
+    // event, which PERSISTS a user's stated reason for disagreeing with a
+    // finding VERBATIM (`system-events/dispatch.ts`, `statement:
+    // event.statement`, "the words are the record"). That persistence is
+    // Paul's ruling of 2026-09-11 — a deliberate, reviewed widening of
+    // standing privacy rule R-004. The half of R-004 that STANDS is that
+    // the text may contain PII and must never be re-emitted into telemetry
+    // or logs, so the field name joins the mechanical boundary here.
+    //
+    // SCOPE, stated precisely: this is PROSPECTIVE, not a live leak — the
+    // same footing as `systemPrompt` (#1435). Swept at 46a27ae6 with a
+    // contrast control: NO log call site in `src/` names `statement` today
+    // (contrast: 27 log sites name `label`), and there is no SQL/prepared
+    // `statement` anywhere in the tree. What enrolment buys is that a
+    // future `log.*({ ...fact.result })`, or an innocent
+    // `log.debug({ statement })`, cannot put the user's words on the wire.
+    //
+    // ⚠ WHAT IT DOES NOT COVER, so nobody inherits an overclaim: the one
+    // real re-emission surface #1445's reviewer probed is
+    // `log.error({ parse_error: check.error.message })` (dispatch.ts
+    // ~:757-765). That field is named `parse_error`, not `statement`, so
+    // this enrolment does NOT close it; the boundary keys on the field
+    // NAME. The reviewer measured no leak there across seven failure modes
+    // with a firing positive control — that remains the evidence for that
+    // surface, and this listing neither strengthens nor replaces it.
+    //
+    // SECOND POPULATION under the same name, and it is content too, so the
+    // enrolment is reinforcing rather than a collision cost: decision-records
+    // carries `prediction.statement` (`store-adapter.ts:120`). Auto-capture
+    // sets it from `fact.result.summary` (`capture.ts:246`) — analysis prose
+    // naming the leading option, which `turn-executor.ts:2863` already gates
+    // as withheld content — and the user-committed write sets it to "the
+    // user's own stated expectation" (`user-commit.ts:28`). Both halves are
+    // decision content; NEITHER is service vocabulary, an enum or a
+    // diagnostic code, so digesting the name blinds no diagnostic.
+    //
+    // Bound by the exact field NAME, not by a value predicate: this test
+    // must RED if `statement` leaves DECISION_CONTENT_FIELDS, which the
+    // list-derived coverage test above cannot see (a derived guard proves
+    // agreement, never completeness).
+    expect(isDecisionContentField("statement")).toBe(true);
+
+    const { logger, lines } = protectedLogger();
+    logger.info({ statement: SENTINEL });
+    logger.info({ ctx: { statement: SENTINEL } });
+    logger.info({ a: { b: { statement: SENTINEL } } });
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).not.toContain(SENTINEL);
+      expect(line).toMatch(DIGEST_RE);
+    }
+
+    // The two live SHAPES this protects, at the depth each actually occurs:
+    // the #1445 handler-fact result (depth 1 under `result`) and the
+    // decision-records prediction (depth 1 under `prediction`).
+    const shapes = protectedLogger();
+    shapes.logger.info({
+      result: { finding_id: "f-42", analysis_id: "a-7", statement: SENTINEL },
+    });
+    shapes.logger.info({ prediction: { statement: SENTINEL, confidence: 0.62 } });
+    expect(shapes.lines.join("")).not.toContain(SENTINEL);
+    expect(shapes.lines.join("")).toMatch(DIGEST_RE);
+
+    // NEGATIVE PIN — the discriminating twin. `statement` has NO shape twins
+    // (measured zero at 46a27ae6, contrast control `system_prompt_sha256`
+    // firing at 3 files), so unlike `system_prompt` there is no
+    // `statement_sha256` to exclude. The honest analogue is the ADDRESS:
+    // 0.55.0's FindingDissentResultSchema is {finding_id, analysis_id,
+    // statement, provenance}, and the pair (analysis_id, finding_id) is what
+    // makes a dissent traceable and a leak correlatable. Those carry no user
+    // bytes and must survive, or the detection surface goes with the words.
+    expect(isDecisionContentField("finding_id")).toBe(false);
+    expect(isDecisionContentField("analysis_id")).toBe(false);
+    expect(isDecisionContentField("provenance")).toBe(false);
+    const addr = protectedLogger();
+    addr.logger.info({ finding_id: "f-42", analysis_id: "a-7", provenance: "user_set" });
+    expect(addr.lines.join("")).toContain("f-42");
+    expect(addr.lines.join("")).toContain("a-7");
+    expect(addr.lines.join("")).toContain("user_set");
+  });
+
+  it("POSITIVE CONTROL: `statement` leaks through a logger WITHOUT the content paths (the probe can see a presence)", () => {
+    // Absence assertions above are only worth the harness that proves a
+    // presence. Both controls fire on the SAME field name and the SAME
+    // sentinel used in the protected assertions.
+    const preFix = preFixLogger();
+    preFix.logger.info({ statement: SENTINEL });
+    preFix.logger.info({ ctx: { statement: SENTINEL } });
+    expect(preFix.lines.filter((l) => l.includes(SENTINEL))).toHaveLength(2);
+
+    const bare = captureLogger({ level: "info" });
+    bare.logger.info({ result: { statement: SENTINEL } });
+    expect(bare.lines.join("")).toContain(SENTINEL);
+  });
+
   it("POSITIVE CONTROL: the pre-fix config (credential paths only) leaks the sentinel at every depth", () => {
     const { logger, lines } = preFixLogger();
     for (const field of DECISION_CONTENT_FIELDS) {

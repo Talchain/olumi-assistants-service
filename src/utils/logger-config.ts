@@ -201,6 +201,42 @@ export const DECISION_CONTENT_FIELDS = [
   // mirror, and listing it here makes it mechanical. Same shape-twin
   // ruling as above: `systemPromptSha256` / `systemPromptChars` stay OFF.
   "systemPrompt",
+  // A user's STATED REASON for disagreeing with a finding (#1445's
+  // `finding_dissent` system event). Paul's ruling of 2026-09-11
+  // deliberately widened standing privacy rule R-004 so this free text
+  // is PERSISTED verbatim — `dispatch.ts` passes it through untouched,
+  // "the words are the record". The half of R-004 that STANDS is that
+  // the text may contain PII and must never be re-emitted into telemetry
+  // or logs, which is exactly this boundary's job.
+  //
+  // PROSPECTIVE, not a live leak — same footing as `systemPrompt` above.
+  // Swept at 46a27ae6 with a contrast control: no log call site in `src/`
+  // names `statement` today (contrast: 27 log sites name `label`), and
+  // #1445's reviewer measured the one real re-emission surface
+  // (`log.error({ parse_error: check.error.message })`, dispatch.ts
+  // ~:757-765) across seven failure modes with a firing positive control
+  // and saw no leak. ⚠ Note the honest limit: that field is named
+  // `parse_error`, so listing `statement` does NOT close that surface —
+  // this boundary keys on the field NAME. What it closes is the innocent
+  // future `log.*({ ...fact.result })` or `log.debug({ statement })`.
+  //
+  // NO SHAPE TWINS TO EXCLUDE, unlike `system_prompt`: 0.55.0's
+  // FindingDissentResultSchema is {finding_id, analysis_id, statement,
+  // provenance} and there is no `statement_sha256`/`statement_chars`
+  // anywhere in the tree (measured zero, contrast control firing). The
+  // address pair (analysis_id, finding_id) stays OFF this list on the
+  // same reasoning the shape twins do — it carries no user bytes and is
+  // what lets a dissent be traced and a leak correlated.
+  //
+  // SECOND POPULATION, and it is content too, so this is reinforcing
+  // rather than over-scrubbing: decision-records' `prediction.statement`
+  // (`store-adapter.ts:120`) is set either from `fact.result.summary`
+  // (`capture.ts:246` — analysis prose naming the leading option, which
+  // `turn-executor.ts:2863` already gates as withheld content) or from
+  // "the user's own stated expectation" (`user-commit.ts:28`). Neither
+  // half is service vocabulary, an enum or a diagnostic code, so the
+  // digest blinds no diagnostic.
+  "statement",
 ] as const;
 
 export type DecisionContentField = (typeof DECISION_CONTENT_FIELDS)[number];
