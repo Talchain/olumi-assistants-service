@@ -204,6 +204,33 @@ export const MUTATION_DISPATCH_SKIP: ReadonlyMap<HandlerFact['fact_type'], strin
     ['feedback', 'Judgement receipt (thumbs rating) — no graph state change.'],
     ['edge_adjudication', 'Judgement receipt (contested-edge verdict) — no graph state change.'],
     ['prior_range_edit', 'Judgement receipt (user-set prior range) — no graph state change.'],
+    // 0.55.0 — `finding_dissent`, the FOURTH judgement receipt. Classified SKIP
+    // on 2026-09-11. DERIVED rather than assumed, because the conformance test
+    // forces the question and a silent answer is the thing it exists to stop:
+    //
+    //   1. `recent_changes` answers "What changed in the MODEL?" — the referent
+    //      register says so in as many words (`context/turn-referents.ts`),
+    //      where this field is named APART from its neighbours precisely
+    //      because two questions under one name is this estate's signature
+    //      defect. A dissent is a claim ABOUT a finding, not a change to the
+    //      model that produced it, so it is not an answer to that question.
+    //   2. The event's own transport classification agrees: `finding_dissent`
+    //      is `'fact_and_commit'` in `system-events/dispatch.ts`, explicitly
+    //      NOT `'mutating'` — it writes no `scenarios.graph` and moves no
+    //      `graph_hash`.
+    //   3. It is emitted by `buildJudgementFact`, the same function that emits
+    //      the three receipts above — all three already skipped for this
+    //      reason. It is the same class, not a new one.
+    //   4. SKIP is also the CONSERVATIVE reading: `summariseMutation` has no
+    //      branch for this fact_type and already falls through to `return
+    //      null`, so this entry makes the EXISTING behaviour explicit rather
+    //      than changing behaviour to clear a red.
+    //
+    // The alternative (a receipt) would let `deriveInterveningChange` say
+    // "since you changed X" about something that changed nothing, and would
+    // trip its `several ⇒ name none` guard on a non-change — a false causal
+    // claim, which is the one thing that module exists to avoid.
+    ['finding_dissent', 'Judgement receipt (stated dissent from a finding) — no graph state change.'],
   ]);
 
 function summariseMutation(fact: HandlerFact): RecentMutation | null {
