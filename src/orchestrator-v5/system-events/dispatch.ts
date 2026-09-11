@@ -370,6 +370,22 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // not reach `scenarios.graph` is not an edit — it is a number the user watched
   // vanish on reload.
   option_intervention_edit: 'mutating',
+  // 0.55.0 — the Reasoning tab's stated disagreement. `'fact_and_commit'`
+  // because this event changes NO graph and yet carries something the server
+  // must keep: the words a human wrote about a finding.
+  //
+  // ⚠ NOT `'mutating'`. Every member of that set writes `scenarios.graph`, which
+  // moves `graph_hash` and invalidates the user's analysis. A dissent asserts no
+  // value and edits no node — it is a claim ABOUT a finding, not a change to the
+  // model that produced it. Making it mutating would invalidate the very
+  // analysis the user is objecting to: wrong, and self-defeating.
+  //
+  // ⚠ NOT `'ack_and_commit'`, and this is the whole point of the change. An ack
+  // commits a turn row and DISCARDS the payload — precisely the defect recorded
+  // against `feedback` above, where the UI emitted a typed event and the server
+  // threw its content away. Here the payload IS the record, so an ack would
+  // reproduce the empty-ack class on the one field the event exists to carry.
+  finding_dissent: 'fact_and_commit',
 };
 
 // DERIVED from the map above — not a second list to keep in step. undo/redo are
@@ -397,6 +413,14 @@ const CLIENT_ONLY_EVENT_KINDS: ReadonlySet<SystemEventKindLiteral> = new Set<Sys
  * text — the user's free text may contain PII and a fact row is long-lived
  * and widely read. The contract's `FeedbackResultSchema` is `.strict()`, so a
  * future `comment` field is a deliberate reviewed widening, not a quiet leak.
+ * That widening now has a REALISED EXAMPLE, and it does NOT relax the rule
+ * above: `FindingDissentResultSchema` persists a `statement` VERBATIM,
+ * authorised by Paul's ruling of 2026-09-11. The limit is the authorisation's
+ * own — it is scoped to a user's OWN STATED REASONING ABOUT A FINDING, never a
+ * general licence to persist free text. `feedback.comment` is still withheld,
+ * and both halves are pinned together in
+ * tests/integration/orchestrator/route-v2-judgement-receipts.test.ts so neither
+ * can quietly drift into the other.
  *
  * Provenance on the adjudication/prior facts is stamped HERE, server-side
  * (`user_set`) — the wire deliberately carries no provenance field (the event
@@ -443,6 +467,22 @@ export function buildJudgementFact(
           range_min: event.range_min,
           range_max: event.range_max,
           distribution: event.distribution ?? null,
+          provenance: 'user_set',
+        },
+      };
+    case 'finding_dissent':
+      return {
+        fact_type: 'finding_dissent',
+        fact_version: 1,
+        noop: false,
+        result: {
+          finding_id: event.finding_id,
+          analysis_id: event.analysis_id,
+          // VERBATIM — passed through untouched. Not trimmed, collapsed,
+          // truncated or re-encoded: the words are the record, and a
+          // whitespace-only statement is REFUSED by the contract at the wire
+          // rather than tidied into something the user did not write.
+          statement: event.statement,
           provenance: 'user_set',
         },
       };

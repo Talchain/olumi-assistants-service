@@ -387,4 +387,181 @@ describe('POST /orchestrate/v2/turn — human-judgement receipts (P4 transport)'
     const option = graph!.nodes.find((n) => n.id === 'o-launch')!;
     expect((option.observed_state as Record<string, unknown> | undefined)?.source).toBeUndefined();
   });
+
+  // ── 6. finding_dissent — the STATED REASON persists (R-004's authorised
+  //        widening, Paul's ruling of 2026-09-11) ─────────────────────────────
+  //
+  // ⚠ WHY THIS SECTION IS DIFFERENT FROM SECTION 1, AND WHY THE DIFFERENCE IS
+  // THE POINT. `feedback` above proves the comment TEXT never reaches the store
+  // (R-004). Here the text IS the record. That is not R-004 being relaxed — it
+  // is the "deliberate reviewed widening" R-004's own wording anticipates,
+  // authorised by Paul on 2026-09-11 and SCOPED to a user's own stated reasoning
+  // about a finding. Both tests must hold simultaneously; if a future change
+  // makes them agree, one of them has lost its point.
+
+  it('⭐ a finding_dissent commits a typed fact CARRYING the statement; no graph write', async () => {
+    const FINDING_ID = 'rec-7f2a-margin-floor';
+    const ANALYSIS_ID = 'an-2026-09-11-0042';
+    const STATEMENT = 'The margin floor assumes last year’s supplier terms, which we renegotiated in Q2.';
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        {
+          kind: 'finding_dissent',
+          finding_id: FINDING_ID,
+          analysis_id: ANALYSIS_ID,
+          statement: STATEMENT,
+        },
+        '9',
+      ),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(llmChatMock).not.toHaveBeenCalled();
+
+    const arg = lastAppend();
+    // Carry the signal, never touch the model — this event changes no graph.
+    expect(arg.graph == null).toBe(true);
+    // The PR B precedent, identical to the three receipts above.
+    expect(arg.turn_class).toBe('direct_answer');
+    expect(arg.handler_id ?? null).toBeNull();
+
+    expect(arg.handler_facts).toHaveLength(1);
+    const fact = arg.handler_facts![0]!;
+    // Parses against the CONTRACT, not a local shape.
+    expect(HandlerFactSchema.safeParse(fact).success).toBe(true);
+    // Identity-bound: this finding, in this run. Never a value predicate
+    // another record could satisfy.
+    expect(fact).toMatchObject({
+      fact_type: 'finding_dissent',
+      fact_version: 1,
+      noop: false,
+      result: {
+        finding_id: FINDING_ID,
+        analysis_id: ANALYSIS_ID,
+        statement: STATEMENT,
+        provenance: 'user_set',
+      },
+    });
+  });
+
+  it('⭐ the statement is persisted VERBATIM — whitespace is not trimmed, collapsed or normalised', async () => {
+    // Deliberately hostile to tidying: leading and trailing spaces, a double
+    // space, and an embedded newline. Every one of these survives or the words
+    // are not the record.
+    //
+    // ⚠ THIS TEST EXISTS BECAUSE THE CONTRACT CANNOT PIN IT HERE. An independent
+    // review of the schemas release found the verbatim property is pinned by
+    // execution on the WIRE side only: the fact-side schema would stay green if
+    // something in CEE added a `.trim()` on the way to the store, because a
+    // trimmed statement is still a valid `statement`. The bound is `.min(1)` and
+    // a max, not an identity. So it is pinned HERE, at the seam that could break
+    // it, and the negative assertion below is the half that bites.
+    const FINDING_ID = 'rec-9c31-demand-curve';
+    const ANALYSIS_ID = 'an-2026-09-11-0043';
+    const RAW = '  the elasticity looks inverted to me\n\nand nobody owns this number.  ';
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        {
+          kind: 'finding_dissent',
+          finding_id: FINDING_ID,
+          analysis_id: ANALYSIS_ID,
+          statement: RAW,
+        },
+        'a',
+      ),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const fact = lastAppend().handler_facts![0]! as { result: Record<string, unknown> };
+    // Identity binding first — assert we are reading THIS dissent's record.
+    expect(fact.result.finding_id).toBe(FINDING_ID);
+
+    // Byte-for-byte. `toBe` on the exact string, not a `toContain`.
+    expect(fact.result.statement).toBe(RAW);
+    expect((fact.result.statement as string).length).toBe(RAW.length);
+
+    // ⭐ THE ASSERTION THAT BITES. Every plausible "tidy-up" of this field
+    // produces a DIFFERENT string, and each is named so a failure says which
+    // transformation crept in rather than only that something did.
+    expect(fact.result.statement).not.toBe(RAW.trim());
+    expect(fact.result.statement).not.toBe(RAW.replace(/\s+/g, ' '));
+    expect(fact.result.statement).not.toBe(RAW.replace(/\n/g, ' '));
+  });
+
+  it('a whitespace-only statement is REFUSED at the wire (422) — never a persisted empty record', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        {
+          kind: 'finding_dissent',
+          finding_id: 'rec-blank',
+          analysis_id: 'an-2026-09-11-0044',
+          statement: '   ',
+        },
+        'b',
+      ),
+    });
+    // Refused rather than tidied: a blank statement is this member with its
+    // point removed. `.min(1)` alone would admit it.
+    expect(res.statusCode).toBe(422);
+    expect(appendMock).not.toHaveBeenCalled();
+  });
+
+  it('R-004 holds BOTH ways at once — the dissent statement persists while a feedback comment still does not', async () => {
+    // The two halves of the ruling, in one test, so neither can drift into the
+    // other. A change that persists feedback comments, or that stops persisting
+    // dissent statements, REDs here.
+    const STATEMENT = 'this understates the downside for the EU entity';
+
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        {
+          kind: 'finding_dissent',
+          finding_id: 'rec-both-ways',
+          analysis_id: 'an-2026-09-11-0045',
+          statement: STATEMENT,
+        },
+        'c',
+      ),
+    });
+    const dissentBytes = JSON.stringify(appendMock.mock.calls.at(-1));
+    // Positive control (trap 13): the scan can SEE a known-present value.
+    expect(dissentBytes).toContain('rec-both-ways');
+    // AUTHORISED: the stated reasoning is the record.
+    expect(dissentBytes).toContain(STATEMENT);
+
+    appendMock.mockClear();
+
+    const PII_COMMENT = 'ask raj.patel@example.com, he ran the numbers';
+    await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: payloadFor(
+        {
+          kind: 'feedback',
+          rating: 'down',
+          comment: PII_COMMENT,
+          target: { id: RATED_TURN_ID, kind: 'turn' },
+        },
+        'd',
+      ),
+    });
+    const feedbackBytes = JSON.stringify(appendMock.mock.calls.at(-1));
+    // Positive control again, on the SECOND scan — a scan that cannot see is
+    // not evidence of absence.
+    expect(feedbackBytes).toContain('comment_present');
+    // STILL WITHHELD: the widening is scoped to stated reasoning, and a
+    // feedback comment is not that.
+    expect(feedbackBytes).not.toContain(PII_COMMENT);
+    expect(feedbackBytes).not.toContain('raj.patel');
+  });
 });

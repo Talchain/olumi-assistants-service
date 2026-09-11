@@ -7,7 +7,49 @@ identically from a normal clone, a CI checkout, and any worktree.
 
 ## Current contents
 
-### `talchain-schemas-0.54.0.tgz` ← **THE CURRENT PIN**
+### `talchain-schemas-0.55.0.tgz` ← **THE CURRENT PIN**
+
+> **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
+>
+> Downloaded from GitHub Packages at
+> `https://npm.pkg.github.com/download/@talchain/schemas/0.55.0/06d04f693ae47d12660d3b98d8ca73da8e757466`,
+> the tarball `npm publish` produced from `olumi-schemas` `main`
+> **`a016076f10f1845df2d6367e3cfa848f6c60d1c2`** (tag `v0.55.0`; the registry's
+> own `gitHead` binds that commit), publisher job `103096047436`
+> (workflow run `34545148675`), 00:09:19 UTC on 2026-09-11.
+>
+> **508,334 bytes.** Verified three ways against the registry's published
+> metadata, all exact:
+>
+> ```
+> npm shasum (sha1)  06d04f693ae47d12660d3b98d8ca73da8e757466   ← matches
+> integrity (sha512) sha512-pCfgES4b58MqILdMD8KIkdZ1uzeRz0FHGZuvENDfNyfHzPDB
+>                    R+SE6fPg8cbywe3XwrDvn2geA0tpZ9PavGY7oQ==   ← matches
+> sha256             ea61d924a44722e327963455682aeb84a29d80a05848b7215e590ca2b72fad00
+> ```
+>
+> ⭐ **A FOURTH, INDEPENDENT CONFIRMATION arrived for free and is worth recording
+> because it is derived rather than asserted:** `pnpm install` wrote
+> `integrity: sha512-pCfgES4b58Mq…` into `pnpm-lock.yaml` for this tarball, and
+> that value is byte-identical to the registry's published `integrity`. The
+> lockfile hashes the file on disk without consulting the registry, so the
+> agreement is two independent paths reaching the same digest — not the same
+> claim copied twice.
+>
+> ⚠ **DOWNLOADED, NOT SOURCE-PACKED — the same procedure as 0.54.0 above, and
+> the distinction is deliberate.** A pack proves our bytes derive from the
+> tagged source; a download proves these ARE the published bytes. Do not
+> describe one as the other. The entries below 0.54.0 were source-packed
+> (`npm ci && npm run build && npm pack` from an asserted tag checkout); both
+> are legitimate and they prove different things.
+>
+> **What this release adds (additive only, two members):** `SystemEventSchema`
+> gains `FindingDissentEvent` and `HandlerFactSchema` gains
+> `FindingDissentHandlerFactSchema` — the wire and fact halves of a user's
+> stated disagreement with a finding, authorised by Paul's ruling of
+> 2026-09-11 and consumed by CEE's `finding_dissent` dispatch.
+
+### `talchain-schemas-0.54.0.tgz` (historical — no longer vendored as of 0.55.0)
 
 > **✔ THE PUBLISHED REGISTRY ARTEFACT ITSELF — not a local re-pack.**
 >
