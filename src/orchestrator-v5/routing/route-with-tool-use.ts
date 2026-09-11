@@ -1895,19 +1895,72 @@ export const BRIEF_INSTRUCTION = [
   '- Never repeat internal field names or framing metadata in user-facing text.',
 ].join('\n');
 
+/**
+ * COACHING STATE — what the model may claim about computed results, and what it
+ * must still do for the person regardless.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────────
+ * Witnessed on deployed staging 2026-09-08 16:47Z (UI 8f65f7c5, CEE dcff3c5,
+ * routing prompt v121/bec840a648800928, one real conversational turn). The user
+ * asked a genuinely strategic question — rapidly rising salaries, a £200,000
+ * budget, "what is the most effective way to spend that money on this
+ * additional resource?" — with the coaching context PRESENT and the analysis
+ * stale. The reply opened "Your model doesn't yet price out either option
+ * against that £200,000", explained how to add a budget ceiling, explained the
+ * staleness, withheld an option and asked whether to set a constraint and
+ * re-run. It never touched the hiring problem: no conditional trade-off between
+ * leadership and delivery capacity, no unknown worth naming (spending period,
+ * fully loaded cost), no question about which bottleneck actually binds.
+ * Every safety property PASSED. The useful-coaching check FAILED.
+ *
+ * ── WHY THE OLD WORDING PRODUCED THAT ──────────────────────────────────────
+ * The unsafe-state bullet said, in full: "do not present the results as
+ * current, and do not recommend one option over another. Say the analysis may
+ * be out of date and suggest re-running it BEFORE GIVING CONFIDENT ADVICE."
+ * Read literally that is a prohibition on ALL advice until a run exists, so the
+ * only thing left to say is how to fix the model. The prohibition that is
+ * actually warranted is narrower by a long way: a missing or stale analysis
+ * means there are no CURRENT COMPUTED RESULTS to quote or rank options by. It
+ * says nothing about whether the person can be helped to think.
+ *
+ * ── WHAT CHANGED, AND WHAT DELIBERATELY DID NOT ────────────────────────────
+ * The block now states the positive obligation first and scopes each
+ * prohibition to computed results, rankings and figures. Unchanged and
+ * deliberately so: no invented numbers, provenance, confidence or evidence; no
+ * claim that anything was applied, saved or re-run; honest currentness; honest
+ * uncertainty; no identifiers or field names in user-facing text. The refusal
+ * bullet is untouched.
+ *
+ * ⚠ THIS IS AN INSTRUCTION CHANGE, SO IT IS A HYPOTHESIS UNTIL MEASURED. The
+ * captured-adapter tests below prove what the model is TOLD, never what it
+ * generates. Generated quality is the job of the local candidate comparison
+ * recorded alongside this change; nothing here may be described as a proven
+ * repair of the witnessed turn on the strength of the assembly tests alone.
+ */
 export const COACHING_CONTEXT_INSTRUCTION = [
   '## Coaching state (deterministic — authoritative)',
   'The `coaching_context` block above is the system’s verified state of the analysis. Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',
+  // ⭐ THE POSITIVE OBLIGATION, STATED BEFORE THE PROHIBITIONS. Every bullet
+  // below restricts what may be claimed about COMPUTED RESULTS. None of them
+  // restricts thinking with the person, and this line says so explicitly so a
+  // later reader of the prohibitions cannot infer a general silence from them.
+  'This block governs what you may claim about computed results. It never suspends coaching: whatever it says, still help the person think about the problem they actually raised, reasoning from the concerns, goals, options, constraints and evidence already supplied.',
+  '- Answer the question that was actually asked, first. Reason conditionally from the supplied material — "if X matters more here than Y, then …" — and give at least one useful practical implication or trade-off, name the unknown that would most change the answer, and ask one question that would genuinely move the person’s thinking on. Advice about maintaining the model (setting a value, running an analysis) may accompany that; it must never replace it.',
+  '- Keep grounded facts and hypotheses distinguishable in the words themselves. Anything not present in the supplied context is your own reading, and must be voiced as such — a possibility, an assumption, a question — never asserted as a fact about the model, the analysis or the world.',
   // Pre-analysis honesty (review r2): when `freshness` is "none" NO analysis has
   // ever run, so telling the user the results "may be out of date" or to
   // "re-run" is a FALSE claim (there is nothing to re-run). Say plainly that no
-  // analysis has been run yet. The "don't recommend one option over another
-  // before analysis" stance is retained here deliberately (a phase-② design
-  // question, out of scope for this fix).
-  '- If `freshness` is "none": no analysis has been run yet — say so plainly, and do not recommend one option over another as though a result already existed.',
+  // analysis has been run yet.
+  //
+  // ⚠ The former clause "do not recommend one option over another" was DROPPED
+  // here on purpose, and replaced by a ban on stating COMPUTED results. Before
+  // any analysis the honest position is not silence about the options — it is
+  // that no figures exist, which is exactly what the narrower ban says.
+  '- If `freshness` is "none": no analysis has been run yet — say so plainly. You may still reason qualitatively about the options and about what would matter, but state no computed result, ranking, probability or score, and do not settle the choice as though a result already existed.',
   '- If `latest_run_attempt_refused` is true: the latest attempt was refused before computation. Do not say running is safe, that the current model can produce a result, or that a run would show probabilities unless a newer successful run is present. Answer the user’s question directly, preserve the refusal caveat, and give one useful next fact or remedy.',
-  '- Otherwise, if `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not recommend one option over another. Say the analysis may be out of date and suggest re-running it before giving confident advice.',
-  '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units, and never claim a change was applied. State only what the supplied context or analysis already contains.',
+  '- Otherwise, if `freshness` is not "fresh", or `rerun_required` is true, or `usable_for_chips` is false, or `blocked` is true: do not present the results as current, and do not name a leading, winning or recommended option as though the figures settled it. Say the analysis may be out of date and suggest re-running it before any conclusion that depends on the numbers — and still give the qualitative reasoning, the trade-off and the next question the question deserves.',
+  '- Never invent freshness, confidence, evidence, provenance, scientific or bias claims, numeric values or units. Computed results, rankings and figures may come only from the supplied analysis; qualitative reasoning must stay visibly qualitative.',
+  '- Nothing here licences changing anything. Never claim a change was applied, saved, confirmed or re-run — propose it and ask.',
   '- Never quote hashes, identifiers, or internal field names.',
 ].join('\n');
 
