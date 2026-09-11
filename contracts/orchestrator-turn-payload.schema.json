@@ -1015,6 +1015,38 @@
                     "base_graph_hash"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "finding_dissent"
+                    },
+                    "finding_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact id of the finding the user is objecting to, as the surface rendering it holds it (the Reasoning tab's per-run recommendation id). ID-ADDRESSED — never a label or the rendered sentence, which every surface truncates. Deliberately NOT narrowed to a UUID or ULID: the id convention belongs to CEE, and a regex here would be this package asserting a producer convention it does not own — the reasoning `analysis_fact.fact_id` already records. Deliberately NOT named `target_id`, which on this union means a GRAPH NODE id: a finding is not a node, and one name over two id-spaces is how a write lands on the wrong entity."
+                    },
+                    "analysis_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "The analysis run the finding was rendered from — the same token the analysis-fact contract calls `analysis_id` (\"the run this fact belongs to\"), reused rather than respelled. REQUIRED, and not merely for context: a recommendation id is per-run, so this is the other half of the subject's address. Without it a dissent could be shown beside a later analysis, which would be a claim the user never made. It is a RECORD STAMP, never a stale gate: CEE must not refuse a dissent because the run has since been superseded — the statement was still true when it was made."
+                    },
+                    "statement": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000,
+                      "description": "The user's reason, VERBATIM. This is the field Paul's ruling of 2026-09-11 authorises persisting and it is the entire purpose of the member — R-004's deliberate reviewed widening, not a quiet leak. It MAY contain PII: consumers persist it as authored user content and must not re-emit it into telemetry or logs, which is the half of R-004 that still stands. Named `statement` to reuse `DisagreementPositionSchema`'s `preference` member rather than mint a synonym for the same idea. NEVER trimmed, collapsed or normalised by any consumer — the words are the record, and a whitespace-only statement is REFUSED rather than tidied, on the same reasoning refineStructuralDelete and refineStructuralRename give for refusing a provably meaningless request. `.min(1)` alone would admit \" \". The bound is DERIVED, not chosen: it is `feedback.comment`'s, the only other user-free-text field on this union and the exact field R-004 is about."
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "finding_id",
+                    "analysis_id",
+                    "statement"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             }
