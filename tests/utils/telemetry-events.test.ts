@@ -162,6 +162,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         CeeEnforcementPostValidationWarnings: "cee.draft_graph.enforcement_post_validation_warnings",
         CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
         CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
+        // ⭐ A no-op option is DE-CONFIGURED, not refused (PR #1449).
+        // Deliberate frozen-registry addition per the registry discipline.
+        CeeOptionNoOpNeutralised: "cee.draft_graph.option_no_op_neutralised",
 
         // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
         CeeEnforcementAutoRetry: "cee.draft_graph.enforcement_auto_retry",
@@ -1240,6 +1243,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.CeeEnforcementPostValidationWarnings,
         TelemetryEvents.CeeEnforcementPostValidationFailed,
         TelemetryEvents.CeeEnforcementBlocked,
+        // No-op option neutralisation (PR #1449) — diagnostic, no Datadog.
+        // Emitted as a content-free structured log (option ids + count only,
+        // never labels or magnitudes) via log.warn, not emit(), so there is no
+        // datadogClient metric to map until a dashboard consumes it.
+        TelemetryEvents.CeeOptionNoOpNeutralised,
         // Bounded auto-retry (ROADMAP 2.1086) — diagnostic, no Datadog
         TelemetryEvents.CeeEnforcementAutoRetry,
         TelemetryEvents.CeeEnforcementAutoRetrySkipped,
@@ -1919,6 +1927,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "cee.draft_graph.enforcement_post_validation_warnings",
         "cee.draft_graph.enforcement_post_validation_failed",
         "cee.draft_graph.enforcement_blocked",
+        // ⭐ The no-op neutralisation meter (PR #1449).
+        // Deliberate frozen-registry addition per the registry discipline.
+        "cee.draft_graph.option_no_op_neutralised",
 
         // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
         "cee.draft_graph.enforcement_auto_retry",
