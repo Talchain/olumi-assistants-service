@@ -193,6 +193,49 @@ export interface EvaluateFactorValueProposalInput {
   readonly factorObservedValue?: number;
   readonly factorObservedRawValue?: number;
   /**
+   * ⭐⭐ TRAP 21 — THE SECOND QUESTION, NAMED APART: "is there a SCALE here for
+   * a declaration to overwrite?" (2026-09-11, the journey-witnessed dead end).
+   *
+   * The two fields above answer *"does this factor carry a VALUE?"*, and 2c /
+   * 2d have been asking that in place of the question they actually need. The
+   * two answers come apart on exactly one shape, and it is the shape the
+   * analysis seam refuses: a capless, unitless baseline outside [0,1] with no
+   * recoverable frame (`{value: 250000, raw_value: 250000}`). There IS a
+   * value. There is NO scale. A cap or a unit on it is a FIRST declaration.
+   *
+   * THE LOOP THIS CLOSES, measured on deployed staging. The run refuses with
+   * `baseline_scale_unresolved` and its copy asks for a range
+   * (`run-analysis.ts:666` — *"recorded as a bare amount with no range for me
+   * to measure it against"*). Supplying that range hit 2d; supplying a unit
+   * hit 2c — *"This factor is recorded without a unit"*, the second refusal in
+   * the witness. Both were sealed by `factorHasRecordedValue`, which the
+   * user's OWN accepted edit had just made true. The product asked for a
+   * range and then refused the range.
+   *
+   * ⚠ THE CALLER DERIVES THIS FROM THE ANALYSIS GATE, NEVER FROM A RULE
+   * WRITTEN HERE. `set-factor-value.ts` computes it with
+   * `findScaleIncoherentBaselineFactorIds` — the same function `run_analysis`
+   * calls — so the edit seam and the analysis seam cannot drift into
+   * disagreeing about which factors are unusable. That matters more than it
+   * looks: the gate's exemptions (a recoverable pair frame, and the ratified
+   * round-5 astride-1 class where the factor's own user-authored
+   * interventions establish its raw frame) come along for free, and a factor
+   * whose analysis COMPUTES today is never admitted here. Re-implementing the
+   * test in this module would be the hand-maintained mirror (trap 12) that
+   * this estate keeps paying for.
+   *
+   * ⚠ IT DOES NOT WIDEN THE GATES. Both harms 2c / 2d were written for sit on
+   * a factor whose recorded scale is READABLE — the two-turn launder's 0.9 and
+   * the one-step cap dodge's 0.7 are both inside [0,1] — so both still refuse,
+   * pinned in
+   * `__tests__/evaluate-factor-value-proposal-scale-declaration-on-unusable-scale.test.ts`.
+   *
+   * Optional, and `false` by default: every caller that does not thread it
+   * (the validator, `encode-option-interventions.ts`, existing mocks) keeps
+   * exactly today's behaviour BY CONSTRUCTION rather than by assumption.
+   */
+  readonly factorRecordedScaleIsUnusable?: boolean;
+  /**
    * When true, the parameter arrived with an explicit unit. Mirrors
    * `parseProposalValue`'s flag — bare numbers vs unit-bearing values
    * have different guard rules (`bare_number_outside_cap` vs
@@ -402,6 +445,7 @@ function evaluateFactorValueProposalImpl(
     factorExistingRaw,
     factorObservedValue,
     factorObservedRawValue,
+    factorRecordedScaleIsUnusable,
     inputHasUnit,
   } = input;
 
@@ -512,10 +556,26 @@ function evaluateFactorValueProposalImpl(
   const factorHasRecordedValue =
     factorObservedValue !== undefined || factorObservedRawValue !== undefined;
 
+  // ⭐⭐ AND THE SECOND QUESTION, ASKED SEPARATELY (2026-09-11). A recorded
+  // value is not a recorded SCALE. When the caller has derived — from the
+  // ANALYSIS GATE itself, never from a rule restated here — that this factor's
+  // recorded scale is one the analysis refuses to compute with, a proposal's
+  // unit or cap is the FIRST declaration of a scale, not a silent
+  // redeclaration of one. See the field's doc for the measured loop this
+  // closes and for why the gate, not this module, owns the classification.
+  //
+  // ⚠ ONE CONJUNCT, TWO GATES, DELIBERATELY. 2c and 2d are the same question
+  // about two carriers, and splitting the exemption between them is how a
+  // user ends up able to state a unit and not a range (or the reverse) on the
+  // one shape where neither is recorded. Closing only the cap limb would also
+  // have been enough to clear the run, which is exactly the kind of narrowness
+  // that leaves the next reader a half-open door with no note on it.
+  const declarationIsFirstNotRe = factorHasRecordedValue && factorRecordedScaleIsUnusable === true;
+
   // 2c. unit_redeclares_scale. The proposal states a unit; the factor has
   //     none. `unit_mismatch` (2b) cannot see this case — it requires BOTH
   //     sides to carry a unit.
-  if (factorHasRecordedValue && unit !== undefined && factorUnit === undefined) {
+  if (factorHasRecordedValue && !declarationIsFirstNotRe && unit !== undefined && factorUnit === undefined) {
     return {
       ok: false,
       reason: 'unit_redeclares_scale',
@@ -534,7 +594,7 @@ function evaluateFactorValueProposalImpl(
   //     Distinct from the CONSENTED extension of an EXISTING cap (1.16 item
   //     A2), which is unaffected: that path only ever fires on a factor whose
   //     cap is already set, and it renormalises option interventions.
-  if (factorHasRecordedValue && proposalCap !== undefined && factorCap === undefined) {
+  if (factorHasRecordedValue && !declarationIsFirstNotRe && proposalCap !== undefined && factorCap === undefined) {
     return {
       ok: false,
       reason: 'cap_redeclares_scale',
@@ -769,6 +829,8 @@ export function evaluatePostOperatorFactorValue(input: {
    *  redeclaration gates (2c / 2d). Magnitude is never inspected. */
   readonly factorObservedValue?: number;
   readonly factorObservedRawValue?: number;
+  /** 2026-09-11 — see the field's doc on `EvaluateFactorValueProposalInput`. */
+  readonly factorRecordedScaleIsUnusable?: boolean;
   readonly inputHasUnit: boolean;
 }): FactorValueProposalEvaluation {
   return evaluateFactorValueProposalImpl(
@@ -790,6 +852,15 @@ export function evaluatePostOperatorFactorValue(input: {
         : {}),
       ...(input.factorObservedRawValue !== undefined
         ? { factorObservedRawValue: input.factorObservedRawValue }
+        : {}),
+      // 2026-09-11 — forwarded for the same AC.1 parity reason as the two
+      // fields above: the execute-time backstop must enforce the SAME rule set
+      // as `preEvaluation`, not a stricter one. Omitting it here would make
+      // the handler refuse at execute exactly what it had just admitted at
+      // pre-check — a disagreement between two runs of one predicate, which is
+      // the shape this whole change exists to remove.
+      ...(input.factorRecordedScaleIsUnusable !== undefined
+        ? { factorRecordedScaleIsUnusable: input.factorRecordedScaleIsUnusable }
         : {}),
       inputHasUnit: input.inputHasUnit,
     },
