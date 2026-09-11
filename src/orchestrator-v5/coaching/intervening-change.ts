@@ -149,8 +149,9 @@ export function deriveInterveningChange(
   if (between.some((fact) => fact.fact_type === 'run_analysis')) return null;
 
   // ⚠ FORWARD RISK, PINNED RATHER THAN REMEMBERED: the projector's
-  // `MUTATION_DISPATCH_SKIP` deliberately hides the three judgement receipts
-  // (`feedback`, `edge_adjudication`, `prior_range_edit`) because they persist a
+  // `MUTATION_DISPATCH_SKIP` deliberately hides the four judgement receipts
+  // (`feedback`, `edge_adjudication`, `prior_range_edit` and, from schemas
+  // 0.55.0, `finding_dissent`) because they persist a
   // human judgement WITHOUT touching the graph. That is correct today — they
   // cannot move an analysis, so they are not an intervening change. The day any
   // of them feeds the compute, this join goes blind to it and `several ⇒ name
