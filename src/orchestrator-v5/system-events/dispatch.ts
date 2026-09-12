@@ -68,6 +68,10 @@ import {
 import { applyFactorValueEdit } from './factor-value-edit.js';
 import { applyStructuralDelete } from './structural-delete.js';
 import { applyStructuralAdd, findFabricatedLevel } from './structural-add.js';
+import {
+  applyStructuralAddEdge,
+  InvalidPersistedAddEdgeGraphError,
+} from './structural-add-edge.js';
 import { applyStructuralRename, findStaleRenamedLabel } from './structural-rename.js';
 // TYPE-ONLY — binds READER_ONLY_CHAT_ROUTE_OPS to the canonical structural-edit
 // grammar at typecheck time without adding a runtime edge into the tools layer.
@@ -350,7 +354,23 @@ export const SYSTEM_EVENT_HANDLING: Readonly<Record<SystemEventKindLiteral, Syst
   // for the collision gate the base hash provably cannot replace, and for why a
   // new factor arrives as an EXPLICIT UNKNOWN rather than a fabricated number.
   structural_add: 'mutating',
-  structural_add_edge: 'reader_only_refusal',
+  // 0.50.0 — THE EDGE WRITER (landed after the node one above, and for the same
+  // reason its comment gives): `'reader_only_refusal'` was honest while CEE had
+  // no writer; it becomes a LIE the moment one exists, because the refusal tells
+  // the user this version cannot connect two nodes and it now can.
+  //
+  // ⭐⭐ THIS ONE KIND CARRIES FOUR USER-FACING GESTURES, which is why it is
+  // worth the writer: draw-a-link, the five "Add connected …" affordances,
+  // duplicate, and paste. The last three are gestures users ALREADY perform and
+  // already believe work — a duplicated subgraph reaches the server as nodes
+  // with no connections and returns having quietly lost its causal structure.
+  //
+  // ⚠ NOT `'ack_and_commit'`, and the delete sibling above says why: an ack
+  // writes a turn row and NO graph, so the connection survives exactly until the
+  // next reload. See `structural-add-edge.ts` for the three gates (stale hash,
+  // endpoint resolution, duplicate) and for why the two server-owned fields are
+  // the canonical constants rather than anything hand-rolled.
+  structural_add_edge: 'mutating',
   // 0.50.0 — THE LABEL WRITER (landed after the two above). `'reader_only_refusal'`
   // here was honest while CEE had no writer; it is a LIE the moment one exists,
   // because the refusal tells the user this version cannot apply a canvas rename
@@ -572,13 +592,13 @@ const READER_ONLY_REFUSAL_COPY: Partial<
   // saying "I can't apply a factor added on the canvas in this version" would be
   // false the moment someone re-declared the kind. Deleted rather than left as a
   // comment, on the same reasoning as `structural_rename`'s.
-  structural_add_edge: {
-    text:
-      "I can't apply a link added on the canvas in this version, so I haven't " +
-      "changed the model. Tell me in chat which factors to connect and I'll add " +
-      'the link for you.',
-    reason: 'structural_add_edge_reader_only',
-  },
+  // ⚠ `structural_add_edge` DELIBERATELY HAS NO ENTRY ANY MORE, on exactly the
+  // reasoning its two siblings above record. It is declared `'mutating'`, so this
+  // branch is unreachable for it, and the sentence it used to carry — "I can't
+  // apply a link added on the canvas in this version" — would be FALSE the moment
+  // someone re-declared the kind. Dead copy that reads as live is how an honest
+  // label gets overwritten by a false one, so it is deleted rather than commented
+  // out. `SYSTEM_EVENT_HANDLING` is the only place that decides this.
   // ⚠ `structural_rename` DELIBERATELY HAS NO ENTRY ANY MORE. It is declared
   // `'mutating'` above, so this branch is unreachable for it, and a refusal
   // sentence saying "I can't apply a rename made on the canvas in this version"
@@ -616,7 +636,16 @@ const READER_ONLY_REFUSAL_COPY: Partial<
 export const READER_ONLY_CHAT_ROUTE_OPS: Readonly<
   Partial<Record<SystemEventKindLiteral, StructuralEditOp>>
 > = {
-  structural_add_edge: 'add_edge',
+  // ⚠⚠ THIS TABLE IS NOW EMPTY, AND THAT IS A MILESTONE RATHER THAN A DEFECT:
+  // every kind `SYSTEM_EVENT_HANDLING` declares has a writer or a defined
+  // non-writer posture, so no canvas gesture is refused for want of a server
+  // implementation. `structural_add_edge` was the last member and left when its
+  // writer landed, exactly as `structural_rename` and `structural_add` did.
+  //
+  // ⛔ THE MACHINERY STAYS WIRED, deliberately. The next contract version that
+  // adds a kind CEE cannot yet write must land here reader-first, and the
+  // both-ways pin in `reader-only-refusal-capability-honesty.test.ts` REDs if a
+  // kind is parked reader-only without adjudicating what its copy may claim.
   // `structural_rename` is GONE from this table because it is no longer
   // reader-only: CEE writes the label server-side now. The table's own both-ways
   // pin REDs if this table and `SYSTEM_EVENT_HANDLING` ever disagree again.
@@ -735,6 +764,12 @@ export async function dispatchSystemEvent(
     payload.event.kind === 'structural_add'
   ) {
     return await dispatchStructuralAdd(payload, payload.event, requestId, startedAt);
+  }
+  if (
+    handling === 'mutating' &&
+    payload.event.kind === 'structural_add_edge'
+  ) {
+    return await dispatchStructuralAddEdge(payload, payload.event, requestId, startedAt);
   }
   if (
     handling === 'mutating' &&
@@ -2860,6 +2895,308 @@ async function dispatchStructuralAdd(
     // Readiness from the bytes that LANDED. An added option with no
     // interventions can legitimately move the model to not-analysable, and that
     // verdict must describe the model the user now has.
+    analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
+    freshness,
+    graph: graphForReadiness,
+  };
+}
+
+/**
+ * `structural_add_edge` — the edge writer's dispatch half.
+ *
+ * Mirrors `dispatchStructuralAdd` above, because the commit contract is the
+ * same one: ONE atomic commit carrying the graph, the `edit_graph` fact and the
+ * CAS expected-base hashes, followed by a receipt check on the committed bytes.
+ *
+ * ⚠ THE ONE PLACE IT DELIBERATELY DIFFERS from its sibling is the post-commit
+ * check. The node writer verifies PRESENCE plus "no fabricated level". An edge
+ * has no level to fabricate, but it does have a SIGN — and a sign is the one
+ * property a merge or projection pass could silently drop while leaving the
+ * edge itself present. So the check verifies the edge is there AND that its
+ * `strength.mean` still matches what the adapter decided.
+ */
+async function dispatchStructuralAddEdge(
+  payload: SystemEventTurnPayload,
+  event: Extract<SystemEventTurnPayload['event'], { kind: 'structural_add_edge' }>,
+  requestId: string,
+  startedAt: number,
+): Promise<DispatchSystemEventResult> {
+  let persistedGraph: unknown;
+  let priorPendingActions: Awaited<
+    ReturnType<typeof loadMostRecentPendingActionsIntegrityStrict>
+  >;
+  let priorFactsRead: Awaited<ReturnType<typeof loadPriorFactsWithReadState>>;
+  try {
+    [persistedGraph, priorPendingActions, priorFactsRead] = await Promise.all([
+      loadPersistedGraphStrict(payload.scenario_id),
+      loadMostRecentPendingActionsIntegrityStrict(payload.scenario_id, requestId),
+      loadPriorFactsWithReadState(payload.scenario_id, requestId),
+    ]);
+  } catch (err) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_add_edge — authoritative graph/pending read failed; refusing any append',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  let result: ReturnType<typeof applyStructuralAddEdge>;
+  try {
+    result = applyStructuralAddEdge({ payload, event, requestId, persistedGraph });
+  } catch (err) {
+    // `InvalidPersistedAddEdgeGraphError` lands here by design: a non-null
+    // persisted graph that fails GraphV3 is CORRUPTION, not absence, and must
+    // become a retryable failure with no append rather than a silent refusal.
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        corrupt_persisted_graph: err instanceof InvalidPersistedAddEdgeGraphError,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_add_edge — adapter failed before commit',
+    );
+    return {
+      response: buildAcknowledgementResponse(payload),
+      commitPerformed: false,
+      graph: null,
+    };
+  }
+
+  const persistedParse = GraphV3.safeParse(persistedGraph);
+  const contentGraph = persistedParse.success ? persistedParse.data : null;
+  const currentAnalysisHash = persistedParse.success
+    ? computeAnalysisAffectingGraphHash(
+        persistedGraph as Parameters<typeof computeAnalysisAffectingGraphHash>[0],
+      )
+    : null;
+
+  if (result.kind === 'refused') {
+    const response: OlumiResponse =
+      currentAnalysisHash !== null
+        ? { ...result.response, graph_hash: currentAnalysisHash }
+        : result.response;
+    if (result.baseHashConflict !== undefined) {
+      return {
+        response,
+        commitPerformed: false,
+        graph: contentGraph,
+        graphConflict: {
+          recovery_action: result.baseHashConflict.recovery_action,
+          conflict_category: result.baseHashConflict.conflict_category,
+          expected_base_graph_hash: result.baseHashConflict.expected_base_graph_hash,
+        },
+      };
+    }
+    try {
+      await commitDirectAnswer(response, {
+        scenario_id: payload.scenario_id,
+        turn_id: payload.turn_id,
+        turn_class: 'direct_answer',
+        handler_id: null,
+        request_hash: computeRequestHash(payload),
+        llm_calls_used: 0,
+        duration_ms: Date.now() - startedAt,
+        handler_facts: [],
+        pending_actions: [],
+        priorPendingActions,
+        ...(currentAnalysisHash !== null ? { graph_hash: currentAnalysisHash } : {}),
+        ...(contentGraph !== null ? { contentGraph } : {}),
+        coaching_state: null,
+      });
+    } catch (err) {
+      log.error(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          refusal_reason: result.reason,
+          err:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        },
+        'V5 structural_add_edge — refusal commit failed',
+      );
+      return { response, commitPerformed: false, graph: null };
+    }
+    log.info(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        refusal_reason: result.reason,
+      },
+      'V5 structural_add_edge refused — committed honestly, no graph written',
+    );
+    return { response, commitPerformed: true, graph: contentGraph };
+  }
+
+  // ── the mutation path: ONE atomic commit ─────────────────────────────────
+  let persistedAnalysisGraphHash: string | null = null;
+  let persistedGraphBytes: unknown = null;
+  let graphPersisted = false;
+  let committedResponse: OlumiResponse = result.response;
+  try {
+    const cas = computeExpectedGraphCasHashes(result.baseGraph);
+    const commitResult = await commitDirectAnswer(result.response, {
+      scenario_id: payload.scenario_id,
+      turn_id: payload.turn_id,
+      turn_class: 'direct_answer',
+      handler_id: null,
+      request_hash: computeRequestHash(payload),
+      llm_calls_used: 0,
+      duration_ms: Date.now() - startedAt,
+      handler_facts: result.handlerFacts,
+      // THE LINE THE WHOLE CHANGE IS ABOUT — without this key the commit writes
+      // a turn row and NO graph, and the connection vanishes on the next reload.
+      graph: result.mutatedGraph,
+      baseGraphForInvariants: result.baseGraph,
+      pending_actions: [],
+      priorPendingActions,
+      contentGraph: result.mutatedGraph,
+      // SPREAD, never conditionally omitted — `supabase-store.ts` derives
+      // `p_expected_base_known` from key PRESENCE.
+      ...cas,
+      coaching_state: null,
+    });
+    persistedAnalysisGraphHash = commitResult.persistedAnalysisGraphHash;
+    persistedGraphBytes = commitResult.persistedGraph;
+    graphPersisted = commitResult.graphPersisted;
+    committedResponse = commitResult.response;
+  } catch (err) {
+    if (err instanceof GraphStaleWriteError) {
+      log.warn(
+        {
+          request_id: requestId,
+          event_kind: event.kind,
+          scenario_id: payload.scenario_id,
+          conflict_category: err.conflict_category,
+        },
+        'V5 structural_add_edge — atomic graph CAS conflict; refresh and reconfirm',
+      );
+      return {
+        response: result.response,
+        commitPerformed: false,
+        graph: null,
+        graphConflict: {
+          recovery_action: 'refresh_and_reconfirm',
+          conflict_category: err.conflict_category,
+          expected_base_graph_hash: await readClientRecoverableBaseHash(payload.scenario_id),
+        },
+      };
+    }
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        err:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      },
+      'V5 structural_add_edge — atomic mutation commit failed',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+
+  // ── the post-commit receipt check ────────────────────────────────────────
+  // ⚠ SCOPE, at the honesty level the siblings state it:
+  // `commitResult.persistedGraph` is this commit's own input after projection,
+  // NOT a re-read. So this compares the adapter's projected graph against the
+  // chokepoint's SECOND projection of it. It catches a non-idempotent projection
+  // dropping the edge or flipping its sign; it CANNOT see the store persisting
+  // something different from what it was handed.
+  const committedParse = GraphV3.safeParse(persistedGraphBytes);
+  const committedEdge = committedParse.success
+    ? committedParse.data.edges.find((e) => e.from === result.from && e.to === result.to)
+    : undefined;
+  const addLanded =
+    committedEdge !== undefined && committedEdge.strength.mean === result.signedMean;
+  if (
+    graphPersisted !== true ||
+    persistedAnalysisGraphHash === null ||
+    !committedParse.success ||
+    !addLanded
+  ) {
+    log.error(
+      {
+        request_id: requestId,
+        event_kind: event.kind,
+        scenario_id: payload.scenario_id,
+        graph_persisted: graphPersisted,
+        has_analysis_hash: persistedAnalysisGraphHash !== null,
+        graph_parse_ok: committedParse.success,
+        add_landed: addLanded,
+      },
+      'V5 structural_add_edge — committed graph receipt invalid; withholding success',
+    );
+    return { response: result.response, commitPerformed: false, graph: null };
+  }
+  const graphForReadiness = committedParse.data;
+
+  const response: OlumiResponse = {
+    ...committedResponse,
+    graph_hash: persistedAnalysisGraphHash,
+    draft_graph: buildAppliedGraphWireField(graphForReadiness),
+  };
+
+  const freshness: FreshnessDerivation =
+    priorFactsRead.status === 'ok'
+      ? deriveAnalysisFreshness(priorFactsRead.facts, persistedAnalysisGraphHash)
+      : {
+          freshness: 'unknown',
+          reason: 'derivation_failed',
+          selected_fact_index: null,
+          graph_hash_at_run: null,
+          current_graph_hash: persistedAnalysisGraphHash,
+          computed_at: null,
+        };
+  emitFreshnessTelemetry(
+    freshness,
+    {
+      request_id: requestId,
+      scenario_id: payload.scenario_id,
+      dispatch_path: 'system_event.structural_add_edge',
+    },
+    {
+      prior_fact_count: priorFactsRead.facts.length,
+      prior_fact_read_status: priorFactsRead.status,
+    },
+  );
+
+  log.info(
+    {
+      request_id: requestId,
+      event_kind: event.kind,
+      scenario_id: payload.scenario_id,
+      edge_from: result.from,
+      edge_to: result.to,
+    },
+    'V5 structural_add_edge committed — canonical graph/fact written atomically, connection verified in the persisted bytes with its sign intact',
+  );
+  return {
+    response,
+    commitPerformed: true,
+    // Readiness from the bytes that LANDED: a new causal edge can move the model
+    // to analysable, and that verdict must describe the model the user now has.
     analysisReady: buildCanonicalAnalysisReadyFromGraph(graphForReadiness),
     freshness,
     graph: graphForReadiness,
