@@ -50,7 +50,6 @@
  */
 
 import { GraphV3, type NodeV3T } from '../../../../schemas/cee-v3.js';
-import type { NodeT } from '../../../../schemas/graph.js';
 // The estate's ONE owner of "what frame is this factor on?" (a leaf module),
 // and the reader that already answers "where is this factor today" for the
 // no-op validator. Consulted, never re-derived — two consumers holding private
@@ -314,21 +313,18 @@ function pickInterventionTarget(node: NodeV3T): InterventionTarget | null {
   // shared reader. Guarded above so this is only consulted where it can answer
   // on the model scale.
   //
-  // The cast crosses `NodeV3T` (cee-v3) to `NodeT` (graph) — two schemas for
-  // one wire node. It is the SMALLEST change that shares one implementation:
-  // widening the reader's signature would edit a module this PR is scoped out
-  // of, and copying it would be the fourth private answer to "which number is
-  // the current level".
+  // NO CAST: `NodeV3T` (cee-v3) is structurally assignable to the reader's
+  // `NodeT` (graph). Measured, not assumed — an earlier version of this line
+  // carried an `as unknown as NodeT` double cast that was never needed, and the
+  // forbidden-boundary ratchet was right to reject it.
   //
-  // Safe because the reader reaches every field through its OWN `unknown`-typed
-  // accessors and `typeof === 'number'` guards, so it depends on no declaration
-  // from either schema. Of the surfaces it consults, `observed_state`
-  // {value, raw_value, baseline} and `scale_frame` are both declared on
-  // `NodeV3` — and its `node.data` fallback is INERT here: `NodeV3` declares no
-  // `data`, and it is a plain `z.object`, so `GraphV3.safeParse` has already
-  // stripped that key by the time we hold the node. The live limb is the
-  // `observed_state` one, which is the surface this builder reads anyway.
-  const current = readFactorBaselineLevel(node as unknown as NodeT);
+  // Note which limb of the reader is live here: it consults `observed_state`
+  // {value, raw_value, baseline} and `scale_frame`, both declared on `NodeV3`.
+  // Its `node.data` fallback is INERT on this path — `NodeV3` declares no
+  // `data` and is a plain `z.object`, so `GraphV3.safeParse` has already
+  // stripped that key by the time we hold the node (proven by execution with a
+  // contrast control: the declared `observed_state` survives, `data` does not).
+  const current = readFactorBaselineLevel(node);
   if (current === undefined || !Number.isFinite(current)) return null;
 
   // 1. A declared ceiling, put on the model scale.
