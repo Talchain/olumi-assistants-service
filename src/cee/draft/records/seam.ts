@@ -63,6 +63,45 @@ const StatedItemWire = z.object({
   direction: z.enum(DRAFT_RECORD_DIRECTIONS).optional(),
   // `option` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
+  // ⭐ `constraint` only — WHAT THE LIMIT APPLIES TO. Typed by namespace, the
+  // same shape as the `claims[]` endpoints below. `.int()` because these index
+  // an array: a fractional index is not a near-miss of a valid one, and letting
+  // it through would push the refusal down to the projector where it would have
+  // to be named `unparseable_ref` — a reason the grammar otherwise makes
+  // unreachable.
+  // ⛔⛔ `.catch(undefined)` — A MALFORMED VALUE HERE DEGRADES TO ABSENCE, NEVER
+  // TO A DEAD DRAFT. Without it a model that emits `applies_to_claim: "0"` on
+  // the prompt-only degradation path (where no grammar is attached, so nothing
+  // enforces `{"type":"integer"}` provider-side) fails THIS item, which fails
+  // the whole `DraftRecordSetWire.safeParse`, which the seam turns into
+  // `not_a_record_set` — the ENTIRE draft lost over an optional enhancement
+  // field. Measured on this tree, and the measurement CORRECTED THE PREMISE
+  // handed to the repair: this is NOT a falsy check treating `"0"` as absent.
+  // There is no falsy special-case anywhere. `"1"`, `0.5` and `null` all refuse
+  // identically to `"0"` — it is plain type strictness whose blast radius is the
+  // whole record set. Absent, empty and zero are three different facts and none
+  // of them is what was happening.
+  //
+  // ⭐ WHY THESE TWO AND NOT THE REFERENCE FAMILY — they answer DIFFERENT
+  // QUESTIONS (trap 21), so one rule was never right for both. `from_claim` /
+  // `to_claim` / `from_stated` / `to_stated` are LOAD-BEARING STRUCTURE: a
+  // malformed one means an edge the model intended cannot be built, and
+  // refusing loudly is correct. `applies_to_*` is an OPTIONAL ENHANCEMENT whose
+  // ABSENCE is defined as byte-identical to today's behaviour — so absence IS
+  // the honest degradation, and failing the whole draft to reach it is
+  // disproportionate in a way the existing case is not. The asymmetry is
+  // deliberate and it is PINNED: a contrast control in
+  // `__tests__/constraint-applies-to-binding.test.ts` asserts a malformed
+  // `from_claim` STILL refuses, so this tolerance cannot silently widen to the
+  // family.
+  //
+  // ⚠ Nothing is hidden by this. The limit itself is untouched — its value,
+  // unit, direction and quote all still parse, the constraint node is still
+  // minted with them, and the pre-existing unbindable-limit ask still fires.
+  // What degrades is only the model's optional HINT about what the limit
+  // applies to, which is a field that did not exist at all until this change.
+  applies_to_stated: z.number().int().optional().catch(undefined),
+  applies_to_claim: z.number().int().optional().catch(undefined),
 }).passthrough();
 
 const InferenceClaimWire = z.object({
@@ -210,6 +249,8 @@ export function projectDraftRecords(
       ...(item.role !== undefined ? { role: item.role } : {}),
       ...(item.direction !== undefined ? { direction: item.direction } : {}),
       ...(item.is_baseline !== undefined ? { is_baseline: item.is_baseline } : {}),
+      ...(item.applies_to_stated !== undefined ? { applies_to_stated: item.applies_to_stated } : {}),
+      ...(item.applies_to_claim !== undefined ? { applies_to_claim: item.applies_to_claim } : {}),
     })),
     claims: parsed.data.claims.map((claim) => ({
       claim_kind: claim.claim_kind,

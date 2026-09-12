@@ -768,8 +768,14 @@ export function generateNodeId(targetName: string, prefix: string = "fac"): stri
 
 /**
  * Generate a constraint ID from target and operator.
+ *
+ * EXPORTED so the draft-records projector mints the SAME id shape for a
+ * model-bound stated limit. Re-spelling `constraint_<node>_<min|max>` in a
+ * second module would be the hand-maintained mirror of trap 12; the projector
+ * derives it from here instead. (The merge in `compound-goals.ts` dedupes on
+ * `node_id::operator`, never on this id — it is a label, not a key.)
  */
-function generateConstraintId(targetNodeId: string, operator: ">=" | "<="): string {
+export function generateConstraintId(targetNodeId: string, operator: ">=" | "<="): string {
   const operatorSuffix = operator === ">=" ? "min" : "max";
   return `constraint_${targetNodeId}_${operatorSuffix}`;
 }

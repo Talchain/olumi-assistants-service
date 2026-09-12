@@ -495,9 +495,33 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * `label` field is a statement about a field, not about how two records connect,
  * so the connect half is byte-identical to v13 (asserted below).
  */
-const PREREGISTERED_V14_INSTRUCTION_SHA256 =
+/**
+ * v15 — THE `constraint` BULLET LEARNS TO SAY WHAT THE LIMIT APPLIES TO.
+ *
+ * PRE-REGISTERED: these bytes were hashed and written here in the same commit
+ * that produced them, BEFORE any draw was taken under them. Nothing has been
+ * measured under v15 yet, and this pin exists so that whatever IS measured is
+ * attributable to these exact bytes rather than to "the current instruction".
+ *
+ * SHAPE-HALF IN ITS ENTIRETY — the EIGHTH version to touch it. Which record a
+ * limit applies to is a statement about what goes in a FIELD, not about how two
+ * records connect, so the connect half is byte-identical to v14 (asserted
+ * below).
+ */
+const PREREGISTERED_V15_INSTRUCTION_SHA256 =
+  "b0701296dbb67606a174b40d7886467aff3ca768e138170e41da34defa425532";
+const PREREGISTERED_V15_INSTRUCTION_BYTES = 13966;
+/**
+ * SUPERSEDED — v14's bytes. Retained and asserted DISTINCT for the same reason
+ * every superseded literal below is: v14 is the artefact the DROPPED-LIMIT
+ * defect was witnessed under (`cee.compound_goal.target_no_match` on
+ * `fac_monthly_churn` against a node the model had labelled "Subscriber Churn
+ * Rate"). Re-pointing this literal would let that finding read as a finding
+ * about v15, which is the version written to remove its cause.
+ */
+const SUPERSEDED_V14_INSTRUCTION_SHA256 =
   "1cc4dd657eecd6a5fe6c67bd2cbf3e321b9d88a8526cc374b4accaefe4cdd1f3";
-const PREREGISTERED_V14_INSTRUCTION_BYTES = 13406;
+const SUPERSEDED_V14_INSTRUCTION_BYTES = 13406;
 /**
  * SUPERSEDED — v13's bytes. Retained and asserted DISTINCT for the same reason
  * v11's and v12's are: v13 is the artefact the unnamed-node defect was WITNESSED
@@ -520,10 +544,17 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v14 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V14_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v15 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V15_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V14_INSTRUCTION_BYTES,
+      PREREGISTERED_V15_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v14 bytes, so the dropped-limit witness stays its own", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V14_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V14_INSTRUCTION_BYTES,
     );
   });
 
@@ -699,10 +730,22 @@ describe("the draft records instruction is the measured artefact", () => {
     // entirety and the connect half is byte-identical to v13 (asserted in the
     // next test). The asymmetry is again the point: this edit is legible as
     // "the label rule was added" without reading a diff.
+    // ⚠⚠ AND AGAIN IN v15 — the EIGHTH version to touch it, and the SECOND
+    // consecutive one. Which record a limit APPLIES TO is a statement about what
+    // goes in a field, so v15 is shape-half in its entirety and the connect half
+    // is byte-identical to v14 (asserted in the next test). The asymmetry is
+    // again the point: this edit is legible as "the constraint bullet learned to
+    // name its target" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "8a25b547b6cf8d936da09e561e2096868cb6cff9c879e8c7bb0f7be2af9fad84",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(9422);
+    // SUPERSEDED — v14's shape half, the bytes the dropped-limit defect was
+    // witnessed under.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "433d50d69971ed0bf42923ee823f55085346c1585f31f9c6a68b2a4ba88f3cee",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(8862);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(8862);
     // SUPERSEDED — v13's shape half, the bytes the unnamed-node defect was
     // witnessed under.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(

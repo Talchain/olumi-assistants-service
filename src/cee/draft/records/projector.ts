@@ -85,6 +85,17 @@ import {
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
 import { boundNodeLabel } from "./label-bound.js";
 import { isNameShapedLabel } from "./claim-label-shape.js";
+// ⭐ THE CONSTRAINT-BINDING AUTHORITIES, all DERIVED rather than re-spelled.
+// `MINTABLE_TARGET_KINDS` is the one rule about which kinds may carry a
+// threshold; `classifyUnitScaleClass` is this directory's four-class unit scale
+// authority; `CURRENCY_SYMBOL_TO_CODE` is the canonical currency vocabulary (a
+// second hand-written one is exactly the mirror a union guard in
+// `cee/extraction/__tests__/currency-vocabulary.union.test.ts` exists to RED).
+import { MINTABLE_TARGET_KINDS } from "../../compound-goal/mintable-target-kinds.js";
+import { generateConstraintId } from "../../compound-goal/extractor.js";
+import { classifyUnitScaleClass } from "./unit-scale-class.js";
+import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
+import type { GoalConstraintT } from "../../../schemas/assist.js";
 import {
   deriveGoalObjectiveLabel,
   deriveDecisionLabel,
@@ -347,6 +358,24 @@ export interface RecordProvenance {
   readonly label_placeholder?: boolean;
 }
 
+/**
+ * ⭐⭐ THE `claim_kind` A DISCLOSURE CARRIES WHEN ITS SUBJECT IS A
+ * `stated_items[]` ENTRY RATHER THAN A `claims[]` ENTRY.
+ *
+ * ⛔ LOAD-BEARING BEYOND LABELLING, and that is why it is a constant rather than
+ * three string literals. `enumerateCompletionAsk` reads it to decide whether a
+ * refusal can be PUT TO THE MODEL at all: the repair for a stated-item refusal
+ * is a change to a `stated_items[]` field, and the completion grammar exposes
+ * `claims` only (`buildRecordsCompletionSchema`, `additionalProperties: false`).
+ * Several reasons — `ambiguous_ref`, `ref_out_of_range`, `ref_target_not_a_node`,
+ * `missing_ref` — arrive on BOTH paths from the same resolver, so the reason
+ * cannot tell the two apart and this label is the only thing that can.
+ *
+ * Imported by the consumer rather than re-spelled, so the two cannot drift into
+ * a hand-maintained mirror of each other (trap 12).
+ */
+export const STATED_ITEM_DROP_KIND = "stated_item";
+
 /** A reference the model emitted that the projector could not resolve. */
 export interface DroppedRecordRef {
   readonly claim_index: number;
@@ -555,6 +584,36 @@ export interface DroppedRecordRef {
      */
     | "constraint_direction_unstated"
     /**
+     * ⭐ A STATED `constraint` NAMED WHAT IT LIMITS, AND THE TARGET CANNOT
+     * CARRY A THRESHOLD.
+     *
+     * The reference RESOLVED — it is a real record and a real node — but its
+     * kind is outside `MINTABLE_TARGET_KINDS`. A `goal` is the thing being
+     * achieved and an `option` is a course of action; neither is the measured
+     * quantity a limit bounds. Named apart from `ref_target_not_a_node` (which
+     * means the index reached nothing at all) because they are different
+     * questions and the fixes differ (trap 21).
+     */
+    | "constraint_target_not_measurable"
+    /**
+     * ⭐⭐ THE REFERENCE RESOLVED TO A NODE MEASURING A DIFFERENT QUANTITY.
+     *
+     * A percentage must not weld to a currency node. This is the refusal that
+     * makes a model-supplied binding safe to honour at all: a reference alone
+     * cannot tell "budget remaining" from "budget consumed", and a limit bound
+     * to the complement of its metric INVERTS while looking perfectly bound. A
+     * WRONG BINDING IS WORSE THAN A GAP, so where the two sides provably
+     * measure different quantities the projector declines and asks.
+     *
+     * ⚠ WHAT IT CANNOT DO, STATED PLAINLY. It fires only where BOTH sides
+     * declare a unit this service can classify. A model-authored factor claim
+     * carries no unit at all (`claims[]` has no `unit` field), so the common
+     * case is UNCHECKABLE rather than checked — see `constraintUnitFamily`.
+     * This gate bounds the unit class of harm; it does not bound the
+     * complement class, and nothing here should be read as claiming it does.
+     */
+    | "constraint_target_unit_mismatch"
+    /**
      * ⭐ ROOT 2(b). A `figure` was stated with `role:"target"`. It is on the
      * graph as the user's own words, but it is NOT yet a goal threshold — so
      * nothing downstream should read it as a level that has been ACHIEVED.
@@ -687,6 +746,41 @@ export interface RecordProjection {
    * that vanished without trace.
    */
   readonly dropped: readonly DroppedRecordRef[];
+  /**
+   * ⭐⭐ THE LIMITS THE MODEL BOUND TO A NODE ITSELF.
+   *
+   * A stated `constraint` that names what it limits (`applies_to_stated` /
+   * `applies_to_claim`) and survives every safety gate becomes a row here,
+   * carrying the TARGET's node id.
+   *
+   * ⛔⛔ THIS FIELD HAS NO CONSUMER YET, AND SAYING SO IS THE POINT. An earlier
+   * version of this comment said the row "reaches `ctx.llmGoalConstraints` and
+   * is merged by the EXISTING `runCompoundGoals` machinery". THAT IS FALSE at
+   * this tip and was falsified by sweeping for it: the live draft path copies
+   * only `.graph` (`adapters/llm/anthropic.ts`,
+   * `rawJson = { ...activeProjection.graph }`), and this field is read by NO
+   * non-test file outside this one. Contrast control in the same sweep: the
+   * sibling `.dropped` is read by 12. `ctx.goalConstraints` in
+   * `unified-pipeline` IS real and IS widely read — it is a DIFFERENT FIELD
+   * THAT HAPPENS TO SHARE THE NAME, and nothing joins the two. Believing the
+   * two were one channel is what made removing the user's constraint node look
+   * safe (trap 21).
+   *
+   * ⭐ So this field is the ARTEFACT the carrier lane needs, produced and
+   * proven, and nothing more. It changes no user-visible byte, which is
+   * precisely why nothing may be taken away on the strength of it.
+   *
+   * ⭐ WHY THIS CANNOT NAME A NODE THAT DOES NOT EXIST. The id is the one the
+   * projector MINTED for the target in this same pass, so the merge's
+   * `existingNodeIds.has(node_id)` filter is satisfied by construction. That is
+   * the whole reason the reference is an integer index into the record set
+   * rather than a name to be matched: string matching is what dropped the
+   * user's limit in the first place.
+   *
+   * EMPTY on every record set that does not use the new fields, which is what
+   * makes the change strictly additive.
+   */
+  readonly goalConstraints: readonly GoalConstraintT[];
 }
 
 // ── GraphV3 output shapes (structural mirrors of `schemas/graph.ts`) ─────────
@@ -2102,6 +2196,93 @@ function bindFactorCarriedStatedMagnitude(args: {
  * would silently re-point every later reference — the exact class of silent
  * mis-binding the typed reference fields were introduced to end.
  */
+/**
+ * ⭐ WHAT A UNIT MEASURES — coarse ON PURPOSE, and honest about `unknown`.
+ *
+ * Three classes, every one DERIVED from an existing authority: the percent
+ * family from this directory's own `classifyUnitScaleClass` (percent /
+ * percentage points / basis points), currency from the canonical
+ * `CURRENCY_SYMBOL_TO_CODE` map in BOTH its spellings (the symbol "£" and the
+ * ISO code "GBP" both occur across this estate), and `unknown` for everything
+ * else.
+ *
+ * ⚠⚠ `unknown` MEANS "I CANNOT TELL", NEVER "COMPATIBLE" — and the caller must
+ * treat it that way. This function is used ONLY to REFUSE on a proven
+ * mismatch; it is never evidence that two things DO measure the same quantity.
+ * Written this way round deliberately: a classifier used to grant bindings
+ * would be a string matcher wearing a unit's clothes, which is the family of
+ * fix this change exists to avoid.
+ *
+ * Deliberately NOT extended to counts, durations or bare words. Every class
+ * added here is a class that can produce a REFUSAL, so a sloppy addition costs
+ * a user their stated limit. Two classes cover the harm actually measured.
+ */
+type ConstraintUnitFamily = "percent" | "currency" | "unknown";
+
+function constraintUnitFamily(unit: string | undefined): ConstraintUnitFamily {
+  if (typeof unit !== "string") return "unknown";
+  const token = unit.trim();
+  if (token.length === 0) return "unknown";
+  if (classifyUnitScaleClass(token) !== "unknown") return "percent";
+  for (const [symbol, code] of Object.entries(CURRENCY_SYMBOL_TO_CODE)) {
+    // ⚠ AN ALPHABETIC SYMBOL MATCHES ONLY EXACTLY. The canonical map holds two
+    // that are pure letters (`CHF`, `kr`), and prefix/suffix matching on those
+    // would classify any unit word that happens to end in them as currency.
+    // That direction produces a FALSE REFUSAL rather than a false binding — the
+    // safe direction — but it costs a user their stated limit for no reason, so
+    // it is closed rather than tolerated. Symbols carrying a non-letter (`£`,
+    // `$`, `A$`, `NZ$`…) keep affix matching, because that is how they actually
+    // appear against a number.
+    const alphabeticOnly = /^[A-Za-z]+$/.test(symbol);
+    if (alphabeticOnly) {
+      if (token.toLowerCase() === symbol.toLowerCase()) return "currency";
+    } else if (token === symbol || token.startsWith(symbol) || token.endsWith(symbol)) {
+      return "currency";
+    }
+    if (token.toUpperCase() === code) return "currency";
+  }
+  return "unknown";
+}
+
+/**
+ * The unit a projected node DECLARES, read from the two places this projector
+ * writes one. Derived from the emission sites rather than guessed: a `figure`
+ * lands its unit on `data.unit`, and a directed `constraint` lands it on
+ * `observed_state.metadata.unit`.
+ *
+ * Absent is absent. A node that declares no unit yields `undefined`, which
+ * classifies `unknown`, which cannot produce a refusal — see the warning on
+ * `constraintUnitFamily`.
+ */
+function nodeDeclaredUnit(node: ProjectedNode): string | undefined {
+  const data = node.data as { unit?: unknown } | undefined;
+  if (typeof data?.unit === "string") return data.unit;
+  const observed = node.observed_state as { metadata?: { unit?: unknown } } | undefined;
+  if (typeof observed?.metadata?.unit === "string") return observed.metadata.unit;
+  return undefined;
+}
+
+/** A stated `constraint` that named what it limits, held until every id exists. */
+interface StatedConstraintBinding {
+  readonly statedIndex: number;
+  readonly nodeId: string;
+  /**
+   * ⭐ THE ORIGINAL NODE OBJECT, held so it can be PUT BACK.
+   *
+   * The ordering rule's failure behaviour is PRESERVE THE ORIGINAL — not crash,
+   * and above all not silently discard, which is the defect being repaired. A
+   * postcondition cannot restore what it did not keep, so the carrier is held
+   * from the moment it is minted rather than reconstructed later from parts.
+   */
+  readonly node: ProjectedNode;
+  readonly quote: string;
+  readonly operator: ">=" | "<=";
+  readonly value: number;
+  readonly unit: string | undefined;
+  readonly appliesToStated: number | undefined;
+  readonly appliesToClaim: number | undefined;
+}
+
 function projectOnce(
   records: DraftRecordSet,
   demoted: ReadonlyMap<number, DemoteDecision>,
@@ -2113,6 +2294,16 @@ function projectOnce(
   const nodes: ProjectedNode[] = [];
   const edges: ProjectedEdge[] = [];
   const dropped: DroppedRecordRef[] = [];
+  /**
+   * Stated `constraint`s that named a target, held until BOTH node passes have
+   * run. A constraint may point at a `claims[]` entry declared after it, so the
+   * reference cannot be resolved while pass 1 is still minting — the same
+   * reason `causal_link` endpoints are resolved in pass 3 rather than inline.
+   */
+  const statedConstraintBindings: StatedConstraintBinding[] = [];
+  /** Bindings that actually produced a row — the only carriers a withdrawal could be licensed by. */
+  const boundCarriers: StatedConstraintBinding[] = [];
+  const goalConstraints: GoalConstraintT[] = [];
   /** edge id → the model's stated option→factor intervention level (`sets_to`). */
   const setsToByEdgeId = new Map<string, number>();
   /**
@@ -2428,7 +2619,7 @@ function projectOnce(
       // says so. `enumerateCompletionAsk` turns this disclosure into a question.
       dropped.push({
         claim_index: -1,
-        claim_kind: "stated_item",
+        claim_kind: STATED_ITEM_DROP_KIND,
         label: quote,
         node_id: id,
         reason: "constraint_direction_unstated",
@@ -2445,6 +2636,27 @@ function projectOnce(
           ...(item.unit ? { unit: item.unit } : {}),
         },
       };
+      // ⭐⭐ THE DIRECTION GATE STAYS IN FRONT OF THE MODEL'S BINDING, NEVER
+      // BEHIND IT. This collection sits INSIDE the branch that already proved a
+      // direction was stated, so a constraint whose direction is unknown keeps
+      // its `constraint_direction_unstated` disclosure and binds NOTHING —
+      // whatever reference it carries. A floor shipped as a ceiling is a LIE and
+      // an unbound limit is a GAP; honouring a reference on an undirected limit
+      // would let the model's confidence about the TARGET smuggle past our
+      // refusal to guess the OPERATOR, which are two different questions.
+      if (item.applies_to_stated !== undefined || item.applies_to_claim !== undefined) {
+        statedConstraintBindings.push({
+          statedIndex: index,
+          nodeId: id,
+          node,
+          quote,
+          operator,
+          value: item.value,
+          unit: item.unit,
+          appliesToStated: item.applies_to_stated,
+          appliesToClaim: item.applies_to_claim,
+        });
+      }
     } else if (kind === "factor" && typeof item.value === "number") {
       node.data = {
         value: item.value,
@@ -2617,7 +2829,7 @@ function projectOnce(
       const valueLandedSomewhere = node.observed_state !== undefined;
       dropped.push({
         claim_index: -1,
-        claim_kind: "stated_item",
+        claim_kind: STATED_ITEM_DROP_KIND,
         label: quote,
         node_id: id,
         reason: valueLandedSomewhere
@@ -2919,6 +3131,180 @@ function projectOnce(
     if (claimIdx !== undefined) return `claims[${claimIdx}]`;
     return undefined;
   };
+
+  // ── Pass 2b: a stated `constraint` that says WHAT IT LIMITS ───────────────
+  //
+  // ⭐⭐ THE DEFECT THIS CLOSES, wire-witnessed. A user writes "…keeping monthly
+  // churn under 4%". The model labels the relevant node "Subscriber Churn Rate"
+  // — so it plainly knows they are the same quantity. A regex then minted the
+  // target id `fac_monthly_churn`, and a string-containment matcher asked
+  // whether `"subscriber_churn_rate"` contains `"monthly_churn"`. It does not.
+  // The limit was dropped and the user was told it matched nothing on the model.
+  // Characterised across draws: THE BINDER WORKED WHEN THE DRAFTER ECHOED THE
+  // USER'S PHRASING AND FAILED WHEN IT IMPROVED ON IT.
+  //
+  // The root cause was not the matcher's quality — it was that the record
+  // grammar had fields for a limit's value, unit, direction and source quote and
+  // NO FIELD FOR WHAT IT APPLIES TO. The model had nowhere to write down what it
+  // already knew. This pass reads that field.
+  //
+  // ⛔ NOT A BETTER STRING MATCHER, AND DELIBERATELY SO. Three candidates
+  // (alias-to-labels, head-noun, all-tokens) were built and adversarially tested
+  // and EVERY ONE wrong-binds somewhere. That ruling is settled and this pass
+  // does no string comparison of any kind.
+  //
+  // ⭐ RUNS HERE, between the node passes and the edge pass, for two reasons that
+  // are both about not blaming the model for our own sequencing: every minted id
+  // exists by now (a constraint may point at a claim declared after it), and any
+  // id remapping below lands BEFORE the first edge is built, so a link into a
+  // withdrawn constraint resolves onto its target instead of reporting
+  // `ref_out_of_range` for a reference that was perfectly good.
+  for (const binding of statedConstraintBindings) {
+    const resolved = resolveEndpoint(binding.appliesToStated, binding.appliesToClaim);
+    const toRef = renderRef(binding.appliesToStated, binding.appliesToClaim);
+    // ⭐ EVERY REFUSAL BELOW IS DISCLOSED AND LEAVES THE PROJECTION EXACTLY AS
+    // IT WOULD HAVE BEEN WITH NO REFERENCE AT ALL — which is the precise claim,
+    // and it is pinned by a same-run comparison rather than asserted.
+    //
+    // ⚠ THE LOOSER SENTENCE THAT WAS HERE FIRST SAID "the constraint keeps its
+    // own node", AND THAT IS NOT ALWAYS TRUE — measured, not assumed. An
+    // unconnected `constraint` node is PRUNED by the connectivity pass with
+    // `unconnected_to_goal`, so a stated limit the model does not link to the
+    // goal reaches the graph NOWHERE, with or without this change. Refusing
+    // therefore costs the user nothing they had a moment ago, which is the
+    // honest claim; it does NOT mean their limit is safe on the graph.
+    const refuse = (reason: DroppedRecordRef["reason"]): void => {
+      dropped.push({
+        claim_index: -1,
+        claim_kind: STATED_ITEM_DROP_KIND,
+        label: binding.quote,
+        node_id: binding.nodeId,
+        reason,
+        from_ref: `stated_items[${binding.statedIndex}]`,
+        ...(toRef !== undefined ? { to_ref: toRef } : {}),
+      });
+    };
+
+    if (resolved.reason !== undefined || resolved.id === undefined) {
+      // `ambiguous_ref` (both namespaces named at once) and `ref_out_of_range`
+      // (an index that reached no minted node) arrive here from the SAME
+      // resolver the causal-link endpoints use, and both are already cases in
+      // the completion ask's switch — so an unresolved reference becomes a
+      // follow-up question with no new machinery.
+      refuse(resolved.reason ?? "missing_ref");
+      continue;
+    }
+    const target = nodes.find((n) => n.id === resolved.id);
+    if (target === undefined) {
+      refuse("ref_target_not_a_node");
+      continue;
+    }
+    // SAFETY 1 — the target must be a MEASURED quantity. Derived from the one
+    // shared `MINTABLE_TARGET_KINDS`, never re-spelled here.
+    if (!MINTABLE_TARGET_KINDS.has(target.kind)) {
+      refuse("constraint_target_not_measurable");
+      continue;
+    }
+    // SAFETY 2 — the unit must SURVIVE and be CHECKED. It survives because
+    // `binding.unit` is carried onto the row below unchanged, in the user's own
+    // units (the convention `observed_state` already uses: "PLoT normalises").
+    // It is CHECKED here, and only ever to REFUSE: a percentage must not weld
+    // to a currency node.
+    const limitFamily = constraintUnitFamily(binding.unit);
+    const targetFamily = constraintUnitFamily(nodeDeclaredUnit(target));
+    if (limitFamily !== "unknown" && targetFamily !== "unknown" && limitFamily !== targetFamily) {
+      refuse("constraint_target_unit_mismatch");
+      continue;
+    }
+
+    // ── BOUND ──────────────────────────────────────────────────────────────
+    //
+    // ⚠⚠ `value_frame` IS DELIBERATELY NOT STAMPED, AND THAT COSTS SOMETHING.
+    // The contract is explicit that the field is never defaulted, because "a
+    // defaulted frame is a manufactured attestation" and only a producer that
+    // knows its own minting arithmetic may stamp it. This projector does not:
+    // the grammar's `constraint` has `direction` and `value` and no way to say
+    // whether the number is a LEVEL to stay under or a DELTA to stay within, so
+    // a stamped "level" would be a guess on exactly the axis a wrong answer
+    // makes a 100x error. The honest consequence, stated rather than glossed:
+    // an unframed row leaves ISL's `constraint_analysis` withheld with
+    // `CONSTRAINT_FRAME_UNSPECIFIED` unless a frame-bearing producer speaks for
+    // the same node+operator — in which case `mergeWithProtectedFrame` carries
+    // that deterministic frame onto this row, which is the collaboration that
+    // merge was built for. Earning the frame outright needs a new grammar field
+    // and its own measurement; it is NOT a line to add here.
+    goalConstraints.push({
+      constraint_id: generateConstraintId(target.id, binding.operator),
+      node_id: target.id,
+      operator: binding.operator,
+      value: binding.value,
+      ...(binding.unit !== undefined ? { unit: binding.unit } : {}),
+      // The user's own words, bounded to the contract's 200-char maximum so a
+      // long quote cannot fail the schema and take the whole row with it.
+      source_quote: binding.quote.slice(0, 200),
+      // `explicit`: the user stated this limit and the MODEL named its target.
+      // Not `inferred` — nothing here was guessed; the alternative to a stated
+      // reference was a refusal, not an inference.
+      provenance: "explicit",
+    });
+    // The carrier this bind would license a later lane to withdraw. Tracked so
+    // the postcondition below can police that withdrawal — see pass 2d.
+    boundCarriers.push(binding);
+
+    // ⛔⛔ THE STANDALONE CONSTRAINT NODE IS *NOT* WITHDRAWN, AND THAT IS THE
+    // WHOLE ORDERING CONSTRAINT OF THIS CHANGE.
+    //
+    // ⚠⚠ WHAT WAS HERE BEFORE, AND WHY IT WAS DESTRUCTIVE — MEASURED, NOT
+    // ARGUED. This block used to splice the constraint node out of `nodes` and
+    // repoint the stated index, on the stated ground that "the limit now lives
+    // ON the quantity it bounds". IT DOES NOT. The row above is written to
+    // `RecordProjection.goalConstraints`, a SIBLING of `.graph` — and the live
+    // draft path copies ONLY `.graph` (`adapters/llm/anthropic.ts`,
+    // `rawJson = { ...activeProjection.graph }`). Contrast-controlled sweep of
+    // the same tree: the sibling `.dropped` is read by 12 non-test files;
+    // `RecordProjection.goalConstraints` is read by NONE outside this file.
+    // (`ctx.goalConstraints` in `unified-pipeline` is a DIFFERENTLY-SCOPED FIELD
+    // OF THE SAME NAME with many readers, and nothing joins the two — conflating
+    // them is exactly what made the removal look safe. Trap 21: two names, two
+    // questions.)
+    //
+    // A/B on this projector, two arms differing in ONE key, the constraint
+    // LINKED to the goal so the connectivity prune is not the variable:
+    //   without the field → 3 nodes, incl. `constraint` "keeping monthly churn
+    //                        under 4%" carrying `observed_state.value 4`,
+    //                        `unit "%"`, `operator "<="`
+    //   with    the field → 2 nodes. THAT NODE IS GONE. `dropped` EMPTY.
+    //                        `graph.goal_constraints` undefined.
+    // The user's own stated limit left the product with nothing disclosed — the
+    // precise silent loss this change exists to end, manufactured by the change
+    // itself.
+    //
+    // ⛔ THE RULE, and it is an ORDERING rule rather than a better splice:
+    // A NODE CARRYING A USER-STATED LIMIT MAY ONLY BE REMOVED ONCE THAT LIMIT IS
+    // DEMONSTRABLY CARRIED SOMEWHERE A CONSUMER READS. Until then, KEEP THE NODE.
+    //
+    // So the row is still MINTED above — the grammar, the reference resolution
+    // and every safety gate are exactly as designed, and the artefact the
+    // carrier lane needs exists — but nothing is taken away. The change is
+    // therefore genuinely additive: the graph a user receives is byte-identical
+    // to the one they receive today, which is what "inert until the carrier
+    // lands" has to MEAN. Pinned, not asserted, by a same-run byte comparison in
+    // `__tests__/constraint-applies-to-binding.test.ts` ("NO SILENT LOSS — a
+    // SUCCESSFUL bind leaves the graph byte-identical to the same records with
+    // no reference").
+    //
+    // ⭐ WHEN THE CARRIER LANDS (`goalConstraints` carried across
+    // `anthropic.ts` alongside `.graph`, reaching `ctx.goalConstraints`), the
+    // removal becomes correct — AND IT MUST ARRIVE WITH A DISCLOSURE. That is
+    // not left to a comment anyone must remember: the invariant test
+    // "NO SILENT LOSS INVARIANT — every bound limit is on the graph as a node,
+    // or is disclosed" is written against the RULE rather than against today's
+    // code, so re-enabling a splice without disclosing REDs it.
+    //
+    // No repoint is needed while the node stays: a `causal_link` into this
+    // constraint still resolves onto the constraint itself, exactly as it does
+    // today, so no good reference is turned into a dropped one.
+  }
 
   const kindAtLinkTime = new Map(nodes.map((n) => [n.id, n.kind as string]));
 
@@ -3791,12 +4177,104 @@ function projectOnce(
     }
   }
 
+  // ── Pass 2c: a bound limit whose TARGET did not survive ──────────────────
+  //
+  // ⚠⚠ CAUGHT BY PROBING MY OWN CLAIM, AND IT WAS FALSE. Pass 2b's note says the
+  // bound `node_id` is on the graph "by construction" because it was minted in
+  // the same pass. That is true AT BIND TIME and NOT true at the end: the
+  // connectivity prune runs AFTER, and it withdraws a `factor` that never
+  // reaches the goal. Measured — a constraint bound to an unconnected factor
+  // left a row naming a node the graph no longer carried.
+  //
+  // ⭐ WHY THAT IS THE WORST CASE AND NOT A COSMETIC ONE. Binding WITHDREW the
+  // standalone constraint node. So an orphan row means the limit is gone from
+  // the graph AND gone from the constraint list — the user's stated limit
+  // vanishes with nothing but a downstream `llm_dropped` warn to show for it,
+  // which is precisely the silent-loss failure this whole change exists to end.
+  //
+  // The row is therefore reconciled against the FINAL node set and, where the
+  // target is gone, DISCLOSED with the same reason the target itself carries.
+  // `unconnected_to_goal` is honest here and is deliberately not turned into a
+  // question: `enumerateCompletionAsk` already declines to ask about it, on the
+  // measured ground that asking is pressure to invent a causal link.
+  const survivingNodeIds = new Set(nodes.map((n) => n.id));
+  const boundLimits: GoalConstraintT[] = [];
+  for (const row of goalConstraints) {
+    if (survivingNodeIds.has(row.node_id)) boundLimits.push(row);
+    // ⭐ NO DISCLOSURE IS PUSHED HERE, AND THAT IS A MEASUREMENT RATHER THAN AN
+    // OMISSION. Pass 2b no longer withdraws the standalone constraint node, so
+    // the user's stated limit is NOT lost when its target is pruned — it is
+    // still on the graph as its own node, carrying its operator, value and
+    // unit. And in the case where the constraint is itself unconnected, the
+    // connectivity prune ALREADY discloses it, more richly than this loop could:
+    // measured on this projector with no reference at all, `dropped` carries
+    // `{ label: "keeping monthly churn under 4%", reason: "unconnected_to_goal",
+    // value: 4, unit: "%" }`. A second entry for the same event would be a
+    // duplicate, and an entry claiming the limit was lost while it sits on the
+    // graph would be false — confident wrongness is worse than silence, and
+    // here silence is not even the alternative.
+    //
+    // ⛔ WHAT MUST COME BACK WITH A FUTURE SPLICE. Re-enable the withdrawal in
+    // pass 2b and this branch becomes a REAL loss that MUST be disclosed. That
+    // obligation is not parked in this comment: the invariant test "NO SILENT
+    // LOSS INVARIANT" is written against the rule, so it REDs the moment a
+    // removal happens without a disclosure.
+  }
+
+  // ── Pass 2d: THE ORDERING RULE, MADE EXECUTABLE ──────────────────────────
+  //
+  // ⛔⛔ NOTHING IS REMOVED UNLESS IT IS DISCLOSED. Stated as an invariant a few
+  // lines up is a comment; stated here it is a POSTCONDITION THAT ACTS.
+  //
+  // ⚠ WHY A COMMENT WAS NOT ENOUGH, and it is this estate's most expensive
+  // defect class. The rule "a node carrying a user-stated limit may only be
+  // removed once that limit is carried somewhere a consumer reads" is exactly
+  // the kind of rule a later author, holding a green suite and a plausible
+  // reason, removes in one line. A HAND-MAINTAINED RULE DRIFTS SILENTLY AND THE
+  // DRIFT ALWAYS READS AS GREEN (trap 12). So the rule is derived and enforced
+  // from the projection itself on every single run.
+  //
+  // ⭐ THE FAILURE BEHAVIOUR IS PRESERVE, NOT CRASH AND NOT DISCARD. Throwing
+  // here would turn a representation bug into a dead draft — trading a silent
+  // loss for a loud total one, which is the same trade the seam's
+  // `not_a_record_set` was making over an optional field. So an undisclosed
+  // withdrawal is UNDONE: the original node goes back, exactly the object that
+  // was minted, with its operator, value and unit.
+  //
+  // ⭐ AND IT DOES NOT BLOCK A LEGITIMATE FUTURE WITHDRAWAL — it prices it. Once
+  // `goalConstraints` genuinely reaches a consumer, a lane may withdraw the
+  // standalone node, and this postcondition lets that through THE MOMENT the
+  // withdrawal is accompanied by a `dropped` entry the user can read. Removal is
+  // permitted; UNDISCLOSED removal is not.
+  //
+  // ⚠ WHAT IT DELIBERATELY DOES NOT DO: it does not second-guess the
+  // connectivity prune. A constraint the prune withdraws is already disclosed by
+  // the prune (measured: `{ label, reason: "unconnected_to_goal", value, unit }`),
+  // so it satisfies the rule and is left alone. Restoring those would put
+  // unconnected nodes back on the graph — a different defect wearing this fix's
+  // clothes.
+  const disclosedNodeIds = new Set(dropped.map((d) => d.node_id));
+  for (const carrier of boundCarriers) {
+    const stillPresent = nodes.some((n) => n.id === carrier.nodeId);
+    if (stillPresent || disclosedNodeIds.has(carrier.nodeId)) continue;
+    // An undisclosed withdrawal. PRESERVE THE ORIGINAL — the node object that
+    // was minted, and the provenance entry that belongs to it. Provenance is
+    // taken FROM THE NODE rather than from a second held copy, because the two
+    // are the same object by construction (`provenance[id] = prov` and
+    // `node.provenance = prov`) and a second copy is a mirror that could drift.
+    nodes.push(carrier.node);
+    nodeIds.add(carrier.nodeId);
+    if (carrier.node.provenance !== undefined) provenance[carrier.nodeId] = carrier.node.provenance;
+  }
+
   // ── meta: derived, in node-emission order (never Set-iteration order).
   const hasIncoming = new Set(edges.map((e) => e.to));
   const hasOutgoing = new Set(edges.map((e) => e.from));
 
   return {
     optionClaimIndexById,
+    // Reconciled against the final node set — see pass 2c.
+    goalConstraints: boundLimits,
     graph: {
       version: "1",
       // The frozen default (`schemas/graph.ts` `default_seed: 17`). A projector
@@ -4023,6 +4501,7 @@ export function projectRecordsToGraph(
       graph: projection.graph,
       provenance: projection.provenance,
       dropped: projection.dropped,
+      goalConstraints: projection.goalConstraints,
     }),
   );
 }
@@ -4186,6 +4665,11 @@ function boundEveryNodeLabel(projection: RecordProjection): RecordProjection {
 
   if (!changed) return projection;
   return {
+    // ⚠ SPREAD FIRST, THEN OVERRIDE. This was a field-by-field literal, and a
+    // field-by-field literal is how `sets_to` reached the wire and was dropped
+    // one line before projection with every test still green. A field added to
+    // `RecordProjection` now survives this hop by default.
+    ...projection,
     graph: { ...projection.graph, nodes },
     provenance,
     dropped: projection.dropped,

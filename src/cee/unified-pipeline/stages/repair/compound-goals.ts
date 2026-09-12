@@ -30,6 +30,7 @@ import {
   type DirectionUnresolvedItem,
 } from "../../../compound-goal/direction-gate.js";
 import { generateNodeId } from "../../../compound-goal/extractor.js";
+import { MINTABLE_TARGET_KINDS } from "../../../compound-goal/mintable-target-kinds.js";
 import { buildBoundDisplayName } from "../../../compound-goal/constraint-display-name.js";
 import { deriveStatedTargetBaselinePercent } from "../../../factor-extraction/stated-level.js";
 import { log } from "../../../../utils/telemetry.js";
@@ -201,7 +202,10 @@ export function mergeWithProtectedFrame<T extends Record<string, unknown>>(
  * only the NEW path — every existing producer keeps the binding behaviour it
  * has always had.
  */
-const MINTABLE_TARGET_KINDS: ReadonlySet<string> = new Set(["outcome", "factor"]);
+// ⭐ DERIVED, NOT DECLARED HERE ANY MORE. The draft-records projector now applies
+// the same rule to a model-supplied constraint reference, and two spellings of
+// one rule is trap 12. The constant moved to a zero-import leaf module (see its
+// header for why a leaf and not this file); this stage's use of it is unchanged.
 
 /**
  * The node-id families the shared matcher will consider.

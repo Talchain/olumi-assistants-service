@@ -299,6 +299,48 @@ export const DRAFT_RECORD_REF_FIELDS = {
 export const DRAFT_RECORD_REF_FIELD_NAMES = Object.values(DRAFT_RECORD_REF_FIELDS) as readonly string[];
 
 /**
+ * ⭐⭐ WHAT A STATED `constraint` APPLIES TO — the field the record grammar
+ * never had.
+ *
+ * A `constraint` stated item could say what the limit IS (`value`, `unit`,
+ * `direction`) and could quote the sentence it came from — and had **nowhere to
+ * write down what it LIMITS.** The model knows: it labels the node
+ * "Subscriber Churn Rate" in the same breath as it transcribes "keeping monthly
+ * churn under 4%". The binder then had to REDISCOVER that link from the two
+ * strings, and a string-containment matcher asking whether
+ * `"subscriber_churn_rate"` contains `"monthly_churn"` says no. The limit was
+ * dropped and the user was told it matched nothing on the model.
+ *
+ * ⛔ THE RULED-OUT ALTERNATIVE, recorded so it is not re-proposed. Three better
+ * string matchers (alias-to-labels, head-noun, all-tokens) were built and
+ * adversarially tested, and EVERY ONE wrong-binds somewhere; the best-looking
+ * one passed only because its stop-word list was written while looking at the
+ * answer. Widening `CONSTRAINT_ALIASES` is worse still — it matches node IDS
+ * while this projector mints CONTENT HASHES, so it can never fire, and
+ * widening it would trade a silent gap for a confident wrong binding. **A wrong
+ * binding is worse than a gap.** Both rulings are settled; this field is the
+ * exit that does not guess.
+ *
+ * ⭐ WHY AN INTEGER INDEX AND NOT A NAME. These are the SAME
+ * `DRAFT_RECORD_REF_FIELDS` integer-index refs `claims[]` already uses, resolved
+ * by the SAME resolver. A ref is therefore **structurally incapable of naming a
+ * record that does not exist** — the failure modes are `out of range` and
+ * `names both arrays at once`, both of which the projector already discloses and
+ * the completion ask already turns into a question. A NAME would have reopened
+ * the matching problem one layer up.
+ *
+ * `stated` and `claim` are the ARRAY NAMES the model is already emitting, so the
+ * field name tells the model which list it is indexing — the same reasoning that
+ * shaped the reference fields above, kept deliberately identical so one habit
+ * serves both.
+ */
+export const DRAFT_RECORD_APPLIES_TO_FIELDS = {
+  appliesToStated: "applies_to_stated",
+  appliesToClaim: "applies_to_claim",
+} as const;
+
+
+/**
  * ⚠ NOTE FOR THE ADAPTER, recorded because a silence here is invisible.
  * `DRAFT_EDGES_REACHED_RE` (`draft-budget.ts`) is `/"from(_ref)?"\s*:/`, and it
  * matched records streams ONLY because the old reference field happened to be
@@ -379,6 +421,19 @@ export interface DraftStatedItem {
   role?: DraftRecordRole;
   /** `constraint` only. */
   direction?: DraftRecordDirection;
+  /**
+   * `constraint` only — WHAT THIS LIMIT APPLIES TO. TYPED BY NAMESPACE, exactly
+   * as the `claims[]` endpoints are: `applies_to_stated` indexes
+   * `stated_items`, `applies_to_claim` indexes `claims`. At most ONE of the
+   * pair; emitting both is a contradiction the projector discloses rather than
+   * resolving by preference.
+   *
+   * OPTIONAL, and its absence is byte-identical to the behaviour before it
+   * existed: the constraint keeps its own node and asserts its own threshold.
+   */
+  applies_to_stated?: number;
+  /** The other namespace — see `applies_to_stated`. */
+  applies_to_claim?: number;
   /**
    * `option` only — see design note 5.
    *
@@ -480,6 +535,33 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             direction: { type: "string", enum: [...DRAFT_RECORD_DIRECTIONS] },
             // Design note 5. `option` only; the projector ignores it elsewhere.
             is_baseline: { type: "boolean" },
+            // ⭐ WHAT A `constraint` APPLIES TO.
+            //
+            // ⚠⚠ THE CLAIM THAT USED TO BE HERE WAS FALSE, AND IT CITED TRAP 12
+            // WHILE COMMITTING IT. It said the wire schema, the seam's
+            // carried-key set and the projector's binder were all keyed from
+            // `DRAFT_RECORD_APPLIES_TO_FIELDS` so none was a hand-maintained
+            // mirror. Derived at the bytes: ONLY THE TWO LINES BELOW are. The
+            // seam's Zod (`seam.ts`), the seam's carried-key spread and the
+            // projector's binder all read the names as literals — necessarily,
+            // for the property ACCESSES — and the companion export
+            // `DRAFT_RECORD_APPLIES_TO_FIELD_NAMES` had ZERO consumers anywhere
+            // in the repo (contrast control in the same sweep:
+            // `DRAFT_RECORD_REF_FIELD_NAMES`, 2). A derivation claim over a
+            // symbol nobody reads is the mirror wearing the anti-mirror's
+            // clothes, so the claim and the dead export are both gone rather
+            // than restated.
+            //
+            // ⭐ WHAT ACTUALLY CATCHES A RENAME, stated so the next reader does
+            // not have to re-derive it: the PRE-REGISTERED GRAMMAR HASH. Change
+            // either name and the pin REDs. That is a real guard; it is simply
+            // not the one the deleted sentence described.
+            //
+            // DELIBERATELY ABSENT FROM `required`: a model that does not know
+            // what a limit applies to must be able to say so by omission, and
+            // omission has to mean exactly today's behaviour.
+            [DRAFT_RECORD_APPLIES_TO_FIELDS.appliesToStated]: { type: "integer" },
+            [DRAFT_RECORD_APPLIES_TO_FIELDS.appliesToClaim]: { type: "integer" },
           },
           required: ["kind", "source_quote"],
           additionalProperties: false,
