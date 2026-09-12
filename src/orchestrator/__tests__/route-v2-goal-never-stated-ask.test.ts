@@ -32,6 +32,8 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
+import type { PipelineStageEvent } from '../../cee/unified-pipeline/stage-stream-context.js';
+import { runWithStageStream } from '../../cee/unified-pipeline/stage-stream-context.js';
 import { _resetConfigCache } from '../../config/index.js';
 
 const dispatchDraftGraphMock = vi.fn();
@@ -149,6 +151,19 @@ const SELF_INFLICTED_DETAILS = {
 const ORDINARY_DETAILS = {
   validation_error_codes: ['NO_PATH_TO_GOAL', 'NO_EFFECT_PATH'],
   last_phase: 'deterministic_enforcement',
+};
+
+/**
+ * A GRAPH_READY frame, exactly as the streamed-turn route's own observer sees
+ * it. Built from the pipeline's `PipelineStageEvent` union so it cannot drift
+ * from the real emission shape. Copied from
+ * `route-v2-draft-loss-disclosure.test.ts`, which owns this seam.
+ */
+const GRAPH_READY_EVENT: PipelineStageEvent = {
+  kind: 'GRAPH_READY',
+  graph: { nodes: [], edges: [] },
+  schema_version: 'v3',
+  elapsed_ms: 33_000,
 };
 
 function messagePayload(message: string): Record<string, unknown> {
@@ -279,6 +294,58 @@ describe('POST /orchestrate/v2/turn — a draft blocked on CEE\'s OWN goal asks 
     });
 
     expect(res.statusCode).toBe(500);
+  });
+
+  /**
+   * ⭐⭐ THE CONJUNCT A SURVIVING MUTANT EXPOSED — AND IT GUARDS A REAL HARM.
+   *
+   * Deleting `!previewWasStreamed` left the whole suite GREEN, because every
+   * other case here injects into the BUFFERED `/orchestrate/v2/turn`, which
+   * emits no stage frames at all: `graphPreviewEmitted()` is structurally
+   * false on all of them, so the conjunct was never exercised in either
+   * direction.
+   *
+   * It matters. On the STREAMED route a GRAPH_READY frame can already have
+   * handed the client a graph to render. Answering that turn with a question
+   * would silently retract a model the user is looking at — replacing a
+   * visible draft with "what outcome would make this a success?" and no
+   * explanation. That case belongs to the existing draft-loss disclosure,
+   * which is why the fence declines it and the 500 path stands.
+   */
+  it('REFUSES: a self-inflicted block AFTER a GRAPH_READY frame streamed keeps the 500', async () => {
+    dispatchDraftGraphMock.mockRejectedValue(pipelineThrow(SELF_INFLICTED_DETAILS));
+
+    const seen: PipelineStageEvent[] = [];
+    const res = await runWithStageStream(
+      (event) => {
+        seen.push(event);
+      },
+      async () => {
+        const emitFrame = (
+          await import('../../cee/unified-pipeline/stage-stream-context.js')
+        ).currentStageEmitter();
+        emitFrame?.(GRAPH_READY_EVENT);
+        return await app.inject({
+          method: 'POST',
+          url: '/orchestrate/v2/turn',
+          payload: messagePayload(COMPLETE_BRIEF),
+        });
+      },
+    );
+
+    // PRECONDITION PINNED IN-TEST: the frame really did travel the seam.
+    // Without this the assertion below could pass because the emitter
+    // silently did nothing — a guard agreeing with itself (trap 13b).
+    expect(seen.map((e) => e.kind)).toContain('GRAPH_READY');
+
+    expect(res.statusCode).toBe(500);
+    // The user saw a graph, so this IS a loss and must be disclosed as one.
+    expect(markGraphWriteFailedMock).toHaveBeenCalledWith(
+      SCENARIO_ID,
+      TURN_ID,
+      expect.any(String),
+      'draft_loss',
+    );
   });
 
   /**
