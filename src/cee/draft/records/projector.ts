@@ -66,6 +66,14 @@ import { MAX_OPTIONS as MAX_PROJECTED_OPTIONS } from "../../../validators/graph-
 // EXPORTED for exactly this reuse. A local copy would drift from the rule it
 // claims to pre-empt, and this file's own history says the drift reads as green.
 import { buildInterventionSignature } from "../../../validators/graph-validator.js";
+// ⭐ THE SAME REPAIR THE ENFORCEMENT STAGE RUNS, RUN WHERE THE RECONCILIATION
+// BELOW CAN STILL SEE ITS RESULT. Imported rather than reimplemented: a second
+// copy of the corroboration rule is trap 12, and this module must not hold a
+// private opinion about what an option's own sentence states.
+import {
+  repairNoOpOptionTargets,
+  type NoOpTargetRepairPolicy,
+} from "../../unified-pipeline/stages/repair/no-op-target-repair.js";
 // ⭐ THE SINGLE BRIEF-BINDING AUTHORITY. Shared with the V3 response transform so
 // that a node's badge and an option's badge cannot disagree about one fact — they
 // contradicted each other on the wire before this (trap 12, two mirrors).
@@ -3971,6 +3979,72 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
 }
 
 /**
+ * ⭐⭐ GIVE A USER-STATED OPTION THE TARGET ITS OWN SENTENCE STATES, BEFORE THE
+ * DUPLICATE GATE GROUPS.
+ *
+ * ## WHY HERE, AND NOT ONLY AT THE ENFORCEMENT STAGE
+ *
+ * `no-op-target-repair.ts` already computes the number; nothing is recomputed
+ * here and no predicate over language is minted. What this placement changes is
+ * WHEN it runs. Derived at the call sites:
+ *
+ *   Stage 1 Parse  -> `adapters/llm/anthropic.ts:1982` -> `seam.ts:277` -> HERE
+ *   Stage 4 Repair -> `stages/repair/graph-enforcement.ts:765`
+ *
+ * The enforcement stage runs THREE STAGES LATER, and by then its only neighbour
+ * is re-validation — so a repair that collides with a model option it cannot
+ * withdraw must decline, or `OPTIONS_IDENTICAL` kills the draft. Measured on
+ * Paul's own graph (11 Sep 2026), that decline is exactly what happens: his
+ * option, an invented £59 and an invented £54, so repairing his to £59 collides
+ * and he keeps the de-configured outcome.
+ *
+ * Run before {@link findUndevelopedDuplicates} and the collision is not a hazard
+ * but that gate's own input: it groups on the validator's own
+ * `buildInterventionSignature` and withdraws the MODEL duplicate of a
+ * user-stated option, disclosing it. No adjudication is invented — that ruling
+ * already exists, and this function only lets the gate see the number it was
+ * always meant to group on.
+ *
+ * ## ⚠ EVERY REFUSAL DIRECTION LANDS ON TODAY'S BEHAVIOUR
+ *
+ *  · No goal node — {@link findUndevelopedDuplicates} returns `[]` on such a
+ *    graph (its own first line), so NOTHING would reconcile a collision we
+ *    created. The gate's precondition is therefore this function's precondition;
+ *    it is read here rather than assumed, and pinned in-test.
+ *  · Only USER-STATED options are candidates. A repaired MODEL option could be
+ *    demoted by the very gate this runs before, which is that gate's question,
+ *    not this one's.
+ *  · Only MODEL options are declared reconcilable. A collision between two
+ *    STATED options is one the gate deliberately leaves standing for the user to
+ *    resolve, so it still blocks the repair.
+ *
+ * The set of drafts that survive can only GROW: every option this declines
+ * reaches the enforcement stage exactly as it does today.
+ */
+function repairStatedOptionTargets(projection: OneProjection): void {
+  // The gate's OWN precondition, read from the gate rather than restated as a
+  // rule of our own (trap 13b — a guard agreeing with itself).
+  if (!projection.graph.nodes.some((n) => n.kind === "goal")) return;
+
+  const repairableOptionIds = new Set<string>();
+  const reconciledOptionIds = new Set<string>();
+  for (const node of projection.graph.nodes) {
+    if (node.kind !== "option") continue;
+    // A MODEL option is one this projector minted FROM A CLAIM — the same
+    // authority the gate itself uses to decide what it may withdraw, read from
+    // the projection rather than from a label or a position (trap 19).
+    if (projection.optionClaimIndexById.has(node.id)) reconciledOptionIds.add(node.id);
+    else if (projection.provenance[node.id]?.provenance_class === "stated") {
+      repairableOptionIds.add(node.id);
+    }
+  }
+  if (repairableOptionIds.size === 0) return;
+
+  const policy: NoOpTargetRepairPolicy = { repairableOptionIds, reconciledOptionIds };
+  repairNoOpOptionTargets(projection.graph, undefined, policy);
+}
+
+/**
  * ⭐⭐ THE PROJECTOR — projection to a FIXED POINT.
  *
  * `projectOnce` is run, its option signatures are compared with the VALIDATOR'S
@@ -4010,11 +4084,13 @@ export function projectRecordsToGraph(
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();
   let projection = projectOnce(records, demoted, brief);
+  repairStatedOptionTargets(projection);
   for (let pass = 0; pass < claimCount; pass++) {
     const decisions = findUndevelopedDuplicates(projection);
     if (decisions.length === 0) break;
     for (const d of decisions) demoted.set(d.claimIndex, d);
     projection = projectOnce(records, demoted, brief);
+    repairStatedOptionTargets(projection);
   }
   // The internal binding is not part of the contract: consumers get the same
   // three fields they always did.
