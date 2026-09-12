@@ -4868,7 +4868,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
                 : [],
             });
             log.info({
-              event: 'v5.draft_graph.goal_never_stated_ask',
+              event: 'v5.recovery_response.goal_never_stated_ask',
               request_id: requestId,
               scenario_id: ingress.scenario_id,
             }, 'Draft blocked on a goal CEE itself minted — asking the user for the outcome instead of returning a dead 500');

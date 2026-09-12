@@ -483,6 +483,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         PostAnalysisDirectAnswerRecoverySkipped: "v5.post_analysis.direct_answer_recovery_skipped",
         ProbabilityOutOfRange: "v5.probability_out_of_range",
         RecoveryResponse: "v5.recovery_response",
+        // goalfence: a draft blocked on a goal CEE itself minted answers with
+        // the outcome question instead of a dead 500.
+        V5DraftGoalNeverStatedAsk: "v5.recovery_response.goal_never_stated_ask",
         SessionReadDegraded: "session.read_degraded",
         V5SessionContinuityGap: "v5.session.continuity_gap",
         V5TurnSelectionResolved: "v5.selection.resolved",
@@ -1813,6 +1816,18 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // "the user pointed at a node the model does not have" and "CEE could
         // not read the model" are different faults with the same count.
         TelemetryEvents.V5TurnSelectionResolved,
+        // goalfence (2026-09-13) — content-free structured log (request_id,
+        // scenario_id, the blocking validator codes) emitted when a draft that
+        // failed to reach a goal CEE ITSELF minted is answered with the outcome
+        // question instead of a 500. No Datadog mapping until a dashboard
+        // consumes it. The mapping to add when one does is a RATIO, not a
+        // count: this event over `cee.draft_graph.enforcement_blocked`, because
+        // the useful question is "what share of draft blocks were ours?" — a
+        // bare count of asks falls whether the fence is working or the traffic
+        // is. ⚠ And it must NOT be read as a success metric on its own: the
+        // fence firing more often is not an improvement, since the same change
+        // that raises it would raise the 500s it replaced.
+        TelemetryEvents.V5DraftGoalNeverStatedAsk,
       ];
 
       for (const event of allEvents) {
@@ -2276,6 +2291,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.prompt_resolution_policy",
         "v5.recovery_chip_served",
         "v5.recovery_response",
+        "v5.recovery_response.goal_never_stated_ask",
         "v5.response.prose_sanitised",
         "v5.unexpected_explanation_payload",
         "v5.validator_outcome",
