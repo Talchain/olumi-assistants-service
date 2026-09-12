@@ -54,7 +54,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import type { GraphT, NodeT } from "../../src/schemas/graph.js";
+import type { EdgeT, GraphT, NodeT } from "../../src/schemas/graph.js";
 
 vi.mock("../../src/utils/telemetry.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/utils/telemetry.js")>();
@@ -178,7 +178,7 @@ function paulsGraph(opts: FixtureOptions = {}): GraphT {
     version: "1",
     default_seed: 17,
     nodes: nodes as NodeT[],
-    edges,
+    edges: edges as EdgeT[],
     meta: { roots: [], leaves: [], suggested_positions: {}, source: "assistant" },
   } as GraphT;
 }
