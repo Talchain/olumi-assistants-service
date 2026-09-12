@@ -248,6 +248,12 @@ export const TelemetryEvents = {
   // reoffered_graph_changed / reoffered_graph_present /
   // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
   V5DraftOfferSeeded: "v5.draft_offer.seeded",
+  // ROADMAP goalfence — the draft blocked on a goal CEE itself minted and the
+  // turn asked the user for the outcome instead of returning a dead 500. Its
+  // own event, NOT folded into the clarify_v2 stream: clarify is strictly
+  // pre-draft, so a dashboard measuring "how often do we clarify before
+  // drafting" must not silently absorb post-draft-failure asks.
+  V5DraftGoalNeverStatedAsk: "v5.draft_graph.goal_never_stated_ask",
   V5DraftOfferResumed: "v5.draft_offer.resumed",
   // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
   // CEE_CLARIFY_V2_ENABLED. `questions_emitted` fires once per clarify

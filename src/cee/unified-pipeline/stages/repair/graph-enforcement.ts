@@ -44,6 +44,10 @@ import { validateGraph as validateGraphDeterministic } from "../../../../validat
 import { repairNoOpOptionTargets } from "./no-op-target-repair.js";
 import { neutraliseNoOpOptions } from "./no-op-neutralisation.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
+// ⭐ THE ONE AUTHORITY for "is this block the pipeline's own doing?" — imported,
+// never restated. Both consumers (this stamp and the auto-retry skip) read the
+// same bytes, so they cannot drift into disagreeing about the same block.
+import { isSelfInflictedGoalGap } from "./self-inflicted-goal-gap.js";
 
 // ---------------------------------------------------------------------------
 // The fail-closed block signature (ROADMAP 2.1086)
@@ -141,6 +145,25 @@ export function readEnforcementBlockCodes(body: unknown): string[] {
   const codes = (details as Record<string, unknown>).validation_error_codes;
   if (!Array.isArray(codes)) return [];
   return codes.filter((c): c is string => typeof c === "string" && c.length > 0);
+}
+
+/**
+ * Read the producer's own self-inflicted marker (`details.goal_never_stated`)
+ * off an emitted block body.
+ *
+ * ⚠ ABSENT IS FALSE, AND ABSENT IS THE COMMON CASE. The stamp is emitted only
+ * on the true arm, so every ordinary block — and every block from any other
+ * emitter — reads false here and keeps today's behaviour exactly. This reader
+ * is the ONLY way a consumer learns the fact: the graph is gone by the time the
+ * result is held, so nothing downstream can re-derive it and nothing should
+ * try (a second derivation off a different input is how two authorities for one
+ * fact begin).
+ */
+export function readGoalNeverStated(body: unknown): boolean {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
+  const details = (body as Record<string, unknown>).details;
+  if (details === null || typeof details !== "object" || Array.isArray(details)) return false;
+  return (details as Record<string, unknown>).goal_never_stated === true;
 }
 
 /**
@@ -826,6 +849,34 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
       // blocked, not from the class alone. See selectEnforcementBlockRecovery.
       const blockRecovery = selectEnforcementBlockRecovery(errorCodes);
 
+      // ⭐⭐ DID WE CAUSE THIS? A THIRD QUESTION OF AN ALREADY-BLOCKED RESULT.
+      //
+      // The block signature answers   "should the server re-draft this?"
+      // `selectEnforcementBlockRecovery` answers "what do we tell the user?"
+      // This answers                  "is the goal it failed to reach OURS?"
+      //
+      // Three questions, named apart rather than folded together (trap 21).
+      // Nothing above is narrowed: the gate still fires for whatever the
+      // post-enforcement validator classifies as blocking, and the copy
+      // selection is untouched. This only STAMPS a fact about the block that
+      // two downstream readers need and neither can derive for itself — the
+      // auto-retry seam holds the result but not the graph, and the route holds
+      // neither.
+      //
+      // Derived at the GRAPH rather than inferred from the codes: the codes say
+      // what could not reach the goal, and only the goal node itself says who
+      // authored it.
+      const goalNeverStated = isSelfInflictedGoalGap(graph, errorCodes);
+      if (goalNeverStated) {
+        log.info({
+          event: TelemetryEvents.CeeEnforcementBlocked,
+          request_id: requestId,
+          error_count: postValidationErrorCount,
+          codes: errorCodes,
+          goal_never_stated: true,
+        }, "Enforcement block is self-inflicted: the unreached goal is CEE's own placeholder");
+      }
+
       const errorBody = buildCeeErrorResponse(
         ENFORCEMENT_BLOCK_ERROR_CODE,
         `Graph failed post-enforcement validation (${postValidationErrorCount} topology error(s))`,
@@ -861,6 +912,13 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
             validation_error_codes: revalidation.errors.map((e) => e.code),
             enforcement_repairs: allRepairs.length,
             last_phase: ENFORCEMENT_BLOCK_LAST_PHASE,
+            // ROADMAP goalfence: a fixed boolean, no user content — the same
+            // shape rule every other allowlisted details key here obeys.
+            // Emitted ONLY on the true arm: an absent key means "not
+            // self-inflicted, or not asked", and every reader treats absence as
+            // the ordinary block (fail-closed). A `false` would be a claim this
+            // module has not earned on the paths that never reach the check.
+            ...(goalNeverStated ? { goal_never_stated: true } : {}),
           },
         },
       );

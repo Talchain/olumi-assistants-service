@@ -237,6 +237,7 @@ import {
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
 } from '../orchestrator-v5/session/pending-action.js';
 import { randomUUID } from 'node:crypto';
+import { composeGoalNeverStatedAsk } from '../orchestrator-v5/clarify-v2/goal-never-stated-ask.js';
 import {
   commitDirectAnswer,
   computeRequestHash,
@@ -4785,6 +4786,127 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         // frames at all, so it reads false, which is the honest answer: no
         // client saw a preview from it.
         const previewWasStreamed = graphPreviewEmitted();
+
+        // ⭐⭐⭐ WE INVENTED THE GOAL, THEN FAILED THE DRAFT FOR NOT REACHING IT.
+        //     ASK, INSTEAD OF DYING SILENTLY.
+        //
+        // ── THE DEFECT THIS CLOSES ──────────────────────────────────────
+        // When a brief designates no objective, the pipeline mints a goal node
+        // labelled "Achieve the best outcome for this decision"
+        // (`goal-inference.ts:87`) — CEE-authored prose naming no metric, no
+        // direction, no horizon — and the post-enforcement validator then
+        // requires every node to reach it. Nothing can meaningfully reach it,
+        // so the draft is rejected. `graph-enforcement.ts` stamps
+        // `details.goal_never_stated` when, and only when, that is what
+        // happened: the goal is OURS and every blocking code is a
+        // goal-connectivity code.
+        //
+        // Measured on the served build `2212ae0`, n=40, zero excluded attempts:
+        // the short brief failed 11/15 (73%); the SAME brief plus one sentence
+        // naming the outcome failed 0/10, at the same graph-size band
+        // (Fisher two-sided p = 5.45e-04). The missing fact is the goal, and
+        // only the user has it.
+        //
+        // ── WHY THIS IS A 200 AND NOT BETTER 500 COPY ───────────────────
+        // The honest sentence ALREADY rides this failure — `recovery.suggestion`
+        // has said "State the outcome you are optimising for explicitly" for
+        // weeks. It reaches nobody: a `BoundaryError` has no `assistant_text`,
+        // as the note ~90 lines below this one records in terms. The product
+        // knew the remedy, composed the sentence, and delivered it in an
+        // envelope the user cannot read. This puts it where it can be read.
+        //
+        // ── THE THREE CONJUNCTS, AND WHY EACH IS LOAD-BEARING ───────────
+        //  1. `goal_never_stated` — the producer's own verdict, derived at the
+        //     GRAPH (only the goal node knows who authored it) and never
+        //     re-derived here. An absent key is false, so every other failure
+        //     class keeps today's 500 exactly.
+        //  2. `!previewWasStreamed` — if a GRAPH_READY frame already reached
+        //     this client the user HAS SEEN a model, and replacing it with a
+        //     question would silently retract something on their screen. That
+        //     case belongs to the existing draft-loss disclosure, untouched.
+        //  3. the commit must SUCCEED — a question the user answers into a turn
+        //     that was never recorded is worse than the 500, because their
+        //     reply arrives with no memory of what was asked. On any commit
+        //     failure we fall through to the unchanged 500 path below.
+        //
+        // ⚠ NOTHING PARTIAL IS SHIPPED. The drafted graph is discarded here
+        // exactly as it is discarded today. An option cannot silently vanish
+        // from a comparison that was never presented, and there is no gutted
+        // model to mistake for a whole one — the safety argument is structural,
+        // not a matter of care.
+        if (
+          pipelineDetails?.goal_never_stated === true
+          && !previewWasStreamed
+        ) {
+          try {
+            const askResponse = composeGoalNeverStatedAsk();
+            const askCommit = await commitDirectAnswer(askResponse, {
+              scenario_id: ingress.scenario_id,
+              turn_id: ingress.turn_id,
+              // The same class the frame-no-brief guard commits its framing
+              // prompt under (`route-v2.ts:7186`). This turn asks a question
+              // and carries no graph — that is what `clarify` means here.
+              turn_class: 'clarify',
+              handler_id: null,
+              request_hash: computeRequestHash(ingress),
+              // The draft's own LLM spend is attributed to the failed draft,
+              // not to this exit: the ask itself is deterministic and calls
+              // nothing. Counting the draft's calls here would double-count
+              // them against a turn that made none.
+              llm_calls_used: 0,
+              duration_ms: Date.now() - routeStartedAt,
+              handler_facts: [],
+              pending_actions: [],
+              coaching_state: null,
+              userMessage: ingress.message,
+            });
+            emit(TelemetryEvents.V5DraftGoalNeverStatedAsk, {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              codes: Array.isArray(pipelineDetails.validation_error_codes)
+                ? pipelineDetails.validation_error_codes
+                : [],
+            });
+            log.info({
+              event: 'v5.draft_graph.goal_never_stated_ask',
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+            }, 'Draft blocked on a goal CEE itself minted — asking the user for the outcome instead of returning a dead 500');
+            return sendFinalised200(
+              reply,
+              requestId,
+              'draft_graph_goal_never_stated',
+              askCommit.response,
+              {
+                graph: null,
+                // T1 claim safety — INHERITED from the turn-entry read. Never a
+                // literal: the permission belongs to the fact this response
+                // DISPLAYS, and this one displays no analysis at all.
+                ...(await claimSafety.forExit()),
+                // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a deterministic
+                // question is functional copy and must ship plain.
+                answerKind: 'functional',
+                requestStartedAt: routeStartedAt,
+                scenarioId: ingress.scenario_id,
+                turnId: ingress.turn_id,
+                userMessage: ingress.message,
+              },
+            );
+          } catch (askErr) {
+            // FALL THROUGH to the unchanged 500. A failed commit means the turn
+            // was not recorded, and an unrecorded question is worse than an
+            // error (see conjunct 3). This is the fail-closed direction and it
+            // is the same shape the frame guard uses when ITS commit fails.
+            log.warn({
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: askErr instanceof Error
+                ? { name: askErr.name, message: askErr.message }
+                : { message: String(askErr) },
+            }, 'V5 draft goal-never-stated ask — commit failed; falling back to the 500 BoundaryError');
+          }
+        }
+
         await markDraftGraphWriteFailed(
           ingress.scenario_id,
           ingress.turn_id,
