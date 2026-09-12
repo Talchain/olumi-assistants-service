@@ -458,6 +458,13 @@ const LABEL_CORPUS: readonly string[] = [
   "increase the Pro plan price from £49 to £59 per month",
   "should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
   "Increase the Pro plan price from £49 to £59",
+  // — admitted: NEITHER record states a unit, so the unit conjunct is skipped —
+  // CQE returns `unit: null` for bare numerals (probed; the `£` members above
+  // return `"GBP"`), and this fixture's factor records no `unit` at all. The
+  // conjunct fires only where BOTH sides state one, so this is the class it
+  // deliberately ADMITS. Pinned here so that class cannot be tightened in
+  // silence (trap 22b: a corpus that watches only one door).
+  "increase the Pro plan price from 49 to 59",
   // — refused: CQE reports no from-to —
   "Raise Price to £59 at Feature Launch",          // bare `to`: range_min is null
   "Cut costs by £10,000",                          // delta: operator decrement
@@ -484,6 +491,7 @@ const LABEL_CORPUS: readonly string[] = [
 
 const EXPECTED_REPAIRED: readonly string[] = [
   "Increase the Pro plan price from £49 to £59",
+  "increase the Pro plan price from 49 to 59",
   "increase the Pro plan price from £49 to £59 per month",
   "should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
 ];
