@@ -1948,9 +1948,36 @@ export function renderDirectionClarifications(
           // `goal_constraints[]` nor the analysis. "It is not being enforced"
           // is the true statement; "it stays on your model" would be a lie
           // this product has shipped before under a neighbouring voice.
+          //
+          // ⚠⚠ AND IT MAY NOT SAY THE MODEL HOLDS NO REFERENT — IT USUALLY
+          // DOES. This sentence read "I could not match it to anything on the
+          // model" until 2026-09-13. That is an existential claim about the
+          // MODEL'S CONTENTS, and step 6 does not establish it: step 6 fires
+          // when the BINDER found zero or ambiguous candidates, which it
+          // decides from the node-ID stem and a hand-maintained alias table,
+          // not from the label the user reads. Measured on the captured
+          // `staging-budget-brief-node-sets-2026-08-30` corpus, ALL SEVEN drop
+          // runs carry two or three nodes labelled with the user's own word
+          // ("Annual Support Budget Consumed", "Budget Overrun Risk"), so the
+          // sentence was false on every one of them; a founder hit the same
+          // shape on 2026-09-13 with "monthly churn" against a drafted node
+          // labelled `Pro Subscriber Churn Rate`.
+          //
+          // ⚠ AND IT MUST NOT GROW. The narrative composer's direction-only
+          // rung is CHARACTER-BUDGETED: a 6-character-longer draft of this
+          // sentence blew the rung's budget and silently dropped the SECOND
+          // limit question from short drafts (caught by
+          // `first-response-stated-limit-order`, which exists for exactly
+          // this). The replacement is SHORTER than the copy it replaces.
+          //
+          // "I could not place it on the model" is true in
+          // ALL THREE cases — referent present and binding failed, referent
+          // genuinely absent, and direction ambiguous — because it reports what
+          // this code actually knows: its own failure, not the model's
+          // contents. Pinned by `constraint-target-unmatched-copy-honesty`.
           detail:
             `You set a limit of ${it.amount_text} in your brief and I could not ` +
-            `match it to anything on the model. ` +
+            `place it on the model. ` +
             `${composeTargetChoiceQuestion(it.amount_text)} ` +
             `Until then it is not being enforced — add it as a constraint on the ` +
             `right factor to make it binding.`,
