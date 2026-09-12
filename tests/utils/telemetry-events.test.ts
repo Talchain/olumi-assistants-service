@@ -165,6 +165,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ⭐ A no-op option is DE-CONFIGURED, not refused (PR #1449).
         // Deliberate frozen-registry addition per the registry discipline.
         CeeOptionNoOpNeutralised: "cee.draft_graph.option_no_op_neutralised",
+        CeeOptionNoOpTargetRepaired: "cee.draft_graph.option_no_op_target_repaired",
 
         // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
         CeeEnforcementAutoRetry: "cee.draft_graph.enforcement_auto_retry",
@@ -1248,6 +1249,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // never labels or magnitudes) via log.warn, not emit(), so there is no
         // datadogClient metric to map until a dashboard consumes it.
         TelemetryEvents.CeeOptionNoOpNeutralised,
+        // No-op TARGET REPAIR — named apart from the neutralisation above,
+        // because it records the OPPOSITE action (the option was kept and
+        // given the level its own label states). Same content-free shape:
+        // option ids + count via log.warn, never labels or magnitudes.
+        TelemetryEvents.CeeOptionNoOpTargetRepaired,
         // Bounded auto-retry (ROADMAP 2.1086) — diagnostic, no Datadog
         TelemetryEvents.CeeEnforcementAutoRetry,
         TelemetryEvents.CeeEnforcementAutoRetrySkipped,
@@ -1930,6 +1936,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ⭐ The no-op neutralisation meter (PR #1449).
         // Deliberate frozen-registry addition per the registry discipline.
         "cee.draft_graph.option_no_op_neutralised",
+        // ⭐ The no-op TARGET REPAIR meter. Deliberate frozen-registry
+        // addition per the registry discipline; the repair runs immediately
+        // before the neutralisation above and every case it declines falls
+        // through to it.
+        "cee.draft_graph.option_no_op_target_repaired",
 
         // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
         "cee.draft_graph.enforcement_auto_retry",

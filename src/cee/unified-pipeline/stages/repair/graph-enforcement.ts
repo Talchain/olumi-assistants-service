@@ -41,6 +41,7 @@ import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
 import type { ValidationErrorCode, ValidatorPhase } from "../../../../validators/graph-validator.types.js";
 import { CANONICAL_EDGE } from "../../../../validators/graph-validator.types.js";
 import { validateGraph as validateGraphDeterministic } from "../../../../validators/graph-validator.js";
+import { repairNoOpOptionTargets } from "./no-op-target-repair.js";
 import { neutraliseNoOpOptions } from "./no-op-neutralisation.js";
 import { buildCeeErrorResponse } from "../../../validation/pipeline.js";
 
@@ -755,11 +756,18 @@ export function applyDeterministicEnforcement(ctx: StageContext): void {
   // than refused — it ships in the user's graph and the analysable-option gate
   // excludes it from comparative ranking, so it can never be named a leader.
   // See `no-op-neutralisation.ts` for why DROP and `is_baseline` were rejected.
+  // ⭐ REPAIR BEFORE WITHDRAWAL. An option whose own label states the target
+  // its intervention failed to carry gets that target written — so the user's
+  // own question stays in their comparison instead of being de-configured.
+  // Shares `findNoOpOptions` with the neutralisation below rather than asking
+  // the question a second time, and every case it declines falls through to
+  // that neutralisation unchanged. See `no-op-target-repair.ts`.
+  const noOpRepairResult = repairNoOpOptionTargets(graph, requestId);
   const noOpResult = neutraliseNoOpOptions(graph, requestId);
 
   // Append repairs deterministically: canonicalise, then bridge, then budget
   // (matches call order).
-  const allRepairs = [...canonResult.repairs, ...bridgeResult.repairs, ...budgetResult.repairs, ...noOpResult.repairs];
+  const allRepairs = [...canonResult.repairs, ...bridgeResult.repairs, ...budgetResult.repairs, ...noOpRepairResult.repairs, ...noOpResult.repairs];
   if (allRepairs.length > 0) {
     ctx.deterministicRepairs = [
       ...(ctx.deterministicRepairs ?? []),

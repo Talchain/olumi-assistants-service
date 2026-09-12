@@ -395,6 +395,7 @@ export const TelemetryEvents = {
   CeeEnforcementPostValidationFailed: "cee.draft_graph.enforcement_post_validation_failed",
   CeeEnforcementBlocked: "cee.draft_graph.enforcement_blocked",
   CeeOptionNoOpNeutralised: "cee.draft_graph.option_no_op_neutralised",
+  CeeOptionNoOpTargetRepaired: "cee.draft_graph.option_no_op_target_repaired",
 
   // Bounded auto-retry on the post-enforcement fail-closed class (ROADMAP 2.1086)
   CeeEnforcementAutoRetry: "cee.draft_graph.enforcement_auto_retry",
