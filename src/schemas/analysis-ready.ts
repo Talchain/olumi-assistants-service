@@ -149,22 +149,80 @@ export const AnalysisBlockerAction = z.enum(["add_value", "confirm_value", "add_
  * Emitted when a controllable factor connected to an option has neither
  * observed_state.value nor data.value.
  */
-export const AnalysisBlocker = z.object({
-  /** Which option needs this input (undefined = applies to all) */
-  option_id: z.string().optional(),
-  /** Human-readable option label */
-  option_label: z.string().optional(),
-  /** Factor node ID */
-  factor_id: z.string(),
-  /** Human-readable factor label */
-  factor_label: z.string(),
-  /** Type of blocker */
-  blocker_type: AnalysisBlockerType,
-  /** Actionable message for the user */
-  message: z.string(),
-  /** Suggested action to resolve */
-  suggested_action: AnalysisBlockerAction,
-});
+export const AnalysisBlocker = z
+  .object({
+    /** Which option needs this input (undefined = applies to all) */
+    option_id: z.string().optional(),
+    /** Human-readable option label */
+    option_label: z.string().optional(),
+    /**
+     * Factor node ID.
+     *
+     * ⭐ OPTIONAL, TO MATCH THE PUBLISHED WIRE CONTRACT — AND THE STRICTNESS
+     * WAS NOT A GUARANTEE, IT WAS A GAG.
+     *
+     * `AnalysisBlockerSchema` in `@talchain/schemas/boundary` — the shape this
+     * row is actually mapped onto by `blockerIssue` before it reaches a
+     * consumer — has carried `factor_id`/`factor_label` as OPTIONAL for as long
+     * as it has existed (verified byte-identical in the vendored 0.54.0 and
+     * 0.55.0 tarballs, i.e. the UI's pin and ours). This local schema was
+     * STRICTER than the wire it feeds, and the only thing that strictness
+     * achieved was to make one whole refusal class unrepresentable: an option
+     * with NO option→factor edge has no factor to name, so it could not be
+     * itemised at all and the product fell through to *"Ask in the chat and it
+     * will explain what is missing."*
+     *
+     * ⛔ THE SCOPE RULE IS NOT WEAKENED, IT IS MOVED AND MADE HONEST. A blocker
+     * that names NEITHER scope gives a consumer nothing to render, so the
+     * refinement below still rejects it — loudly, and for the real reason
+     * ("name a scope") rather than incidentally ("name a factor"). The smuggle
+     * fixtures that pin `buildAnalysisRefusalReadiness`'s passthrough refusal
+     * (`{ kind: 'missing_value' }`) still fail this schema on
+     * `blocker_type`/`message`/`suggested_action`, so that property survives
+     * untouched.
+     */
+    factor_id: z.string().optional(),
+    /** Human-readable factor label */
+    factor_label: z.string().optional(),
+    /** Type of blocker */
+    blocker_type: AnalysisBlockerType,
+    /** Actionable message for the user */
+    message: z.string(),
+    /** Suggested action to resolve */
+    suggested_action: AnalysisBlockerAction,
+  })
+  .superRefine((blocker, ctx) => {
+    // A blocker exists to send the user somewhere. One of the two scopes must
+    // be present or there is nothing for a surface to name, link or resolve —
+    // which is precisely the silence this field's former shape produced.
+    const hasFactor =
+      typeof blocker.factor_id === "string" && blocker.factor_id.length > 0;
+    const hasOption =
+      typeof blocker.option_id === "string" && blocker.option_id.length > 0;
+    if (!hasFactor && !hasOption) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "A blocker must name at least one scope: option_id or factor_id.",
+        path: ["option_id"],
+      });
+    }
+    // A named scope carries its label, so a consumer never has to invent one.
+    if (hasFactor && (blocker.factor_label ?? "").length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "factor_id was given without factor_label.",
+        path: ["factor_label"],
+      });
+    }
+    if (hasOption && (blocker.option_label ?? "").length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "option_id was given without option_label.",
+        path: ["option_label"],
+      });
+    }
+  });
 export type AnalysisBlockerT = z.infer<typeof AnalysisBlocker>;
 
 // ============================================================================

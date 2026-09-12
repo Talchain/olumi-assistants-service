@@ -400,19 +400,41 @@ describe('the waivable-code set carries no unreachable entries', () => {
     expect(withOption?.option_id).toBe('opt_a');
   });
 
-  it('MISSING_OPTION_CONNECTION has no producer in this repo', () => {
-    // The mapper can build it — so the absence claim is about PRODUCERS, not
-    // about the mapper being incapable.
+  it('MISSING_OPTION_CONNECTION now HAS exactly one producer, and stays un-waivable', () => {
+    /**
+     * ⚠⚠ THIS FACT FLIPPED, AND THE OLD ASSERTION IS CORRECTED RATHER THAN
+     * DELETED (trap 14). It read `MISSING_OPTION_CONNECTION has no producer in
+     * this repo` and asserted `writes` did NOT contain `missing_connection`.
+     *
+     * That was true when written and is FALSE now: `cee/transforms/analysis-ready.ts`
+     * mints an option-scoped `missing_connection` for an option that reaches no
+     * factor — the class that previously refused MUTELY and left the UI on its
+     * `unspecified` rung ("Ask in the chat and it will explain what is missing"),
+     * which was the first thing a fresh guest saw after pressing "Run analysis".
+     *
+     * ⭐ THE GUARD DID ITS JOB AND THIS IS THE REVISIT IT DEMANDED. Its own
+     * header says the removal "is the FAIL-SAFE direction: if either code gains
+     * a producer, the run refuses rather than silently waiving something new",
+     * and that the decision is to be revisited when this REDs.
+     *
+     * REVISITED, AND DELIBERATELY UNCHANGED: `MISSING_OPTION_CONNECTION` stays
+     * OUT of `WAIVABLE_BY_EXCLUSION`. Adding it would LOOSEN a refusal, which is
+     * the opposite of what the producing change is for — that change makes a
+     * refusal ARTICULATE, never weaker. Measured alongside: the route-vs-run
+     * agreement corpus in this file is unaffected.
+     */
+    // The mapper builds it — asserted first so the producer claim below is
+    // about PRODUCERS and not about the mapper.
     expect(
       blockerIssue({ blocker_type: 'missing_connection', option_id: 'opt_a' }, 0, 'needs_encoding')
         ?.code,
     ).toBe('MISSING_OPTION_CONNECTION');
 
-    // Sweep the source for writes of `blocker_type`, with a CONTRAST CONTROL in
-    // the same sweep: absence is only proven when the target reads zero AND a
-    // same-family symbol reads non-zero.
+    // Sweep the source for writes of `blocker_type`, keeping the CONTRAST
+    // CONTROL: a sweep that found nothing at all would "prove" any claim.
     const root = join(process.cwd(), 'src');
     const writes: string[] = [];
+    const files: string[] = [];
     const walk = (dir: string): void => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, entry.name);
@@ -421,19 +443,24 @@ describe('the waivable-code set carries no unreachable entries', () => {
           continue;
         }
         if (!entry.name.endsWith('.ts')) continue;
-        // STRIP COMMENTS FIRST. Without this the sweep matched THIS PR own doc
-        // comment describing the absence — a probe reading its own description
-        // and reporting it as evidence. Caught by the test itself.
+        // STRIP COMMENTS FIRST. Without this the sweep matches the doc comments
+        // that DESCRIBE these producers — a probe reading its own description
+        // and reporting it as evidence.
         const src = stripComments(readFileSync(p, "utf8"));
         for (const m of src.matchAll(/blocker_type:\s*["']([a-z_]+)["']/g)) {
           writes.push(m[1]);
+          if (m[1] === 'missing_connection') files.push(p);
         }
       }
     };
     walk(root);
     expect(writes.length, 'sweep found no producers at all — the probe is blind').toBeGreaterThan(0);
     expect(writes).toContain('missing_value'); // contrast: present
-    expect(writes).not.toContain('missing_connection'); // target: absent
+    // The target is now PRESENT, and bound to its one producer by identity so a
+    // second one cannot appear unnoticed and inherit this settled decision.
+    expect(writes).toContain('missing_connection');
+    expect(files).toHaveLength(1);
+    expect(files[0].endsWith(join('cee', 'transforms', 'analysis-ready.ts'))).toBe(true);
   }, GUARD_WALK_TIMEOUT_MS);
 });
 
