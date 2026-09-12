@@ -97,6 +97,11 @@ describe('buildCounterfactualModel — faithful mapping', () => {
       factorUnit: 'engineers',
       factorCurrentValue: 10,
       interventionValue: 20,
+      // This factor is UNFRAMED (no `raw_value`, no `scale_frame`), so raw IS
+      // the model scale and the two intervention numbers coincide. The pair is
+      // asserted rather than collapsed so a framed factor, where they differ,
+      // cannot quietly reuse one for both.
+      interventionDisplayValue: 20,
     });
   });
 
