@@ -31,9 +31,13 @@
  *
  * The intervention variable (the selected factor) is NEVER placed in `context`
  * — that overlap is exactly the do∩observe case ISL rejects with 422. It is set
- * only via `intervention`, at a graph-provided model-unit target
- * (`observed_state.cap`, else a distinct `baseline`); when neither exists the
- * builder returns `null` rather than invent a target.
+ * only via `intervention`, at a graph-provided target put onto the MODEL scale
+ * (`observed_state.cap` ÷ the factor's frame, else the `value` a distinct
+ * `baseline` reveals to be the PROPOSED level); when neither exists, or when
+ * the frame needed to reconcile a from-to pair cannot be resolved, the builder
+ * returns `null` rather than invent a target. See {@link pickInterventionTarget}
+ * — its previous reading was inverted AND ~100x out of scale, and the wire
+ * carried the error silently because ISL computes on whatever it is given.
  *
  * ## Fidelity boundary (reported to A1)
  *
@@ -46,6 +50,13 @@
  */
 
 import { GraphV3, type NodeV3T } from '../../../../schemas/cee-v3.js';
+import type { NodeT } from '../../../../schemas/graph.js';
+// The estate's ONE owner of "what frame is this factor on?" (a leaf module),
+// and the reader that already answers "where is this factor today" for the
+// no-op validator. Consulted, never re-derived — two consumers holding private
+// opinions about one shared field is the defect this module was fixed for.
+import { resolveScaleFrame } from '../d1-shared/scale-frame.js';
+import { levelsAreIdentical, readFactorBaselineLevel } from '../../../../validators/option-no-op.js';
 import type { CounterfactualProbe } from './select-counterfactual-probe.js';
 import type { CounterfactualRequestBody, CounterfactualStructuralModel } from '../../../../adapters/isl/counterfactual-client.js';
 
@@ -61,8 +72,16 @@ export interface CounterfactualModelMeta {
   readonly goalLabel: string;
   readonly factorLabel: string;
   readonly factorUnit: string | null;
+  /** MODEL units — the scale `interventionValue` is compared against. */
   readonly factorCurrentValue: number;
+  /** MODEL units — what ISL was asked to set, and the raise/lower comparand. */
   readonly interventionValue: number;
+  /**
+   * USER-SCALE magnitude — what the card displays. Separate from
+   * `interventionValue` because `formatFactorValue` formats raw values and
+   * returns `null` for a bare sub-1 decimal; see {@link InterventionTarget}.
+   */
+  readonly interventionDisplayValue: number;
 }
 
 export interface BuiltCounterfactualModel {
@@ -125,9 +144,10 @@ export function buildCounterfactualModel(
   // counterfactual to compute.
   if (!incoming.has(goalNode.id)) return null;
 
-  // --- intervention target (model-unit, graph-provided, no conversion) ------
-  const interventionValue = pickInterventionTarget(probeNode);
-  if (interventionValue === null) return null;
+  // --- intervention target (graph-provided, put onto the MODEL scale) -------
+  const target = pickInterventionTarget(probeNode);
+  if (target === null) return null;
+  const interventionValue = target.model;
 
   // --- equations for endogenous nodes ---------------------------------------
   const equations: Record<string, string> = {};
@@ -195,21 +215,128 @@ export function buildCounterfactualModel(
     goalLabel: goalNode.label,
     factorLabel: probeNode.label,
     factorUnit: probeNode.observed_state?.unit ?? null,
-    factorCurrentValue: probeNode.observed_state!.value,
+    // NOT `observed_state.value`: in a from-to graph that field holds the
+    // PROPOSED level, so reading it as "current" made the card's raise/lower
+    // word compare the target against itself.
+    factorCurrentValue: target.current,
     interventionValue,
+    interventionDisplayValue: target.raw,
   };
 
   return { request, meta };
 }
 
-/** The model-unit intervention target from the factor's own graph fields.
- *  `cap` (a declared ceiling) first, then a `baseline` that differs from the
- *  current value; both are model-unit values already in the graph. */
-function pickInterventionTarget(node: NodeV3T): number | null {
+/**
+ * The intervention target, in BOTH of the scales its two consumers need.
+ *
+ * ⚠ TWO QUESTIONS WERE LIVING UNDER ONE NAME (trap 21), AND THAT IS WHY THE
+ * DEFECT LOOKED CORRECT ON SCREEN. A single `interventionValue` was serving:
+ *   · the ISL `intervention` and the raise/lower comparison — MODEL units, the
+ *     scale every other variable in the request is pinned in; and
+ *   · `formatFactorValue`, which formats the USER-SCALE magnitude and returns
+ *     `null` for a bare sub-1 decimal (`compose/format-factor-value.ts`).
+ * A raw target satisfied the display question and violated the model one, so
+ * the card read "£49" while the wire carried a variable ~100x off its own
+ * equations. They are named apart here rather than reconciled.
+ */
+interface InterventionTarget {
+  /** On `observed_state.value`'s scale — what ISL is asked to set. */
+  readonly model: number;
+  /** The user-scale magnitude — what the card displays. */
+  readonly raw: number;
+  /** The level the factor is at TODAY, on the same scale as `model`. */
+  readonly current: number;
+}
+
+/**
+ * The intervention target from the factor's own graph fields.
+ *
+ * ⚠⚠ THIS FUNCTION'S HEADER PREVIOUSLY READ: *"the model-unit intervention
+ * target … `cap` first, then a `baseline` that differs from the current value;
+ * both are model-unit values already in the graph."* IT WAS WRONG TWICE, and
+ * the correction is recorded in place rather than tidied away (trap 14).
+ *
+ *  1. SEMANTICS. `baseline` is *"Baseline/original value (e.g., \"from X to
+ *     Y\" → baseline is X)"* (`schemas/graph.ts:158`) — the level the factor is
+ *     at TODAY, i.e. the FROM. Returning it as the intervention asked ISL what
+ *     would happen if the factor were where it already is. `value` is the field
+ *     that holds the proposed level in a from-to graph — its own contract calls
+ *     it *"Current or proposed value"* (`schemas/cee-v3.ts:53`), which is the
+ *     same two-questions-under-one-name defect one level down.
+ *
+ *  2. SCALE. `baseline` and `cap` are RAW. The contract's own examples are the
+ *     from-to `X` (49, for "from £49 to £59") and *"\"up to £500k\" → cap is
+ *     500000"* (`schemas/graph.ts:162`), while `value` is *"The factor's
+ *     current position on the model 0-1 scale"* (`schemas/graph.ts:263`).
+ *     "Both are model-unit values already in the graph" was false of both.
+ *
+ * ── NO FOURTH OPINION ABOUT EITHER QUESTION ───────────────────────────────
+ * The divisor comes from `resolveScaleFrame`, the estate's ONE owner of "what
+ * frame is this factor on?", and the current level from
+ * `readFactorBaselineLevel`, the estate's reader for "where is this factor
+ * today" — the sibling that already reads this same field correctly. Neither is
+ * re-derived here; a private copy of either is the hand-maintained mirror of
+ * trap 12, and a second reader disagreeing with the first is how this defect
+ * existed at all.
+ *
+ * ── WHY THE BASELINE BRANCH NEEDS A FRAME AND THE CAP BRANCH DOES NOT ──────
+ * `cap` is ONE number on one scale: the scale-frame doctrine gives an exact
+ * rule for putting it on `value`'s scale — divide by the frame, or take it
+ * verbatim when the factor is unframed, where raw IS the model scale (counts,
+ * ratios, unbounded scales — "today's behaviour … which is CORRECT and is
+ * pinned", `d1-shared/scale-frame.ts`).
+ *
+ * A from-to is TWO numbers written by DIFFERENT passes — the extractor writes
+ * the pair raw, and the records projector reframes `value` ALONE — so only the
+ * divisor can say whether `{value: 0.59, baseline: 49}` is a framed pair
+ * (current 0.49) or an unframed one (current 49). Those two are
+ * indistinguishable on the evidence, and guessing is exactly the invention this
+ * module refuses. Without a frame it returns `null`: the lens emits nothing and
+ * the base flip answer is byte-preserved.
+ */
+function pickInterventionTarget(node: NodeV3T): InterventionTarget | null {
   const os = node.observed_state;
-  if (!os) return null;
-  if (isFiniteValue(os.cap) && os.cap !== os.value) return os.cap!;
-  if (isFiniteValue(os.baseline) && os.baseline !== os.value) return os.baseline!;
+  if (!os || !isFiniteValue(os.value)) return null;
+
+  const frame = resolveScaleFrame({
+    storedFrame: node.scale_frame,
+    value: os.value,
+    raw_value: os.raw_value,
+  });
+
+  // Whether `baseline` states something `value` does not. Spelled with the
+  // sibling reader's OWN predicate (`baseline === value` on the raw pair,
+  // `option-no-op.ts`) so the two cannot disagree about when a baseline speaks.
+  const statesDistinctBaseline = isFiniteValue(os.baseline) && os.baseline !== os.value;
+  if (statesDistinctBaseline && frame === undefined) return null;
+
+  // The level the factor is at today, already put on `value`'s frame by the
+  // shared reader. Guarded above so this is only consulted where it can answer
+  // on the model scale.
+  const current = readFactorBaselineLevel(node as unknown as NodeT);
+  if (current === undefined || !Number.isFinite(current)) return null;
+
+  // 1. A declared ceiling, put on the model scale.
+  if (isFiniteValue(os.cap)) {
+    const capModel = frame === undefined ? os.cap! : os.cap! / frame;
+    if (Number.isFinite(capModel) && !levelsAreIdentical(capModel, current)) {
+      return { model: capModel, raw: os.cap!, current };
+    }
+  }
+
+  // 2. A distinct `baseline` means `value` holds the PROPOSED level, so `value`
+  //    IS the target — and it is already model-unit, needing no conversion.
+  if (statesDistinctBaseline && !levelsAreIdentical(os.value, current)) {
+    // `raw_value` verbatim where the graph carries it. It is absent only when
+    // the frame came from a stored `scale_frame` (a recovered frame IS
+    // raw_value/value, so it cannot be missing there), and `value * frame` is
+    // then the user magnitude by the definition of the frame — arithmetic over
+    // two graph fields, not an invented number.
+    const raw = isFiniteValue(os.raw_value) ? os.raw_value! : os.value * frame!;
+    if (!Number.isFinite(raw)) return null;
+    return { model: os.value, raw, current };
+  }
+
   return null;
 }
 
