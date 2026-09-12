@@ -102,6 +102,30 @@ export const STORE_MODEL_CONFIG_LIVE_CALL_SITES: readonly string[] = [
 ];
 
 /**
+ * THE TASKS RANK 2 CAN OUTRANK — the task-id face of the call-site list above.
+ *
+ * STORE_MODEL_CONFIG_LIVE_CALL_SITES names FILES; a reporting surface needs
+ * TASK IDS. This is the same fact, not a second one: each entry is the task
+ * named by the `getSystemPromptSnapshot('<task>')` call in its call site, and
+ * src/config/__tests__/store-model-config-call-sites.test.ts asserts this set
+ * equals the set DERIVED from those files' source. It is therefore not a
+ * hand-maintained mirror (CLAUDE.md trap 12): a new task path REDs, a task
+ * path that stopped reading pins REDs.
+ *
+ * Consumers use it to say what a startup-time projection CANNOT know. A
+ * projection built from env vars and checked-in defaults never consults the
+ * prompt store, so for these tasks its value is UNVERIFIED — the per-request
+ * "model.resolution" log and GET /admin/v1/turn-debug/:turn_id are the only
+ * authorities. For every other task a pin is inert and the startup value IS
+ * the server-side resolution.
+ */
+export const STORE_MODEL_CONFIG_OUTRANKABLE_TASKS: readonly string[] = [
+  "critique_graph",
+  "draft_graph",
+  "suggest_options",
+];
+
+/**
  * Readers of a prompt's modelConfig that are NOT live task paths.
  *
  * The admin testing harness runs an OPERATOR-CHOSEN prompt record and reads

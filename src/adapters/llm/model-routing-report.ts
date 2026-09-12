@@ -320,11 +320,24 @@ export function resolveModelRoutingSnapshot(): ModelRoutingSnapshot {
 }
 
 /**
- * Current effective serving projection for startup health. Static-but-gated,
- * inert/display rows and configuration errors remain visible in the full
- * snapshot but must never be presented as effective live assignments.
+ * STARTUP-TIME task/model projection. Static-but-gated, inert/display rows and
+ * configuration errors remain visible in the full snapshot but are excluded
+ * here.
+ *
+ * ⚠ THIS IS NOT "WHAT IS RUNNING". It is built from `resolveTaskRouting`,
+ * which reads env vars, providers.json and checked-in defaults — precedence
+ * ranks 3-6. It NEVER consults the prompt store, so it cannot see rank 2
+ * (`store_model_config`), and it cannot see rank 1 (`per_call`) because that
+ * arrives on a request that has not happened yet. Measured 2026-09-11: this
+ * projection reported draft_graph=claude-sonnet-5 while 26 `model.resolution`
+ * events on the same deployed service showed draft turns running
+ * claude-sonnet-4-6 via `resolution_source=store_model_config`.
+ *
+ * Consumers must therefore present it as a startup projection and name the
+ * tasks it cannot speak for — STORE_MODEL_CONFIG_OUTRANKABLE_TASKS. Naming
+ * this function or its wire field "effective" is the defect, not a shorthand.
  */
-export function buildEffectiveTaskModels(
+export function buildStartupTaskModels(
   snapshot: ModelRoutingSnapshot,
 ): Readonly<Record<string, string>> {
   return Object.freeze(Object.fromEntries(
