@@ -313,6 +313,21 @@ function pickInterventionTarget(node: NodeV3T): InterventionTarget | null {
   // The level the factor is at today, already put on `value`'s frame by the
   // shared reader. Guarded above so this is only consulted where it can answer
   // on the model scale.
+  //
+  // The cast crosses `NodeV3T` (cee-v3) to `NodeT` (graph) — two schemas for
+  // one wire node. It is the SMALLEST change that shares one implementation:
+  // widening the reader's signature would edit a module this PR is scoped out
+  // of, and copying it would be the fourth private answer to "which number is
+  // the current level".
+  //
+  // Safe because the reader reaches every field through its OWN `unknown`-typed
+  // accessors and `typeof === 'number'` guards, so it depends on no declaration
+  // from either schema. Of the surfaces it consults, `observed_state`
+  // {value, raw_value, baseline} and `scale_frame` are both declared on
+  // `NodeV3` — and its `node.data` fallback is INERT here: `NodeV3` declares no
+  // `data`, and it is a plain `z.object`, so `GraphV3.safeParse` has already
+  // stripped that key by the time we hold the node. The live limb is the
+  // `observed_state` one, which is the surface this builder reads anyway.
   const current = readFactorBaselineLevel(node as unknown as NodeT);
   if (current === undefined || !Number.isFinite(current)) return null;
 
