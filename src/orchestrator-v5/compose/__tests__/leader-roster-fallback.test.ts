@@ -353,7 +353,7 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       expect(args).toContain('analysisReady: ctx.analysisReady');
     });
 
-    it('TRIPWIRE: the exit population is 25 — a new exit must be looked at, not assumed', () => {
+    it('TRIPWIRE: the exit population is 26 — a new exit must be looked at, not assumed', () => {
       const calls = enumerateSendCalls(source);
       // Not a mirror to keep green: if you added an exit, confirm it funnels
       // through sendFinalised200 (it must, or the guard above fails too) and
@@ -370,7 +370,23 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       //  · its copy is a held PROPOSAL — a receipt and a question about a change
       //    that has not happened — so it cannot assert a leading option, and
       //    `answerKind: 'functional'` keeps it out of the prose lane entirely.
-      expect(calls.length).toBe(25);
+      //
+      // 2026-09-12, 25 -> 26: the add-option TEXT leg's option-LABEL CLARIFY
+      // exit (`'add_option_transaction'`, route-v2), which asks what to call an
+      // option proposed under its own decision's name. LOOKED AT, not assumed:
+      //  · it funnels through `sendFinalised200`, so it inherits the single
+      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
+      //    roster sources threaded;
+      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
+      //    held exit above it, so it adds no new claim authority;
+      //  · its copy is a QUESTION ABOUT A NAME, composed by
+      //    `compose/option-label-clarify-response.ts` from exactly two strings —
+      //    a rejected label naming a node that does NOT exist on the graph, and
+      //    the label of the DECISION it collided with. No analysis result, no
+      //    value, no candidate list and no option ordering is in scope, so there
+      //    is no per-option datum to rank or crown. `answerKind: 'functional'`
+      //    keeps it out of the prose lane, and it ships ZERO chips.
+      expect(calls.length).toBe(26);
       // #1246's additional exit is a functional recorded-answer refusal, not
       // a new claim authority. It still funnels through the shared finalizer,
       // forwards claim safety, and uses only the canonical repair graph roster.
