@@ -90,20 +90,42 @@
  *
  * ## ⭐⭐ THE TARGET IS NEVER GUESSED — IT IS CORROBORATED
  *
- * The load-bearing conjunct is that **CQE's FROM value, put on the factor's
- * frame, must equal the level the factor INDEPENDENTLY RECORDS as its current
- * one.** Two records written by different producers — the model's label and the
- * factor's `observed_state` — must agree before either is believed. Nothing
- * infers intent; an arithmetic consistency check does the work.
+ * The load-bearing conjunct is that **CQE's FROM QUANTITY — its magnitude on
+ * the factor's frame AND its unit — must match what the factor INDEPENDENTLY
+ * RECORDS.** Two records written by different producers — the model's label and
+ * the factor's own `unit` + `observed_state` — must agree before either is
+ * believed. Nothing infers intent; a structural consistency check does the work.
+ *
+ * ⚠ THE UNIT HALF IS NOT DECORATION, AND ITS ABSENCE WAS A MEASURED DEFECT.
+ * Corroborating the MAGNITUDE alone binds the write to a bare number, so a
+ * label about an entirely different quantity that happens to share the
+ * factor's digits was silently written through. Both of these were measured on
+ * the mounted path against a factor at `{value: 0.49, raw_value: 49}`:
+ *
+ *   · `"move the deadline from 49 days to 59 days"` → CQE `unit: "day"`,
+ *     against "Pro Plan Monthly Price" `unit: "£"` — wrote **0.59**;
+ *   · `"extend the free trial from 14 to 30 days"` → CQE `unit: "day"`,
+ *     against "Trial-to-paid conversion rate" `unit: "%"` — wrote **0.30**.
+ *
+ * De-configuring is a VISIBLE omission; those writes are SILENT wrongness —
+ * the same harm class this module exists to end, so magnitude agreement alone
+ * is not corroboration. **What must agree is a QUANTITY, not a MAGNITUDE.**
  *
  * It is also what makes the INVERTED TWIN safe without a second rule.
  * `"Cut the price from £59 to £49"` against a factor sitting at £49 has
  * FROM = 59 ≠ 49, so it is REFUSED rather than raised to £59. The case that
  * would invert a user's intent cannot reach the write.
  *
- * And it VALIDATES THE FRAME for free: if the divisor resolved here is wrong,
- * the FROM will not corroborate, and the repair declines. The frame is not
- * trusted, it is tested.
+ * ⚠ AND IT VALIDATES THE FRAME — FOR EVERY `from` EXCEPT ZERO. Where the
+ * divisor resolved here is wrong, the FROM normally fails to corroborate and
+ * the repair declines, so the frame is tested rather than trusted. **That
+ * argument does not hold at `from === 0`**: `0 / frame === 0` for every finite
+ * non-zero frame, so a zero FROM corroborates a factor sitting at level 0 on
+ * ANY divisor and the frame goes untested. The write is still bounded by the
+ * unit conjunct, by `levelsAreIdentical` and by the `[0, 1]` check, and
+ * `readStatedTransition` refuses `from === to` so the TO is never also zero —
+ * but the frame is not evidence in that one case, and this sentence no longer
+ * claims it is.
  *
  * ## THE BOUND, DERIVED AT THE CONSUMER'S BYTES
  *
@@ -147,6 +169,7 @@
  */
 
 import { extractQuantities } from "../../../../orchestrator-v5/context/cqe/extract-quantities.js";
+import { unitsAreCompatible } from "../../../factor-extraction/merge.js";
 import { resolveScaleFrame } from "../../../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import {
   buildInterventionSignature,
@@ -175,6 +198,13 @@ export interface NoOpTargetRepairResult {
 interface StatedTransition {
   readonly from: number;
   readonly to: number;
+  /**
+   * CQE's own normalised unit for the transition, or `null` where the label
+   * states none. Read, never parsed: `normaliseUnit` (`cqe/rules.ts:209`) has
+   * already mapped `£`→`GBP`, `%`→`percentage`, `days`→`day` before this
+   * module sees it.
+   */
+  readonly unit: string | null;
 }
 
 function finiteOrUndefined(value: unknown): number | undefined {
@@ -219,7 +249,29 @@ function readStatedTransition(label: unknown): StatedTransition | undefined {
   if (from === undefined || to === undefined) return undefined;
   if (from === to) return undefined;
 
-  return { from, to };
+  return { from, to, unit: only.unit };
+}
+
+/**
+ * The unit this factor records for itself, or `undefined` where it records
+ * none.
+ *
+ * ⚠ THE PRECEDENCE IS THE OPPOSITE OF `readFactorLevelFrame`'S, DELIBERATELY,
+ * AND THE TWO ARE NAMED APART FOR IT (trap 21). That one reads the
+ * `{value, raw_value}` PAIR, whose declaring schema is `FactorObservedState`
+ * (`schemas/graph.ts:261`), so it consults `observed_state` first. `unit` is
+ * declared on `FactorData` (`:160`) and NOT on `FactorObservedState`, which
+ * admits it only through `.passthrough()` — so `data` is the declaring surface
+ * here and is read first. Each reader prefers the schema that DECLARES its own
+ * field; the differing order is that rule applied twice, not a copy-paste slip.
+ */
+function readFactorUnit(node: NodeT): string | undefined {
+  const data = node.data as { unit?: unknown } | undefined;
+  const observed = (node as { observed_state?: { unit?: unknown } }).observed_state;
+  for (const candidate of [data?.unit, observed?.unit]) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) return candidate;
+  }
+  return undefined;
 }
 
 /**
@@ -260,11 +312,46 @@ function readFactorLevelFrame(node: NodeT): number | undefined {
  * The level this factor should be set to for the stated transition, or
  * `undefined` where this factor is not the one the transition is about.
  *
- * The corroboration is the whole predicate: the transition's FROM, on this
- * factor's frame, must be INDISTINGUISHABLE from the level the factor records
- * — at `levelsAreIdentical`, the same shared resolution `OPTION_NO_OP` uses to
- * decide two levels are the same number, so the two cannot drift apart about
- * what "the same" means.
+ * The corroboration is the whole predicate, and it is a claim about a
+ * QUANTITY — a magnitude AND its unit:
+ *
+ *   · the transition's FROM, on this factor's frame, must be INDISTINGUISHABLE
+ *     from the level the factor records — at `levelsAreIdentical`, the same
+ *     shared resolution `OPTION_NO_OP` uses to decide two levels are the same
+ *     number, so the two cannot drift apart about what "the same" means;
+ *   · and where BOTH records state a unit, those units must not disagree.
+ *
+ * ⚠ THE UNIT CONJUNCT IS STRUCTURAL, LIKE EVERY OTHER ONE HERE. It compares
+ * two RECORDED fields — CQE's normalised `unit` and the factor's own `unit` —
+ * and reads nothing from the label's words. No regex, no string matching and
+ * no private `£`↔`GBP` map is minted: `unitsAreCompatible`
+ * (`factor-extraction/merge.ts:203`) is the estate's single exported authority
+ * for "are these two units the same kind of quantity", and its groups already
+ * span BOTH vocabularies in play — the factor surface's symbols (`£`, `%`) and
+ * CQE's normalised codes (`GBP`, `percentage`). Borrowing it rather than
+ * copying it is the only way the two cannot drift apart (trap 12).
+ *
+ * ⚠ IT FIRES ONLY WHERE BOTH SIDES STATE A UNIT, and that bound is deliberate.
+ * A factor that records no unit is the common case on the measured fixture, and
+ * refusing it would shrink the repaired set to nothing rather than sharpen it.
+ * An absent unit is therefore NOT evidence of disagreement — it is silence, and
+ * silence falls through to the magnitude corroboration exactly as before.
+ *
+ * ⚠⚠ DECLARED RESIDUAL, BECAUSE THE BORROWED AUTHORITY IS LENIENT BY DESIGN
+ * (and a bound this module cannot tighten without minting the private map it
+ * just refused to mint). `unitsAreCompatible` groups ALL currencies together
+ * and ALL durations together, so these two still reach the write and are
+ * pinned as KNOWN-ADMITTED in `cee.no-op-target-repair.test.ts`:
+ *
+ *   · `"from $49 to $59"` (CQE `USD`) against a factor recording `£`;
+ *   · `"from 49 days to 59 days"` (CQE `day`) against a factor recording
+ *     `month`.
+ *
+ * Both are narrower than the class this closes — they still require the
+ * magnitudes to corroborate — and tightening either belongs to
+ * `unitsAreCompatible`'s owner, whose grouping other callers depend on. They
+ * are recorded here so the next session inherits a KNOWN gap rather than an
+ * unnoticed one (trap 22f's known-dropped-set rule).
  */
 function resolveRepairedLevel(
   factor: NodeT,
@@ -272,6 +359,18 @@ function resolveRepairedLevel(
 ): number | undefined {
   const currentLevel = readFactorBaselineLevel(factor);
   if (currentLevel === undefined) return undefined;
+
+  // QUANTITY AGREEMENT — two recorded units, never the label's words. Checked
+  // before the arithmetic because it asks the prior question: is this factor
+  // about the same KIND of thing the label is about?
+  const factorUnit = readFactorUnit(factor);
+  if (
+    transition.unit !== null
+    && factorUnit !== undefined
+    && !unitsAreCompatible(transition.unit, factorUnit)
+  ) {
+    return undefined;
+  }
 
   const frame = readFactorLevelFrame(factor) ?? 1;
   const fromLevel = transition.from / frame;

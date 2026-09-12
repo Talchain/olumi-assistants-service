@@ -91,6 +91,15 @@ interface FixtureOptions {
   readonly isBaselineData?: boolean;
   readonly observed?: Record<string, unknown>;
   readonly extraFactor?: boolean;
+  /**
+   * The unit the FACTOR records for itself, on `data` — the surface
+   * `FactorData` (`schemas/graph.ts:160`) declares it on. Left absent by
+   * default because Paul's measured graph records none, which is exactly why
+   * the unit conjunct had to be bounded to "both sides state one".
+   */
+  readonly factorUnit?: string;
+  /** The factor's own label, for cases where the quantity it names matters. */
+  readonly factorLabel?: string;
 }
 
 /**
@@ -130,11 +139,12 @@ function paulsGraph(opts: FixtureOptions = {}): GraphT {
     {
       id: "fac_price",
       kind: "factor",
-      label: "Pro Plan Monthly Price",
+      label: opts.factorLabel ?? "Pro Plan Monthly Price",
       category: "controllable",
       observed_state: opts.observed ?? { value: BASELINE, raw_value: 49 },
       data: {
         ...(opts.observed ?? { value: BASELINE, raw_value: 49 }),
+        ...(opts.factorUnit === undefined ? {} : { unit: opts.factorUnit }),
         extractionType: "explicit",
         factor_type: "price",
         uncertainty_drivers: ["churn response"],
@@ -296,6 +306,136 @@ describe("the stated target lands on the factor's own frame", () => {
       observed: { value: 0.4, raw_value: 40 },
     });
     expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(0.8, 10);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// ⭐⭐ WHAT MUST AGREE IS A QUANTITY, NOT A MAGNITUDE
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Corroborating the MAGNITUDE alone binds the write to a bare number, so a
+ * label about an entirely DIFFERENT quantity that happens to share the factor's
+ * digits was written through silently. Both cases below were measured on the
+ * mounted path before the unit conjunct existed, and both wrote a number:
+ *
+ *   · `"move the deadline from 49 days to 59 days"` wrote **0.59** onto
+ *     "Pro Plan Monthly Price" (`unit: "£"`), which sits at 49;
+ *   · `"extend the free trial from 14 to 30 days"` wrote **0.30** onto
+ *     "Trial-to-paid conversion rate" (`unit: "%"`), which sits at 14.
+ *
+ * De-configuring an option is a VISIBLE omission. These are SILENT wrongness —
+ * the same harm class this module exists to end — so the corroboration is a
+ * claim about a QUANTITY: a magnitude AND its unit.
+ *
+ * ⚠ THE TESTS BELOW ARE A DISCRIMINATING SET, NOT A LIST (trap 19). Each
+ * refusal is paired with a case sharing its LABEL, its FACTOR and its
+ * MAGNITUDES, differing only in the recorded units. Without the pair a refusal
+ * proves only that something declined; with it, the decline is provably caused
+ * by the unit disagreement and not by some other conjunct quietly refusing the
+ * whole class.
+ */
+describe("the corroboration binds a QUANTITY, not a bare magnitude", () => {
+  it("REFUSES 'from 49 days to 59 days' against a factor recording £", () => {
+    const graph = enforced({
+      label: "move the deadline from 49 days to 59 days",
+      factorUnit: "£",
+    });
+    expect(interventionsOf(graph, "opt_noop")).toBeUndefined();
+  });
+
+  it("REFUSES 'from 14 to 30 days' against a rate recording %", () => {
+    const graph = enforced({
+      label: "extend the free trial from 14 to 30 days",
+      factorLabel: "Trial-to-paid conversion rate",
+      factorUnit: "%",
+      intervention: 0.14,
+      observed: { value: 0.14, raw_value: 14 },
+    });
+    expect(interventionsOf(graph, "opt_noop")).toBeUndefined();
+  });
+
+  /**
+   * ⭐ THE DISCRIMINATOR. Same label, same factor, same magnitudes as the
+   * first refusal — only the factor's recorded unit is removed. It IS repaired,
+   * which proves the refusal above is the unit conjunct's doing and that the
+   * conjunct has not swallowed the class.
+   */
+  it("ADMITS that same label and factor once the factor records NO unit", () => {
+    const graph = enforced({ label: "move the deadline from 49 days to 59 days" });
+    expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(0.59, 10);
+  });
+
+  it("the SAME rate case is ADMITTED once the % is removed", () => {
+    const graph = enforced({
+      label: "extend the free trial from 14 to 30 days",
+      factorLabel: "Trial-to-paid conversion rate",
+      intervention: 0.14,
+      observed: { value: 0.14, raw_value: 14 },
+    });
+    expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(0.3, 10);
+  });
+
+  it("⭐ THE ACCEPTANCE CASE IS UNTOUCHED when both sides DO state a unit", () => {
+    const graph = enforced({ factorUnit: "£" });
+    expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(STATED_TARGET, 10);
+  });
+
+  it("a factor unit with no CQE unit is silence, not disagreement — still repaired", () => {
+    const graph = enforced({
+      label: "grow the headcount from 40 to 80",
+      intervention: 0.4,
+      observed: { value: 0.4, raw_value: 40 },
+      factorUnit: "users",
+    });
+    expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(0.8, 10);
+  });
+
+  it("the unit bridge spans BOTH vocabularies: CQE 'percentage' vs factor '%'", () => {
+    const graph = enforced({
+      label: "raise the margin from 85% to 95%",
+      intervention: 0.85,
+      observed: { value: 0.85 },
+      factorUnit: "%",
+    });
+    expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(0.95, 10);
+  });
+});
+
+/**
+ * ⚠⚠ DECLARED KNOWN-ADMITTED SET — recorded so the next session inherits a
+ * KNOWN gap rather than an unnoticed one (CLAUDE.md trap 22f).
+ *
+ * `unitsAreCompatible` (`factor-extraction/merge.ts:203`) is the estate's
+ * single exported authority for "are these two units the same kind of
+ * quantity", and it is LENIENT BY DESIGN: its `currency` group holds every
+ * currency and its `time` group holds every duration. Both cases below
+ * therefore still reach the write.
+ *
+ * They are NOT closed here, and that is a deliberate boundary rather than an
+ * oversight: tightening either means minting a private unit map inside this
+ * module — the exact duplication the conjunct was written to avoid (trap 12) —
+ * and `unitsAreCompatible`'s grouping is depended on by its own callers, so
+ * narrowing it is its owner's ruling, not this module's.
+ *
+ * Both remain strictly narrower than the class the conjunct closes: each still
+ * requires the magnitudes to corroborate the factor's recorded level.
+ */
+describe("KNOWN-ADMITTED: the borrowed unit authority is lenient within a group", () => {
+  it("cross-CURRENCY is admitted — CQE 'USD' against a factor recording £", () => {
+    const graph = enforced({
+      label: "increase the Pro plan price from $49 to $59 per month",
+      factorUnit: "£",
+    });
+    expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(STATED_TARGET, 10);
+  });
+
+  it("cross-DURATION is admitted — CQE 'day' against a factor recording month", () => {
+    const graph = enforced({
+      label: "move the deadline from 49 days to 59 days",
+      factorUnit: "month",
+    });
+    expect(interventionsOf(graph, "opt_noop")?.fac_price).toBeCloseTo(0.59, 10);
   });
 });
 
@@ -504,14 +644,29 @@ describe("the CQE invariants the repair's redundant conjuncts rest on", () => {
       "Raise Price to £59",
       "double the price from £49",
     ];
+    let corroboratedShapeSeen = 0;
     for (const text of probes) {
       for (const q of extractQuantities(text)) {
         if (typeof q.range_min === "number" && Number.isFinite(q.range_min)
           && typeof q.value === "number" && Number.isFinite(q.value)) {
+          corroboratedShapeSeen += 1;
           expect(q.operator, `"${text}" carries a finite range_min and value`).toBe("set");
         }
       }
     }
+    // ⚠⚠ POSITIVE CONTROL, AND THIS TEST IS THE ONE THAT MOST NEEDED ONE: it
+    // pins the LOAD-BEARING conjunct of the three, and its only assertion sits
+    // inside a conditional. Measured without this line, the test ran ZERO
+    // assertions and still passed GREEN — a shape that survives CQE simply
+    // ceasing to emit the finite-`range_min` + finite-`value` pair at all,
+    // which is precisely the change it exists to catch (trap 13: an absence
+    // assertion that never observed a presence).
+    //
+    // Pinned to the EXACT measured count, not merely to non-zero, matching this
+    // file's partition discipline: exactly FOUR of the ten probes carry the
+    // shape (the four from-tos), and a CQE change that adds or removes one REDs
+    // here and tells the next session the redundancy moved.
+    expect(corroboratedShapeSeen, "probes carrying a finite range_min AND value").toBe(4);
   });
 
   it("a `compromise` result never carries an operator or a range_min", () => {
