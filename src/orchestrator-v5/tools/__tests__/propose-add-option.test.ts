@@ -329,10 +329,17 @@ describe('validateProposedAddOption — ambiguity is asked about, never guessed'
     kindById: new Map([...GROWTH_G.kindById, ['dec_second', 'decision']]),
   };
 
-  it('no parent + MORE THAN ONE decision → clarify, with the candidates named', () => {
+  it('no parent + MORE THAN ONE decision → clarify(parent), with the candidates named', () => {
     const v = validateProposedAddOption({ label: 'Partner locally', links: [] }, twoDecisions);
     expect(v.ok).toBe(false);
-    if (v.ok || v.kind !== 'clarify') throw new Error('expected clarify');
+    // ⭐ THE DISCRIMINANT IS ASSERTED, NOT ASSUMED. Two different questions now
+    // travel under `kind: 'clarify'` — "which decision owns this?" and "what
+    // should this be called?" — and they must never be reconciled into one
+    // (CLAUDE.md trap 21). If the label arm ever claimed this turn, the user
+    // would be asked to rename an option whose name was fine.
+    if (v.ok || v.kind !== 'clarify' || v.reason !== 'parent') {
+      throw new Error(`expected clarify(parent), got ${JSON.stringify(v)}`);
+    }
     expect(v.candidates.map((c) => c.id)).toEqual(['dec_expansion', 'dec_second']);
     expect(v.label).toBe('Partner locally');
   });
@@ -354,7 +361,9 @@ describe('validateProposedAddOption — ambiguity is asked about, never guessed'
       GROWTH_G,
     );
     expect(v.ok).toBe(false);
-    if (v.ok || v.kind !== 'clarify') throw new Error('expected clarify');
+    if (v.ok || v.kind !== 'clarify' || v.reason !== 'parent') {
+      throw new Error(`expected clarify(parent), got ${JSON.stringify(v)}`);
+    }
     expect(v.question).toContain('channel partner');
   });
 
@@ -459,19 +468,31 @@ describe('validateProposedAddOption — the remaining refusals', () => {
     expect(validateProposedAddOption({ ...base, links: [{ factor_id: fid, rationale: 'r' }] }, GROWTH_G).ok).toBe(false);
   });
 
-  it('⭐ named after the decision MINUS ITS HEAD NOUN → LABEL_IS_THE_PARENT_DECISION', () => {
+  it('⭐ named after the decision MINUS ITS HEAD NOUN → clarify(label), NOT a silent rejection', () => {
     // The class the recogniser CANNOT reach. "Add an option for pricing" and
     // "add an option for licensing" are the same shape — a bare gerund after a
     // preposition — so a graph-blind rule can only guess. This one is
     // graph-aware: the parent decision is "Geographic Expansion Strategy", so
     // "Geographic Expansion" is the decision itself, not an option for it.
+    //
+    // ⭐ IT NOW ASKS. This used to return `LABEL_IS_THE_PARENT_DECISION`, which
+    // the route discarded into the generic edit lane — the detector fired and
+    // the user learned nothing. The honest answer to "is this a name or the
+    // decision?" is neither accept nor refuse but ASK, and this is the exit the
+    // `labelIsTheDecisionItself` header names as its own successor work.
     const decision = GROWTH_G.labelById.get('dec_expansion')!;
     const subject = decision.replace(/\s+Strategy$/i, '');
     expect(subject, 'the fixture must actually carry a head noun to strip').not.toBe(decision);
     const v = validateProposedAddOption({ ...base, label: subject }, GROWTH_G);
     expect(v.ok, `"${subject}" is the decision itself`).toBe(false);
-    if (v.ok || v.kind !== 'rejected') throw new Error('expected rejection');
-    expect(v.code).toBe('LABEL_IS_THE_PARENT_DECISION');
+    if (v.ok || v.kind !== 'clarify' || v.reason !== 'label') {
+      throw new Error(`expected clarify(label), got ${JSON.stringify(v)}`);
+    }
+    // Bound BY IDENTITY to the decision that actually collided — not by a
+    // value predicate another decision in this real graph could satisfy.
+    expect(v.decision.id).toBe('dec_expansion');
+    expect(v.decision.label).toBe(decision);
+    expect(v.label).toBe(subject);
   });
 
   it('...and in the other direction — the label carrying a head noun the decision lacks', () => {
@@ -480,8 +501,13 @@ describe('validateProposedAddOption — the remaining refusals', () => {
     for (const head of ['decision', 'choice', 'question']) {
       const v = validateProposedAddOption({ ...base, label: `${subject} ${head}` }, GROWTH_G);
       expect(v.ok, `"${subject} ${head}"`).toBe(false);
-      if (v.ok || v.kind !== 'rejected') continue;
-      expect(v.code).toBe('LABEL_IS_THE_PARENT_DECISION');
+      // ⚠ NO `continue` HERE. This loop previously skipped the assertion when
+      // the kind was not `rejected`, so it would have gone GREEN-BUT-VACUOUS
+      // against exactly the change this PR makes. A wrong kind must RED.
+      if (v.ok || v.kind !== 'clarify' || v.reason !== 'label') {
+        throw new Error(`"${subject} ${head}" expected clarify(label), got ${JSON.stringify(v)}`);
+      }
+      expect(v.decision.id).toBe('dec_expansion');
     }
   });
 
@@ -527,8 +553,15 @@ describe('validateProposedAddOption — the remaining refusals', () => {
     for (const label of ['Hiring', 'hiring', 'The hiring']) {
       const v = validateProposedAddOption({ ...b, label }, g);
       expect(v.ok, `"${label}" is the decision itself`).toBe(false);
-      if (v.ok || v.kind !== 'rejected') continue;
-      expect(v.code).toBe('LABEL_IS_THE_PARENT_DECISION');
+      // ⚠ NO `continue` — see the sibling case above. A skipped assertion is
+      // indistinguishable from a passing one.
+      if (v.ok || v.kind !== 'clarify' || v.reason !== 'label') {
+        throw new Error(`"${label}" expected clarify(label), got ${JSON.stringify(v)}`);
+      }
+      expect(v.decision.id).toBe('dec_hiring');
+      // The label is echoed in the USER'S OWN spelling, not normalised — the
+      // composer quotes it back, so a lower-cased echo would misquote them.
+      expect(v.label).toBe(label);
     }
   });
 
@@ -638,6 +671,35 @@ const COMPOSE_ARGS = {
 };
 
 describe('composeAddOption — one call, one validation, one answer', () => {
+  it('⭐ carries the LABEL clarify out to the route, discriminated from the parent one', async () => {
+    // The seam the route branches on. Without the `reason` discriminant on the
+    // OUTCOME (not just the validation), the route can only see
+    // `status: 'clarify'` and would have to guess which question was asked —
+    // and the existing parent-decision clarify must keep falling through
+    // exactly as it does today.
+    const decisionLabel = GROWTH_G.labelById.get('dec_expansion')!;
+    const subject = decisionLabel.replace(/\s+Strategy$/i, '');
+    // PRECONDITION PINNED IN-TEST: this payload must really trip the detector,
+    // otherwise a green result would be the fixture failing to set the trap
+    // rather than the code doing its job.
+    expect(subject).not.toBe(decisionLabel);
+    const adapter = adapterReturning({
+      label: subject,
+      parent_decision_id: 'dec_expansion',
+      parent_decision_label: decisionLabel,
+      links: [],
+      unknowns: [],
+    });
+    const out = await composeAddOption({ adapter, ...COMPOSE_ARGS });
+    expect(out.status).toBe('clarify');
+    if (out.status !== 'clarify' || out.reason !== 'label') {
+      throw new Error(`expected clarify(label), got ${JSON.stringify(out)}`);
+    }
+    expect(out.decision.id).toBe('dec_expansion');
+    expect(out.decision.label).toBe(decisionLabel);
+    expect(out.label).toBe(subject);
+  });
+
   it('composes from a tool_use block, and forces the tool (no free-text escape)', async () => {
     const adapter = adapterReturning({
       label: 'Partner with a local distributor',

@@ -901,20 +901,30 @@ export function buildAddOptionClarifyChipMessage(label: string, decisionLabel: s
  * whose head noun this list does not carry, the honest answer is neither
  * refuse nor accept but ASK. `AddOptionValidation`'s `kind: 'clarify'` arm
  * (`propose-add-option.ts`) already exists as a TYPE and as a VALIDATOR
- * OUTCOME. ⚠ THE ROUTE DOES NOT RENDER IT: `route-v2.ts:6385` branches only on
- * `composed.status === 'composed'`, and every other status — `clarify`
- * included — falls through to the generic edit lane, emitting
- * `fell_through:text_clarify` (`route-v2.ts:6509`). The clarify arm that IS
- * wired asks WHICH DECISION the option belongs under; it does not ask WHAT THE
- * LABEL SHOULD BE, which is the question this successor needs.
+ * OUTCOME.
  *
- * ⚠⚠ THIS SENTENCE PREVIOUSLY SAID THE ROUTE "already renders it" — false, and
- * it is the second time in this PR that a comment claimed a mechanism that did
- * not exist (the first was an "asserted byte-identical" check with no
- * assertion). Landing on the one sentence describing the named successor work
- * is the worst place for it: it tells whoever picks this up that the hard half
- * is done. The successor has to WIRE the arm as well as call it.
- * Rowed as successor work; deliberately not built here.
+ * ⭐ UPDATED 12 Sep 2026 — THE ROUTE NOW RENDERS ONE OF THE TWO ARMS, AND ONLY
+ * ONE. `route-v2.ts` gained a branch for `status: 'clarify'` with
+ * `reason: 'label'`, composed by `compose/option-label-clarify-response.ts`, so
+ * the case `labelIsTheDecisionItself` detects is now ASKED about instead of
+ * falling through (`outcome: 'clarify_label'` replaces
+ * `fell_through:text_clarify` for it). The PARENT clarify — "which decision
+ * owns this option?" — still falls through deliberately.
+ *
+ * ⚠ THAT IS NOT THIS GAP. The wired arm fires only on EQUALITY after head-noun
+ * stripping. A determiner-led container fragment whose head noun this list does
+ * not carry still reaches the validator as a label and is NOT detected, so it
+ * cannot reach the new ask either. The successor work for THIS gap is
+ * unchanged, and it is a SCHEMA change rather than another rule: the tool sets
+ * `required: ['label']`, so the model has no legal way to decline a name.
+ *
+ * ⚠⚠ THIS SENTENCE PREVIOUSLY SAID THE ROUTE "already renders it" — false when
+ * written, and it is the second time in that PR that a comment claimed a
+ * mechanism that did not exist (the first was an "asserted byte-identical"
+ * check with no assertion). Landing on the one sentence describing the named
+ * successor work is the worst place for it: it tells whoever picks this up that
+ * the hard half is done. Kept here because the correction above is now the
+ * THIRD state of this sentence, and the next reader should see that it moves.
  *
  * Severity, stated exactly: a survivor here reaches the VALIDATOR as a hint,
  * not as the final label — `route-v2.ts` passes `detectedLabel` to the
@@ -1176,10 +1186,16 @@ export const KNOWN_OPEN_DEFERRAL_LABEL: readonly string[] = [
  * THE REMEDY IS THE `clarify` ARM, and that is reasoned from the measurement
  * rather than hoped for: the label is exactly what the user typed, the user has
  * told us they do not know, and asking is the only answer that is neither a
- * refusal nor a lie. `AddOptionValidation` carries `kind: 'clarify'`; ⚠ the
- * route does NOT render it (`route-v2.ts` branches only on
- * `composed.status === 'composed'`), so the successor must WIRE it as well as
- * call it. NOT BUILT HERE — a scope expansion, deliberately not taken.
+ * refusal nor a lie. `AddOptionValidation` carries `kind: 'clarify'`.
+ *
+ * ⭐ UPDATED 12 Sep 2026 — THE ROUTE NOW RENDERS THE `reason: 'label'` ARM
+ * (`route-v2.ts` → `compose/option-label-clarify-response.ts`), so the wiring
+ * half of this successor exists. ⚠ IT DOES NOT REACH THIS CASE. That arm fires
+ * only where `labelIsTheDecisionItself` is TRUE — equality after head-noun
+ * stripping — and a hedge the user typed ("something like a price rise, I'm not
+ * sure what to call it") satisfies no such equality. So the mechanism is built
+ * and this gap is still open: the detector, not the renderer, is what is
+ * missing here. NOT BUILT HERE — a scope expansion, deliberately not taken.
  *
  * ⚠ SEVERITY, AND THE RUNG IS CODE-READ, NOT WIRE-WITNESSED. Sharper than "a
  * hint reaching the composer": the system prompt instructs the model to name

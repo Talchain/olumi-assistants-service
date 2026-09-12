@@ -275,6 +275,7 @@ import { shouldInterceptBeforeEditLane } from '../orchestrator-v5/routing/config
 import { resolveOptionEffectWrite } from '../orchestrator-v5/routing/option-effect-write.js';
 import { composeOptionEffectAskResponse } from '../orchestrator-v5/compose/option-effect-ask-response.js';
 import { composeDuplicateOptionLabelResponse } from '../orchestrator-v5/compose/duplicate-option-label-response.js';
+import { composeOptionLabelClarifyResponse } from '../orchestrator-v5/compose/option-label-clarify-response.js';
 import { composeConfigureOptionClarifyResponse } from '../orchestrator-v5/compose/configure-option-clarify-response.js';
 // ⭐ ROADMAP 2.1261 — repair-leg bare-value binding ("Set it to 0.12.").
 import {
@@ -6677,15 +6678,78 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
                 outcome: `fell_through:${textOutcome.reason}`,
               });
             }
+          } else if (composed.status === 'clarify' && composed.reason === 'label') {
+            // ⭐⭐ THE OPTION-LABEL CLARIFY — the one non-composed outcome that
+            // is now ANSWERED rather than discarded.
+            //
+            // `labelIsTheDecisionItself` has always detected this class
+            // ("Geographic expansion" proposed under "Geographic expansion
+            // strategy"). It fell through to the generic edit lane below,
+            // which asks for "the specific factor, edge, option, or value to
+            // change" — a sentence about a different question. The product
+            // knew exactly what was wrong with the name and said none of it.
+            //
+            // ⚠ IT COMMITS NOTHING, AND THAT IS WHY IT IS NOT THE
+            // "clarify-and-commit path" the note below rightly declined. There
+            // is no pending, no proposal and no second consent producer: this
+            // turn is a QUESTION, and the answer arrives as an ordinary user
+            // turn that re-enters the add-option recogniser at the top of this
+            // same block.
+            //
+            // ⚠ CORRECTED 12 Sep 2026 — this added "the resume costs nothing
+            // because it already exists." IT RE-ENTERS AND DOES NOT MATCH: four
+            // natural answers to this very question all return
+            // `not_add_option_shape` and reach no proposer, while the contrast
+            // control 'Add "X" as an option' is held in the same run. The
+            // deterministic path accepts a COMMAND, not an answer. The replies
+            // fall to the conversational lane, which the harness stubs, so the
+            // live behaviour is UNMEASURED rather than known-broken. Full
+            // measurement and scope at `propose-add-option.ts`'s header.
+            //
+            // Detection is DETERMINISTIC (equality after head-noun stripping),
+            // so no model call decides whether the user is asked — the same
+            // property that lets this ship without a new string rule over
+            // natural language.
+            emit(TelemetryEvents.V5AddOptionTransaction, {
+              request_id: requestId,
+              origin: 'text',
+              outcome: 'clarify_label',
+            });
+            return sendFinalised200(
+              reply,
+              requestId,
+              'add_option_transaction',
+              composeOptionLabelClarifyResponse({
+                proposedLabel: composed.label,
+                decisionLabel: composed.decision.label,
+                stage: ingress.stage,
+              }),
+              {
+                graph: null,
+                ...(await claimSafety.forExit()),
+                // A question about a name is functional copy, shipped plain
+                // (ROADMAP 1.132 / F1) — the same posture as the held
+                // proposal and the configure-option clarify.
+                answerKind: 'functional',
+                requestStartedAt: routeStartedAt,
+                scenarioId: ingress.scenario_id,
+                turnId: ingress.turn_id,
+                userMessage: ingress.message,
+              },
+            );
           } else {
-            // ⭐ EVERY NON-COMPOSED OUTCOME FALLS THROUGH, INCLUDING `clarify`.
+            // ⭐ EVERY REMAINING NON-COMPOSED OUTCOME FALLS THROUGH.
+            //
+            // ⚠ AMENDED 12 Sep 2026: this block used to read "INCLUDING
+            // `clarify`", which is no longer true of the LABEL clarify — it is
+            // answered by the branch above. The PARENT clarify ("which decision
+            // owns this option?") still falls through here, deliberately.
             //
             // ⚠ ROWED, NOT FIXED (3 Sep 2026): the parenthetical below is
             // FALSE as a reachability claim — a `clarify` is not restricted to
             // multi-decision models, and the validator's single-decision
             // auto-resolve is not the only path here. The BEHAVIOUR is correct
-            // either way (every non-`composed` status falls through to the edit
-            // lane), so this is a comment defect, not a routing defect.
+            // either way, so this is a comment defect, not a routing defect.
             // Backlog; deliberately not fixed inside this round.
             //
             // ⚠ ALSO ROWED: the three chip-arm telemetry emits above
@@ -6695,14 +6759,18 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // chip-originated fall-throughs are indistinguishable from
             // unattributed ones in telemetry. Real, minor, backlog.
             //
-            // `clarify` means the proposer could not tell WHICH decision owns
-            // the option (only reachable when the model holds more than one —
-            // with a single decision the validator resolves it). The edit lane
-            // below is the existing, working answer for that turn and it holds
-            // its proposal for confirmation too, so the user still sees and
-            // approves the parent before anything moves. Deliberately NOT a new
-            // clarify-and-commit path here: it would be a second consent
-            // producer on a live route for a case this arm can simply decline.
+            // The `clarify` that still reaches here is the PARENT one — the
+            // proposer could not tell WHICH decision owns the option. The edit
+            // lane below is the existing, working answer for that turn and it
+            // holds its proposal for confirmation too, so the user still sees
+            // and approves the parent before anything moves. Deliberately NOT a
+            // clarify-and-COMMIT path: that would be a second consent producer
+            // on a live route for a case this arm can simply decline.
+            //
+            // ⚠ THAT RULING IS ABOUT COMMITTING, NOT ABOUT ASKING, and the
+            // label-clarify branch above does not breach it: it persists
+            // nothing, holds nothing, and produces no consent — it asks a
+            // question and lets the answer arrive as an ordinary turn.
             emit(TelemetryEvents.V5AddOptionTransaction, {
               request_id: requestId,
               origin: 'text',

@@ -221,6 +221,12 @@ export const TelemetryEvents = {
   // `fell_through:text_clarify`, `fell_through:text_no_grounding`,
   // `fell_through:text_no_budget`). One event, one place to read the whole
   // add-option funnel — and no widening of this frozen registry.
+  //
+  // 2026-09-12 — `clarify_label` joins that outcome set (NOT a fall-through:
+  // the turn is ANSWERED with a question about the option's name). It replaces
+  // `fell_through:text_clarify` for the label case only; the parent-decision
+  // clarify still emits the fall-through. The two are distinguishable in
+  // telemetry precisely because they are different outcomes for the user.
   V5AddOptionTransaction: "v5.add_option_transaction",
 
   // ROADMAP 2.63 C1 — stage-2 explicit-generate wire. Fires once per

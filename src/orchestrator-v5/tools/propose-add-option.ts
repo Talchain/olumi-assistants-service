@@ -389,6 +389,23 @@ export interface ValidatedAddOption {
   readonly unknowns: readonly string[];
 }
 
+/**
+ * ⭐⭐ TWO CLARIFIES, NAMED APART — and they must never be reconciled.
+ *
+ * `reason: 'parent'` answers "WHICH DECISION owns this option?" — the ask the
+ * tool schema's `clarification` field was built for, resolved by picking a
+ * decision from `candidates`.
+ *
+ * `reason: 'label'` answers "IS THIS A NAME, OR THE DECISION?" — a different
+ * question with a different resolution (the user supplies a name in free text),
+ * and it carries the single decision it COLLIDED with rather than a set to
+ * choose between.
+ *
+ * They travel under one `kind` because both are questions rather than answers,
+ * and they are discriminated because two authorities answering different
+ * questions under one name is this estate's signature defect (CLAUDE.md trap
+ * 21). Giving them identical shapes would make the route guess.
+ */
 export type AddOptionValidation =
   | { readonly ok: true; readonly proposal: ValidatedAddOption }
   | {
@@ -400,8 +417,19 @@ export type AddOptionValidation =
   | {
       readonly ok: false;
       readonly kind: 'clarify';
+      readonly reason: 'parent';
       readonly question: string;
       readonly candidates: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+      readonly label: string;
+    }
+  | {
+      readonly ok: false;
+      readonly kind: 'clarify';
+      readonly reason: 'label';
+      /** The decision the proposed name collided with. Carries its id so the
+       *  caller binds by identity, never by re-matching the label. */
+      readonly decision: { readonly id: string; readonly label: string };
+      /** The refused name, in the spelling the model proposed it. */
       readonly label: string;
     };
 
@@ -478,13 +506,49 @@ function decisionSubject(label: string): string {
  * ⭐ THE SUCCESSOR WORK IS THE `clarify` ARM OF THIS FUNCTION'S OWN RETURN
  * TYPE, not a fifth rule. Where a single word appears in the parent decision's
  * label, the honest answer is neither refuse nor accept but ASK — "an option
- * called Build, or are you naming the decision?" `AddOptionValidation` already
- * carries `kind: 'clarify'`. ⚠ THE ROUTE DOES NOT RENDER IT — `route-v2.ts`
- * branches only on `composed.status === 'composed'` and every other status
- * falls through to the generic edit lane (`fell_through:text_clarify`). The
- * clarify arm that IS wired asks WHICH DECISION owns the option, not what the
- * LABEL should be. The successor has to WIRE this as well as call it. Make the
- * ambiguity the product; that is the documented exit for an unwinnable parse.
+ * called Build, or are you naming the decision?"
+ *
+ * ⭐⭐ BUILT AND WIRED, 12 Sep 2026 — for the case THIS function already
+ * decides. The equality-after-stripping hit now returns
+ * `kind: 'clarify', reason: 'label'` instead of
+ * `LABEL_IS_THE_PARENT_DECISION`, and `route-v2.ts` renders it through
+ * `compose/option-label-clarify-response.ts` rather than falling through to the
+ * generic edit lane. The user is asked what to call the option.
+ *
+ * ⚠ CORRECTED 12 Sep 2026 — this read "the answer arrives as an ordinary turn
+ * and re-enters the add-option recogniser, so no new resume machinery was
+ * needed." IT RE-ENTERS AND DOES NOT MATCH. Driven in this PR's own harness,
+ * the turn AFTER the ask:
+ *
+ *     "Open a Berlin office"             -> not_add_option_shape
+ *     "Berlin office"                    -> not_add_option_shape
+ *     "Let's call it the Berlin office"  -> not_add_option_shape
+ *     "Call it Open a Berlin office"     -> not_add_option_shape
+ *     'Add "X" as an option'             -> held   <- contrast control, same run
+ *
+ * None reach the focused proposer; zero add-option telemetry. **The
+ * DETERMINISTIC path accepts only a COMMAND, not an answer to the question this
+ * arm asks.**
+ *
+ * ⚠ SCOPE, AND IT IS NOT A DEMONSTRATED DEAD END. Those replies do not reach the
+ * generic edit lane either — they fall to the CONVERSATIONAL lane, which the
+ * harness stubs, so a live model's behaviour there is UNMEASURED IN BOTH
+ * DIRECTIONS. Settling it needs a driven session, not another static
+ * derivation. `answeredAskClaim` exists for exactly this shape but is bound to
+ * `resolveOptionEffectWrite` and does not catch this ask.
+ *
+ * ⛔ THIS SENTENCE HAS NOW BEEN WRONG ABOUT ITS OWN MECHANISM THREE TIMES, and
+ * the two prior corrections are quoted in the same file. A claim that a resume
+ * "already exists" must name the recogniser AND show an accepted input.
+ *
+ * ⚠ THE KNOWN-OPEN CASE ABOVE IS STILL OPEN. A single word that is only PART
+ * of the decision's subject ("Expansion" under "Geographic expansion
+ * strategy") does NOT satisfy this predicate, so it never reaches the new ask.
+ * Closing it is still not a fifth string rule: the tool schema sets
+ * `required: ['label']`, so a model must invent a name and has no legal way to
+ * decline. That is a SCHEMA change, and it is where this class actually has to
+ * be solved. Make the ambiguity the product; that is the documented exit for an
+ * unwinnable parse.
  */
 function labelIsTheDecisionItself(label: string, decisionLabel: string): boolean {
   const l = normaliseLabel(label).replace(LEADING_ARTICLE_IN_LABEL, '').trim();
@@ -542,6 +606,7 @@ export function validateProposedAddOption(
       return {
         ok: false,
         kind: 'clarify',
+        reason: 'parent',
         question:
           p.clarification?.question ??
           'Which decision should this option sit under?',
@@ -632,13 +697,25 @@ export function validateProposedAddOption(
 
   // ...and an option may not be named after the DECISION IT HANGS OFF, even
   // when the two strings differ. See `labelIsTheDecisionItself`.
+  //
+  // ⭐ THIS ASKS RATHER THAN REFUSES, and that is the whole change. It returned
+  // `LABEL_IS_THE_PARENT_DECISION` until 12 Sep 2026, which the route discarded
+  // into the generic edit lane — the detector fired on every one of these and
+  // the user was never told what was wrong with the name. A refusal the caller
+  // throws away is indistinguishable from no detection at all.
+  //
+  // The rejection CODE is deliberately retained in `ADD_OPTION_REJECTION_CODES`
+  // and is now unreachable from here: it is a wire value that historic
+  // telemetry carries, and narrowing a published enum to tidy up would be a
+  // separate, breaking change with no user in it.
   for (const d of grounding.decisions) {
     if (!labelIsTheDecisionItself(label, d.label)) continue;
     return {
       ok: false,
-      kind: 'rejected',
-      code: 'LABEL_IS_THE_PARENT_DECISION',
-      reason: 'the proposed name is the decision itself, not an option for it',
+      kind: 'clarify',
+      reason: 'label',
+      decision: { id: d.id, label: d.label },
+      label,
     };
   }
 
@@ -729,10 +806,21 @@ export interface AddOptionComposeInput {
 
 export type AddOptionComposeOutcome =
   | { readonly status: 'composed'; readonly proposal: ValidatedAddOption }
+  // ⭐ The `reason` discriminant is carried OUT to the route, not just held
+  // inside the validation. The route can otherwise see only `status:
+  // 'clarify'` and would have to re-derive which question was asked — a
+  // second predicate deciding one question (trap 21).
   | {
       readonly status: 'clarify';
+      readonly reason: 'parent';
       readonly question: string;
       readonly candidates: ReadonlyArray<{ readonly id: string; readonly label: string }>;
+      readonly label: string;
+    }
+  | {
+      readonly status: 'clarify';
+      readonly reason: 'label';
+      readonly decision: { readonly id: string; readonly label: string };
       readonly label: string;
     }
   | { readonly status: 'rejected'; readonly code: AddOptionRejectionCode; readonly reason: string }
@@ -831,12 +919,20 @@ export async function composeAddOption(
   // widening a frozen registry, and would still not know what the TURN did.
   if (validation.ok) return { status: 'composed', proposal: validation.proposal };
   if (validation.kind === 'clarify') {
-    return {
-      status: 'clarify',
-      question: validation.question,
-      candidates: validation.candidates,
-      label: validation.label,
-    };
+    return validation.reason === 'label'
+      ? {
+          status: 'clarify',
+          reason: 'label',
+          decision: validation.decision,
+          label: validation.label,
+        }
+      : {
+          status: 'clarify',
+          reason: 'parent',
+          question: validation.question,
+          candidates: validation.candidates,
+          label: validation.label,
+        };
   }
   return { status: 'rejected', code: validation.code, reason: validation.reason };
 }

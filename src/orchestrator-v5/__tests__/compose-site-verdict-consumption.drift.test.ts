@@ -177,6 +177,12 @@ const SCANNED_FILES: Readonly<Record<string, string>> = {
     HERE,
     '../compose/duplicate-option-label-response.ts',
   ),
+  // The option-label clarify exit (2026-09-12) — registered on the commit that
+  // created it, because the derived domain test fails otherwise.
+  'compose/option-label-clarify-response.ts': resolve(
+    HERE,
+    '../compose/option-label-clarify-response.ts',
+  ),
 };
 
 /**
@@ -857,6 +863,39 @@ const DUPLICATE_OPTION_LABEL_SITES: Readonly<Record<string, RegisteredSite>> = {
   },
 };
 
+/**
+ * `src/orchestrator-v5/compose/option-label-clarify-response.ts` — the
+ * option-label clarify exit (2026-09-12), on the commit that created the file.
+ * The derived domain test caught it on its first run, which is the mechanism
+ * working exactly as designed.
+ */
+const OPTION_LABEL_CLARIFY_SITES: Readonly<Record<string, RegisteredSite>> = {
+  assistant_text: {
+    stance: 'structural',
+    why:
+      'ONE site, keyed `assistant_text` because the site uses the ES6 shorthand property (same '
+      + 'shape as DUPLICATE_OPTION_LABEL_SITES, OPTION_EFFECT_ASK_SITES and '
+      + 'REPAIR_VALUE_ASK_SITES). The template interpolates exactly TWO ingredients and one '
+      + 'exported constant, and every one is a structural fact rather than anything read from '
+      + 'an analysis. '
+      + '(1) `proposedLabel` — the name the focused proposer emitted for a NEW option, echoed '
+      + 'back verbatim so the user reads their own words; it names a node that does NOT exist '
+      + 'on the graph, so it cannot be an analysed option at all. '
+      + '(2) `decisionLabel` — the label of the DECISION node the proposed name collided with, '
+      + 'selected by `labelIsTheDecisionItself` (equality after head-noun stripping), quoted '
+      + 'verbatim. A decision is not a candidate in any ranking. '
+      + '(3) `OPTION_LABEL_CLARIFY_UNCHANGED_SENTENCE`, a frozen literal. '
+      + 'IT CANNOT ASSERT A LEADER: this composer never receives an analysis result, a value, '
+      + 'a candidate list, or an option ordering of any kind — its whole input is one rejected '
+      + 'string and one decision label, so there is no per-option datum in scope to rank, '
+      + 'compare or crown even if the copy wanted one. '
+      + 'It ships ZERO chips, asserted by its companion spec, so no label leaves this file '
+      + 'through the chip channel either. Zero LLM calls: the composer exists precisely to '
+      + 'answer without one, from a DETERMINISTIC detection. The route threads '
+      + '`mayNameLeadingOption` from `claimSafety.forExit()` on this exit, not a literal.',
+  },
+};
+
 const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, RegisteredSite>>>> = {
   'turn-executor.ts': TURN_EXECUTOR_SITES,
   'route-v2.ts': ROUTE_V2_SITES,
@@ -869,6 +908,7 @@ const COMPOSE_SITE_REGISTER: Readonly<Record<string, Readonly<Record<string, Reg
   'compose/repair-value-ask-response.ts': REPAIR_VALUE_ASK_SITES,
   'compose/option-effect-ask-response.ts': OPTION_EFFECT_ASK_SITES,
   'compose/duplicate-option-label-response.ts': DUPLICATE_OPTION_LABEL_SITES,
+  'compose/option-label-clarify-response.ts': OPTION_LABEL_CLARIFY_SITES,
 };
 
 /** Count occurrences per key — the multiset the assertions compare. */
@@ -1334,13 +1374,23 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // for the same reason: this ledger failed `pnpm test:required` on the
     // commit that created the site, and the guard found the omission rather
     // than a human remembering it. Eighth instance of the mechanism working.
-    expect(sites.length, 'total compose SITES across every scanned file').toBe(47);
-    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(43);
+    // ⚠ OPTION-LABEL CLARIFY EXIT (2026-09-12): 47 -> 48 sites, 43 -> 44 keys,
+    // one ADDED file (compose/option-label-clarify-response.ts), registered
+    // `structural` with its derivation (OPTION_LABEL_CLARIFY_SITES). Recorded
+    // the same way as every entry above, and for the same reason: this ledger
+    // failed the required check on the commit that created the site, and the
+    // guard found the omission rather than a human remembering it. NINTH
+    // instance of the mechanism working — and the author had run the whole
+    // affected-set locally and still missed it, which is the argument for
+    // deriving the domain rather than listing it, once more.
+    expect(sites.length, 'total compose SITES across every scanned file').toBe(48);
+    expect(Object.keys(registerTally()).length, 'distinct file::expression KEYS').toBe(44);
     expect(Object.keys(COMPOSE_SITE_REGISTER).sort()).toEqual([
       'compose/configure-option-clarify-response.ts',
       'compose/duplicate-option-label-response.ts',
       'compose/edit-clarify-response.ts',
       'compose/option-effect-ask-response.ts',
+      'compose/option-label-clarify-response.ts',
       'compose/repair-value-ask-response.ts',
       'handlers/chip-click-dispatch.ts',
       'route-v2.ts',
