@@ -214,6 +214,69 @@ describe("Paul's own option is rescued: it carries his stated target and the dup
 });
 
 // ────────────────────────────────────────────────────────────────────────────
+// ⭐ ONLY THE USER'S OWN OPTIONS ARE REPAIRED — and this is NOT a redundant
+// conjunct. Demonstrated, because an equivalent mutant must be shown and never
+// asserted (trap 13c): with the restriction removed, this fixture loses an
+// alternative the model authored.
+//
+// The harm it prevents: repairing a MODEL option can make it identical to
+// ANOTHER model option that was distinct a moment earlier. The group is then
+// all-model, so the gate's deterministic tie-break withdraws one of them — and
+// the duplicate it withdraws is one THIS REPAIR MANUFACTURED. A user-stated
+// option cannot cause that, because the gate never demotes one.
+// ────────────────────────────────────────────────────────────────────────────
+describe("a MODEL option is never repaired into a collision with another model option", () => {
+  /**
+   * `headcount` sits at 40. `MODEL_A` is a no-op there and its own label states
+   * "from 40 to 30" — so a repair would move it onto `MODEL_B`'s number.
+   */
+  const MODEL_A = "reduce headcount from 40 to 30 over the next two quarters";
+  const MODEL_B = "Cut To 30 Immediately";
+  const SHAPE: DraftRecordSet = {
+    stated_items: [
+      { kind: "goal", source_quote: "reach break-even next year" },
+      { kind: "option", source_quote: "hold headcount at 20 contractors" },
+    ],
+    claims: [
+      { claim_kind: "factor", label: "headcount", value: 40 },
+      { claim_kind: "option_refinement", label: MODEL_A },
+      { claim_kind: "option_refinement", label: MODEL_B },
+      { claim_kind: "causal_link", label: "stated sets headcount", from_stated: 1, to_claim: 0, effect: "negative", sets_to: 20 },
+      { claim_kind: "causal_link", label: "A sets headcount", from_claim: 1, to_claim: 0, effect: "negative", sets_to: 40 },
+      { claim_kind: "causal_link", label: "B sets headcount", from_claim: 2, to_claim: 0, effect: "negative", sets_to: 30 },
+      { claim_kind: "causal_link", label: "headcount bears on the goal", from_claim: 0, to_stated: 0, effect: "negative" },
+    ],
+  };
+
+  it("PRECONDITION: the model option really is a no-op whose label states a rival's number", () => {
+    // Pinned in-test so the assertion below is the restriction's doing and not
+    // the fixture quietly failing to set the trap (trap 13b).
+    const { graph } = projectRecordsToGraph(SHAPE);
+    const factor = idOf(graph as G, "headcount");
+    // The frame this fixture resolves to is 50, so 40 -> 0.8 and 30 -> 0.6.
+    // Read from the factor itself rather than hardcoding the divisor, so the
+    // trap stays set if `deriveFactorScaleFrame` ever picks differently.
+    const level = (raw: number): number => {
+      const f = graph.nodes.find((n) => n.id === factor) as { scale_frame?: number } | undefined;
+      return raw / (f?.scale_frame ?? 1);
+    };
+    const aLevel = interventionsOf(graph as G, idOf(graph as G, MODEL_A))?.[factor];
+    const bLevel = interventionsOf(graph as G, idOf(graph as G, MODEL_B))?.[factor];
+    // A sits exactly where the factor does -> it IS a no-op...
+    expect(aLevel).toBeCloseTo(level(40), 10);
+    // ...and the number its own label states is exactly B's -> the trap is set.
+    expect(bLevel).toBeCloseTo(level(30), 10);
+    expect(aLevel).not.toBeCloseTo(level(30), 10);
+  });
+
+  it("keeps BOTH model alternatives — neither is withdrawn for a duplicate this repair created", () => {
+    const { graph } = projectRecordsToGraph(SHAPE);
+    expect(optionLabels(graph as G)).toContain(MODEL_A);
+    expect(optionLabels(graph as G)).toContain(MODEL_B);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
 // THE GATE'S OWN PRECONDITION — pinned, so the repair cannot create a collision
 // that nothing resolves.
 // ────────────────────────────────────────────────────────────────────────────
