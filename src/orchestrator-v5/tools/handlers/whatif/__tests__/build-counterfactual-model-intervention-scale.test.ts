@@ -40,11 +40,18 @@
  * typed contract, and is composed into a card.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 import { buildCounterfactualModel } from '../build-counterfactual-model.js';
+import { runCounterfactualLens } from '../run-counterfactual-lens.js';
 import { formatFactorValue } from '../../../../compose/format-factor-value.js';
 import type { CounterfactualProbe } from '../select-counterfactual-probe.js';
+import type {
+  CounterfactualClient,
+  CounterfactualResult,
+} from '../../../../../adapters/isl/counterfactual-client.js';
+import type { FlipSummary } from '../../../../compose/flip-proposal.js';
+import type { RawRobustnessSignals } from '../../../../coaching/robustness-honesty.js';
 
 interface LooseGraph {
   nodes: Array<Record<string, unknown>>;
@@ -186,6 +193,27 @@ describe('pickInterventionTarget — the target is a model-unit TO', () => {
   });
 
   /**
+   * ⭐ THE FRAME PRECONDITION, PINNED ON ITS OWN.
+   *
+   * The case above is ALSO refused by the downstream non-finite guard (with no
+   * `raw_value` and no frame, the reconstructed display magnitude is NaN), so
+   * it does not discriminate: deleting the precondition leaves it green. Found
+   * by a surviving mutant, not by inspection.
+   *
+   * Here `raw_value` IS present but the pair yields no frame (`recoverScaleFrame`
+   * requires `raw > value`), so the display magnitude is finite and ONLY the
+   * precondition refuses. Without it the builder returns a target whose
+   * "current" (49, raw) and "model" (0.59) sit on different scales.
+   */
+  it('refuses an unresolvable from-to even when a display magnitude is finite', () => {
+    const built = buildCounterfactualModel(
+      priceGraph({ value: 0.59, raw_value: 0.3, baseline: 49, unit: '£' }),
+      PRICE_PROBE,
+    );
+    expect(built).toBeNull();
+  });
+
+  /**
    * THE OPPOSITE-DIRECTION TWIN (trap 22b). An unframed factor — a count, where
    * raw IS the model scale — must keep working exactly as it does today. A fix
    * that disarmed the 100x error by refusing everything would pass every
@@ -202,5 +230,58 @@ describe('pickInterventionTarget — the target is a model-unit TO', () => {
     expect(request.intervention.factor_price).toBe(20);
     expect(meta.factorCurrentValue).toBe(10);
     expect(meta.interventionDisplayValue).toBe(20);
+  });
+});
+
+/**
+ * The lens's own display seam. The builder tests above pin the numbers; this
+ * pins that the CARD spends the raw one. Without it, swapping the card back to
+ * `interventionValue` is invisible — `formatFactorValue` returns `null` for a
+ * bare sub-1 decimal, so the sentence silently loses its target clause rather
+ * than printing a wrong number.
+ */
+describe('runCounterfactualLens — the card shows the user-scale magnitude', () => {
+  const FRAGILE: RawRobustnessSignals = { level: 'fragile', near_tie_is_tie: false };
+  const CONCRETE_FLIP: FlipSummary = {
+    overall_status: 'concrete',
+    margin_supports_flip: true,
+    entries: [{ factor_id: 'factor_price', factor_label: 'Pro plan price', flip_value: 0.59 }],
+  };
+
+  function okClient(): CounterfactualClient {
+    const result: CounterfactualResult = {
+      ok: true,
+      response: {
+        scenario: { intervention: { factor_price: 0.59 }, outcome: 'goal_margin' },
+        prediction: {
+          point_estimate: 0.354,
+          confidence_interval: { lower: 0.354, upper: 0.354 },
+          sensitivity_range: { optimistic: 0.4, pessimistic: 0.3, explanation: 'x' },
+        },
+        uncertainty: { overall: 'low', sources: [] },
+        robustness: { score: 'robust', critical_assumptions: [] },
+        explanation: { summary: 's', reasoning: 'r', technical_basis: 't', assumptions: [] },
+      } as never,
+    };
+    return { getCounterfactual: vi.fn(async () => result) };
+  }
+
+  it('names the target in the user’s own units, not the model-unit decimal', async () => {
+    const lens = await runCounterfactualLens({
+      client: okClient(),
+      graphForTurn: priceGraph({ value: 0.59, raw_value: 59, baseline: 49, unit: '£' }),
+      flipSummary: CONCRETE_FLIP,
+      rawRobustness: FRAGILE,
+      requestId: 'req-scale',
+      signal: new AbortController().signal,
+    });
+
+    expect(lens).not.toBeNull();
+    // The user's magnitude, and the direction that follows from comparing two
+    // numbers on ONE scale (0.59 model vs 0.49 model → a raise, £49 → £59).
+    expect(lens!.card).toContain('to £59');
+    expect(lens!.card).toContain('raised');
+    // The model-unit decimal must never reach user copy.
+    expect(lens!.card).not.toContain('0.59');
   });
 });
