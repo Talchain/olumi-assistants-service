@@ -130,6 +130,43 @@ describe("hasContentlessMintedGoal", () => {
     expect(hasContentlessMintedGoal(graphWithMintedGoal({ source_quote: "   " }))).toBe(true);
   });
 
+  /**
+   * ⭐⭐ THE CLASS THIS CORPUS ORIGINALLY MISSED, AND A SURVIVING MUTANT FOUND IT.
+   *
+   * Deleting the `label !== DEFAULT_GOAL_LABEL` conjunct left the whole suite
+   * GREEN — which said the label was doing no discriminating work. It is:
+   * `ensureGoalNode`'s REGEX limb (`goal-inference.ts:375-381`) mints a goal
+   * with a CONTENTFUL label derived from the brief — "Increase Revenue" — and
+   * badges it with the very same `MINTED_GOAL_PROVENANCE`, so it carries NO
+   * `source_quote` either. Every case in the first corpus separated the two
+   * classes by verbatim alone, so the label check was untested.
+   *
+   * That goal HAS content. Nodes can connect to it, so a block on such a graph
+   * is a genuine topology failure, NOT the pipeline punishing the user for its
+   * own placeholder — and fencing it would route a real defect into a question
+   * about a goal the user's own words already produced.
+   *
+   * (Trap 22: a corpus drawn from the author's head cannot see the class the
+   * author did not imagine. The mutant saw it.)
+   */
+  it("REFUSES a CEE-minted goal whose label was derived from the brief and HAS content", () => {
+    expect(
+      hasContentlessMintedGoal({
+        nodes: [
+          {
+            // Same id, same badge, same absent verbatim as the placeholder —
+            // the LABEL is the only thing that separates them.
+            id: "goal_inferred",
+            kind: "goal",
+            label: "Increase Revenue",
+            provenance: { provenance_class: "projector_structural", source: "synthetic" },
+          },
+        ],
+        edges: [],
+      } as unknown as GraphT),
+    ).toBe(false);
+  });
+
   it("REFUSES a graph with no goal — MISSING_GOAL owns that failure", () => {
     expect(
       hasContentlessMintedGoal({
