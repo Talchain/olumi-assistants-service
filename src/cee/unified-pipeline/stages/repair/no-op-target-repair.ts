@@ -156,7 +156,7 @@ import {
   levelsAreIdentical,
   readFactorBaselineLevel,
 } from "../../../../validators/option-no-op.js";
-import type { GraphT, NodeT } from "../../../../schemas/graph.js";
+import type { NodeT } from "../../../../schemas/graph.js";
 import { log, TelemetryEvents } from "../../../../utils/telemetry.js";
 
 interface Repair {
@@ -169,6 +169,59 @@ export interface NoOpTargetRepairResult {
   readonly repairs: Repair[];
   /** Option ids whose stated target was written, in graph node order. */
   readonly repairedOptionIds: string[];
+}
+
+/**
+ * The graph shape this module reads — deliberately STRUCTURAL rather than
+ * `GraphT`.
+ *
+ * The draft PROJECTOR calls this function too (`draft/records/projector.ts`),
+ * and its nodes are `ProjectedNode`: the same fields carrying the same values,
+ * a different nominal type. Every field access below already goes through the
+ * `as NodeT[]` assertion on the next line, so widening the parameter changes NO
+ * behaviour — it stops the signature over-claiming which of the two node types
+ * it can accept, instead of buying the same freedom with a double cast at each
+ * call site (`as unknown as`, which the forbidden-boundary ratchet counts).
+ */
+export interface NoOpRepairableGraph {
+  readonly nodes: unknown[];
+}
+
+/**
+ * WHERE THIS CALL SITE SITS IN THE PIPELINE, expressed as what it may rely on.
+ *
+ * ⭐⭐ THE COLLISION RULE IS POSITION-DEPENDENT, AND THAT IS THE WHOLE REASON
+ * THIS TYPE EXISTS (trap 21 — two call sites asking DIFFERENT questions under
+ * one name).
+ *
+ * The enforcement stage declines EVERY collision, because the next thing that
+ * happens there is re-validation and `OPTIONS_IDENTICAL` (severity `error`)
+ * would kill the draft. That is correct AT STAGE 4 and it is the default here.
+ *
+ * At the PROJECTOR the next thing that happens is `findUndevelopedDuplicates`
+ * (`projector.ts:4014`), a reconciliation that WITHDRAWS a model option
+ * duplicating a user-stated one. A collision with such an option is therefore
+ * not a hazard but that gate's own input — so the projector names those options
+ * and nothing else changes.
+ *
+ * ⚠ BOTH FIELDS DEFAULT TO TODAY'S BEHAVIOUR AND FAIL CLOSED. An omitted
+ * `reconciledOptionIds` means "nothing downstream resolves anything", which is
+ * the strictest reading; an omitted `repairableOptionIds` means "every no-op
+ * option is a candidate", which is Stage 4 unchanged.
+ */
+export interface NoOpTargetRepairPolicy {
+  /**
+   * Restrict candidates to these option ids. The projector passes its
+   * USER-STATED options only: a model option it repaired could then be demoted
+   * by the very gate this runs before, which is a question that belongs to that
+   * gate and not to this module.
+   */
+  readonly repairableOptionIds?: ReadonlySet<string>;
+  /**
+   * Option ids whose signature may be collided with, because a reconciliation
+   * between this call site and the next validation WITHDRAWS them.
+   */
+  readonly reconciledOptionIds?: ReadonlySet<string>;
 }
 
 /** A transition an option's own label states: a FROM and a TO, in that order. */
@@ -297,11 +350,13 @@ function resolveRepairedLevel(
  * when no option is repairable — so a healthy draft is unchanged to the byte.
  */
 export function repairNoOpOptionTargets(
-  graph: GraphT,
+  graph: NoOpRepairableGraph,
   requestId?: string,
+  policy: NoOpTargetRepairPolicy = {},
 ): NoOpTargetRepairResult {
   const repairs: Repair[] = [];
   const repairedOptionIds: string[] = [];
+  const { repairableOptionIds, reconciledOptionIds } = policy;
 
   const nodes = graph.nodes as NodeT[];
   const nodeById = new Map<string, NodeT>();
@@ -312,6 +367,9 @@ export function repairNoOpOptionTargets(
   // Baseline options are excluded inside it, by identity, through
   // `readIsBaseline` — never re-decided here.
   for (const finding of findNoOpOptions(options, nodeById)) {
+    // The caller may narrow the candidate set to options whose repair it can
+    // account for. Omitted = every no-op option, which is Stage 4 unchanged.
+    if (repairableOptionIds !== undefined && !repairableOptionIds.has(finding.optionId)) continue;
     const option = nodeById.get(finding.optionId);
     const data = option?.data as { interventions?: Record<string, number> } | undefined;
     const interventions = data?.interventions;
@@ -347,6 +405,11 @@ export function repairNoOpOptionTargets(
     const candidateSignature = buildInterventionSignature(candidate);
     const collides = options.some((other) => {
       if (other.id === option.id) return false;
+      // ⭐ AN OPTION A RECONCILIATION IS ABOUT TO WITHDRAW CANNOT COLLIDE WITH
+      // ANYTHING. Only the projector names any — see `NoOpTargetRepairPolicy`.
+      // At the enforcement stage this set is empty and the rule below is the
+      // unconditional decline it has always been.
+      if (reconciledOptionIds?.has(other.id) === true) return false;
       const otherInterventions = (other.data as { interventions?: Record<string, number> } | undefined)
         ?.interventions;
       if (otherInterventions === undefined) return false;
