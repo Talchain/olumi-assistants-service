@@ -513,9 +513,33 @@ function decisionSubject(label: string): string {
  * `kind: 'clarify', reason: 'label'` instead of
  * `LABEL_IS_THE_PARENT_DECISION`, and `route-v2.ts` renders it through
  * `compose/option-label-clarify-response.ts` rather than falling through to the
- * generic edit lane. The user is asked what to call the option; the answer
- * arrives as an ordinary turn and re-enters the add-option recogniser, so no
- * new resume machinery was needed.
+ * generic edit lane. The user is asked what to call the option.
+ *
+ * ⚠ CORRECTED 12 Sep 2026 — this read "the answer arrives as an ordinary turn
+ * and re-enters the add-option recogniser, so no new resume machinery was
+ * needed." IT RE-ENTERS AND DOES NOT MATCH. Driven in this PR's own harness,
+ * the turn AFTER the ask:
+ *
+ *     "Open a Berlin office"             -> not_add_option_shape
+ *     "Berlin office"                    -> not_add_option_shape
+ *     "Let's call it the Berlin office"  -> not_add_option_shape
+ *     "Call it Open a Berlin office"     -> not_add_option_shape
+ *     'Add "X" as an option'             -> held   <- contrast control, same run
+ *
+ * None reach the focused proposer; zero add-option telemetry. **The
+ * DETERMINISTIC path accepts only a COMMAND, not an answer to the question this
+ * arm asks.**
+ *
+ * ⚠ SCOPE, AND IT IS NOT A DEMONSTRATED DEAD END. Those replies do not reach the
+ * generic edit lane either — they fall to the CONVERSATIONAL lane, which the
+ * harness stubs, so a live model's behaviour there is UNMEASURED IN BOTH
+ * DIRECTIONS. Settling it needs a driven session, not another static
+ * derivation. `answeredAskClaim` exists for exactly this shape but is bound to
+ * `resolveOptionEffectWrite` and does not catch this ask.
+ *
+ * ⛔ THIS SENTENCE HAS NOW BEEN WRONG ABOUT ITS OWN MECHANISM THREE TIMES, and
+ * the two prior corrections are quoted in the same file. A claim that a resume
+ * "already exists" must name the recogniser AND show an accepted input.
  *
  * ⚠ THE KNOWN-OPEN CASE ABOVE IS STILL OPEN. A single word that is only PART
  * of the decision's subject ("Expansion" under "Geographic expansion

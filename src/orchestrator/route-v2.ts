@@ -6694,7 +6694,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             // is no pending, no proposal and no second consent producer: this
             // turn is a QUESTION, and the answer arrives as an ordinary user
             // turn that re-enters the add-option recogniser at the top of this
-            // same block. The resume costs nothing because it already exists.
+            // same block.
+            //
+            // ⚠ CORRECTED 12 Sep 2026 — this added "the resume costs nothing
+            // because it already exists." IT RE-ENTERS AND DOES NOT MATCH: four
+            // natural answers to this very question all return
+            // `not_add_option_shape` and reach no proposer, while the contrast
+            // control 'Add "X" as an option' is held in the same run. The
+            // deterministic path accepts a COMMAND, not an answer. The replies
+            // fall to the conversational lane, which the harness stubs, so the
+            // live behaviour is UNMEASURED rather than known-broken. Full
+            // measurement and scope at `propose-add-option.ts`'s header.
             //
             // Detection is DETERMINISTIC (equality after head-noun stripping),
             // so no model call decides whether the user is asked — the same
