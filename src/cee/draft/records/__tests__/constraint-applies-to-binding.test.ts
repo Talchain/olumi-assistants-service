@@ -49,7 +49,11 @@
 import { describe, it, expect } from "vitest";
 
 import { projectDraftRecords } from "../seam.js";
-import { enumerateCompletionAsk } from "../completion.js";
+import {
+  enumerateCompletionAsk,
+  modelAnswerableAskItems,
+  buildRecordsCompletionSchema,
+} from "../completion.js";
 import type { RecordProjection } from "../projector.js";
 import { MINTABLE_TARGET_KINDS } from "../../../compound-goal/mintable-target-kinds.js";
 
@@ -260,13 +264,19 @@ describe("a stated constraint that names what it limits", () => {
     expectIndistinguishableFromNoReference(p, baseline);
     expect(p.graph.nodes.filter((n) => n.kind === "constraint")).toHaveLength(1);
 
-    // …and it reaches the user as a question through the EXISTING switch — no
-    // new machinery was needed for an unresolved reference.
+    // ⚠⚠ RESTATED, AND THE OLD SENTENCE WAS FALSE IN THE DIRECTION THAT MATTERS.
+    // It read "it reaches the user as a question through the EXISTING switch",
+    // and asserted `kind === "unresolved_reference"`. The ask is not what reaches
+    // the USER — `NOTICE_KIND_BY_REASON` is, on a different path — and routing
+    // this through `unresolved_reference` is precisely what made an UNANSWERABLE
+    // refusal inherit "answerable" and get put to the model. The refusal is still
+    // enumerated; it now carries its own kind and is withheld from the model.
+    // See the dedicated describe block at the foot of this file.
     const ask = enumerateCompletionAsk(
       churnRecords({ applies_to_claim: 0, applies_to_stated: 0 }, { linkToGoal: true }) as never,
       p,
     );
-    expect(ask.items.some((i) => i.kind === "unresolved_reference")).toBe(true);
+    expect(ask.items.some((i) => i.kind === "constraint_target_unbindable")).toBe(true);
   });
 
   // ── THE SAFETY CONDITIONS ────────────────────────────────────────────────
@@ -786,5 +796,243 @@ describe("a malformed optional reference degrades to absence, never to a dead dr
     );
     expect(r.ok, "the reference family must keep refusing — this rule is scoped to applies_to_*").toBe(false);
     if (!r.ok) expect(r.reason).toBe("not_a_record_set");
+  });
+});
+
+/**
+ * ⭐⭐ THE FLOOR DIRECTION, DRIVEN RATHER THAN ASSUMED.
+ *
+ * Every case above this block is a CEILING — "under 4%". The gap this feature
+ * was written for has a FLOOR as its canonical example ("reach £20k MRR"), so
+ * the direction the binder is most likely to be used on was the one direction
+ * this file never drove. `directionToOperator` is pinned elsewhere
+ * (`projector-behaviour.test.ts`), but nothing pinned it THROUGH the binder —
+ * a binder that hardcoded `<=` would have passed every case in this file.
+ *
+ * ⚠ THE TWIN IS THE LOAD-BEARING HALF. One floor case alone is satisfied by a
+ * binder that always emits `>=`; the pair proves the operator TRACKS the stated
+ * direction rather than merely being one of the two legal values.
+ */
+describe("a stated FLOOR binds with the floor operator, through the reference", () => {
+  const retentionRecords = (direction: "floor" | "ceiling") => {
+    const records = churnRecords({ applies_to_claim: 0 });
+    const limit = records.stated_items[1] as Record<string, unknown>;
+    limit.source_quote = "keeping monthly retention above 96%";
+    limit.value = 96;
+    limit.direction = direction;
+    return records;
+  };
+
+  it("FLOOR — 'keeping monthly retention above 96%' binds to its target with `>=`", () => {
+    const records = retentionRecords("floor");
+    // ⚠ PRECONDITION PINNED IN-TEST. The trap is only set if the record really
+    // reaches the projector carrying `floor`; without this the case could pass
+    // for a fixture reason while the binder refused on something unrelated.
+    expect((records.stated_items[1] as Record<string, unknown>).direction).toBe("floor");
+
+    const p = project(records);
+    expect(p.dropped.map((d) => d.reason)).not.toContain("constraint_direction_unstated");
+
+    const targetId = idOfLabel(p, "Subscriber Churn Rate");
+    expect(p.goalConstraints).toHaveLength(1);
+    const row = p.goalConstraints[0]!;
+    // Bound by IDENTITY to the minted target id, not by "some row with value 96".
+    expect(row.node_id).toBe(targetId);
+    expect(row.operator).toBe(">=");
+    expect(row.value).toBe(96);
+    expect(row.unit).toBe("%");
+    expect(row.source_quote).toBe("keeping monthly retention above 96%");
+  });
+
+  it("FLOOR TWIN — the SAME record set as a `ceiling` binds `<=`, so the operator tracks the direction", () => {
+    const p = project(retentionRecords("ceiling"));
+    expect(p.goalConstraints).toHaveLength(1);
+    expect(p.goalConstraints[0]!.operator).toBe("<=");
+    // …and the two arms differ in the OPERATOR and nothing else about the row.
+    const floorRow = project(retentionRecords("floor")).goalConstraints[0]!;
+    expect(floorRow.node_id).toBe(p.goalConstraints[0]!.node_id);
+    expect(floorRow.value).toBe(p.goalConstraints[0]!.value);
+    expect(floorRow.operator).not.toBe(p.goalConstraints[0]!.operator);
+  });
+});
+
+/**
+ * ⛔⛔ A REFUSAL ABOUT A STATED LIMIT IS NEVER PUT TO A MODEL THAT CANNOT ACT ON IT.
+ *
+ * ── THE DEFECT THIS PINS ──────────────────────────────────────────────────
+ * Every refusal the stated-limit binder can raise asks for the same repair: a
+ * change to `applies_to_stated` / `applies_to_claim` on a `stated_items[]`
+ * entry. **`buildRecordsCompletionSchema()` exposes `claims` ONLY, with
+ * `additionalProperties: false`** — so that repair is not expressible on the
+ * completion turn, three times over (see the derivation on
+ * `isModelAnswerableAskItem`: the key is rejected before the answer is read, and
+ * `mergeCompletionClaims` discards the WHOLE completion if `stated_items` is
+ * present at all, taking the claims that would have repaired every other gap).
+ *
+ * Put to the model anyway, it is an advertised action terminating in refusal —
+ * the defect class this estate already shipped once on the Research CTA, and
+ * the exact trap `completion.ts` documents by name for `no_goal`.
+ *
+ * ⭐ THE MECHANISM IS THE KIND, NOT THE COPY. `isModelAnswerableAskItem` is
+ * keyed on `item.kind`. An item that reuses `unresolved_reference` inherits
+ * "answerable" from a kind whose OTHER members are genuinely answerable on the
+ * claim axis, and the schema is never consulted. Separating the detail copy does
+ * not separate the verdict.
+ *
+ * ⚠ THE CLASS IS SIX REASONS WIDE, NOT TWO — derived at the producer rather than
+ * listed. `projector.ts`'s `refuse()` helper raises `ambiguous_ref`,
+ * `ref_out_of_range`, `ref_target_not_a_node`, `missing_ref`,
+ * `constraint_target_not_measurable` and `constraint_target_unit_mismatch`, and
+ * the first four are the SAME reasons a causal-link endpoint raises — where they
+ * ARE answerable. So the discriminator cannot be the reason. It is
+ * `claim_kind === "stated_item"`, which the producer already stamps on exactly
+ * the rows the binder refused.
+ *
+ * ⚠ NOTHING IS WITHHELD FROM THE USER. These reasons all carry a user-facing
+ * notice kind in `NOTICE_KIND_BY_REASON`, a different path; and the item stays
+ * in `ask.items`, so telemetry and `shouldKeepCompletion` still see it. What is
+ * withheld is the instruction to a model that cannot follow it.
+ */
+describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD from the model", () => {
+  const askFor = (records: unknown) => {
+    const r = projectDraftRecords(records, BRIEF);
+    if (!r.ok) throw new Error(`seam refused: ${r.reason}: ${r.detail}`);
+    return { ask: enumerateCompletionAsk(r.records, r.projection), projection: r.projection };
+  };
+
+  const LIMIT_QUOTE = "keeping monthly churn under 4%";
+
+  /**
+   * ⭐ THE PREMISE, PINNED IN-TEST. Every case below is true only while the
+   * completion grammar has no `stated_items` axis. If that changes, these cases
+   * must be RE-DERIVED rather than quietly keep passing on a stale premise
+   * (trap 12b — a control pinned to something that moves).
+   */
+  it("PRECONDITION — the completion grammar exposes `claims` only, and is closed", () => {
+    const schema = buildRecordsCompletionSchema();
+    expect(Object.keys(schema.properties as Record<string, unknown>)).toEqual(["claims"]);
+    expect(schema.additionalProperties).toBe(false);
+  });
+
+  it("a target that cannot carry a threshold is asked ABOUT but not asked OF the model", () => {
+    const { ask, projection } = askFor(churnRecords({ applies_to_stated: 0 }, { linkToGoal: true }));
+    // The trap is genuinely set: the projector really refused, for this reason.
+    expect(projection.dropped.map((d) => d.reason)).toContain("constraint_target_not_measurable");
+
+    // Bound by IDENTITY — the exact kind and the user's exact quote.
+    const item = ask.items.find(
+      (i) => i.kind === "constraint_target_unbindable" && i.detail.includes(LIMIT_QUOTE),
+    );
+    expect(item, "the refusal must still be enumerated — the record stays honest").toBeDefined();
+    expect(modelAnswerableAskItems(ask)).not.toContain(item);
+  });
+
+  it("a cross-quantity refusal is likewise enumerated and withheld", () => {
+    const { ask, projection } = askFor({
+      stated_items: [
+        { kind: "goal", source_quote: "grow net revenue", role: "target" },
+        { kind: "figure", source_quote: "we spend £240,000 a year on support", value: 240000, unit: "£" },
+        {
+          kind: "constraint",
+          source_quote: LIMIT_QUOTE,
+          value: 4,
+          unit: "%",
+          direction: "ceiling",
+          applies_to_stated: 1,
+        },
+      ],
+      claims: [
+        { claim_kind: "causal_link", label: "support spend bears on revenue", from_stated: 1, to_stated: 0, effect: "negative" },
+      ],
+    });
+    expect(projection.dropped.map((d) => d.reason)).toContain("constraint_target_unit_mismatch");
+
+    const item = ask.items.find(
+      (i) => i.kind === "constraint_target_unbindable" && i.detail.includes(LIMIT_QUOTE),
+    );
+    expect(item).toBeDefined();
+    expect(modelAnswerableAskItems(ask)).not.toContain(item);
+  });
+
+  /**
+   * ⭐⭐ THE REASON IS SHARED WITH THE CAUSAL-LINK PATH, SO THE FIX MUST NOT BE
+   * KEYED ON IT. An out-of-range `applies_to_claim` raises `ref_out_of_range` —
+   * the same reason a bad `to_claim` raises, where the repair IS expressible.
+   * This is the case a two-reason fix would leave open.
+   */
+  it("an out-of-range reference on a LIMIT is withheld too, though its reason is shared", () => {
+    const { ask, projection } = askFor(churnRecords({ applies_to_claim: 99 }, { linkToGoal: true }));
+    expect(projection.dropped.map((d) => d.reason)).toContain("ref_out_of_range");
+
+    const item = ask.items.find(
+      (i) => i.kind === "constraint_target_unbindable" && i.detail.includes(LIMIT_QUOTE),
+    );
+    expect(item, "a bad limit reference is still a stated-limit refusal").toBeDefined();
+    expect(modelAnswerableAskItems(ask)).not.toContain(item);
+  });
+
+  /**
+   * ⭐⭐ THE DISCRIMINATING TWIN, and the half that proves this is a binding and
+   * not a blanket suppression. THE SAME REASON on a CAUSAL-LINK endpoint stays
+   * `unresolved_reference` and stays ANSWERABLE — because re-emitting a claim
+   * with a corrected `to_claim` is exactly what the completion grammar admits.
+   * Without this case, a fix that silenced the whole `unresolved_reference`
+   * family would pass every assertion above.
+   */
+  it("CONTRAST CONTROL — the same reason on a CAUSAL LINK stays answerable", () => {
+    const { ask, projection } = askFor({
+      stated_items: [{ kind: "goal", source_quote: "grow net revenue", role: "target" }],
+      claims: [
+        { claim_kind: "factor", label: "Subscriber Churn Rate" },
+        { claim_kind: "causal_link", label: "churn erodes revenue", from_claim: 0, to_stated: 0, effect: "negative" },
+        { claim_kind: "causal_link", label: "a link to nowhere", from_claim: 0, to_claim: 99, effect: "negative" },
+      ],
+    });
+    expect(projection.dropped.map((d) => d.reason)).toContain("ref_out_of_range");
+
+    const item = ask.items.find(
+      (i) => i.kind === "unresolved_reference" && i.detail.includes("a link to nowhere"),
+    );
+    expect(item, "a causal-link endpoint failure is answerable and must stay so").toBeDefined();
+    expect(modelAnswerableAskItems(ask)).toContain(item);
+  });
+
+  /**
+   * ⭐ THE COMPLETENESS ASSERTION, derived over the projection rather than over a
+   * list of reasons someone has to keep current (trap 12). Whatever the binder
+   * refuses, and for whatever reason, no item built from a `stated_item` row
+   * reaches the model while the grammar cannot express the repair.
+   */
+  it("NO STATED-LIMIT REFUSAL REACHES THE MODEL — over every reason the binder raises", () => {
+    const corpus: ReadonlyArray<readonly [string, unknown]> = [
+      ["goal target", churnRecords({ applies_to_stated: 0 }, { linkToGoal: true })],
+      ["both namespaces", churnRecords({ applies_to_claim: 0, applies_to_stated: 0 }, { linkToGoal: true })],
+      ["out of range", churnRecords({ applies_to_claim: 99 }, { linkToGoal: true })],
+      ["out of range, stated", churnRecords({ applies_to_stated: 99 }, { linkToGoal: true })],
+    ];
+
+    let statedRefusalsSeen = 0;
+    for (const [name, records] of corpus) {
+      const { ask, projection } = askFor(records);
+      const statedRows = projection.dropped.filter((d) => d.claim_kind === "stated_item");
+      // POSITIVE CONTROL, per arm: an arm that refused nothing proves nothing,
+      // and a corpus of four silent arms would pass this case vacuously.
+      expect(statedRows.length, `${name}: the binder must actually have refused`).toBeGreaterThan(0);
+      statedRefusalsSeen += statedRows.length;
+
+      // ⚠ KIND-AGNOSTIC ON PURPOSE. Filtering on the new kind would pass
+      // VACUOUSLY against a tree where the kind does not exist — the filter is
+      // empty either way and the case could never fail (trap 13). The question
+      // is "does any refusal ABOUT THIS STATED LIMIT reach the model", so it is
+      // asked over the REFUSED ROW'S OWN LABEL, whatever kind carries it.
+      const answerable = modelAnswerableAskItems(ask);
+      for (const row of statedRows) {
+        expect(
+          answerable.filter((i) => i.detail.includes(row.label)).map((i) => `${i.kind}: ${i.detail}`),
+          `${name}: no refusal about "${row.label}" may be put to the model`,
+        ).toEqual([]);
+      }
+    }
+    expect(statedRefusalsSeen).toBeGreaterThanOrEqual(corpus.length);
   });
 });

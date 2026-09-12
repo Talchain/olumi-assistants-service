@@ -339,10 +339,6 @@ export const DRAFT_RECORD_APPLIES_TO_FIELDS = {
   appliesToClaim: "applies_to_claim",
 } as const;
 
-/** Every applies-to field name, derived — never re-listed. */
-export const DRAFT_RECORD_APPLIES_TO_FIELD_NAMES = Object.values(
-  DRAFT_RECORD_APPLIES_TO_FIELDS,
-) as readonly string[];
 
 /**
  * ⚠ NOTE FOR THE ADAPTER, recorded because a silence here is invisible.
@@ -539,10 +535,28 @@ export function buildDraftRecordsSchema(): Record<string, unknown> {
             direction: { type: "string", enum: [...DRAFT_RECORD_DIRECTIONS] },
             // Design note 5. `option` only; the projector ignores it elsewhere.
             is_baseline: { type: "boolean" },
-            // ⭐ WHAT A `constraint` APPLIES TO. Keyed from
-            // DRAFT_RECORD_APPLIES_TO_FIELDS so the wire schema, the seam's
-            // carried-key set and the projector's binder all move together and
-            // none of them is a hand-maintained mirror of the others (trap 12).
+            // ⭐ WHAT A `constraint` APPLIES TO.
+            //
+            // ⚠⚠ THE CLAIM THAT USED TO BE HERE WAS FALSE, AND IT CITED TRAP 12
+            // WHILE COMMITTING IT. It said the wire schema, the seam's
+            // carried-key set and the projector's binder were all keyed from
+            // `DRAFT_RECORD_APPLIES_TO_FIELDS` so none was a hand-maintained
+            // mirror. Derived at the bytes: ONLY THE TWO LINES BELOW are. The
+            // seam's Zod (`seam.ts`), the seam's carried-key spread and the
+            // projector's binder all read the names as literals — necessarily,
+            // for the property ACCESSES — and the companion export
+            // `DRAFT_RECORD_APPLIES_TO_FIELD_NAMES` had ZERO consumers anywhere
+            // in the repo (contrast control in the same sweep:
+            // `DRAFT_RECORD_REF_FIELD_NAMES`, 2). A derivation claim over a
+            // symbol nobody reads is the mirror wearing the anti-mirror's
+            // clothes, so the claim and the dead export are both gone rather
+            // than restated.
+            //
+            // ⭐ WHAT ACTUALLY CATCHES A RENAME, stated so the next reader does
+            // not have to re-derive it: the PRE-REGISTERED GRAMMAR HASH. Change
+            // either name and the pin REDs. That is a real guard; it is simply
+            // not the one the deleted sentence described.
+            //
             // DELIBERATELY ABSENT FROM `required`: a model that does not know
             // what a limit applies to must be able to say so by omission, and
             // omission has to mean exactly today's behaviour.

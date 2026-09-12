@@ -70,6 +70,7 @@ import {
 } from "./grammar.js";
 import {
   type RecordProjection,
+  STATED_ITEM_DROP_KIND,
   UNRESCUABLE_EDGE_SHAPES,
   projectedKindAfterNormalisation,
 } from "./projector.js";
@@ -110,6 +111,26 @@ export interface CompletionAskItem {
      * ask that was SILENT about the one thing wrong with it.
      */
     | "no_goal"
+    /**
+     * ⭐⭐ A STATED LIMIT NAMED WHAT IT APPLIES TO AND THE PROJECTOR REFUSED THE
+     * BINDING — the reference did not resolve, or it resolved to something that
+     * cannot carry a threshold.
+     *
+     * ⛔ ITS OWN KIND, AND THE KIND IS THE WHOLE MECHANISM — not a copy change.
+     * `isModelAnswerableAskItem` is keyed on `kind`, so folding these into
+     * `unresolved_reference` makes them INHERIT "answerable" from a kind whose
+     * other members are genuinely answerable on the claim axis, and the grammar
+     * is never consulted. The repair here is a change to `applies_to_stated` /
+     * `applies_to_claim` on a `stated_items[]` entry, which the completion turn
+     * cannot express — see the derivation on `isModelAnswerableAskItem`. Put to
+     * the model anyway it is an advertised action terminating in refusal, the
+     * class this estate already shipped once on the Research CTA.
+     *
+     * ⚠ The user still sees every one of these: each reason carries a notice
+     * kind in `NOTICE_KIND_BY_REASON`, which is a different path, and the item
+     * stays in `ask.items` for telemetry and `shouldKeepCompletion`.
+     */
+    | "constraint_target_unbindable"
     | "no_chain_reaches_goal"
     | "no_outcome_or_risk"
     | "options_indistinguishable";
@@ -204,6 +225,12 @@ export interface CompletionAsk {
  */
 const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem["kind"]> = new Set([
   "no_goal",
+  // ⭐ SAME GATE, SAME REASON, DIFFERENT VERB. `no_goal` needs a `stated_items`
+  // entry ADDED; a refused limit needs a field on an EXISTING one CHANGED. Both
+  // are writes to the `stated_items` axis, and the completion grammar has no
+  // such axis — so both are withheld by the same derived verdict, and both
+  // become answerable automatically on the day it gains one.
+  "constraint_target_unbindable",
 ]);
 
 export function isModelAnswerableAskItem(item: CompletionAskItem): boolean {
@@ -625,15 +652,40 @@ export function enumerateCompletionAsk(
       case "ref_target_not_a_node":
       case "missing_ref":
       case "ambiguous_ref":
-        push({
-          kind: "unresolved_reference",
-          detail: `"${d.label}" — ${d.from_ref ?? "(no from)"} → ${d.to_ref ?? "(no to)"} did not resolve (${d.reason})`,
-          // NON-BLOCKING BY CONSTRUCTION: this edge is in `projection.dropped`,
-          // which is disjoint from `projection.graph.edges`. The validator is
-          // handed the graph, so it cannot raise anything about an edge that
-          // never entered it.
-          validatorCode: null,
-        });
+        // ⭐⭐ THESE FIVE REASONS ARRIVE FROM THE SAME RESOLVER ON TWO DIFFERENT
+        // PATHS, AND ONLY ONE OF THEM IS ANSWERABLE (trap 21 — two questions
+        // under one name).
+        //
+        // · a CAUSAL-LINK endpoint failed  → the repair is to re-emit the claim
+        //   with a corrected `to_claim` / `to_stated`, which is exactly what the
+        //   completion grammar admits. Answerable, and asked.
+        // · a STATED LIMIT's `applies_to_*` failed → the repair is a write to a
+        //   `stated_items[]` entry, which the completion grammar cannot express.
+        //   Unanswerable, and withheld by `isModelAnswerableAskItem`.
+        //
+        // ⛔ THE REASON CANNOT DISCRIMINATE — it is identical on both paths. The
+        // producer's own `claim_kind` can, and it is IMPORTED rather than
+        // re-spelled here so the two cannot drift (trap 12). Keying this on a
+        // list of reasons would have been a hand-maintained mirror of
+        // `projector.ts`'s `refuse()` helper, and would have left every shared
+        // reason open — a guard watching one door (trap 22b).
+        push(
+          d.claim_kind === STATED_ITEM_DROP_KIND
+            ? {
+                kind: "constraint_target_unbindable",
+                detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} did not resolve (${d.reason}), so this limit is not attached to anything on the model`,
+                validatorCode: null,
+              }
+            : {
+                kind: "unresolved_reference",
+                detail: `"${d.label}" — ${d.from_ref ?? "(no from)"} → ${d.to_ref ?? "(no to)"} did not resolve (${d.reason})`,
+                // NON-BLOCKING BY CONSTRUCTION: this edge is in
+                // `projection.dropped`, which is disjoint from
+                // `projection.graph.edges`. The validator is handed the graph, so
+                // it cannot raise anything about an edge that never entered it.
+                validatorCode: null,
+              },
+        );
         break;
       // ⭐⭐ THE COPY NAMES THE RULE THAT FIRED, AND THE OLD SENTENCE WAS FALSE.
       //
@@ -666,7 +718,7 @@ export function enumerateCompletionAsk(
       // asked for is the binding.
       case "constraint_target_not_measurable":
         push({
-          kind: "unresolved_reference",
+          kind: "constraint_target_unbindable",
           detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} is not a measured quantity, so it cannot carry a threshold; point this limit at the factor or outcome it bounds`,
           // NON-BLOCKING BY CONSTRUCTION, same as every reason above it: the
           // refusal withheld a BINDING, and the graph the validator is handed is
@@ -676,7 +728,7 @@ export function enumerateCompletionAsk(
         break;
       case "constraint_target_unit_mismatch":
         push({
-          kind: "unresolved_reference",
+          kind: "constraint_target_unbindable",
           detail: `"${d.label}" — ${d.to_ref ?? "(no target)"} measures a different quantity from this limit, so binding it would change what the limit means; point it at the node measured in the same unit`,
           validatorCode: null,
         });

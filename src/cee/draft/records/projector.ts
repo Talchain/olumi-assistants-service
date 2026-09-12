@@ -358,6 +358,24 @@ export interface RecordProvenance {
   readonly label_placeholder?: boolean;
 }
 
+/**
+ * ⭐⭐ THE `claim_kind` A DISCLOSURE CARRIES WHEN ITS SUBJECT IS A
+ * `stated_items[]` ENTRY RATHER THAN A `claims[]` ENTRY.
+ *
+ * ⛔ LOAD-BEARING BEYOND LABELLING, and that is why it is a constant rather than
+ * three string literals. `enumerateCompletionAsk` reads it to decide whether a
+ * refusal can be PUT TO THE MODEL at all: the repair for a stated-item refusal
+ * is a change to a `stated_items[]` field, and the completion grammar exposes
+ * `claims` only (`buildRecordsCompletionSchema`, `additionalProperties: false`).
+ * Several reasons — `ambiguous_ref`, `ref_out_of_range`, `ref_target_not_a_node`,
+ * `missing_ref` — arrive on BOTH paths from the same resolver, so the reason
+ * cannot tell the two apart and this label is the only thing that can.
+ *
+ * Imported by the consumer rather than re-spelled, so the two cannot drift into
+ * a hand-maintained mirror of each other (trap 12).
+ */
+export const STATED_ITEM_DROP_KIND = "stated_item";
+
 /** A reference the model emitted that the projector could not resolve. */
 export interface DroppedRecordRef {
   readonly claim_index: number;
@@ -2601,7 +2619,7 @@ function projectOnce(
       // says so. `enumerateCompletionAsk` turns this disclosure into a question.
       dropped.push({
         claim_index: -1,
-        claim_kind: "stated_item",
+        claim_kind: STATED_ITEM_DROP_KIND,
         label: quote,
         node_id: id,
         reason: "constraint_direction_unstated",
@@ -2811,7 +2829,7 @@ function projectOnce(
       const valueLandedSomewhere = node.observed_state !== undefined;
       dropped.push({
         claim_index: -1,
-        claim_kind: "stated_item",
+        claim_kind: STATED_ITEM_DROP_KIND,
         label: quote,
         node_id: id,
         reason: valueLandedSomewhere
@@ -3158,7 +3176,7 @@ function projectOnce(
     const refuse = (reason: DroppedRecordRef["reason"]): void => {
       dropped.push({
         claim_index: -1,
-        claim_kind: "stated_item",
+        claim_kind: STATED_ITEM_DROP_KIND,
         label: binding.quote,
         node_id: binding.nodeId,
         reason,
