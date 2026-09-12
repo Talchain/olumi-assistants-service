@@ -4020,6 +4020,14 @@ function findUndevelopedDuplicates(projection: OneProjection): DemoteDecision[] 
  *
  * The set of drafts that survive can only GROW: every option this declines
  * reaches the enforcement stage exactly as it does today.
+ *
+ * ⚠ THAT IS A CLAIM ABOUT WHICH DRAFTS SURVIVE, NOT ABOUT WHAT IS WRITTEN INTO
+ * THEM. This placement converts a class of DECLINES into WRITES — an option
+ * whose repaired signature collides with a reconcilable model option now
+ * completes where the enforcement stage would have declined. Every one of those
+ * writes rests on `resolveRepairedLevel`'s corroboration, including its unit
+ * conjunct (#1462). Until this PR was rebased that dependency was enforced by
+ * the branch stacking; on `staging` it is enforced by nothing but this note.
  */
 function repairStatedOptionTargets(projection: OneProjection): void {
   // The gate's OWN precondition, read from the gate rather than restated as a
