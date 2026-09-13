@@ -826,12 +826,53 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
     });
   });
 
-  it("S4 ⭐ twin: the same bare amount INSIDE the user's own goal sentence binds", () => {
+  it("S4 ⛔ …and the user's goal sentence does NOT license it either — quotation is not metric binding (Codex P1, 13 Sep)", () => {
+    // The first round-5 cut let a bare amount inside the stamped goal sentence
+    // mint. That re-licensed the MODEL's metric one level down: "For ARR, we
+    // want to reach £64k" + label "Reach £64k MRR" minted an MRR target from an
+    // ARR statement. The label's head noun must appear in the user's sentence.
     const brief = "We're a small SaaS. We want to reach £42k. Churn is fine.";
-    const r = stated("Reach £42k MRR", brief, { goalSourceQuote: "We want to reach £42k." });
+    expect(stated("Reach £42k MRR", brief, { goalSourceQuote: "We want to reach £42k." })).toEqual({
+      ok: false,
+      refusal: "metric_unbound",
+      briefQuote: "£42k",
+    });
+    // THE TWIN: the same sentence naming the label's metric binds.
+    const r = stated("Reach £42k MRR", "We want to reach £42k MRR.", { goalSourceQuote: "We want to reach £42k MRR." });
     expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.target.value).toBe(42_000);
+  });
+
+  it("S18 ⛔ Codex P1 (13 Sep): the user's metric named OUTSIDE the governor window wins over the label's", () => {
+    const brief = "For ARR, we want to reach £64k.";
+    expect(stated("Reach £64k MRR", brief, { goalSourceQuote: brief })).toEqual({
+      ok: false,
+      refusal: "metric_unbound",
+      briefQuote: "£64k",
+    });
+    // discriminating control: ONLY the label changes → mints
+    const r = stated("Reach £64k ARR", brief, { goalSourceQuote: brief });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.target.value).toBe(64_000);
+    // and the metric named EARLIER in the sentence binds without a quote too
+    expect(stated("Reach £64k ARR", "Our ARR is £30k and we want to reach £64k.").ok).toBe(true);
+    expect(stated("Reach £64k MRR", "Our ARR is £30k and we want to reach £64k.").ok).toBe(false);
+  });
+
+  it("S19 ⛔ Codex P1 (13 Sep): a desire prefix does not turn a CHANGE amount into a level", () => {
+    expect(stated("Reach £64k MRR", "We want to increase MRR by £64k.")).toEqual({
+      ok: false,
+      refusal: "stated_as_change_amount",
+      briefQuote: "£64k",
+    });
+    expect(stated("Reach £64k MRR", "Increase MRR by £64k.")).toMatchObject({ ok: false });
+    // twins: the LEVEL forms
+    expect(stated("Reach £64k MRR", "We want to increase MRR to £64k.").ok).toBe(true);
+    expect(stated("Reach £64k MRR", "We want to grow MRR to £64k.").ok).toBe(true);
+    // and a "from" amount is the baseline, never the level
+    expect(stated("Reach £42k MRR", "We want to grow MRR from £42k to £64k.")).toMatchObject({
+      ok: false,
+      refusal: "stated_as_current_level",
+    });
   });
 
   it("S4 ⛔ a goal sentence that does NOT contain the occurrence withholds, even when the metric words bind", () => {
@@ -1090,6 +1131,40 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
       const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
       expect(goal.goal_threshold_raw).toBeUndefined();
       expect(res.goalThresholdsMinted).toEqual([]);
+    });
+
+    it("S18/S19 ⛔ Codex's P1 cases through BOTH routes, with the projector's stated provenance on the goal", async () => {
+      const cases: Array<[label: string, brief: string, mints: boolean]> = [
+        ["Reach £64k MRR", "For ARR, we want to reach £64k.", false],
+        ["Reach £64k ARR", "For ARR, we want to reach £64k.", true],
+        ["Reach £64k MRR", "We want to increase MRR by £64k.", false],
+        ["Reach £64k MRR", "We want to increase MRR to £64k.", true],
+      ];
+      for (const [label, brief, mints] of cases) {
+        for (const skipRoute of [false, true]) {
+          const graph = founderGraph();
+          const goalNode = graph.nodes.find((n: any) => n.id === "552bd1c0");
+          goalNode.label = label;
+          goalNode.provenance = { provenance_class: "stated", source_quote: brief };
+          if (skipRoute) {
+            graph.nodes.push(
+              { id: "opt1", kind: "option", label: "Hire", data: { interventions: { f1: 0.9 } } },
+              { id: "f1", kind: "factor", label: "Sales Spend", data: { value: 0.5 } },
+            );
+          }
+          const res = await enrichGraphWithFactorsAsync(graph, brief, { minConfidence: 0.6 });
+          const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+          const tag = `${label} / ${brief} / ${skipRoute ? "skip" : "loop"}`;
+          if (mints) {
+            expect(goal.goal_threshold_raw, tag).toBe(64_000);
+            expect(res.goalThresholdsMinted, tag).toEqual(["552bd1c0"]);
+          } else {
+            expect(goal.goal_threshold_raw, tag).toBeUndefined();
+            expect(goal.goal_threshold, tag).toBeUndefined();
+            expect(res.goalThresholdsMinted, tag).toEqual([]);
+          }
+        }
+      }
     });
 
     it("⭐ the user's own goal sentence, stamped by the projector, is READ by this route", async () => {

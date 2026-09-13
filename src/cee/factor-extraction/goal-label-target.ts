@@ -226,7 +226,9 @@ export type GoalLabelTargetRefusal =
   /** Governed, but the construction names NO metric and no goal sentence binds it. */
   | "metric_unbound"
   /** Governed, but the occurrence lies OUTSIDE the sentence the user wrote as their goal. */
-  | "outside_goal_statement";
+  | "outside_goal_statement"
+  /** Governed, but the amount is a CHANGE ("increase MRR by £64k") or a baseline ("from £42k"), not a level. */
+  | "stated_as_change_amount";
 
 /**
  * A target quantity read from the goal label and attested in the brief.
@@ -702,6 +704,30 @@ function labelWordSet(label: string): Set<string> {
     label.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 0).map(singularise),
   );
 }
+/**
+ * The label's HEAD metric noun: the last word of the goal label that is not a
+ * number, a temporal word, a stop/skip token or a goal/change verb form —
+ * "Reach £30k MRR Within 18 Months" → "mrr"; "Reach 18 Enterprise Accounts" →
+ * "account"; "Hold Price At £49pcm" → "price". `undefined` for a wordless label.
+ *
+ * ⭐ THE BINDING IS THROUGH THE USER'S WORDS OR NOT AT ALL (Codex, 13 Sep, on
+ * "For ARR, we want to reach £64k" + label "Reach £64k MRR"): the label is
+ * model-authored, so its metric is licensed only when the user's own governed
+ * SENTENCE carries that noun. A quoted occurrence proves the figure is in the
+ * brief; it never proves the model's metric reading. Direction is deliberate:
+ * an unrecognised label verb counted as a noun costs a withhold (a gap), never
+ * a mint.
+ */
+function labelHeadMetricNoun(label: string): string | undefined {
+  const words = label
+    .toLowerCase()
+    .split(/[^a-z0-9%£$€]+/)
+    .filter((w) => w.length > 0 && /^[a-z]/.test(w))
+    .filter((w) => isMetricWord(w) && !/^(?:zero|nil|none|half|double|triple)$/.test(w));
+  const last = words[words.length - 1];
+  return last === undefined ? undefined : singularise(last);
+}
+
 function isMetricWord(raw: string): boolean {
   const w = raw.toLowerCase().replace(/[^a-z0-9'-]/g, "");
   if (w.length === 0 || NON_METRIC_TOKENS.has(w)) return false;
@@ -844,6 +870,12 @@ function judgeOccurrence(
   }
 
   // ── C1 stops: closed-class screens on the governed occurrence ─────────────
+  // FRAME, before anything else and for every construction alike: "by" makes
+  // the amount a CHANGE, "from" a BASELINE — neither is a level, whatever
+  // governs it ("we want to increase MRR BY £64k" is not an MRR target; Codex,
+  // 13 Sep: a desire prefix must not bypass the change/level distinction).
+  if (/\bby\s*$/i.test(window)) return { ok: false, refusal: "stated_as_change_amount", rank: 5 };
+  if (/\bfrom\s*$/i.test(window)) return { ok: false, refusal: "stated_as_current_level", rank: 5 };
   if (NEGATION_MARKER.test(window)) return { ok: false, refusal: "negated_target", rank: 5 };
   if (CONDITIONAL_MARKER.test(sentence)) return { ok: false, refusal: "hypothetical_target", rank: 5 };
   const afterText = brief.slice(occ.end, occ.end + 40);
@@ -860,27 +892,37 @@ function judgeOccurrence(
     }
   }
 
-  // ── C2: the metric is bound by the user's words ───────────────────────────
-  const metricWords = [...bridgeWords, ...trailingWords(brief, occ.end)];
+  // ── C2: the metric is bound by the user's words, in BOTH directions ───────
+  // (a) the construction's own metric words must all be in the label;
+  // (b) the label's head metric noun must be in the user's governed SENTENCE
+  //     (not just the governor window — "For ARR, we want to reach £64k" names
+  //     its metric before the comma, and a label reading "MRR" must not win);
+  // (c) the user's goal sentence, when stamped, is a NEGATIVE guard only: an
+  //     occurrence outside it withholds; an occurrence inside it licenses
+  //     nothing on its own.
   if (quoteSpan !== "absent" && quoteSpan !== "unplaceable") {
     const inside = occ.index >= quoteSpan[0] && occ.end <= quoteSpan[1];
     if (!inside) return { ok: false, refusal: "outside_goal_statement", rank: 6 };
   }
-  if (metricWords.length === 0) {
-    if (quoteSpan === "absent" || quoteSpan === "unplaceable") {
-      return { ok: false, refusal: "metric_unbound", rank: 6 };
-    }
-    return { ok: true, rank: 9 };
-  }
+  const metricWords = [...bridgeWords, ...trailingWords(brief, occ.end)];
   // A label carrying NO words at all ("£30k") names no metric to conflict
-  // with; the user's own metric words stand alone and bind by default. This
-  // is not the removed escape hatch — that admitted a construction with no
-  // user-stated metric on the strength of the LABEL's; here the user stated
-  // one and the label is silent.
+  // with; the user's own metric words stand alone. Not the removed escape
+  // hatch — that licensed the LABEL's metric; here the label is silent.
   const labelHasWords = [...labelWords].some((w) => /^[a-z]/.test(w));
   if (labelHasWords) {
     const unbound = metricWords.filter((w) => !labelWords.has(singularise(w.toLowerCase())));
     if (unbound.length > 0) return { ok: false, refusal: "metric_mismatch", rank: 7 };
+    const head = labelHeadMetricNoun(label);
+    if (head !== undefined) {
+      const sentenceWords = new Set(
+        sentence.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 0).map(singularise),
+      );
+      if (!sentenceWords.has(head)) {
+        return { ok: false, refusal: metricWords.length === 0 ? "metric_unbound" : "metric_mismatch", rank: 7 };
+      }
+    }
+  } else if (metricWords.length === 0) {
+    return { ok: false, refusal: "metric_unbound", rank: 6 };
   }
   return { ok: true, rank: 9 };
 }
