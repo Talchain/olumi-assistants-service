@@ -942,6 +942,53 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
     });
   });
 
+  it("S15 ⛔ a level ACHIEVED or produced today is a statement, not an aim — found by the author's own probe, 13 Sep", () => {
+    // Every one of these MINTED at the first round-5 cut: a bare subject +
+    // target verb ("we hit", "we generate") read as a target. A subject + verb
+    // is a report; an aim arrives through an infinitive, a modal, a desire
+    // lead, or at clause start.
+    for (const brief of [
+      "We've hit £42k MRR and want to double it.",
+      "We just hit £42k MRR.",
+      "We hit £42k MRR in March.",
+      "We generate £42k MRR from 300 customers.",
+      "We deliver £42k MRR to the group.",
+    ]) {
+      expect(stated("Reach £42k MRR", brief).ok, brief).toBe(false);
+    }
+    // twins: the same verbs as AIMS
+    for (const brief of [
+      "We will hit £42k MRR by June.",
+      "Reaching £42k MRR is the goal.",
+      "We should reach £42k MRR next year.",
+      "We want to generate £42k MRR.",
+    ]) {
+      expect(stated("Reach £42k MRR", brief).ok, brief).toBe(true);
+    }
+  });
+
+  it("S16 ⛔ a change verb without 'to' is a RATE or a DELTA, not a level", () => {
+    expect(stated("Reach 22% Growth", "We grow 22% a year.").ok).toBe(false);
+    expect(stated("Reach 22% Growth", "We are growing 22% year on year.").ok).toBe(false);
+    expect(stated("Reach £42k MRR", "Increase MRR by £42k.").ok).toBe(false);
+    // twins: the level form, with "to"
+    expect(stated("Reach £42k MRR", "We want to grow MRR to £42k.").ok).toBe(true);
+    expect(stated("Reach £42k MRR", "Grow MRR to £42k.").ok).toBe(true);
+  });
+
+  it("S17 ⛔ Paul's enterprise brief, as Core described it: six currency/percent candidates, ONE target — and it is a bound", () => {
+    // Outside-authored parameters (Core, PR38 22:33Z): options at £2.5m / £800k /
+    // £6–9m, churn 11%, "growing 22%", target NRR >110%. Nothing may mint; the
+    // one genuine target is a BOUND and withholds by name.
+    const ENT =
+      "We're growing 22% year on year with churn at 11%. The options are a £2.5m acquisition, an £800k hiring plan, or a £6-9m raise. Our target is NRR above 110%.";
+    expect(stated("Reach 110% NRR", ENT)).toMatchObject({ ok: false, refusal: "limit_direction_not_representable" });
+    expect(stated("Reach 22% Growth", ENT).ok).toBe(false);
+    expect(stated("Reach £2.5m Revenue", ENT).ok).toBe(false);
+    expect(stated("Cut Churn To 11%", ENT).ok).toBe(false);
+    expect(stated("Reach £800k ARR", ENT).ok).toBe(false);
+  });
+
   it("S14 ⛔ the five instances the round-4 comment listed, now asserted by name", () => {
     expect(stated("Reach 12% Conversion", "our conversion is 12% today")).toMatchObject({
       ok: false,

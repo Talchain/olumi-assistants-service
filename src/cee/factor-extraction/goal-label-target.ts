@@ -576,13 +576,22 @@ const DESIRE_GOVERNOR = new RegExp(
  * in that same shape only. Present-tense and gerund forms; the `-ed` past is
  * deliberately absent (a level REACHED is history, not a target).
  */
-const TARGET_VERB_STEMS = Array.from(
-  new Set<string>([
-    ...TARGET_VERBS.map((v) => v.split(/\s+/)[0]!),
-    "achieve", "reach", "grow", "maximise", "maximize", "increase", "improve", "boost", "raise",
-    "take", "get", "bring", "deliver", "generate",
-  ]),
-).filter((v) => !/^(?:keep|reduce)$/.test(v));
+/**
+ * PURE target verbs take the amount directly ("reach £42k", "hit 12%"); the
+ * CHANGE verbs compound-goal reads, plus `take|get|bring`, govern only through
+ * an explicit "to" ("grow MRR TO £42k", "take conversion TO 30%") — without it
+ * "we grow 22% a year" is a rate report and "increase MRR by £42k" is a delta,
+ * neither a level. `generate|deliver` are NOT here: "we generate £42k MRR" is
+ * a statement of current output as often as an aim (measured 13 Sep: it
+ * minted).
+ */
+const PURE_TARGET_VERB_STEMS = Array.from(
+  new Set<string>([...TARGET_VERBS.map((v) => v.split(/\s+/)[0]!), "achieve", "reach", "hit"]),
+).filter((v) => !/^(?:keep|reduce|grow)$/.test(v));
+const CHANGE_TO_VERB_STEMS = [
+  "grow", "maximise", "maximize", "increase", "improve", "boost", "raise", "take", "get", "bring", "lift", "push",
+];
+const TARGET_VERB_STEMS = [...PURE_TARGET_VERB_STEMS, ...CHANGE_TO_VERB_STEMS];
 
 /** Inflections of a verb stem: -s/-es/-ing, with English's doubled final consonant ("get" → "getting"). */
 function verbForms(stem: string): string {
@@ -592,9 +601,25 @@ function verbForms(stem: string): string {
 }
 
 const TARGET_VERB_GOVERNOR = new RegExp(
-  `\\b(?<lead>[A-Za-z']+)?\\s*\\b(?:${TARGET_VERB_STEMS.map(verbForms).join("|")})\\b\\s+(?:(?:a|an|the|our|my)\\s+)?(?<bridge>${bridge(3)})(?:(?:to|of|at)\\s+)?$`,
+  `\\b(?<lead>[A-Za-z']+)?\\s*\\b(?<verb>${PURE_TARGET_VERB_STEMS.map(verbForms).join("|")})\\b\\s+(?:(?:a|an|the|our|my)\\s+)?(?<bridge>${bridge(3)})(?:(?:of|at)\\s+)?$`,
   "i",
 );
+const CHANGE_TO_GOVERNOR = new RegExp(
+  `\\b(?<lead>[A-Za-z']+)?\\s*\\b(?<verb>${CHANGE_TO_VERB_STEMS.map(verbForms).join("|")})\\b\\s+(?:(?:a|an|the|our|my)\\s+)?(?<bridge>${bridge(3)})to\\s+(?:(?:a|an|the)\\s+)?$`,
+  "i",
+);
+
+/**
+ * A bare subject + verb is a STATEMENT ("we hit £42k MRR", "we generate £42k")
+ * — a fact or a habit, not an aim. A target verb governs only through an
+ * infinitive/modal ("to reach", "will hit"), a desire lead (handled above), or
+ * at clause start (imperative/gerund: "Reach £42k by June", "Reaching £42k…").
+ * `target(ing)` is exempt: it is aspiration in every form.
+ */
+const BARE_SUBJECT_LEAD =
+  /^(?:we|i|they|it|you|he|she|we're|we've|i'm|i've|they're|they've|it's|you're|revenue|mrr|arr|sales|churn|growth|the|our|my|this|that)$/i;
+const ACHIEVEMENT_MARKER =
+  /\b(?:'ve|have|has|had|just|already|recently|finally|now)\s+(?:already\s+|just\s+|now\s+|recently\s+)?(?:hit|reached|achieved|got|grown|passed|crossed|delivered|generated|made)\b|\b(?:hit|reached|achieved|passed|crossed)\s+(?:[A-Za-z£$€0-9.,%k]+\s+){0,4}(?:in|during|back\s+in|as\s+of)\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|q[1-4]|20\d\d|19\d\d)\b/i;
 
 /**
  * A BOUND, not a target: carries a direction the level mint cannot express.
@@ -684,6 +709,9 @@ function isMetricWord(raw: string): boolean {
   if (PARTICIPLE_OR_ADVERB.test(w) && w.length > 4) return false;
   if (TARGET_VERB_STEMS.some((v) => w === v || w === `${v}s` || w === `${v}es`)) return false;
   if (/^(?:want|wants|aim|aims|plan|plans|need|needs|hope|hopes|intend|intends|like|target|targets|goal|goals|objective|objectives|threshold|thresholds)$/.test(w)) return false;
+  // Common verbs of producing/obtaining that sit between a desire lead and the
+  // amount ("want to GENERATE £42k") — closed, and none names a metric.
+  if (/^(?:generate|generates|deliver|delivers|produce|produces|make|makes|build|builds|create|creates|sell|sells|sign|signs|close|closes|win|wins|book|books|add|adds|land|lands|secure|secures|earn|earns|collect|collects|convert|converts|see|sees|have|has|get|gets|be)$/.test(w)) return false;
   return true;
 }
 
@@ -782,6 +810,13 @@ function judgeOccurrence(
   const tryGovernor = (re: RegExp, kind: GovernorKind): boolean => {
     const m = re.exec(window);
     if (!m) return false;
+    const verb = (m.groups?.verb ?? "").toLowerCase();
+    const leadToken = (m.groups?.lead ?? "").toLowerCase();
+    // A bare subject + target verb is a statement, not an aim (see
+    // BARE_SUBJECT_LEAD); "targeting" is exempt as aspiration in every form.
+    if (kind === "target_verb" && !verb.startsWith("target") && BARE_SUBJECT_LEAD.test(leadToken)) {
+      return false;
+    }
     governor = kind;
     lead = m.groups?.lead;
     // Words between the governor and the amount, minus function and verb
@@ -790,7 +825,9 @@ function judgeOccurrence(
     return true;
   };
   if (governor === undefined && !tryGovernor(GOAL_WORD_GOVERNOR, "goal_word")) {
-    if (!tryGovernor(DESIRE_GOVERNOR, "desire")) tryGovernor(TARGET_VERB_GOVERNOR, "target_verb");
+    if (!tryGovernor(DESIRE_GOVERNOR, "desire") && !tryGovernor(TARGET_VERB_GOVERNOR, "target_verb")) {
+      tryGovernor(CHANGE_TO_GOVERNOR, "target_verb");
+    }
   }
 
   if (governor === undefined) {
@@ -799,15 +836,20 @@ function judgeOccurrence(
       return { ok: false, refusal: "stated_as_current_level", rank: 2 };
     }
     if (SPEND_GOVERNOR.test(window)) return { ok: false, refusal: "stated_as_spend", rank: 2 };
-    if (PAST_MARKER.test(window)) return { ok: false, refusal: "stated_as_past", rank: 2 };
+    const reportedSpan = window + brief.slice(occ.index, occ.end + 40);
+    if (PAST_MARKER.test(window) || ACHIEVEMENT_MARKER.test(reportedSpan)) {
+      return { ok: false, refusal: "stated_as_past", rank: 2 };
+    }
     return { ok: false, refusal: "quantity_not_stated_as_target", rank: 1 };
   }
 
   // ── C1 stops: closed-class screens on the governed occurrence ─────────────
   if (NEGATION_MARKER.test(window)) return { ok: false, refusal: "negated_target", rank: 5 };
   if (CONDITIONAL_MARKER.test(sentence)) return { ok: false, refusal: "hypothetical_target", rank: 5 };
-  if (PAST_MARKER.test(window)) return { ok: false, refusal: "stated_as_past", rank: 5 };
   const afterText = brief.slice(occ.end, occ.end + 40);
+  if (PAST_MARKER.test(window) || ACHIEVEMENT_MARKER.test(window + brief.slice(occ.index, occ.end) + afterText)) {
+    return { ok: false, refusal: "stated_as_past", rank: 5 };
+  }
   if (PRESENT_STATE_MARKER.test(window) || /^\s*(?:[A-Za-z]+\s+){0,2}(?:currently|today|now|presently|at\s+the\s+moment|right\s+now)\b/i.test(afterText)) {
     return { ok: false, refusal: "stated_as_current_level", rank: 5 };
   }
