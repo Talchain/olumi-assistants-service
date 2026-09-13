@@ -32,7 +32,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 
 import type { PendingAction } from '../../orchestrator-v5/session/pending-action.js';
-import type { PipelineStageEvent } from '../../cee/unified-pipeline/stage-stream-context.js';
+import type { PipelineStageEvent } from '../../cee/unified-pipeline/types.js';
 import { runWithStageStream } from '../../cee/unified-pipeline/stage-stream-context.js';
 import { _resetConfigCache } from '../../config/index.js';
 
