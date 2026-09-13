@@ -30,7 +30,6 @@ import { join } from 'node:path'
  */
 
 const SRC = join(__dirname, '..', 'turn-executor.ts')
-const ROOT = join(__dirname, '..', '..')
 
 /**
  * ⛔ THE HONEST GAP, PINNED AS AN EXACT SET.
