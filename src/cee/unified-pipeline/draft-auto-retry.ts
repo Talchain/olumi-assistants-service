@@ -117,21 +117,29 @@ export function decideDraftAutoRetry(
   if (retryClass === null) {
     return { retry: false, reason: "not_retryable_class" };
   }
-  // ⭐⭐ A RE-DRAFT CANNOT INVENT A GOAL THE USER NEVER STATED.
+  // ⭐⭐ THE RETRY WAS MEASURED NEVER TO RESCUE THIS CLASS.
+  //
+  // ⚠ THE CLAIM IS THE MEASUREMENT, NOT AN IMPOSSIBILITY PROOF. What was
+  // measured is a rate and a cost; "a re-draft CANNOT invent a goal" is a
+  // stronger statement about a stochastic generator than any capture can
+  // support, and this comment used to make it (review, 13 Sep).
   //
   // The retry exists because the two funded classes are STOCHASTIC — the same
   // brief drafts cleanly in a neighbouring run, which is measured and is why
-  // `retryable: true` is honest for them. A self-inflicted goal gap is NOT
-  // stochastic: the placeholder is minted deterministically from a brief that
-  // designates no objective, so attempt 2 starts from the same contentless goal
-  // and fails the same way.
+  // `retryable: true` is honest for them. The self-inflicted goal gap behaved
+  // differently in every capture we have: the placeholder is minted
+  // deterministically from a brief that designates no objective, so attempt 2
+  // began from the same contentless goal and returned the same codes.
   //
   // MEASURED on the served build `2212ae0`: across all 11 captured short-brief
   // failures the retry ran (`{attempted: true, attempts: 2}`, zero
   // `skipped_reason`), produced IDENTICAL codes both times, RESCUED 0 OF 11,
-  // and spent ~18s doing it. This is the one conjunct that was wrong about this
-  // class, and it is checked BEFORE affordability because an unaffordable retry
-  // and an impossible one are different facts and the user is owed the true one.
+  // and spent ~18s doing it. That is the whole basis for declining it: an
+  // observed 0/11 rescue rate at ~18s, not a proof that a rescue is impossible.
+  //
+  // Checked BEFORE affordability because the two skips are different facts and
+  // the user is owed the true one: "no budget to retry" invites a retry by
+  // hand, which on this class has never yet produced a different outcome.
   if (readGoalNeverStated(result.body)) {
     return { retry: false, reason: "goal_never_stated" };
   }
@@ -466,17 +474,18 @@ export const GOAL_NEVER_STATED_HINTS: readonly string[] = [
 
 /**
  * Return a copy of `result` whose recovery copy is honest that no automatic
- * retry was made BECAUSE ONE COULD NOT HELP, and whose details disclose the
- * skip on the wire (`auto_retry: { attempted: false, attempts: 1,
+ * retry was made BECAUSE IT WAS MEASURED NOT TO HELP ON THIS CLASS (0 of 11
+ * captured failures rescued, identical codes both attempts, ~18s spent), and
+ * whose details disclose the skip on the wire (`auto_retry: { attempted: false, attempts: 1,
  * skipped_reason: "goal_never_stated" }` — fixed shape, fixed enum reason, no
  * user content, riding the already-allowlisted `auto_retry` key).
  *
  * ⚠ A DIFFERENT SKIP FROM `applyRetryUnaffordableCopy`, AND THE DISTINCTION IS
  * THE POINT (trap 21). That one means *"we ran out of budget to try again"* —
- * a fact about this request. This means *"trying again cannot work"* — a fact
- * about the failure. They share a shape and must not share a reason: a user
- * told "no time to retry" will retry by hand, which here reproduces the
- * failure. Everything else — status code, `code`, `retryable`, the codes-only
+ * a fact about this request. This means *"retrying has not rescued this class
+ * in any run we have measured"* — a fact about the failure. They share a shape
+ * and must not share a reason: a user told "no time to retry" will retry by
+ * hand, which on every captured instance of this class reproduced the failure. Everything else — status code, `code`, `retryable`, the codes-only
  * validator mirror, `last_phase`, `goal_never_stated` — is preserved
  * byte-for-byte. Pure: the input is not mutated.
  */

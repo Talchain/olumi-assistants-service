@@ -4522,6 +4522,27 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       explicitGenerateDraft ||
       clarifyV2DraftBrief !== null
     ) {
+      // ⭐ ONE AUTHORITY FOR "THE BRIEF THIS DRAFT IS ABOUT" (trap 21).
+      //
+      // This value used to be an inline ternary in the argument list below and
+      // nowhere else. The goal-never-stated exit in the catch block needs the
+      // SAME string — it must retain the brief the pipeline actually drafted
+      // from so the user's answer resumes it — and re-deriving it there would
+      // create two expressions for one concept that can silently disagree.
+      // Computed once, read twice: the argument, and the resumable round.
+      const draftBriefOverride: string | null =
+        clarifyV2DraftBrief !== null
+          ? clarifyV2DraftBrief
+          : explicitGenerateDraft && explicitGenerateBrief !== null
+            ? explicitGenerateBrief.brief
+            : null;
+      // The dispatcher's own resolution, mirrored deliberately:
+      // `effectiveBrief = params.briefOverride ?? payload.message`
+      // (`draft-graph-dispatch.ts:591`). Anything the pipeline drafted from is
+      // in here; `ingress.message` alone is NOT that string whenever an
+      // override is live, which is exactly the case that loses the user's
+      // alternatives and constraints.
+      const draftEffectiveBrief: string = draftBriefOverride ?? ingress.message;
       // V4 cordon: dispatchDraftGraph delegates to the V4 graph-synthesis
       // pipeline. V5 has no deterministic draft_graph handler yet. See
       // Docs/v5/v5-cordon.md §1 for trigger conditions and replacement plan.
@@ -4543,11 +4564,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // behaviour there is bit-identical to before. Clarify v2's
           // answer-augmented brief (flag-gated resume) takes precedence —
           // when set, it already incorporates the explicit-generate brief.
-          ...(clarifyV2DraftBrief !== null
-            ? { briefOverride: clarifyV2DraftBrief }
-            : explicitGenerateDraft && explicitGenerateBrief !== null
-              ? { briefOverride: explicitGenerateBrief.brief }
-              : {}),
+          ...(draftBriefOverride !== null
+            ? { briefOverride: draftBriefOverride }
+            : {}),
           // ROADMAP 2.63 C3/C4 — a draft retires any outstanding draft
           // offer: the honoured pending on a consent resume, or the stale
           // marker when a shaped brief drafted alongside one. Without this
@@ -4838,72 +4857,179 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           pipelineDetails?.goal_never_stated === true
           && !previewWasStreamed
         ) {
+          // ⭐⭐⭐ THE QUESTION MUST BE RESUMABLE, OR IT IS NOT A CONTINUATION.
+          //
+          // ── WHAT WAS WRONG (Codex P1 at b87aa7bd) ───────────────────────
+          // This exit committed `pending_actions: []` and nothing else. The
+          // commit chokepoint RESPECTS an explicit empty list rather than
+          // deriving one (`commit.ts:1205-1216`), so the ask carried no state
+          // at all: no outstanding goal question, no working brief, and — the
+          // half that is a separate harm — no carry-forward, which WIPED any
+          // unrelated live hold (measured: a `proposed_concept` hold vanished
+          // across the ask turn).
+          //
+          // The user's answer then arrived at a route with no memory of the
+          // brief. If it reached the heuristic draft path, the dispatcher
+          // drafts from `payload.message` alone (`draft-graph-dispatch.ts:591`)
+          // — so the chip answer *"The goal is to increase revenue."* BECOMES
+          // THE WHOLE BRIEF, and the alternatives and constraints the user
+          // wrote are gone. The ask's closing promise — *"You don't need to
+          // rewrite anything else"* — was false.
+          //
+          // ── THE MECHANISM, REUSED RATHER THAN REBUILT ───────────────────
+          // `clarify_v2_round` is this service's EXISTING typed resumable
+          // clarification state, and its reader is live and unconditional
+          // (`route-v2.ts:4324`: the former CEE_CLARIFY_V2_ENABLED gate is
+          // deleted; swept with a contrast control — no `process.env` read for
+          // it survives anywhere in `src/`). `tryClarifyV2Turn` resumes the
+          // latest live round, folds the reply into the persisted brief via
+          // `incorporateAnswerIntoBrief`, and hands the route the augmented
+          // `briefOverride` (`clarify-v2-dispatch.ts:125-148,402-413`). Round 1
+          // no longer ARMS rounds, so the reader has been running with no
+          // writer — this exit is exactly the writer it was built for. Minting
+          // a second continuation channel beside it is this estate's dominant
+          // defect, so nothing new is invented here.
+          //
+          //  · `brief` is the EFFECTIVE brief the pipeline drafted from, not
+          //    `ingress.message` — with a live override those differ, and the
+          //    message is the lossy one.
+          //  · `asked_dimensions: ['goal']` is the truth (we asked exactly the
+          //    goal) and NO-REPEAT then stops the goal being asked twice.
+          //  · `round: CLARIFY_V2_MAX_ROUNDS` fires the resume's OWN STOP RULE
+          //    so the answer DRAFTS instead of buying another question. The
+          //    round budget is genuinely spent: a whole draft attempt was made
+          //    and failed. Asking again here would dilute the one question
+          //    measured to work (0/10 failures once the outcome is named).
+          //  · NO "draft it anyway" affordance is armed. The composer emits
+          //    candidate answers only, deliberately — that chip is the action
+          //    just measured to fail 11/15 on this input, and the pending's
+          //    `chip_id` is the clarify round's own stable handle (so a re-ask
+          //    SUPERSEDES the previous round rather than accumulating against
+          //    the 3-pending cap), never a rendered bypass.
+          //
+          // The prior pendings are read FIRST and separately, and an
+          // unreadable prior state FAILS CLOSED to the unchanged 500 — same
+          // reasoning as the configure-option clarify ask ~900 lines below:
+          // committing without carry-forward would silently wipe a live
+          // proposal, and losing the memory of this question is strictly
+          // better than losing the user's own state.
+          const { CLARIFY_V2_MAX_ROUNDS, CLARIFY_V2_PROCEED_CHIP_ID } = await import(
+            '../orchestrator-v5/clarify-v2/preflight.js'
+          );
+          const { CLARIFY_V2_TURN_TTL, CLARIFY_V2_WALL_TTL_MS } = await import(
+            '../orchestrator-v5/handlers/clarify-v2-dispatch.js'
+          );
+          let askPriorPendings: readonly PendingAction[] | null = null;
           try {
-            const askResponse = composeGoalNeverStatedAsk();
-            const askCommit = await commitDirectAnswer(askResponse, {
-              scenario_id: ingress.scenario_id,
-              turn_id: ingress.turn_id,
-              // The same class the frame-no-brief guard commits its framing
-              // prompt under (`route-v2.ts:7186`). This turn asks a question
-              // and carries no graph — that is what `clarify` means here.
-              turn_class: 'clarify',
-              handler_id: null,
-              request_hash: computeRequestHash(ingress),
-              // The draft's own LLM spend is attributed to the failed draft,
-              // not to this exit: the ask itself is deterministic and calls
-              // nothing. Counting the draft's calls here would double-count
-              // them against a turn that made none.
-              llm_calls_used: 0,
-              duration_ms: Date.now() - routeStartedAt,
-              handler_facts: [],
-              pending_actions: [],
-              coaching_state: null,
-              userMessage: ingress.message,
-            });
-            emit(TelemetryEvents.V5DraftGoalNeverStatedAsk, {
-              request_id: requestId,
-              scenario_id: ingress.scenario_id,
-              codes: Array.isArray(pipelineDetails.validation_error_codes)
-                ? pipelineDetails.validation_error_codes
-                : [],
-            });
-            log.info({
-              event: 'v5.recovery_response.goal_never_stated_ask',
-              request_id: requestId,
-              scenario_id: ingress.scenario_id,
-            }, 'Draft blocked on a goal CEE itself minted — asking the user for the outcome instead of returning a dead 500');
-            return sendFinalised200(
-              reply,
+            askPriorPendings = await loadMostRecentPendingActionsStrict(
+              ingress.scenario_id,
               requestId,
-              'draft_graph_goal_never_stated',
-              askCommit.response,
-              {
-                graph: null,
-                // T1 claim safety — INHERITED from the turn-entry read. Never a
-                // literal: the permission belongs to the fact this response
-                // DISPLAYS, and this one displays no analysis at all.
-                ...(await claimSafety.forExit()),
-                // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a deterministic
-                // question is functional copy and must ship plain.
-                answerKind: 'functional',
-                requestStartedAt: routeStartedAt,
-                scenarioId: ingress.scenario_id,
-                turnId: ingress.turn_id,
-                userMessage: ingress.message,
-              },
             );
-          } catch (askErr) {
-            // FALL THROUGH to the unchanged 500. A failed commit means the turn
-            // was not recorded, and an unrecorded question is worse than an
-            // error (see conjunct 3). This is the fail-closed direction and it
-            // is the same shape the frame guard uses when ITS commit fails.
-            log.warn({
-              request_id: requestId,
-              scenario_id: ingress.scenario_id,
-              err: askErr instanceof Error
-                ? { name: askErr.name, message: askErr.message }
-                : { message: String(askErr) },
-            }, 'V5 draft goal-never-stated ask — commit failed; falling back to the 500 BoundaryError');
+          } catch (err) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err:
+                  err instanceof Error
+                    ? { name: err.name, message: err.message }
+                    : { message: String(err) },
+              },
+              'V5 goal-never-stated ask — prior-pending read failed; not asking, because a commit without carry-forward would wipe live proposals',
+            );
+          }
+          if (askPriorPendings !== null) {
+            try {
+              const askResponse = composeGoalNeverStatedAsk();
+              const askEmittedAtIso = new Date().toISOString();
+              const goalRoundPending: PendingAction = {
+                id: `cv2_${ingress.turn_id}`,
+                scenario_id: ingress.scenario_id,
+                chip_id: CLARIFY_V2_PROCEED_CHIP_ID,
+                action: {
+                  kind: 'clarify_v2_round',
+                  brief: draftEffectiveBrief,
+                  asked_dimensions: ['goal'],
+                  round: CLARIFY_V2_MAX_ROUNDS,
+                },
+                preconditions: {},
+                expires_at_turn_count: CLARIFY_V2_TURN_TTL,
+                expires_at_iso: new Date(
+                  Date.parse(askEmittedAtIso) + CLARIFY_V2_WALL_TTL_MS,
+                ).toISOString(),
+                emitted_at_iso: askEmittedAtIso,
+              };
+              const askCommit = await commitDirectAnswer(askResponse, {
+                scenario_id: ingress.scenario_id,
+                turn_id: ingress.turn_id,
+                // The same class the frame-no-brief guard commits its framing
+                // prompt under (`route-v2.ts:7186`). This turn asks a question
+                // and carries no graph — that is what `clarify` means here.
+                turn_class: 'clarify',
+                handler_id: null,
+                request_hash: computeRequestHash(ingress),
+                // The draft's own LLM spend is attributed to the failed draft,
+                // not to this exit: the ask itself is deterministic and calls
+                // nothing. Counting the draft's calls here would double-count
+                // them against a turn that made none.
+                llm_calls_used: 0,
+                duration_ms: Date.now() - routeStartedAt,
+                handler_facts: [],
+                // THIS TURN'S OWN pending: the resumable goal round.
+                pending_actions: [goalRoundPending],
+                // …and the prior turn's set, so the carry-forward runs over the
+                // REAL prior state instead of the empty default. Without this,
+                // `computeSurvivingPriorPendings` is a no-op and every unrelated
+                // live hold is wiped by the ask (hold-wipe class).
+                priorPendingActions: askPriorPendings,
+                coaching_state: null,
+                userMessage: ingress.message,
+              });
+              emit(TelemetryEvents.V5DraftGoalNeverStatedAsk, {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                codes: Array.isArray(pipelineDetails.validation_error_codes)
+                  ? pipelineDetails.validation_error_codes
+                  : [],
+              });
+              log.info({
+                event: 'v5.recovery_response.goal_never_stated_ask',
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+              }, 'Draft blocked on a goal CEE itself minted — asking the user for the outcome instead of returning a dead 500');
+              return sendFinalised200(
+                reply,
+                requestId,
+                'draft_graph_goal_never_stated',
+                askCommit.response,
+                {
+                  graph: null,
+                  // T1 claim safety — INHERITED from the turn-entry read. Never a
+                  // literal: the permission belongs to the fact this response
+                  // DISPLAYS, and this one displays no analysis at all.
+                  ...(await claimSafety.forExit()),
+                  // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a deterministic
+                  // question is functional copy and must ship plain.
+                  answerKind: 'functional',
+                  requestStartedAt: routeStartedAt,
+                  scenarioId: ingress.scenario_id,
+                  turnId: ingress.turn_id,
+                  userMessage: ingress.message,
+                },
+              );
+            } catch (askErr) {
+              // FALL THROUGH to the unchanged 500. A failed commit means the turn
+              // was not recorded, and an unrecorded question is worse than an
+              // error (see conjunct 3). This is the fail-closed direction and it
+              // is the same shape the frame guard uses when ITS commit fails.
+              log.warn({
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err: askErr instanceof Error
+                  ? { name: askErr.name, message: askErr.message }
+                  : { message: String(askErr) },
+              }, 'V5 draft goal-never-stated ask — commit failed; falling back to the 500 BoundaryError');
+            }
           }
         }
 
