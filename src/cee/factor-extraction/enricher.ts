@@ -1101,34 +1101,12 @@ function applyGoalTargetRedirect(
   collector?: CorrectionCollector,
 ): boolean {
   const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
-  // ⭐⭐ THE DEFERRAL TESTS THE FIELD AN UPSTREAM MINT *ALWAYS* WRITES.
-  //
-  // `applyStatedGoalTarget` writes `goal_threshold_raw` UNCONDITIONALLY but
-  // writes `goal_threshold`, `_cap` and `_frame` only when
-  // `resolveGoalThresholdCap` returns non-null — and that resolver returns
-  // `null` for any target that is not strictly positive. So a user who states a
-  // target of ZERO ("cut churn to zero", "break even") leaves a PARTIAL quad:
-  // raw and unit present, `goal_threshold` absent.
-  //
-  // Guarding on `goal_threshold` alone let that partial quad through, and this
-  // function then overwrote the user's stated zero with the CURRENT level
-  // stated in the same brief — measured, `goal_threshold_raw: 0` → `4`. A wrong
-  // threshold is a confident lie and an absent one is a gap; a lie outranks a
-  // gap, so the guard tests the conservation field rather than the convenient
-  // one. Written against the SPEC ("an upstream mint is deferred to"), not
-  // against the zero-target case that exposed it.
-  //
-  // ⚠ IT LIVES HERE, NOT IN THE LABEL ROUTE, DELIBERATELY. Both routes pass
-  // through this one point; gating only the caller would leave the factor route
-  // committing the identical harm through a door nothing watches (trap 22b).
-  // The behavioural delta is confined to the partial quad — a FULL upstream
-  // quad already returned false on the first conjunct.
-  if (
-    currentGoalNode.goal_threshold !== undefined ||
-    currentGoalNode.goal_threshold_raw !== undefined
-  ) {
-    return false;
-  }
+  if (currentGoalNode.goal_threshold !== undefined) return false;
+
+  // ⚠ THE DEFERRAL LIVES HERE, NOT IN THE LABEL ROUTE, DELIBERATELY. The factor
+  // route and the label-route fallback added by this change both pass through this
+  // one point; gating only the caller would leave the factor route committing the
+  // identical harm through a door nothing watches (trap 22b).
 
   // ⭐⭐ AN UPSTREAM MINT THAT RESOLVED NO CAP STILL WROTE THE USER'S TARGET.
   //
