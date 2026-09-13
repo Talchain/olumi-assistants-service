@@ -54,6 +54,11 @@ import { dirname, resolve } from 'node:path';
 
 import { runCompoundGoals } from '../compound-goals.js';
 import { renderDirectionClarifications } from '../../../../compound-goal/direction-gate.js';
+// ⭐ THE PRODUCER'S OWN TOKENISER, IMPORTED RATHER THAN MIRRORED. The rung this
+// copy lands in is word-budgeted; a local re-implementation of `countWords`
+// would drift the first time the composer's changed, and the guard would go on
+// measuring in a unit the composer had stopped using.
+import { countWords } from '../../../../../orchestrator-v5/coaching/post-draft-narrative.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -73,6 +78,14 @@ const BRIEF =
   'Our support budget for the year is £240,000 and each engineer costs about £65,000 fully loaded. ' +
   'Ticket backlog has roughly doubled since January. ' +
   'The goal is to bring first-response time back under four hours without going over budget.';
+
+/**
+ * The word count of the copy this fix REPLACED — "…and I could not match it to
+ * anything on the model." — measured on run `272c16` (50 words, 242 chars). The
+ * replacement must not be longer than the sentence it replaced. The shipped
+ * copy measures 48 words / 230 chars.
+ */
+const WORDS_IN_REPLACED_COPY = 50;
 
 /** Captured runs that DROPPED the £240,000 while budget-labelled nodes existed. */
 const CASE_C_RUNS = ['272c16', 'f887d4', 'f869d0', '75900a', '63d377', '150852', 'd2a1e8'] as const;
@@ -161,27 +174,56 @@ describe('a limit that failed to bind must not be reported as absent from the mo
   });
 
   /**
-   * ⭐⭐ THE COPY IS CHARACTER-BUDGETED, AND THE COUPLING IS INVISIBLE FROM HERE.
-   * The post-draft narrative's direction-only rung has a length budget. The
-   * FIRST draft of this fix made the sentence six characters LONGER, which blew
-   * that budget and silently dropped the SECOND limit question from short
-   * drafts — a user-visible regression, caught only because
+   * ⭐⭐ THE COPY IS WORD-BUDGETED, AND THE COUPLING IS INVISIBLE FROM HERE.
+   *
+   * ⚠⚠ THIS GUARD FIRST SHIPPED IN THE WRONG UNIT AND WOULD HAVE BLESSED THE
+   * REGRESSION IT EXISTS TO CATCH. It asserted `detail.length <= 242` —
+   * CHARACTERS. The composer does not spend characters. Derived at the bytes of
+   * `post-draft-narrative.ts`: `MAX_WORDS = 140` (`:116`), `countWords` splits
+   * on /\s+/ (`:2370`), and `assembleSectionedNarrative` sheds a block per rung
+   * on `countWords(text) <= MAX_WORDS` (`:2577 :2582 :2587 :2599 :2605`) — the
+   * direction-only Rung 3b being the `:2599` arm. There is NO character budget
+   * anywhere in that path; the only `.length` tests in the function are `> 0`
+   * emptiness checks. `DRIVER_MAX_CHARS = 80` (`:292`) is real, but governs
+   * `validateUncertaintyDriver` (`:349`) — a different string entirely.
+   *
+   * ⭐ THE TWO UNITS DISAGREE ON EXACTLY THE REWORDING THAT MATTERS, which is
+   * why the unit is not a pedantic point. `…could not place it on a part of the
+   * model.` measures 240 characters — UNDER the old guard, which passed it —
+   * and 51 words, one MORE than the 50 of the copy this fix replaced. The
+   * character guard was strictly weaker than no guard at all in the direction
+   * that counts: it read green while the rung silently shed a block.
+   *
+   * The FIRST draft of this fix made the sentence longer, which blew the rung's
+   * budget and silently dropped the SECOND limit question from short drafts — a
+   * user-visible regression, caught only because
    * `first-response-stated-limit-order.test.ts` pins a deliberately short
    * fixture. Growing the fixed content ADDS a block; that spec's own comment
    * says so.
    *
    * This guard puts the constraint in the file that OWNS the copy, so the next
-   * person to reword it fails here rather than in a distant ordering spec. 242
-   * is the length of the copy this fix replaced, measured on this fixture — the
-   * replacement must not be longer than the sentence it replaced.
+   * person to reword it fails here rather than in a distant ordering spec.
    */
-  it('the card copy must not grow past the copy it replaced — the rung is character-budgeted', () => {
+  it('the card copy must not grow past the copy it replaced — the rung is word-budgeted', () => {
     const { card } = drive(NODE_SETS['272c16']!);
     expect(card).toBeDefined();
     expect(
-      card!.detail.length,
+      countWords(card!.detail),
       'a longer sentence blows the direction-only rung budget and drops a limit question',
+    ).toBeLessThanOrEqual(WORDS_IN_REPLACED_COPY);
+
+    // ⭐ PIN THE GUARD'S OWN DISCRIMINATING POWER IN-TEST (trap 13b). A budget
+    // that cannot reject the rewording it was written to reject is a tautology
+    // at rest, and this one already was once. Both arms, asserted together: the
+    // character guard PASSES this string, the word guard must REJECT it. If a
+    // future reword makes these agree, that is a finding, not a tidy-up.
+    const m4 = card!.detail.replace('place it on the model', 'place it on a part of the model');
+    expect(m4, 'the M4 rewording must actually apply, or this pins nothing').not.toBe(card!.detail);
+    expect(
+      m4.length,
+      'M4 must stay UNDER the old 242-character guard — that is what made the wrong unit dangerous',
     ).toBeLessThanOrEqual(242);
+    expect(countWords(m4), 'the word budget must REJECT M4').toBeGreaterThan(WORDS_IN_REPLACED_COPY);
   });
 
   it('ADMIT TWIN, CASE (b) — a run with NO budget node still asks about the limit', () => {

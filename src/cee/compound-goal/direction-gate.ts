@@ -1964,11 +1964,15 @@ export function renderDirectionClarifications(
           // labelled `Pro Subscriber Churn Rate`.
           //
           // ⚠ AND IT MUST NOT GROW. The narrative composer's direction-only
-          // rung is CHARACTER-BUDGETED: a 6-character-longer draft of this
-          // sentence blew the rung's budget and silently dropped the SECOND
-          // limit question from short drafts (caught by
+          // rung (Rung 3b) is WORD-BUDGETED — not character-budgeted, as this
+          // comment claimed until the unit was derived at the bytes:
+          // `assembleSectionedNarrative` sheds blocks on
+          // `countWords(text) <= MAX_WORDS` (140). A longer draft of this
+          // sentence blew that budget and silently dropped the SECOND limit
+          // question from short drafts (caught by
           // `first-response-stated-limit-order`, which exists for exactly
-          // this). The replacement is SHORTER than the copy it replaces.
+          // this). The replacement is SHORTER than the copy it replaces —
+          // 48 words against 50.
           //
           // "I could not place it on the model" is true in
           // ALL THREE cases — referent present and binding failed, referent

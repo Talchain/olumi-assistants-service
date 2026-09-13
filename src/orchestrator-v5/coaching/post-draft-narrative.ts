@@ -2367,7 +2367,13 @@ function extractFirstSentence(text: string): string | null {
   return candidate.length > 0 ? candidate : null;
 }
 
-function countWords(text: string): number {
+/**
+ * The unit the ladder below actually spends. Exported so a guard on copy that
+ * lands in a rung can measure in the SAME unit the composer sheds on, rather
+ * than mirroring this tokenisation into a spec — a copy of it would drift
+ * silently the first time this one changed.
+ */
+export function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
