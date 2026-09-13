@@ -46,6 +46,7 @@ const ROOT = join(__dirname, '..', '..')
  */
 const KNOWN_DROPPED: ReadonlySet<string> = new Set([
   'anaphoricDispatch',
+  'baselineAnswer',
   'compoundDispatch',
   'goalTargetAnswer',
 ])
@@ -74,6 +75,30 @@ function producerReturnsSkipReason(source: string, fnName: string): boolean {
   }
 }
 
+/**
+ * ⛔⛔ IS THE REASON **EMITTED**, OR MERELY **MENTIONED**? THE FIRST VERSION OF
+ * THIS GUARD ASKED THE WRONG ONE, AND A MUTANT CAUGHT IT.
+ *
+ * It tested `source.includes(binding + '.skip_reason')`. A sibling that keeps a
+ * BRANCH on its reason (`if (x.skip_reason === 'no_pending')`) while dropping
+ * its `emit` still contained the string, so the guard stayed GREEN — measured:
+ * removing one sibling's emit line left 3/3 passing. **Presence of the symbol
+ * is not observability of the value**, which is the same defect class this
+ * change exists to fix, committed inside the guard written to fix it.
+ *
+ * So the predicate is now: the reason must reach a TELEMETRY PAYLOAD KEY
+ * (`reason:` or `skip_reason:`), not a comparison. `baselineAnswer` moves into
+ * the known-dropped set on that definition — it only ever branches on its
+ * reason and nothing emits it — and that is the honest reading, not a
+ * regression.
+ */
+function reasonIsEmitted(source: string, binding: string): boolean {
+  const asPayloadValue = new RegExp(
+    `(?:reason|skip_reason):[\\s\\S]{0,120}?\\b${binding}\\.skip_reason`,
+  )
+  return asPayloadValue.test(source)
+}
+
 describe('every resumer that can decline says why, observably', () => {
   const source = readFileSync(SRC, 'utf8')
 
@@ -98,7 +123,7 @@ describe('every resumer that can decline says why, observably', () => {
   it('⭐ no resumer computes a skip_reason that this file then discards', () => {
     const dropped = bindings
       .filter((b) => producerReturnsSkipReason(source, b.producer))
-      .filter((b) => !source.includes(`${b.binding}.skip_reason`))
+      .filter((b) => !reasonIsEmitted(source, b.binding))
       .map((b) => b.binding)
       .sort()
 
