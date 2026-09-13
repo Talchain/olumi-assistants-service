@@ -122,9 +122,27 @@ describe("quantity identity at the real enrichment write", () => {
     if (price.raw_value === undefined || price.cap === undefined) throw new Error("Price lost its raw scale");
     expect(price.value).toBe(price.raw_value / price.cap);
     expect(node(result.graph, GOAL_ID).goal_baseline).toBeUndefined();
-    // No claim that the existing goal grammar has acquired the trailing MRR
-    // target or that execution now establishes goal/churn success.
-    expect(node(result.graph, GOAL_ID).goal_threshold).toBeUndefined();
+    // ⭐ SUPERSEDED BY #1328, AND THE DIRECTION MATTERS: THIS LINE ASSERTED THE
+    // DEFECT. The goal label states £20k and the brief attests "reaching £20k MRR
+    // within 12 months", so the user's own target was shipping as prose with every
+    // typed field null — the exact harm #1328 closes. When this case was written
+    // the mint was unreachable for a brief like this one, so "no threshold" read
+    // as the status quo rather than as a loss.
+    //
+    // Replaced by its POSITIVE TWIN rather than deleted: the quad is pinned by
+    // IDENTITY (this goal node) and by EXACT VALUE, so a regression to the old
+    // null quad REDs here instead of passing quietly.
+    //
+    // The case itself is unchanged — it is about ROLE BINDING, that the MRR amount
+    // must not stamp the perception factor, and it still does not (asserted above).
+    expect(node(result.graph, GOAL_ID)).toMatchObject({
+      goal_threshold_raw: 20000,
+      goal_threshold_unit: "£",
+      goal_threshold_cap: 25000,
+      goal_threshold_frame: "level",
+    });
+    // The normalisation invariant re-derived in place, not copied: 20000 / 25000.
+    expect(node(result.graph, GOAL_ID).goal_threshold).toBe(20000 / 25000);
   });
 
   it("positive non-pricing counterpart: an identified hiring budget retains its own currency scale", async () => {
