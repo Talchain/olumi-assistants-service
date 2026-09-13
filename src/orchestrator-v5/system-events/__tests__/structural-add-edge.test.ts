@@ -193,11 +193,40 @@ describe('B — nothing is invented', () => {
     expect(edge.strength.std).not.toBe(0.01)
   })
 
-  it('writes no provenance claiming a person supplied the server-owned fields', () => {
+  /**
+   * ⚠⚠ TWO OF THE THREE KEYS THIS ONCE ASSERTED DO NOT EXIST ANYWHERE IN THE
+   * ESTATE, so two thirds of it could never fail. Measured, target vs contrast
+   * in one sweep over `src/` and `vendor/`, excluding this file:
+   *
+   *   exists_probability_source  → 0 files    strength_std_source → 0 files
+   *   strengthStdSource          → 2 files    beliefExistsSource  → 2 files   ← contrast fired
+   *
+   * The real symbol is `strengthStdSource` (camelCase, `field-safety.ts:205`) —
+   * the differently-named-twin defect. Worse, the field that CAN carry the claim
+   * the header warns about was not asserted at all, so the exact regression it
+   * forbids would have passed this green.
+   *
+   * Found by an independent review seat on #1443.
+   */
+  it('claims no user origin for the two server-owned fields', () => {
     const edge = landedEdge(run(), 'fac_churn', 'goal_revenue') as Record<string, unknown>
-    for (const key of ['exists_probability_source', 'strength_std_source', 'beliefExistsSource']) {
+    for (const key of ['strengthStdSource', 'beliefExistsSource']) {
       expect(edge[key], `${key} was stamped on a defaulted value`).toBeUndefined()
     }
+  })
+
+  /**
+   * ⭐ THE POSITIVE HALF, AND IT IS THE ONE THAT WAS MISSING. Absence is not
+   * neutral here: `transforms/provenance-display.ts:39-43` maps an absent source
+   * to `"ai_inferred"`, so an unstamped edge is not "unclaimed" — it is claimed
+   * BY THE MODEL, on a link the user drew.
+   *
+   * ⚠ Bound by VALUE, not by presence. `toBeDefined()` would pass on
+   * `cee_hypothesis`, which is the precise wrong answer this guards against.
+   */
+  it('claims the user as the source of the relationship, because they drew it', () => {
+    const edge = landedEdge(run(), 'fac_churn', 'goal_revenue') as Record<string, unknown>
+    expect((edge.provenance as Record<string, unknown> | undefined)?.source).toBe('user_specified')
   })
 })
 

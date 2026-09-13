@@ -47,6 +47,39 @@
  * `beliefExists: 0.8` fabrication class, re-shipped from the server side where
  * it is harder to see.
  *
+ * ⚠⚠ AMENDED 13 Sep 2026 — THE ⛔ ABOVE IS RIGHT ABOUT THE FIELDS AND WAS BEING
+ * READ AS FORBIDDING THE EDGE-LEVEL STAMP, WHICH IS A DIFFERENT CLAIM. It is
+ * struck for that second reading only; everything it says about `std` and
+ * `exists_probability` stands, and this module still invents no measurement.
+ *
+ * The distinction is settled by the type, derived at CEE's own bytes rather
+ * than argued: `EdgeProvenanceV3` (`schemas/cee-v3.ts:335-341`) is
+ * `{ source: enum, reasoning?: string }` and NOTHING ELSE. **There is no
+ * per-field slot to abuse.** `source` answers "Source of the relationship" —
+ * who put this edge here — and the honest answer for a link a user drew is
+ * `user_specified`. It cannot, by construction, claim the user supplied `std`.
+ *
+ * ⚠ AND OMITTING IT IS NOT NEUTRAL, WHICH IS THE PART THAT MAKES THIS A
+ * DEFECT RATHER THAN A PREFERENCE. `transforms/provenance-display.ts:39-43`
+ * maps an ABSENT source to `"ai_inferred"`, and that transform is recomputed on
+ * every response. So writing no provenance does not leave the question open —
+ * it answers it wrongly, attributing the user's own edge to the model. The
+ * shared contract states the same rule from the other side: "producer stamped
+ * no provenance — a consumer MUST NOT read absence as any [value]"
+ * (`@talchain/schemas` `graph.d.ts`).
+ *
+ * ⭐ FOUR IN-REPO PRECEDENTS AGREE, TWO OF THEM ON EDGES:
+ * `structural-add.ts:271` and `structural-rename.ts:596` (nodes, both
+ * `user_set`) · `routing/add-option-transaction.ts:214-221`, which stamps
+ * `user_specified` on an edge whose strength, std AND exists_probability are
+ * ENTIRELY server constants and calls that provenance truthful ·
+ * `edge-strength-edit.ts:189-190`, which REQUIRES the stamp on an edge where
+ * the user changed no number at all. `field-safety.ts:553-557` names the field
+ * for what it is — "the edge's creation-source DECLARATION" — and records that
+ * `add_edge` is left unscreened precisely so CEE's own constructor may write it.
+ *
+ * Found by an independent review seat on #1443, not by the author or by me.
+ *
  * ⚠ AND NOT `STRUCTURAL_EDGE_DEFAULTS`. That constant (1.0 / mean 1.0 / std
  * 0.01) is for TOPOLOGY edges — decision→option, option→factor — which "represent
  * graph topology, not causal beliefs". An edge a user draws between two existing
@@ -291,6 +324,12 @@ export function applyStructuralAddEdge(
     strength: { mean: signedMean, std: DEFAULT_STD },
     exists_probability: DEFAULT_EXISTS_PROBABILITY,
     effect_direction: event.effect_direction,
+    // ⭐ THE EDGE-LEVEL ORIGIN CLAIM, AND IT IS TRUE: the user drew this link.
+    // Derived, not inherited — see the amended note at the head of this file.
+    // Only `source` is written: `provenance_display` is recomputed from it by
+    // `transforms/provenance-display.ts` on every response, so stamping the
+    // sibling here would be a hand-maintained mirror of a derivable value.
+    provenance: { source: 'user_specified' as const },
   };
   const operations: PatchOperation[] = [
     // `applyAddEdge` reads the id off `value`, not `path`; the `from::to` path
