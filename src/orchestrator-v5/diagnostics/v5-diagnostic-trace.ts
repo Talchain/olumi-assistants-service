@@ -361,6 +361,16 @@ export type V5DiagnosticExitPath =
   // (process_meta_intake / readiness_intake / clarify_v2). External dashboards
   // that bucket by exit_path gain a new `add_option_transaction` bucket.
   | 'add_option_transaction'
+  // ROADMAP goalfence — the draft pipeline blocked, and the ONLY thing it could
+  // not connect was a goal IT minted itself (`details.goal_never_stated`, set by
+  // `graph-enforcement.ts` when the goal is `DEFAULT_GOAL_LABEL` and every
+  // blocking code is a goal-connectivity code). Instead of the dead 500 the turn
+  // asks the one question whose absence caused the failure. Its OWN member, not
+  // `clarify_v2`: clarify is strictly PRE-draft (`clarify-v2-dispatch.ts:362`
+  // refuses a turn once a graph exists) and a dashboard that buckets clarify
+  // volume must not silently absorb post-draft-failure asks — the two have
+  // different causes and different fixes.
+  | 'draft_graph_goal_never_stated'
   | 'draft_graph_error';
 
 /**

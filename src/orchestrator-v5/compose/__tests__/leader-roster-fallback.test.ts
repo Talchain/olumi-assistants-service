@@ -386,7 +386,27 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       //    value, no candidate list and no option ordering is in scope, so there
       //    is no per-option datum to rank or crown. `answerKind: 'functional'`
       //    keeps it out of the prose lane, and it ships ZERO chips.
-      expect(calls.length).toBe(26);
+      //
+      // 2026-09-13, 26 -> 27: the goalfence ask
+      // (`'draft_graph_goal_never_stated'`, route-v2) — a draft blocked because
+      // nothing could reach a goal CEE itself minted now answers with the
+      // outcome question instead of a dead 500. LOOKED AT, not assumed:
+      //  · it funnels through `sendFinalised200`, so it inherits the single
+      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
+      //    roster sources threaded;
+      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
+      //    clarify exit above it, so it adds no new claim authority — and here
+      //    `graph: null` is not merely conventional: THE DRAFT FAILED, so there
+      //    is no model at all, let alone one carrying options to rank;
+      //  · its copy is a QUESTION ABOUT THE USER'S OBJECTIVE, composed by
+      //    `clarify-v2/goal-never-stated-ask.ts` from the clarify-v2 `goal`
+      //    template. No analysis result, no value, no option ordering and no
+      //    per-option datum is in scope, so there is nothing to rank or crown.
+      //    `answerKind: 'functional'` keeps it out of the prose lane;
+      //  · it DOES ship chips, unlike the two exits above — but they are
+      //    candidate answers about the GOAL ("The goal is to increase
+      //    revenue."), never options, so they carry no leader claim either.
+      expect(calls.length).toBe(27);
       // #1246's additional exit is a functional recorded-answer refusal, not
       // a new claim authority. It still funnels through the shared finalizer,
       // forwards claim safety, and uses only the canonical repair graph roster.
