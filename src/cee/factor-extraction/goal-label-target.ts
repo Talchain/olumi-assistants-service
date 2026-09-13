@@ -93,7 +93,14 @@
  * `goal_threshold_frame: 'level'` on it — after which ISL computes a
  * `probability_of_goal` against a threshold nobody set. By this module's own
  * doctrine ("a wrong threshold is a confident lie, an absent one is a gap, and
- * a lie outranks a gap") that is the wrong side, and it is NOT CLOSED HERE.
+ * a lie outranks a gap") that is the wrong side.
+ *
+ * ✅ CLOSED IN ROUND 5 (CEE #1328, 13 Sep 2026 — see the ROUND 5 block below
+ * `sameQuantity`). Attestation-by-equality is now followed by a ROLE rule: an
+ * occurrence mints only when a target construction in the USER'S words governs
+ * it and binds its metric to the label, or lies inside the user's own goal
+ * sentence; everything else withholds with a named reason. The measurements
+ * above are kept as the record of what this module used to do.
  *
  * A second instance, same root, also open: a BARE YEAR attests a count —
  * label "Sign 2026 Enterprise Accounts" + brief "Our plan runs to 2026." mints
@@ -129,13 +136,15 @@
  * later. The span remedy — bind the attestation to a span that
  * `factor-extraction/index.ts`'s goal grammar resolved as a TARGET — is DUE.
  *
- * ⚠ IT IS NOT DONE HERE. Its owner is `factor-extraction/index.ts`, a file this
- * lane does not own, and "while we're here" work is prohibited. It is reported
- * at the boundary in the PR thread instead of being absorbed silently.
- *
- * Until it lands the gap is asserted, not merely described: see the KNOWN GAP
- * floor in `__tests__/goal-label-target.test.ts`, which REDs when an instance
- * closes.
+ * ✅ DONE, round 5 — with one correction to the remedy as written above. "Bind
+ * to a span the index.ts grammar resolved as a TARGET" would have refused the
+ * founder's own phrasing ("I want to reach £30k MRR"), which no deterministic
+ * resolver claims; the rule below therefore composes the existing closed
+ * vocabularies (goal words, `signals/brief-signals.ts` TARGET_VERBS, the
+ * stated-level present-state list, the goal-pair span now exported from
+ * `index.ts`) positionally, and binds the metric through the user's words or
+ * the user's own goal sentence. The KNOWN-DROPPED table in the test file pins
+ * EXACTLY what it still refuses.
  *
  * ── FAIL-CLOSED, EVERY BRANCH ─────────────────────────────────────────────
  *   no goal label                     -> refuse `no_goal_label`
@@ -182,6 +191,8 @@ import {
   resolveMagnitude,
 } from "../../utils/magnitude-alphabet.js";
 import { TIME_UNIT_ALT } from "../compound-goal/extractor.js";
+import { TARGET_VERBS } from "../signals/brief-signals.js";
+import { resolveStatedGoalPairSpan } from "./index.js";
 
 /**
  * Why no target was derived. Carried so the caller can log a REASON rather than
@@ -192,7 +203,30 @@ export type GoalLabelTargetRefusal =
   | "no_goal_label"
   | "no_quantity_in_label"
   | "quantity_not_attested"
-  | "ambiguous_multiple_attested";
+  | "ambiguous_multiple_attested"
+  /* ── ROUND 5 (CEE #1328 BLOCKING 3): the figure OCCURS but was not STATED AS THIS GOAL'S TARGET ── */
+  /** Attested by equality only — no target construction governs any occurrence. */
+  | "quantity_not_stated_as_target"
+  /** Every occurrence is a present-state report ("churn is 5% today", "MRR is £8k"). */
+  | "stated_as_current_level"
+  /** Every occurrence is a spend/cost/price/charge ("we spent £42k", "we charge £49"). */
+  | "stated_as_spend"
+  /** Every occurrence reports a PAST level or achievement ("we reached £42k last year"). */
+  | "stated_as_past"
+  /** Governed by a bound/limit construction whose comparison direction the mint cannot carry. */
+  | "limit_direction_not_representable"
+  /** Governed, but negated ("we don't want to reach £42k"). */
+  | "negated_target"
+  /** Governed, but inside a conditional/hypothetical sentence ("if we wanted £42k"). */
+  | "hypothetical_target"
+  /** Governed, but the stated subject is not the user ("our competitor targets £42k"). */
+  | "subject_not_bound"
+  /** Governed, and the construction names a metric the goal label does not carry. */
+  | "metric_mismatch"
+  /** Governed, but the construction names NO metric and no goal sentence binds it. */
+  | "metric_unbound"
+  /** Governed, but the occurrence lies OUTSIDE the sentence the user wrote as their goal. */
+  | "outside_goal_statement";
 
 /**
  * A target quantity read from the goal label and attested in the brief.
@@ -218,7 +252,27 @@ export interface GoalLabelTarget {
 
 export type GoalLabelTargetResult =
   | { ok: true; target: GoalLabelTarget }
-  | { ok: false; refusal: GoalLabelTargetRefusal };
+  | {
+      ok: false;
+      refusal: GoalLabelTargetRefusal;
+      /**
+       * The brief span the refusal is ABOUT, when the figure was found. Carried
+       * only by the round-5 role refusals so a log can say WHICH occurrence was
+       * read as a level, a spend, a limit; the four original refusals keep
+       * their exact shape.
+       */
+      briefQuote?: string;
+    };
+
+/**
+ * What the caller knows about the goal node beyond its label. The user's own
+ * goal sentence, when the projector stamped one (`provenance.source_quote`),
+ * is the strongest binding this module can be handed: a figure INSIDE that
+ * sentence is the user's goal figure; a figure outside it is a coincidence.
+ */
+export interface GoalLabelTargetContext {
+  readonly goalSourceQuote?: string | null;
+}
 
 /** Currency symbols this service reads, in the spelling every sibling pattern uses. */
 const CURRENCY_CLASS = "[£$€]";
@@ -335,6 +389,9 @@ interface ScannedQuantity {
   unit: string;
   matchedText: string;
   temporal: boolean;
+  /** Half-open [index, end) of the match in the scanned text — identity is position (trap 19). */
+  index: number;
+  end: number;
 }
 
 /** Every quantity in `text`, in source order, each classified temporal or not. */
@@ -418,7 +475,7 @@ function scanQuantities(text: string): ScannedQuantity[] {
     // suite asserts that in both directions on inputs of its own.
     const isTemporal = m.groups?.time !== undefined && unit === UNIT_COUNT;
 
-    out.push({ value, unit, matchedText: m[0], temporal: isTemporal });
+    out.push({ value, unit, matchedText: m[0], temporal: isTemporal, index: m.index, end: m.index + m[0].length });
   }
   return out;
 }
@@ -440,16 +497,371 @@ function sameQuantity(a: ScannedQuantity, b: ScannedQuantity): boolean {
   return scale > 0 && Math.abs(a.value - b.value) / scale < 1e-9;
 }
 
+/* ===========================================================================
+ * ROUND 5 — A FIGURE MUST BE STATED AS THIS GOAL'S TARGET, NOT MERELY OCCUR.
+ *
+ * `sameQuantity` answers "does this figure occur in the brief?". Every refusal
+ * above the line was about the SCANNER; the class below is about ROLE, and it
+ * is the class the module header called NOT CLOSED: a figure the user stated as
+ * a current level, a cost, a year or a competitor's number attested a label the
+ * MODEL wrote, and ISL then scored a `probability_of_goal` against a threshold
+ * nobody set.
+ *
+ * THE RULE, stated against the SPEC ("the user stated this figure as the
+ * target of this goal") and never against the failure in hand:
+ *
+ *   C1  the occurrence is GOVERNED by a target construction — one of
+ *         · the goal-pair grammar's resolved span (`index.ts`, exported span);
+ *         · a goal word (`target|goal|objective|threshold`) reaching the amount
+ *           through ≤3 words ("our goal of reaching £20k MRR");
+ *         · a desire lead (`want|aim|plan|need|hope|intend|would like`) reaching
+ *           the amount through ≤3 words ("we want 800 customers");
+ *         · a target verb (`signals/brief-signals.ts` TARGET_VERBS, plus the
+ *           change verbs compound-goal already reads, plus `take|get|bring`
+ *           in the "<verb> <metric> to <amount>" shape) reaching the amount
+ *           through ≤3 words ("reach £30k MRR", "take conversion to 30%").
+ *       and NOT screened out by a closed-class stop: negation, conditional
+ *       mood, past tense, a present-state marker, a spend/price verb, a
+ *       third-party subject, or a BOUND ("under 4%", "at least", "cap at") —
+ *       the last withheld outright because `goal_threshold_frame` is the code
+ *       constant `level` and this mint cannot carry a comparison direction; a
+ *       ceiling minted as a level would be scored as something to REACH. The
+ *       user's limit still rides `goal_constraints[]`, which keeps its operator.
+ *   C2  the METRIC is bound by the user's words, never by the label alone:
+ *         (a) the construction's metric words (the words between the governor
+ *             and the amount, and the noun phrase after it) must ALL appear in
+ *             the goal label — stated-level.ts's own subject-binding rule, fail
+ *             closed ("competitor churn" does not bind "Churn");
+ *         (b) a construction with NO metric words binds only if the occurrence
+ *             lies INSIDE the sentence the user wrote as their goal
+ *             (`provenance.source_quote`); no quote → withhold. The label is
+ *             model-authored, so "we want to reach £42k" + "Reach £42k MRR"
+ *             is the model's reading of the metric, not the user's statement;
+ *         (c) if a goal sentence exists and the occurrence lies OUTSIDE it,
+ *             withhold — two conjuncts that disagree withhold (a lie outranks
+ *             a gap).
+ *
+ * Every vocabulary here is CLOSED and, where one already existed, IMPORTED —
+ * but composing old lists positionally is a NEW rule, and the parts being old
+ * does not validate the whole. The outside corpus in the test file is the
+ * evidence; the KNOWN-DROPPED table there pins EXACTLY what this rule still
+ * refuses among legitimate phrasings, so its reach cannot move silently in
+ * either direction.
+ * ========================================================================= */
+
+/** Letter-word bridge of up to N words, each followed by whitespace. */
+function bridge(n: number): string {
+  return `(?:[A-Za-z][A-Za-z'-]*\\s+){0,${n}}`;
+}
+
+/** Closed goal-word governance: "target is", "goal of reaching", "objective: ". */
+const GOAL_WORD_GOVERNOR = new RegExp(
+  `\\b(?<lead>[A-Za-z']+)?\\s*\\b(?:target|goal|objective|threshold)s?\\b\\s*(?:is|of|to|at|for|:|=|-)?\\s*(?:(?:a|an|the)\\s+)?(?<bridge>${bridge(3)})$`,
+  "i",
+);
+
+/** Closed desire-lead governance: "we want to reach", "aiming for", "would like". */
+const DESIRE_GOVERNOR = new RegExp(
+  // `want|need|would like` may take the amount directly ("we want 800
+  // customers"); `aim|plan|hope|intend` are nouns as often as verbs ("our PLAN
+  // runs to 2026") and govern only through their infinitive/prepositional
+  // complement ("plan TO reach", "aim FOR", "hope TO hit").
+  `\\b(?<lead>[A-Za-z']+)?\\s*\\b(?:(?:want(?:s|ed|ing)?|need(?:s|ed|ing)?|would\\s+like)\\b\\s+(?:to\\s+)?|(?:aim(?:s|ed|ing)?|plan(?:s|ned|ning)?|hop(?:e|es|ed|ing)|intend(?:s|ed|ing)?)\\s+(?:to|for|on|at)\\s+)(?:(?:a|an|the)\\s+)?(?<bridge>${bridge(3)})$`,
+  "i",
+);
+
+/**
+ * Target verbs: the imported closed list, plus the change verbs the compound-goal
+ * extractor already reads in "<verb> <metric> to <amount>", plus `take|get|bring`
+ * in that same shape only. Present-tense and gerund forms; the `-ed` past is
+ * deliberately absent (a level REACHED is history, not a target).
+ */
+const TARGET_VERB_STEMS = Array.from(
+  new Set<string>([
+    ...TARGET_VERBS.map((v) => v.split(/\s+/)[0]!),
+    "achieve", "reach", "grow", "maximise", "maximize", "increase", "improve", "boost", "raise",
+    "take", "get", "bring", "deliver", "generate",
+  ]),
+).filter((v) => !/^(?:keep|reduce)$/.test(v));
+
+/** Inflections of a verb stem: -s/-es/-ing, with English's doubled final consonant ("get" → "getting"). */
+function verbForms(stem: string): string {
+  const last = stem[stem.length - 1]!;
+  const doubled = /[bdgklmnprt]/.test(last) ? `${last}?` : "";
+  return `${stem}${doubled}(?:s|es|ing)?`;
+}
+
+const TARGET_VERB_GOVERNOR = new RegExp(
+  `\\b(?<lead>[A-Za-z']+)?\\s*\\b(?:${TARGET_VERB_STEMS.map(verbForms).join("|")})\\b\\s+(?:(?:a|an|the|our|my)\\s+)?(?<bridge>${bridge(3)})(?:(?:to|of|at)\\s+)?$`,
+  "i",
+);
+
+/**
+ * A BOUND, not a target: carries a direction the level mint cannot express.
+ * Includes the downward-level verbs (`reduce|cut|lower|decrease … to`) because
+ * "cut churn to 2%" is reached by going DOWN, and nothing on the node says so.
+ */
+const BOUND_GOVERNOR = new RegExp(
+  `\\b(?:below|under|beneath|above|over|exceed(?:s|ing)?|at\\s+least|at\\s+most|no\\s+more\\s+than|no\\s+less\\s+than|not\\s+(?:to\\s+)?exceed(?:ing)?|(?:a\\s+)?max(?:imum)?(?:\\s+of)?|(?:a\\s+)?min(?:imum)?(?:\\s+of)?|capp?(?:ed)?(?:\\s+at|\\s+of)?|less\\s+than|more\\s+than|up\\s+to|floor\\s+of|ceiling\\s+of|keep(?:s|ing)?\\s+(?:[A-Za-z]+\\s+){0,3}(?:below|under|above|over|at)|(?:reduc(?:e|es|ing)|cut(?:s|ting)?|lower(?:s|ing)?|decreas(?:e|es|ing)|minimi[sz](?:e|es|ing)|bring(?:s|ing)?\\s+(?:[A-Za-z]+\\s+){0,3}down)\\s+(?:[A-Za-z]+\\s+){0,3}to)\\s+(?:(?:a|an|the)\\s+)?${bridge(2)}$`,
+  "i",
+);
+
+/** Present-state report: copula or tense marker right before the amount. */
+const PRESENT_STATE_GOVERNOR =
+  /\b(?:is|are|am|'s|'re|sits?\s+at|stands?\s+at|running\s+at|currently(?:\s+at)?|now(?:\s+at)?|presently|today|at\s+the\s+moment|right\s+now|we\s+have|we've\s+got|we\s+are\s+at|we're\s+at)\s*(?:at|around|about|roughly|approximately|circa|only|just)?\s*$/i;
+const PRESENT_STATE_MARKER = /\b(?:currently|now|presently|today|at\s+the\s+moment|right\s+now|so\s+far|to\s+date)\b/i;
+
+/** Spend / price / charge verbs and nouns right before the amount. */
+const SPEND_GOVERNOR =
+  /\b(?:spen[dt](?:s|ing)?|cost(?:s|ing)?|pa(?:y|ys|id|ying)|charg(?:e|es|ed|ing)|pric(?:e|es|ed|ing)|budget(?:s|ed)?|invest(?:s|ed|ing)?|bill(?:s|ed)?|fee(?:s)?|salary|salaries)\b\s*(?:of|is|at|was|were|about|around|roughly|us|them|me|it|for|per)?\s*(?:(?:a|an|the)\s+)?(?:[A-Za-z]+\s+){0,2}$/i;
+
+/** Negation proper, in the governing window. */
+const NEGATION_MARKER =
+  /\b(?:not|no|never|don't|doesn't|didn't|won't|wouldn't|can't|cannot|couldn't|shouldn't|mustn't|without|nor)\b/i;
+/** Conditional mood — read on the WHOLE sentence, both sides of the amount. */
+const CONDITIONAL_MARKER =
+  /\b(?:if|unless|suppose|supposing|imagine|assuming|hypothetically|what\s+if|were\s+we\s+to|had\s+we|in\s+case)\b/i;
+/** Past tense / past reference in the governing window. */
+const PAST_MARKER =
+  /\b(?:last\s+(?:year|month|quarter|week)|ago|previously|used\s+to|was|were|had|has\s+been|have\s+been|reached|achieved|hit\s+(?:[A-Za-z]+\s+)*last|grew|rose|fell|went|got\s+to|already)\b/i;
+
+/** First-person and function tokens that may sit right before a governor. */
+const FIRST_PERSON_OR_FUNCTION: ReadonlySet<string> = new Set([
+  "we", "i", "our", "my", "us", "ours", "mine", "we're", "we've", "i'm", "i've", "we'll", "i'll",
+  "we'd", "i'd", "let's", "the", "a", "an", "this", "that", "these", "those", "and", "but",
+  "so", "then", "also", "still", "really", "just", "now", "to", "will", "would", "should", "must",
+  "can", "could", "may", "might", "do", "does", "did", "have", "has", "had", "be", "is", "are",
+  "which", "who", "what", "where", "with", "given", "of", "for", "in", "on", "by", "at",
+  // The speaker's own organisation, named in the third person — still the user.
+  "team", "company", "business", "firm", "startup", "ideally", "ultimately", "eventually",
+  "hopefully", "realistically", "definitely", "really",
+  // ⚠ NOT here, deliberately: "board", "founder(s)", "investor(s)", "competitor(s)",
+  // "client(s)" — a target another party holds for the user is pinned in the
+  // KNOWN-DROPPED table as a gap, never admitted as the user's own statement.
+]);
+/** Third-party possessives — never the user's own statement. */
+const THIRD_PARTY_LEAD = /^(?:their|his|her|its|your|theirs|competitor'?s?|rival'?s?|client'?s?|customer'?s?)$/i;
+
+/**
+ * Tokens that END a metric phrase: prepositions, conjunctions, relatives. A
+ * word after one of these belongs to a different phrase ("£30k BY June").
+ */
+const METRIC_STOP_TOKENS: ReadonlySet<string> = new Set([
+  "to", "of", "is", "at", "for", "be", "by", "on", "in", "from", "with", "within", "per",
+  "over", "across", "during", "before", "after", "and", "or", "but", "so", "which", "that",
+  "as", "while", "until", "till", "than", "into", "onto", "towards", "toward", "if", "when",
+  "where", "because", "since", "whilst", "then", "versus", "vs", "against", "without",
+]);
+/**
+ * Tokens that are SKIPPED inside a metric phrase without ending it: articles,
+ * quantifiers, hedges, and first-person furniture ("2bn MONTHLY impressions",
+ * "the TOTAL headcount"). Temporal adverbs and participles are skipped too —
+ * "18 enterprise accounts SIGNED" names the accounts, not the signing.
+ */
+const METRIC_SKIP_TOKENS: ReadonlySet<string> = new Set([
+  "a", "an", "the", "about", "around", "roughly", "approximately", "circa", "our", "my", "us",
+  "it", "its", "them", "up", "out", "this", "next", "every", "each", "end", "least", "most",
+  "we", "i", "some", "total", "overall", "new", "more", "less", "again", "ideally", "only",
+  "just", "net", "gross", "roughly", "combined", "all", "extra", "additional", "further",
+]);
+const NON_METRIC_TOKENS: ReadonlySet<string> = new Set([...METRIC_STOP_TOKENS, ...METRIC_SKIP_TOKENS]);
+const TEMPORAL_WORD = new RegExp(`^(?:${TIME_UNIT_ALT}|annually|monthly|weekly|daily|quarterly|yearly|yoy|y\\/y|mom|m\\/m)$`, "i");
+const PARTICIPLE_OR_ADVERB = /(?:ing|ed|ly)$/i;
+
+function singularise(word: string): string {
+  if (/[a-z]{3,}s$/.test(word) && !/(?:ss|us|is)$/.test(word)) return word.slice(0, -1);
+  return word;
+}
+function labelWordSet(label: string): Set<string> {
+  return new Set(
+    label.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 0).map(singularise),
+  );
+}
+function isMetricWord(raw: string): boolean {
+  const w = raw.toLowerCase().replace(/[^a-z0-9'-]/g, "");
+  if (w.length === 0 || NON_METRIC_TOKENS.has(w)) return false;
+  if (TEMPORAL_WORD.test(w)) return false;
+  if (PARTICIPLE_OR_ADVERB.test(w) && w.length > 4) return false;
+  if (TARGET_VERB_STEMS.some((v) => w === v || w === `${v}s` || w === `${v}es`)) return false;
+  if (/^(?:want|wants|aim|aims|plan|plans|need|needs|hope|hopes|intend|intends|like|target|targets|goal|goals|objective|objectives|threshold|thresholds)$/.test(w)) return false;
+  return true;
+}
+
+/** Sentence containing `index` — split on sentence punctuation only. */
+function sentenceAround(text: string, index: number): string {
+  let start = 0;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    if (/[.!?;]/.test(text[i]!) && !/\d/.test(text[i + 1] ?? "")) { start = i + 1; break; }
+  }
+  let end = text.length;
+  for (let i = index; i < text.length; i += 1) {
+    if (/[.!?;]/.test(text[i]!) && !/\d/.test(text[i + 1] ?? "")) { end = i; break; }
+  }
+  return text.slice(start, end);
+}
+
+/**
+ * The governing WINDOW before an occurrence: back to the nearest clause
+ * boundary — sentence punctuation, comma, dash, or a coordinating word — so a
+ * verb in an earlier clause cannot govern a figure in this one.
+ */
+function windowBefore(text: string, index: number): string {
+  const before = text.slice(0, index);
+  const m = /(?:[.!?;:,]|—|–|\s-\s|\((?=[^)]*$)|\b(?:and|but|while|whereas|although|though|because|since|so\s+that|which|whilst|then)\b)(?![^]*(?:[.!?;:,]|—|–|\s-\s|\b(?:and|but|while|whereas|although|though|because|since|which|whilst|then)\b))/i.exec(before);
+  return m ? before.slice(m.index + m[0].length) : before;
+}
+
+/** Up to 3 letter-words after the amount, stopping at the first non-metric token. */
+function trailingWords(text: string, end: number): string[] {
+  const after = text.slice(end);
+  // Must begin with whitespace: a token glued to the digits is a unit/trailer,
+  // which the scanner's guards already adjudicated (£49pcm, 30kMRR).
+  const m = /^\s+((?:[A-Za-z][A-Za-z'-]*)(?:\s+[A-Za-z][A-Za-z'-]*){0,2})/.exec(after);
+  if (!m) return [];
+  const words: string[] = [];
+  for (const w of m[1]!.split(/\s+/)) {
+    const lower = w.toLowerCase().replace(/[^a-z0-9'-]/g, "");
+    if (METRIC_STOP_TOKENS.has(lower)) break;
+    if (!isMetricWord(w)) continue; // skipped, not stopped: temporal, participle, determiner
+    words.push(w);
+  }
+  return words;
+}
+
+type GovernorKind = "goal_pair" | "goal_word" | "desire" | "target_verb";
+
+interface OccurrenceVerdict {
+  readonly ok: boolean;
+  readonly refusal?: GoalLabelTargetRefusal;
+  /** Higher = the occurrence got FURTHER before refusing; used to pick the reported reason. */
+  readonly rank: number;
+}
+
+function judgeOccurrence(
+  brief: string,
+  occ: ScannedQuantity,
+  label: string,
+  quoteSpan: readonly [number, number] | "absent" | "unplaceable",
+  pairSpan: ReturnType<typeof resolveStatedGoalPairSpan>,
+): OccurrenceVerdict {
+  // A doubled or spaced currency symbol ("££30k", "£ 30k") leaves a stray
+  // symbol at the window's end; it is not a word and must not hide the governor.
+  const window = windowBefore(brief, occ.index).replace(/[£$€\s]+$/, " ");
+  const sentence = sentenceAround(brief, occ.index);
+  const labelWords = labelWordSet(label);
+
+  // ── C1: which construction, if any, governs this occurrence? ──────────────
+  let governor: GovernorKind | undefined;
+  let lead: string | undefined;
+  let bridgeWords: string[] = [];
+
+  const pairGoverned =
+    pairSpan !== null && occ.index >= pairSpan.span[0] && occ.end <= pairSpan.span[1];
+  if (pairGoverned) {
+    const pairTargetSameUnit = (pairSpan!.pair.unit ?? UNIT_COUNT) === occ.unit;
+    const eq = (a: number, b: number): boolean => {
+      if (a === b) return true;
+      const scale = Math.max(Math.abs(a), Math.abs(b));
+      return scale > 0 && Math.abs(a - b) / scale < 1e-9;
+    };
+    if (pairTargetSameUnit && eq(pairSpan!.pair.baseline, occ.value) && !eq(pairSpan!.pair.value, occ.value)) {
+      return { ok: false, refusal: "stated_as_current_level", rank: 3 };
+    }
+    if (pairTargetSameUnit && eq(pairSpan!.pair.value, occ.value)) {
+      governor = "goal_pair";
+      bridgeWords = brief.slice(pairSpan!.span[0], occ.index).split(/\s+/).filter(isMetricWord);
+    }
+  }
+
+  // Bounds are checked BEFORE the target governors: "keep churn under 4%"
+  // also matches the desire/verb shapes, and the bound is the truth about it.
+  if (governor === undefined && BOUND_GOVERNOR.test(window)) {
+    return { ok: false, refusal: "limit_direction_not_representable", rank: 4 };
+  }
+
+  const tryGovernor = (re: RegExp, kind: GovernorKind): boolean => {
+    const m = re.exec(window);
+    if (!m) return false;
+    governor = kind;
+    lead = m.groups?.lead;
+    // Words between the governor and the amount, minus function and verb
+    // tokens, are the construction's own metric words ("grow MRR to £42k").
+    bridgeWords = (m.groups?.bridge ?? "").split(/\s+/).filter(isMetricWord);
+    return true;
+  };
+  if (governor === undefined && !tryGovernor(GOAL_WORD_GOVERNOR, "goal_word")) {
+    if (!tryGovernor(DESIRE_GOVERNOR, "desire")) tryGovernor(TARGET_VERB_GOVERNOR, "target_verb");
+  }
+
+  if (governor === undefined) {
+    // Not governed. Say WHICH non-target role was read, when one was.
+    if (PRESENT_STATE_GOVERNOR.test(window) || PRESENT_STATE_MARKER.test(window)) {
+      return { ok: false, refusal: "stated_as_current_level", rank: 2 };
+    }
+    if (SPEND_GOVERNOR.test(window)) return { ok: false, refusal: "stated_as_spend", rank: 2 };
+    if (PAST_MARKER.test(window)) return { ok: false, refusal: "stated_as_past", rank: 2 };
+    return { ok: false, refusal: "quantity_not_stated_as_target", rank: 1 };
+  }
+
+  // ── C1 stops: closed-class screens on the governed occurrence ─────────────
+  if (NEGATION_MARKER.test(window)) return { ok: false, refusal: "negated_target", rank: 5 };
+  if (CONDITIONAL_MARKER.test(sentence)) return { ok: false, refusal: "hypothetical_target", rank: 5 };
+  if (PAST_MARKER.test(window)) return { ok: false, refusal: "stated_as_past", rank: 5 };
+  const afterText = brief.slice(occ.end, occ.end + 40);
+  if (PRESENT_STATE_MARKER.test(window) || /^\s*(?:[A-Za-z]+\s+){0,2}(?:currently|today|now|presently|at\s+the\s+moment|right\s+now)\b/i.test(afterText)) {
+    return { ok: false, refusal: "stated_as_current_level", rank: 5 };
+  }
+  if (governor !== "goal_pair" && lead !== undefined) {
+    const l = lead.toLowerCase();
+    if (THIRD_PARTY_LEAD.test(l) || (!FIRST_PERSON_OR_FUNCTION.has(l) && !labelWords.has(singularise(l)))) {
+      return { ok: false, refusal: "subject_not_bound", rank: 5 };
+    }
+  }
+
+  // ── C2: the metric is bound by the user's words ───────────────────────────
+  const metricWords = [...bridgeWords, ...trailingWords(brief, occ.end)];
+  if (quoteSpan !== "absent" && quoteSpan !== "unplaceable") {
+    const inside = occ.index >= quoteSpan[0] && occ.end <= quoteSpan[1];
+    if (!inside) return { ok: false, refusal: "outside_goal_statement", rank: 6 };
+  }
+  if (metricWords.length === 0) {
+    if (quoteSpan === "absent" || quoteSpan === "unplaceable") {
+      return { ok: false, refusal: "metric_unbound", rank: 6 };
+    }
+    return { ok: true, rank: 9 };
+  }
+  // A label carrying NO words at all ("£30k") names no metric to conflict
+  // with; the user's own metric words stand alone and bind by default. This
+  // is not the removed escape hatch — that admitted a construction with no
+  // user-stated metric on the strength of the LABEL's; here the user stated
+  // one and the label is silent.
+  const labelHasWords = [...labelWords].some((w) => /^[a-z]/.test(w));
+  if (labelHasWords) {
+    const unbound = metricWords.filter((w) => !labelWords.has(singularise(w.toLowerCase())));
+    if (unbound.length > 0) return { ok: false, refusal: "metric_mismatch", rank: 7 };
+  }
+  return { ok: true, rank: 9 };
+}
+
+/** Whitespace runs collapsed, so a quote still places inside a brief that wrapped it. */
+function canonicalise(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 /**
  * Derive the goal target from the goal node's own label, attested against the
- * brief. See the module header for why both halves are required.
+ * brief AND bound to a target statement in the user's words. See the module
+ * header and the ROUND 5 block for why every half is required.
  *
- * @param goalLabel the GOAL NODE's label — binds which quantity is the target
- * @param brief     the user's own words — attests that the number is theirs
+ * @param goalLabel the GOAL NODE's label — names WHICH quantity is the target
+ * @param brief     the user's own words — must STATE that quantity as a target
+ * @param context   the node's `provenance.source_quote`, when the projector
+ *                  stamped the user's goal sentence on it
  */
 export function deriveGoalTargetFromLabel(
   goalLabel: string | undefined | null,
   brief: string | undefined | null,
+  context: GoalLabelTargetContext = {},
 ): GoalLabelTargetResult {
   if (typeof goalLabel !== "string" || goalLabel.trim() === "") {
     return { ok: false, refusal: "no_goal_label" };
@@ -460,82 +872,81 @@ export function deriveGoalTargetFromLabel(
     return { ok: false, refusal: "no_quantity_in_label" };
   }
 
-  const briefText = typeof brief === "string" ? brief : "";
-  // ⚠⚠ THE TEMPORAL EXCLUSION APPLIES TO BOTH SIDES, AND IT USED TO APPLY TO
-  // ONE. The label side was filtered; the brief side was not — and
-  // `sameQuantity` compares only unit and value, so "18 months" in the brief
-  // ATTESTED a bare count of 18 in the label. Measured at `cd010b55`:
-  //
-  //   label "Reach 18 Enterprise Accounts" + brief "…grow the business within
-  //   18 months."   →  ok, { value: 18, unit: "count", briefQuote: "18 months" }
-  //   label "Hire 6 Salespeople" + brief "…keep at least 6 months of runway."
-  //                 →  ok, { value: 6,  unit: "count", briefQuote: "6 months" }
-  //
-  // The user stated 18 as a DEADLINE and the mint stamped it as a LEVEL. That
-  // is precisely the class the header says is closed, and the reason
-  // `TIME_UNIT_ALT` is imported at all — the invariant was right, its domain
-  // had one side missing.
-  //
-  // ⚠ THE KIT COULD NOT SEE IT: the mutant mutates the LABEL-side filter, so by
-  // construction it only ever measured the side that exists, and no case in the
-  // corpus had a temporal brief quantity as the attesting one. The invariant
-  // was written with the same asymmetry as the code (trap 13d).
-  //
-  // ⚠⚠ AND THE SENTENCE THAT USED TO SIT HERE WAS FALSE. It read: "It cannot
-  // cost a legitimate mint, and that is structural rather than measured." The
-  // structural argument was sound about the shape it examined — a temporal
-  // LABEL quantity is refused above as `no_quantity_in_label`, and
-  // `sameQuantity` requires equal units — and it was still wrong, because it
-  // assumed `temporal` meant "denominated in time" when the classifier read
-  // only whether a time word followed. It DID cost a legitimate mint: a
-  // two-target brief refused correctly at `cd010b55` and minted one of the two
-  // at `d167f80a`. See `scanQuantities` for the measurement and the fix. The
-  // claim is not restated in a corrected form here — the predicate now says it
-  // itself, and a safety argument written a second time in a second place is
-  // the mirror this estate keeps paying for (trap 12).
+  // The brief is scanned in CANONICAL form so quote containment and every
+  // span below share one coordinate system.
+  const briefText = canonicalise(typeof brief === "string" ? brief : "");
   const briefQuantities = scanQuantities(briefText).filter((q) => !q.temporal);
 
-  // ⚠ THE ATTESTED SET IS DEDUPED BY QUANTITY, NOT BY OCCURRENCE. A label that
-  // names one target and a brief that states it three times is UNAMBIGUOUS;
-  // counting occurrences would refuse it as "multiple".
-  const attested: Array<{ label: ScannedQuantity; brief: ScannedQuantity }> = [];
+  // ⚠ THE ATTESTED SET IS DEDUPED BY QUANTITY, NOT BY OCCURRENCE — unchanged
+  // from round 1: a label naming one target that the brief states three times
+  // is UNAMBIGUOUS. Attestation-by-equality runs FIRST, so "two label figures
+  // both present" still refuses as ambiguous rather than letting the role rule
+  // quietly pick the one it can govern (the round-3 harm, one level up).
+  const attested: Array<{ label: ScannedQuantity; occurrences: ScannedQuantity[] }> = [];
   for (const lq of labelQuantities) {
     if (attested.some((a) => sameQuantity(a.label, lq))) continue;
-    const match = briefQuantities.find((bq) => sameQuantity(bq, lq));
-    if (match) attested.push({ label: lq, brief: match });
+    const occurrences = briefQuantities.filter((bq) => sameQuantity(bq, lq));
+    if (occurrences.length > 0) attested.push({ label: lq, occurrences });
   }
 
   if (attested.length === 0) return { ok: false, refusal: "quantity_not_attested" };
   if (attested.length > 1) return { ok: false, refusal: "ambiguous_multiple_attested" };
 
-  const only = attested[0];
-  return {
-    ok: true,
-    target: {
-      value: only.label.value,
-      unit: only.label.unit,
-      matchedText: only.label.matchedText,
-      briefQuote: only.brief.matchedText,
-    },
-  };
+  // ── ROUND 5: of the occurrences, which (if any) is STATED AS THE TARGET? ──
+  const quote = typeof context.goalSourceQuote === "string" ? canonicalise(context.goalSourceQuote) : "";
+  let quoteSpan: readonly [number, number] | "absent" | "unplaceable" = "absent";
+  if (quote.length > 0) {
+    const at = briefText.indexOf(quote);
+    quoteSpan = at >= 0 ? [at, at + quote.length] : "unplaceable";
+  }
+  const pairSpan = resolveStatedGoalPairSpan(briefText);
+
+  const only = attested[0]!;
+  let best: { verdict: OccurrenceVerdict; occ: ScannedQuantity } | undefined;
+  for (const occ of only.occurrences) {
+    const verdict = judgeOccurrence(briefText, occ, goalLabel, quoteSpan, pairSpan);
+    if (verdict.ok) {
+      return {
+        ok: true,
+        target: {
+          value: only.label.value,
+          unit: only.label.unit,
+          matchedText: only.label.matchedText,
+          briefQuote: occ.matchedText,
+        },
+      };
+    }
+    if (best === undefined || verdict.rank > best.verdict.rank) best = { verdict, occ };
+  }
+  return { ok: false, refusal: best!.verdict.refusal!, briefQuote: best!.occ.matchedText };
 }
 
 /**
  * The conservation question, asked as a predicate so a guard can fail on it.
  *
  * TRUE when the goal node's label states a non-temporal quantity that the
- * user's brief also states, and the node carries NO typed threshold — i.e. the
- * exact state the witnessed defect shipped in, where the target survived only
- * as label prose. Deliberately narrower than "the label has digits": a figure
- * the brief does not contain is a model invention and must NOT be minted, so it
+ * user's brief STATES AS THE TARGET, and the node carries NO typed threshold —
+ * i.e. the exact state the witnessed defect shipped in, where the target
+ * survived only as label prose. A figure the brief does not contain, or
+ * contains in another role, is a model invention and must NOT be minted, so it
  * is not a conservation failure either.
  */
 export function goalLabelStatesUncarriedTarget(
-  node: { label?: string | null; goal_threshold_raw?: unknown } | null | undefined,
+  node:
+    | { label?: string | null; goal_threshold_raw?: unknown; provenance?: unknown }
+    | null
+    | undefined,
   brief: string | undefined | null,
 ): boolean {
   if (!node) return false;
   const raw = node.goal_threshold_raw;
   if (typeof raw === "number" && Number.isFinite(raw)) return false;
-  return deriveGoalTargetFromLabel(node.label, brief).ok;
+  const provenance = node.provenance;
+  const quote =
+    typeof provenance === "object" && provenance !== null
+      ? (provenance as { source_quote?: unknown }).source_quote
+      : undefined;
+  return deriveGoalTargetFromLabel(node.label, brief, {
+    goalSourceQuote: typeof quote === "string" ? quote : undefined,
+  }).ok;
 }

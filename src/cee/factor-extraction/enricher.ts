@@ -1300,9 +1300,14 @@ function mintGoalTargetFromGoalLabel(
   const goalNode = enrichedGraph.nodes[goalNodeIndex];
   if (!goalNode) return undefined;
 
-  const derived = deriveGoalTargetFromLabel(goalNode.label, brief);
+  // ROUND 5 (CEE #1328 BLOCKING 3): the label names WHICH quantity; the brief
+  // must STATE it as this goal's target, and the user's own goal sentence —
+  // when the projector stamped one — is the strongest binding available.
+  const derived = deriveGoalTargetFromLabel(goalNode.label, brief, {
+    goalSourceQuote: statedSourceQuote(goalNode),
+  });
   if (!derived.ok) {
-    logGoalLabelRefusal(goalNode.id, derived.refusal);
+    logGoalLabelRefusal(goalNode.id, derived.refusal, derived.briefQuote);
     return undefined;
   }
 
@@ -1361,12 +1366,20 @@ function mintGoalTargetFromGoalLabel(
 }
 
 /** Fail loud on every non-mint, with the reason, never a silence. */
-function logGoalLabelRefusal(goalNodeId: string, refusal: GoalLabelTargetRefusal): void {
+function logGoalLabelRefusal(
+  goalNodeId: string,
+  refusal: GoalLabelTargetRefusal,
+  briefSpan?: string,
+): void {
   log.info(
     {
       event: "cee.factor_enrichment.goal_threshold_label_refused",
       goalNodeId,
       refusal,
+      // The occurrence the refusal is ABOUT, when the figure was found in the
+      // brief in a role other than this goal's target (round 5). Absent for the
+      // scanner-level refusals, which have no occurrence to name.
+      ...(briefSpan !== undefined && { brief_span: briefSpan }),
     },
     `Goal target not minted from the goal label: ${refusal}`,
   );

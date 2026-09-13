@@ -416,11 +416,19 @@ describe("the review's three findings — measured, then pinned", () => {
       expect(r.target.value, label).toBe(value);
     }
     // And #799's narrowing is untouched: a trailer that is NOT a magnitude key
-    // must keep extracting.
-    const pcm = deriveGoalTargetFromLabel("Hold Price At £49pcm", "we charge £49pcm");
+    // must keep extracting. ⚠ ROUND 5 SPLIT THIS FIXTURE, DELIBERATELY: the
+    // original brief "we charge £49pcm" states the CURRENT charge, which the
+    // role rule now refuses by name — so the trailer-guard property is pinned
+    // on a TARGET-framed brief (a broken guard reads £4, not £49, and the mint
+    // assertion still discriminates), and the current-charge reading is pinned
+    // beside it as the refusal it now is. One property per assertion.
+    const pcm = deriveGoalTargetFromLabel("Hold Price At £49pcm", "our target price is £49pcm");
     expect(pcm.ok).toBe(true);
     if (!pcm.ok) return;
     expect(pcm.target.value).toBe(49);
+    expect(
+      deriveGoalTargetFromLabel("Hold Price At £49pcm", "we charge £49pcm"),
+    ).toEqual({ ok: false, refusal: "stated_as_spend", briefQuote: "£49" });
   });
 
   it("a digit INSIDE a word is not a quantity — `B2B` is not two billion", () => {
@@ -478,59 +486,36 @@ describe("the review's three findings — measured, then pinned", () => {
   /* ─────────────────────────────────────────────────────────────────────────
    * BLOCKING 3 — NOT CLOSED. Pinned as a KNOWN GAP so it stays visible.
    * ────────────────────────────────────────────────────────────────────── */
-  it("⛔ KNOWN GAP — A SAMPLED FLOOR, NOT AN EXACT SET: a figure stated as a LEVEL still attests a target", () => {
-    // ⚠ THIS TEST ASSERTS THE DEFECT, DELIBERATELY, AND MUST BE INVERTED —
-    // NOT DELETED — WHEN THE SPAN BINDING LANDS. `sameQuantity` answers "does
-    // this figure occur in the brief?", never "did the user state it as their
-    // target". The brief below states 4% as the CURRENT churn level; the model
-    // wrote the label; the mint stamps `goal_threshold_frame: 'level'`.
-    //
-    // ⚠⚠ WHAT THIS TEST GUARANTEES, AND THE PREVIOUS SENTENCE HERE CLAIMED MORE.
-    // It read: "Pinned as an EXACT set so it REDs if the class grows OR
-    // shrinks". FALSE, and falsifiable by reading the code beneath it: two
-    // independent `toBe(true)` assertions on two hand-written inputs, with no
-    // computed set and no `toEqual` over an enumeration. It REDs on SHRINK ONLY
-    // — when one of these two instances starts refusing — and is structurally
-    // blind to the class growing.
-    //
-    // THE CLASS IS WIDER THAN THESE TWO. Five more instances, measured through
-    // this module at this head, every one of them minting and none of them
-    // visible to the assertions below:
-    //
-    //   "Reach 12% Conversion"  + "our conversion is 12% today"          → %0.12
-    //   "Reach £500 CAC"        + "we currently pay £500 per acquisition" → £500
-    //   "Grow To 12 Engineers"  + "we are a team of 12 engineers"        → count 12
-    //   "Ship 4 Releases"       + "we are migrating to GPT-4"            → count 4
-    //   "Reach 27001 Users"     + "we need ISO 27001 certification"      → count 27001
-    //
-    // ⛔ DO NOT GROW THE SET TO MATCH. "A figure the brief states for some
-    // reason other than as a target" is an OPEN CLASS over natural language;
-    // enumerating it is the error, not the fix, and an exact-set claim over an
-    // open class reads green as the class grows — a tracking mirror wearing a
-    // guard's clothes (trap 12). These two are a SAMPLED FLOOR: a floor under
-    // the gap's visibility, chosen because they are the two the review
-    // measured, and they say nothing about the size of the class.
-    //
-    // A gap recorded in the suite is honest; a gap invisible to it is how this
-    // one reached a review. What this floor is FOR is the shrink direction:
-    // when the span binding lands (see the module header), these REDden and the
-    // successor is told to invert them rather than discovering the gap closed
-    // by accident.
-    const level = deriveGoalTargetFromLabel(
-      "Keep Monthly Churn Below 4%",
-      "Trial-to-paid conversion is 12% and monthly churn is 4%.",
-    );
-    expect(level.ok, "if this is now false, INVERT this test — the gap closed").toBe(true);
-    if (!level.ok) return;
-    expect(level.target.value).toBe(0.04);
+  it("✅ INVERTED (round 5): a figure stated as a LEVEL no longer attests a target — BLOCKING 3 closed", () => {
+    // ⚠ THIS TEST USED TO ASSERT THE DEFECT, DELIBERATELY, and its own comment
+    // ordered the successor to INVERT rather than delete it when the span
+    // binding landed. It landed in round 5: `sameQuantity` still answers "does
+    // this figure occur?", and the ROLE rule beneath it now answers "did the
+    // user state it as this goal's target?". The two instances the review
+    // measured are the two pinned here; the five it listed in a comment are
+    // asserted in the round-5 KNOWN-CLASS table below, by name.
+    expect(
+      deriveGoalTargetFromLabel(
+        "Keep Monthly Churn Below 4%",
+        "Trial-to-paid conversion is 12% and monthly churn is 4%.",
+      ),
+    ).toEqual({ ok: false, refusal: "stated_as_current_level", briefQuote: "4%" });
 
-    const year = deriveGoalTargetFromLabel(
+    expect(
+      deriveGoalTargetFromLabel("Sign 2026 Enterprise Accounts", "Our plan runs to 2026."),
+    ).toEqual({ ok: false, refusal: "quantity_not_stated_as_target", briefQuote: "2026" });
+
+    // THE TWINS, so the inversion cannot pass on a module that refuses
+    // everything: the same figures STATED AS TARGETS still mint.
+    const churn = deriveGoalTargetFromLabel("Hit 4% Monthly Churn", "we want to hit 4% monthly churn");
+    expect(churn.ok).toBe(true);
+    if (churn.ok) expect(churn.target.value).toBeCloseTo(0.04, 12);
+    const accounts = deriveGoalTargetFromLabel(
       "Sign 2026 Enterprise Accounts",
-      "Our plan runs to 2026.",
+      "our goal is to sign 2026 enterprise accounts",
     );
-    expect(year.ok, "if this is now false, INVERT this test — the gap closed").toBe(true);
-    if (!year.ok) return;
-    expect(year.target.value).toBe(2026);
+    expect(accounts.ok).toBe(true);
+    if (accounts.ok) expect(accounts.target.value).toBe(2026);
   });
 });
 
@@ -578,28 +563,44 @@ describe("round 3 — a % or a currency amount is not a duration", () => {
     // fix that merely widened the brief-side filter would satisfy the harm case
     // above by refusing more, so the mint has to be asserted in this direction
     // too — and on BOTH sides, because the predicate is shared.
-    const pct = deriveGoalTargetFromLabel("Keep Churn Under 4%", "we need it under 4% year on year");
+    // ⚠ ROUND 5 RE-FIXTURED THESE THREE, and SPLIT each: the property this test
+    // pins is the TEMPORAL-UNIT predicate ("4% year on year" is a percentage,
+    // not a duration), and the original briefs happened to state their figure
+    // as a BOUND ("under 4%") or a SPEND ("we spend £200k") or a LEVEL ("churn
+    // is 4%") — roles the round-5 rule now refuses by name. So the temporal
+    // property is pinned on TARGET-framed twins carrying the same time word,
+    // and the original briefs are pinned beside them as the refusals they are.
+    const pct = deriveGoalTargetFromLabel("Hit 4% Growth", "we want to hit 4% growth year on year");
     expect(pct.ok).toBe(true);
     if (!pct.ok) return;
     expect(pct.target.unit).toBe("%");
     expect(pct.target.value).toBeCloseTo(0.04, 12);
+    expect(
+      deriveGoalTargetFromLabel("Keep Churn Under 4%", "we need it under 4% year on year"),
+    ).toEqual({ ok: false, refusal: "limit_direction_not_representable", briefQuote: "4% year" });
 
-    const money = deriveGoalTargetFromLabel("Hold Spend At £200k", "we spend £200k year on year");
+    const money = deriveGoalTargetFromLabel("Reach £200k Revenue", "our target is £200k revenue year on year");
     expect(money.ok).toBe(true);
     if (!money.ok) return;
     expect(money.target.unit).toBe("£");
     expect(money.target.value).toBe(200_000);
+    expect(
+      deriveGoalTargetFromLabel("Hold Spend At £200k", "we spend £200k year on year"),
+    ).toEqual({ ok: false, refusal: "stated_as_spend", briefQuote: "£200k year" });
 
     // The LABEL side carried the same misclassification before this round — it
     // refused `no_quantity_in_label` on a perfectly ordinary percentage target.
     // One predicate, so one fix closes both; asserted here so that stays true.
     const labelSide = deriveGoalTargetFromLabel(
-      "Keep Churn Under 4% Year On Year",
-      "monthly churn is 4%",
+      "Reach 4% Growth Year On Year",
+      "we want to reach 4% growth",
     );
     expect(labelSide.ok).toBe(true);
     if (!labelSide.ok) return;
     expect(labelSide.target.value).toBeCloseTo(0.04, 12);
+    expect(
+      deriveGoalTargetFromLabel("Keep Churn Under 4% Year On Year", "monthly churn is 4%"),
+    ).toEqual({ ok: false, refusal: "stated_as_current_level", briefQuote: "4%" });
   });
 
   it("⭐ THE TWIN, negative direction: a BARE COUNT with a time word is still a duration, on both sides", () => {
@@ -739,5 +740,330 @@ describe("round 4 — this route defers to the projector's upstream mint", () =>
     expect(goal.goal_threshold_raw).toBe(0);
     expect(goal.goal_threshold).toBeUndefined();
     expect(res.goalThresholdsMinted).toEqual([]);
+  });
+});
+
+/**
+ * ── ROUND 5 — A FIGURE MUST BE STATED AS THIS GOAL'S TARGET (CEE #1328 BLOCKING 3) ──
+ *
+ * `sameQuantity` answers "does this figure OCCUR in the brief?". Rounds 1–4
+ * bounded the SCANNER; this round bounds the ROLE. The rule (see the module's
+ * ROUND 5 block): an occurrence mints only when a target construction GOVERNS
+ * it (goal word · desire lead · target verb · goal-pair span), no closed-class
+ * stop screens it (bound · negation · conditional · past · present-state ·
+ * spend · third-party subject), and the METRIC is bound by the user's words —
+ * the construction's own metric words all appear in the label, or, when it
+ * names none, the occurrence lies inside the sentence the user wrote as their
+ * goal. Where two conjuncts disagree, withhold: a lie outranks a gap.
+ *
+ * EVERY CASE CARRIES ITS OPPOSITE-DIRECTION TWIN, and every twin pins its own
+ * precondition (the figure IS in the brief), so a case cannot pass on a scanner
+ * that stopped matching (trap 13b) and a refusal cannot pass on a module that
+ * refuses everything.
+ *
+ * ⚠ THE CORPUS BELOW IS THE AUTHOR'S. Composing pre-existing closed lists
+ * positionally is a NEW rule, and the author's corpus cannot see the class the
+ * author did not imagine (trap 22). The reviewer's OUTSIDE corpus is the merge
+ * evidence; this block is the development aid and the regression floor.
+ */
+describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", () => {
+  const stated = (label: string, brief: string, ctx?: { goalSourceQuote?: string }) =>
+    deriveGoalTargetFromLabel(label, brief, ctx);
+
+  it("S1 ⛔ a COST that happens to equal the label figure is not the target (the review's example)", () => {
+    const brief = "We spent £42k on office refurbishment last year; improve recurring revenue.";
+    expect(brief).toContain("£42k"); // precondition: the figure IS there
+    expect(stated("Reach £42k MRR", brief)).toEqual({
+      ok: false,
+      refusal: "stated_as_spend",
+      briefQuote: "£42k",
+    });
+  });
+
+  it("S1 ⭐ twin: the same figure STATED AS THE TARGET mints", () => {
+    const r = stated("Reach £42k MRR", "We want to reach £42k MRR.");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.target.value).toBe(42_000);
+    expect(r.target.unit).toBe("£");
+    expect(r.target.briefQuote).toBe("£42k");
+  });
+
+  it("S2 ⛔ a CURRENT LEVEL beside a written zero target is not the target (the review's second example)", () => {
+    const brief = "Monthly churn is 5% today. We want to cut churn to zero.";
+    expect(brief).toContain("5%");
+    expect(stated("Cut Churn From 5% To Zero", brief)).toEqual({
+      ok: false,
+      refusal: "stated_as_current_level",
+      briefQuote: "5%",
+    });
+  });
+
+  it("S2 ⭐ twin: the same percentage STATED AS THE TARGET mints", () => {
+    const r = stated("Hit 5% Churn", "We want to hit 5% churn.");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.target.value).toBeCloseTo(0.05, 12);
+  });
+
+  it("S3 ✅ the £20k fixture (goal word reaching the amount through 'of reaching') still mints", () => {
+    const brief =
+      "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?";
+    const r = stated("Reach £20k MRR Within 12 Months", brief);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.target.value).toBe(20_000);
+    expect(r.target.briefQuote).toBe("£20k");
+  });
+
+  it("S4 ⛔ a BARE amount in a target construction does not bind the LABEL's metric — the model's reading is not the user's statement", () => {
+    // "we want to reach £42k" says nothing about MRR; the label does. Without
+    // the user's own goal sentence there is no user-stated metric to bind.
+    expect(stated("Reach £42k MRR", "We want to reach £42k.")).toEqual({
+      ok: false,
+      refusal: "metric_unbound",
+      briefQuote: "£42k",
+    });
+  });
+
+  it("S4 ⭐ twin: the same bare amount INSIDE the user's own goal sentence binds", () => {
+    const brief = "We're a small SaaS. We want to reach £42k. Churn is fine.";
+    const r = stated("Reach £42k MRR", brief, { goalSourceQuote: "We want to reach £42k." });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.target.value).toBe(42_000);
+  });
+
+  it("S4 ⛔ a goal sentence that does NOT contain the occurrence withholds, even when the metric words bind", () => {
+    // Two conjuncts disagree — the construction says target, the user's goal
+    // sentence is about something else — so withhold (coincidence guard).
+    const brief = "We want to reach £42k MRR. Our goal is to keep the team small.";
+    expect(
+      stated("Reach £42k MRR", brief, { goalSourceQuote: "Our goal is to keep the team small." }),
+    ).toEqual({ ok: false, refusal: "outside_goal_statement", briefQuote: "£42k" });
+  });
+
+  it("S4 ⭐ a goal sentence that cannot be PLACED in the brief is treated as absent, never as a match", () => {
+    expect(
+      stated("Reach £42k MRR", "We want to reach £42k.", { goalSourceQuote: "Reach forty-two thousand." }),
+    ).toEqual({ ok: false, refusal: "metric_unbound", briefQuote: "£42k" });
+  });
+
+  it("S5 ⛔ two label figures both stated as targets still refuse as AMBIGUOUS (attestation runs before role)", () => {
+    expect(
+      stated("Reach £30k MRR And 12% Conversion", "we want to reach £30k MRR and hit 12% conversion"),
+    ).toEqual({ ok: false, refusal: "ambiguous_multiple_attested" });
+  });
+
+  it("S6 ⛔ the SAME number stated as the target of a DIFFERENT metric does not bind", () => {
+    expect(stated("Cut Churn To 12%", "Our target is 12% conversion.")).toEqual({
+      ok: false,
+      refusal: "metric_mismatch",
+      briefQuote: "12%",
+    });
+    // twin: the metric the user named IS the label's
+    const r = stated("Reach 12% Conversion", "Our target is 12% conversion.");
+    expect(r.ok).toBe(true);
+  });
+
+  it("S8 ⛔ a BOUND is not a target: the level mint cannot carry a comparison direction", () => {
+    // "keep churn under 4%" scored as a level would be a probability of
+    // REACHING 4% churn. The user's limit still rides goal_constraints[], which
+    // keeps its operator; this route withholds rather than inverts.
+    expect(stated("Keep Churn Under 4%", "We want to keep churn under 4%.")).toEqual({
+      ok: false,
+      refusal: "limit_direction_not_representable",
+      briefQuote: "4%",
+    });
+    expect(stated("Reach 500 Customers", "we need at least 500 customers")).toEqual({
+      ok: false,
+      refusal: "limit_direction_not_representable",
+      briefQuote: "500",
+    });
+    expect(stated("Cut Churn To 2%", "we want to cut churn to 2%")).toEqual({
+      ok: false,
+      refusal: "limit_direction_not_representable",
+      briefQuote: "2%",
+    });
+    // twin: the same count stated without a bound mints
+    const r = stated("Reach 500 Customers", "we need 500 customers");
+    expect(r.ok).toBe(true);
+  });
+
+  it("S9 ⛔ a NEGATED target is not a target", () => {
+    expect(stated("Reach £42k MRR", "We don't want to reach £42k MRR; that is too small.")).toEqual({
+      ok: false,
+      refusal: "negated_target",
+      briefQuote: "£42k",
+    });
+    expect(stated("Reach £42k MRR", "We want to reach £42k MRR.").ok).toBe(true);
+  });
+
+  it("S10 ⛔ a HYPOTHETICAL target is not a target", () => {
+    expect(stated("Reach £42k MRR", "If we wanted £42k MRR we would need a sales team.")).toEqual({
+      ok: false,
+      refusal: "hypothetical_target",
+      briefQuote: "£42k",
+    });
+    expect(stated("Reach £42k MRR", "We want £42k MRR and will need a sales team.").ok).toBe(true);
+  });
+
+  it("S11 ⛔ ANOTHER PARTY's target is not the user's", () => {
+    expect(stated("Reach £42k MRR", "Our competitor targets £42k MRR.")).toEqual({
+      ok: false,
+      refusal: "subject_not_bound",
+      briefQuote: "£42k",
+    });
+    expect(stated("Reach £42k MRR", "Their goal is £42k MRR.")).toEqual({
+      ok: false,
+      refusal: "subject_not_bound",
+      briefQuote: "£42k",
+    });
+    expect(stated("Reach £42k MRR", "Our target is £42k MRR.").ok).toBe(true);
+  });
+
+  it("S12 ✅ a CURRENT value beside a DESIRED value: only the desired one binds", () => {
+    const brief = "Churn is 5% today; we want to reach 2% churn.";
+    const desired = stated("Reach 2% Churn", brief);
+    expect(desired.ok).toBe(true);
+    if (desired.ok) expect(desired.target.briefQuote).toBe("2%");
+    expect(stated("Reach 5% Churn", brief)).toEqual({
+      ok: false,
+      refusal: "stated_as_current_level",
+      briefQuote: "5%",
+    });
+  });
+
+  it("S13 ⛔ a level REACHED in the past is history, not a target", () => {
+    expect(stated("Reach £42k MRR", "We reached £42k MRR last year and want to double it.")).toEqual({
+      ok: false,
+      refusal: "stated_as_past",
+      briefQuote: "£42k",
+    });
+  });
+
+  it("S14 ⛔ the five instances the round-4 comment listed, now asserted by name", () => {
+    expect(stated("Reach 12% Conversion", "our conversion is 12% today")).toMatchObject({
+      ok: false,
+      refusal: "stated_as_current_level",
+    });
+    expect(stated("Reach £500 CAC", "we currently pay £500 per acquisition")).toMatchObject({
+      ok: false,
+      refusal: "stated_as_current_level",
+    });
+    expect(stated("Grow To 12 Engineers", "we are a team of 12 engineers")).toMatchObject({
+      ok: false,
+    });
+    expect(stated("Ship 4 Releases", "we are migrating to GPT-4")).toMatchObject({ ok: false });
+    expect(stated("Reach 27001 Users", "we need ISO 27001 certification")).toMatchObject({ ok: false });
+  });
+
+  /**
+   * ⭐⭐ THE KNOWN-DROPPED SET, PINNED EXACTLY — RED IF IT GROWS *OR* SHRINKS.
+   *
+   * Legitimate-looking target phrasings this rule still refuses, and the reason
+   * it gives. Each is a GAP (a user is asked instead of told), never a lie. The
+   * table is asserted with `toEqual` over the computed results, so a rule change
+   * that admits one of these — or starts refusing one of the twins above — REDs
+   * here and the successor is told, rather than discovering the reach moved.
+   * A gap recorded in the suite is honest; a gap the suite cannot see is how
+   * four rounds of oscillation happen (CLAUDE.md trap 22f).
+   */
+  it("⛔ KNOWN-DROPPED, exact set", () => {
+    const table: ReadonlyArray<readonly [label: string, brief: string]> = [
+      ["Reach £42k MRR", "£42k MRR is where we need to be."],
+      ["Reach £42k MRR", "£42k MRR by December, whatever it takes."],
+      ["Reach £42k MRR", "We would love to see £42k MRR."],
+      ["Reach £42k MRR", "The board wants us to reach £42k MRR."],
+      ["Reach £42k MRR", "We want to get the business to £42k MRR."],
+      ["Reach 800 Customers", "800 customers is the number."],
+    ];
+    const measured = table.map(([label, brief]) => {
+      const r = stated(label, brief);
+      return [label, brief, r.ok ? "MINTS" : r.refusal] as const;
+    });
+    expect(measured).toEqual([
+      ["Reach £42k MRR", "£42k MRR is where we need to be.", "quantity_not_stated_as_target"],
+      ["Reach £42k MRR", "£42k MRR by December, whatever it takes.", "quantity_not_stated_as_target"],
+      ["Reach £42k MRR", "We would love to see £42k MRR.", "quantity_not_stated_as_target"],
+      ["Reach £42k MRR", "The board wants us to reach £42k MRR.", "subject_not_bound"],
+      ["Reach £42k MRR", "We want to get the business to £42k MRR.", "metric_mismatch"],
+      ["Reach 800 Customers", "800 customers is the number.", "quantity_not_stated_as_target"],
+    ]);
+  });
+
+  it("⭐ positives the rule admits that are NOT goal-word or from→to shapes — pinned so the reach is visible", () => {
+    for (const [label, brief, value] of [
+      ["Reach £42k MRR", "We're targeting £42k MRR.", 42_000],
+      ["Reach £42k MRR", "Getting to £42k MRR is the plan.", 42_000],
+      ["Reach 30% Trial Conversion", "Take trial conversion to 30%.", 0.3],
+      ["Reach 800 Customers", "We need 800 customers by year end.", 800],
+      ["Reach £42k MRR", "We aim to hit £42k MRR.", 42_000],
+    ] as const) {
+      const r = stated(label, brief);
+      expect(r.ok, `${label} / ${brief}`).toBe(true);
+      if (r.ok) expect(r.target.value, brief).toBeCloseTo(value, 9);
+    }
+  });
+
+  describe("through the enricher — both routes into the mint", () => {
+    it("S1 ⛔ the refurbishment cost is NOT minted as the MRR target (enrichment-loop route)", async () => {
+      const graph = founderGraph();
+      graph.nodes.find((n: any) => n.kind === "goal").label = "Reach £42k MRR";
+      const brief = "We spent £42k on office refurbishment last year; improve recurring revenue.";
+      const res = await enrichGraphWithFactorsAsync(graph, brief, { minConfidence: 0.6 });
+      const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+      expect(goal.goal_threshold).toBeUndefined();
+      expect(goal.goal_threshold_raw).toBeUndefined();
+      expect(res.goalThresholdsMinted).toEqual([]);
+    });
+
+    it("S2 ⛔ the current churn level is NOT minted with NO upstream mint (the route round 4 could not cover)", async () => {
+      const graph = founderGraph();
+      const goalNode = graph.nodes.find((n: any) => n.id === "552bd1c0");
+      goalNode.label = "Cut Churn From 5% To Zero";
+      // NO pre-set quad: the projector minted nothing (zero is a word, not a digit).
+      const brief = "Monthly churn is 5% today. We want to cut churn to zero.";
+      const res = await enrichGraphWithFactorsAsync(graph, brief, { minConfidence: 0.6 });
+      const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+      expect(goal.goal_threshold).toBeUndefined();
+      expect(goal.goal_threshold_raw).toBeUndefined();
+      expect(res.goalThresholdsMinted).toEqual([]);
+    });
+
+    it("S2 ⛔ …and on the v4-complete-skip route", async () => {
+      const graph = founderGraph();
+      graph.nodes.find((n: any) => n.id === "552bd1c0").label = "Cut Churn From 5% To Zero";
+      graph.nodes.push(
+        { id: "opt1", kind: "option", label: "Hire", data: { interventions: { f1: 0.9 } } },
+        { id: "f1", kind: "factor", label: "Sales Spend", data: { value: 0.5 } },
+      );
+      const brief = "Monthly churn is 5% today. We want to cut churn to zero.";
+      const res = await enrichGraphWithFactorsAsync(graph, brief, { minConfidence: 0.6 });
+      const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
+      expect(goal.goal_threshold_raw).toBeUndefined();
+      expect(res.goalThresholdsMinted).toEqual([]);
+    });
+
+    it("⭐ the user's own goal sentence, stamped by the projector, is READ by this route", async () => {
+      // Inside the quote: mints (the founder positive, now with its provenance).
+      const inside = founderGraph();
+      inside.nodes.find((n: any) => n.id === "552bd1c0").provenance = {
+        source_quote: "I want to reach £30k MRR within 18 months.",
+      };
+      const r1 = await enrichGraphWithFactorsAsync(inside, FOUNDER_BRIEF, { minConfidence: 0.6 });
+      expect(r1.goalThresholdsMinted).toEqual(["552bd1c0"]);
+
+      // Outside the quote: the same brief, the same label, and the goal sentence
+      // the user wrote is about runway — withhold.
+      const outside = founderGraph();
+      outside.nodes.find((n: any) => n.id === "552bd1c0").provenance = {
+        source_quote: "We have £200k of runway.",
+      };
+      const r2 = await enrichGraphWithFactorsAsync(outside, FOUNDER_BRIEF, { minConfidence: 0.6 });
+      expect(r2.goalThresholdsMinted).toEqual([]);
+      const goal: any = r2.graph.nodes.find((n: any) => n.id === "552bd1c0");
+      expect(goal.goal_threshold_raw).toBeUndefined();
+    });
   });
 });

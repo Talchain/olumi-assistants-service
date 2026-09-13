@@ -1583,6 +1583,24 @@ export interface GoalTargetWithBaseline {
  * refuses with `missing_goal_baseline`, and the user is asked rather than
  * guessed at.
  */
+/**
+ * The goal pair WITH ITS SPAN, for a consumer that must bind an attestation to
+ * the construction the grammar resolved rather than to any equal number
+ * (`goal-label-target.ts`, CEE #1328 BLOCKING 3). Same resolver, same
+ * first-match-wins rule; only the half-open span is added to the surface.
+ * `null` when no pair was stated OR the stated pair was refused by name — a
+ * refused pair is not a target the label may bind to.
+ */
+export interface StatedGoalPairSpan {
+  readonly span: readonly [number, number];
+  readonly pair: GoalTargetWithBaseline;
+}
+
+export function resolveStatedGoalPairSpan(text: string): StatedGoalPairSpan | null {
+  const resolution = resolveGoalPair(text);
+  return resolution?.kind === "pair" ? { span: resolution.span, pair: resolution.pair } : null;
+}
+
 export function extractGoalTargetWithBaseline(text: string): GoalTargetWithBaseline | null {
   const resolution = resolveGoalPair(text);
   return resolution?.kind === "pair" ? resolution.pair : null;
