@@ -5464,6 +5464,33 @@ export async function runTurnExecutor(
           ? { currentGraphHash: freshness.current_graph_hash }
           : {}),
       });
+      // ⭐⭐ THE ELEVEN SKIP REASONS THIS RESUMER COMPUTES WERE COMPUTED AND
+      // DISCARDED. Derived repo-wide, not at this call site alone:
+      // `tryClarificationResume` has exactly ONE caller (here), every use of
+      // this binding is a property read (`.dispatch` 5, `.matched` 3,
+      // `.candidates` 3, `.pending` 2, `.riskLabel` 1, `.driverLabel` 1), the
+      // object is never passed on wholesale, and `.skip_reason` was read ZERO
+      // times — while THREE siblings in this same function emit theirs.
+      //
+      // ⛔ SO IT IS NOT A CONVENTION NOBODY FOLLOWS — it is a convention
+      // followed for the siblings and dropped for this one. The module's own
+      // header says its skip reasons "exist for telemetry only"; nothing
+      // emitted them, so "which of the eleven fired" could not be answered
+      // from logs, telemetry, or anywhere else. A module reporting its own
+      // reason into a void.
+      //
+      // ⚠ THIS CHANGES NO ROUTING AND NO PREDICATE. It makes an existing
+      // diagnostic observable and nothing else. It is deliberately NOT a fix
+      // for the measured carry-forward defect: that repair cannot be named
+      // until this value can be read, and naming it from a guess is how the
+      // estate paid for four oscillating rounds on a predicate of this class.
+      if (!clarificationDispatch.matched) {
+        emit(TelemetryEvents.PendingActionSkipped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          reason: clarificationDispatch.skip_reason,
+        });
+      }
       if (
         clarificationDispatch.matched &&
         clarificationDispatch.dispatch === 'set_factor_value'
