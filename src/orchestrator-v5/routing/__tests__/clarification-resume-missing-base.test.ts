@@ -206,6 +206,54 @@ describe('tryClarificationResume — recovery_missing_base (ROADMAP 2.1426)', ()
 });
 
 /**
+ * ⛔ THE CARRIED PENDING MUST NOT HIJACK THE ANSWER.
+ *
+ * This arm re-emits nothing, but `commitTurn`'s Signature-Loop carry-forward
+ * keeps the held `increase` alive for one more turn. So when the user does
+ * what the copy asks and states an absolute value, a live delta pending for
+ * the SAME factor is sitting there — and if the resumer could claim that
+ * reply, it would apply its own held quantity in place of the number the user
+ * just typed. That is precisely the harm `system-events/scale-ask.ts` names,
+ * where the same property is relied on and pinned "by a test rather than left
+ * to the pattern's goodwill". Pinned here too, bound to THIS scenario rather
+ * than inherited from the generic negative-gate test, because it is what makes
+ * leaving the pending carried safe.
+ */
+describe('the carried delta cannot claim the absolute answer', () => {
+  it('the follow-up the copy asks for falls through to the value-update detector, not to the held increase', () => {
+    const r = tryClarificationResume({
+      message: `set ${TARGET_LABEL} to 120`,
+      pendingActions: [pendingFor()], // the carried `increase` 10%
+      graphLookup: lookupWithObservedState(null),
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    expect(r).toEqual({
+      matched: false,
+      skip_reason: 'message_likely_value_update',
+    });
+  });
+
+  it('and so does a bare current value, so the held delta is never silently applied to it', () => {
+    const r = tryClarificationResume({
+      message: '100',
+      pendingActions: [pendingFor()],
+      graphLookup: lookupWithObservedState(null),
+      nowMs: NOW_MS,
+      currentGraphHash: DEFAULT_GRAPH_HASH,
+    });
+    // Every message carrying a digit is refused by the negative gate, so no
+    // live `set_factor_value` pending can ever claim one. The consequence is
+    // stated plainly in the copy: a bare number is NOT offered as an answer,
+    // because nothing would read it as one.
+    expect(r).toEqual({
+      matched: false,
+      skip_reason: 'message_likely_value_update',
+    });
+  });
+});
+
+/**
  * ⛔⛔ THE INTERLOCK. The copy this dispatch produces tells the user to state
  * an ABSOLUTE value. That sentence is a promise about what the product will
  * accept next, and a message that is true about a state while naming an
