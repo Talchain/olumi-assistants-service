@@ -41,6 +41,25 @@ vi.mock('../../orchestrator-v5/handlers/draft-graph-dispatch.js', () => ({
   dispatchDraftGraph: dispatchDraftGraphMock,
 }));
 
+/**
+ * The model-routed open-frame intake. Defaulted to the FALLBACK verdict
+ * (`continue_conversation`), which is what the real call degrades to with no
+ * adapter — so every case that does not opt in behaves exactly as it did
+ * before this mock existed. Only the semantic-intake case below overrides it.
+ */
+const understandOpenFrameIntakeMock = vi.fn(async () => ({
+  route: 'continue_conversation' as const,
+  source: 'fallback' as const,
+  fallbackReason: 'adapter_unavailable' as const,
+}));
+vi.mock('../../orchestrator-v5/routing/open-frame-intake.js', async (importOriginal) => ({
+  // ⚠ `vi.mock`'s factory REPLACES the module, so a hand-listed mock silently
+  // drops every other export (trap 12). Spread the original and override the
+  // ONE seam this suite drives.
+  ...(await importOriginal<Record<string, unknown>>()),
+  understandOpenFrameIntake: understandOpenFrameIntakeMock,
+}));
+
 let persistedGraphForRead: unknown | null = null;
 let persistedBriefTextForRead: string | null = null;
 let hasPriorTurnsForRead = false;
@@ -215,6 +234,7 @@ describe('POST /orchestrate/v2/turn — a draft blocked on CEE\'s OWN goal asks 
     draftLossStandsForRead = false;
     pendingActionsForRead = [];
     pendingActionsReadImpl = defaultPendingActionsRead;
+    understandOpenFrameIntakeMock.mockClear();
   });
 
   it('ADMITS: a self-inflicted block answers 200 with the outcome question, not a 500', async () => {
@@ -441,6 +461,7 @@ describe('POST /orchestrate/v2/turn — the goal ask RESUMES: the answer redraft
     draftLossStandsForRead = false;
     pendingActionsForRead = [];
     pendingActionsReadImpl = defaultPendingActionsRead;
+    understandOpenFrameIntakeMock.mockClear();
   });
 
   /** A successful draft, for the SECOND turn. */
@@ -697,6 +718,66 @@ describe('POST /orchestrate/v2/turn — the goal ask RESUMES: the answer redraft
     expect(res.statusCode).toBe(500);
     // The unchanged path still leaves its server-side trace.
     expect(markGraphWriteFailedMock).toHaveBeenCalled();
+  });
+
+  /**
+   * ⭐⭐ THE SEMANTIC-INTAKE PATH — the one the P1 named by name, and the ONLY
+   * path on which the retained brief falls back to `ingress.message`.
+   *
+   * On every draft-SHAPED turn, clarify v2's round 1 hands the route a
+   * `briefOverride`, so `draftEffectiveBrief`'s `?? ingress.message` arm never
+   * runs. It runs here: a NON-draft-shaped message that the model-routed
+   * open-frame intake sends to `start_model`. Clarify declines the turn
+   * (`clarify-v2-dispatch.ts:514` — not draft-shaped, no explicit generate),
+   * the draft dispatches with no override, and `payload.message` IS the
+   * effective brief — which is exactly the path the review warned could end up
+   * drafting from the one-line answer alone.
+   *
+   * Found by a SURVIVING MUTANT: replacing the fallback with `''` left the
+   * suite green, because no case reached it. A survivor is a claim either way,
+   * so it is covered rather than declared equivalent.
+   */
+  it('CONTINUES (semantic intake, no override): the message IS the effective brief, and it is retained', async () => {
+    understandOpenFrameIntakeMock.mockResolvedValue({
+      route: 'start_model' as const,
+      source: 'model' as const,
+      model: 'test-model',
+      latencyMs: 5,
+      inputTokens: 1,
+      outputTokens: 1,
+    } as never);
+
+    // Deliberately NOT draft-shaped: no decision verb, no question mark — so
+    // clarify v2 declines and cannot supply a briefOverride.
+    const openFrame =
+      'We keep going back and forth between a Berlin office and the Lisbon team, '
+      + 'and headcount is capped at forty.';
+
+    await askTurnThenArmNextIngress(openFrame);
+
+    // Precondition: turn 1 really took the no-override path (trap 13b).
+    const args0 = dispatchDraftGraphMock.mock.calls[0]![0] as { briefOverride?: string };
+    expect(
+      args0.briefOverride,
+      'precondition: this path must carry NO briefOverride',
+    ).toBeUndefined();
+
+    dispatchDraftGraphMock.mockResolvedValueOnce(draftSucceeds());
+    const res2 = await app.inject({
+      method: 'POST',
+      url: '/orchestrate/v2/turn',
+      payload: { ...messagePayload('The goal is to increase revenue.'), turn_id: TURN_ID_2 },
+    });
+
+    expect(res2.statusCode).toBe(200);
+    expect(dispatchDraftGraphMock.mock.calls.length).toBe(2);
+
+    const next = effectiveBriefOfCall(1);
+    expect(next).toContain('Berlin office');
+    expect(next).toContain('Lisbon team');
+    expect(next).toContain('capped at forty');
+    expect(next).toContain('The goal is to increase revenue.');
+    expect(next).not.toBe('The goal is to increase revenue.');
   });
 
   /**
