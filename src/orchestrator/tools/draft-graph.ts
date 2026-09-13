@@ -407,6 +407,13 @@ export async function handleDraftGraph(
       // been spent made "the server tried twice" and "the server never tried"
       // indistinguishable — the two cases whose honest advice differs most.
       'auto_retry',              // bounded auto-retry disclosure — fixed shape, no user content
+      // ROADMAP goalfence: did the draft fail to reach a goal CEE ITSELF
+      // minted? A fixed boolean, emitted only on the true arm by
+      // `graph-enforcement.ts`, carrying no user content. It is allowlisted
+      // because route-v2 reads it OFF THIS OBJECT to decide whether to answer
+      // the turn with the outcome question instead of a dead 500 — the graph is
+      // gone by then and nothing downstream can re-derive the fact.
+      'goal_never_stated',       // self-inflicted goal gap — fixed boolean, no user content
     ]);
     const rawDetails = (body as { details?: unknown }).details;
     const pipelineDetails: Record<string, unknown> | null =

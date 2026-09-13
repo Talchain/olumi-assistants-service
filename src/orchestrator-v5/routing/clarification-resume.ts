@@ -63,6 +63,7 @@ import {
   ANSWER_HEDGE_WORDS,
   classifyElicitedBaselineAnswer,
 } from '../../cee/factor-extraction/stated-level.js';
+import { resolveExistingRawValue } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
@@ -125,6 +126,10 @@ export type ClarificationResumeSkipReason =
  *                                 reply matched multiple candidates.
  *                                 The caller emits one chip per
  *                                 candidate and never calls the LLM.
+ *   - `recovery_missing_base`   — the target is resolved and the held change
+ *                                 is a DELTA, but the factor carries no
+ *                                 current value for the delta to be computed
+ *                                 from. See {@link probeDeltaBase}.
  */
 export type ClarificationResumeDispatch =
   | { readonly matched: false; readonly skip_reason: ClarificationResumeSkipReason }
@@ -155,6 +160,28 @@ export type ClarificationResumeDispatch =
         readonly pending: PendingAction;
         readonly factorLabel: string;
       }>;
+    }
+  | {
+      /**
+       * ROADMAP 2.1426 — THE TARGET IS SETTLED AND THE STARTING POINT IS NOT.
+       *
+       * Named apart from `recovery_targets_missing` deliberately (trap 21):
+       * that one means "the factor is gone", this one means "the factor is
+       * here and has no current value". They are two different questions and
+       * reconciling them would put a wrong sentence in front of the user.
+       *
+       * Carries everything the caller needs to restate the request without
+       * making the user retype it: which factor, which direction, how much.
+       */
+      readonly matched: true;
+      readonly dispatch: 'recovery_missing_base';
+      readonly pending: PendingAction;
+      readonly factorId: string;
+      readonly factorLabel: string;
+      /** Never `set` — `set` needs no base and is dispatched normally. */
+      readonly operator: 'increase' | 'decrease' | 'multiply';
+      readonly value: number;
+      readonly unit?: string;
     }
   | {
       /**
@@ -508,6 +535,70 @@ function tryAddRiskDriverResume(
   };
 }
 
+/**
+ * ROADMAP 2.1426 — CAN A DELTA BE COMPUTED AGAINST THIS FACTOR?
+ *
+ * Three answers, and the third is the one that matters most:
+ *
+ *   - `base_recorded`  — the factor carries a value a delta can start from.
+ *   - `no_base`        — it carries none. A delta against it is arithmetic
+ *                        with one operand missing.
+ *   - `not_probeable`  — this lookup adapter cannot answer the question.
+ *
+ * ⛔ `not_probeable` MUST fall through to the pre-existing behaviour, and the
+ * reason is the whole point of the repair: telling a user "I have no current
+ * value for this" when the truth is "I could not look" is a FALSE STATEMENT
+ * ABOUT THE MODEL'S OWN CONTENTS — the same class of defect this dispatch
+ * exists to remove. `findFactorObservedState` is optional on {@link
+ * GraphLookup} (older mocks and simple synthetic graphs omit it; the
+ * production `buildGraphLookup` adapter implements it), so absence is a fact
+ * about the instrument, never about the graph.
+ *
+ * ⭐ THE PREDICATE IS THE VALIDATOR'S OWN, NOT A SECOND OPINION. The field
+ * projection below is copied from the `set_factor_value` precheck in
+ * `validator.ts`, which feeds the SAME `resolveExistingRawValue` and omits
+ * `factorExistingRaw` for anything but a `resolved` result — so the delta
+ * guard refuses exactly the cases this returns as `no_base` or better.
+ * Writing a local "has a value" test instead would be an invariant with the
+ * same blind spot as the code it guards; the two could then disagree, and the
+ * user would get a "from what?" question followed by a successful edit, or
+ * worse, no question and the dead-end refusal.
+ *
+ * ⚠ `ambiguous` IS DELIBERATELY `base_recorded`, AND IT IS NOT A ROUNDING OF
+ * THE TRUTH. `resolveExistingRawValue` returns `ambiguous` when a value IS
+ * stored but its SCALE has no reliable provenance (a `%` factor outside [0,1]
+ * with no unambiguous divisor). The delta guard refuses that too, so the
+ * dead end is real — but the honest question there is "what scale is this
+ * on?", not "what is it now?", and that seam has its own machinery. Claiming
+ * it here would make the product say a factor has no recorded value when it
+ * has one. Scope recorded rather than quietly widened.
+ */
+type DeltaBaseProbe = 'base_recorded' | 'no_base' | 'not_probeable';
+
+function probeDeltaBase(
+  factorId: string,
+  graphLookup: GraphLookup,
+): DeltaBaseProbe {
+  const accessor = graphLookup.findFactorObservedState;
+  if (accessor === undefined) return 'not_probeable';
+  const obs = accessor.call(graphLookup, factorId);
+  // Field-for-field the validator's projection. `obs === null` (no node, or
+  // no observed_state block) collapses to an empty snapshot, which is
+  // `missing` — identical to how the validator treats it.
+  const existing = resolveExistingRawValue({
+    ...(obs?.raw_value !== undefined ? { raw_value: obs.raw_value } : {}),
+    ...(obs?.value !== undefined ? { value: obs.value } : {}),
+    ...(obs?.unit !== undefined ? { unit: obs.unit } : {}),
+    ...(obs?.cap !== undefined ? { cap: obs.cap } : {}),
+  });
+  // ⭐ ZERO IS A BASE. `resolveExistingRawValue` reports `{raw_value: 0}` and
+  // `{value: 0}` as `resolved`, so a factor sitting at zero takes the
+  // `base_recorded` branch here and a delta against it runs exactly as
+  // before. Keyed on `kind`, never on truthiness, so it cannot regress into
+  // treating 0 as absent.
+  return existing.kind === 'missing' ? 'no_base' : 'base_recorded';
+}
+
 export function tryClarificationResume(
   input: TryClarificationResumeInput,
 ): ClarificationResumeDispatch {
@@ -652,12 +743,44 @@ export function tryClarificationResume(
     };
   }
 
+  const winner = pickFrom[0]!;
+  const winnerAction = winner.pending.action;
+
+  // ROADMAP 2.1426 — THE TARGET IS SETTLED; IS THERE ANYTHING TO CHANGE FROM?
+  //
+  // Runs here, on the SOLE surviving candidate, and nowhere earlier: the
+  // question "from what?" is only askable once "which one?" has an answer.
+  // An ambiguous reply keeps its existing re-clarify (resolve the target
+  // first; the base question follows on the next turn if it still applies).
+  //
+  // `operator !== 'set'` is the delta test, and it is written to be the SAME
+  // SENTENCE as the guard it front-runs — `evaluateFactorValueProposal` opens
+  // its delta block with exactly `if (operator !== 'set')`. A hand-listed set
+  // of delta operators here would be a mirror of that union and would drift
+  // the day one is added.
+  if (
+    winnerAction.kind === 'set_factor_value' &&
+    winnerAction.operator !== 'set' &&
+    probeDeltaBase(winnerAction.factor_id, input.graphLookup) === 'no_base'
+  ) {
+    return {
+      matched: true,
+      dispatch: 'recovery_missing_base',
+      pending: winner.pending,
+      factorId: winnerAction.factor_id,
+      factorLabel: winner.label,
+      operator: winnerAction.operator,
+      value: winnerAction.value,
+      ...(winnerAction.unit !== undefined ? { unit: winnerAction.unit } : {}),
+    };
+  }
+
   return {
     matched: true,
     dispatch: 'set_factor_value',
-    pending: pickFrom[0]!.pending,
-    factorLabel: pickFrom[0]!.label,
-    matchKind: pickFrom[0]!.matchKind,
+    pending: winner.pending,
+    factorLabel: winner.label,
+    matchKind: winner.matchKind,
   };
 }
 

@@ -248,6 +248,19 @@ export const TelemetryEvents = {
   // reoffered_graph_changed / reoffered_graph_present /
   // state_read_failed_fallthrough; `trigger`: copy_replay / bare_confirm).
   V5DraftOfferSeeded: "v5.draft_offer.seeded",
+  // ROADMAP goalfence — the draft blocked on a goal CEE itself minted and the
+  // turn asked the user for the outcome instead of returning a dead 500.
+  //
+  // NAMESPACED UNDER `recovery_response`, NOT `clarify_v2`, and not under a new
+  // `v5.draft_graph.*` token. Two reasons, and the second is a rule this file
+  // enforces on itself: (a) clarify is strictly PRE-draft, so a dashboard
+  // measuring "how often do we clarify before drafting" must not silently
+  // absorb post-draft-failure asks; (b) `v5.draft_graph` is not a sanctioned
+  // v5 namespace token — `tests/utils/telemetry-events.test.ts` REDs on it —
+  // and widening a frozen contract to fit one event is the wrong direction.
+  // This IS a recovery response, so it belongs in the namespace that already
+  // means that.
+  V5DraftGoalNeverStatedAsk: "v5.recovery_response.goal_never_stated_ask",
   V5DraftOfferResumed: "v5.draft_offer.resumed",
   // Clarify v2 (E0-B, ROADMAP 1.94 Option A replacement) — DARK behind
   // CEE_CLARIFY_V2_ENABLED. `questions_emitted` fires once per clarify

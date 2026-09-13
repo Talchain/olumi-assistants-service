@@ -186,10 +186,95 @@ export const RULE_CITATION_PATTERNS: readonly RegExp[] = [
  * admit the bare gerund *"the user asking"*, which is a shape an ordinary
  * factor label could take. Requiring the possessive for the gerund forms keeps
  * the widening to exactly the class that was measured leaking.
+ *
+ * ⭐⭐ THE THIRD PATTERN IS THE 12 SEP MISS — POSSESSIVE + CONVERSATIONAL NOUN,
+ * AND IT IS THE THIRD TIME THIS CLASS HAS LEAKED THROUGH A ONE-WORD GAP.
+ *
+ * Driven on the deployed build, 12 runs: the reply to a clarifying answer
+ * opened *"The user's turn "Both" answers the clarifying question from two
+ * turns back…"*. Measured at `a3d9b953` with both historic patterns and two
+ * contrast controls in the SAME run (trap 13e): TARGET clean, `The user's
+ * asking` HIT, `The user wants` HIT, `ContextPack` HIT, two second-person
+ * controls clean. The absence was real, not instrument blindness. Pattern 1
+ * needs a bare verb after `user`; pattern 2's alternation is gerunds and
+ * prepositions. A NOUN after the possessive is admitted by neither.
+ *
+ * ⭐ WHY THIS CANNOT OSCILLATE THE WAY A NATURAL-LANGUAGE PREDICATE USUALLY
+ * DOES (trap 22b/22f — four rounds were burned in this estate on one such
+ * rule, each fix opening the opposite defect). That oscillation came from ONE
+ * parameter guarding TWO opposite harms, so every tightening bought a leak and
+ * every widening bought a lie. This pattern has no such parameter. It is a
+ * CLOSED alternation over nouns that denote a move in THIS dialogue — the
+ * things a reply would call *your* turn, *your* answer, *your* brief. The
+ * product's own register for all nine is the second person, so the third
+ * person is the leak by construction rather than by threshold. There is no
+ * window to widen, no length constant, no cliff: adding a noun is a visible,
+ * reviewable edit that REDs the KNOWN-DROPPED assertion, and removing one REDs
+ * the admitted-noun contrast. Both directions are pinned, so a later round
+ * cannot quietly trade one for the other.
+ *
+ * FALSE-POSITIVE SWEEP, run for this pattern at `a3d9b953` with the same
+ * method as the header's: every string literal in production `src/` excluding
+ * tests and prompts — 966 files, 113,151 literals — with two contrast controls
+ * in the same run (`context[\s_]?packs?` → 69, `the user` → 450, so the sweep
+ * was not blind). SEVEN hits, every one adjudicated by reading it:
+ *   · six are DEVELOPER COMMENTS (`not-modelled-manifest.ts:608`,
+ *     `draft-graph-dispatch.ts:873`, `edit-graph-dispatch.ts:229` and `:5128`,
+ *     `route-with-tool-use.ts:1660`) — never `assistant_text`;
+ *   · one is MODEL-FACING ROUTING PROMPT text (`route-with-tool-use.ts:1908`,
+ *     *"Answer the user’s question directly…"*, typographic apostrophe) — an
+ *     instruction sent TO the model, never back from it.
+ * ZERO hits in shipped user-facing copy, so this cannot displace product prose.
+ *
+ * ⚠ ONE COLLISION, DISCLOSED RATHER THAN HIDDEN. A sibling spec's
+ * hand-written twin — `__tests__/runner-up-gap-statistic.test.ts:235`, *"The
+ * user's brief targets a 5-point NPS improvement."* — DOES match this pattern.
+ * It does not break: that spec exercises the gap-noun binder and never invokes
+ * this guard. It is recorded because the string is genuinely third-person
+ * about the addressee and WOULD be a leak if it ever shipped as
+ * `assistant_text`; the author reached for it as incidental scaffolding for a
+ * hyphenated quantity, not as a judgement about register. The twin for it in
+ * this module's own spec is the second-person form, *"Your brief targets a
+ * 5-point NPS improvement."*, which must and does survive.
  */
 export const THIRD_PERSON_READER_PATTERNS: readonly RegExp[] = [
   /\bthe\s+user\s+(?:wants?|is\s+asking|asked|asks|has\s+asked|needs?|would\s+like|is\s+trying|said|means|meant|expects?)\b/i,
   /\bthe\s+user['’]s\s+(?:asking|wanting|trying|saying|looking|after)\b/i,
+  /\bthe\s+user['’]s\s+(?:turn|message|reply|answer|response|question|brief|phrasing|wording)\b/i,
+];
+
+/**
+ * ⛔ THE KNOWN-DROPPED SET — nouns this module deliberately does NOT admit
+ * after `the user's`, and the reason it does not.
+ *
+ * A gap recorded in the suite is honest; a gap invisible to it is how the two
+ * previous misses of this class survived. `__tests__/process-narration.test.ts`
+ * asserts this set EXACTLY — it REDs if the set grows AND if it shrinks — and
+ * asserts in the same run that every ADMITTED noun does match, so the drop
+ * cannot be satisfied by a pattern that matches nothing (trap 13).
+ *
+ * Every member is a noun this product's users write about THEIR OWN customers.
+ * `the user's journey`, `the user's base` and `the user's experience` are
+ * ordinary business prose; `feedback`, `intent`, `input` and `point` are
+ * routinely domain nouns in a product or operations model; `request` is a
+ * first-class noun in any model of a service or an API. Admitting them would
+ * buy recall in exchange for destroying legitimate prose — the failure
+ * direction this module refuses, because a false positive costs the user a
+ * sentence they needed and reports nothing anywhere.
+ *
+ * These are NOT covered and are not being guessed at. Reported rather than
+ * invented (the same standard as this module's *"Let me check what's actually
+ * in the model"* disclosure).
+ */
+export const THIRD_PERSON_KNOWN_DROPPED_NOUNS: readonly string[] = [
+  'request',
+  'input',
+  'intent',
+  'feedback',
+  'journey',
+  'base',
+  'experience',
+  'point',
 ];
 
 /**

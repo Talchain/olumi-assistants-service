@@ -243,6 +243,14 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
   they must stay below.
+  Say what the limit APPLIES TO: set \`applies_to_claim\` to the index of the
+  \`claims\` entry it limits, or \`applies_to_stated\` to the index of the
+  \`stated_items\` entry, whichever names the quantity being bounded — never
+  both. "Keep monthly churn under 4%" applies to whatever you called the churn
+  measure, even when you named it something better than the user did. Leave both
+  out when nothing you emitted measures that quantity: an omission is read as
+  "not stated" and costs nothing, and a wrong index binds the user's limit to the
+  wrong number.
 - \`cause\` — an explanation the user offered for why something is happening: a
   hypothesis, whoever holds it. Keep every one the brief carries. See the
   \`option\` entry above for why a cause is never an option.

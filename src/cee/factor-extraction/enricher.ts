@@ -343,6 +343,116 @@ function inferFactorType(
 }
 
 /**
+ * ⭐⭐ THE STATED CURRENCY, WRITTEN ONTO A FACTOR THE MODEL ALREADY VALUED.
+ *
+ * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────
+ * Paul's *"increase the Pro plan price from £49 to £59"* reached the graph as
+ * `{value: 0.49, raw_value: 49}` with NO `unit` — so `inferFactorType` fell
+ * through its currency branch to `"other"` (`:342`), the UI routed a price down
+ * its qualitative tier-label path, and the `raw_value: 49` sitting on the node
+ * became structurally unreachable because the UI's denormalise path requires a
+ * non-null unit. One missing field, both harms.
+ *
+ * The extractor had the unit all along: the founder's verbatim brief yields
+ * `{label: "Price", value: 59, baseline: 49, unit: "£"}`, and `schema-v3.ts:398`
+ * ships a unit faithfully when one exists. It was never LOST — it was never
+ * WRITTEN, because the caller's `hasFactorData` gate treats "the model gave this
+ * node a level" as "the model gave this node complete data". Two questions under
+ * one name (trap 21).
+ *
+ * ── WHY THIS IS BOUND BY IDENTITY AND NOT BY A VALUE PREDICATE ────────────
+ * The unit is written ONLY when the node's own `raw_value` IS the magnitude this
+ * factor states (`statedCurrentRaw`). "The brief mentions £ somewhere" would
+ * stamp a currency onto any similarly-labelled quantity (trap 19); requiring the
+ * magnitudes to be the same number makes the write a TRANSCRIPTION of one span
+ * rather than an inference across two. It also scopes the change to exactly the
+ * class the harm lives in — an unreachable `raw_value` IS the harm — so a factor
+ * with no `raw_value` is deliberately left alone rather than given a "£0.49".
+ *
+ * ── ADDITIVE ONLY ────────────────────────────────────────────────
+ * This may ADD an absent field; it may never move a number and never overwrite a
+ * unit or a `factor_type` the model stated. `cap` is deliberately NOT written:
+ * an extracted cap is ENFORCED downstream against the user's own later
+ * correction (see `computeExtractedFactorCap`'s header), so minting one here
+ * would constrain an edit the user has not made yet. The span gate is REUSED
+ * rather than re-derived, so this cannot stamp a figure from a sentence that is
+ * not the node's own (trap 12).
+ *
+ * @returns `true` when a unit was written.
+ */
+function backfillStatedUnit(
+  enrichedGraph: GraphT,
+  existingNode: NodeT,
+  factor: ExtractedFactor,
+  brief: string,
+  collector?: CorrectionCollector
+): boolean {
+  if (factor.unit === undefined) return false;
+
+  const nodeIndex = enrichedGraph.nodes.findIndex((n) => n.id === existingNode.id);
+  if (nodeIndex < 0) return false;
+
+  const node = enrichedGraph.nodes[nodeIndex];
+  const data = node.data;
+  if (!isFactorData(data)) return false;
+
+  // Never overwrite a stated unit. This function may only ADD.
+  if (data.unit !== undefined) return false;
+
+  // ⭐ IDENTITY, NOT A VALUE PREDICATE (trap 19).
+  const raw = data.raw_value;
+  // ⚠ THIS LINE IS AN EQUIVALENT MUTANT, AND THAT IS MEASURED, NOT ASSUMED.
+  // Deleting it leaves all five specs GREEN and `tsc -p tsconfig.build.json`
+  // CLEAN, because the identity comparison below already rejects `undefined`
+  // and `NaN` (`undefined !== 49`). It is kept because it states the
+  // precondition the next line only implies — but it discriminates nothing, so
+  // do not read it as a guard that bites. (An equivalent mutant must be
+  // demonstrated, never asserted — trap 13c.)
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return false;
+  if (raw !== statedCurrentRaw(factor)) return false;
+
+  // The same gate the enhance path uses — reused, not re-derived.
+  if (!enhanceWriteIsSpanContained(existingNode, factor, brief)) return false;
+
+  const nextData: FactorDataT = {
+    ...data,
+    unit: factor.unit,
+    // `factor_type` is derived FROM the unit, so the two are one defect and one
+    // fix. Classified against the NODE's own label: this write keeps the model's
+    // node and its level, so the node is the subject the type describes.
+    ...(data.factor_type === undefined
+      ? { factor_type: inferFactorType(factor.unit, existingNode.label ?? factor.label) }
+      : {}),
+  };
+
+  enrichedGraph.nodes[nodeIndex] = { ...node, data: nextData };
+
+  log.info(
+    {
+      event: "cee.factor_enrichment.unit_backfilled",
+      nodeId: existingNode.id,
+      unit: factor.unit,
+      rawValue: raw,
+      factorType: nextData.factor_type,
+    },
+    `Wrote the brief's stated unit "${factor.unit}" onto "${existingNode.id}"`
+  );
+
+  if (collector) {
+    collector.addByStage(
+      11, // Stage 11: Factor Enrichment
+      "node_modified",
+      { node_id: existingNode.id, kind: "factor" },
+      `Backfilled the stated unit on a model-valued factor`,
+      data,
+      nextData
+    );
+  }
+
+  return true;
+}
+
+/**
  * Check if two labels refer to the same concept
  */
 function labelsMatch(label1: string, label2: string): boolean {
@@ -1433,7 +1543,16 @@ export async function enrichGraphWithFactorsAsync(
           }
         }
       } else {
-        factorsSkipped++;
+        // ⭐⭐ A PARTIAL DATA BLOCK IS NOT A COMPLETE ONE. `hasFactorData` above
+        // asks whether the model gave this node a LEVEL; it has never asked
+        // whether it gave it a UNIT. A model-valued factor therefore discarded
+        // the extractor's `unit: "£"` and rendered a price as a coarse band.
+        // See `backfillStatedUnit` for the derivation and the identity binding.
+        if (backfillStatedUnit(enrichedGraph, existingNode, factor, brief, collector)) {
+          factorsEnhanced++;
+        } else {
+          factorsSkipped++;
+        }
       }
       continue;
     }

@@ -28,6 +28,7 @@ import { isDemandNotBriefFailure } from "../../adapters/llm/draft-budget.js";
 import { buildCeeErrorResponse } from "../validation/pipeline.js";
 import { buildLlmMetadataProjection } from "./llm-metadata-projection.js";
 import {
+  applyGoalNeverStatedSkipCopy,
   decideDraftAutoRetry,
   applyRetryExhaustedCopy,
   applyRetryUnaffordableCopy,
@@ -714,6 +715,28 @@ export async function runUnifiedPipeline(
   const elapsedMs = Date.now() - retryBaselineMs;
   const decision = decideDraftAutoRetry(first, elapsedMs);
   if (!decision.retry) {
+    if (decision.reason === "goal_never_stated") {
+      // ⭐ THE RETRY IS NOT UNAFFORDABLE HERE — IT IS USELESS.
+      //
+      // Measured on the served build `2212ae0`: the retry ran on all 11
+      // captured short-brief failures, returned IDENTICAL validator codes both
+      // times, rescued 0 of 11, and cost ~18s of the user's request budget. The
+      // placeholder goal is minted deterministically, so attempt 2 begins from
+      // the same contentless goal as attempt 1.
+      //
+      // The disclosure is emitted on this arm exactly as it is on the
+      // unaffordable arm and for the same P0d reason: "the server never tried"
+      // and "the server tried twice" are the two cases whose honest advice
+      // differs most, so neither may be silent.
+      log.warn({
+        event: TelemetryEvents.CeeEnforcementAutoRetrySkipped,
+        request_id: getRequestId(request),
+        retry_class: classifyRetryableDraftFailure(first),
+        auto_retry_skip_reason: decision.reason,
+        elapsed_ms: elapsedMs,
+      }, "Draft failed to reach a goal CEE itself minted — a re-draft cannot supply the missing outcome, so no retry was funded");
+      return applyGoalNeverStatedSkipCopy(first);
+    }
     if (decision.reason === "budget_unaffordable") {
       // ⭐ P0d — THE COPY ON THIS PATH WAS A FALSE CLAIM, AND THE PATH ITSELF
       // WAS INVISIBLE.

@@ -117,6 +117,12 @@ export const MAX_WORDS = 140;
 const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
 const MAX_NAMED_OPTIONS = 4;
+/**
+ * Appended to an option the product proposed, so the user can tell our
+ * suggestion from their own. Appended AFTER elision, so it is never the part
+ * that gets truncated. See {@link collectOptions} for when it is earned.
+ */
+const CEE_PROPOSED_MARKER = ' — my suggestion';
 const MAX_LISTED_WHEN_OVER = 3;
 
 /**
@@ -405,6 +411,20 @@ interface NodeLite {
    * to node level and collapses the rest to this verdict.
    */
   readonly provenance?: string;
+  /**
+   * The user's own words for this node, lifted to node level by
+   * `projectNodeProvenance` alongside `label_authored` (see the note on
+   * {@link NodeLite.provenance} above; declared at `cee-v3.ts:276`).
+   *
+   * ⭐ READ HERE AS A STRUCTURAL FACT ABOUT WHICH ARRAY THE NODE CAME FROM,
+   * not as display text. A user-stated option arrives in `stated_items[]`,
+   * whose schema REQUIRES `source_quote` (`grammar.ts:484`); an option the
+   * model proposed arrives in `claims[]`, which has no `source_quote` field
+   * at all. `projector.ts:4257-4259` states the consequence directly — an
+   * `ai_inferred` claim node "has no `source_quote` and whose label was never
+   * the user's". See {@link collectOptions}.
+   */
+  readonly source_quote?: string;
   readonly observed_state?: {
     readonly uncertainty_drivers?: readonly string[];
   };
@@ -705,7 +725,7 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   }
 
   const goalLabel = findGoalLabel(nodes);
-  const options = collectLabels(nodes, 'option');
+  const options = collectOptions(nodes);
   const factors = collectLabels(nodes, 'factor');
   const risks = collectLabels(nodes, 'risk');
 
@@ -1264,11 +1284,19 @@ function buildConfirmSentence(
  * spread without enumerating every variant.
  */
 function buildOptionsBlock(
-  options: readonly string[],
+  options: readonly OptionLite[],
   provisionalDecision = false,
 ): string | null {
   if (options.length === 0) return null;
-  const trimmed = options.map((label) => elideLabelAtWordBoundary(label, MAX_LABEL_CHARS));
+  // ⚠ THE MARKER IS APPENDED AFTER ELISION, NEVER BEFORE. Eliding the joined
+  // string would spend the label budget on our own disclosure and could cut
+  // the marker itself — the display budget belongs to the user's words.
+  const trimmed = options.map(
+    (option) =>
+      `${elideLabelAtWordBoundary(option.label, MAX_LABEL_CHARS)}${
+        option.ceeProposed ? CEE_PROPOSED_MARKER : ''
+      }`,
+  );
 
   // ⚠ THE OPTIONS ARE NEVER WITHHELD, ONLY RE-TITLED. They are rendered on the
   // user's canvas either way; a narrative that omitted them while the canvas
@@ -2177,6 +2205,57 @@ function goalCameFromBrief(nodes: readonly NodeLite[]): boolean {
     }
   }
   return false;
+}
+
+/** An option label plus the one verdict the narrative needs about it. */
+interface OptionLite {
+  readonly label: string;
+  /** TRUE only when BOTH signals agree that the product proposed this option. */
+  readonly ceeProposed: boolean;
+}
+
+/**
+ * ⭐⭐ THE OPTION LIST KEEPS ITS PROVENANCE. `collectLabels` projects a node to
+ * its label string, which is why the verdict the projector already stamped on
+ * every option node died two lines before the composer could read it — an
+ * option the product INVENTED was rendered indistinguishably from one the user
+ * stated. (The founder's own session: his stated option was a no-op, the
+ * product invented a price he never named, and that price won.)
+ *
+ * ⚠⚠ TWO SIGNALS, AND THE CONJUNCTION IS LOAD-BEARING. `provenance ===
+ * 'ai_inferred'` ALONE IS NOT SAFE, and the producer says so in its own
+ * header: `bindOptionLabelToBrief` shares a 3-character specificity floor
+ * (`brief-binding.ts:153-157`) under which a genuine two-character option the
+ * user wrote (`"Go"`) "now reads `cee_hypothesis` rather than
+ * `brief_extraction`". Marking on that signal alone would tell a user that
+ * their own option was our suggestion.
+ *
+ * So the second conjunct is STRUCTURAL rather than lexical: a user-stated
+ * option arrives in `stated_items[]`, whose schema REQUIRES `source_quote`;
+ * an invented one arrives in `claims[]`, which has no such field. A node
+ * carrying a quote is therefore the user's, whatever the binding floor made of
+ * its label.
+ *
+ * ⚠ FAIL-SAFE DIRECTION, AND IT IS THE SAME RULING THE GOAL OPENER MADE.
+ * UNDER-disclosing our own suggestion is recoverable; falsely telling a user we
+ * invented THEIR option is not. Every ambiguous shape goes UNMARKED — an absent
+ * stamp, a legacy graph, a stated option whose label failed the floor.
+ */
+function collectOptions(nodes: readonly NodeLite[]): OptionLite[] {
+  const out: OptionLite[] = [];
+  for (const n of nodes) {
+    if (n.kind !== 'option') continue;
+    if (typeof n.label !== 'string') continue;
+    const trimmed = n.label.trim();
+    if (trimmed.length === 0) continue;
+    const carriesVerbatim =
+      typeof n.source_quote === 'string' && n.source_quote.trim().length > 0;
+    out.push({
+      label: trimmed,
+      ceeProposed: n.provenance === 'ai_inferred' && !carriesVerbatim,
+    });
+  }
+  return out;
 }
 
 function collectLabels(nodes: readonly NodeLite[], kind: string): string[] {

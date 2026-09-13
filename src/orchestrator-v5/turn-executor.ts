@@ -221,7 +221,10 @@ import {
   tryClarificationResume,
   tryGoalTargetElicitationResume,
 } from './routing/clarification-resume.js';
-import { formatBaselineReask } from './tools/handlers/d1-shared/format-confirmation.js';
+import {
+  formatBaselineReask,
+  formatValueWithUnit,
+} from './tools/handlers/d1-shared/format-confirmation.js';
 import {
   buildTypedChipMutationProposal,
   isTypedChipMutationActionType,
@@ -5464,6 +5467,33 @@ export async function runTurnExecutor(
           ? { currentGraphHash: freshness.current_graph_hash }
           : {}),
       });
+      // ⭐⭐ THE ELEVEN SKIP REASONS THIS RESUMER COMPUTES WERE COMPUTED AND
+      // DISCARDED. Derived repo-wide, not at this call site alone:
+      // `tryClarificationResume` has exactly ONE caller (here), every use of
+      // this binding is a property read (`.dispatch` 5, `.matched` 3,
+      // `.candidates` 3, `.pending` 2, `.riskLabel` 1, `.driverLabel` 1), the
+      // object is never passed on wholesale, and `.skip_reason` was read ZERO
+      // times — while THREE siblings in this same function emit theirs.
+      //
+      // ⛔ SO IT IS NOT A CONVENTION NOBODY FOLLOWS — it is a convention
+      // followed for the siblings and dropped for this one. The module's own
+      // header says its skip reasons "exist for telemetry only"; nothing
+      // emitted them, so "which of the eleven fired" could not be answered
+      // from logs, telemetry, or anywhere else. A module reporting its own
+      // reason into a void.
+      //
+      // ⚠ THIS CHANGES NO ROUTING AND NO PREDICATE. It makes an existing
+      // diagnostic observable and nothing else. It is deliberately NOT a fix
+      // for the measured carry-forward defect: that repair cannot be named
+      // until this value can be read, and naming it from a guess is how the
+      // estate paid for four oscillating rounds on a predicate of this class.
+      if (!clarificationDispatch.matched) {
+        emit(TelemetryEvents.PendingActionSkipped, {
+          request_id: requestId,
+          scenario_id: context.session_id,
+          reason: clarificationDispatch.skip_reason,
+        });
+      }
       if (
         clarificationDispatch.matched &&
         clarificationDispatch.dispatch === 'set_factor_value'
@@ -5650,7 +5680,8 @@ export async function runTurnExecutor(
           | 'expired'
           | 'graph_changed'
           | 'targets_missing'
-          | 'label_ambiguous';
+          | 'label_ambiguous'
+          | 'missing_base';
         if (clarificationDispatch.dispatch === 'recovery_expired') {
           telemetryReason = 'expired';
           recoveryAssistantText =
@@ -5665,6 +5696,70 @@ export async function runTurnExecutor(
           telemetryReason = 'targets_missing';
           recoveryAssistantText =
             'The factors I was asking about aren’t in the model any more. Tell me which factor you want to change and what value to set, and I’ll apply it.';
+        } else if (
+          clarificationDispatch.dispatch === 'recovery_missing_base'
+        ) {
+          // ROADMAP 2.1426 — THE QUESTION THAT WAS NEVER ASKED.
+          //
+          // The target is settled and the change is a delta, but the factor
+          // has no current value to compute it from. Until now this
+          // dispatched into `delta_no_existing_value`, whose refusal is
+          // correct and terminal: it tells the user what went wrong and
+          // leaves them with no move.
+          //
+          // ⛔ THE BINDING CONSTRAINT ON THIS COPY. "From what?" is the right
+          // question ONLY if the user can answer it, and a person who never
+          // recorded a value for this factor may well not know one. A message
+          // that is TRUE ABOUT A STATE but names an action the reader cannot
+          // take is still a defect (UI #1539/#1540 — a toast prescribing a
+          // gesture the product had just greyed out). So the sentence that
+          // asks for anything at all is the ABSOLUTE one, and it is always
+          // available: `set` is exempt from the delta guard by construction,
+          // and on a factor with no recorded state the unit and cap
+          // redeclaration gates are inert too, so "set X to 120" is
+          // executable on exactly the factor this fires for. The delta route
+          // is offered second, as two steps that are each independently
+          // reachable, and never as a promise that a bare current value
+          // typed now will have the held change applied to it — nothing
+          // consumes an answer in that shape, and saying otherwise would
+          // reproduce the defect one turn later.
+          telemetryReason = 'missing_base';
+          const held = formatValueWithUnit(
+            clarificationDispatch.value,
+            clarificationDispatch.unit,
+          );
+          const changePhrase =
+            clarificationDispatch.operator === 'multiply'
+              ? `multiplying it by ${held}`
+              : `a ${held} ${clarificationDispatch.operator}`;
+          const label = clarificationDispatch.factorLabel;
+          recoveryAssistantText =
+            `I don’t have a current value recorded for ${label}, so there’s nothing for ${changePhrase} to work from. ` +
+            `Tell me what ${label} should be and I’ll set it directly. ` +
+            `If you’d rather keep that change, set its current value first and ask me again.`;
+          // ⭐ THE PERSIST DECISION: this arm RE-EMITS NOTHING, i.e. it leaves
+          // `recoveryPendingActions` undefined, exactly like the expired /
+          // graph-changed / targets-missing arms. Only the ambiguity arm
+          // re-emits, and it has a reason this arm does not: there a chip
+          // click genuinely resumes the original quantity, so the candidates
+          // must survive with a fresh TTL. Here the copy asks for an ABSOLUTE
+          // value, which routes through the value-update detector — a path
+          // that reads no pending actions at all — so a re-emitted pending
+          // would have no reader.
+          //
+          // ⚠ AND WHAT THAT DOES NOT MEAN, measured rather than assumed:
+          // re-emitting nothing does NOT delete the held pending. `commitTurn`
+          // runs `computeSurvivingPriorPendingsDetailed` (`commit.ts`), the
+          // Signature-Loop carry-forward that keeps a still-valid proposal
+          // alive across a non-consuming turn, decrementing its turn TTL. So
+          // the held `increase` survives this turn with one less life, which
+          // is the right outcome and is not this arm's doing: if the user
+          // answers by setting a current value the graph hash moves and the
+          // carried pending is hash-invalidated on the next commit; if they
+          // reply with the bare label again this arm simply fires again, which
+          // is still true. Carrying a delta ACROSS a stated base would need
+          // its own pending kind and its own resume path — a larger repair,
+          // and inventing half of it here would ship a question with no reader.
         } else {
           // recovery_label_ambiguous — emit one chip per candidate so
           // the user can disambiguate without retyping. No LLM call.

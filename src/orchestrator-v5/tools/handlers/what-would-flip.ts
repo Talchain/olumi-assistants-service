@@ -204,9 +204,30 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     // What-if (counterfactual) lens EXTENSION — runs only here, on the execute
     // path, and only APPENDS. `runCounterfactualLens` is fully fail-loud and
     // returns `null` (append nothing) unless it has a validated ISL 2xx for the
-    // exact intervention it asked about. When the client is null (the latent
-    // state on staging today) it short-circuits immediately, so `rawText` is
-    // returned unchanged and the base flip behaviour is byte-preserved.
+    // exact intervention it asked about. When the client is null it short-circuits
+    // immediately, so `rawText` is returned unchanged and the base flip behaviour
+    // is byte-preserved.
+    //
+    // ⚠ CORRECTED 12 Sep 2026 — this parenthetical read "(the latent state on
+    // staging today)". THAT WAS FALSE, and it taught every reader that this lens
+    // was dark (CLAUDE.md trap 14 — an honest label overwritten by a false one is
+    // worse than no label, because it teaches people to stop looking). Derived
+    // during the independent review of #1463 at head `de61c46a`:
+    //   · Render API, service `srv-d4slpaili9vc73eiq4og` (confirmed
+    //     `name: cee-staging`, `branch: staging`): `ISL_BASE_URL` is set to
+    //     `https://isl-staging.onrender.com` — TRUTHY.
+    //   · `createCounterfactualClient` (`adapters/isl/counterfactual-client.ts:232`)
+    //     returns `null` ONLY when `config.isl.baseUrl` is falsy, so staging gets a
+    //     REAL client.
+    //   · `tools/registry.ts:646-654` injects it in production (the override is
+    //     test-only); `:81` here reads it and `:225` calls the lens.
+    //   · A live probe of `POST /api/v1/causal/counterfactual` with the
+    //     `X-API-Key` header returned HTTP 200. The probe discriminates: a
+    //     fabricated route returned 404 and a malformed body 422, so the 200 is
+    //     real compute rather than a blanket accept.
+    // The BRANCH description above is unchanged and still correct — it describes
+    // what happens when `client === null`, which remains reachable wherever
+    // `ISL_BASE_URL` is unset. Only the claim about STAGING was wrong.
     //
     // ⚠ NOT APPENDED AFTER A NEGATIVE TARGETED ANSWER. `selectCounterfactualProbe`
     // picks its probe from the GENERIC flip set, so right after "nothing tested
@@ -215,9 +236,11 @@ export function createWhatWouldFlipHandler(deps?: WhatWouldFlipHandlerDeps): Han
     // read, reasonably, as "try this to make X win". The card is claim-safe in
     // isolation and contradictory in that adjacency, so the adjacency is what is
     // removed. `addressed` and `already_leading` keep it: there the suggestion
-    // and the answer point the same way. (Latent on staging today — the client is
-    // null — but the interplay is structural, not a live-only concern. A
-    // target-aware probe selector would let this branch keep the card.)
+    // and the answer point the same way. (⚠ NOT latent on staging — see the
+    // correction above: `ISL_BASE_URL` is set and the client is REAL there, so
+    // this adjacency is LIVE, not hypothetical. It was structural either way, but
+    // it should never have been read as a future concern. A target-aware probe
+    // selector would let this branch keep the card.)
     const targetedIsNegative =
       targeted !== null && (targeted.kind === 'refused' || targeted.kind === 'position_unstated');
     const lens = targetedIsNegative

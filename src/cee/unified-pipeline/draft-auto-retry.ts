@@ -41,6 +41,7 @@ import {
   isEnforcementBlockedResult,
   isOptionNoOpOnlyBlock,
   readEnforcementBlockCodes,
+  readGoalNeverStated,
 } from "./stages/repair/graph-enforcement.js";
 import { isOptionsIdenticalBypassResult } from "./stages/repair/options-identical-bypass.js";
 import type { UnifiedPipelineResult } from "./types.js";
@@ -89,7 +90,7 @@ export type DraftAutoRetryDecision =
   | { retry: true; retryBudgetMs: number; retryClass: RetryableDraftFailureClass }
   | {
       retry: false;
-      reason: "not_retryable_class" | "budget_unaffordable";
+      reason: "not_retryable_class" | "budget_unaffordable" | "goal_never_stated";
       retryBudgetMs?: number;
     };
 
@@ -115,6 +116,32 @@ export function decideDraftAutoRetry(
   const retryClass = classifyRetryableDraftFailure(result);
   if (retryClass === null) {
     return { retry: false, reason: "not_retryable_class" };
+  }
+  // ⭐⭐ THE RETRY WAS MEASURED NEVER TO RESCUE THIS CLASS.
+  //
+  // ⚠ THE CLAIM IS THE MEASUREMENT, NOT AN IMPOSSIBILITY PROOF. What was
+  // measured is a rate and a cost; "a re-draft CANNOT invent a goal" is a
+  // stronger statement about a stochastic generator than any capture can
+  // support, and this comment used to make it (review, 13 Sep).
+  //
+  // The retry exists because the two funded classes are STOCHASTIC — the same
+  // brief drafts cleanly in a neighbouring run, which is measured and is why
+  // `retryable: true` is honest for them. The self-inflicted goal gap behaved
+  // differently in every capture we have: the placeholder is minted
+  // deterministically from a brief that designates no objective, so attempt 2
+  // began from the same contentless goal and returned the same codes.
+  //
+  // MEASURED on the served build `2212ae0`: across all 11 captured short-brief
+  // failures the retry ran (`{attempted: true, attempts: 2}`, zero
+  // `skipped_reason`), produced IDENTICAL codes both times, RESCUED 0 OF 11,
+  // and spent ~18s doing it. That is the whole basis for declining it: an
+  // observed 0/11 rescue rate at ~18s, not a proof that a rescue is impossible.
+  //
+  // Checked BEFORE affordability because the two skips are different facts and
+  // the user is owed the true one: "no budget to retry" invites a retry by
+  // hand, which on this class has never yet produced a different outcome.
+  if (readGoalNeverStated(result.body)) {
+    return { retry: false, reason: "goal_never_stated" };
   }
   const retryBudgetMs = getDraftLlmRetryBudgetMs(elapsedMs);
   if (retryBudgetMs < MIN_DRAFT_RETRY_BUDGET_MS) {
@@ -413,6 +440,81 @@ export function applyRetryUnaffordableCopy(
           attempted: false,
           attempts: 1,
           skipped_reason: "budget_unaffordable",
+        },
+      },
+    },
+  };
+}
+
+/**
+ * The honest sentence for a draft that failed to reach a goal THIS PIPELINE
+ * INVENTED.
+ *
+ * ⚠ IT MAKES NO FREQUENCY CLAIM AND DOES NOT SAY "TRY AGAIN", and both
+ * omissions are measured. The connectivity copy's "usually transient / retrying
+ * usually succeeds" is inherited from a population this user is not in: for
+ * this class the same brief re-drafted from the same contentless goal and
+ * failed identically, 11 times out of 11. Telling this user to retry would be
+ * the cruel inversion the truncation arm already names — advice that
+ * reproduces the failure.
+ *
+ * It also does not blame the brief. The brief was fine; the pipeline supplied
+ * the goal. What is missing is one fact only the user has, so the sentence asks
+ * for that fact and nothing else.
+ */
+export const GOAL_NEVER_STATED_SUGGESTION =
+  "This model could not be built because the outcome it should optimise for was never named, "
+  + "so there was nothing for the alternatives to connect to. Say what a good result looks like "
+  + "and the model can be drafted around it.";
+
+export const GOAL_NEVER_STATED_HINTS: readonly string[] = [
+  "Name the measure that matters — revenue, cost, risk, retention — and which way you want it to move",
+  "A single sentence is enough; the rest of the brief can stay as it is",
+];
+
+/**
+ * Return a copy of `result` whose recovery copy is honest that no automatic
+ * retry was made BECAUSE IT WAS MEASURED NOT TO HELP ON THIS CLASS (0 of 11
+ * captured failures rescued, identical codes both attempts, ~18s spent), and
+ * whose details disclose the skip on the wire (`auto_retry: { attempted: false, attempts: 1,
+ * skipped_reason: "goal_never_stated" }` — fixed shape, fixed enum reason, no
+ * user content, riding the already-allowlisted `auto_retry` key).
+ *
+ * ⚠ A DIFFERENT SKIP FROM `applyRetryUnaffordableCopy`, AND THE DISTINCTION IS
+ * THE POINT (trap 21). That one means *"we ran out of budget to try again"* —
+ * a fact about this request. This means *"retrying has not rescued this class
+ * in any run we have measured"* — a fact about the failure. They share a shape
+ * and must not share a reason: a user told "no time to retry" will retry by
+ * hand, which on every captured instance of this class reproduced the failure. Everything else — status code, `code`, `retryable`, the codes-only
+ * validator mirror, `last_phase`, `goal_never_stated` — is preserved
+ * byte-for-byte. Pure: the input is not mutated.
+ */
+export function applyGoalNeverStatedSkipCopy(
+  result: UnifiedPipelineResult,
+): UnifiedPipelineResult {
+  const body = result.body as Record<string, unknown>;
+  const details =
+    body.details !== null && typeof body.details === "object" && !Array.isArray(body.details)
+      ? (body.details as Record<string, unknown>)
+      : {};
+  return {
+    ...result,
+    body: {
+      ...body,
+      recovery: {
+        suggestion: GOAL_NEVER_STATED_SUGGESTION,
+        hints: [...GOAL_NEVER_STATED_HINTS],
+      },
+      // The pinned flat mirror, kept in agreement with `recovery.suggestion` —
+      // `buildCeeErrorResponse` set it at emission, so rewriting `recovery`
+      // alone would leave the body carrying two DIFFERENT sentences.
+      recovery_suggestion: GOAL_NEVER_STATED_SUGGESTION,
+      details: {
+        ...details,
+        auto_retry: {
+          attempted: false,
+          attempts: 1,
+          skipped_reason: "goal_never_stated",
         },
       },
     },

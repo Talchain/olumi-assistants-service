@@ -118,11 +118,33 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     //
     // ⚠ ORDER IS THE MAP'S INSERTION ORDER, not alphabetical, and is asserted
     // as such — `.map()` over `Object.entries` preserves it.
+    //
+    // 2026-09-11 (schemas 0.50.0 member, writer landed now) — `structural_add_edge`
+    // joins, and this is its conscious act with the justification this comment
+    // demands. It could not stay `'reader_only_refusal'` for the reason both
+    // structural siblings record: that posture tells the user, truthfully, that
+    // this version cannot apply the gesture, and the sentence becomes false the
+    // instant a writer exists. It could not be `'ack_and_commit'` for the reason
+    // `structural_delete` records — an ack writes a turn row and NO graph, so the
+    // connection survives until the next reload and then vanishes.
+    //
+    // ⭐ IT CARRIES FOUR USER-FACING GESTURES, not one: draw-a-link, the five
+    // "Add connected …" affordances, duplicate, and paste. The last three are
+    // gestures users already perform and already believe work.
+    //
+    // ⚠ ITS SAFETY IS NOT INHERITED FROM THIS ROW either. It needs no `expected`
+    // twin — unlike `structural_rename`, every edge field the hash projection
+    // reads is analysis-affecting, so `base_graph_hash` genuinely covers it — and
+    // it carries two gates the hash cannot replace: endpoint resolution (a
+    // dangling edge is what the contract forbids) and the duplicate check (the
+    // edge is already in the very graph the user was looking at, so the hash is
+    // perfectly fresh and the add is still destructive).
     expect(mutating).toEqual([
       'factor_value_edit',
       'edge_strength_edit',
       'structural_delete',
       'structural_add',
+      'structural_add_edge',
       'structural_rename',
       'option_intervention_edit',
     ]);
@@ -158,7 +180,19 @@ describe('system-event kind exhaustiveness — derived from the schema, not mirr
     // ⚠ `structural_add` LEFT THIS SET when its writer landed, exactly as
     // `structural_rename` did before it. `structural_add_edge` is the last kind
     // still genuinely reader-only.
-    expect(readerOnly).toEqual(['structural_add_edge']);
+    // ⚠ `structural_add_edge` LEFT THIS SET when its writer landed, exactly as
+    // `structural_rename` and `structural_add` did before it — and it was the
+    // LAST member, so the set is now empty. That is the transition the note above
+    // says must RED rather than pass silently, and it did.
+    //
+    // ⛔ EMPTY IS THE HEALTHY READING TODAY AND WILL NOT ALWAYS BE. The note at
+    // the top of this case records that `toEqual([])` was once a snapshot that
+    // decayed into a false constraint. It is asserted again here for the OPPOSITE
+    // reason: every declared kind now has a writer or a defined non-writer
+    // posture, and the next contract version that adds a kind CEE cannot write
+    // must land reader-first — which REDs here, by name, so it gets a writer or
+    // an adjudicated refusal instead of being parked.
+    expect(readerOnly).toEqual([]);
     // The ORIGINAL intent of this case, named so it cannot be lost by a future
     // edit to the list above: no kind that has a server-side writer may be
     // DECLARED reader-only. Train C regressing would fail here specifically.

@@ -106,12 +106,54 @@ const HISTORIC_V6_GRAMMAR_SHA256 =
  * #1287's capture among them, and a reader of those logs must be able to tell
  * which grammar produced them.
  */
-const PINNED_GRAMMAR_SHA256 =
+const HISTORIC_V7_GRAMMAR_SHA256 =
   "87bd3212076c64773e5f62c4b3e669cc5d47be2038b3a690636f67a6bb109864";
 
+/**
+ * ⭐ v8 — the `applies_to_stated` / `applies_to_claim` widening on
+ * `stated_items[]`. TWO optional integers, the same shape as the widening v6
+ * made, closing the field a stated `constraint` never had: WHAT THE LIMIT
+ * APPLIES TO.
+ *
+ * ⚠ WHY IT WAS WORTH A GRAMMAR CHANGE AT ALL, since this boundary is the one
+ * place in the draft path where a mistake degrades every draft silently. The
+ * binder that replaced this field was a STRING-CONTAINMENT matcher, and it
+ * dropped a user's stated limit whenever the drafting model improved on their
+ * wording — "keeping monthly churn under 4%" against a node the model itself
+ * labelled "Subscriber Churn Rate". Three replacement matchers were built and
+ * adversarially tested and every one wrong-binds somewhere. The model already
+ * knows the answer; it had nowhere to write it down.
+ *
+ * COST against the budget that actually binds: +77 serialised bytes (1272 →
+ * 1349, against 3400) and +2 optional parameters (16 → 18, against 24). NO new
+ * object schema (3, unchanged) and NO union (0, unchanged), so the compiled-
+ * grammar-size boundary — the UNPUBLISHED constraint that silently degrades a
+ * draft to prompt-only JSON on a 400 — gains no structural complexity. All four
+ * figures MEASURED at this tip via `measureDraftRecordsSchemaBudget`, not
+ * estimated.
+ *
+ * ⚠ THE STATIC BUDGET IS NOT EVIDENCE ABOUT THE COMPILED BOUNDARY, which is
+ * unpublished and was established empirically. What is asserted here is the
+ * serialised size and the SHAPE of the change; a live compiled-grammar probe
+ * with a 400-producing negative control needs provider credentials and is owed
+ * separately. See the PR body — this is stated as an OWED measurement, not as a
+ * cleared one.
+ *
+ * ⚠ v7's VALUE STAYS AND IS ASSERTED DISTINCT, exactly as v3-v6's are: every
+ * draft between 2026-08-31 and this change emitted `grammar_sha256:87bd3212…`,
+ * INCLUDING the draws in which the dropped-limit defect was witnessed, and a
+ * reader of those logs must be able to tell which grammar produced them.
+ */
+const PINNED_GRAMMAR_SHA256 =
+  "3da0c71e7ea918fb652965fd64cf185072ec4a7aad70698386b59262145b868a";
+
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("hashes to the PRE-REGISTERED v7 grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v8 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
+  });
+
+  it("is DISTINCT from the v7 grammar, so the dropped-limit draws stay attributable to it", () => {
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V7_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the historic v6 grammar, so #1287's capture stays attributable", () => {
