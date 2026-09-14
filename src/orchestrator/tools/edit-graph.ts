@@ -3973,6 +3973,14 @@ export async function handleEditGraph(
             // codebase are slug-shaped renderings of the user's own labels. See
             // the redaction note on `firstOperationThatDidNotLand`. The op's
             // `value` and `path` are never read here.
+            //
+            // ⚠ QUERY NOTE FOR OPERATORS. Render's log `text=` filter is
+            // CASE-INSENSITIVE, so searching `did_not_land` also matches the
+            // long-standing rejection code `OPERATION_DID_NOT_LAND` — measured
+            // 2026-09-14: 33 hits over 24h, every one of them the old code and
+            // none of them this field. Grep `key_is_intervention_subtree`
+            // instead: it is unique to this descriptor and is always present
+            // (null when the reason is not key-specific).
             did_not_land: nonLanding,
           },
           'edit_graph B5 — an operation did not survive canonicalisation onto the persisted graph; refusing the WHOLE edit (no silent partial, no false success)',
