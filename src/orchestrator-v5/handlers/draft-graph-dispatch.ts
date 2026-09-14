@@ -85,6 +85,7 @@ import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
+import { buildGoalTargetAskPending } from '../goal-target/decide-goal-target-ask.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   attachModelVersionMutationReceipt,
@@ -944,6 +945,74 @@ export async function dispatchDraftGraph(
         })
       : null;
 
+    /**
+     * ⭐ THE GOAL-TARGET ASK — the draft-turn consumer of
+     * `goalTargetCandidate` (CEE #1328, Codex disposition 14 Sep).
+     *
+     * ⛔ IT NEVER WRITES AND NEVER PROPOSES A VALUE. `elicit_goal_target`
+     * carries no value field; the target is parsed from the user's ANSWER at
+     * resume through the one canonical writer. A candidate the brief did not
+     * actually offer as a target therefore cannot be adopted by a careless
+     * reply — the user supplies the number or nothing happens.
+     *
+     * Bound to `draftGraphForCommit`, which on this path IS the graph the next
+     * turn loads, and to `postDraftGraphHash`, computed from it — so the
+     * precondition is verifiable rather than asserted.
+     */
+    /**
+     * ⛔⛔ ONE ACTIVE NUMBER-ASK AT A TIME, AND THIS IS A CORRECTNESS RULE, NOT
+     * TIDINESS. Codex measured it: with BOTH this pending and the readiness
+     * effect pending live, `tryGoalTargetElicitationResume` on "£20k" returns
+     * `matched: false / no_pending_question`. With only this one it returns
+     * `matched: true`, 20000, £, the exact goal id. `findSoleLiveGoalTargetPending`
+     * counts EVERY live numeric claimant and is right to — so arming a second
+     * number-ask does not merely clutter the turn, IT DISABLES THE ANSWER TO THE
+     * FIRST.
+     *
+     * ⚠ MY OWN BOTH-ASKS TEST PROVED THE WRONG PROPERTY: it asserted both
+     * pendings survive the commit — true, and the state it documents is the one
+     * that breaks the feature. Answer-heard is the property; array contents are not.
+     *
+     * The readiness ask wins because it is already the turn's subject; the goal
+     * target surfaces on a later turn once that resolves.
+     */
+    const goalTargetAsk = askedEffect === null && draftGraphForCommit != null && postDraftGraphHash !== null
+      ? buildGoalTargetAskPending({
+          candidate: draftResult.goalTargetCandidate,
+          graphNodes: draftGraphForCommit.nodes,
+          scenarioId: payload.scenario_id,
+          graphHash: postDraftGraphHash,
+          emittedAtIso: new Date().toISOString(),
+        })
+      : null;
+    /**
+     * ⚠ ONE ARRAY, NOT TWO SPREADS. `pending_actions` is a single field; a
+     * second conditional spread would SILENTLY REPLACE the first, dropping the
+     * readiness ask whenever a goal-target ask existed.
+     */
+    /**
+     * ⭐⭐ THE ONE SENTENCE THE PERSON ACTUALLY READS — taken from the pending
+     * that was armed, never composed a second time.
+     *
+     * ⛔ WITHOUT THIS THE QUESTION WAS ARMED AND NEVER ASKED. Codex drove the
+     * real dispatch: the pending carried the question, the returned response
+     * ended with generic review-the-model text, and the provisional
+     * `assistant_text` handed to the durable commit was EMPTY. A question nobody
+     * is shown cannot be answered, so every downstream link — answer heard,
+     * canonical write, analysis consumes, reopen retains — was already dead.
+     *
+     * Derived from `goalTargetAsk.action.question` so the public sentence and the
+     * durable record are THE SAME BYTES as the pending's, from ONE decision. A
+     * second composition here could drift from what the resume binds against.
+     */
+    const goalTargetQuestionText =
+      goalTargetAsk !== null && goalTargetAsk.action.kind === 'elicit_goal_target'
+        ? goalTargetAsk.action.question
+        : null;
+    const draftPendingActions = [askedEffect, goalTargetAsk].filter(
+      (x): x is NonNullable<typeof x> => x !== null,
+    );
+
     // Capture persistence_ms for the diagnostic trace's substage timings.
     // Cheap: two Date.now() calls regardless of flag state — the timing is
     // only surfaced when the trace is built (flag-on); flag-off path
@@ -976,7 +1045,7 @@ export async function dispatchDraftGraph(
       // The code-owned missing-effect referent DOES persist below, atomically
       // with this graph: no prose parsing or second write is needed to retain
       // the exact question that the successful response will render.
-      { response_version: 2, assistant_text: [framingNotice, holdThread.notice].filter(Boolean).join('\n\n'), blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
+      { response_version: 2, assistant_text: [framingNotice, holdThread.notice, goalTargetQuestionText].filter(Boolean).join('\n\n'), blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
@@ -1007,7 +1076,7 @@ export async function dispatchDraftGraph(
         // carry-forward runs on this path; graph_hash is the NEW draft's
         // analysis-affecting hash (only when a graph is actually written).
         priorPendingActions: holdThread.threaded,
-        ...(askedEffect !== null ? { pending_actions: [askedEffect] } : {}),
+        ...(draftPendingActions.length > 0 ? { pending_actions: draftPendingActions } : {}),
         // ROADMAP 2.63 C3/C4 — retire the honoured draft-offer pending
         // atomically with the draft it produced (see the param doc).
         ...(params.consumedPendingRefs !== undefined
@@ -1027,6 +1096,25 @@ export async function dispatchDraftGraph(
     const persistenceMs = Date.now() - commitStartedAt;
 
     let response = draftResultToOlumiResponse(draftResult, payload, commitResult.graphPersisted, requestId, effectiveBrief);
+
+    /**
+     * ⭐⭐ THE QUESTION REACHES THE PERSON THROUGH THE ESTATE'S OWN CARRIER, NOT
+     * A SECOND APPEND OF MINE.
+     *
+     * It is written ONCE, into the provisional response handed to
+     * `commitDirectAnswer` above — the same commit that stores the pending. The
+     * re-attach below (*"the honest sentence must ship, never be stored-only"*)
+     * then carries the committed text onto the wire. **One decision, one write,
+     * one carrier, and the pending and the sentence are ATOMIC by construction.**
+     *
+     * ⛔ I FIRST BOLTED A SECOND APPEND ON HERE, gated on `commitResult.performed`
+     * — which is typed `readonly performed: true`, A LITERAL, so the guard was a
+     * TAUTOLOGY. My own commit-failure control caught it; re-gating on
+     * `graphPersisted` still failed, and instrumenting the guard showed why: it
+     * correctly did NOT fire and the question shipped anyway, because this
+     * carrier had already done the work. **The append was redundant and its guard
+     * was decorative.** Deleted rather than repaired.
+     */
     // ⚠⚠ DEGRADE, NEVER THROW — THE WRITE IS ALREADY DURABLE HERE.
     //
     // This is `commit.ts`'s guard (see the twin block there, and its reasoning)

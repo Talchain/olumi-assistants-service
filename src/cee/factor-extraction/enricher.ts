@@ -30,6 +30,12 @@ import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCap,
 } from "../../utils/goal-threshold-cap.js";
+import {
+  deriveGoalTargetFromLabel,
+  deriveGoalTargetCandidate,
+  type GoalTargetCandidate,
+  type GoalLabelTargetRefusal,
+} from "./goal-label-target.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -957,6 +963,15 @@ export interface EnrichmentResultAsync extends EnrichmentResult {
    * guessing from the number's appearance.
    */
   goalThresholdsMinted: string[];
+  /**
+   * ROUND 6 (CEE #1328) — the figure the goal LABEL names, when the brief
+   * contains it and nothing else minted a target: a CANDIDATE for the
+   * orchestration seam to ask the user about, never a write. Carried to
+   * `ctx.goal_target_candidate` by `stages/enrich.ts`; one name, one hop,
+   * one reader. Absent when the label names no figure the brief contains, or
+   * when a typed target is already on the node.
+   */
+  goal_target_candidate?: GoalTargetCandidate;
 }
 
 /**
@@ -1065,12 +1080,26 @@ function qualifyExtractedFactors(
 }
 
 /**
- * THE ONE mint of `goal_threshold` on the draft path.
+ * THE ENRICHER'S mint of `goal_threshold` on the draft path.
+ *
+ * ⚠⚠ IT IS NOT THE ONLY ONE, AND AN EARLIER VERSION OF THIS DOC SAID IT WAS.
+ * `applyStatedGoalTarget` (`cee/draft/records/projector.ts:1312`) mints the
+ * same five fields from the model's STATED GOAL RECORD. That sibling read as
+ * absent because `stripModelAuthoredGoalThreshold` deleted its output before
+ * this function ever saw it — and **#1339 removed that strip on the Anthropic
+ * path**, so on that provider the projector now mints FIRST and this function
+ * is the fallback. The strip is deliberately retained on the OpenAI path
+ * (`adapters/llm/openai.ts`), where this remains the only surviving mint.
+ *
+ * The false premise was not a careless sentence: it was derived by a
+ * SINGLE-STAGE measurement (running `extractFactors` over the brief), which is
+ * structurally incapable of seeing a mint two stages upstream — CLAUDE.md trap
+ * 16-inverse, reachability within one stage is not reachability in the system.
  *
  * Mutates `enrichedGraph.nodes[goalNodeIndex]` in place (the caller owns the
  * clone) and returns whether it minted. Returns `false` — writing nothing —
- * when the goal node already carries a threshold, which is the pre-existing
- * "first writer wins" rule.
+ * when the goal node already carries an upstream target, which is the
+ * pre-existing "first writer wins" rule.
  *
  * ROADMAP 2.281 — extracted verbatim from the enrichment loop so the
  * factor-skip path can reach it. Every line of arithmetic and every stamped
@@ -1084,6 +1113,11 @@ function applyGoalTargetRedirect(
 ): boolean {
   const currentGoalNode = enrichedGraph.nodes[goalNodeIndex];
   if (currentGoalNode.goal_threshold !== undefined) return false;
+
+  // ⚠ THE DEFERRAL LIVES HERE, NOT IN THE LABEL ROUTE, DELIBERATELY. The factor
+  // route and the label-route fallback added by this change both pass through this
+  // one point; gating only the caller would leave the factor route committing the
+  // identical harm through a door nothing watches (trap 22b).
 
   // ⭐⭐ AN UPSTREAM MINT THAT RESOLVED NO CAP STILL WROTE THE USER'S TARGET.
   //
@@ -1241,6 +1275,106 @@ function applyGoalTargetRedirect(
 }
 
 /**
+ * THE FALLBACK ROUTE — ROUND 6: A CANDIDATE, NOT A MINT.
+ *
+ * ⭐ WHY THIS ROUTE EXISTS. `isTargetGoalLabel` decides whether the user's
+ * stated target becomes typed data by asking whether a REGEX-INFERRED FACTOR
+ * LABEL contains one of four substrings. MEASURED at `f4c8f501` against the
+ * 3 Sep founder brief: 21 extracted factors, ZERO carrying any of the four
+ * words, and the £30,000 target extracted under the label `"Customer Count"`.
+ * The mint was UNREACHABLE for that brief and the target shipped as label
+ * prose with all four typed fields null.
+ *
+ * ⛔ WHY IT NO LONGER WRITES. Rounds 1–5 tried to decide, from the label and
+ * the brief alone, whether a figure that OCCURS in the brief was STATED as
+ * this goal's target. Sixteen defects in one evening, and the round-five tweak
+ * run in advance oscillated (see `goal-label-target.ts` ROUND 6 block). Codex's
+ * decisive case — "We rejected the proposal to reach £64k MRR." — returned
+ * `ok: true` and was written as the user's target on both routes. The label is
+ * MODEL-authored; a number read from it is a suggestion, never authority to
+ * write. So this route now derives a CANDIDATE and writes nothing. The
+ * orchestration seam asks the user through `elicit_goal_target` — whose
+ * pending record carries no value field, so only the user's answer, through
+ * the ONE canonical success-target writer, becomes `goal_threshold`.
+ *
+ * FIRST WRITER WINS still holds one level up: a node that already carries a
+ * typed target (`goal_threshold`, or the finite `goal_threshold_raw` the
+ * projector always writes — including the PARTIAL quad a stated zero leaves)
+ * yields no candidate, so the projector and factor routes are untouched.
+ *
+ * Returns the candidate, or `undefined`, and logs the reason either way.
+ */
+function deriveGoalTargetCandidateFromLabel(
+  enrichedGraph: GraphT,
+  goalNodeIndex: number,
+  brief: string,
+): GoalTargetCandidate | undefined {
+  const goalNode = enrichedGraph.nodes[goalNodeIndex];
+  if (!goalNode) return undefined;
+
+  if (
+    goalNode.goal_threshold !== undefined ||
+    (typeof goalNode.goal_threshold_raw === "number" && Number.isFinite(goalNode.goal_threshold_raw))
+  ) {
+    log.info(
+      {
+        event: "cee.factor_enrichment.goal_target_candidate_suppressed",
+        goalNodeId: goalNode.id,
+        reason: "threshold_already_set",
+      },
+      "Goal label candidate not derived: a typed target is already on the node",
+    );
+    return undefined;
+  }
+
+  const context = { goalSourceQuote: statedSourceQuote(goalNode) };
+  const candidate = deriveGoalTargetCandidate(goalNode.id, goalNode.label, brief, context);
+  if (candidate === undefined) {
+    const derived = deriveGoalTargetFromLabel(goalNode.label, brief, context);
+    logGoalLabelRefusal(
+      goalNode.id,
+      derived.ok ? "quantity_not_attested" : derived.refusal,
+      derived.ok ? undefined : derived.briefQuote,
+    );
+    return undefined;
+  }
+
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_target_candidate",
+      goalNodeId: goalNode.id,
+      binding: candidate.binding,
+      reason: candidate.reason,
+      label_span: candidate.label_span,
+      brief_span: candidate.brief_span,
+      unit: candidate.unit,
+    },
+    `Goal target candidate derived from the goal label (${candidate.binding}); nothing written`,
+  );
+  return candidate;
+}
+
+/** Fail loud on every non-mint, with the reason, never a silence. */
+function logGoalLabelRefusal(
+  goalNodeId: string,
+  refusal: GoalLabelTargetRefusal,
+  briefSpan?: string,
+): void {
+  log.info(
+    {
+      event: "cee.factor_enrichment.goal_threshold_label_refused",
+      goalNodeId,
+      refusal,
+      // The occurrence the refusal is ABOUT, when the figure was found in the
+      // brief in a role other than this goal's target (round 5). Absent for the
+      // scanner-level refusals, which have no occurrence to name.
+      ...(briefSpan !== undefined && { brief_span: briefSpan }),
+    },
+    `Goal target not minted from the goal label: ${refusal}`,
+  );
+}
+
+/**
  * The goal-target redirect, run WITHOUT the factor side.
  *
  * ROADMAP 2.281 — the repair. `allOptionsHaveInterventions` is a sound reason
@@ -1264,14 +1398,13 @@ function mintGoalTargetOnly(
   brief: string,
   minConfidence: number,
   collector?: CorrectionCollector,
-): { graph: GraphT; mintedGoalId: string | undefined } {
+): { graph: GraphT; mintedGoalId: string | undefined; goalTargetCandidate: GoalTargetCandidate | undefined } {
   const goalNodeIndex = graph.nodes.findIndex((n) => n.kind === "goal");
-  if (goalNodeIndex < 0) return { graph, mintedGoalId: undefined };
+  if (goalNodeIndex < 0) return { graph, mintedGoalId: undefined, goalTargetCandidate: undefined };
 
   const target = qualifyExtractedFactors(extractFactors(brief), minConfidence).find((f) =>
     isTargetGoalLabel(f.label),
   );
-  if (!target) return { graph, mintedGoalId: undefined };
 
   // Clone before writing — the skip path returns the caller's own graph object
   // when nothing is minted, and must not mutate it when something is.
@@ -1281,10 +1414,21 @@ function mintGoalTargetOnly(
     edges: [...graph.edges],
   };
 
-  const minted = applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector);
-  return minted
-    ? { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id }
-    : { graph, mintedGoalId: undefined };
+  // ⚠ NO EARLY RETURN ON `!target` ANY MORE. That return is what made the mint
+  // unreachable for the 3 Sep founder brief: `isTargetGoalLabel` matched none
+  // of its 21 extracted factor labels, so the skip path gave up before ever
+  // looking at the goal node — whose label carried the target in plain sight.
+  const minted = target
+    ? applyGoalTargetRedirect(enrichedGraph, goalNodeIndex, target, collector)
+    : false;
+  if (minted) {
+    return { graph: enrichedGraph, mintedGoalId: enrichedGraph.nodes[goalNodeIndex].id, goalTargetCandidate: undefined };
+  }
+
+  // ROUND 6: the label route derives a CANDIDATE and writes nothing, so the
+  // caller's graph object is returned untouched.
+  const goalTargetCandidate = deriveGoalTargetCandidateFromLabel(graph, goalNodeIndex, brief);
+  return { graph, mintedGoalId: undefined, goalTargetCandidate };
 }
 
 /**
@@ -1356,6 +1500,7 @@ export async function enrichGraphWithFactorsAsync(
         extractionMode: minted ? "v4_factor_skip_goal_minted" : "v4_complete_skip",
         warnings: [],
         goalThresholdsMinted: goalOnly.mintedGoalId ? [goalOnly.mintedGoalId] : [],
+        ...(goalOnly.goalTargetCandidate !== undefined && { goal_target_candidate: goalOnly.goalTargetCandidate }),
       };
     }
   }
@@ -1414,6 +1559,7 @@ export async function enrichGraphWithFactorsAsync(
   let factorsSkipped = 0;
   let goalThresholdsSet = 0;
   const goalThresholdsMinted: string[] = [];
+  let goalTargetCandidate: GoalTargetCandidate | undefined;
 
   // Deep clone the graph to avoid mutation
   const enrichedGraph: GraphT = {
@@ -1704,6 +1850,15 @@ export async function enrichGraphWithFactorsAsync(
     factorsAdded++;
   }
 
+  // ── THE FALLBACK: the goal node's own label — a CANDIDATE, never a write ──
+  // Runs only when the loop above minted nothing, so the factor route keeps
+  // precedence and FIRST WRITER WINS is unchanged. See
+  // `deriveGoalTargetCandidateFromLabel` for why the loop can miss an ordinary
+  // quantified target entirely, and why the label route no longer mints.
+  if (goalThresholdsSet === 0 && goalNode && goalNodeIndex >= 0) {
+    goalTargetCandidate = deriveGoalTargetCandidateFromLabel(enrichedGraph, goalNodeIndex, brief);
+  }
+
   // Emit telemetry
   if (factorsAdded > 0 || factorsEnhanced > 0 || goalThresholdsSet > 0) {
     emit(TelemetryEvents.FactorExtractionComplete, {
@@ -1739,5 +1894,6 @@ export async function enrichGraphWithFactorsAsync(
     llmSuccess,
     warnings,
     goalThresholdsMinted,
+    ...(goalTargetCandidate !== undefined && { goal_target_candidate: goalTargetCandidate }),
   };
 }
