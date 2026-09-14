@@ -133,6 +133,16 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
     receipts.formatConstraintUnchanged({ targetLabel: SLOT, operator: '>=', value: 2 }),
   formatConstraintLabelUpdated: () =>
     receipts.formatConstraintLabelUpdated({ targetLabel: SLOT, operator: '>=', value: 2 }),
+  // The write-time honesty pair. `formatConstraintNotCheckable` reuses the
+  // run_analysis-time `unmeasured_target` voice verbatim (one shared definition
+  // in `coaching/constraint-gap-copy.ts`), so a doctrine failure here would
+  // also be a doctrine failure in the disclosure that already ships.
+  formatConstraintNotCheckable: () =>
+    receipts.formatConstraintNotCheckable({ targetLabel: SLOT }),
+  // The span slot carries the user's own words, quoted back — the strongest
+  // reason to classify the TEMPLATE and never the composed string.
+  formatConstraintDurationNotEvaluated: () =>
+    receipts.formatConstraintDurationNotEvaluated({ span: SLOT }),
   formatBaselineNoted: () =>
     receipts.formatBaselineNoted({ targetLabel: SLOT, value: 12, unit: '%' }),
   // ROADMAP 2.918 — the baseline elicitation question (the mint receipt's

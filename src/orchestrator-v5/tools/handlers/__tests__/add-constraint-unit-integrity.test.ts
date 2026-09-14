@@ -50,6 +50,24 @@ import type { ComposeContext } from '../../../compose/types.js';
 import { HandlerInvocationFailedError } from '../../handler-errors.js';
 import { createRegistry } from '../../registry.js';
 import { createAddConstraintHandler } from '../add-constraint.js';
+import { formatConstraintNotCheckable } from '../d1-shared/format-confirmation.js';
+
+/**
+ * ⚠ `r-attrition` IS A BARE RISK NODE — no `observed_state`, no `prior`, no
+ * quantity on any field — so from the constraint-admissibility change onwards
+ * every receipt about it correctly carries the "this will not be checked"
+ * disclosure. That is not noise appended to these assertions: it is the point.
+ * The receipts below were previously claiming a bound would bind on a target
+ * the compute path cannot evaluate (PLoT `plot.constraint_no_observed_value`),
+ * which is the defect `constraint-write-admissibility.ts` closes.
+ *
+ * The expectations stay EXACT (`toBe`) and compose the disclosure from its own
+ * formatter rather than transcribing it, so this suite keeps testing UNIT
+ * PRESERVATION and can never drift from the shared copy (CLAUDE.md trap 12).
+ */
+const ATTRITION_NOT_CHECKABLE = formatConstraintNotCheckable({
+  targetLabel: 'Key Talent Attrition',
+});
 import { buildD1Fixture, buildHandlerInvocation } from '../d1-shared/__tests__/fixtures.js';
 
 // ---------------------------------------------------------------------------
@@ -219,7 +237,7 @@ describe('add_constraint unit preservation — omission means UNCHANGED (Gate-1)
     // unchanged — the honest noop receipt, not a false "Updated" claim.
     expect(outcome.handler_facts[0]?.noop).toBe(true);
     expect(outcome.assistant_text).toBe(
-      'Key Talent Attrition is already constrained to be at most 30%.',
+      `Key Talent Attrition is already constrained to be at most 30%. ${ATTRITION_NOT_CHECKABLE}`,
     );
   });
 
@@ -243,7 +261,7 @@ describe('add_constraint unit preservation — omission means UNCHANGED (Gate-1)
     expect(outcome.handler_facts[0]?.noop).toBe(false);
     // The user-visible receipt carries the preserved unit.
     expect(outcome.assistant_text).toBe(
-      'Updated constraint: Key Talent Attrition must be at most 25%.',
+      `Updated constraint: Key Talent Attrition must be at most 25%. ${ATTRITION_NOT_CHECKABLE}`,
     );
   });
 
@@ -325,7 +343,7 @@ describe('add_constraint unit preservation — omission means UNCHANGED (Gate-1)
     // receipt confirms the repair user-visibly.
     expect(outcome.handler_facts[0]?.noop).toBe(false);
     expect(outcome.assistant_text).toBe(
-      'Updated constraint: Key Talent Attrition must be at most 30%.',
+      `Updated constraint: Key Talent Attrition must be at most 30%. ${ATTRITION_NOT_CHECKABLE}`,
     );
   });
 });
