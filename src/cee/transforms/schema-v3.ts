@@ -64,6 +64,10 @@ import {
   mergeRephrasedOptions,
   type RephraseMergeResult,
 } from "./option-rephrase-merge.js";
+import {
+  adoptStatedFiguresForStatedOptions,
+  type StatedOptionCoverageResult,
+} from "./stated-option-figure-adoption.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
 
@@ -1235,6 +1239,11 @@ export interface V3GraphOptionsProjection extends GraphTransformResult {
   readonly goal_node_id: string;
   readonly extracted_options: ExtractedOption[];
   readonly rephrase_merge: RephraseMergeResult;
+  /**
+   * What the stated options were completed with, and which elements of a stated
+   * proposal remain unwired. See `stated-option-figure-adoption.ts`.
+   */
+  readonly stated_option_coverage: StatedOptionCoverageResult;
 }
 
 /**
@@ -1387,12 +1396,23 @@ export function projectGraphAndOptionsToV3(
     options,
   });
 
+  // ⭐ AFTER absorption, and that order is load-bearing. A rephrase twin that is
+  // about to be removed must not fund an adoption, and an option that survives
+  // absorption must be complete before either consumer reads it. Running this
+  // first would let a donor disappear between the write and the read.
+  const statedOptionCoverage = adoptStatedFiguresForStatedOptions({
+    nodes: projectedNodes,
+    edges: projectedEdges,
+    options,
+  });
+
   return {
     ...transformed,
     options,
     goal_node_id: goalNodeId,
     extracted_options: extractedOptions,
     rephrase_merge: rephraseMerge,
+    stated_option_coverage: statedOptionCoverage,
   };
 }
 
