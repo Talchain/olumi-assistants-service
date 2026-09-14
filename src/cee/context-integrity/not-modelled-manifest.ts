@@ -51,6 +51,7 @@ import { CURRENCY_SYMBOL_TO_CODE } from "../extraction/numeric-parser.js";
 import { readUnit, type AmountKind } from "../provenance/stated-amounts.js";
 import { classifyValueSource } from "../graph-readiness/obligation-provenance.js";
 import type { KnownObservedStateSourceLiteral } from "@talchain/schemas";
+import type { ObservedStateStatedRole } from "./stated-role-vocabulary.js";
 
 /** Wire schema discriminator. The UI lane builds against this. */
 export const NOT_MODELLED_SCHEMA = "not_modelled.v1" as const;
@@ -1504,6 +1505,18 @@ interface ConstraintSpan {
   readonly end: number;
   readonly value: number | null;
   readonly unit: string | null;
+  /**
+   * The node the producer BOUND this limit to (`goal_constraints[].node_id`),
+   * or null where the row named none.
+   *
+   * ⭐ ADDITIVE, AND `classifyStatedKind` DOES NOT READ IT — that function's
+   * two-part conjunction is byte-unchanged. It is here for
+   * {@link deriveStatedQuantityRoles}, which needs the producer's own IDENTITY
+   * binding rather than a re-derived one: the row already says which node the
+   * limit is about, and re-deriving that from magnitudes would be a value
+   * predicate another node could satisfy (CLAUDE.md trap 19).
+   */
+  readonly nodeId: string | null;
 }
 
 /**
@@ -1550,6 +1563,7 @@ function constraintSpans(
       end: start + matched.length,
       value: typeof r.value === "number" ? r.value : null,
       unit: typeof r.unit === "string" ? r.unit : null,
+      nodeId: typeof r.node_id === "string" && r.node_id.length > 0 ? r.node_id : null,
     });
   }
   return spans;
@@ -1724,4 +1738,136 @@ export function deriveNotModelledManifest(
     ),
     not_tracked: NOT_TRACKED_CLASSES,
   };
+}
+
+
+// ── the ROLE axis reaching the NODE, not just the manifest ──────────────────
+
+/**
+ * One node, and what the user stated the magnitude it carries **as**.
+ *
+ * `node_id` is the PRODUCER'S OWN binding — `goal_constraints[].node_id`,
+ * written by the drafting model and validated by `GoalConstraintSchema` — never
+ * a magnitude this function matched back to a node. Identity, not a value
+ * predicate another node could satisfy (CLAUDE.md trap 19).
+ */
+export interface StatedQuantityRoleBinding {
+  readonly node_id: string;
+  readonly stated_role: ObservedStateStatedRole;
+}
+
+/** A node's `observed_state.value`, or null if it has none. */
+function observedValueOf(graph: Record<string, unknown>, nodeId: string): number | null {
+  const nodes = graph.nodes;
+  if (!Array.isArray(nodes)) return null;
+  for (const raw of nodes) {
+    if (raw === null || typeof raw !== "object") continue;
+    const n = raw as Record<string, unknown>;
+    if (n.id !== nodeId) continue;
+    const observed = n.observed_state;
+    if (observed === null || typeof observed !== "object") return null;
+    const v = (observed as Record<string, unknown>).value;
+    return typeof v === "number" ? v : null;
+  }
+  return null;
+}
+
+/**
+ * ⭐⭐ A STATED LIMIT SITTING IN THE FIELD FOR WHAT IS CURRENTLY TRUE.
+ *
+ * MEASURED, 14 Sep 2026, 11 fresh live drafts of one brief containing
+ * *"…while keeping monthly churn under 4%…"*. In 3 of the 11 the 4% reached the
+ * wire as the churn node's `observed_state: { value: 0.04, unit: "%", source:
+ * "brief_extraction", extractionType: "explicit" }` — `observed_state` being,
+ * by its own declaration, *"current or proposed value"*. The model therefore
+ * asserts **churn IS 4%** where the user said **keep it under 4%**. In 2 of
+ * those 3 the SAME node also carried an honest `goal_constraints[]` row
+ * (`{node_id, operator: "<=", value: 0.04}`), so CEE had already decided the
+ * role and stored the number in the other field regardless.
+ *
+ * This returns the nodes for which that is provable, so a stamp can say so.
+ *
+ * ── THE ORACLE IS THE ROW, AND THE ROW IS ALREADY BOUND ────────────────────
+ * Nothing here parses the brief for limit language, and nothing re-matches a
+ * magnitude to a node. `goal_constraints[].node_id` states which node the limit
+ * is about; `constraintSpans` (this module, unchanged) proves the row's
+ * `source_quote` is really in the brief, which is the fabrication gate —
+ * an unlocatable quote classifies nothing and can never produce a stamp.
+ *
+ * ── ⛔ WHY THE SAFEGUARD IS A *LITERAL* TEST AND NOT A VALUE ONE ───────────
+ * One predicate guards two OPPOSITE harms (trap 22b). Not stamping leaves a
+ * limit masquerading as an observation (a GAP). Stamping wrongly tells a user
+ * that a rate they actually measured is only a cap (a LIE). They cannot share
+ * one window, so the lie direction gets its own, strictly stronger condition.
+ *
+ * The case is real: *"churn is currently 4% and we must keep it under 4%"*
+ * states one magnitude twice, in two different roles, and the observed 0.04
+ * then genuinely is an observation. The guard is that **no quantity written the
+ * same way as one inside the row's quoted span may appear anywhere outside it**
+ * — `"4%"` occurring twice refuses the stamp and leaves today's behaviour
+ * exactly as it is.
+ *
+ * ⚠ THE COMPARISON IS DELIBERATELY ON THE LITERAL, NOT THE PARSED VALUE, AND
+ * THAT IS THE POINT. `extractStatedQuantities` reads `"4%"` as **4**
+ * (percentage points as written) while the producer's row holds **0.04**
+ * (`value_frame: "level"`, `unit: "fraction"` — measured on all six live
+ * drafts that carried a row). Any safeguard comparing those two numbers is
+ * comparing different frames, and `numbersEqual` performs no frame conversion.
+ * Literals carry their own frame, so the guard cannot be defeated by one.
+ *
+ * ── WHAT THIS DOES NOT CLAIM ───────────────────────────────────────────────
+ * The `observed_state.value === row.value` test only holds where the two are
+ * already on the same scale, which they are for a fraction-framed percent
+ * (both 0.04, measured). A currency row stated *"in user units"* (200000)
+ * against an observed 0-1 position (0.4) will not compare equal and is NOT
+ * stamped. That is a known GAP, disclosed rather than closed by guessing a
+ * frame — it fails toward silence, the safe direction, and closing it needs the
+ * frame authority, not a wider window here.
+ *
+ * Pure: same (brief, graph) ⇒ same bindings, sorted by `node_id`.
+ */
+export function deriveStatedQuantityRoles(
+  briefText: string | null | undefined,
+  graph: unknown,
+): readonly StatedQuantityRoleBinding[] {
+  if (typeof briefText !== "string" || briefText.trim().length === 0) return [];
+  if (graph === null || graph === undefined || typeof graph !== "object") return [];
+
+  const g = graph as Record<string, unknown>;
+  const spans = constraintSpans(g, briefText);
+  if (spans.length === 0) return [];
+
+  const quantities = extractStatedQuantities(briefText);
+  const seen = new Set<string>();
+  const bindings: StatedQuantityRoleBinding[] = [];
+
+  for (const span of spans) {
+    if (span.nodeId === null || span.value === null) continue;
+    if (seen.has(span.nodeId)) continue;
+
+    // The node's stored position must BE this limit's threshold. Where it is
+    // some other number the node holds an independent level and nothing here
+    // has anything to say about it.
+    const observed = observedValueOf(g, span.nodeId);
+    if (observed === null || !numbersEqual(observed, span.value)) continue;
+
+    // The lie-direction guard — see the note above.
+    const inSpan = quantities.filter(
+      (q) => q.at >= span.start && q.at + q.literal.length <= span.end,
+    );
+    if (inSpan.length === 0) continue;
+    const spelt = new Set(inSpan.map((q) => q.literal.trim().toLowerCase()));
+    const restatedOutside = quantities.some(
+      (q) =>
+        !(q.at >= span.start && q.at + q.literal.length <= span.end) &&
+        spelt.has(q.literal.trim().toLowerCase()),
+    );
+    if (restatedOutside) continue;
+
+    seen.add(span.nodeId);
+    bindings.push({ node_id: span.nodeId, stated_role: "constraint" });
+  }
+
+  bindings.sort((a, b) => (a.node_id < b.node_id ? -1 : a.node_id > b.node_id ? 1 : 0));
+  return bindings;
 }

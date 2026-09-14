@@ -20,6 +20,7 @@ import {
   type ValueSourceDisplay,
 } from "../../cee/transforms/provenance-display.js";
 import { collectDirectedReachable } from "../../graph/reachability.js";
+import type { ObservedStateStatedRole } from "../../cee/context-integrity/stated-role-vocabulary.js";
 
 // ============================================================================
 // Output Types
@@ -100,6 +101,16 @@ export interface CompactNode {
   raw_value?: number;  // from observed_state.raw_value
   unit?: string;       // from observed_state.unit
   cap?: number;        // from observed_state.cap
+  /**
+   * What the user stated this magnitude AS — from `observed_state.stated_role`.
+   *
+   * `constraint` means the user gave it as a LIMIT and `value` is that limit
+   * standing in for a level they never stated. Emitted ONLY when a producer
+   * settled the role: absence is UNDECLARED and must never be read as
+   * "therefore an observation". See `cee/context-integrity/
+   * stated-role-vocabulary.ts` for why the alphabet has one member.
+   */
+  stated_role?: ObservedStateStatedRole;
   /** Provenance enum (legacy CompactNodeSource vocabulary).
    *  Kept alongside `provenance` for back-compat with context-pack-assembler /
    *  telemetry consumers that read this field today. */
@@ -707,7 +718,41 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         // table, so emitting it would just burn LLM context tokens.
         const et = obsState.extractionType;
         const authored = valueSourceAuthorship(obsState.source);
-        if (authored !== undefined) {
+        // ⭐⭐ A LIMIT IS NOT A LEVEL THE USER STATED — the role outranks both
+        // authorship routes below, and this is where it has to, because this is
+        // the object the MODEL reads its own graph from.
+        //
+        // MEASURED on live staging 14 Sep 2026. A brief saying *"keeping
+        // monthly churn under 4%"* put `{ value: 0.04, source:
+        // "brief_extraction", extractionType: "explicit" }` on the churn node.
+        // `brief_extraction` maps to `null` in `SOURCE_AUTHORSHIP` (the table's
+        // own note: the `extractionType` mapping is the finer instrument), so
+        // the `authored` route declines and the `explicit` arm below fires:
+        // **`source: 'user' / provenance: 'from_brief'`**. The assistant is
+        // therefore told the USER stated that churn IS 4% — and it will say so
+        // back to them, about a number they gave as a ceiling.
+        //
+        // WHAT THE ROLE CHANGES, AND WHAT IT DELIBERATELY DOES NOT. `value`,
+        // `raw_value`, `unit` and `cap` are untouched: the magnitude is real,
+        // it is the user's, and the compute reads it. What is withdrawn is the
+        // AUTHORSHIP of the LEVEL — CEE, not the user, decided to stand the
+        // node at its own limit — so this lands on the same rung the
+        // `inferred` arm already uses (`assumption` / `ai_inferred`), which is
+        // the truthful one: an assumption CEE made with the user's own
+        // evidence behind it. `stated_role` rides alongside so the positive
+        // fact survives too — the user DID state 4%, as a limit — rather than
+        // the model being left to infer a bare estimate from a demotion.
+        //
+        // This is the same shape as `schema-v3.ts`'s ROADMAP 2.972 withdrawal
+        // (a value-free node cannot have come from the brief) applied one
+        // question along: a node whose only brief information is a BOUND
+        // carries no brief information about its LEVEL.
+        const statedRole = obsState.stated_role;
+        if (statedRole === 'constraint') {
+          n.stated_role = 'constraint';
+          n.source = 'assumption';
+          n.provenance = 'ai_inferred';
+        } else if (authored !== undefined) {
           n.source = authored.source;
           n.provenance = authored.provenance;
         } else if (et === 'explicit') {

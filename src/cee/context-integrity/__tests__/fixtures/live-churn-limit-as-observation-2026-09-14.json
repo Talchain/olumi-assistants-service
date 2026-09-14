@@ -1,0 +1,236 @@
+{
+ "_provenance": {
+  "captured": "2026-09-14",
+  "source": "POST https://cee-staging.onrender.com/proxy/v5/turn",
+  "scenario_id": "4554586e-07a4-452b-a352-4cc4aaf98558",
+  "brief": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release, while keeping monthly churn under 4% and reaching £20k MRR within 12 months.",
+  "note": "draft_graph exactly as served. Node ab78e513 carries the stated LIMIT as observed_state.value. APPEND-ONLY: a dated capture is evidence, never a fixture to keep current (CLAUDE.md trap 14b)."
+ },
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "235f713a",
+    "kind": "decision",
+    "label": "Question",
+    "provenance": "ai_inferred",
+    "label_placeholder": true
+   },
+   {
+    "id": "32b7e30c",
+    "kind": "option",
+    "label": "Hold Price at £49 (Status Quo)",
+    "interventions": {
+     "6d9a37f3": {
+      "value": 0.49,
+      "raw_value": 49,
+      "unit": "£",
+      "source": "brief_extraction",
+      "target_match": {
+       "node_id": "6d9a37f3",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "value_confidence": "high",
+      "reasoning": "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+     }
+    },
+    "is_baseline": true,
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "3699e00c",
+    "kind": "option",
+    "label": "With the Next Pro Feature Release",
+    "interventions": {},
+    "is_baseline": false,
+    "provenance": "from_brief",
+    "source_quote": "with the next Pro feature release",
+    "label_authored": true
+   },
+   {
+    "id": "454a603a",
+    "kind": "option",
+    "label": "Raise Price to £59 Now",
+    "interventions": {
+     "6d9a37f3": {
+      "value": 0.59,
+      "raw_value": 59,
+      "unit": "£",
+      "source": "brief_extraction",
+      "target_match": {
+       "node_id": "6d9a37f3",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "value_confidence": "high",
+      "reasoning": "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+     }
+    },
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "5d37cb33",
+    "kind": "option",
+    "label": "Raise Price to £54 (Soft Increase)",
+    "interventions": {
+     "6d9a37f3": {
+      "value": 0.54,
+      "raw_value": 54,
+      "unit": "£",
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "6d9a37f3",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "value_confidence": "low",
+      "reasoning": "Olumi estimate via edge ff851c6c; this option→factor effect is not bound to a stated option record"
+     }
+    },
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "5e836b61",
+    "kind": "option",
+    "label": "Raise Price to £59 at Feature Release",
+    "interventions": {
+     "6d9a37f3": {
+      "value": 0.59,
+      "raw_value": 59,
+      "unit": "£",
+      "source": "brief_extraction",
+      "target_match": {
+       "node_id": "6d9a37f3",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "value_confidence": "high",
+      "reasoning": "Direct from V4 prompt data.interventions; the amount is stated in the brief"
+     },
+     "a22327b3": {
+      "value": 0.75,
+      "raw_value": 0.75,
+      "source": "cee_hypothesis",
+      "target_match": {
+       "node_id": "a22327b3",
+       "match_type": "exact_id",
+       "confidence": "high"
+      },
+      "value_confidence": "low",
+      "reasoning": "Olumi estimate via edge 36f35979; this option→factor effect is not bound to a stated option record"
+     }
+    },
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "6d9a37f3",
+    "kind": "factor",
+    "label": "Pro Plan Monthly Price",
+    "observed_state": {
+     "value": 0.49,
+     "baseline": 49,
+     "unit": "£",
+     "source": "brief_extraction",
+     "raw_value": 49,
+     "cap": 100,
+     "extractionType": "explicit",
+     "factor_type": "price",
+     "uncertainty_drivers": [
+      "Extracted from brief — confirm value"
+     ]
+    },
+    "category": "controllable",
+    "scale_frame": 100,
+    "prior": {
+     "distribution": "uniform",
+     "range_min": 0,
+     "range_max": 1,
+     "prior_is_unquantified": true
+    },
+    "display_value": "£49",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "83bd0a68",
+    "kind": "risk",
+    "label": "Churn Spike on Price Increase",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "94fa174b",
+    "kind": "outcome",
+    "label": "Monthly Recurring Revenue",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "a22327b3",
+    "kind": "factor",
+    "label": "Perceived Value at Price Point",
+    "category": "controllable",
+    "prior": {
+     "distribution": "uniform",
+     "range_min": 0,
+     "range_max": 1,
+     "prior_is_unquantified": true
+    },
+    "factor_type": "other",
+    "uncertainty_drivers": [
+     "Not provided"
+    ],
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "ab78e513",
+    "kind": "factor",
+    "label": "Monthly Churn Rate",
+    "observed_state": {
+     "value": 0.04,
+     "unit": "%",
+     "source": "brief_extraction",
+     "extractionType": "explicit"
+    },
+    "category": "observable",
+    "display_value": "4%",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "b4014d90",
+    "kind": "goal",
+    "label": "Reach £20k MRR Within 12 Months",
+    "provenance": "from_brief",
+    "source_quote": "reaching £20k MRR within 12 months",
+    "label_authored": true
+   },
+   {
+    "id": "ff548fa6",
+    "kind": "option",
+    "label": "increase the Pro plan price from £49 to £59 per month",
+    "interventions": {},
+    "is_baseline": false,
+    "provenance": "from_brief",
+    "source_quote": "increase the Pro plan price from £49 to £59 per month"
+   },
+   {
+    "id": "out_ab78e513_impact",
+    "kind": "outcome",
+    "label": "Monthly Churn Rate Impact",
+    "provenance": "ai_inferred"
+   }
+  ],
+  "edges": [],
+  "goal_constraints": [
+   {
+    "constraint_id": "constraint_ab78e513_max",
+    "node_id": "ab78e513",
+    "operator": "<=",
+    "value": 0.04,
+    "label": "Keep monthly churn at or below 4%",
+    "unit": "fraction",
+    "source_quote": "while keeping monthly churn under 4%",
+    "confidence": 0.85,
+    "provenance": "explicit",
+    "value_frame": "level"
+   }
+  ]
+ }
+}

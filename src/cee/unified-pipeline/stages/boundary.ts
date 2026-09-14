@@ -16,6 +16,7 @@ import { log, emit, TelemetryEvents } from "../../../utils/telemetry.js";
 import { config } from "../../../config/index.js";
 import { getRuntimeEnv } from "../../../config/env-resolver.js";
 import { runGraphDataIntegrityChecks } from "../../transforms/graph-data-integrity.js";
+import { deriveStatedQuantityRoles } from "../../context-integrity/not-modelled-manifest.js";
 
 /**
  * Deterministic-sweep repair codes that become user-reviewable
@@ -101,6 +102,56 @@ export async function runStageBoundary(ctx: StageContext): Promise<void> {
         } else {
           (pipelineTrace as any).repair_summary = { graph_data_integrity: integrityRepairs };
         }
+      }
+    }
+
+    // ── A STATED LIMIT STOPS MASQUERADING AS AN OBSERVATION ────────────────
+    //
+    // Measured live 14 Sep 2026, 11 fresh drafts of one brief: in 3 of them the
+    // *"keeping monthly churn under 4%"* limit reached the wire as
+    // `observed_state: { value: 0.04, extractionType: "explicit" }` on the churn
+    // node — the field for what is CURRENTLY TRUE — while `goal_constraints[]`
+    // carried the same magnitude honestly (`<= 0.04`) against the SAME node id.
+    // CEE already knew the role and stored the number in the other field anyway.
+    //
+    // ⛔ THIS IS NOT THE FOURTH INTEGRITY CHECK THE BLOCK ABOVE BANS, and the
+    // distinction is the whole reason it is a separate block rather than a
+    // fifth argument to `runGraphDataIntegrityChecks`. That prohibition is
+    // about WRITING A MAGNITUDE READ OUT OF PROSE and attributing it to the
+    // user (#853: values 10^6x wrong, values the user had retracted, stamped
+    // `source: "user_override"`). This writes NO value, moves NO magnitude and
+    // never touches `source`. It stamps ONE optional role field, derived from
+    // `goal_constraints[]` — a producer already on the graph, whose rows the
+    // drafting model emitted and the schema validated — and the brief is read
+    // only to LOCATE that producer's own `source_quote`. Its effect on a user's
+    // attribution runs the opposite way to #853's: it WITHDRAWS a claim the
+    // product was making, never adds one.
+    //
+    // The derivation is `deriveNotModelledManifest`'s own, called through the
+    // same five functions in the same order, so the node stamp and the manifest
+    // row cannot disagree about one figure. Nodes with no `observed_state.value`
+    // are skipped: there is no stored position for a role to describe, and an
+    // option carrier (`CANDIDATE_COLLECTIONS` walks options too) has none.
+    const roleBindings = deriveStatedQuantityRoles(ctx.input.brief, v3Body as unknown);
+    if (roleBindings.length > 0 && Array.isArray((v3Body as any).nodes)) {
+      const roleByNodeId = new Map(roleBindings.map((b) => [b.node_id, b.stated_role]));
+      const stamped: string[] = [];
+      for (const node of (v3Body as any).nodes as Array<Record<string, unknown>>) {
+        const nodeId = typeof node?.id === "string" ? node.id : null;
+        if (nodeId === null) continue;
+        const role = roleByNodeId.get(nodeId);
+        if (role === undefined) continue;
+        const observed = node.observed_state;
+        if (observed === null || typeof observed !== "object") continue;
+        if (typeof (observed as Record<string, unknown>).value !== "number") continue;
+        node.observed_state = { ...(observed as Record<string, unknown>), stated_role: role };
+        stamped.push(nodeId);
+      }
+      if (stamped.length > 0) {
+        log.info(
+          { requestId: ctx.requestId, stage: "boundary", stated_role_stamped: stamped },
+          "Stated-role stamp: node quantities recorded as a stated limit",
+        );
       }
     }
 
