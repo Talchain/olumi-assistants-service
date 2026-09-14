@@ -125,6 +125,32 @@ export interface RecentMutation {
    * explicit rather than silently claiming the complete canonical label.
    */
   readonly target_label: string;
+  /**
+   * ⭐⭐ THE WRITE-TIME EVALUABILITY VERDICT, CARRIED FORWARD.
+   *
+   * Present only on a `constraint_added` entry whose limit the analysis cannot
+   * check because its target node records no number anywhere. The value is the
+   * SAME token the write path's {@link
+   * import('../tools/handlers/d1-shared/constraint-write-admissibility.js').ConstraintWriteAdmissibility}
+   * carries, so the two moments cannot drift into different vocabularies for
+   * one fact.
+   *
+   * ⚠ ABSENCE IS **NOT** A POSITIVE CLAIM — it is UNKNOWN, and a consumer that
+   * reads it as "this limit is fine" recreates the defect this field exists to
+   * close. The field is absent whenever the turn read no graph, the target is
+   * not in the graph, no verdict was derived, or the limit is genuinely
+   * checkable; only the last of those is evidence. Same contract as the pack's
+   * `readiness` / `goal_target` keys, and the same reason.
+   *
+   * ⚠ IT IS A SEPARATE FIELD RATHER THAN AN APPENDED SENTENCE BECAUSE
+   * `summary` IS A BUDGET, NOT A PARAGRAPH. {@link
+   * RECENT_CHANGES_SUMMARY_MAX_CHARS} is 80 and {@link cap} truncates; the
+   * ratified not-checkable sentence is 144 characters before its repair ask, so
+   * appending it would silently eat the receipt it is qualifying. The copy is
+   * unchanged — this increment moves the set of turns on which the verdict is
+   * available, never the words.
+   */
+  readonly constraint_not_checkable?: 'target_records_no_value';
 }
 
 /**
@@ -135,10 +161,27 @@ export interface RecentMutation {
  * Returns a frozen, possibly-empty array. Never throws — bad/unknown
  * fact shapes are skipped silently so a single corrupt fact cannot
  * blank the entire projection.
+ *
+ * @param notCheckableConstraintIds the `constraint_id`s the analysis cannot
+ *   check on the graph AS IT STANDS THIS TURN, from
+ *   `collectNotCheckableConstraintIds`. OPTIONAL, and omission is
+ *   byte-identical to the behaviour before it existed: no entry is qualified,
+ *   which is what every caller that holds no graph must get. It is deliberately
+ *   a DERIVED CLAIM rather than a graph — this module's contract is that it
+ *   never reaches into the live graph (see the file header), and handing it one
+ *   would break that as well as give it a second graph authority to disagree
+ *   with.
+ *
+ *   ⚠ THE VERDICT IS ABOUT NOW, NOT ABOUT THE TURN THAT WROTE THE ROW, AND
+ *   THAT IS THE CORRECT SEMANTICS: if the user has since recorded a number on
+ *   the target, the limit IS checkable and the entry stops being qualified. A
+ *   verdict frozen at write time would become the mirror defect — a stale
+ *   "cannot be checked" re-asserted after the gap was closed.
  */
 export function projectRecentChanges(
   priorFacts: readonly HandlerFact[] | undefined,
   entries?: readonly IdentifiedHandlerFact[],
+  notCheckableConstraintIds?: ReadonlySet<string>,
 ): readonly RecentMutation[] {
   if (!priorFacts || priorFacts.length === 0) return Object.freeze([]);
 
@@ -147,7 +190,7 @@ export function projectRecentChanges(
     if (out.length >= RECENT_CHANGES_CAP) break;
     const entry = entries?.[index];
     const transition = entry?.fact === fact ? entry.label_transition : undefined;
-    const summarised = summariseMutation(fact);
+    const summarised = summariseMutation(fact, notCheckableConstraintIds);
     if (summarised?.action === 'graph_edited' && transition?.kind === 'node_label_changed') {
       const summary = `Renamed ${JSON.stringify(transition.before_label)} to ${JSON.stringify(transition.after_label)}.`;
       const canShowExact = summary.length <= RECENT_CHANGES_SUMMARY_MAX_CHARS &&
@@ -233,7 +276,10 @@ export const MUTATION_DISPATCH_SKIP: ReadonlyMap<HandlerFact['fact_type'], strin
     ['finding_dissent', 'Judgement receipt (stated dissent from a finding) — no graph state change.'],
   ]);
 
-function summariseMutation(fact: HandlerFact): RecentMutation | null {
+function summariseMutation(
+  fact: HandlerFact,
+  notCheckableConstraintIds?: ReadonlySet<string>,
+): RecentMutation | null {
   // Successful mutations only — noops carry no user-visible change to
   // reference. `isNoopFact` is the shared predicate (tools/fact-noop.ts);
   // the coaching-signal detector gates on the same one, so the two
@@ -241,7 +287,7 @@ function summariseMutation(fact: HandlerFact): RecentMutation | null {
   if (isNoopFact(fact)) return null;
 
   if (fact.fact_type === 'add_constraint') {
-    return summariseAddConstraint(fact.result);
+    return summariseAddConstraint(fact.result, notCheckableConstraintIds);
   }
   if (fact.fact_type === 'set_factor_value') {
     return summariseSetFactorValue(fact.result);
@@ -402,6 +448,7 @@ function summariseEditGraph(
 
 function summariseAddConstraint(
   result: Record<string, unknown> | undefined,
+  notCheckableConstraintIds?: ReadonlySet<string>,
 ): RecentMutation | null {
   if (!result || typeof result !== 'object') return null;
   const after = (result as { after?: unknown }).after;
@@ -430,10 +477,30 @@ function summariseAddConstraint(
     ...(unit !== undefined ? { unit } : {}),
   });
 
+  // ⭐ THE VERDICT, JOINED BY IDENTITY.
+  //
+  // `result.target_id` is the CONSTRAINT id, not the node id — derived at
+  // `add-constraint.ts:975` (`target_id: newConstraint.constraint_id`), NOT
+  // inferred from the field's name, which reads like a node reference and is
+  // not one. Joining on it binds this entry to the row that exists in
+  // `goal_constraints` RIGHT NOW: a limit the user has since removed is absent
+  // from the set and is silently left unqualified, which is the correct
+  // direction (we have not established anything about a row that is gone).
+  //
+  // ⚠ Deliberately NOT `after.node_id`. That would be an open-record read of a
+  // field the schema does not declare, and it would keep speaking about a
+  // constraint that is no longer on the model.
+  const constraintId = result.target_id;
+  const notCheckable =
+    typeof constraintId === 'string' &&
+    notCheckableConstraintIds !== undefined &&
+    notCheckableConstraintIds.has(constraintId);
+
   return {
     action: 'constraint_added',
     summary: cap(summary),
     target_label: cap(label),
+    ...(notCheckable ? { constraint_not_checkable: 'target_records_no_value' as const } : {}),
   };
 }
 
@@ -540,6 +607,25 @@ const RECENT_CHANGES_HASH_LENGTH = 12;
  * {@link projectRecentChanges}). SHA-256, truncated to twelve hex
  * characters.
  *
+ * ⚠ THE TWO OPTIONAL KEYS ARE SPREAD CONDITIONALLY AND APPENDED LAST, WHICH IS
+ * WHAT KEEPS THIS BACKWARD-COMPATIBLE. An unconditional key would move the hash
+ * of every entry that does not carry it — i.e. all historic ones — and the
+ * telemetry this feeds exists precisely to distinguish "same payload" from
+ * "different payload" across calls. Including the verdict when it IS present is
+ * equally load-bearing: omitting it would let the verdict be dropped anywhere
+ * downstream while the operator evidence still read "unchanged".
+ *
+ * ⚠ THE CONDITIONAL SPREAD IS BELT-AND-BRACES, AND SAYING SO IS THE HONEST
+ * FORM. Making the key unconditional is a DEMONSTRATED-EQUIVALENT mutant at
+ * this tip, not a surviving one: `JSON.stringify` drops undefined-valued keys,
+ * so both spellings serialise identically (measured, not reasoned about —
+ * `{a:1,b:undefined}` → `{"a":1}`). The guarantee therefore has TWO independent
+ * sources today and no test can tell them apart. The conditional form is kept
+ * because the OTHER source is an implementation detail of the canonicaliser: a
+ * future stable-key sorter, or a switch to a serialiser that emits `null` for
+ * undefined, would silently move every historic hash. Do not "simplify" it on
+ * the grounds that nothing goes red — nothing can.
+ *
  * **Not** a security primitive. Two different curated payloads with the
  * same prefix-of-12 hex chars are theoretically possible; for E4 evidence
  * that risk is acceptable because the operator only needs to distinguish
@@ -552,6 +638,9 @@ export function computeRecentChangesHash(items: readonly RecentMutation[]): stri
     summary: m.summary,
     target_label: m.target_label,
     ...(m.transition !== undefined ? { transition: m.transition } : {}),
+    ...(m.constraint_not_checkable !== undefined
+      ? { constraint_not_checkable: m.constraint_not_checkable }
+      : {}),
   }));
   return createHash('sha256')
     .update(JSON.stringify(canonical))
