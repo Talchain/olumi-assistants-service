@@ -1007,6 +1007,55 @@ export const TelemetryEvents = {
   // deterministic functional copy.
   V5ClaimSafetyFailClosedUnavailable: "v5.claim_safety.fail_closed_unavailable",
 
+  // ⭐ A USER-VISIBLE REFUSAL, COUNTED AS A REFUSAL.
+  //
+  // Emitted once per turn at `sendFinalised200`, the SOLE sanctioned 200-OK
+  // exit, when the bytes leaving for the user carry a refusal. Same seam and
+  // same argument as `V5ClaimSafetyFailClosedUnavailable` above: a
+  // derivation-level emit would count refusals that were later recovered and
+  // never shipped, and would not prove the user received one.
+  //
+  // WHY IT EXISTS. Before this event a turn that said *"I couldn't complete
+  // that change, and nothing in your model has changed"* was recorded by every
+  // instrument we own as a SUCCESS. Measured on scenario
+  // 9677de7d-0af8-4bee-b2ac-0e63b45aff8e (2026-09-14): 18 turns, `failed 0`,
+  // `answered 17`, two of them refusals, `status: 200` on both. A refusal was
+  // not a queryable thing, which is why the first search for one returned zero.
+  //
+  // WHY NOT `v5.edit_graph.turn` outcome `rejected`, which already exists: it
+  // answers a different question (CLAUDE.md trap 21). It reports the HANDLER's
+  // verdict, and the same session logged `outcome="rejected" branch="clarify"`
+  // for a turn whose user-visible text was a QUESTION. A clarification is the
+  // product working; counting it as a refusal over-states the harm.
+  //
+  // Payload — correlation ids plus the producers' OWN codes, no new vocabulary:
+  //   request_id: string        (joins to every other line of this request)
+  //   scenario_id: string|null  (joins to the SESSION — the join that did not
+  //                              exist: the one event with a request_id had no
+  //                              scenario_id and vice versa)
+  //   exit_path: V5ExitPath     (closed union)
+  //   error_code: BoundaryErrorCode
+  //   severity: 'warn' | 'error'   ('warn' = recoverable, 'error' = fatal)
+  //   refusal_source: string|null  (producer's `details.source`, e.g. 'edit_graph')
+  //   refusal_code: string|null    (producer's `details.rejection_code`, e.g.
+  //                                 'OPERATION_DID_NOT_LAND'; null means the
+  //                                 producer stated no cause — never guessed)
+  //
+  // ⚠ SCOPE, EXACTLY (CLAUDE.md trap 20). This counts refusals MARKED ON THE
+  // WIRE. `composeRecoverableHandlerResponse`,
+  // `composeRecoverableValidationResponse` and `composeUnsupportedActionResponse`
+  // deliberately ship a clean body (`blocks: []`), so their refusals are
+  // invisible here by construction. Those are ALREADY countable via
+  // `turn_executor.failure_response` — and joinable, because that event's
+  // `session_id` IS the scenario id (this repo writes
+  // `scenario_id: context.session_id` at ~30 sites). ⚠ The differently-named
+  // twin is a live hazard, not a tidy-up: a query joining `scenario_id` across
+  // events silently misses that one. Deliberately NOT renamed here — renaming
+  // a frozen event's field is a dashboard-breaking change, and refusals are
+  // countable without it. Recorded so the next reader does not conclude the
+  // clean-body class is dark.
+  CeeTurnRefused: "cee.turn.refused",
+
   // G-CEE-1 — the EXPLANATION-ANSWER gate (compose/withheld-explanation-answer.ts).
   //
   // Unlike the egress guard above, this one ENFORCES: on a turn whose persisted
