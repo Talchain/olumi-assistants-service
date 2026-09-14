@@ -27,57 +27,58 @@ const candidate = (over: Partial<GoalTargetCandidate> = {}): GoalTargetCandidate
     ...over,
   }) as GoalTargetCandidate;
 
-/**
- * ⭐ THE HOSTILE SET, drawn from the producer's OWN refusal union rather than
- * from my head — every `present_unbound` reason means the figure was NOT stated
- * as this goal's target. None of them may be quoted back at the user.
- */
-const PRESENT_UNBOUND_REASONS = [
-  'quantity_not_stated_as_target',
-  'stated_as_current_level',
-  'stated_as_spend',
-  'stated_as_past',
-  'limit_direction_not_representable',
-  'negated_target',
-  'hypothetical_target',
-  'subject_not_bound',
-  'metric_mismatch',
-  'metric_unbound',
-  'outside_goal_statement',
-  'stated_as_change_amount',
-] as const;
 
-describe('the question never presents a rejected or unrelated amount as the choice', () => {
-  it.each(PRESENT_UNBOUND_REASONS)(
-    'present_unbound/%s ⇒ the figure is NOT quoted',
-    (reason) => {
-      const q = composeGoalTargetQuestion(
-        candidate({ binding: 'present_unbound', reason: reason as never }),
-      );
-      expect(q).not.toContain('64');
-      expect(q).not.toContain('£');
-      // NON-VACUITY: it still asks, so "never quotes" cannot be satisfied by
-      // returning an empty string.
-      expect(q).toContain('Reply with an amount');
-    },
-  );
+const THE_QUESTION = 'What target should this goal be scored against? Reply with an amount.';
 
-  it('⭐ DISCRIMINATING TWIN: a GOVERNED figure IS quoted — so the rule above is a rule, not a mute', () => {
+describe('the figure is NEVER quoted — no value of `binding` licenses it', () => {
+  /**
+   * ⛔ I FIRST QUOTED ON `binding === 'governed'`, reading the producer's docstring
+   * ("how well the user's own words bind the figure"). **The producer's own corpus
+   * refutes that:** its S20 case pins "We rejected the proposal to reach £64k MRR."
+   * as `governed`, because `governed` means *the round-5 governor would have minted
+   * it*, NOT *the user established it*. The rejected proposal is the CANONICAL
+   * member of that class — so quoting on `governed` quotes back the one figure the
+   * brief explicitly refused.
+   *
+   * Caught by Codex against the REAL producer output, after my own hostile-case
+   * test passed by FABRICATING `present_unbound` for that brief.
+   */
+  it.each([
+    ['governed', 'governed'],
+    ['present_unbound', 'quantity_not_stated_as_target'],
+    ['present_unbound', 'stated_as_current_level'],
+    ['present_unbound', 'stated_as_spend'],
+    ['present_unbound', 'stated_as_past'],
+    ['present_unbound', 'limit_direction_not_representable'],
+    ['present_unbound', 'negated_target'],
+    ['present_unbound', 'hypothetical_target'],
+    ['present_unbound', 'subject_not_bound'],
+    ['present_unbound', 'metric_mismatch'],
+    ['present_unbound', 'metric_unbound'],
+    ['present_unbound', 'outside_goal_statement'],
+    ['present_unbound', 'stated_as_change_amount'],
+  ])('%s/%s ⇒ the neutral question, with no figure', (binding, reason) => {
     const q = composeGoalTargetQuestion(
-      candidate({ binding: 'governed', reason: 'governed' as never, brief_span: '£20k MRR' }),
+      candidate({ binding: binding as never, reason: reason as never, brief_span: '£64k MRR', value_user_units: 64000 }),
     );
-    expect(q).toContain('£20k MRR');
-    expect(q).toContain('Reply with an amount');
-    // and it is a statement of fact, never a proposal
-    expect(q).toContain('mentions');
-    expect(q).not.toMatch(/is your target|confirm|yes\/no/i);
+    expect(q).not.toContain('64');
+    expect(q).not.toContain('£');
+    // ⭐ NON-VACUITY: "never quotes" must not be satisfiable by an empty or
+    // degenerate sentence. The exact question is the discriminator.
+    expect(q).toBe(THE_QUESTION);
   });
 
-  it('Codex’s decisive case: "We rejected the proposal to reach £64k MRR" never surfaces 64k', () => {
-    const q = composeGoalTargetQuestion(
-      candidate({ binding: 'present_unbound', reason: 'negated_target' }),
-    );
-    expect(q).toBe('What target should this goal be scored against? Reply with an amount.');
+  it("⭐ the two bindings produce the SAME sentence — the rule is not accidentally neutral for one", () => {
+    const g = composeGoalTargetQuestion(candidate({ binding: 'governed', reason: 'governed' as never }));
+    const u = composeGoalTargetQuestion(candidate({ binding: 'present_unbound', reason: 'negated_target' }));
+    expect(g).toBe(u);
+    expect(g).toBe(THE_QUESTION);
+  });
+
+  it('and it never asks for a yes/no, which the receiver could not honour anyway', () => {
+    const q = composeGoalTargetQuestion(candidate({ binding: 'governed', reason: 'governed' as never }));
+    expect(q).toMatch(/Reply with an amount/);
+    expect(q).not.toMatch(/is your target|confirm|yes\/no/i);
   });
 });
 

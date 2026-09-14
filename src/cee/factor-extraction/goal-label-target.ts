@@ -1063,6 +1063,13 @@ export function goalLabelStatesUncarriedTarget(
  * ========================================================================= */
 
 /** How well the user's own words bind the figure the label names. */
+/**
+ * How the figure relates to the ROUND-5 RULE, not to the user's intent.
+ * `governed`: the round-5 governor would have minted it (S20 shows a REJECTED
+ * proposal is in this class — never quote the figure to the user on this basis).
+ * `present_unbound`: present in the brief but no governor claimed it.
+ * Neither value licenses a write or a quoted figure; the candidate exists to ASK.
+ */
 export type GoalTargetCandidateBinding = "governed" | "present_unbound";
 
 export interface GoalTargetCandidate {
@@ -1076,7 +1083,7 @@ export interface GoalTargetCandidate {
   /** The exact span of the BRIEF where the figure occurs (the first governed occurrence when governed). */
   readonly brief_span: string;
   readonly binding: GoalTargetCandidateBinding;
-  /** `"governed"`, or the named reason the figure is present but unbound. */
+  /** `"governed"` (see the binding caveat: NOT user-established), or the named reason the figure is present but unbound. */
   readonly reason: GoalLabelTargetRefusal | "governed";
 }
 

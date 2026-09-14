@@ -62,21 +62,22 @@ export type GoalTargetAskDecision =
     };
 
 /**
- * ⛔ THE FIGURE IS QUOTED ONLY WHEN THE PARSER FOUND A TARGET CONSTRUCTION
- * GOVERNING IT. Every `present_unbound` reason means, by its own definition,
- * that the figure was NOT stated as this goal's target — it is a current level,
- * a price, a past achievement, a change amount, a competitor's number, a
- * negation, a hypothetical, or a different metric. Quoting any of those invites
- * the user to adopt a number the brief did not offer, which is precisely what
- * Codex's ruling forbids.
+ * ⛔⛔ THE FIGURE IS NEVER QUOTED. NO VALUE OF `binding` LICENSES IT.
  *
- * ⭐ FAIL-CLOSED BY CONSTRUCTION: this is a single positive predicate on
- * `binding`, not an allowlist of reasons. A new refusal reason added upstream is
- * silently UNQUOTED rather than silently quoted — the safe direction — so this
- * cannot rot into a short list (CLAUDE.md trap 12d).
+ * I first wrote `binding === 'governed'` as the licence, reading the producer's
+ * docstring ("how well the user's own words bind the figure"). **That reading was
+ * wrong and the producer's own corpus proves it:** its S20 case pins
+ * `"We rejected the proposal to reach £64k MRR."` as **`governed`** — because
+ * `governed` means *the round-5 governor would have minted this*, NOT *the user
+ * established this as their target*. **The rejected proposal is the canonical
+ * member of that class.** So a consumer quoting on `governed` quotes back the one
+ * figure the brief explicitly refused — exactly what Codex's ruling forbids.
+ *
+ * ⭐ Caught by Codex against the REAL producer output after my own hostile-case
+ * test passed — because that test FABRICATED `present_unbound` for the £64k brief
+ * rather than composing from what the producer actually returns. A fixture I wrote
+ * myself was not evidence about the producer.
  */
-const QUOTES_THE_FIGURE = (c: GoalTargetCandidate): boolean => c.binding === 'governed';
-
 /**
  * `count` is what the producer emits for a BARE figure, so it is NOT a
  * user-established unit and must not be carried. The pending action's own field
@@ -107,10 +108,8 @@ const hasRegisteredTarget = (goal: PersistedGoalView): boolean => {
  * ⚠ "mentions" is load-bearing and survives the hostile cases: it stays TRUE of
  * a brief that rejects the figure, where "Is £64k your target?" would be a lie.
  */
-export function composeGoalTargetQuestion(candidate: GoalTargetCandidate): string {
-  const ask = 'What target should this goal be scored against? Reply with an amount.';
-  if (!QUOTES_THE_FIGURE(candidate)) return ask;
-  return `Your brief mentions ${candidate.brief_span.trim()} — ${ask}`;
+export function composeGoalTargetQuestion(_candidate: GoalTargetCandidate): string {
+  return 'What target should this goal be scored against? Reply with an amount.';
 }
 
 export function decideGoalTargetAsk(
