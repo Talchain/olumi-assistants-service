@@ -117,8 +117,9 @@ describe('E — DISCRIMINATING CONTROLS: non-currency bounds are unchanged below
       [],
     );
     expect(built.ok).toBe(false);
-    if (built.ok) throw new Error('unreachable');
-    expect(built.reason).toBe('required_parameter_missing');
+    if (built.ok || built.reason !== 'required_parameter_missing') {
+      throw new Error(`expected required_parameter_missing, got ${JSON.stringify(built)}`);
+    }
     expect(built.parameterName).toBe('value');
   });
 

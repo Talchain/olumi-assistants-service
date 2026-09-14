@@ -87,8 +87,9 @@ describe('offer sufficiency — the gate', () => {
       [],
     );
     expect(built.ok).toBe(false);
-    if (built.ok) throw new Error('unreachable');
-    expect(built.reason).toBe('required_parameter_missing');
+    if (built.ok || built.reason !== 'required_parameter_missing') {
+      throw new Error(`expected required_parameter_missing, got ${JSON.stringify(built)}`);
+    }
     expect(built.parameterName).toBe('value');
   });
 
@@ -117,8 +118,9 @@ describe('offer sufficiency — the gate', () => {
     ]) {
       const built = buildWarrantDemotion(action('add_constraint', params), []);
       expect(built.ok).toBe(false);
-      if (built.ok) throw new Error('unreachable');
-      expect(built.reason).toBe('required_parameter_missing');
+      if (built.ok || built.reason !== 'required_parameter_missing') {
+        throw new Error(`expected required_parameter_missing, got ${JSON.stringify(built)}`);
+      }
       expect(built.parameterName).toBe('constraint_type');
     }
   });
@@ -126,7 +128,9 @@ describe('offer sufficiency — the gate', () => {
   it('REFUSES to offer a set_factor_value with no value, and an adjust_edge_strength with no strength', () => {
     const noValue = buildWarrantDemotion(action('set_factor_value', []), []);
     expect(noValue.ok).toBe(false);
-    if (noValue.ok) throw new Error('unreachable');
+    if (noValue.ok || noValue.reason !== 'required_parameter_missing') {
+      throw new Error(`expected required_parameter_missing, got ${JSON.stringify(noValue)}`);
+    }
     expect(noValue.parameterName).toBe('value');
 
     const noStrength = buildWarrantDemotion(
@@ -134,7 +138,9 @@ describe('offer sufficiency — the gate', () => {
       [],
     );
     expect(noStrength.ok).toBe(false);
-    if (noStrength.ok) throw new Error('unreachable');
+    if (noStrength.ok || noStrength.reason !== 'required_parameter_missing') {
+      throw new Error(`expected required_parameter_missing, got ${JSON.stringify(noStrength)}`);
+    }
     expect(noStrength.parameterName).toBe('strength');
   });
 
