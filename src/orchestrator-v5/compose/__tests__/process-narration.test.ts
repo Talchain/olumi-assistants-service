@@ -324,10 +324,31 @@ describe('the 12 Sep clarifying-answer leak — the third miss of this class', (
     expect(SHIPPED_AT_a3d9b953[0]!.test(PRIOR_WITNESSED_MONOLOGUE)).toBe(true);
     expect(SHIPPED_AT_a3d9b953[1]!.test(LEAK_DELIBERATION)).toBe(true);
 
-    // And it carried no forbidden phrase either — that lexicon is a SEPARATE
-    // module with its own remedy, and it has no third-person-reader entry, so
-    // this assertion stays live and stays meaningful.
-    expect(findForbiddenPhraseHit(LEAK_CLARIFY_ANSWER)).toBeNull();
+    // ⛔ FLIPPED 14 Sep 2026, AND THE PREMISE IT RESTED ON IS CORRECTED HERE
+    // RATHER THAN LEFT STANDING. This assertion used to read `.toBeNull()`,
+    // justified by the comment "that lexicon is a SEPARATE module with its own
+    // remedy, and it has no third-person-reader entry". THAT IS NO LONGER TRUE:
+    // the same change that widened THIRD_PERSON_READER_PATTERNS also added a
+    // register entry — `/\bthe\s+user\b/i` — to FORBIDDEN_USER_FACING_PHRASES,
+    // after a founder received the model's own reasoning as the reply. Leaving
+    // the old comment beside a flipped assertion would leave the file asserting
+    // one thing and explaining another.
+    //
+    // The HISTORIC fact this block exists to pin is untouched and still lives
+    // above, against the FROZEN `SHIPPED_AT_a3d9b953` patterns — which is
+    // exactly where a record of what shipped belongs (trap 12b). What changes
+    // here is only the LIVE reading, and the live reading is now a second,
+    // independent guard seeing the same leak.
+    //
+    // Bound by IDENTITY to the matched substring, not merely to "something
+    // fired" (trap 19): `findForbiddenPhraseHit` returns the matched text, so
+    // this pins the REGISTER entry specifically. An unrelated entry going off
+    // on this string would not satisfy it.
+    expect(findForbiddenPhraseHit(LEAK_CLARIFY_ANSWER)).toBe('The user');
+    // CONTRAST, same run, so the flip cannot pass by the lexicon having become
+    // a blanket that hits everything: the second-person register Olumi is
+    // supposed to use is still clean through the very same call.
+    expect(findForbiddenPhraseHit('You named values for the two unset factors.')).toBeNull();
   });
 
   it('the widening reaches BOTH consumers of the shared set, by construction', () => {
