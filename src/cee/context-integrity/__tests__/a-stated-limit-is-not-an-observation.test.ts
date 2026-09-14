@@ -116,7 +116,7 @@ describe("negative controls — a fix that reclassifies everything is worse than
     // Both stated: the observation is 1.9%, the ceiling is 4%. The node holds a
     // real measurement, so nothing here has anything to say about it.
     const roles = deriveStatedQuantityRoles(
-      "monthly churn is currently 1.9%, and we must keep monthly churn under 4%",
+      "monthly churn is currently 1.9%, and we are keeping monthly churn under 4%",
       graphWith([churnNode({ value: 0.019, unit: "%" })], [churnRow()]),
     );
     expect(roles).toEqual([]);
@@ -127,7 +127,7 @@ describe("negative controls — a fix that reclassifies everything is worse than
     // — the observed 0.04 genuinely IS an observation here, and stamping it
     // would tell a user that a rate they measured is only a cap.
     const roles = deriveStatedQuantityRoles(
-      "monthly churn is currently 4%, and we must keep monthly churn under 4%",
+      "monthly churn is currently 4%, and we are keeping monthly churn under 4%",
       graphWith([churnNode({ value: 0.04, unit: "%" })], [churnRow()]),
     );
     expect(roles).toEqual([]);
@@ -246,5 +246,49 @@ describe("the consumer honours it — the model's own view of the graph", () => 
     expect(node.source).toBe("user");
     expect(node.provenance).toBe("from_brief");
     expect(node.value).toBe(0.04);
+  });
+});
+
+describe("the negative controls fail for the reason they name", () => {
+  /**
+   * ⚠ PIN THE PRECONDITION IN-TEST (CLAUDE.md trap 13b). Two of the controls
+   * above assert an EMPTY result, and an empty result has several possible
+   * causes — most cheaply, a `source_quote` that does not locate in the brief,
+   * which the fabrication gate discards before any of this module's own logic
+   * runs. A control refusing for that reason is not testing what it claims.
+   *
+   * It happened: the first draft of the two-roles control wrote a brief saying
+   * *"we must keep"* against a row quoting *"keeping"*, so the quote never
+   * located and the case passed while the guard it was written for was
+   * DISARMED — proven by a mutant that removed the guard and stayed green.
+   * These assertions are what caught it, and are what stop it recurring.
+   */
+  const locates = (brief: string, quote: string) => brief.includes(quote);
+
+  it("the two-roles control's quote really is in its brief", () => {
+    expect(
+      locates(
+        "monthly churn is currently 4%, and we are keeping monthly churn under 4%",
+        "keeping monthly churn under 4%",
+      ),
+    ).toBe(true);
+  });
+
+  it("the independent-level control's quote really is in its brief", () => {
+    expect(
+      locates(
+        "monthly churn is currently 1.9%, and we are keeping monthly churn under 4%",
+        "keeping monthly churn under 4%",
+      ),
+    ).toBe(true);
+  });
+
+  it("and the fabrication-gate control's quote really is NOT — the contrast", () => {
+    expect(
+      locates(
+        "keeping monthly churn under 4%",
+        "we agreed a hard ceiling of 4% at the board meeting",
+      ),
+    ).toBe(false);
   });
 });
