@@ -1810,7 +1810,7 @@ function observedValueOf(graph: Record<string, unknown>, nodeId: string): number
  * ⚠ THE COMPARISON IS DELIBERATELY ON THE LITERAL, NOT THE PARSED VALUE, AND
  * THAT IS THE POINT. `extractStatedQuantities` reads `"4%"` as **4**
  * (percentage points as written) while the producer's row holds **0.04**
- * (`value_frame: "level"`, `unit: "fraction"` — measured on all six live
+ * (a `value_frame` of "level" with `unit` "fraction" — measured on all six live
  * drafts that carried a row). Any safeguard comparing those two numbers is
  * comparing different frames, and `numbersEqual` performs no frame conversion.
  * Literals carry their own frame, so the guard cannot be defeated by one.
