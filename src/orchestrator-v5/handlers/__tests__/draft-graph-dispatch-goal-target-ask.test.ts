@@ -25,6 +25,7 @@ import { handleDraftGraph } from '../../../orchestrator/tools/draft-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import { setTestSink } from '../../../utils/telemetry.js';
+import { isDirectionClarificationId } from '../../../cee/compound-goal/direction-gate.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const TURN_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -68,11 +69,35 @@ const READINESS_THAT_ASKS = {
   ],
 };
 
-const makeDraftResult = (goalTargetCandidate?: unknown, analysisReady?: unknown) => ({
+/**
+ * ⭐ THE PRODUCER'S OWN ID SPACE, not a string this test invented.
+ * `direction-gate.ts` mints `direction_unresolved_<n>` (and `_more` for the
+ * overflow row); `isDirectionClarificationId` matches on that prefix. A test
+ * that hard-codes a DIFFERENT spelling would pass while the product regressed.
+ */
+const DIRECTION_ITEM = {
+  id: 'direction_unresolved_1',
+  label: 'Confirm the direction of the gross margin limit',
+  detail: 'You mentioned 78% for gross margin. Is that a floor or a ceiling?',
+  action_type: 'add_constraint',
+};
+/** A strengthen item that is NOT a direction clarification — the discriminator. */
+const OTHER_ITEM = {
+  id: 'strengthen_add_option_1',
+  label: 'Add an option',
+  detail: 'You are comparing two options; a third would widen the set.',
+  action_type: 'add_option',
+};
+
+const makeDraftResult = (
+  goalTargetCandidate?: unknown,
+  analysisReady?: unknown,
+  strengthenItems: readonly unknown[] = [],
+) => ({
   blocks: [],
   assistantText: 'Drafted a decision graph.',
   latencyMs: 1000,
-  strengthenItems: [],
+  strengthenItems,
   coachingSummary: null,
   coachingWideningLog: null,
   coachingBiasSignals: null,
@@ -206,6 +231,72 @@ describe('the goal-target candidate becomes an armed question on the draft commi
   it('⭐ TWIN: with NO readiness ask, the goal-target ask is armed and is the only claimant', async () => {
     vi.mocked(handleDraftGraph).mockResolvedValue(makeDraftResult(candidate()) as never);
     await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-6', request: STUB_REQUEST });
+    expect(committedPendings().map((p) => p.action.kind)).toEqual(['elicit_goal_target']);
+  });
+
+  /**
+   * ⛔⛔ ZERO OR ONE QUESTION PER TURN — AND THIS IS A DIFFERENT RULE FROM THE
+   * ONE ABOVE, WHICH IS WHY IT GETS ITS OWN PAIR (CLAUDE.md trap 21).
+   *
+   * The readiness exclusion above is about ANSWER-HEARD: two live pendings and
+   * "£20k" resolves to nothing. A direction clarification arms NO pending — it
+   * reaches the person as prose — so it cannot make this ask unanswerable. It
+   * is excluded because the served prompt's rule is "ASK. Zero or one question
+   * per turn", and a founder's first post-draft turn carried four at once and
+   * he answered none of them.
+   *
+   * ⭐ THE PAIR IS THE EVIDENCE, NOT EITHER HALF. The first test alone would
+   * pass just as well against `strengthenItems.length > 0`; the second is what
+   * proves the stand-down binds to the producer's ID PREFIX and not merely to
+   * "this turn has coaching items" (trap 19 — bind by identity, never by a
+   * predicate another object could satisfy).
+   */
+  it('a promoted DIRECTION CLARIFICATION ⇒ the goal-target ask STANDS DOWN', async () => {
+    vi.mocked(handleDraftGraph).mockResolvedValue(
+      makeDraftResult(candidate(), undefined, [DIRECTION_ITEM]) as never,
+    );
+    await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-10', request: STUB_REQUEST });
+    // PRECONDITION, in-test: the item really is one the producer's predicate
+    // claims, so a rename of the id space REDs here rather than passing vacuously.
+    expect(isDirectionClarificationId(DIRECTION_ITEM.id)).toBe(true);
+    expect(committedPendings().map((p) => p.action.kind)).not.toContain('elicit_goal_target');
+    // ...and the sentence goes with the pending: armed and asked are atomic.
+    expect(committedAssistantText()).not.toContain(THE_QUESTION);
+  });
+
+  it('⭐ DISCRIMINATING TWIN: a NON-direction strengthen item leaves the ask ARMED', async () => {
+    vi.mocked(handleDraftGraph).mockResolvedValue(
+      makeDraftResult(candidate(), undefined, [OTHER_ITEM]) as never,
+    );
+    await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-11', request: STUB_REQUEST });
+    // PRECONDITION: the fixture is genuinely NOT in the reserved id space, or
+    // this twin is asserting nothing.
+    expect(isDirectionClarificationId(OTHER_ITEM.id)).toBe(false);
+    expect(committedPendings().map((p) => p.action.kind)).toEqual(['elicit_goal_target']);
+    expect(committedAssistantText()).toContain(THE_QUESTION);
+  });
+
+  it('⭐ AND MIXED: one direction clarification among others still stands the ask down', async () => {
+    vi.mocked(handleDraftGraph).mockResolvedValue(
+      makeDraftResult(candidate(), undefined, [OTHER_ITEM, DIRECTION_ITEM]) as never,
+    );
+    await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-12', request: STUB_REQUEST });
+    expect(committedPendings().map((p) => p.action.kind)).not.toContain('elicit_goal_target');
+  });
+
+  /**
+   * ⚠ A NULL ENTRY IS AN OBSERVED INPUT CLASS, NOT A THEORETICAL ONE —
+   * `unified-pipeline/stages/package.ts:395-417` records it, and
+   * `normalise-legacy-coaching.ts:61` repairs non-object entries WITHOUT
+   * removing them. Reading `.id` off one throws, and a throw in this handler
+   * aborts the draft commit — the turn, not the card. Measured before the
+   * guard: `Cannot read properties of null (reading 'id')`.
+   */
+  it('⛔ a malformed strengthen item does not throw, and does not stand the ask down', async () => {
+    vi.mocked(handleDraftGraph).mockResolvedValue(
+      makeDraftResult(candidate(), undefined, [null, {}, { id: 7 }]) as never,
+    );
+    await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-13', request: STUB_REQUEST });
     expect(committedPendings().map((p) => p.action.kind)).toEqual(['elicit_goal_target']);
   });
 });

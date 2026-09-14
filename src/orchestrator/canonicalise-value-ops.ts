@@ -135,7 +135,7 @@ const OBSERVED_ROOT = 'observed_state';
  * target `normaliseEditOpsForPlot` uses for `add_node`; `field-safety.ts`
  * already treats the two roots as one subtree.
  */
-const OBSERVED_ROOT_SPELLINGS: ReadonlySet<string> = new Set([OBSERVED_ROOT, 'data']);
+export const OBSERVED_ROOT_SPELLINGS: ReadonlySet<string> = new Set([OBSERVED_ROOT, 'data']);
 
 /**
  * Tunable leaves this module will translate, DERIVED from the referee's
