@@ -175,6 +175,30 @@ describe('#1560 — the widened vocabulary may NEVER over-reach', () => {
     }
   });
 
+  /**
+   * THE BRIEF'S NEGATIVE CONTROL, verbatim from the live capture. The bare
+   * mention that OPENS the journey must still write nothing and still ask —
+   * the ask-first behaviour is correct and must survive this widening. A fix
+   * that applied a constraint from a bare mention would be far worse than the
+   * defect it replaces.
+   *
+   * Measured live at pristine `8e4efce0`: this message produced "Nothing has
+   * been changed. I want to confirm this with you before I edit the model"
+   * with graph_hash unchanged. That behaviour is unchanged here.
+   */
+  it('NEGATIVE CONTROL — a bare mention with no confirmation resolves nothing', () => {
+    const held = heldProposal('prop_baremention1');
+    const out = resume(
+      'If the churn goes over 7% for more than 3 months, we will have a cash flow problem, so this is a serious risk.',
+      [held],
+    );
+    expect(out.matched).toBe(false);
+    // The offer is untouched and still owed.
+    expect(filterLivePendingActions([held], NOW_MS).map((p) => p.chip_id)).toEqual([
+      'prop_baremention1',
+    ]);
+  });
+
   it('a proposal-shaped confirmation with NO live proposal resolves nothing', () => {
     // Paired control: the same strings that resolve above must be inert when
     // there is nothing held — the vocabulary is not a licence to mutate.
