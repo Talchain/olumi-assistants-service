@@ -250,6 +250,27 @@ export interface ComposeToolCallInput {
    */
   readonly analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'];
   /**
+   * The WHOLE current `analysis_ready` payload, carried alongside the narrowed
+   * {@link ComposeToolCallInput.analysisReadyStatus} rather than replacing it.
+   *
+   * ⚠ TWO FIELDS, TWO QUESTIONS — not a duplication to be tidied away.
+   * `analysisReadyStatus` answers *"may analysis run on this model?"* and gates
+   * factor-EVPPI guidance. This one is read ONLY for
+   * `analysis_admission.permitted_analysis_mode`, which answers *"has the user
+   * confirmed any estimate this comparison rests on?"* — the premise
+   * `compose/unrequested-analysis-confinement.ts` asserts in the unrequested-run
+   * summary and, before this field existed, could not check. Collapsing them
+   * would put one name on two questions (CLAUDE.md trap 21).
+   *
+   * Typed `unknown` deliberately, matching `enforceLeadingOptionClaimsAtWire`:
+   * the only readers are the defensive helpers in `admission/analysis-admission.ts`,
+   * which parse it shape-blind and return `null` — "could not establish", never
+   * "no" — so an absent or older payload keeps today's behaviour exactly.
+   *
+   * Input-only authority: the composer never manufactures or emits `analysis_ready`.
+   */
+  readonly analysisReady?: unknown;
+  /**
    * V5 Task 2.1: pre-generated deterministic chips. See `ComposeInput`.
    */
   readonly suggested_actions?: readonly SuggestedAction[];
@@ -376,6 +397,7 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     input.priorTurnFactsForLensHistory,
     input.flipFocusFactorId,
     input.analysisReadyStatus,
+    input.analysisReady,
   );
 
   return {
@@ -438,6 +460,7 @@ function buildBlocksFromFacts(
   priorTurnFactsForLensHistory?: readonly HandlerFact[],
   flipFocusFactorId?: string,
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
+  analysisReady?: unknown,
 ): OlumiResponse['blocks'] {
   const blocks: OlumiResponse['blocks'] = [];
   let currentTurnRunAnalysisHandled = false;
@@ -498,7 +521,7 @@ function buildBlocksFromFacts(
   for (const fact of facts) {
     if (fact.fact_type === 'run_analysis') {
       currentTurnRunAnalysisHandled = true;
-      blocks.push(buildAnalysisResultBlock(fact));
+      blocks.push(buildAnalysisResultBlock(fact, analysisReady));
 
       // PR 3 lifecycle branch 1 — fresh blocks from current-turn fact.
       const graphHash = fact.result.graph_hash_at_run;
@@ -709,6 +732,7 @@ function buildBlocksFromFacts(
         lifecycle,
         persistedGraph,
         analysisReadyStatus,
+        analysisReady,
       ),
     );
   }
@@ -1347,8 +1371,13 @@ function buildAnalysisResultBlockUnconfined(
  */
 export function buildAnalysisResultBlock(
   fact: RunAnalysisHandlerFact,
+  analysisReady?: unknown,
 ): Extract<OlumiResponse['blocks'][number], { type: 'analysis_result' }> {
-  return confineUnrequestedAnalysisBlock(buildAnalysisResultBlockUnconfined(fact), fact);
+  return confineUnrequestedAnalysisBlock(
+    buildAnalysisResultBlockUnconfined(fact),
+    fact,
+    analysisReady,
+  );
 }
 
 /**
@@ -1670,6 +1699,7 @@ function buildLifecycleBlocksFromPrior(
   lifecycle: NonNullable<ComposeToolCallInput['lifecycle']>,
   persistedGraph?: unknown,
   analysisReadyStatus?: NonNullable<GraphPatchBlockData['analysis_ready']>['status'],
+  analysisReady?: unknown,
 ): OlumiResponse['blocks'] {
   const { freshness, priorFacts } = lifecycle;
   const verdict = freshness.freshness;
@@ -1763,7 +1793,7 @@ function buildLifecycleBlocksFromPrior(
   // reaching here, so a diverged graph never surfaces a result block (only the
   // stale-safe rerun coaching block). Enrichment is sanitised by the
   // response-finaliser before egress.
-  const analysisResultBlock = buildAnalysisResultBlock(priorFact);
+  const analysisResultBlock = buildAnalysisResultBlock(priorFact, analysisReady);
   // FRESH verdict ⇒ the freshness derivation already proved the current
   // persisted graph's canonical hash equals the source fact's
   // `graph_hash_at_run`, so the persisted graph is an identity-consistent

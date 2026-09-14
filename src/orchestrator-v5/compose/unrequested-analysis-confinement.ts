@@ -191,6 +191,10 @@
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
+import {
+  modePermitsAtLeast,
+  permittedAnalysisModeFromAnalysisReady,
+} from '../admission/analysis-admission.js';
 import { isAutoInitiatedRunAnalysisFact } from '../context/run-initiator.js';
 import { mayNameLeadingOptionForFact } from './withheld-claim-projection.js';
 
@@ -297,10 +301,88 @@ export function mayPresentLeaderClaimForFact(fact: RunAnalysisHandlerFact): bool
  * sharing one string would put a chat sentence in a panel field. They must
  * stay CONSISTENT, which the acceptance test asserts by claim rather than by
  * byte equality.
+ *
+ * ⚠⚠ ITS SECOND CLAUSE IS NOT THIS MODULE'S TO MAKE, AND IT WENT FALSE IN THE
+ * FIELD. `Nothing in it is confirmed yet` answers a question this module has no
+ * authority over — see {@link unrequestedSummaryPremiseHolds}, which is now the
+ * gate on the substitution. The sentence itself is UNCHANGED, deliberately: on
+ * the arm where its premise holds it is the hard-won disclosure and ships byte
+ * for byte.
  */
 export const UNREQUESTED_ANALYSIS_SUMMARY =
   'Olumi ran a first pass on the model it had just drafted. Nothing in it is confirmed yet, ' +
   'so no option is put forward and no result is called reliable. Use it to find what is wrong.';
+
+/**
+ * ⭐⭐ DOES {@link UNREQUESTED_ANALYSIS_SUMMARY}'S PREMISE STILL HOLD?
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE MEASURED HARM (founder session, deployed staging, 2026-09-14)
+ *
+ * The debug export `olumi-debug-44e349fa-20260914.json` carries, in ONE payload:
+ *
+ *     analysis_ready.analysis_admission.permitted_analysis_mode = "comparative_leader"
+ *     reasons[].code    = CONFIDENCE_PARAMETERS_PARTLY_USER_STATED
+ *     reasons[].message = "At least one of the estimates this comparison rests
+ *                          on is yours, so a leading option can be named."
+ *
+ * beside a block asserting `Nothing in it is confirmed yet`. Those are not two
+ * readings of one question — the second is the DIRECT NEGATION of the first,
+ * and the admission is the authority on it.
+ *
+ * ⭐ IT IS AN ENTAILMENT, NOT A CORRELATION, so this gate cannot drift from the
+ * sentence it guards. `deriveMode` (admission/analysis-admission.ts) returns
+ * `comparative_leader` on exactly one branch — `semanticSufficient === true` —
+ * and `semanticQualitySufficient` is one line:
+ *
+ *     return signals.material_parameters_user_stated > 0;
+ *
+ * So `comparative_leader` ENTAILS the user has stated a material parameter,
+ * which is precisely what `Nothing in it is confirmed yet` denies.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⭐ TWO QUESTIONS, NAMED APART — NOT ONE WIDENED PREDICATE (CLAUDE.md trap 21)
+ *
+ * The temptation was to widen {@link wasAnalysisRequestedByUser}, or to align
+ * it with the admission. That would have been the defect itself:
+ *
+ *   {@link wasAnalysisRequestedByUser}  "did anybody ASK for this run?"
+ *       — provenance of the RUN. UNCHANGED, and still the sole gate on every
+ *         FIELD this module drops (leader, probabilities, verdict).
+ *
+ *   THIS PREDICATE                      "has the user confirmed any estimate
+ *                                        this comparison rests on?"
+ *       — provenance of the ESTIMATES, owned by the admission.
+ *
+ * They are independent, and the module header's own prose already conceded the
+ * second one without checking it: it justifies the unconditional substitution
+ * on the ground that *"the summary describes a model with no user input"*. That
+ * is a PREMISE, not a consequence of unrequestedness — and `comparative_leader`
+ * is the admission saying it has ended. So this gate does not reconcile the two
+ * authorities; it stops the SENTENCE borrowing the one it never owned.
+ *
+ * ⚠ SCOPE — WHAT THIS DOES **NOT** TOUCH. Only the summary SUBSTITUTION. Every
+ * field-level confinement below (`win_probabilities` dropped, the enrichment
+ * projection, the leader nulled upstream) is governed by provenance alone and
+ * is byte-identical on both arms. An unrequested run still puts no option
+ * forward; it merely stops claiming the user has confirmed nothing when the
+ * admission records that they have.
+ *
+ * ⚠ FAILS OPEN, AND THE ASYMMETRY IS THE SCHEMA'S OWN RULE. `null` from
+ * {@link permittedAnalysisModeFromAnalysisReady} means "could not establish
+ * one", NEVER "no" — so an absent, older or unparseable admission keeps
+ * today's sentence exactly as it ships now. The disclosure can only be stood
+ * down by the admission POSITIVELY recording that its premise has ended.
+ *
+ * Rank comparison via `modePermitsAtLeast`, never a string test, so a mode
+ * added to the lattice later is ordered by construction rather than by a
+ * second hand-written list (CLAUDE.md trap 12).
+ */
+export function unrequestedSummaryPremiseHolds(analysisReady: unknown): boolean {
+  const mode = permittedAnalysisModeFromAnalysisReady(analysisReady);
+  if (mode === null) return true;
+  return !modePermitsAtLeast(mode, 'comparative_leader');
+}
 
 /**
  * The ONLY members of `enrichment.robustness` that survive on an unrequested
@@ -660,6 +742,7 @@ export function projectTransportEnrichmentForUnrequestedRun(
 export function confineUnrequestedAnalysisBlock(
   block: AnalysisResultBlock,
   fact: RunAnalysisHandlerFact,
+  analysisReady?: unknown,
 ): AnalysisResultBlock {
   if (wasAnalysisRequestedByUser(fact)) return block;
 
@@ -679,9 +762,25 @@ export function confineUnrequestedAnalysisBlock(
     block.enrichment as Record<string, unknown> | undefined,
   );
 
+  // ⭐ THE SUBSTITUTION IS NOW GATED ON ITS OWN PREMISE, and the fall-through is
+  // SAFE BY CONSTRUCTION rather than by a second sentence someone has to keep
+  // honest. `rest.summary` is not the producer's raw text: on this path
+  // `buildAnalysisResultBlockUnconfined` has ALREADY run it through
+  // `projectAnalysisSummaryForWithheldClaim`, because `mayPresentLeaderClaimForFact`
+  // conjoins `wasAnalysisRequestedByUser` and is therefore FALSE for every fact
+  // that reaches this line. So what ships when the premise has ended is either a
+  // leader-free summary kept byte-identical, or `WITHHELD_ANALYSIS_SUMMARY`
+  // ("This analysis has been run. No single option can be put forward on its
+  // result yet.") — both true, neither naming an option.
+  //
+  // ⚠ THAT IS WHY THIS IS A SUBTRACTION AND NOT A NEW STRING. Authoring a
+  // second disclosure here would put two authorities on one sentence, which is
+  // the mirror this estate keeps paying for; the withheld projection is already
+  // the ratified owner of "what may a summary say when no leader may be named".
+  const premiseHolds = unrequestedSummaryPremiseHolds(analysisReady);
   return {
     ...rest,
-    summary: UNREQUESTED_ANALYSIS_SUMMARY,
+    ...(premiseHolds ? { summary: UNREQUESTED_ANALYSIS_SUMMARY } : {}),
     ...(enrichment !== undefined
       ? { enrichment: enrichment as AnalysisResultBlock['enrichment'] }
       : {}),

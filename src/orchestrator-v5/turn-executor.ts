@@ -12051,6 +12051,15 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         analysisReadyStatus: analysisReadyForTurn?.status,
+        // ⭐ THE WHOLE PAYLOAD, NOT A SECOND NARROWING. `analysisReadyForTurn`
+        // already carries `analysis_admission` (it is built by
+        // `canonicalAnalysisReadyFrom`); until now compose only ever saw
+        // `.status`, so the unrequested-run summary asserted "nothing in it is
+        // confirmed yet" with no way to check whether the admission had already
+        // recorded the opposite. Measured contradicting itself on a founder
+        // session, 2026-09-14 — see `compose/unrequested-analysis-confinement.ts`
+        // :: unrequestedSummaryPremiseHolds.
+        analysisReady: analysisReadyForTurn,
         suggested_actions: executeChips,
         // R4 lookup fix — persisted-snapshot fallback for graph-node
         // ID→{label,kind} resolution. The PLoT envelope on the fact has no
