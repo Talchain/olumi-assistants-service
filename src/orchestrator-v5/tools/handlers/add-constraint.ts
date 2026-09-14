@@ -72,12 +72,18 @@ import {
   formatBaselineElicitation,
   formatBaselineNoted,
   formatConstraintAdded,
+  formatConstraintDurationNotEvaluated,
   formatConstraintLabelUpdated,
+  formatConstraintNotCheckable,
   formatConstraintUnchanged,
   formatConstraintUpdated,
   formatGoalTargetSet,
   formatGoalTargetUnchanged,
 } from './d1-shared/format-confirmation.js';
+import {
+  classifyConstraintWriteAdmissibility,
+  findUnevaluatedDurationSpan,
+} from './d1-shared/constraint-write-admissibility.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 /**
@@ -1018,6 +1024,54 @@ export function createAddConstraintHandler(): HandlerFn {
           : existing !== undefined
             ? formatConstraintUpdated(formatInput)
             : formatConstraintAdded(formatInput);
+
+      // ⭐⭐ THE RECEIPT MUST NOT CLAIM AN ENFORCEMENT THAT WILL NOT HAPPEN.
+      //
+      // Measured on staging 14 Sep 2026 (debug export `44e349fa`): this handler
+      // said "Added constraint: …" for a `<= 7%` bound on a `risk` node that
+      // records no value anywhere. PLoT logged
+      // `plot.constraint_no_observed_value` and `constraint_analysis_absent` for
+      // all four options; the user learned this TWO TURNS LATER, on the rerun.
+      // The disclosure was correct and correctly worded — it was simply two
+      // turns too late, so the same words are now available at the write.
+      //
+      // ⚠ READ THE **RAW** NODE, NOT THE PARSED ONE, AND IT IS NOT A DETAIL.
+      // `NodeV3` is a plain `z.object`, so it STRIPS undeclared keys — and the
+      // V1 quantity carrier `data` is undeclared (measured at
+      // `schemas/cee-v3.ts` 14 Sep 2026: 8 of the 9 fields in
+      // `NODE_QUANTITY_FIELDS` are declared, `data` is not). Classifying the
+      // parsed node would therefore read a `data`-only node as carrying nothing
+      // and tell a user their perfectly good limit will be ignored — the one
+      // error this disclosure must never make. The raw node is also the exact
+      // input class the run_analysis-time collector consumes
+      // (`snapshot.rawPersistedGraph`), so the two moments classify the same
+      // bytes.
+      //
+      // ⚠ AND IF THE RAW NODE CANNOT BE FOUND, SAY NOTHING. A sweep that could
+      // not look returns the same clean answer as one that looked and found
+      // nothing (CLAUDE.md standing brief). Silence is today's behaviour;
+      // speaking on an unread node would be a claim we have not established.
+      const rawTargetNode = ((): Record<string, unknown> | null => {
+        const nodes = (rawGraph as { nodes?: unknown } | null)?.nodes;
+        if (!Array.isArray(nodes)) return null;
+        for (const n of nodes) {
+          if (n !== null && typeof n === 'object' && (n as Record<string, unknown>).id === targetId) {
+            return n as Record<string, unknown>;
+          }
+        }
+        return null;
+      })();
+      const admissibility =
+        rawTargetNode === null ? null : classifyConstraintWriteAdmissibility(rawTargetNode);
+
+      // The time span the row has no field for. Read off the label that will be
+      // PERSISTED, because that is the only place it survives.
+      const unevaluatedDurationSpan = findUnevaluatedDurationSpan({
+        label: newConstraint.label,
+        value: params.value,
+        unit: newConstraint.unit,
+      });
+
       // ROADMAP 2.877 (link 2) — the mint is user-visible in the same receipt:
       // the user stated two facts (a bound and a level) and is owed
       // confirmation of both; and on an otherwise-unchanged restatement the
@@ -1025,19 +1079,40 @@ export function createAddConstraintHandler(): HandlerFn {
       // no-op (see `turnIsNoop` above).
       // ROADMAP 2.918 — the elicitation is the mint receipt's interrogative
       // dual, on the same cell and the same channel: mint fired → note the
-      // level; mint impossible for want of a statement → ask for one. The
-      // question is ADDITIVE (the constraint receipt precedes it and the row
-      // is already in the committed write); ignoring it costs nothing beyond
-      // the honest ISL refusal that already existed.
-      const assistantText = mintedBaseline
-        ? `${constraintText} ${formatBaselineNoted({
+      // level; mint impossible for want of a statement → ask for one.
+      //
+      // ⚠ THE NOT-CHECKABLE DISCLOSURE IS THE LAST ARM OF THE SAME CHAIN, AND
+      // THAT ORDERING IS DELIBERATE, NOT INCIDENTAL:
+      //   · `mintedBaseline` — this very turn stamps `observed_state` on the
+      //     target, so the limit IS checkable from here on. Disclosing
+      //     otherwise would be false the moment it was written.
+      //   · `elicitBaseline` — the elicitation already names the missing thing
+      //     and asks for it ("the analysis also needs to know where X stands
+      //     today"). It is ADDITIVE (the constraint receipt precedes it and the
+      //     row is already in the committed write). Stacking a second repair ask
+      //     on the same cell is noise, and two asks in one receipt invite the
+      //     user to answer neither.
+      //   · otherwise, and only then, the disclosure speaks.
+      const fragments: string[] = [constraintText];
+      if (unevaluatedDurationSpan !== null) {
+        fragments.push(
+          formatConstraintDurationNotEvaluated({ span: unevaluatedDurationSpan }),
+        );
+      }
+      if (mintedBaseline) {
+        fragments.push(
+          formatBaselineNoted({
             targetLabel: targetNode.label,
             value: statedBaselinePercent!,
             unit: '%',
-          })}`
-        : elicitBaseline
-          ? `${constraintText} ${formatBaselineElicitation({ targetLabel: targetNode.label })}`
-          : constraintText;
+          }),
+        );
+      } else if (elicitBaseline) {
+        fragments.push(formatBaselineElicitation({ targetLabel: targetNode.label }));
+      } else if (admissibility !== null && !admissibility.checkable) {
+        fragments.push(formatConstraintNotCheckable({ targetLabel: targetNode.label }));
+      }
+      const assistantText = fragments.join(' ');
 
       return {
         assistant_text: assistantText,
