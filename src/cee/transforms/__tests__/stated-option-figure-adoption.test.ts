@@ -182,6 +182,39 @@ describe("the stated option is completed whole, or not at all", () => {
     ]);
   });
 
+  /**
+   * ⭐⭐ RULE 6, PINNED BY THE ONLY SHAPE THAT CAN SEE IT — one connected factor
+   * that clears every gate beside one that does not.
+   *
+   * This case exists because a mutant proved rule 6 unpinned after rule 5 was
+   * tightened: once the witnessed two-figure quote refuses BOTH factors, there
+   * is no adoption left for all-or-nothing to withdraw, so deleting the rule
+   * changed nothing observable. The guard had quietly stopped discriminating
+   * while still reading green (trap 13b).
+   */
+  it("withdraws an otherwise-valid adoption when a SIBLING factor on the same option cannot be wired", () => {
+    const d = witnessedDraft();
+    // One figure, so the price factor clears rule 5 and would adopt 59 alone.
+    d.nodes.find((n) => n.id === "14d36e6f")!.source_quote = SINGLE_FIGURE_QUOTE;
+    // `a4e6cef0` still has only cee_hypothesis donors, so it cannot be wired.
+
+    const result = run(d);
+
+    // Half-configuring here is the reported harm: the option would become
+    // `ready`, the ask would disappear, and it would enter the comparison wired
+    // on 1 of 2 factors against siblings wired on 2.
+    expect(result.adopted).toEqual([]);
+    expect(Object.keys(d.options.find((o) => o.id === "14d36e6f")!.interventions as object)).toEqual([]);
+    expect(result.gaps).toEqual([
+      {
+        option_id: "14d36e6f",
+        factor_id: "a4e6cef0",
+        reason: "no_stated_donor",
+        covered_by_sibling: true,
+      },
+    ]);
+  });
+
   it("adopts the user's own £59 when the quote names one figure and the price is the only connected factor", () => {
     const d = witnessedDraft();
     d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
