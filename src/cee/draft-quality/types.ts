@@ -52,8 +52,29 @@ export interface DraftCoverageFacts {
    * one shared node.
    */
   readonly causal_waist: number;
-  /** Waist factors reachable from exactly ONE option. */
+  /**
+   * Waist factors reachable from exactly ONE option — INCLUDING the Status Quo.
+   *
+   * ⛔ THIS IS NOT "how many factors are specific to one alternative", and
+   * reading it that way produced a false programme finding on 2026-09-14. The
+   * served prompt mandates a Status Quo option and requires it to keep its
+   * factor edges, so a lever touched by one real option AND the Status Quo has
+   * an option-count of 2 and is NOT counted here. The healthy N-options-plus-
+   * baseline shape therefore scores 0. Use `deviating_private_factor_count`
+   * for the question this field's name suggests.
+   *
+   * Kept unchanged so the telemetry series stays comparable across the change.
+   */
   readonly private_factor_count: number;
+  /**
+   * ⭐ Waist factors reachable from exactly one NON-BASELINE option — i.e. how
+   * many causal levers exactly one alternative actually deviates on.
+   *
+   * This is the honest form of the field above and it is what the redraw
+   * tie-break consumes. On a graph with no `is_baseline` option the two are
+   * identical by construction.
+   */
+  readonly deviating_private_factor_count: number;
   /** Waist factors reachable from EVERY option. */
   readonly shared_factor_count: number;
   /** Longest option → … → goal chain, in edges. 0 when no option reaches goal. */
