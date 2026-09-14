@@ -65,9 +65,10 @@
  *     DONOR. The figure is one the extractor already bound to the brief.
  *  4. Every eligible donor for `F` AGREES on that raw value. Disagreement is
  *     refused, never adjudicated.
- *  5. The donor's raw value appears VERBATIM as a figure in `O`'s OWN
- *     `source_quote`. This is what makes the write a recovery of the user's own
- *     words rather than a copy from a sibling.
+ *  5. `O`'s OWN `source_quote` names EXACTLY ONE figure, and it is the donor's.
+ *     This is what makes the write a recovery of the user's own words rather
+ *     than a copy from a sibling — and the "exactly one" is load-bearing, not
+ *     tidiness. See the trajectory note below.
  *  6. ⭐ EVERY connected factor of `O` clears 2–5, or NOTHING is adopted for
  *     `O`. See the all-or-nothing note below — it is the load-bearing rule.
  *
@@ -90,6 +91,40 @@
  * the shape that oscillates (trap 22f: four rounds, each fixing one direction
  * and opening the other). The typed role answers the same question without
  * reading the sentence, so the sentence is not read.
+ *
+ * ── ⛔⛔ A MULTI-FIGURE QUOTE IS REFUSED, AND AN OUTSIDE CORPUS IS WHY ───────
+ *
+ * The first version of this module required only that the donor's figure appear
+ * SOMEWHERE in the recipient's quote. `tests/integration/model-readiness-
+ * compiler-corpus.records.test.ts` refuted it — a corpus written long before
+ * this module, containing the class its author's own fixtures did not:
+ *
+ *     option : "charging £49 now and £59 in Q2"     (non-baseline, no sets_to)
+ *     sibling: "raising the price to £59 immediately" (non-baseline, sets_to 59)
+ *     sibling: "keeping the price at £49"            (baseline,     sets_to 49)
+ *
+ * Every earlier gate passes: the recipient is `from_brief`, connected to
+ * `Monthly Subscription Price` and unvalued; the baseline filter removes the 49;
+ * the surviving donors agree on 59; and 59 is verbatim in the quote. So the
+ * module ADOPTED 59 — collapsing a two-stage trajectory into one scalar, which
+ * that brief's own last sentence forbids in words: *"do not turn two stages into
+ * one made-up price."*
+ *
+ * ⚠ AND IT IS STRUCTURALLY INDISTINGUISHABLE FROM THE CASE THIS MODULE WAS
+ * WRITTEN FOR. "increase the Pro plan price from £49 to £59" and "charging £49
+ * now and £59 in Q2" are both non-baseline recipients whose quote names {49, 59}
+ * with a non-baseline donor at 59, and in BOTH the other figure is claimed by
+ * the baseline sibling. Nothing in the records tells them apart. The only
+ * difference is linguistic — a transition to a destination versus a trajectory
+ * through two stages — and that is the direction-of-change parse refused two
+ * paragraphs above. Writing its mirror here would be the same mistake with the
+ * sign flipped.
+ *
+ * So a quote naming more than one figure is AMBIGUOUS about the level and
+ * adoption refuses. The cost is paid honestly: on the 9 witnessed drafts of the
+ * motivating brief, whose quote names £49 and £59, this module now adopts
+ * NOTHING and records the gap instead. That is the direction that loses a fix
+ * rather than fabricating a number the user never chose.
  *
  * ── ⭐⭐ ALL-OR-NOTHING, AND WHY A PARTIAL ADOPTION WOULD BE WORSE THAN NONE ──
  *
@@ -144,7 +179,11 @@ export interface AdoptedStatedFigure {
 export interface StatedOptionCoverageGap {
   readonly option_id: string;
   readonly factor_id: string;
-  readonly reason: "no_stated_donor" | "donors_disagree" | "figure_not_in_quote";
+  readonly reason:
+    | "no_stated_donor"
+    | "donors_disagree"
+    | "quote_names_several_figures"
+    | "figure_not_in_quote";
   readonly covered_by_sibling: boolean;
 }
 
@@ -315,6 +354,19 @@ export function adoptStatedFiguresForStatedOptions(args: {
         continue;
       }
       const donor = donors[0]!;
+      // ⭐⭐ RULE 5. The recipient's own quote must name EXACTLY ONE figure, and
+      // it must be the donor's. A quote naming several is ambiguous about which
+      // one is this option's LEVEL, and no deterministic rule available here can
+      // resolve it — see the header's note on the temporal trajectory.
+      if (figures.size > 1) {
+        pendingGaps.push({
+          option_id: optionId,
+          factor_id: factorId,
+          reason: "quote_names_several_figures",
+          covered_by_sibling: anySiblingCovers,
+        });
+        continue;
+      }
       if (!figures.has(donor.raw)) {
         pendingGaps.push({
           option_id: optionId,

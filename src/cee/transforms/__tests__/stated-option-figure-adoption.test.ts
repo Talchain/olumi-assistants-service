@@ -50,6 +50,17 @@ function hypothesisIntervention(value: number) {
 const STATED_QUOTE =
   "increase the Pro plan price from £49 to £59 per month with the next Pro feature release";
 
+/**
+ * A stated option whose quote names ONE figure.
+ *
+ * ⚠ THE WITNESSED QUOTE CANNOT BE USED FOR THE ADOPT CASES, and that is a
+ * finding rather than a fixture convenience: it names £49 AND £59, so rule 5
+ * refuses it — see the module header on the temporal trajectory the integration
+ * corpus caught. The adopt path is therefore exercised on the single-figure
+ * shape, and the witnessed two-figure shape is exercised as a REFUSAL.
+ */
+const SINGLE_FIGURE_QUOTE = "raise the Pro plan price to £59";
+
 /** run00 — the stated option wired to BOTH factors, carrying neither. */
 function witnessedDraft(): { nodes: AnyNode[]; edges: AnyNode[]; options: AnyOption[] } {
   const nodes: AnyNode[] = [
@@ -152,9 +163,16 @@ describe("the stated option is completed whole, or not at all", () => {
     const stated = d.options.find((o) => o.id === "14d36e6f")!;
     expect(Object.keys(stated.interventions as object)).toEqual([]);
 
-    // And the gap is RECORDED rather than shipped silently, naming the factor
-    // and the fact that a sibling covers it.
+    // And BOTH gaps are RECORDED rather than shipped silently, each naming its
+    // factor, its reason, and the fact that a sibling covers it — which is what
+    // makes this the reported harm rather than a bare absence.
     expect(result.gaps).toEqual([
+      {
+        option_id: "14d36e6f",
+        factor_id: "6d9a37f3",
+        reason: "quote_names_several_figures",
+        covered_by_sibling: true,
+      },
       {
         option_id: "14d36e6f",
         factor_id: "a4e6cef0",
@@ -164,10 +182,10 @@ describe("the stated option is completed whole, or not at all", () => {
     ]);
   });
 
-  it("adopts the user's own £59 when the price is the option's ONLY connected factor (run07)", () => {
+  it("adopts the user's own £59 when the quote names one figure and the price is the only connected factor", () => {
     const d = witnessedDraft();
-    // run07: the model wired the stated option to the price factor alone.
     d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
+    d.nodes.find((n) => n.id === "14d36e6f")!.source_quote = SINGLE_FIGURE_QUOTE;
 
     const result = run(d);
 
@@ -184,13 +202,45 @@ describe("the stated option is completed whole, or not at all", () => {
     expect(iv.raw_value).toBe(59);
     expect(iv.value).toBe(0.59);
     expect(iv.source).toBe("brief_extraction");
-    // It did NOT gain the coupled factor it is no longer wired to.
     expect(Object.keys(stated.interventions as object)).toEqual(["6d9a37f3"]);
+  });
+
+  /**
+   * ⛔ THE CASE AN OUTSIDE CORPUS CAUGHT, transcribed from
+   * `tests/integration/model-readiness-compiler-corpus.records.test.ts` — a
+   * corpus written long before this module, carrying the class this author's
+   * own fixtures did not contain. The first version of this module adopted 59
+   * here, collapsing a two-stage trajectory into one scalar.
+   */
+  it("refuses a two-stage trajectory, which is indistinguishable from the motivating case except in language", () => {
+    const quote = "charging £49 now and £59 in Q2";
+    const d = witnessedDraft();
+    d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
+    d.nodes.find((n) => n.id === "14d36e6f")!.source_quote = quote;
+
+    const result = run(d);
+
+    expect(result.adopted).toEqual([]);
+    expect(result.gaps.map((g) => g.reason)).toEqual(["quote_names_several_figures"]);
+    expect(Object.keys(d.options.find((o) => o.id === "14d36e6f")!.interventions as object)).toEqual([]);
+  });
+
+  it("refuses the motivating brief's own two-figure quote, by the same rule, and says so", () => {
+    const d = witnessedDraft();
+    d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
+    // Unmodified: "increase the Pro plan price from £49 to £59 …" names {49, 59}.
+    const result = run(d);
+
+    expect(result.adopted).toEqual([]);
+    expect(result.gaps.map((g) => g.reason)).toEqual(["quote_names_several_figures"]);
   });
 
   it("refuses the baseline's £49 for a non-baseline stated option, and the refusal is what makes the adopt clean", () => {
     const d = witnessedDraft();
     d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
+    // A quote naming ONE figure — 49 — so rule 5 cannot be what refuses this,
+    // and the baseline ROLE filter is the only gate left standing.
+    d.nodes.find((n) => n.id === "14d36e6f")!.source_quote = "hold the Pro plan price at £49";
     // Remove both non-baseline donors, leaving ONLY "Hold Price at £49" (49).
     // 49 is verbatim in the user's quote, so nothing but the role filter can
     // stop it being written onto a proposal to RAISE the price.
@@ -213,6 +263,7 @@ describe("the stated option is completed whole, or not at all", () => {
   it("refuses when eligible donors disagree on the stated figure", () => {
     const d = witnessedDraft();
     d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
+    d.nodes.find((n) => n.id === "14d36e6f")!.source_quote = SINGLE_FIGURE_QUOTE;
     // A second non-baseline donor that says 49 rather than 59.
     (d.options.find((o) => o.id === "868f8b07")!.interventions as Record<string, unknown>)["6d9a37f3"] =
       briefIntervention(0.49, 49, "£");
@@ -242,7 +293,7 @@ describe("the stated option is completed whole, or not at all", () => {
     // "Should we increase the Pro plan price from £49 to £59 per month?" — one
     // connected factor, one stated figure, one AI sibling that also moves a
     // second factor the stated option is NOT wired to.
-    const quote = "increase the Pro plan price from £49 to £59 per month";
+    const quote = "raise the Pro plan price to £59 per month";
     const nodes: AnyNode[] = [
       { id: "b4014d90", kind: "goal", label: "Reach £20k MRR" },
       { id: "6d9a37f3", kind: "factor", label: "Pro Plan Monthly Price" },
@@ -316,8 +367,9 @@ describe("the stated option is completed whole, or not at all", () => {
     const d = witnessedDraft();
     d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
     // The model's own option, given the quote it does not have today.
+    d.nodes.find((n) => n.id === "14d36e6f")!.source_quote = SINGLE_FIGURE_QUOTE;
     const twin = d.nodes.find((n) => n.id === "868f8b07")!;
-    twin.source_quote = STATED_QUOTE;
+    twin.source_quote = SINGLE_FIGURE_QUOTE;
     const twinOption = d.options.find((o) => o.id === "868f8b07")!;
     delete (twinOption.interventions as Record<string, unknown>)["6d9a37f3"];
 
