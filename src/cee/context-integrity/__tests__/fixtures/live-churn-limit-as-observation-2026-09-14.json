@@ -4,7 +4,7 @@
   "source": "POST https://cee-staging.onrender.com/proxy/v5/turn",
   "scenario_id": "4554586e-07a4-452b-a352-4cc4aaf98558",
   "brief": "increase the Pro plan price from £49 to £59 per month with the next Pro feature release, while keeping monthly churn under 4% and reaching £20k MRR within 12 months.",
-  "note": "draft_graph exactly as served. Node ab78e513 carries the stated LIMIT as observed_state.value. APPEND-ONLY: a dated capture is evidence, never a fixture to keep current (CLAUDE.md trap 14b)."
+  "note": "draft_graph exactly as served, every collection included. Node ab78e513 carries the stated LIMIT as observed_state.value while goal_constraints[0] binds the same node id. APPEND-ONLY: a dated capture is a record of what the product emitted on a dated build, never a fixture to keep current (CLAUDE.md trap 14b)."
  },
  "draft_graph": {
   "nodes": [
@@ -217,7 +217,726 @@
     "provenance": "ai_inferred"
    }
   ],
-  "edges": [],
+  "edges": [
+   {
+    "from": "235f713a",
+    "to": "32b7e30c",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "235f713a",
+    "to": "3699e00c",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "235f713a",
+    "to": "454a603a",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "235f713a",
+    "to": "5d37cb33",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "235f713a",
+    "to": "5e836b61",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "235f713a",
+    "to": "ff548fa6",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Decision-to-option scaffold minted by the projector"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "default"
+   },
+   {
+    "from": "32b7e30c",
+    "to": "6d9a37f3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "3699e00c",
+    "to": "6d9a37f3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "3699e00c",
+    "to": "a22327b3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "454a603a",
+    "to": "6d9a37f3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "5d37cb33",
+    "to": "6d9a37f3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "5e836b61",
+    "to": "6d9a37f3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "5e836b61",
+    "to": "a22327b3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai"
+   },
+   {
+    "from": "6d9a37f3",
+    "to": "83bd0a68",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai",
+    "validation": {
+     "status": "agreed",
+     "contested_reasons": [],
+     "pass1": {
+      "strength_mean": 0,
+      "strength_std": 0,
+      "exists_probability": 0
+     },
+     "pass2": {
+      "strength_mean": 0.6,
+      "strength_std": 0.15,
+      "exists_probability": 0.9,
+      "reasoning": "A 20% price increase typically generates a substantial churn spike in SaaS contexts.",
+      "basis": "domain_prior",
+      "needs_user_input": true,
+      "lint_corrected": false
+     },
+     "pass2_adjusted": {
+      "strength_mean": 0.44285714285714284,
+      "strength_std": 0.175,
+      "exists_probability": 0.855
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 0,
+     "distance_to_goal": 1,
+     "sign_unstable": false,
+     "pass1_missing": true,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": []
+    }
+   },
+   {
+    "from": "6d9a37f3",
+    "to": "94fa174b",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai",
+    "validation": {
+     "status": "agreed",
+     "contested_reasons": [],
+     "pass1": {
+      "strength_mean": 0,
+      "strength_std": 0,
+      "exists_probability": 0
+     },
+     "pass2": {
+      "strength_mean": 0.2,
+      "strength_std": 0.05,
+      "exists_probability": 0.99,
+      "reasoning": "A direct 20% price increase mechanically raises MRR by about 20% if subscriber count holds constant.",
+      "basis": "structural_inference",
+      "needs_user_input": false,
+      "lint_corrected": false
+     },
+     "pass2_adjusted": {
+      "strength_mean": 0.0428571428571429,
+      "strength_std": 0.07499999999999998,
+      "exists_probability": 0.9450000000000001
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 0,
+     "distance_to_goal": 1,
+     "sign_unstable": false,
+     "pass1_missing": true,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": []
+    }
+   },
+   {
+    "from": "83bd0a68",
+    "to": "b4014d90",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai",
+    "validation": {
+     "status": "agreed",
+     "contested_reasons": [],
+     "pass1": {
+      "strength_mean": -0.5,
+      "strength_std": 0,
+      "exists_probability": 0
+     },
+     "pass2": {
+      "strength_mean": -0.28571428571428575,
+      "strength_std": 0.2,
+      "exists_probability": 0.85,
+      "reasoning": "Large churn spikes materially reduce the likelihood of hitting an MRR growth goal within a year.",
+      "basis": "domain_prior",
+      "needs_user_input": true,
+      "lint_corrected": true
+     },
+     "pass2_adjusted": {
+      "strength_mean": -0.44285714285714284,
+      "strength_std": 0.225,
+      "exists_probability": 0.8049999999999999
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 0.6666666666666666,
+     "distance_to_goal": 0,
+     "sign_unstable": false,
+     "pass1_missing": false,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "83bd0a68->b4014d90",
+       "before": -0.6,
+       "after": -0.28571428571428575
+      }
+     ]
+    }
+   },
+   {
+    "from": "94fa174b",
+    "to": "b4014d90",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai",
+    "validation": {
+     "status": "agreed",
+     "contested_reasons": [],
+     "pass1": {
+      "strength_mean": 0,
+      "strength_std": 0,
+      "exists_probability": 0
+     },
+     "pass2": {
+      "strength_mean": 0.38095238095238104,
+      "strength_std": 0.15,
+      "exists_probability": 0.99,
+      "reasoning": "Higher current MRR directly increases the chance of reaching the £20k target.",
+      "basis": "structural_inference",
+      "needs_user_input": false,
+      "lint_corrected": true
+     },
+     "pass2_adjusted": {
+      "strength_mean": 0.22380952380952393,
+      "strength_std": 0.175,
+      "exists_probability": 0.9450000000000001
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 0,
+     "distance_to_goal": 0,
+     "sign_unstable": false,
+     "pass1_missing": true,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "94fa174b->b4014d90",
+       "before": 0.8,
+       "after": 0.38095238095238104
+      }
+     ]
+    }
+   },
+   {
+    "from": "a22327b3",
+    "to": "83bd0a68",
+    "strength": {
+     "mean": -0.5,
+     "std": 0.11999999999999998
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai",
+    "validation": {
+     "status": "agreed",
+     "contested_reasons": [],
+     "pass1": {
+      "strength_mean": 0,
+      "strength_std": 0,
+      "exists_probability": 0
+     },
+     "pass2": {
+      "strength_mean": -0.4,
+      "strength_std": 0.15,
+      "exists_probability": 0.85,
+      "reasoning": "Stronger perceived value typically cushions customers against churn in price hikes.",
+      "basis": "domain_prior",
+      "needs_user_input": true,
+      "lint_corrected": false
+     },
+     "pass2_adjusted": {
+      "strength_mean": -0.5571428571428572,
+      "strength_std": 0.175,
+      "exists_probability": 0.8049999999999999
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 0,
+     "distance_to_goal": 1,
+     "sign_unstable": false,
+     "pass1_missing": true,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": []
+    }
+   },
+   {
+    "from": "a22327b3",
+    "to": "ab78e513",
+    "strength": {
+     "mean": -0.6,
+     "std": 0.144
+    },
+    "exists_probability": 0.8,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Model-inferred causal link (records projector)"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "ai",
+    "validation": {
+     "status": "agreed",
+     "contested_reasons": [],
+     "pass1": {
+      "strength_mean": -0.6,
+      "strength_std": 0,
+      "exists_probability": 0
+     },
+     "pass2": {
+      "strength_mean": -0.5,
+      "strength_std": 0.2,
+      "exists_probability": 0.9,
+      "reasoning": "Higher perceived value generally lowers the observable monthly churn rate.",
+      "basis": "domain_prior",
+      "needs_user_input": true,
+      "lint_corrected": false
+     },
+     "pass2_adjusted": {
+      "strength_mean": -0.6571428571428571,
+      "strength_std": 0.225,
+      "exists_probability": 0.855
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 0.6666666666666666,
+     "distance_to_goal": 2,
+     "sign_unstable": false,
+     "pass1_missing": false,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": []
+    }
+   },
+   {
+    "from": "ab78e513",
+    "to": "out_ab78e513_impact",
+    "strength": {
+     "mean": -0.7,
+     "std": 0.15
+    },
+    "exists_probability": 0.9,
+    "effect_direction": "negative",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Split factor→goal into factor→outcome→goal"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair",
+    "validation": {
+     "status": "contested",
+     "contested_reasons": [
+      "sign_flip",
+      "confidence_band_change",
+      "existence_boundary_crossing"
+     ],
+     "pass1": {
+      "strength_mean": -0.7,
+      "strength_std": 0.15,
+      "exists_probability": 0.9
+     },
+     "pass2": {
+      "strength_mean": 1,
+      "strength_std": 0.05,
+      "exists_probability": 0.99,
+      "reasoning": "Monthly churn rate mechanically defines the churn‐impact metric.",
+      "basis": "structural_inference",
+      "needs_user_input": false,
+      "lint_corrected": false
+     },
+     "pass2_adjusted": {
+      "strength_mean": 0.8428571428571429,
+      "strength_std": 0.07499999999999998,
+      "exists_probability": 0.9450000000000001
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 1,
+     "distance_to_goal": 1,
+     "sign_unstable": true,
+     "pass1_missing": false,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": []
+    }
+   },
+   {
+    "from": "ff548fa6",
+    "to": "6d9a37f3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "ff548fa6",
+    "to": "a22327b3",
+    "strength": {
+     "mean": 1,
+     "std": 0.01
+    },
+    "exists_probability": 1,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Status-quo option wired to factor"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair"
+   },
+   {
+    "from": "out_ab78e513_impact",
+    "to": "b4014d90",
+    "strength": {
+     "mean": 0.5,
+     "std": 0.15
+    },
+    "exists_probability": 0.9,
+    "effect_direction": "positive",
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Split factor→goal into factor→outcome→goal"
+    },
+    "provenance_display": "ai_inferred",
+    "origin": "repair",
+    "validation": {
+     "status": "contested",
+     "contested_reasons": [
+      "sign_flip",
+      "confidence_band_change"
+     ],
+     "pass1": {
+      "strength_mean": 0.5,
+      "strength_std": 0.15,
+      "exists_probability": 0.9
+     },
+     "pass2": {
+      "strength_mean": -0.33333333333333337,
+      "strength_std": 0.2,
+      "exists_probability": 0.9,
+      "reasoning": "Higher churn impact directly undermines achieving the MRR growth goal.",
+      "basis": "domain_prior",
+      "needs_user_input": true,
+      "lint_corrected": true
+     },
+     "pass2_adjusted": {
+      "strength_mean": -0.4904761904761905,
+      "strength_std": 0.225,
+      "exists_probability": 0.855
+     },
+     "bias_correction": {
+      "strength_mean_offset": -0.1571428571428571,
+      "strength_std_offset": 0.024999999999999988,
+      "exists_probability_offset": -0.044999999999999984
+     },
+     "max_divergence": 1,
+     "distance_to_goal": 0,
+     "sign_unstable": true,
+     "pass1_missing": false,
+     "pass2_missing": false,
+     "evoi_rank": null,
+     "evoi_impact": null,
+     "was_shown": false,
+     "user_action": "pending",
+     "resolved_value": null,
+     "resolved_by": "default",
+     "validation_lint_log": [
+      {
+       "code": "LINT_BUDGET_RESCALE",
+       "edge_key": "out_ab78e513_impact->b4014d90",
+       "before": -0.7,
+       "after": -0.33333333333333337
+      }
+     ]
+    }
+   }
+  ],
+  "node_count": 14,
+  "edge_count": 23,
   "goal_constraints": [
    {
     "constraint_id": "constraint_ab78e513_max",
