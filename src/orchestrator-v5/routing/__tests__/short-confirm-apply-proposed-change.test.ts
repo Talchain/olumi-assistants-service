@@ -99,14 +99,50 @@ describe('tryShortConfirmResume — apply_proposed_change resumable', () => {
     expect(out.dispatch).toBe('recovery_expired');
   });
 
-  it('does NOT match when message contains an edit verb (e.g. "yes add it")', () => {
+  /**
+   * ⚠ AMENDED BY #1560 — THIS ASSERTION'S EXAMPLE WAS DELIBERATELY RECLASSIFIED.
+   *
+   * It previously read: `does NOT match when message contains an edit verb
+   * (e.g. "yes add it")` and asserted `matched === false`. That title states a
+   * principle THE CODE ALREADY CONTRADICTED when it was written: "add that"
+   * carries the same edit verb and has always matched, because
+   * `PROPOSAL_CONFIRM_PATTERN` deliberately overrides the edit-verb gate for
+   * closed, value-free, proposal-targeted phrases while a live
+   * `apply_proposed_change` is held. The example was unmatched only because no
+   * arm happened to spell the PRONOUN form.
+   *
+   * #1560 adds the pronoun forms, because the product's own offer copy invites
+   * exactly them ("Say the word and I will make it", chip label "Add this
+   * limit") and a user answering in those words was being asked to confirm a
+   * SECOND time while nothing was written. "yes add it" against a single live
+   * proposal names no value and has no other referent — it is consent.
+   *
+   * The guard's REAL safety content is preserved and sharpened below: an edit
+   * verb carrying SUBSTANTIVE content — a value, or a different target — still
+   * must not resume a held mutation.
+   */
+  it('does NOT match when an edit verb carries substantive content', () => {
+    for (const message of ['yes add a constraint on revenue', 'yes add it at 5%', 'yes set it to 5']) {
+      const out = tryShortConfirmResume({
+        message,
+        pendingActions: [applyProposed()],
+        currentTurnIndex: 0,
+        nowMs: NOW_MS,
+      });
+      expect(out.matched, `${message} must not resume a held mutation`).toBe(false);
+    }
+  });
+
+  it('#1560 — a bare pronoun confirmation DOES resume the single live proposal', () => {
     const out = tryShortConfirmResume({
       message: 'yes add it',
       pendingActions: [applyProposed()],
       currentTurnIndex: 0,
       nowMs: NOW_MS,
     });
-    expect(out.matched).toBe(false);
+    expect(out.matched).toBe(true);
+    if (!out.matched) return;
+    expect(out.dispatch).toBe('pending_action');
   });
 
   // ── P1a (real-user run 2026-07-17, scenario c510030e) ────────────────────
