@@ -909,7 +909,7 @@ describe('EXT-2 / 2.1085 — the refusal reaches the USER, not only the payload'
     "I can't run this analysis safely. Annual CRM Licence Cost is recorded as a bare "
     + "amount with no range for me to measure it against, so I can't tell the analysis "
     + 'engine what it means next to everything else, and the numbers would not be the '
-    + "ones your model states — I've stopped rather than show you a confident wrong "
+    + "ones your model states. I've stopped rather than show you a confident wrong "
     + 'answer. Nothing in your model has changed, and this is a limit in how I record '
     + 'and prepare values, not a verdict on your model. Telling me the same amount '
     + "again won't clear it; ask me to run it again after any change and I'll re-check.";
