@@ -34,6 +34,8 @@
  *   Matches (suppressed → routed to TurnExecutor):
  *     "set churn to 5%"
  *     "update existing team maturity to mid-weight developers"
+ *     "Change Annual CRM Spend to £63,000."                  (live capture)
+ *     "change the raise option from $49 to $39"              (live capture)
  *     "update the existing team maturity to be mid-weight developers"
  *     "increase price by 10%"
  *     "decrease the cost by half"
@@ -49,6 +51,8 @@
  *     "update the model to be more realistic"              (meta-noun)
  *     "update the graph to be more complete"               (meta-noun)
  *     "update the model to better represent churn"         (meta-noun + represent)
+ *     "change risk X to outcome"             (kind target; verb admitted,
+ *                                             message still discriminated)
  *     "set goal to a factor"                               (kind target)
  *     "set goal to be a factor"                            (kind filler)
  *     "update risk X to be an outcome"                     (kind filler)
@@ -57,8 +61,11 @@
  *
  * Verbs deliberately excluded from clauses A/B:
  *   - `add` and `remove`: structural (add_node / remove_node).
- *   - `change`: ambiguous (could be value or kind change).
  *   - `tweak` / `modify` / `edit`: too vague to determine intent.
+ *
+ * `change` WAS excluded here as "ambiguous"; admitted to clause A on
+ * 2026-09-14 — see VALUE_UPDATE_VERBS_TO for the measurement. It remains
+ * excluded from clause B (`by`), whose verb set is quantity-directional.
  *
  * NOTE: clause D (constraint phrasings) re-admits `add` ONLY when its
  * direct object is the noun "constraint" — an unambiguous add_constraint
@@ -140,10 +147,31 @@ const META_NOUNS: ReadonlyArray<string> = Object.freeze([
 
 /**
  * Verbs that signal a value-update intent in the `<verb> X to Y` form.
- * `add` and `remove` are structural and excluded. `change` is ambiguous
- * (could be value or kind change) and excluded.
+ * `add` and `remove` are structural and excluded.
+ *
+ * `change` was excluded until 2026-09-14 on the grounds that it is
+ * "ambiguous (could be value or kind change)". The ambiguity is real but
+ * it is a property of the VERB, not of the MESSAGE — and this pattern
+ * already disambiguates at the message level, one token later:
+ * `STRUCTURAL_OR_KIND_LOOKAHEAD` sits immediately after `to\s+` in
+ * `SET_UPDATE_TO_PATTERN_SOURCE`, and `META_NOUN_GUARD` reads this very
+ * array. Measured at the pristine tip (9 templates x 3 verbs): for every
+ * KIND/STRUCTURAL/META-NOUN message (`X to a factor`, `risk X to
+ * outcome`, `the model to be more realistic`) all three verbs already
+ * evaluate FALSE — the discriminators do the work regardless of verb.
+ * The exclusion therefore bought no discrimination; it only kept `change`
+ * from ever reaching the discriminators that were already correct for it.
+ *
+ * The cost was a live defect (capture `20260811T012704Z-fresh-5e036e`):
+ * "Change Annual CRM Spend to £63,000." reached the edit_graph LLM, which
+ * renamed the node to "Annual CRM Spend (£63,000)" while `observed_state`
+ * stayed byte-identical at `raw_value: 50000`. `label-value-divergence`
+ * disclosed that honestly — but the user's plain instruction never moved
+ * the number. Admitting `change` here routes it to the value path instead;
+ * the divergence detector is untouched and simply stops firing for this
+ * phrasing.
  */
-const VALUE_UPDATE_VERBS_TO: ReadonlyArray<string> = Object.freeze(['set', 'update']);
+const VALUE_UPDATE_VERBS_TO: ReadonlyArray<string> = Object.freeze(['set', 'update', 'change']);
 
 /**
  * Verbs that signal a quantity-by-amount intent in the `<verb> X by Y`
@@ -226,11 +254,19 @@ const NUMERIC_BY_PATTERN_SOURCE =
  * value intent, unlike bare "raise X").
  */
 const GOAL_TARGET_VERBS: ReadonlyArray<string> = Object.freeze([
-  ...VALUE_UPDATE_VERBS_TO,
-  ...VALUE_UPDATE_VERBS_BY,
-  'change',
-  'adjust',
-  'make',
+  ...new Set([
+    ...VALUE_UPDATE_VERBS_TO,
+    ...VALUE_UPDATE_VERBS_BY,
+    // `change` is listed EXPLICITLY and must stay listed even though
+    // VALUE_UPDATE_VERBS_TO now also carries it: clause C's verb set is
+    // independent intent ("the noun disambiguates"), and deriving it
+    // implicitly would silently drop `change` from goal-target routing if
+    // clause A's list were ever narrowed again. The `new Set` keeps the
+    // composed alternation duplicate-free while preserving that intent.
+    'change',
+    'adjust',
+    'make',
+  ]),
 ]);
 
 /**
