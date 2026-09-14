@@ -34,6 +34,7 @@ const GRAPH = {
   nodes: [
     { id: 'goal_mrr', kind: 'goal', label: 'Reach £20k MRR' },
     { id: 'fac_price', kind: 'factor', label: 'Price', observed_state: { value: 49 } },
+    { id: 'opt_raise', kind: 'option', label: 'Raise to 59' },
   ],
   edges: [
     { from: 'fac_price', to: 'goal_mrr', strength: { mean: 0.4, std: 0.1 }, exists_probability: 1, effect_direction: 'positive' },
@@ -47,7 +48,27 @@ const makePayload = () => ({
   stage: 'frame',
 }) as never;
 
-const makeDraftResult = (goalTargetCandidate?: unknown) => ({
+/**
+ * ⭐ THE READINESS ASK'S OWN PRECONDITIONS, derived at its source rather than
+ * guessed: `projectReadinessRecovery` needs `status === 'needs_user_input'` and
+ * a head blocker of type `missing_value` carrying option/factor id AND label;
+ * `buildReadinessEffectPending` then requires EXACTLY ONE node of each kind
+ * whose id and trimmed label both match. Anything less returns null silently.
+ */
+const READINESS_THAT_ASKS = {
+  status: 'needs_user_input',
+  blockers: [
+    {
+      blocker_type: 'missing_value',
+      option_id: 'opt_raise',
+      option_label: 'Raise to 59',
+      factor_id: 'fac_price',
+      factor_label: 'Price',
+    },
+  ],
+};
+
+const makeDraftResult = (goalTargetCandidate?: unknown, analysisReady?: unknown) => ({
   blocks: [],
   assistantText: 'Drafted a decision graph.',
   latencyMs: 1000,
@@ -58,6 +79,7 @@ const makeDraftResult = (goalTargetCandidate?: unknown) => ({
   draftWarnings: [],
   graphOutput: JSON.parse(JSON.stringify(GRAPH)),
   ...(goalTargetCandidate !== undefined ? { goalTargetCandidate } : {}),
+  ...(analysisReady !== undefined ? { analysisReady } : {}),
 });
 
 const candidate = (over: Record<string, unknown> = {}) => ({
@@ -141,18 +163,36 @@ describe('the goal-target candidate becomes an armed question on the draft commi
   });
 
   /**
-   * ⛔ KNOWN GAP, RECORDED RATHER THAN IMPLIED.
+   * ⭐⭐ THE MERGE, NO LONGER ARGUED FROM CONSTRUCTION.
    *
-   * The dispatch merges the readiness ask and the goal-target ask into ONE
-   * array, because `pending_actions` is a single field and a second conditional
-   * spread would silently REPLACE the first. That merge is NOT covered here:
-   * `buildReadinessEffectPending` fires only on a `provide_value` recovery with
-   * exactly one option and one factor whose labels match, and constructing that
-   * fixture alongside this one was not attempted.
+   * `pending_actions` is a SINGLE field. A second conditional spread beside the
+   * readiness one would silently REPLACE it, dropping whichever ask lost the
+   * race — a defect no single-ask test can see, because each passes alone.
    *
-   * So: the goal-target arm is proven; "both survive together" is argued from
-   * the filter's construction and is NOT fixture-covered. A gap recorded in the
-   * suite is honest; a gap invisible to it is how a regression ships.
+   * This was recorded as a known gap and skipped; the estate's test-skip ratchet
+   * blocked on it, which is the guard behaving exactly as designed. Built rather
+   * than inventoried.
    */
-  it.skip('BOTH a readiness ask and a goal-target ask survive the same commit — NOT COVERED', () => {});
+  it('⭐ BOTH a readiness ask AND a goal-target ask survive the same commit', async () => {
+    vi.mocked(handleDraftGraph).mockResolvedValue(
+      makeDraftResult(candidate(), READINESS_THAT_ASKS) as never,
+    );
+    await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-5', request: STUB_REQUEST });
+
+    const kinds = committedPendings().map((p) => p.action.kind);
+    // PRECONDITION: the readiness ask actually fired. Without this the test
+    // passes vacuously the moment its fixture stops reaching that branch.
+    expect(kinds).toContain('elicit_option_effect');
+    expect(kinds).toContain('elicit_goal_target');
+    expect(committedPendings()).toHaveLength(2);
+  });
+
+  it('⭐ TWIN: the readiness ask survives ALONE when there is no candidate', async () => {
+    vi.mocked(handleDraftGraph).mockResolvedValue(
+      makeDraftResult(undefined, READINESS_THAT_ASKS) as never,
+    );
+    await dispatchDraftGraph({ payload: makePayload(), requestId: 'req-6', request: STUB_REQUEST });
+    const kinds = committedPendings().map((p) => p.action.kind);
+    expect(kinds).toEqual(['elicit_option_effect']);
+  });
 });
