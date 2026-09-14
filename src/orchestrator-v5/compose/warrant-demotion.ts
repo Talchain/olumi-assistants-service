@@ -30,12 +30,23 @@
  * the two cannot fork.
  */
 
+import type { z } from 'zod';
+
 import { CURRENCY_SYMBOL_TO_CODE } from '../../cee/extraction/numeric-parser.js';
 import type { ProposalAction } from '../routing/types.js';
 import type { ProposedChange, ProposedChangeIntent } from '../types/proposed-change.js';
 import { isProposedChangeActionType } from '../types/proposed-change.js';
 import { buildResidualConstraintDisclosure } from '../routing/mutation-warrant.js';
-import { SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS } from '../tools/handlers/set-factor-value.js';
+import {
+  SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS,
+  SetFactorValueValueSchema,
+} from '../tools/handlers/set-factor-value.js';
+import {
+  AddConstraintTypeSchema,
+  AddConstraintValueSchema,
+} from '../tools/handlers/add-constraint.js';
+import { AdjustEdgeStrengthSchema } from '../tools/handlers/adjust-edge-strength.js';
+import { PARAMETER_USER_PHRASING } from './parameter-user-phrasing.js';
 
 /**
  * Chip copy per intent.
@@ -199,6 +210,127 @@ export function findUnsupportedOfferTargetKind(
 }
 
 /**
+ * ⭐⭐ PARAMETER-SUFFICIENCY PRECONDITION — the THIRD sibling of the
+ * registry-executable and target-kind checks above, asking the one question
+ * neither of them asks: are the PARAMETERS ones the handler accepts?
+ *
+ * ── THE WITNESS (CEE staging `8e4efce0`, reported 2026-09-14) ─────────────
+ * A user stated a churn limit, was offered "Add this limit", said so again,
+ * and was offered "Add this limit" a SECOND time. "do it" then produced
+ * "I have more than one change waiting for your go-ahead... 1) Add this limit
+ * 2) Add this limit" with the graph hash UNCHANGED. Two identical strings,
+ * nothing applied, and no way to choose between them.
+ *
+ * ── WHY THERE WERE TWO, AND WHY THE SECOND ONE WAS NEVER APPLIABLE ────────
+ * The `prop_<hex>` handle is NOT content-derived: `CHIP_COPY` above is a
+ * per-intent CONSTANT, so the copy cannot vary. `computeProposalId` hashes
+ * `{scenario_id, intent, params, graph_hash, target_entity_ids}`, and the
+ * pending's `preconditions.graph_hash` is that SAME hash, so a proposal
+ * minted against a moved graph is dropped by the carry-forward's hash rule.
+ * Two survivors at one graph hash therefore differ in `params` — nothing
+ * else can make them differ, and the supersede rule keys on `chip_id`, so it
+ * cannot fire.
+ *
+ * The reported second offer described its bound as "at or below THAT LEVEL".
+ * `formatBound` returns that string, and only that string, when the value is
+ * not a finite number. Reproduced here at pristine: a proposal carrying only
+ * `constraint_type` builds `params: { constraint_type: 'at_most' }` and
+ * `changeDescription: 'a limit keeping "Churn Rate" at or below that level'`
+ * — a DIFFERENT params record, a DIFFERENT id, a second live pending, and a
+ * change the resumer must refuse (`add_constraint` throws PARAMETER_INVALID
+ * without a `value`).
+ *
+ * ── WHY `validateToolCall` DOES NOT CATCH IT ──────────────────────────────
+ * It validates the parameters that ARE present and never asserts that the
+ * required ones are. Its own comment says so and defers "required-parameter
+ * enforcement" to a future brief (`routing/validator.ts`). So the residual
+ * gap is PRESENCE, and that is what this gate closes. Present values are
+ * re-checked against the SAME schemas `validation-registry.ts` declares, so
+ * this can never be stricter than the validator already is.
+ *
+ * ── WHY THIS IS NOT A SUPERSEDE RULE, DELIBERATELY ────────────────────────
+ * Superseding one live consent-expecting pending with another would have the
+ * product choose on the user's behalf, which the consent-clarity amendment
+ * forbids. This gate removes ONLY offers the resumer must refuse, so it
+ * cannot collapse two genuinely different proposals: the negative control
+ * holds by construction rather than by tuning. A duplicate whose params are
+ * all valid and differ only cosmetically is NOT closed by this change and is
+ * reported as a residual rather than quietly folded in here.
+ *
+ * ── DERIVED, NOT MIRRORED ─────────────────────────────────────────────────
+ * The schemas are the handlers' OWN exports — the identical objects
+ * `validation-registry.ts` imports — so a bound that moves in a handler
+ * moves this gate in the same commit. The genuinely new fact is only WHICH
+ * parameters are required, and that is pinned against the real handlers, by
+ * EXECUTION and in BOTH directions, in
+ * `__tests__/offer-sufficiency-handler-biconditional.test.ts`: a handler
+ * gaining a required parameter REDs the sufficient arm, and one dropping a
+ * requirement REDs the insufficient arm.
+ *
+ * ── FAIL-OPEN ON IGNORANCE ────────────────────────────────────────────────
+ * An intent this table has no authority over returns null and leaves the
+ * offer exactly as it is today, matching `findUnsupportedOfferTargetKind`.
+ */
+interface OfferRequiredParameter {
+  readonly name: string;
+  readonly schema: z.ZodType;
+}
+
+export const OFFER_REQUIRED_PARAMETERS: Readonly<
+  Record<ProposedChangeIntent, readonly OfferRequiredParameter[]>
+> = Object.freeze({
+  // `add_constraint` throws PARAMETER_INVALID without either of these; `label`
+  // and `unit` are optional there and are deliberately NOT required, because
+  // requiring them would suppress legitimate offers.
+  add_constraint: Object.freeze([
+    { name: 'constraint_type', schema: AddConstraintTypeSchema },
+    { name: 'value', schema: AddConstraintValueSchema },
+  ]),
+  set_factor_value: Object.freeze([{ name: 'value', schema: SetFactorValueValueSchema }]),
+  adjust_edge_strength: Object.freeze([{ name: 'strength', schema: AdjustEdgeStrengthSchema }]),
+});
+
+export function findInsufficientOfferParameters(
+  action: ProposalAction,
+): { readonly parameterName: string } | null {
+  if (!isProposedChangeActionType(action.handler_id)) return null;
+  for (const required of OFFER_REQUIRED_PARAMETERS[action.handler_id]) {
+    const supplied = param(action, required.name);
+    if (supplied === undefined) return { parameterName: required.name };
+    if (!required.schema.safeParse(supplied.value).success) {
+      return { parameterName: required.name };
+    }
+  }
+  return null;
+}
+
+/**
+ * The refusal copy for an offer we decline to mint.
+ *
+ * ⛔ IT MUST NOT BORROW `buildMutationWarrantDemotionText`, whose closing
+ * sentence is "Say the word and I will make it." — a promise with no chip
+ * behind it. Saying that here would rebuild the dead end by another door:
+ * the whole point is that there is nothing to say the word TO.
+ *
+ * The "what to do instead" sentence is the parameter's OWN ratified phrasing
+ * (`PARAMETER_USER_PHRASING`), so this introduces no new vocabulary for
+ * talking to users about a parameter, and it names a move the user can
+ * actually make. Schema key names never reach the copy.
+ */
+export function buildIncompleteOfferRefusalText(
+  parameterName: string,
+  entityLabel: string | undefined,
+): string {
+  const guidance =
+    PARAMETER_USER_PHRASING[parameterName]?.guidance ??
+    'Tell me what you would like it to be and I will set it up.';
+  return (
+    `Nothing has been changed. I did not have enough detail to offer that ` +
+    `change to ${quoted(entityLabel)}. ${guidance}`
+  );
+}
+
+/**
  * INVERSE of `buildHandlerParameters`. See the header for why this is the
  * load-bearing part.
  */
@@ -244,7 +376,18 @@ export type WarrantDemotionBuild =
       /** INV-2 sentence, or null when no defective row would survive. */
       readonly residualDisclosure: string | null;
     }
-  | { readonly ok: false; readonly reason: 'not_a_proposable_mutation' };
+  | { readonly ok: false; readonly reason: 'not_a_proposable_mutation' }
+  | {
+      readonly ok: false;
+      /**
+       * The handler requires a parameter this proposal does not usably carry,
+       * so an offer would promise a change the resumer must refuse. See
+       * `findInsufficientOfferParameters`.
+       */
+      readonly reason: 'required_parameter_missing';
+      /** The schema key. NEVER shown to the user — see `buildIncompleteOfferRefusalText`. */
+      readonly parameterName: string;
+    };
 
 /**
  * Currency units → their display symbol, DERIVED from the one canonical
@@ -372,6 +515,18 @@ export function buildWarrantDemotion(
     // Not one of the three proposable mutations. The caller must NOT execute
     // it either — it refuses instead, which is the fail-safe direction.
     return { ok: false, reason: 'not_a_proposable_mutation' };
+  }
+  // Do not build an offer for a change the resumer must refuse. This runs
+  // BEFORE the copy is composed, because `formatBound` renders an unusable
+  // bound as "that level" and would otherwise describe, and offer, a change
+  // the product cannot make.
+  const insufficient = findInsufficientOfferParameters(action);
+  if (insufficient !== null) {
+    return {
+      ok: false,
+      reason: 'required_parameter_missing',
+      parameterName: insufficient.parameterName,
+    };
   }
   const intent: ProposedChangeIntent = action.handler_id;
   const copy = CHIP_COPY[intent];
