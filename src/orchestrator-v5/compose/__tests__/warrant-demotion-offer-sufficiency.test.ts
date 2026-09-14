@@ -57,6 +57,8 @@ import {
   buildIncompleteOfferRefusalText,
   OFFER_REQUIRED_PARAMETERS,
 } from '../warrant-demotion.js';
+import { tryShortConfirmResume } from '../../routing/deterministic-short-confirm.js';
+import type { PendingAction } from '../../session/pending-action.js';
 import type { ProposalAction } from '../../routing/types.js';
 
 function action(
@@ -235,6 +237,78 @@ describe('offer sufficiency — the refusal copy is honest AND executable', () =
     const text = buildIncompleteOfferRefusalText('value', undefined);
     expect(text.startsWith('Nothing has been changed.')).toBe(true);
     expect(text).toContain('that part of the model');
+  });
+});
+
+/**
+ * ⛔ THE CONSENT DOCTRINE MUST SURVIVE THIS CHANGE UNTOUCHED.
+ *
+ * A fix that collapsed two genuinely different proposals would be far worse
+ * than the defect: the product would silently pick one of two changes the
+ * user can tell apart. The consent-clarity amendment (Paul, 2026-07-11)
+ * forbids exactly that.
+ *
+ * This gate cannot do it — it only ever declines to MINT an offer the resumer
+ * must refuse, and never touches a live pending — but "cannot by
+ * construction" is an argument, and an argument is not a guard. So the
+ * property is asserted directly, against the real resumer.
+ */
+function livePending(chipId: string, params: Record<string, unknown>): PendingAction {
+  return {
+    id: `pa-${chipId}`,
+    scenario_id: 'scn',
+    chip_id: chipId,
+    action: {
+      kind: 'apply_proposed_change',
+      proposal_ref: chipId,
+      inline_patch: { handler_id: 'add_constraint', params, target_entity_ids: ['f-churn'] },
+      public_label: 'Add this limit',
+      public_message: 'Add that limit to my model.',
+    },
+    preconditions: { graph_hash: 'h' },
+    expires_at_turn_count: 2,
+    expires_at_iso: '2099-01-01T00:00:00.000Z',
+    emitted_at_iso: '2026-09-14T12:00:00.000Z',
+  };
+}
+
+describe('offer sufficiency — the CONSENT DOCTRINE is untouched', () => {
+  it('two genuinely different live proposals are BOTH still offered, and still require the user to choose', () => {
+    const out = tryShortConfirmResume({
+      message: 'do it',
+      pendingActions: [
+        livePending('prop_aaaaaaaaaaaa', { constraint_type: 'at_most', value: 7 }),
+        livePending('prop_bbbbbbbbbbbb', { constraint_type: 'at_most', value: 5 }),
+      ],
+      currentTurnIndex: 1,
+      nowMs: Date.parse('2026-09-14T12:01:00.000Z'),
+    });
+
+    expect(out.matched).toBe(true);
+    if (!out.matched) throw new Error('unreachable');
+    // NOT `pending_action`: a bare confirmation must not silently resolve one
+    // of two live consent-expecting pendings.
+    expect(out.dispatch).toBe('recovery_ambiguous');
+    if (out.dispatch !== 'recovery_ambiguous') throw new Error('unreachable');
+    expect(out.candidates).toHaveLength(2);
+    expect(out.candidates.map((c) => c.chip_id).sort()).toEqual([
+      'prop_aaaaaaaaaaaa',
+      'prop_bbbbbbbbbbbb',
+    ]);
+  });
+
+  it('DISCRIMINATING TWIN — a single live proposal still resumes directly, so the listing is not universal', () => {
+    // Without this, the case above would pass just as well if the resumer had
+    // been broken into always returning `recovery_ambiguous` (trap 13b).
+    const out = tryShortConfirmResume({
+      message: 'do it',
+      pendingActions: [livePending('prop_aaaaaaaaaaaa', { constraint_type: 'at_most', value: 7 })],
+      currentTurnIndex: 1,
+      nowMs: Date.parse('2026-09-14T12:01:00.000Z'),
+    });
+    expect(out.matched).toBe(true);
+    if (!out.matched) throw new Error('unreachable');
+    expect(out.dispatch).toBe('pending_action');
   });
 });
 
