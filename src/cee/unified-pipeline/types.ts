@@ -173,6 +173,15 @@ export interface UnifiedPipelineResult {
   statusCode: number;
   body: unknown;
   headers?: Record<string, string>;
+  /**
+   * ROUND 6 (CEE #1328) — the goal-label CANDIDATE, as an IN-PROCESS sibling of
+   * `body`, never a field on it: the body is also the legacy HTTP response,
+   * where nothing reads this. `StageContext` does not escape the pipeline
+   * (this function returns `{ statusCode, body }`), so the candidate must
+   * cross here to reach `DraftGraphResult` and the V5 orchestration seam that
+   * asks the user. Absent ⇒ nothing to ask about.
+   */
+  goal_target_candidate?: GoalTargetCandidate;
 }
 
 // ---------------------------------------------------------------------------
