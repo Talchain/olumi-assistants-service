@@ -152,6 +152,24 @@ describe("negative controls — a fix that reclassifies everything is worse than
     expect(roles).toEqual([]);
   });
 
+  it("refuses a row whose quoted sentence carries no number at all", () => {
+    // ⛔ NOT AN EQUIVALENT MUTANT — DEMONSTRATED. Removing `inSpan.length === 0`
+    // from the derivation left the whole suite green until this case existed,
+    // and the branch it guards is reachable: a row can quote a sentence with no
+    // magnitude in it ("keep monthly churn low") while carrying a threshold the
+    // model supplied from elsewhere. Then the row's number did not come from the
+    // words it quotes, so there is no evidence the node's level IS that
+    // threshold — and the coincidence of two 0.04s is not that evidence.
+    const roles = deriveStatedQuantityRoles(
+      "we are keeping monthly churn low while we grow",
+      graphWith(
+        [churnNode({ value: 0.04, unit: "%" })],
+        [churnRow({ source_quote: "keeping monthly churn low" })],
+      ),
+    );
+    expect(roles).toEqual([]);
+  });
+
   it("says nothing when there is no brief to check the quote against", () => {
     expect(
       deriveStatedQuantityRoles(null, graphWith([churnNode({ value: 0.04 })], [churnRow()])),
