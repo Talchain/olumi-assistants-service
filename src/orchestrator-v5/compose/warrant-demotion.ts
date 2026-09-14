@@ -263,9 +263,12 @@ export function findUnsupportedOfferTargetKind(
  * moves this gate in the same commit. The genuinely new fact is only WHICH
  * parameters are required, and that is pinned against the real handlers, by
  * EXECUTION and in BOTH directions, in
- * `__tests__/offer-sufficiency-handler-biconditional.test.ts`: a handler
- * gaining a required parameter REDs the sufficient arm, and one dropping a
- * requirement REDs the insufficient arm.
+ * `__tests__/offer-sufficiency-handler-biconditional.test.ts`. That guard
+ * probes each handler for its own required set rather than reading this
+ * table, and asserts EQUALITY, so all four drift directions RED: a handler
+ * gaining or dropping a requirement, and this table going short or long. Its
+ * first version iterated this table instead and a mutant proved it blind to
+ * a SHORT table — see the ⛔ note in that file.
  *
  * ── FAIL-OPEN ON IGNORANCE ────────────────────────────────────────────────
  * An intent this table has no authority over returns null and leaves the

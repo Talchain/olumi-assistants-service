@@ -22,11 +22,34 @@
  * measures whether a test can DETECT a change, never whether the EXPECTATION
  * is right (trap 13c), and the expectation is exactly what is at stake here.
  *
+ * ⛔⛔ THE FIRST VERSION OF THIS FILE HAD THE DEFECT IT WAS WRITTEN TO
+ * PREVENT, AND A MUTANT CAUGHT IT. It generated its cases by iterating
+ * `OFFER_REQUIRED_PARAMETERS`. Deleting the `value` entry from the table
+ * therefore deleted that entry's OWN test case: the suite went from 8 cases
+ * to 7 and stayed fully GREEN, so the table could silently go SHORT — which
+ * is the direction that reopens the defect. The mirror-checking guard was
+ * itself derived from the mirror (CLAUDE.md trap 12d: a derived guard proves
+ * agreement and can never prove completeness). The too-STRICT mutant bit
+ * correctly, which is exactly how an asymmetric guard flatters itself: one
+ * door watched, the other open, and a green run for both.
+ *
+ * ⭐ THE REPAIR: the required set is now DERIVED FROM THE HANDLER, by probing
+ * it — drop each parameter of a complete proposal in turn and ask the real
+ * handler whether it refuses for a missing parameter. That yields
+ * `derivedRequired` WITHOUT consulting the table, and the table is then
+ * asserted EQUAL to it. A short table REDs; a long one REDs. The case list
+ * comes from `COMPLETE`, never from the thing under test.
+ *
+ * And `COMPLETE`'s own adequacy is pinned rather than assumed: if it omitted
+ * a parameter the handler requires, the handler would refuse `COMPLETE`
+ * itself and the SUFFICIENT arm would RED. So there is no unchecked fixture
+ * left holding the result up.
+ *
  * Each intent gets a PAIR, and both halves must hold:
  *   SUFFICIENT   — params the gate passes must NOT raise PARAMETER_INVALID
  *                  naming a missing parameter at the real handler.
- *   INSUFFICIENT — dropping any one required parameter must make the real
- *                  handler refuse.
+ *   INSUFFICIENT — dropping any parameter the HANDLER requires must make both
+ *                  the handler and the gate refuse.
  * Neither half alone shows anything: the first proves the table is not too
  * strict, the second that it is not too slack.
  */
@@ -143,44 +166,79 @@ async function refusedForMissingParameter(
   }
 }
 
+/**
+ * Ask the HANDLER which of a complete proposal's parameters it requires, by
+ * dropping each one in turn. Deliberately does NOT read the table under test.
+ */
+async function deriveRequiredFromHandler(intent: string): Promise<string[]> {
+  const complete = COMPLETE[intent]!.parameters;
+  const required: string[] = [];
+  for (const candidate of complete) {
+    const without = complete.filter((p) => p.name !== candidate.name);
+    // Precondition pinned IN-TEST: the drop must actually have removed
+    // something, or this probe asserts nothing (trap 13b).
+    expect(without.length, `${intent}: dropping ${candidate.name}`).toBe(complete.length - 1);
+    if (await refusedForMissingParameter(intent, without)) required.push(candidate.name);
+  }
+  return required.sort();
+}
+
 describe('OFFER_REQUIRED_PARAMETERS — the biconditional against the real handlers', () => {
-  for (const intent of Object.keys(OFFER_REQUIRED_PARAMETERS)) {
+  // NOTE: the case list is `COMPLETE`, never `OFFER_REQUIRED_PARAMETERS`. A
+  // loop over the table cannot see the table go short.
+  for (const intent of Object.keys(COMPLETE)) {
     const complete = COMPLETE[intent]!.parameters;
 
     it(`${intent}: SUFFICIENT — the gate passes the complete proposal, and so does the handler`, async () => {
       // The gate must not be stricter than the handler.
       expect(findInsufficientOfferParameters(proposal(intent, complete))).toBeNull();
-      // And the handler must not refuse it for a missing parameter. If a
-      // handler GAINS a requirement, this RED fires here, by name.
+      // And the handler must not refuse it for a missing parameter. This is
+      // also what pins COMPLETE itself: if it omitted a required parameter,
+      // the handler would refuse it here.
       await expect(refusedForMissingParameter(intent, complete)).resolves.toBe(false);
     });
 
-    for (const required of OFFER_REQUIRED_PARAMETERS[
-      intent as keyof typeof OFFER_REQUIRED_PARAMETERS
-    ]) {
-      it(`${intent}: INSUFFICIENT — dropping "${required.name}" is refused by BOTH the gate and the handler`, async () => {
-        const without = complete.filter((p) => p.name !== required.name);
-        // Precondition pinned IN-TEST: the drop must actually have removed
-        // something, or this case asserts nothing (trap 13b).
-        expect(without.length).toBe(complete.length - 1);
+    it(`${intent}: the table states EXACTLY what the handler requires, derived by probing it`, async () => {
+      const derived = await deriveRequiredFromHandler(intent);
+      // The probe must find something, or an empty-equals-empty comparison
+      // would pass while measuring nothing (trap 13: an absence assertion
+      // needs to prove it can see a presence).
+      expect(derived.length, `${intent}: probe found no required parameter`).toBeGreaterThan(0);
 
-        expect(findInsufficientOfferParameters(proposal(intent, without))).toEqual({
-          parameterName: required.name,
+      const declared = (
+        OFFER_REQUIRED_PARAMETERS[intent as keyof typeof OFFER_REQUIRED_PARAMETERS] ?? []
+      )
+        .map((r) => r.name)
+        .sort();
+      // Equality, not containment: a SHORT table reopens the defect, a LONG
+      // one silently suppresses legitimate offers. Both must RED.
+      expect(declared).toEqual(derived);
+    });
+
+    it(`${intent}: INSUFFICIENT — dropping any parameter the handler requires is refused by the gate too`, async () => {
+      const derived = await deriveRequiredFromHandler(intent);
+      expect(derived.length).toBeGreaterThan(0);
+      for (const name of derived) {
+        const without = complete.filter((p) => p.name !== name);
+        expect(findInsufficientOfferParameters(proposal(intent, without)), name).toEqual({
+          parameterName: name,
         });
-        // If a handler DROPS a requirement, this RED fires here, by name.
-        await expect(refusedForMissingParameter(intent, without)).resolves.toBe(true);
-      });
-    }
+      }
+    });
   }
 
-  it('the table names only parameters the handler can actually receive', () => {
-    // A required parameter the proposal channel cannot carry would make the
-    // gate refuse every offer for that intent — a silent capability loss.
+  it('the table names only parameters the proposal channel can actually carry', () => {
+    // A required parameter no proposal can carry would make the gate refuse
+    // every offer for that intent — a silent capability loss.
     for (const [intent, required] of Object.entries(OFFER_REQUIRED_PARAMETERS)) {
       const carried = new Set(COMPLETE[intent]!.parameters.map((p) => p.name));
       for (const r of required) {
         expect(carried.has(r.name), `${intent}.${r.name}`).toBe(true);
       }
     }
+  });
+
+  it('covers every intent the gate has authority over, so none is silently unprobed', () => {
+    expect(Object.keys(COMPLETE).sort()).toEqual(Object.keys(OFFER_REQUIRED_PARAMETERS).sort());
   });
 });
