@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { NOT_TRACKED_CLASSES } from '../../../cee/context-integrity/not-modelled-manifest.js';
 import type { ContextPack } from '../../context/context-pack-assembler.js';
 import type { RecentMutation } from '../../context/recent-changes.js';
 import { isEditRequestShape } from '../mutation-warrant.js';
@@ -182,10 +183,53 @@ describe('ROADMAP 2.975 — brief-audit questions are not answered from edit his
       expect(answer()).toMatch(/not (?:a )?complete/i);
     });
 
-    it('names what it could not look for, rather than implying it looked everywhere', () => {
-      // `NOT_TRACKED_CLASSES` includes dissenting proposals and corrections —
-      // the two classes the trace measured at 0% survival.
-      expect(answer()).toMatch(/dissent|competing|correction/i);
+    it('does NOT enumerate the untracked classes in prose', () => {
+      // ⛔ FLIPPED 14 Sep 2026, and deliberately kept rather than deleted. This
+      // used to assert the answer NAMES the untracked classes
+      // (`/dissent|competing|correction/i`). That enumeration rendered six
+      // underscore-to-space identifiers as 37 of the paragraph's 85 words,
+      // restating a scope the ten words before it already set, and it is cut.
+      // A deleted test would leave the cut unpinned; this one REDs if anyone
+      // re-adds the wall.
+      //
+      // ⚠ THIS IS THE SIBLING OF THE FLIP ALREADY MADE IN
+      // `cee/context-integrity/__tests__/brief-audit-answer.test.ts`. That one
+      // was flipped with the cut and this one was missed — the remedy scoped to
+      // the instance while nothing swept its siblings. Both now assert the same
+      // property at their own level: that file at the composer, this one
+      // through the routing guard that dispatches to it.
+      //
+      // The honesty RECORD is untouched: the classes stay in
+      // NOT_TRACKED_CLASSES, stay asserted by execution in
+      // `not-modelled-manifest.test.ts`, and stay on the
+      // `assist.v1.scenario-graph` wire — only the RENDERING goes.
+      const text = answer();
+
+      // (a) The exact inverse of the assertion this replaces, so a PARTIAL
+      // re-add ("dissenting proposals" alone) cannot slip past a full-phrase
+      // check.
+      expect(text).not.toMatch(/dissent|competing|correction/i);
+
+      // (b) Derived from NOT_TRACKED_CLASSES by identity, so it cannot drift as
+      // the manifest grows (trap 12) — a class added there cannot quietly
+      // reappear in this prose without reddening here.
+      for (const cls of NOT_TRACKED_CLASSES) {
+        expect(text, `untracked class "${cls}" must not be enumerated in prose`).not.toContain(
+          cls.replace(/_/g, ' '),
+        );
+      }
+
+      // POSITIVE SURVIVAL, bound by identity to the surviving clauses (trap 19),
+      // so this test cannot pass by the answer having collapsed to nothing or
+      // to a stub — an absence assertion over an empty string is vacuous.
+      expect(text).toContain('This is not a complete account of what was left out');
+      expect(text).toContain('It only covers figures I can locate in your text');
+      // …and the figure census the audit exists to deliver still arrives.
+      expect(text).toContain('I found 25 stated figures');
+      // The ACTIONABLE clause stays: it tells the user how to make an uncounted
+      // figure visible (give it a unit), which is why it was kept while the
+      // enumeration went.
+      expect(text).toContain('it does not look at');
     });
   });
 

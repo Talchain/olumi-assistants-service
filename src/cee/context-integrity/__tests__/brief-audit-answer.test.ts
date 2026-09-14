@@ -316,13 +316,26 @@ describe("composeBriefAuditAnswer", () => {
         expect(answer).toMatch(/not (?:a )?complete account/i);
       });
 
-      it(`${name}: names every class the derivation cannot see`, () => {
-        // Derived from NOT_TRACKED_CLASSES by identity, so a class added to the
-        // manifest cannot silently drop out of the caveat (trap 12).
+      it(`${name}: does NOT enumerate the untracked classes in prose`, () => {
+        // ⛔ FLIPPED 14 Sep 2026, and deliberately kept rather than deleted.
+        // This used to assert the answer NAMES every class. That enumeration
+        // rendered six underscore-to-space identifiers as 37 of the paragraph's
+        // 85 words, restating a scope the ten words before it already set, and
+        // it is cut. A deleted test would leave the cut unpinned; this one REDs
+        // if anyone re-adds the wall.
+        //
+        // Still DERIVED from NOT_TRACKED_CLASSES by identity, so it cannot drift
+        // as the manifest grows (trap 12) — and the record itself is untouched:
+        // the classes stay in the manifest, stay asserted by execution there,
+        // and stay on the `assist.v1.scenario-graph` wire.
         const answer = tryBriefAuditAnswer(capture.brief_text, capture.graph) ?? "";
         for (const cls of NOT_TRACKED_CLASSES) {
-          expect(answer).toContain(cls.replace(/_/g, " "));
+          expect(answer).not.toContain(cls.replace(/_/g, " "));
         }
+        // The two clauses that stop a false belief SURVIVE — asserted here so
+        // this file cannot pass by the answer having collapsed to nothing.
+        expect(answer).toMatch(/not (?:a )?complete account of what was left out/i);
+        expect(answer).toMatch(/only covers figures I can locate in your text/i);
       });
     }
   });
