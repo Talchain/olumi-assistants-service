@@ -84,7 +84,7 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
-import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -3948,13 +3948,32 @@ export async function handleEditGraph(
       // intervention-subtree spelling that `encodeOptionInterventionsForEdit`
       // translated into canonical `interventions`. Everything else that was
       // stripped is refused.
-      if (!batchFullyLanded(opsToApply, rawApplied, canonicalApplied, context.graph as GraphV3T)) {
+      const nonLanding = firstOperationThatDidNotLand(
+        opsToApply,
+        rawApplied,
+        canonicalApplied,
+        context.graph as GraphV3T,
+      );
+      if (nonLanding !== null) {
         log.warn(
           {
             request_id: requestId,
             scenario_id: context.scenario_id ?? null,
             attempt,
             operations_count: operations.length,
+            // ⭐ WHICH operation, not merely THAT one failed. Without this the
+            // line cannot distinguish "the op spelling is outside the
+            // intervention recogniser" from "the encoder is not on this path" —
+            // two causes with OPPOSITE remedies — and answering it cost an hour
+            // of log archaeology plus a source dive on 2026-09-14.
+            //
+            // Content-free by construction: `op` and `reason` are closed enums,
+            // and `key_shape` masks every non-structural segment to `*` because
+            // op keys are model-controlled AND embed entity ids, which in this
+            // codebase are slug-shaped renderings of the user's own labels. See
+            // the redaction note on `firstOperationThatDidNotLand`. The op's
+            // `value` and `path` are never read here.
+            did_not_land: nonLanding,
           },
           'edit_graph B5 — an operation did not survive canonicalisation onto the persisted graph; refusing the WHOLE edit (no silent partial, no false success)',
         );
