@@ -170,6 +170,27 @@ const META_NOUNS: ReadonlyArray<string> = Object.freeze([
  * the number. Admitting `change` here routes it to the value path instead;
  * the divergence detector is untouched and simply stops firing for this
  * phrasing.
+ *
+ * ⚠ KNOWN LIMITATION, RECORDED AND DELIBERATELY NOT SOLVED — `change` is a
+ * common NOUN as well as a verb. This pattern is UNANCHORED and has no
+ * part-of-speech awareness, so a factor legitimately labelled "Change Rate"
+ * / "Change Management Cost" / "Change Request Volume" makes ordinary
+ * composed copy read as an instruction:
+ *     "Adjust the strength of the link from Change Rate to Throughput…"
+ *   → claimed, because `Change Rate to Throughput` matches mid-sentence.
+ *     The same prompt with "Churn Rate" is NOT claimed (measured) — the
+ *     label is the whole difference.
+ *
+ * ⚠ PRE-EXISTING CLASS, WIDENED — NOT INVENTED BY ADMITTING `change`:
+ * measured at the pristine tip, "Update Frequency to Throughput" was
+ * ALREADY true. Admitting `change` widens the class because "change" is a
+ * far commoner label noun than "update" or "set".
+ *
+ * DO NOT write a noun-vs-verb disambiguator for this. A predicate over
+ * natural language that tries to tell a label noun from a verb is the
+ * unwinnable-predicate road; the honest treatment is that this is pinned
+ * in the KNOWN-DIVERGENT SET of judgement-offer-action.test.ts, with its
+ * contrast, so it stays visible and cannot be mistaken for new.
  */
 const VALUE_UPDATE_VERBS_TO: ReadonlyArray<string> = Object.freeze(['set', 'update', 'change']);
 
