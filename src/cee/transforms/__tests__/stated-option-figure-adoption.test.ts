@@ -296,6 +296,39 @@ describe("the stated option is completed whole, or not at all", () => {
     expect(JSON.stringify(d.options)).toBe(before);
   });
 
+  /**
+   * ⭐ THE AUTHORSHIP GATE IS LOAD-BEARING ON ITS OWN, and this case exists
+   * because a mutant proved it was not otherwise pinned.
+   *
+   * Deleting `node.provenance !== "from_brief"` SURVIVED the rest of this
+   * suite, because every `ai_inferred` option in the live captures carries no
+   * `source_quote`, so the quote gate was incidentally excluding them. That
+   * makes the authorship gate look redundant while it is in fact the only
+   * thing standing behind an incidental property of today's producer.
+   *
+   * It is not a safe property to lean on: `option-rephrase-merge.ts` derived at
+   * 39 banked option nodes that brief-binding is CONTAINMENT and over-claims in
+   * this exact direction — "a model option whose label happens to be a brief
+   * substring reads from_brief". The inverse shape (a model option that acquires
+   * a quote) is the one this pins.
+   */
+  it("does not complete an ai_inferred option, even when it carries a quote with the figure", () => {
+    const d = witnessedDraft();
+    d.edges = d.edges.filter((e) => !(e.from === "14d36e6f" && e.to === "a4e6cef0"));
+    // The model's own option, given the quote it does not have today.
+    const twin = d.nodes.find((n) => n.id === "868f8b07")!;
+    twin.source_quote = STATED_QUOTE;
+    const twinOption = d.options.find((o) => o.id === "868f8b07")!;
+    delete (twinOption.interventions as Record<string, unknown>)["6d9a37f3"];
+
+    const result = run(d);
+
+    // The user's option is completed; the model's twin is not, though every
+    // other condition holds for it.
+    expect(result.adopted.map((a) => a.option_id)).toEqual(["14d36e6f"]);
+    expect((twinOption.interventions as Record<string, unknown>)["6d9a37f3"]).toBeUndefined();
+  });
+
   it("is total: an unreadable shape yields no adoptions and no gaps rather than throwing", () => {
     expect(adoptStatedFiguresForStatedOptions({ nodes: undefined, edges: undefined, options: undefined } as never))
       .toEqual({ adopted: [], gaps: [] });

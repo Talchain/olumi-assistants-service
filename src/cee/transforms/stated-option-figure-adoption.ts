@@ -184,6 +184,19 @@ function isPlainRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * Object-shaped enough to read keys off.
+ *
+ * ⚠ RETURNS `boolean`, NOT A TYPE PREDICATE, AND THAT IS THE POINT. A
+ * `v is Record<string, unknown>` predicate narrows the caller's `NodeV3T` away
+ * and forces a cast back to store it — and a cast that hides declared fields
+ * from the type system is the shape this estate has already paid for. The
+ * runtime check is identical; only the narrowing is declined.
+ */
+function isReadableMember(v: unknown): boolean {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
  * Fill the stated options' missing levels from the user's own stated figures.
  *
  * Mutates `options[]` in place (and therefore the option nodes, which alias the
@@ -202,17 +215,28 @@ export function adoptStatedFiguresForStatedOptions(args: {
     return { adopted, gaps };
   }
 
+  // ⚠ The guards below READ without NARROWING. Narrowing to
+  // `Record<string, unknown>` would lose `NodeV3T`/`OptionV3T` and force a cast
+  // back — and a cast that hides fields from a derived guard is a defect class
+  // this estate has already paid for. The runtime shape is still checked,
+  // because these arrays arrive from a boundary transform and a malformed
+  // member must be skipped rather than throw inside a draft.
   const kindById = new Map<string, string | undefined>();
   const nodeById = new Map<string, NodeV3T>();
   for (const node of nodes) {
-    if (!isPlainRecord(node) || typeof node.id !== "string") continue;
-    nodeById.set(node.id, node);
-    kindById.set(node.id, typeof node.kind === "string" ? node.kind : undefined);
+    if (!isReadableMember(node)) continue;
+    const id: unknown = (node as { id?: unknown }).id;
+    if (typeof id !== "string") continue;
+    nodeById.set(id, node);
+    const kind: unknown = (node as { kind?: unknown }).kind;
+    kindById.set(id, typeof kind === "string" ? kind : undefined);
   }
   const optionById = new Map<string, OptionV3T>();
   for (const option of options) {
-    if (!isPlainRecord(option) || typeof option.id !== "string") continue;
-    optionById.set(option.id, option);
+    if (!isReadableMember(option)) continue;
+    const id: unknown = (option as { id?: unknown }).id;
+    if (typeof id !== "string") continue;
+    optionById.set(id, option);
   }
 
   // Surviving option→factor edges. Repair-authored edges are INCLUDED here, and
