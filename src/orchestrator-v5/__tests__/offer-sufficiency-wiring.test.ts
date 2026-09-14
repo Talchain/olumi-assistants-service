@@ -226,6 +226,24 @@ describe('offer sufficiency — WIRED into the turn path', () => {
     expect(graphWrites()).toHaveLength(0);
   });
 
+  it('NO SUBSTITUTE CHIP is offered in the withdrawn proposal\'s place', async () => {
+    // ⚠ Measured because a sibling lane witnessed the adjacent defect on
+    // deployed staging: after a sentence about a churn threshold the product
+    // offered "Run analysis" and "Configure <a price option>" — chips
+    // unrelated to what had just been discussed. Withdrawing a chip is a
+    // chance to introduce exactly that, by leaving a gap something generic
+    // fills. Measured here: the refusal turn carries ZERO chips.
+    //
+    // This pins the measurement rather than claiming the adjacent defect is
+    // fixed — it is a DIFFERENT defect on the same surface, is not addressed
+    // by this change, and must not be fixed silently.
+    const { response } = await runTurnExecutor(payload(READ_UTTERANCE), 'req-suff-nosub', {
+      routingAdapter: addConstraintAdapter({ withValue: false }),
+      graphState: buildChurnGraph(),
+    });
+    expect(response.suggested_actions ?? []).toEqual([]);
+  });
+
   it('the refusal tells the truth and does not promise a change it cannot make', async () => {
     const { response } = await runTurnExecutor(payload(READ_UTTERANCE), 'req-suff-copy', {
       routingAdapter: addConstraintAdapter({ withValue: false }),
