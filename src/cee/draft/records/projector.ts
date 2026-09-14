@@ -774,6 +774,82 @@ export interface DroppedRecordRef {
   readonly strength_signature?: string;
 }
 
+/**
+ * ⭐⭐ ONE ROW PER FIGURE THE USER STATED, AND WHAT BECAME OF IT.
+ *
+ * This is the first row of the CEE-INTERNAL STORED RECORDS — the ledger this
+ * directory's grammar names in its own header (`grammar.ts:9-12`). It is NOT a
+ * published contract and never reaches PLoT or ISL; it travels beside the graph
+ * so a consumer can answer *"what happened to the thing the user said?"* without
+ * re-deriving it from the graph and guessing.
+ *
+ * ── ⛔ THE JOIN KEY, AND WHY IT IS NOT `source_quote` ───────────────────────
+ * The obvious design — join this row to `NotModelledItem` on `source_quote` —
+ * IS WRONG AND WAS REFUTED AT THE BYTES BEFORE THIS SHIPPED.
+ * `NotModelledItem`'s identity is the QUANTITY's own `literal` plus its
+ * `char_offset` into the brief (`context-integrity/not-modelled-manifest.ts:145-150`).
+ * `source_quote` is a SENTENCE SPAN, and a sentence can state several
+ * quantities: *"reaching £20k MRR within 12 months while keeping monthly churn
+ * under 4%"* is ONE quote and THREE quantities. Joining on the quote would bind
+ * this row to whichever of them happened to be found first.
+ *
+ * So the row deliberately carries the quote AND the magnitude, and the consumer
+ * resolves the address with the conjunction this estate has already shipped and
+ * reviewed for exactly this question — `classifyStatedKind`'s span-containment
+ * AND value-corroboration, whose own docstring calls it *"identity binding, not
+ * a value predicate another object could satisfy"*. Where that conjunction does
+ * not select EXACTLY ONE quantity the row simply does not bind: an ambiguous
+ * address is not an address, and silence is today's behaviour.
+ *
+ * ⚠ `id` IS A ROW IDENTIFIER AND NOT THE JOIN KEY. It exists so two rows from
+ * one sentence are distinguishable in a log; nothing may join on it. The join is
+ * the conjunction above, against the two fields named above. Stated because the
+ * shorthand "join on the id" is how the refuted design got written in the first
+ * place.
+ */
+export interface StatedCommitmentRow {
+  /**
+   * Row identity — `sha8` over kind, quote, value and unit, so two figures
+   * stated in ONE sentence are two rows. NEVER a join key: see the note above.
+   */
+  readonly id: string;
+  /**
+   * ⚠ INCREMENT 1 EMITS ONLY `"figure"`. The field is the grammar's full enum
+   * because narrowing it here would mint a SECOND stated-kind vocabulary
+   * (`grammar.ts:194` is the first), and this estate pays for those. A consumer
+   * must therefore tolerate a kind it has no behaviour for rather than assume
+   * the set is closed at one member.
+   */
+  readonly kind: DraftRecordStatedKind;
+  /** VERBATIM, as the model emitted it. Already substring-verified against the
+   *  brief by the grammar's own contract (`grammar.ts:414-415`). */
+  readonly source_quote: string;
+  readonly value?: number;
+  readonly unit?: string;
+  /** The EXISTING vocabulary (`grammar.ts:198`), never a new one. Stripped at
+   *  the published wire today, which is why the ledger conserves it. */
+  readonly role?: DraftRecordRole;
+  /** `constraint` only. The EXISTING vocabulary (`grammar.ts:202`). */
+  readonly direction?: DraftRecordDirection;
+  /**
+   * Did this figure reach the graph the user is shown?
+   *
+   * `bound` means a node carrying it SURVIVED every gate and the prune — read
+   * off the FINAL node set, not off the mint site, because a node can be minted
+   * and then withdrawn. `not_bound` means it did not, and `reason` says why.
+   */
+  readonly status: "bound" | "not_bound";
+  /**
+   * Why it did not bind. THE EXISTING UNION, taken by indexed access rather than
+   * restated — a hand-copied reason list is the mirror defect this estate keeps
+   * paying for (trap 12), and it would drift the day a reason is added.
+   */
+  readonly reason?: DroppedRecordRef["reason"];
+  /** Where the figure ended up, when it bound. `node_id` is the minted node's
+   *  own id — identity, never a label or a value another node could satisfy. */
+  readonly carrier?: { readonly node_id: string; readonly field: string };
+}
+
 export interface RecordProjection {
   /** GraphV3, ready for the parse stage's post-LLM seam. */
   readonly graph: ProjectedGraph;
@@ -785,6 +861,21 @@ export interface RecordProjection {
    * that vanished without trace.
    */
   readonly dropped: readonly DroppedRecordRef[];
+  /**
+   * ⭐ ONE ROW PER STATED FIGURE — see {@link StatedCommitmentRow}.
+   *
+   * Emitted by the SAME loop that already resolves each stated item, runs the
+   * gates and runs the connectivity prune. That loop previously kept only the
+   * DEATHS (`dropped`); this conserves the survivors too, so "bound" and
+   * "not bound" are answered by one derivation rather than by a consumer
+   * inferring the first from the absence of the second.
+   *
+   * ⚠ DERIVED FROM THE FINAL NODE SET, never accumulated at the drop sites. A
+   * per-site accumulator is a hand-maintained mirror that a new gate escapes
+   * silently (trap 12); reading the end state cannot miss a gate it has never
+   * heard of.
+   */
+  readonly statedCommitments: readonly StatedCommitmentRow[];
   /**
    * ⭐⭐ THE LIMITS THE MODEL BOUND TO A NODE ITSELF.
    *
@@ -1441,6 +1532,111 @@ export function statedMagnitudeOf(node: ProjectedNode): { value?: number; unit?:
     value: raw,
     ...(typeof unit === "string" ? { unit } : {}),
   };
+}
+
+/**
+ * ⭐⭐ ONE ROW PER STATED FIGURE, READ OFF THE FINAL NODE SET.
+ *
+ * ── WHAT `status` ANSWERS, STATED NARROWLY ON PURPOSE ──────────────────────
+ * `bound` means: a node minted from this stated item IS ON THE GRAPH THE USER
+ * WILL BE SHOWN. `not_bound` means it is not — it was never minted, or it was
+ * minted and then withdrawn by a gate or by the connectivity prune — and
+ * `reason` carries the projector's own word for which.
+ *
+ * ⛔⛔ WHAT IT DOES **NOT** CLAIM, AND THIS IS THE HONEST HALF. It does NOT say
+ * the surviving node carries the USER'S magnitude. A node can survive with a
+ * machine-authored value written over the user's, and this row will read
+ * `bound`. That case is real and measured — but settling it requires comparing
+ * a stated magnitude against a stored one ACROSS VALUE FRAMES (`"4%"` is read
+ * as 4 by the brief scanner and stored as 0.04 by the producer), and this
+ * service has no frame authority. Guessing a frame here would turn a gap into a
+ * LIE — the strictly worse direction (trap 22b) — so the row conserves the
+ * user's `value` and `unit` verbatim and leaves the magnitude question to a
+ * consumer that can answer it. Under-claiming, visibly.
+ *
+ * ── ⚠ DERIVED FROM THE END STATE, NEVER ACCUMULATED AT THE DROP SITES ──────
+ * Every gate and the prune already record their deaths in `dropped`; survival
+ * is then just "is this id still in `nodes`". An accumulator threaded through
+ * each gate would be a hand-maintained mirror that the NEXT gate escapes in
+ * silence (trap 12) — and this projector has eleven of them. Reading the end
+ * state cannot miss a gate it has never heard of.
+ *
+ * Pure and order-stable: rows come out in `stated_items` order.
+ */
+function deriveStatedCommitments(args: {
+  readonly statedItems: readonly DraftStatedItem[];
+  readonly statedIdByIndex: ReadonlyMap<number, string>;
+  readonly nodes: readonly ProjectedNode[];
+  readonly dropped: readonly DroppedRecordRef[];
+}): StatedCommitmentRow[] {
+  const { statedItems, statedIdByIndex, nodes, dropped } = args;
+  const surviving = new Map(nodes.map((n) => [n.id, n]));
+  const rows: StatedCommitmentRow[] = [];
+
+  statedItems.forEach((item, index) => {
+    // ⚠ INCREMENT 1 IS FIGURE-CLASS ONLY. The other kinds are not "excluded" —
+    // they are NOT YET BUILT, and emitting a half-derived row for them would be
+    // worse than emitting none, because a consumer cannot tell an absent row
+    // from an absent commitment.
+    if (item.kind !== "figure") return;
+    const quote = canonicalText(item.source_quote ?? "");
+    if (quote.length === 0) return;
+
+    // Row identity. Quote AND magnitude, so the two figures in *"£20k MRR …
+    // while keeping churn under 4%"* — ONE quote — are two distinguishable
+    // rows. NEVER a join key; see {@link StatedCommitmentRow.id}.
+    const id = sha8(
+      "stated_commitment",
+      item.kind,
+      quote,
+      typeof item.value === "number" ? String(item.value) : "",
+      typeof item.unit === "string" ? item.unit : "",
+    );
+
+    const nodeId = statedIdByIndex.get(index);
+    const node = nodeId === undefined ? undefined : surviving.get(nodeId);
+
+    const common = {
+      id,
+      kind: item.kind,
+      source_quote: quote,
+      ...(typeof item.value === "number" && Number.isFinite(item.value)
+        ? { value: item.value }
+        : {}),
+      ...(typeof item.unit === "string" && item.unit.length > 0 ? { unit: item.unit } : {}),
+      ...(item.role !== undefined ? { role: item.role } : {}),
+      ...(item.direction !== undefined ? { direction: item.direction } : {}),
+    };
+
+    if (node !== undefined && nodeId !== undefined) {
+      // WHERE the magnitude sits, derived from the node rather than assumed:
+      // `statedMagnitudeOf` is the same reader the withdrawal path uses, so the
+      // receipt cannot disagree with it.
+      const carriesMagnitude = typeof statedMagnitudeOf(node).value === "number";
+      rows.push({
+        ...common,
+        status: "bound",
+        carrier: {
+          node_id: nodeId,
+          field: carriesMagnitude ? "observed_state.raw_value" : "label",
+        },
+      });
+      return;
+    }
+
+    // Withdrawn, or never minted. The reason is the projector's OWN, looked up
+    // by node identity — never re-derived here, which would be a second
+    // vocabulary for a question `dropped` already answers (trap 21).
+    const death =
+      nodeId === undefined ? undefined : dropped.find((d) => d.node_id === nodeId);
+    rows.push({
+      ...common,
+      status: "not_bound",
+      ...(death?.reason !== undefined ? { reason: death.reason } : {}),
+    });
+  });
+
+  return rows;
 }
 
 export function goalValueIsATarget(role: DraftRecordRole | undefined): boolean {
@@ -4410,8 +4606,20 @@ function projectOnce(
   const hasIncoming = new Set(edges.map((e) => e.to));
   const hasOutgoing = new Set(edges.map((e) => e.from));
 
+  // ⭐ THE LEDGER ROWS. Derived HERE and not earlier, because `nodes` is only
+  // now the FINAL set: every gate, the connectivity prune and the option budget
+  // have run above, so "did this figure reach the user's graph" is answerable by
+  // membership rather than by replaying the gates.
+  const statedCommitments = deriveStatedCommitments({
+    statedItems,
+    statedIdByIndex,
+    nodes,
+    dropped,
+  });
+
   return {
     optionClaimIndexById,
+    statedCommitments,
     // Reconciled against the final node set — see pass 2c.
     goalConstraints: boundLimits,
     graph: {
@@ -4709,16 +4917,22 @@ export function projectRecordsToGraph(
     projection = projectOnce(records, demoted, brief);
     repairStatedOptionTargets(projection);
   }
-  // The internal binding is not part of the contract: consumers get the same
-  // three fields they always did.
-  return boundEveryNodeLabel(
-    discloseNodesNamedWithASentence({
-      graph: projection.graph,
-      provenance: projection.provenance,
-      dropped: projection.dropped,
-      goalConstraints: projection.goalConstraints,
-    }),
-  );
+  // ⚠⚠ SPREAD FIRST, THEN STRIP — NEVER A FIELD-BY-FIELD LITERAL.
+  //
+  // This WAS a field-by-field literal naming four keys, under a comment that
+  // said "the same three fields they always did" — already one field stale, and
+  // that staleness is the tell. `boundEveryNodeLabel` below carries the receipt
+  // for why the shape matters: a field-by-field literal on this path "is how
+  // `sets_to` reached the wire and was dropped one line before projection with
+  // every test still green". A fifth field (`statedCommitments`) would have
+  // died here in exactly the same silence.
+  //
+  // The strip is still deliberate: `optionClaimIndexById` is an INTERNAL pass
+  // binding, not part of `RecordProjection`'s contract. Omitting it by name
+  // keeps that true while letting every contract field — including ones added
+  // after this line was written — survive by default.
+  const { optionClaimIndexById: _internalPassBinding, ...contractFields } = projection;
+  return boundEveryNodeLabel(discloseNodesNamedWithASentence(contractFields));
 }
 
 /**
