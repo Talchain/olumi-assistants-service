@@ -131,14 +131,21 @@ const EDIT_VERB_OR_QUANTITY_PATTERN =
  *       did not, and ADDING AN AFFIRMATIVE MADE A CONFIRMATION WEAKER. The
  *       prefix here is the same construct, deliberately character-identical.
  *
- *   (2) THE PRONOUN OBJECT. `(?:add|make|apply)\s+it` and the `this` forms.
+ *   (2) THE PRONOUN OBJECT. `(?:add|make|apply)\s+it`, and ONLY that.
  *       "make it" is not a fresh request when a proposal is held and the offer
  *       copy just invited exactly that word; an anchored bare pronoun can name
  *       no target and carry no value ("make it 5%" / "make it bigger" both
  *       carry trailing content and are still refused by the anchor).
+ *
+ *       ⚠ The `this` forms ("apply this change") were tried and REVERTED: they
+ *       are unwitnessed, and they stole `"Apply this change"` from the
+ *       route-level exact-copy resolver, whose numbered clarification names the
+ *       DISTINCT rendered labels and is strictly more useful than this module's
+ *       generic ambiguity copy. Pinned by
+ *       `proposed-change-route-level.test.ts` — do not re-add them.
  */
 export const PROPOSAL_CONFIRM_PATTERN =
-  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?)[,\s]+(?:and\s+)?)?(?:add\s+(?:that|this)|make\s+(?:that|this)(?:\s+(?:change|update|edit))?|do\s+(?:that|this)\s+(?:change|update|edit)|apply\s+(?:that|this)(?:\s+(?:change|update|edit))?|(?:add|make|apply)\s+it|try\s+that(?:\s+(?:change|update|edit|one))?|test\s+that(?:\s+(?:change|update|edit|one))?|(?:update|try|test)\s+the\s+model|let'?s\s+(?:do\s+that|apply\s+that|try\s+that|test\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
+  /^\s*(?:(?:yes|yep|yeah|sure|ok(?:ay)?)[,\s]+(?:and\s+)?)?(?:add\s+that|make\s+that(?:\s+(?:change|update|edit))?|do\s+that\s+(?:change|update|edit)|apply\s+that(?:\s+(?:change|update|edit))?|(?:add|make|apply)\s+it|try\s+that(?:\s+(?:change|update|edit|one))?|test\s+that(?:\s+(?:change|update|edit|one))?|(?:update|try|test)\s+the\s+model|let'?s\s+(?:do\s+that|apply\s+that|try\s+that|test\s+that))(?:\s+(?:please|now|thanks|thank\s+you))?[\s.!?\u{1F300}-\u{1FAFF}]*$/iu;
 
 /**
  * ⭐⭐ OFFER-REFERENCE ACCEPTANCE (ROADMAP 2.663 / F-B). Two patterns, and the
