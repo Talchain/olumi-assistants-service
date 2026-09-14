@@ -31,6 +31,7 @@ import { OBSERVED_STATE_STATED_ROLES } from "../stated-role-vocabulary.js";
 import { ObservedStateV3, NodeV3 } from "../../../schemas/cee-v3.js";
 import { NodeV3Schema, ObservedStateSchema } from "@talchain/schemas";
 import { compactGraph } from "../../../orchestrator/context/graph-compact.js";
+import { computeAnalysisAffectingGraphHash } from "../../../orchestrator-v5/context/graph-hash.js";
 import type { GraphV3T } from "../../../schemas/cee-v3.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -199,6 +200,88 @@ describe("the manifest's own classification is untouched", () => {
       "£20k:figure",
       "12 months:figure",
     ]);
+  });
+});
+
+describe("the stamp moves no number, and no verdict", () => {
+  it("is excluded from the analysis-affecting graph hash", () => {
+    // ⚠ A NEW FIELD ON `observed_state` COULD FLIP EVERY FRESHNESS VERDICT. The
+    // projection is a positive whitelist — `projectObservedState` picks exactly
+    // `['value','baseline','cap']` — so the stamp is excluded by construction,
+    // the same guarantee the ROADMAP 2.972 withdrawal relies on for
+    // `extractionType`. Asserted by EXECUTION rather than by reading the list,
+    // because a whitelist is only a guarantee while it stays a whitelist.
+    const base = {
+      nodes: [
+        {
+          id: "n_churn",
+          kind: "factor",
+          label: "Monthly Churn Rate",
+          observed_state: { value: 0.04, unit: "%", extractionType: "explicit" },
+        },
+      ],
+      edges: [],
+    };
+    const stamped = {
+      ...base,
+      nodes: [
+        {
+          ...base.nodes[0]!,
+          observed_state: { ...base.nodes[0]!.observed_state, stated_role: "constraint" },
+        },
+      ],
+    };
+    expect(computeAnalysisAffectingGraphHash(stamped)).toBe(
+      computeAnalysisAffectingGraphHash(base),
+    );
+
+    // Positive control: the hash is not simply constant.
+    const moved = {
+      ...base,
+      nodes: [{ ...base.nodes[0]!, observed_state: { ...base.nodes[0]!.observed_state, value: 0.05 } }],
+    };
+    expect(computeAnalysisAffectingGraphHash(moved)).not.toBe(
+      computeAnalysisAffectingGraphHash(base),
+    );
+  });
+});
+
+describe("the limit this inherits from its oracle, disclosed rather than discovered later", () => {
+  it("follows the row onto a subject the brief never mentions", () => {
+    // ⚠ MEASURED, AND IT IS NOT A PASS — it is the boundary of what a stamp
+    // derived from `goal_constraints[]` can be right about. A row that binds the
+    // churn ceiling to "New Customer Conversion Rate" (a real live shape, and a
+    // sibling lane's subject) takes this stamp with it: the ROLE is reported
+    // correctly and the SUBJECT is the row's error, inherited.
+    //
+    // The direction matters and is the reason this is disclosed rather than
+    // guarded: the stamp LOWERS the authorship claim (`user`/`from_brief` ->
+    // `assumption`/`ai_inferred`), so a mis-bound figure is never made to look
+    // MORE authoritative by it. Second-guessing the producer's own binding here
+    // would be the rival authority this change exists to avoid.
+    const roles = deriveStatedQuantityRoles("we are keeping monthly churn under 4% while we grow", {
+      nodes: [
+        {
+          id: "n_conv",
+          kind: "factor",
+          label: "New Customer Conversion Rate",
+          observed_state: { value: 0.04, unit: "%", extractionType: "explicit" },
+        },
+      ],
+      edges: [],
+      options: [],
+      goal_constraints: [
+        {
+          constraint_id: "c1",
+          node_id: "n_conv",
+          operator: "<=",
+          value: 0.04,
+          unit: "fraction",
+          source_quote: "keeping monthly churn under 4%",
+        },
+      ],
+    });
+    expect(roles).toEqual([{ node_id: "n_conv", stated_role: "constraint" }]);
   });
 });
 
