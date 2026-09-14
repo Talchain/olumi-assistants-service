@@ -3,37 +3,40 @@
  * WRITE BOUND TO THE WRONG ENTITY IS WITHHELD, NOT APPLIED.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * ⚠⚠ THE SCOPE OF THAT CLAIM, STATED BEFORE ANYTHING ELSE — IT IS NARROWER
- * THAN "THE WRONG-ENTITY WRITE IS WITHHELD", AND THE UNQUALIFIED VERSION IS
- * FALSE FOR A REACHABLE CLASS.
+ * ⚠⚠ SCOPE, STATED BEFORE ANYTHING ELSE — AND IT HAS MOVED TWICE. READ BOTH
+ * HALVES; THE SUPERSEDED HALF IS KEPT BECAUSE IT NAMES THE MECHANISM.
  *
- * This module covers an option that carries **no effect values at all**. A
- * **PARTIALLY-CONFIGURED** option — one already holding a value on some other
- * factor — is outside it entirely, and the wrong-entity write still persists
- * for that class, false-success reply and all.
+ * ── SUPERSEDED (accurate until the deliberate-edit lane, 15 Sep 2026) ──────
+ * ~~This module covers an option that carries **no effect values at all**. A
+ * **PARTIALLY-CONFIGURED** option is outside it entirely, and the wrong-entity
+ * write still persists for that class, false-success reply and all.~~
  *
- * Measured at this tip, not reasoned about. `hasNumericInterventions` in
- * `analysis-ready-helper.ts` marks an option `ready` on ANY one numeric
- * intervention, and `resolveConfigureOptionFacts` searches only the
- * `needs_encoding` list, so a named-but-partially-configured option falls
- * through before this guard is ever consulted. Driving the identical
- * wrong-entity write against the two shapes:
+ * The mechanism that caused it, which is still worth knowing:
+ * `hasNumericInterventions` in `analysis-ready-helper.ts` marks an option
+ * `ready` on ANY one numeric intervention, and `resolveConfigureOptionFacts`
+ * searched only the OUTSTANDING-SLOT projection — so a named-but-configured
+ * option fell through before this guard was ever consulted. **A drafted graph
+ * arrives already populated, so every later edit is a REVISION, and a revision
+ * has no outstanding slot: the guard protected the FIRST configuration of a
+ * model and never a correction to one.** Measured live on deployed CEE staging,
+ * 14 Sep 2026: `evaluateConfigureOptionOutcome` returned `not_applicable` on
+ * **46 of 46** real captured turns while the shipped detector matched 46/46.
  *
- *   option with NO effect values   → outcome `not_honoured` → **withhold**
- *   option with ONE effect value   → outcome `not_applicable` → **allow**
+ * ── CURRENT ───────────────────────────────────────────────────────────────
+ * `configure-option-outcome.ts` now splits TARGET RESOLUTION from COPY
+ * REPLACEMENT and emits `not_honoured_no_copy` for a resolvable option with no
+ * honest sentence. This guard accepts BOTH verdicts, so a REVISION is protected
+ * on the same terms as a first configuration. Driving the identical
+ * wrong-entity write against the two shapes now:
  *
- * ⚠ The skip REASON on that second row is fixture-dependent, and both my first
- * report and the first review named one of them as "the" measured reason —
- * the same scope generalisation this file keeps warning about. It is
- * `option_not_identified` when the named option is the only unconfigured one,
- * and `option_not_named` when another unconfigured option exists and the
- * resolver's sole-unconfigured fallback retargets. Behaviourally identical
- * (both allow); quote both, or neither.
+ *   option with NO effect values   → `not_honoured`          → **withhold**
+ *   option with ONE effect value   → `not_honoured_no_copy`  → **withhold**
  *
- * `configure-option-outcome.ts` names this case as reachable in its own P1
- * note. Widening it is a separate, rowed piece of work — it changes which
- * options the 2.427 TEXT guard speaks about, not just this write guard, and
- * that is a bigger blast radius than this lane owns.
+ * ⚠ WHAT IS STILL OUT OF SCOPE, and it is a real residual, not a footnote: a
+ * message that names NO option, or names TWO, reaches no verdict and the write
+ * is **allowed**. That is deliberate — see W1 below; withholding on an unnamed
+ * subject discards correct, explicitly-requested edits wholesale, which is the
+ * direction that destroys user work. The rowed exit is to ASK, not to widen.
  *
  * **A narrowed true claim is worth more than a broad one that is false**, and
  * the overclaim enters at the moment of recording (trap 20), which is why the
@@ -97,8 +100,15 @@
  * 21), and its `named_in_message` requirement is what keeps this identity-bound
  * rather than a guess (trap 19). The one further question asked here is:
  *
- *   *Did this turn move the baseline of a factor THIS OPTION IS WIRED TO, while
- *    writing no effect value for ANY option?*
+ *   *Did this turn move the baseline of a factor THIS OPTION IS WIRED TO — or
+ *    one of THIS OPTION'S OWN OUTGOING EDGES — while writing no effect value
+ *    for ANY option?*
+ *
+ * ⭐ The edge disjunct was added by the deliberate-edit lane and is documented
+ * at `optionEdgeWritesLanded`. It is a STRICTER guard, not a wider one: its
+ * identity binding (`edge.from === optionId`) is tighter than the node arm's,
+ * and it is orthogonal to the W1 false positive below, which moves a node and
+ * no edge at all.
  *
  * All three conjuncts are load-bearing and all three are narrow ON PURPOSE:
  *
@@ -106,7 +116,11 @@
  *     somewhere, the turn accomplished a real option edit and discarding it
  *     would be a new harm. Checked across all options, not just the named one,
  *     because the outcome verdict already says the named one missed out.
- *   - **"a node baseline moved"** — this is the wrong-entity signature.
+ *   - **"a node baseline moved, or one of the option's own edges moved"** —
+ *     this is the wrong-entity signature. Both captures that motivated the two
+ *     rows are in it: a factor `observed_state` (2.1266) and an option→factor
+ *     edge `strength.mean` / `exists_probability` (2.427, and the live capture
+ *     in `wrong-entity-write-capture.fixture.ts`).
  *   - **"a factor THIS OPTION IS WIRED TO"** — the identity binding, added
  *     after an adversarial review executed a false positive against the
  *     version that lacked it. See `optionLinkedNodeIds`.
@@ -163,11 +177,17 @@ export type OptionInterventionWriteAllowReason =
   | 'no_write'
   /** Pre- or post-edit graph does not strict-parse; the harm is unestablished. */
   | 'graph_unparseable'
-  /** The configure-option outcome guard reached no `not_honoured` verdict. */
+  /**
+   * The configure-option outcome guard reached no write-protecting verdict —
+   * neither `not_honoured` nor `not_honoured_no_copy`.
+   */
   | 'outcome_not_unhonoured'
   /** An effect value DID land for some option — a real option edit. */
   | 'interventions_write_landed'
-  /** No node's own value moved; the write was not the wrong-entity kind. */
+  /**
+   * Neither a node's own value NOR one of the option's outgoing edges moved;
+   * the write was not the wrong-entity kind.
+   */
   | 'no_baseline_write'
   /**
    * A baseline DID move, but on a node the named option is not wired to — so
@@ -186,6 +206,18 @@ export type OptionInterventionWriteVerdict =
       readonly optionLabel: string;
       /** Node ids whose own value this turn moved — what is being discarded. */
       readonly baselineNodeIds: readonly string[];
+      /**
+       * `<from>-><to>` for each of the NAMED OPTION'S OWN outgoing edges whose
+       * `strength.mean` or `exists_probability` this turn moved.
+       *
+       * Deliberately NOT folded into `baselineNodeIds`: a moved edge and a
+       * moved node value are two different facts about what was discarded, and
+       * `formatWithheldWriteNotice` may only name a NODE it can truthfully call
+       * unchanged. On an edge-only withhold the node really is unchanged — it
+       * is the LINK that moved — so the notice correctly falls back to its
+       * unqualified sentence rather than naming the factor.
+       */
+      readonly optionEdgeKeys: readonly string[];
     };
 
 /** Every effect value the graph holds, keyed `<optionId>::<factorId>`. */
@@ -300,6 +332,82 @@ export function baselineWritesLanded(before: GraphV3T, after: GraphV3T): string[
   return moved;
 }
 
+/**
+ * ⭐⭐⭐ THE EDGE ARM — the originally-witnessed wrong-entity write, which
+ * `baselineWritesLanded` above is STRUCTURALLY BLIND TO.
+ *
+ * ── THE DEFECT, measured at the stored object ─────────────────────────────
+ * `baselineWritesLanded` reads only node `observed_state.value`. An EDGE-only
+ * write therefore yields `movedNodeIds.length === 0`, the guard returns
+ * `allow` / `no_baseline_write`, and the wrong mutation PERSISTS — with
+ * `evaluateConfigureOptionOutcome` having already replaced the prose. **Honest
+ * text over a persisted wrong mutation** is the precise state this module's own
+ * header says it exists to prevent, surviving in the case it was built from:
+ *
+ *   factor `observed_state`   → withhold   (the node arm — already covered)
+ *   edge `strength.mean`      → allow      ⛔ PERSISTED
+ *   edge `exists_probability` → allow      ⛔ PERSISTED
+ *
+ * ⭐ AND IT IS THE ORIGINAL DEFECT, NOT A NEW CLASS.
+ * `configure-option-outcome.ts`'s header witnesses an EDGE-STRENGTH write as
+ * the 2.427 capture (`opt_cloud_native → fac_adoption_complexity`,
+ * `strength.mean = 0.7`, `interventions` absent), and this module's own live
+ * capture fixture is an `exists_probability` write (1 → 0.79). **2.427 fixed
+ * the TEXT; 2.1266 withheld the WRITE for node baselines only.** The
+ * originally-witnessed edge write persisted the whole time, under both guards.
+ *
+ * ── WHY THIS IS A STRICTER GUARD, NOT A WIDER ONE ─────────────────────────
+ * Its identity binding is TIGHTER than the node arm's. The node arm must ask
+ * whether the moved node is one the option happens to be wired to — a shared
+ * baseline every option reads, which is why the W1 false positive lives there.
+ * An edge whose `from` IS the named option is unambiguously ABOUT that option:
+ * there is no other entity it could belong to. So this arm cannot convert an
+ * honest refusal into a corruption, and it is orthogonal to W1, whose measured
+ * shape (*"change Fuel price to 1.40"*) moves a node and no edge at all.
+ *
+ * ── SCOPE, STATED AS A BOUND (trap 20) ────────────────────────────────────
+ * Reads `strength.mean` and `exists_probability` ONLY — the two numeric claims
+ * the captures actually moved. `effect_direction`, `provenance` and
+ * `validation` are excluded on the same reasoning that excludes
+ * `display_value` from the node arm: a guard that fired on them would withhold
+ * on descriptive edits, the direction that destroys user work.
+ *
+ * Read from the BEFORE graph's edge set, so the edit under suspicion cannot
+ * invent an edge that justifies withholding it.
+ */
+export function optionEdgeWritesLanded(
+  before: GraphV3T,
+  after: GraphV3T,
+  optionId: string,
+): string[] {
+  const numeric = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  const claims = (edge: GraphV3T['edges'][number]): string => {
+    const strength = (edge as { strength?: { mean?: unknown } }).strength;
+    return JSON.stringify([
+      numeric(strength?.mean) ?? null,
+      numeric((edge as { exists_probability?: unknown }).exists_probability) ?? null,
+    ]);
+  };
+
+  const pre = new Map<string, string>();
+  for (const edge of before.edges) {
+    if (edge.from !== optionId) continue;
+    pre.set(`${edge.from}->${edge.to}`, claims(edge));
+  }
+
+  const moved: string[] = [];
+  for (const edge of after.edges) {
+    if (edge.from !== optionId) continue;
+    const key = `${edge.from}->${edge.to}`;
+    // A NEW edge is a structural add, not a rewrite of an existing claim —
+    // same posture as the node arm's treatment of a new node.
+    if (!pre.has(key)) continue;
+    if (pre.get(key) !== claims(edge)) moved.push(key);
+  }
+  return moved;
+}
+
 /** At most this many factor names are spelled out before the notice summarises. */
 const MAX_NAMED_IN_NOTICE = 3;
 
@@ -385,7 +493,18 @@ export function decideOptionInterventionWrite(params: {
     before: params.before,
     after: params.after,
   });
-  if (outcome.status !== 'not_honoured') {
+  // ⭐⭐ BOTH WRITE-PROTECTING VERDICTS, and the difference between them is
+  // about COPY, not about the write. `not_honoured_no_copy` says exactly what
+  // `not_honoured` says — configure-option intent, option resolved BY NAME, no
+  // interventions write for it — and adds only that no true sentence is
+  // available to replace the response with (the option already carries a value,
+  // so *"this option has no effect values yet"* would be a lie).
+  //
+  // Accepting only `not_honoured` here made the WRITE protection inherit the
+  // COPY predicate's domain, which is why a REVISION was unguarded: a drafted
+  // graph arrives populated, so every later edit is a revision. Measured live,
+  // 46 of 46 real captured turns reached no verdict at all.
+  if (outcome.status !== 'not_honoured' && outcome.status !== 'not_honoured_no_copy') {
     return { verdict: 'allow', reason: 'outcome_not_unhonoured' };
   }
 
@@ -393,20 +512,29 @@ export function decideOptionInterventionWrite(params: {
     return { verdict: 'allow', reason: 'interventions_write_landed' };
   }
 
-  const movedNodeIds = baselineWritesLanded(before, after);
-  if (movedNodeIds.length === 0) {
-    return { verdict: 'allow', reason: 'no_baseline_write' };
-  }
-
   // ⭐⭐ BIND BY IDENTITY, NEVER BY A VALUE PREDICATE (trap 19). A moved
   // baseline is only a substitute for THIS option's missing effect value if the
   // option is actually wired to that factor. Everything else is a different
   // edit — very often the one the user asked for — and discarding it destroys
   // their work. See `optionLinkedNodeIds` for the measured false positive.
+  const movedNodeIds = baselineWritesLanded(before, after);
   const linked = optionLinkedNodeIds(before, outcome.optionId);
   const baselineNodeIds = movedNodeIds.filter((id) => linked.has(id));
-  if (baselineNodeIds.length === 0) {
-    return { verdict: 'allow', reason: 'baseline_write_unrelated_to_option' };
+
+  // The edge arm. Identity binding is `edge.from === optionId` — tighter than
+  // the node arm's, because an edge out of the named option cannot be about any
+  // other entity. See `optionEdgeWritesLanded`.
+  const optionEdgeKeys = optionEdgeWritesLanded(before, after, outcome.optionId);
+
+  if (baselineNodeIds.length === 0 && optionEdgeKeys.length === 0) {
+    // The two allow reasons stay NAMED APART (they are two different facts, and
+    // collapsing them is what let the W1 false positive through unseen): a turn
+    // that moved nothing of either kind, vs one that moved a node the option is
+    // not wired to.
+    return {
+      verdict: 'allow',
+      reason: movedNodeIds.length === 0 ? 'no_baseline_write' : 'baseline_write_unrelated_to_option',
+    };
   }
 
   return {
@@ -414,5 +542,6 @@ export function decideOptionInterventionWrite(params: {
     optionId: outcome.optionId,
     optionLabel: outcome.optionLabel,
     baselineNodeIds,
+    optionEdgeKeys,
   };
 }
