@@ -180,6 +180,200 @@ describe("negative controls — a fix that reclassifies everything is worse than
   });
 });
 
+/**
+ * ⭐⭐ THE INDEPENDENT CORPUS THAT FOUND THE DEFECT, ADOPTED INTO THIS SUITE.
+ *
+ * Authored by Codex, executed against `007e4265` on 14 Sep 2026 — NOT by the
+ * author of the implementation. At that head the author's own 23 tests passed
+ * 23/23 and the first two cases below passed; **the last two FAILED**, each
+ * withdrawing a genuine user observation. Both are reproduced here in the
+ * signature they failed with:
+ *
+ *     AssertionError: expected [ { node_id: 'n_churn', …(1) } ] to deeply equal []
+ *
+ * They live here permanently, controls included. The two passing controls are
+ * not decoration: they are what stops the repair over-correcting into silence,
+ * which would trade a lie for a gap and delete this change's whole value
+ * (CLAUDE.md trap 22b — a corpus testing one direction is a guard watching one
+ * door). The graph shape is the reviewer's, kept as written.
+ */
+const codexChurnGraph = (quote: string) => ({
+  nodes: [
+    {
+      id: "n_churn",
+      kind: "factor",
+      label: "Monthly Churn Rate",
+      observed_state: {
+        value: 0.04,
+        unit: "%",
+        source: "brief_extraction",
+        extractionType: "explicit",
+      },
+    },
+  ],
+  edges: [],
+  options: [],
+  goal_constraints: [
+    {
+      constraint_id: "churn_max",
+      node_id: "n_churn",
+      operator: "<=",
+      value: 0.04,
+      unit: "fraction",
+      value_frame: "level",
+      source_quote: quote,
+    },
+  ],
+});
+
+const CAP = "keeping monthly churn under 4%";
+const STAMPED = [{ node_id: "n_churn", stated_role: "constraint" }];
+
+describe("the reviewer's corpus — a genuine observation must survive the stamp", () => {
+  it("positive control: limit alone retains the new classification", () => {
+    expect(deriveStatedQuantityRoles(CAP, codexChurnGraph(CAP))).toEqual(STAMPED);
+  });
+
+  it("negative control: same written number in an observation remains an observation", () => {
+    expect(
+      deriveStatedQuantityRoles(`monthly churn is currently 4%, while ${CAP}`, codexChurnGraph(CAP)),
+    ).toEqual([]);
+  });
+
+  it("a decimal spelling must not erase a genuinely stated observation", () => {
+    // ⛔ RED AT `007e4265`. The guard compared LITERALS, so `"4.0%"` was not the
+    // string `"4%"`, no restatement was detected, and the user's measured rate
+    // was demoted to an assumption. Literal identity is not quantity identity.
+    expect(
+      deriveStatedQuantityRoles(
+        `monthly churn is currently 4.0%, while ${CAP}`,
+        codexChurnGraph(CAP),
+      ),
+    ).toEqual([]);
+  });
+
+  it("a whole-sentence source quote must not erase a genuinely stated observation", () => {
+    // ⛔ RED AT `007e4265`, and for a different reason: when the row quotes the
+    // whole sentence there is no "outside the span" left to search, so a guard
+    // that only looked outside it passed VACUOUSLY. Both roles are legitimately
+    // inside one quote.
+    const brief = `monthly churn is currently 4%, while ${CAP}`;
+    expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual([]);
+  });
+});
+
+describe("the opposite direction — the repair must not answer a lie with silence", () => {
+  // Every case above demands SILENCE. On its own that corpus is satisfied by a
+  // function that returns `[]` for everything, which is the over-correction the
+  // review explicitly refused to accept. Each twin below is the same shape with
+  // the one discriminating fact changed, and every one of them must STAMP.
+
+  it("an unrelated magnitude elsewhere in the brief does not withhold the stamp", () => {
+    // Twin of the positive control. The rule counts occurrences of THIS
+    // magnitude, not "is there a second number anywhere".
+    expect(
+      deriveStatedQuantityRoles(`${CAP} and reaching £20k MRR`, codexChurnGraph(CAP)),
+    ).toEqual(STAMPED);
+  });
+
+  it("an observation stating a DIFFERENT magnitude does not withhold the stamp", () => {
+    // Twin of the negative control: 7% is an independent observation, and the
+    // 4% is still stated exactly once.
+    expect(
+      deriveStatedQuantityRoles(`monthly churn is currently 7%, while ${CAP}`, codexChurnGraph(CAP)),
+    ).toEqual(STAMPED);
+  });
+
+  it("a nearby decimal that is a different magnitude does not withhold the stamp", () => {
+    // Twin of the decimal case. The repair must recognise `4.0%` as four
+    // percent WITHOUT collapsing `4.5%` into it.
+    expect(
+      deriveStatedQuantityRoles(
+        `monthly churn is currently 4.5%, while ${CAP}`,
+        codexChurnGraph(CAP),
+      ),
+    ).toEqual(STAMPED);
+  });
+
+  it("a whole-sentence quote is not itself disqualifying", () => {
+    // Twin of the whole-sentence case. What withheld the stamp there was the
+    // magnitude occurring twice, not the quote's extent — so the same extent
+    // with ONE occurrence must still stamp.
+    const brief = `we are ${CAP}`;
+    expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual(STAMPED);
+  });
+
+  it("a bare number match of a different KIND does not withhold the stamp", () => {
+    // ⚠ THE RULE IS NOT `value === value`. "4 people" and "4%" share a number
+    // and state nothing in common; collapsing them would be the unframed
+    // comparison this repair exists to avoid, one level down.
+    expect(
+      deriveStatedQuantityRoles(`we have 4 people, while ${CAP}`, codexChurnGraph(CAP)),
+    ).toEqual(STAMPED);
+  });
+});
+
+describe("equivalent notation is recognised beyond the percent case", () => {
+  // The decimal case is one instance of a general rule, and a corpus that only
+  // ever exercises `4.0%` cannot show the rule is general. Money carries the
+  // same hazard in a different notation: a magnitude suffix.
+  const spendGraph = (quote: string) => ({
+    nodes: [
+      {
+        id: "n_spend",
+        kind: "factor",
+        label: "Annual Spend",
+        observed_state: { value: 2_000_000, unit: "gbp", source: "brief_extraction" },
+      },
+    ],
+    edges: [],
+    options: [],
+    goal_constraints: [
+      {
+        constraint_id: "spend_max",
+        node_id: "n_spend",
+        operator: "<=",
+        value: 2_000_000,
+        unit: "gbp",
+        source_quote: quote,
+      },
+    ],
+  });
+  const SPEND_CAP = "keeping annual spend under £2m";
+  const SPEND_STAMPED = [{ node_id: "n_spend", stated_role: "constraint" }];
+
+  it("withholds where a magnitude suffix restates the same amount", () => {
+    // "£2,000,000" and "£2m" are one amount written two ways. The literal test
+    // could not see this either.
+    expect(
+      deriveStatedQuantityRoles(
+        `annual spend is £2,000,000 today, while ${SPEND_CAP}`,
+        spendGraph(SPEND_CAP),
+      ),
+    ).toEqual([]);
+  });
+
+  it("stamps where the restated amount is different", () => {
+    expect(
+      deriveStatedQuantityRoles(
+        `annual spend is £3m today, while ${SPEND_CAP}`,
+        spendGraph(SPEND_CAP),
+      ),
+    ).toEqual(SPEND_STAMPED);
+  });
+
+  it("stamps where the same number carries a different currency", () => {
+    // ⚠ $2m is not £2m. Equivalence requires the currency symbol to agree, or
+    // the guard would withhold on a magnitude the user never restated.
+    expect(
+      deriveStatedQuantityRoles(
+        `annual spend is $2m today, while ${SPEND_CAP}`,
+        spendGraph(SPEND_CAP),
+      ),
+    ).toEqual(SPEND_STAMPED);
+  });
+});
+
 describe("the manifest's own classification is untouched", () => {
   it("still reports every figure in the served capture as `figure`", () => {
     // ⚠ A MEASURED FACT ABOUT THE SHIPPED AUTHORITY, PINNED SO THIS CHANGE

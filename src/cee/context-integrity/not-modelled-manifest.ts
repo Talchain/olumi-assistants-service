@@ -1773,6 +1773,44 @@ function observedValueOf(graph: Record<string, unknown>, nodeId: string): number
 }
 
 /**
+ * Do two quantities READ OFF THE SAME BRIEF state the same magnitude?
+ *
+ * ⚠ THE FRAME IS THE PRECONDITION, AND IT IS STRUCTURAL. Both operands must
+ * come from one `extractStatedQuantities` pass over one text, so they are
+ * already expressed in that extractor's own frame — percent literals as
+ * percentage points, money fully expanded, counts as written. Nothing here may
+ * ever be handed a producer-side `goal_constraints[].value`: the row holds
+ * `0.04` where the brief says `4%`, and comparing those is the frame error this
+ * module's own manifest test pins as an open, disclosed finding.
+ *
+ * Equivalence is deliberately NOT literal equality — `"4.0%"` and `"4%"` are one
+ * magnitude written two ways, and treating them as different is what let a
+ * genuine observation be withdrawn. It is also not bare numeric equality:
+ * `4%`, `4 people` and `£4` share a number and state nothing in common, so the
+ * kind must match, money must share its currency symbol, and a count must share
+ * its unit family (`sameUnitFamily`, so "month"/"months" agree).
+ *
+ * Dates and periods carry no magnitude at all (`value === null`); for those the
+ * only honest comparison left is what was written.
+ */
+function sameStatedQuantity(a: Quantity, b: Quantity): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.value === null || b.value === null) {
+    return (
+      a.value === b.value &&
+      a.literal.trim().toLowerCase() === b.literal.trim().toLowerCase()
+    );
+  }
+  if (!numbersEqual(a.value, b.value)) return false;
+  if (a.kind === "money") return a.unit === b.unit;
+  if (a.kind === "count") {
+    if (a.unit === null || b.unit === null) return a.unit === b.unit;
+    return sameUnitFamily(a.unit, b.unit);
+  }
+  return true;
+}
+
+/**
  * ⭐⭐ A STATED LIMIT SITTING IN THE FIELD FOR WHAT IS CURRENTLY TRUE.
  *
  * MEASURED, 14 Sep 2026, 11 fresh live drafts of one brief containing
@@ -1794,26 +1832,52 @@ function observedValueOf(graph: Record<string, unknown>, nodeId: string): number
  * `source_quote` is really in the brief, which is the fabrication gate —
  * an unlocatable quote classifies nothing and can never produce a stamp.
  *
- * ── ⛔ WHY THE SAFEGUARD IS A *LITERAL* TEST AND NOT A VALUE ONE ───────────
+ * ── ⛔ THE LIE-DIRECTION GUARD, AND WHY IT IS A *SUFFICIENCY* TEST ──────────
  * One predicate guards two OPPOSITE harms (trap 22b). Not stamping leaves a
  * limit masquerading as an observation (a GAP). Stamping wrongly tells a user
- * that a rate they actually measured is only a cap (a LIE). They cannot share
- * one window, so the lie direction gets its own, strictly stronger condition.
+ * that a rate they actually measured is only a cap (a LIE) — and because the
+ * consumer lets this stamp override provenance to `assumption`/`ai_inferred`,
+ * the lie direction WITHDRAWS A TRUE AUTHORSHIP CLAIM. They cannot share one
+ * window, so the lie direction gets its own, strictly stronger condition, and
+ * anything it cannot resolve resolves toward NOT demoting.
  *
  * The case is real: *"churn is currently 4% and we must keep it under 4%"*
  * states one magnitude twice, in two different roles, and the observed 0.04
- * then genuinely is an observation. The guard is that **no quantity written the
- * same way as one inside the row's quoted span may appear anywhere outside it**
- * — `"4%"` occurring twice refuses the stamp and leaves today's behaviour
- * exactly as it is.
+ * then genuinely is an observation.
  *
- * ⚠ THE COMPARISON IS DELIBERATELY ON THE LITERAL, NOT THE PARSED VALUE, AND
- * THAT IS THE POINT. `extractStatedQuantities` reads `"4%"` as **4**
- * (percentage points as written) while the producer's row holds **0.04**
- * (a `value_frame` of "level" with `unit` "fraction" — measured on all six live
- * drafts that carried a row). Any safeguard comparing those two numbers is
- * comparing different frames, and `numbersEqual` performs no frame conversion.
- * Literals carry their own frame, so the guard cannot be defeated by one.
+ * ⛔⛔ THE FIRST VERSION OF THIS GUARD ASKED THE WRONG QUESTION, AND AN
+ * INDEPENDENT CORPUS REFUTED IT (Codex, 14 Sep 2026, at `007e4265`, executed).
+ * It asked *"does a quantity written the SAME WAY as one inside the quoted span
+ * appear OUTSIDE it?"* — and reasoned that a literal comparison could not be
+ * defeated by a frame. Two cases it could not see, both of which withdrew a
+ * genuine user observation:
+ *
+ *   1. **Equivalent quantities have different literals.** *"monthly churn is
+ *      currently 4.0%, while keeping monthly churn under 4%"* — `"4.0%"` is not
+ *      the string `"4%"`, so no restatement was detected and the observation
+ *      was demoted. Literal identity is not quantity identity.
+ *   2. **Both roles can sit inside ONE legitimate quote.** When the row quotes
+ *      the whole sentence, there is no "outside" left to look in, so a guard
+ *      that only looks outside the span passes VACUOUSLY.
+ *
+ * Neither absence is proof that the observation was never stated. **The absence
+ * of an identical literal outside a quote is not evidence of anything.**
+ *
+ * ⭐ WHAT IT ASKS NOW — the sufficiency rule. Every magnitude the quoted span
+ * states must be stated EXACTLY ONCE in the whole brief. A second writing of it
+ * — inside the quote or outside it, spelt the same way or not — is an
+ * occurrence whose role this function has no evidence about, so the stamp is
+ * withheld. That subsumes the old test (an identical literal outside the span
+ * is a second occurrence) and closes both holes above, because the count is
+ * taken over the WHOLE brief and compares MAGNITUDES, not spellings.
+ *
+ * ⚠ AND IT STILL NEVER COMPARES 4 TO 0.04. Both operands of `sameStatedQuantity`
+ * are read off the SAME brief by `extractStatedQuantities`, so they share that
+ * one declared frame by construction. The producer's row holds **0.04** (a
+ * `value_frame` of "level" with `unit` "fraction" — measured on all six live
+ * drafts that carried a row) while the brief says `4%`, read as **4**; those two
+ * are never operands of the same comparison here, and `numbersEqual` performs no
+ * frame conversion that could rescue such a comparison.
  *
  * ── WHAT THIS DOES NOT CLAIM ───────────────────────────────────────────────
  * The `observed_state.value === row.value` test only holds where the two are
@@ -1856,13 +1920,17 @@ export function deriveStatedQuantityRoles(
       (q) => q.at >= span.start && q.at + q.literal.length <= span.end,
     );
     if (inSpan.length === 0) continue;
-    const spelt = new Set(inSpan.map((q) => q.literal.trim().toLowerCase()));
-    const restatedOutside = quantities.some(
-      (q) =>
-        !(q.at >= span.start && q.at + q.literal.length <= span.end) &&
-        spelt.has(q.literal.trim().toLowerCase()),
+
+    // SUFFICIENCY. Every magnitude the quoted span states must be stated
+    // exactly once in the WHOLE brief. `sameStatedQuantity` is reflexive, so a
+    // count above one means the same magnitude was written somewhere else too —
+    // inside this quote or outside it — and at least one of those writings may
+    // be the observation the node genuinely carries. Unresolved role evidence
+    // resolves toward NOT demoting.
+    const roleAmbiguous = inSpan.some(
+      (q) => quantities.filter((other) => sameStatedQuantity(q, other)).length > 1,
     );
-    if (restatedOutside) continue;
+    if (roleAmbiguous) continue;
 
     seen.add(span.nodeId);
     bindings.push({ node_id: span.nodeId, stated_role: "constraint" });
