@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  deriveGoalTargetCandidate,
   deriveGoalTargetFromLabel,
   goalLabelStatesUncarriedTarget,
 } from "../goal-label-target.js";
@@ -1048,6 +1049,21 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
     expect(stated("Reach £2.5m Revenue", ENT).ok).toBe(false);
     expect(stated("Cut Churn To 11%", ENT).ok).toBe(false);
     expect(stated("Reach £800k ARR", ENT).ok).toBe(false);
+  });
+
+  it("⭐ candidate values are in USER units, decided by the shared unit classifier — numeric controls for the five scanner units", () => {
+    // The inline `=== "%"` form is a pinned KNOWN-UNMIGRATED set
+    // (draft/records/__tests__/unit-scale-class.test.ts); this module asks the
+    // shared classifier instead. These controls pin that, for the ONLY units
+    // the scanner emits, the classifier answers the same question the inline
+    // form did: `%` scales 0.05 → 5; every other unit passes through unchanged.
+    const cand = (label: string, brief: string) => deriveGoalTargetCandidate("g", label, brief);
+    expect(cand("Hit 5% Churn", "We want to hit 5% churn.")).toMatchObject({ value_user_units: 5, unit: "%" });
+    expect(cand("Reach 24% Margin", "We want to reach 24% margin.")).toMatchObject({ value_user_units: 24, unit: "%" });
+    expect(cand("Reach £42k MRR", "We want to reach £42k MRR.")).toMatchObject({ value_user_units: 42_000, unit: "£" });
+    expect(cand("Reach $42k MRR", "We want to reach $42k MRR.")).toMatchObject({ value_user_units: 42_000, unit: "$" });
+    expect(cand("Reach €42k MRR", "We want to reach €42k MRR.")).toMatchObject({ value_user_units: 42_000, unit: "€" });
+    expect(cand("Reach 800 Customers", "We want 800 customers.")).toMatchObject({ value_user_units: 800, unit: "count" });
   });
 
   it("S14 ⛔ the five instances the round-4 comment listed, now asserted by name", () => {

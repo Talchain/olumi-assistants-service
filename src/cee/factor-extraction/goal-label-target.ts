@@ -197,6 +197,7 @@ import {
 } from "../../utils/magnitude-alphabet.js";
 import { TIME_UNIT_ALT } from "../compound-goal/extractor.js";
 import { TARGET_VERBS } from "../signals/brief-signals.js";
+import { classifyUnitScaleClass } from "../draft/records/unit-scale-class.js";
 import { resolveStatedGoalPairSpan } from "./index.js";
 
 /**
@@ -1079,8 +1080,18 @@ export interface GoalTargetCandidate {
   readonly reason: GoalLabelTargetRefusal | "governed";
 }
 
+/**
+ * The extractor convention stores percentages as FRACTIONS (0.05 for "5%");
+ * a candidate speaks to the user in USER units (5). The percent question is
+ * asked of the shared unit classifier rather than by an inline `=== "%"` —
+ * that inline form is a pinned KNOWN-UNMIGRATED set in
+ * `draft/records/__tests__/unit-scale-class.test.ts`, and this module must not
+ * grow it. For the five units the scanner emits (`£` `$` `€` `%` `count`) the
+ * classifier answers exactly the same question (`%` → percent; the rest →
+ * unknown), which the numeric controls in this module's tests pin.
+ */
 function toUserUnits(value: number, unit: string): number {
-  return unit === "%" ? value * 100 : value;
+  return classifyUnitScaleClass(unit) === "percent" ? value * 100 : value;
 }
 
 /** The first label quantity that occurs in the brief, with its first occurrence. */
