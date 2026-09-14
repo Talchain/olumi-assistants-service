@@ -30,10 +30,91 @@
  * (which still runs at commit as a safety net).
  */
 import { normaliseFactorValue } from '../../orchestrator-v5/tools/handlers/d1-shared/normalise-factor-value.js';
+import { OBSERVED_ROOT_SPELLINGS } from '../canonicalise-value-ops.js';
 import { log } from '../../utils/telemetry.js';
 
 type Dict = Record<string, unknown>;
-const SLASH_KEY_RE = /^data\/interventions\/(.+)$/;
+/**
+ * ⭐ THE RECOGNISER, DERIVED FROM THE ATOMICITY POSTCONDITION RATHER THAN GUESSED.
+ *
+ * This module previously used `/^data\/interventions\/(.+)$/` — ONE prefix
+ * family. The postcondition that judges whether an edit landed
+ * (`isInterventionSubtreeKey`, canonicalise-value-ops.ts) accepts THREE:
+ * `interventions/*`, `data/interventions/*` and `observed_state/interventions/*`,
+ * on either separator. Every spelling in that gap was gathered by nothing, left
+ * on the node verbatim, stripped by the GraphV3 parse, and then correctly
+ * refused by the atomicity guard as OPERATION_DID_NOT_LAND — behind user-facing
+ * copy saying "try again in a moment". The failure is DETERMINISTIC, so that
+ * retry cannot succeed: the same phrasing yields the same op spelling every
+ * time. Measured live on staging, 14 Sep 2026: 6 of 12 op spellings refused.
+ *
+ * ⚠ FOUR VERBATIM COPIES OF THE OLD REGEX REMAIN, each with the same narrowness:
+ * `cee/draft/records/option-magnitude-census.ts:72`,
+ * `orchestrator-v5/context/baseline-override-reach.ts:50`,
+ * `orchestrator-v5/normalise-option-interventions.ts:74` (a near-twin writer,
+ * gather at :175 and sweep at :420) and
+ * `orchestrator-v5/context/intervention-controlled-drivers.ts:41`.
+ * They are NOT changed here: only this module's narrowness is proven to cause a
+ * live refusal, and widening four unproven readers mid-incident trades a
+ * measured fix for an unmeasured one. The predicates below are exported so a
+ * follow-up adopts them rather than inventing a sixth spelling.
+ */
+function interventionKeySegments(key: string): readonly string[] {
+  return key.split(/[/.]/).filter((s) => s.length > 0);
+}
+
+/**
+ * Index of the `interventions` segment when `key` is a FLAT intervention-subtree
+ * key, else `-1`.
+ *
+ * ⚠ THE `length < 2` GUARD IS LOAD-BEARING AND IS NOT A TIDY-UP. Bare
+ * `interventions` IS the canonical bundle key, and the postcondition's
+ * `isInterventionSubtreeKey('interventions')` returns TRUE for it. The promotion
+ * sweep below runs AFTER `node.interventions = bundle`, so a predicate that
+ * accepted the bare key would delete the bundle this module has just written.
+ */
+function interventionRootIndex(key: string): number {
+  const segments = interventionKeySegments(key);
+  if (segments.length < 2) return -1;
+  if (segments[0] === 'interventions') return 0;
+  if (OBSERVED_ROOT_SPELLINGS.has(segments[0]!) && segments[1] === 'interventions') return 1;
+  return -1;
+}
+
+/**
+ * A flat intervention-subtree key at ANY depth — the promotion sweep's and the
+ * intent detector's predicate. The sweep must clear every verbatim spelling once
+ * the canonical bundle is written, including the deeper ones
+ * {@link parseFlatInterventionKey} declines to gather.
+ */
+export function isFlatInterventionKey(key: string): boolean {
+  return interventionRootIndex(key) >= 0;
+}
+
+/**
+ * The factor id a flat intervention key targets, or `undefined` when the key is
+ * not one this encoder can safely encode.
+ *
+ * ⚠ EXACTLY ONE TRAILING SEGMENT — the second, worse defect fixed here. The old
+ * capture group was `(.+)`, so `data/interventions/<fac>/value` captured the
+ * factor id as `"<fac>/value"`: an intervention keyed on a factor that does not
+ * exist. The canonical bundle then DIFFERED from the pre-edit one,
+ * `batchFullyLanded` returned TRUE, and the turn reported the edit APPLIED while
+ * the real factor's value never moved. A silent false success about saved data
+ * is worse than an honest refusal.
+ *
+ * Deeper paths are FIELD-level writes for which this encoder has no safe
+ * encoding (the served edit prompt teaches whole-object patches, not field
+ * updates). Returning `undefined` leaves them to the atomicity guard, which
+ * refuses them honestly. They are a KNOWN-DROPPED set, pinned by name in the
+ * spec so the suite REDs if that set grows OR shrinks.
+ */
+export function parseFlatInterventionKey(key: string): string | undefined {
+  const i = interventionRootIndex(key);
+  if (i < 0) return undefined;
+  const rest = interventionKeySegments(key).slice(i + 1);
+  return rest.length === 1 ? rest[0] : undefined;
+}
 
 /** Raw intervention recovered from any location, pre-encoding. */
 interface RawIntervention {
@@ -99,11 +180,11 @@ function gatherRawInterventions(node: Dict, factorTargets: readonly string[]): M
     }
   }
 
-  // Source 2: slash-keyed flat entries `data/interventions/<fac>`.
+  // Source 2: FLAT intervention-subtree entries, in EVERY spelling the
+  // atomicity postcondition accepts — not only `data/interventions/<fac>`.
   for (const [k, v] of Object.entries(node)) {
-    const m = SLASH_KEY_RE.exec(k);
-    if (!m) continue;
-    const fac = m[1]!;
+    const fac = parseFlatInterventionKey(k);
+    if (fac === undefined) continue;
     if (out.has(fac)) continue;
     out.set(fac, toRawIntervention(v));
   }
@@ -403,7 +484,8 @@ export function encodeOptionInterventionsForEdit<T>(
         if (Object.keys(node.data as Dict).length === 0) delete node.data;
       }
       for (const k of Object.keys(node)) {
-        if (SLASH_KEY_RE.test(k)) delete node[k];
+        // NEVER matches bare `interventions` — see `interventionRootIndex`.
+        if (isFlatInterventionKey(k)) delete node[k];
       }
       delete node.unit;
       delete node.raw_value;
@@ -480,9 +562,9 @@ function addPayloadRequestsIntervention(value: Dict): boolean {
     if (isPlainObject(di) && Object.keys(di as Dict).length > 0) return true;
     if ('interventions' in (data as Dict) && di === null) return true;
   }
-  // Slash-keyed flat entries `data/interventions/<fac>`.
+  // Flat intervention-subtree entries, every accepted spelling.
   for (const k of Object.keys(value)) {
-    if (SLASH_KEY_RE.test(k)) return true;
+    if (isFlatInterventionKey(k)) return true;
   }
   // Node-level scalar intent (SHAPE 2): a unit/raw_value/value smeared on the option.
   if (finiteNum(value.raw_value) !== undefined || finiteNum(value.value) !== undefined || typeof value.unit === 'string') {
