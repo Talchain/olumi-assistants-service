@@ -86,6 +86,7 @@ import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
 import { buildGoalTargetAskPending } from '../goal-target/decide-goal-target-ask.js';
+import { isDirectionClarificationId } from '../../cee/compound-goal/direction-gate.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   attachModelVersionMutationReceipt,
@@ -973,10 +974,78 @@ export async function dispatchDraftGraph(
      * pendings survive the commit — true, and the state it documents is the one
      * that breaks the feature. Answer-heard is the property; array contents are not.
      *
-     * The readiness ask wins because it is already the turn's subject; the goal
-     * target surfaces on a later turn once that resolves.
+     * The readiness ask wins because it is already the turn's subject.
+     *
+     * ⚠⚠ THIS COMMENT USED TO SAY "the goal target surfaces on a later turn
+     * once that resolves". DERIVED AT THE CALL GRAPH 14 SEP 2026 AND FALSE.
+     * `buildGoalTargetAskPending` has exactly TWO call sites: this one, and
+     * `turn-executor.ts`'s receipt-swap repair, which fires only when an
+     * assistant claim of a registered target is not backed by the commit
+     * graph. A follow-up turn does not re-draft (the continuation guard), so
+     * a candidate withheld here is DROPPED for the session, not deferred.
+     * The exclusion is still right — an unanswerable question is worse than
+     * an unasked one — but it is a DROP, and a reader planning work on this
+     * seam needs the true cost rather than a reassurance nothing implements.
      */
-    const goalTargetAsk = askedEffect === null && draftGraphForCommit != null && postDraftGraphHash !== null
+    /**
+     * ⛔ A PROMOTED STATED-LIMIT CLARIFICATION IS ALREADY THIS TURN'S QUESTION.
+     *
+     * The served prompt's own rule is "ASK. Zero or one question per turn."
+     * A founder's first post-draft turn on staging carried FOUR at once — a
+     * limit to confirm, this amount question, an options-you-set-aside card
+     * and a calibration card — and he answered none of them. The direction
+     * clarification is PROMOTED to its own slot and never drops (it sits
+     * outside `assembleSectionedNarrative`'s ladder, so no rung can shed it),
+     * so when one is present the turn already puts a question to the person.
+     *
+     * Identified BY ID PREFIX through the producer's own exported predicate,
+     * the same import `buildPostDraftNarrative` uses — never a text predicate
+     * another item could satisfy (trap 19), never a second copy of the prefix
+     * (trap 12).
+     *
+     * ⚠⚠ THIS IS NOT THE SAME RULE AS THE `askedEffect` CONJUNCT BESIDE IT,
+     * AND FUSING THEM WOULD BE TRAP 21. That one is a CORRECTNESS rule: two
+     * live pendings make "£20k" unanswerable, because
+     * `findSoleLiveGoalTargetPending` counts every live bare-number claimant.
+     * A direction clarification arms NO pending — it reaches the user as
+     * prose — so it is not a claimant and it does not make this ask
+     * unanswerable. Measured, not assumed: the draft turn's pendings are
+     * exactly `[askedEffect, goalTargetAsk]`. This conjunct answers a
+     * different question under a similar name: how many things the PERSON is
+     * asked in one turn. Both answers happen to be "stand down"; the reasons
+     * are not interchangeable and a later edit to one must not be copied to
+     * the other.
+     *
+     * ⚠ AND IT IS A DROP, NOT A DEFERRAL — see the correction above. The
+     * neighbouring exclusion already pays that cost; this widens the
+     * population that pays it. The trade is deliberate: the limit the user
+     * actually stated in their brief outranks a target we can ask for again
+     * whenever they next state one.
+     *
+     * ⚠ SHAPE-GUARDED, AND NOT DEFENSIVELY — `package.ts:395-417` records a
+     * null `strengthen_items` entry as an OBSERVED input class, not a
+     * theoretical one (`normalise-legacy-coaching.ts:61` repairs non-object
+     * entries WITHOUT removing them), and BOTH other consumers of this field
+     * guard the shape before reading `.id`. `extractStrengthenItems` does
+     * filter nulls on today's producer path, so this site is not reachable
+     * through it — the guard is here because the cost of being wrong is the
+     * whole turn: a throw inside this handler aborts the draft commit, and
+     * the sibling's own comment names the same hazard ("the guard would have
+     * destroyed what it guards"). Measured: without `?.` a null entry throws
+     * `Cannot read properties of null`.
+     *
+     * ⚠ DERIVED BEFORE THE NARRATIVE IS BUILT, so it cannot observe the
+     * narrative's content gate rejecting a clarification. The residue is
+     * one-directional and safe: it can only WITHHOLD an ask, never add one,
+     * so it fails toward fewer questions and can never reconstruct the
+     * four-question turn. Widening it to the narrative's accepted set would
+     * mean building the narrative before the commit's pendings, which is a
+     * reordering of this handler, not a conjunct.
+     */
+    const hasPromotedDirectionClarification = draftResult.strengthenItems.some((item) =>
+      isDirectionClarificationId((item as { id?: unknown } | null | undefined)?.id),
+    );
+    const goalTargetAsk = askedEffect === null && !hasPromotedDirectionClarification && draftGraphForCommit != null && postDraftGraphHash !== null
       ? buildGoalTargetAskPending({
           candidate: draftResult.goalTargetCandidate,
           graphNodes: draftGraphForCommit.nodes,
