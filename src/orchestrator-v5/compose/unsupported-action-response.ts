@@ -317,10 +317,20 @@ function textPromptChip(category: HandlerCategory, hasAnalysis: boolean): Sugges
       message: 'I want to run the analysis first.',
     };
   }
+  // ⭐ THE SAME RULE AS THE LIMB ABOVE, ONE LEVEL DOWN: a chip must not only
+  // avoid promising what the click cannot deliver, it must SAY SOMETHING THE
+  // PRODUCT CAN ROUTE. This message used to be "Let's try a different
+  // approach." — a sentence about how the user will speak next, naming nothing.
+  // Clicking it re-submits that text as a fresh turn, and the router has no
+  // referent, so the product refuses the move it just offered (measured on the
+  // sibling edit-rejection path, staging 2026-09-14, scenario 9677de7d).
+  // "Show me what's in my model." routes on every scenario state and is the
+  // concrete follow-up `buildText`'s own closing sentence invites.
+  // Pinned in `compose/recovery-chip-actionability.test.ts`.
   return {
     id: chipId('prompt', `unsupported_${category}`),
-    label: 'Ask a different question',
-    message: "Let's try a different approach.",
+    label: "Show what's in my model",
+    message: "Show me what's in my model.",
   };
 }
 

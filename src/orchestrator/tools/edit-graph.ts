@@ -4644,6 +4644,33 @@ export function mapCodeToRejectionReason(code?: EditRejectionCode): EditRejectio
  * true split/continuation. The user-facing prose stays banned-token clean
  * (no operation counts / schema language — see edit-rejection-text.test.ts).
  */
+/**
+ * Recovery chips for the over-cap split refusal, exported so the no-dead-end
+ * rule can be pinned as an EXACT SET (see
+ * `tests/unit/orchestrator-v5/compose/recovery-chip-actionability.test.ts`).
+ *
+ * ⭐ NAMES A MOVE, NOT A MANNER OF SPEAKING. The first prompt used to read
+ * "Let's start with the single most important change." — which tells the
+ * product nothing it can act on, because only the user knows which change that
+ * is. Clicking it re-submits that sentence as a fresh user turn and the router
+ * has no referent, so the product refuses the move it just offered. Measured on
+ * the sibling edit-rejection path (staging 2026-09-14, scenario 9677de7d,
+ * request 809d0ee2). The replacement is an INSTRUCTION over the batch the
+ * product is already holding.
+ */
+export const OVER_CAP_SPLIT_CHIPS: readonly SuggestedAction[] = [
+  {
+    label: 'Start with the key change',
+    prompt: 'Make just the most important part of that change and leave the rest for now.',
+    role: 'facilitator',
+  },
+  {
+    label: 'Split into smaller edits',
+    prompt: 'Help me break this into a few smaller edits.',
+    role: 'challenger',
+  },
+];
+
 function buildOverCapSplitResult(
   reason: string,
   operations: PatchOperation[],
@@ -4680,18 +4707,7 @@ function buildOverCapSplitResult(
   const assistantText =
     "That's more than I can change in a single step. Let's do it in a couple of " +
     'smaller passes — tell me the change that matters most and we can take it from there.';
-  const suggestedActions: SuggestedAction[] = [
-    {
-      label: 'Start with the key change',
-      prompt: "Let's start with the single most important change.",
-      role: 'facilitator',
-    },
-    {
-      label: 'Split into smaller edits',
-      prompt: 'Help me break this into a few smaller edits.',
-      role: 'challenger',
-    },
-  ];
+  const suggestedActions: SuggestedAction[] = [...OVER_CAP_SPLIT_CHIPS];
 
   return {
     blocks: [block],
