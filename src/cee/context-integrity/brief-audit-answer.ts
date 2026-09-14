@@ -447,8 +447,28 @@ export function composeBriefAuditAnswer(manifest: NotModelledManifest): string |
   // alongside what was never looked at.
   paragraphs.push(
     `This is not a complete account of what was left out. It only covers figures I can ` +
-      `locate in your text: it does not look at ${humaniseList(searchExclusions(manifest))}, ` +
-      `and it cannot see ${humaniseClasses(manifest.not_tracked)}. ` +
+      // ⛔ THE `cannot see` ENUMERATION IS CUT (14 Sep 2026). It rendered six
+      // underscore-to-space identifiers — "stated confidence and self flagged
+      // weakness", "statements the drafting model did not report discarding" —
+      // as 37 of this paragraph's 85 words, restating in machine prose a scope
+      // the ten words before it have already set ("It only covers figures I can
+      // locate in your text"). The founder's reply to it was that the product's
+      // useful output is buried; this was the wall.
+      //
+      // ⭐ WHAT STOPS A FALSE BELIEF SURVIVES, VERBATIM, IN THE SAME SENTENCE:
+      // "This is not a complete account of what was left out" (the report is not
+      // exhaustive) and "It only covers figures I can locate in your text" (its
+      // subject is figures). A user told the account covers figures has no basis
+      // to conclude a colleague's dissenting proposal was weighed.
+      //
+      // ⚠ THE `does not look at` CLAUSE STAYS — 12 words and ACTIONABLE: it
+      // tells the user how to make an uncounted figure visible (give it a unit).
+      // Cutting that would trade noise for a gap.
+      //
+      // The honesty RECORD is untouched: NOT_TRACKED_CLASSES stays in
+      // not-modelled-manifest.ts, stays asserted by execution, and stays on the
+      // wire at routes/assist.v1.scenario-graph.ts. Only the rendering goes.
+      `locate in your text: it does not look at ${humaniseList(searchExclusions(manifest))}. ` +
       `If something matters and is missing, tell me and I will add it.`,
   );
 
@@ -644,21 +664,6 @@ function joinWithOverflow(values: readonly string[], cap: number): string {
   if (values.length <= cap) return values.join(", ");
   const shown = values.slice(0, cap).join(", ");
   return `${shown}, and ${values.length - cap} more (these are the first ${cap} in the order you wrote them, not a ranking)`;
-}
-
-/**
- * Render `not_tracked` identifiers as English.
- *
- * ⚠ DERIVED, NOT MAPPED (CLAUDE.md trap 12). A hand-written identifier→prose
- * table would be a fifth mirror in a service that has paid for four; a class
- * added to `NOT_TRACKED_CLASSES` would then be silently absent from this
- * sentence, quietly making the caveat narrower than the truth. Underscores to
- * spaces is total over the identifier vocabulary and cannot drift.
- */
-function humaniseClasses(classes: readonly string[]): string {
-  const phrases = classes.map((c) => c.replace(/_/g, " "));
-  if (phrases.length === 0) return "everything it does not track";
-  return humaniseList(phrases);
 }
 
 /** Join a list in English, with "or" before the last item. */

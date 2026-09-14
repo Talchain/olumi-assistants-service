@@ -334,6 +334,41 @@ export const FORBIDDEN_USER_FACING_PHRASES: readonly RegExp[] = [
   // 2.655 removed at the producer. `node/edge operations` in the edit prompts
   // is model-facing and is not scanned by this guard.
   /\b(?:node|edge)\s+op(?:eration)?s?\b/i,
+
+  // ⭐⭐ THIRD-PERSON REFERENCE TO THE READER — the model's own reasoning shipped
+  // as the reply, witnessed on a founder's staging session (14 Sep 2026).
+  //
+  // What reached the user, verbatim:
+  //   "The user is naming their own values for the two unset factors: feature
+  //    release quality gets set to 'low' in the first line, but then the second
+  //    line seems to contradict , actually reading carefully, both lines have the
+  //    identical label ... I need to clarify rather than guess which factor
+  //    'high' applies to."
+  //
+  // ⛔ THIS GUARD RAN ON THAT TURN AND PASSED IT. Every entry above is a
+  // PROPOSITION ("I haven't applied any changes"), so the list could only ever
+  // catch a specific false sentence. The defect here is not a proposition, it is
+  // a REGISTER: Olumi addresses the reader as "you", always, and text that talks
+  // ABOUT the reader in the third person is by construction not addressed to
+  // them. One rule covers the whole class rather than the sentence that happened
+  // to leak.
+  //
+  // FALSE-POSITIVE SWEPT BEFORE ADDING, with a contrast control in the same run:
+  // 408 assistant-facing strings across 49 fixture corpora under `src/`, plus 88
+  // from LIVE staging response bodies captured today (walk-b1-131836 and the
+  // 14 Sep A/B) — 496 strings, TARGET 0 hits, CONTRAST ("you") 69 hits. The probe
+  // demonstrably sees assistant prose and this phrase is absent from all of it.
+  //
+  // ⚠ SCOPE, stated rather than implied. This is CONTAINMENT, not the cure, and
+  // the cure is not in this file. A leak phrased "they are naming their own
+  // values" is not caught, and a phrase list cannot bound a register — that is
+  // trap 12's hand-maintained mirror and this entry is one. The root fix is that
+  // reasoning must not arrive in the content channel at all; this stops the
+  // measured instance reaching a person while that is done properly.
+  //
+  // `\bthe user\b` also covers "the user's" — the apostrophe is a non-word
+  // character, so the trailing boundary matches.
+  /\bthe\s+user\b/i,
 ];
 
 /**
