@@ -43,6 +43,26 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
   // what actually happened instead. Derived at the mint site; never re-inferred.
   ctx.enricherMintedGoalIds = new Set(enrichmentResult.goalThresholdsMinted ?? []);
 
+  // ROUND 6 (CEE #1328) — the goal-label CANDIDATE, carried to the ONE reader
+  // (the orchestration seam, which decides whether to ask the user through
+  // `elicit_goal_target`). One name, one hop. ⚠ This stage discards the
+  // enricher's `warnings`; a field is carried only by being named here, which
+  // is why the arrival test in `__tests__/enrich-goal-target-candidate-arrival.test.ts`
+  // is the deliverable and not a nicety.
+  ctx.goal_target_candidate = enrichmentResult.goal_target_candidate;
+  if (ctx.goal_target_candidate !== undefined) {
+    log.info(
+      {
+        event: "cee.enrich.goal_target_candidate_carried",
+        request_id: ctx.requestId,
+        goal_node_id: ctx.goal_target_candidate.goal_node_id,
+        binding: ctx.goal_target_candidate.binding,
+        reason: ctx.goal_target_candidate.reason,
+      },
+      "Goal target candidate carried to the stage context (no write)",
+    );
+  }
+
   log.info({
     stage: "2_factor_enrichment",
     node_count: enrichedGraph.nodes.length,

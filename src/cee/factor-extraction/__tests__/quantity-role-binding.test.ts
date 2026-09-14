@@ -135,14 +135,27 @@ describe("quantity identity at the real enrichment write", () => {
     //
     // The case itself is unchanged — it is about ROLE BINDING, that the MRR amount
     // must not stamp the perception factor, and it still does not (asserted above).
-    expect(node(result.graph, GOAL_ID)).toMatchObject({
-      goal_threshold_raw: 20000,
-      goal_threshold_unit: "£",
-      goal_threshold_cap: 25000,
-      goal_threshold_frame: "level",
+    //
+    // ⚠ ROUND 6 (CEE #1328, 14 Sep 2026) — CHANGED AGAIN, DELIBERATELY AND
+    // DISCLOSED. The #1328 mint asserted here was correct for THIS brief, but no
+    // string rule could keep it from also minting "We rejected the proposal to
+    // reach £64k MRR" (Codex, PR38 5657776136). The label route therefore no
+    // longer writes: it yields a CANDIDATE the orchestration seam asks the user
+    // about, and only the user's answer writes through the canonical path. So
+    // the quad is honestly EMPTY here, and the candidate — pinned by IDENTITY
+    // and EXACT VALUE — is what a regression to either the old mint or to
+    // silence would RED against.
+    expect(node(result.graph, GOAL_ID).goal_threshold_raw).toBeUndefined();
+    expect(node(result.graph, GOAL_ID).goal_threshold).toBeUndefined();
+    expect(result.goal_target_candidate).toEqual({
+      goal_node_id: GOAL_ID,
+      value_user_units: 20000,
+      unit: "£",
+      label_span: "£20k",
+      brief_span: "£20k",
+      binding: "governed",
+      reason: "governed",
     });
-    // The normalisation invariant re-derived in place, not copied: 20000 / 25000.
-    expect(node(result.graph, GOAL_ID).goal_threshold).toBe(20000 / 25000);
   });
 
   it("positive non-pricing counterpart: an identified hiring budget retains its own currency scale", async () => {

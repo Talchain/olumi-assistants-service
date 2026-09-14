@@ -95,12 +95,17 @@
  * doctrine ("a wrong threshold is a confident lie, an absent one is a gap, and
  * a lie outranks a gap") that is the wrong side.
  *
- * ✅ CLOSED IN ROUND 5 (CEE #1328, 13 Sep 2026 — see the ROUND 5 block below
- * `sameQuantity`). Attestation-by-equality is now followed by a ROLE rule: an
- * occurrence mints only when a target construction in the USER'S words governs
- * it and binds its metric to the label, or lies inside the user's own goal
- * sentence; everything else withholds with a named reason. The measurements
- * above are kept as the record of what this module used to do.
+ * ✅ CLOSED IN ROUND 6 (CEE #1328, 14 Sep 2026 — see the ROUND 6 block at the
+ * end of this file) BY REMOVING THE WRITE, NOT BY A BETTER RULE. Round 5 added
+ * a ROLE rule after attestation-by-equality (the ROUND 5 block below
+ * `sameQuantity`); it caught much, and sixteen defects later Codex's
+ * "We rejected the proposal to reach £64k MRR." still returned `ok: true`. The
+ * round-five tweak was run in advance and oscillated. So the role rule now
+ * decides only HOW WELL the user's words bind the figure (`governed` vs
+ * `present_unbound`), and `deriveGoalTargetCandidate` hands that to the
+ * orchestration seam as a CANDIDATE to ask the user about. Nothing on this
+ * route writes `goal_threshold` any more. The measurements above are kept as
+ * the record of what this module used to do.
  *
  * A second instance, same root, also open: a BARE YEAR attests a count —
  * label "Sign 2026 Enterprise Accounts" + brief "Our plan runs to 2026." mints
@@ -1033,4 +1038,105 @@ export function goalLabelStatesUncarriedTarget(
   return deriveGoalTargetFromLabel(node.label, brief, {
     goalSourceQuote: typeof quote === "string" ? quote : undefined,
   }).ok;
+}
+
+/* ===========================================================================
+ * ROUND 6 (CEE #1328, 14 Sep 2026) — A LABEL-DERIVED FIGURE IS A CANDIDATE,
+ * NEVER A WRITE.
+ *
+ * Codex's disposition (PR38 5657776136): the unsafe cases return `ok: true`
+ * ("We rejected the proposal to reach £64k MRR." mints 64000 on both routes),
+ * so a record on the REFUSAL branch can never intercept them, and no further
+ * string rule settles which occurrences are safe (the round-five tweak was run
+ * in advance and oscillates). The exit is the product's own doctrine: a target
+ * the model read from its own label is a SUGGESTION the user is asked about —
+ * never authority to write `goal_threshold`.
+ *
+ * So this module now yields a CANDIDATE: which figure the label names, where
+ * the brief says it, and how well the user's words bind it. The consumer is the
+ * orchestration seam (`elicit_goal_target`, whose pending record carries NO
+ * value field — the user must supply the amount, and the canonical writer
+ * writes what THEY said). A wrong candidate can only ever be a prompt to think.
+ *
+ * No figure in the brief ⇒ no candidate. Nothing here mints.
+ * ========================================================================= */
+
+/** How well the user's own words bind the figure the label names. */
+export type GoalTargetCandidateBinding = "governed" | "present_unbound";
+
+export interface GoalTargetCandidate {
+  readonly goal_node_id: string;
+  /** In USER units (20 for "20%", 20000 for "£20k") — never the extractor's fraction. */
+  readonly value_user_units: number;
+  /** `£` / `$` / `€` / `%` / `count`. */
+  readonly unit: string;
+  /** The exact span of the goal LABEL the figure was read from. */
+  readonly label_span: string;
+  /** The exact span of the BRIEF where the figure occurs (the first governed occurrence when governed). */
+  readonly brief_span: string;
+  readonly binding: GoalTargetCandidateBinding;
+  /** `"governed"`, or the named reason the figure is present but unbound. */
+  readonly reason: GoalLabelTargetRefusal | "governed";
+}
+
+function toUserUnits(value: number, unit: string): number {
+  return unit === "%" ? value * 100 : value;
+}
+
+/** The first label quantity that occurs in the brief, with its first occurrence. */
+function firstAttestedLabelQuantity(
+  goalLabel: string,
+  briefText: string,
+): { label: ScannedQuantity; brief: ScannedQuantity } | undefined {
+  const briefQuantities = scanQuantities(briefText).filter((q) => !q.temporal);
+  for (const lq of scanQuantities(goalLabel).filter((q) => !q.temporal)) {
+    const occ = briefQuantities.find((bq) => sameQuantity(bq, lq));
+    if (occ) return { label: lq, brief: occ };
+  }
+  return undefined;
+}
+
+/**
+ * The candidate the goal label names, or `undefined` when the label names no
+ * figure the brief contains (a model invention is not a candidate either).
+ */
+export function deriveGoalTargetCandidate(
+  goalNodeId: string,
+  goalLabel: string | undefined | null,
+  brief: string | undefined | null,
+  context: GoalLabelTargetContext = {},
+): GoalTargetCandidate | undefined {
+  const r = deriveGoalTargetFromLabel(goalLabel, brief, context);
+  if (r.ok) {
+    return {
+      goal_node_id: goalNodeId,
+      value_user_units: toUserUnits(r.target.value, r.target.unit),
+      unit: r.target.unit,
+      label_span: r.target.matchedText,
+      brief_span: r.target.briefQuote,
+      binding: "governed",
+      reason: "governed",
+    };
+  }
+  if (
+    r.refusal === "no_goal_label" ||
+    r.refusal === "no_quantity_in_label" ||
+    r.refusal === "quantity_not_attested"
+  ) {
+    return undefined;
+  }
+  const att = firstAttestedLabelQuantity(
+    typeof goalLabel === "string" ? goalLabel : "",
+    canonicalise(typeof brief === "string" ? brief : ""),
+  );
+  if (!att) return undefined;
+  return {
+    goal_node_id: goalNodeId,
+    value_user_units: toUserUnits(att.label.value, att.label.unit),
+    unit: att.label.unit,
+    label_span: att.label.matchedText,
+    brief_span: r.briefQuote ?? att.brief.matchedText,
+    binding: "present_unbound",
+    reason: r.refusal,
+  };
 }

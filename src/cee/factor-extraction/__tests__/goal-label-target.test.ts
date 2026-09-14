@@ -253,7 +253,12 @@ describe("goalLabelStatesUncarriedTarget — the conservation predicate", () => 
 });
 
 describe("the draft path mints the founder's target", () => {
-  it("mints goal_threshold from the goal label for the founder brief", async () => {
+  it("ROUND 6: derives a CANDIDATE from the goal label for the founder brief — and writes NOTHING", async () => {
+    // ⚠ DELIBERATE BEHAVIOUR CHANGE, reported not hidden (Codex, PR38
+    // 5657776136): until round 6 this case asserted a MINT of raw 30000. The
+    // label is model-authored and no string rule could tell a stated target
+    // from a rejected proposal, so the label route now yields a candidate the
+    // orchestration seam asks the user about; only the user's answer writes.
     const res = await enrichGraphWithFactorsAsync(founderGraph(), FOUNDER_BRIEF, {
       minConfidence: 0.6,
       maxFactors: 10,
@@ -261,18 +266,24 @@ describe("the draft path mints the founder's target", () => {
     const goal: any = res.graph.nodes.find((n: any) => n.kind === "goal");
 
     expect(goal.id).toBe("552bd1c0");
-    expect(goal.goal_threshold_raw).toBe(30000);
-    expect(goal.goal_threshold_unit).toBe("£");
-    // Normalised against the SAME cap the chat path would resolve, so the two
-    // registration paths score one target identically (ROADMAP 1.18).
-    expect(typeof goal.goal_threshold_cap).toBe("number");
-    expect(goal.goal_threshold).toBeCloseTo(30000 / goal.goal_threshold_cap, 12);
-    expect(res.goalThresholdsMinted).toEqual(["552bd1c0"]);
-    // The conservation failure the bundle shipped is closed for this node.
-    expect(goalLabelStatesUncarriedTarget(goal, FOUNDER_BRIEF)).toBe(false);
+    expect(goal.goal_threshold_raw).toBeUndefined();
+    expect(goal.goal_threshold).toBeUndefined();
+    expect(res.goalThresholdsMinted).toEqual([]);
+    expect(res.goal_target_candidate).toEqual({
+      goal_node_id: "552bd1c0",
+      value_user_units: 30000,
+      unit: "£",
+      label_span: "£30k",
+      brief_span: "£30k",
+      binding: "governed",
+      reason: "governed",
+    });
+    // The target is still UNCARRIED on the node — that is now the honest state
+    // until the user answers, and the predicate says so.
+    expect(goalLabelStatesUncarriedTarget(goal, FOUNDER_BRIEF)).toBe(true);
   });
 
-  it("mints on the v4-complete-skip path too — the same brief, a draft with full interventions", async () => {
+  it("ROUND 6: derives the candidate on the v4-complete-skip path too — the same brief, a draft with full interventions", async () => {
     // The skip fires on every well-formed draft (ROADMAP 2.281), so a fix that
     // only reached the enrichment loop would still ship dark for real drafts.
     const graph = founderGraph();
@@ -283,10 +294,12 @@ describe("the draft path mints the founder's target", () => {
     const res = await enrichGraphWithFactorsAsync(graph, FOUNDER_BRIEF, { minConfidence: 0.6 });
     const goal: any = res.graph.nodes.find((n: any) => n.kind === "goal");
 
-    expect(res.extractionMode).toBe("v4_factor_skip_goal_minted");
-    expect(goal.goal_threshold_raw).toBe(30000);
-    expect(goal.goal_threshold_unit).toBe("£");
-    expect(res.goalThresholdsMinted).toEqual(["552bd1c0"]);
+    // ROUND 6: nothing is written on this path either, so the mode is an
+    // honest COMPLETE skip — and the candidate still arrives.
+    expect(res.extractionMode).toBe("v4_complete_skip");
+    expect(goal.goal_threshold_raw).toBeUndefined();
+    expect(res.goalThresholdsMinted).toEqual([]);
+    expect(res.goal_target_candidate).toMatchObject({ goal_node_id: "552bd1c0", value_user_units: 30000, unit: "£", binding: "governed" });
   });
 
   it("mints NOTHING when the goal label's figure is not in the brief", async () => {
@@ -298,6 +311,9 @@ describe("the draft path mints the founder's target", () => {
     expect(goal.goal_threshold).toBeUndefined();
     expect(goal.goal_threshold_raw).toBeUndefined();
     expect(res.goalThresholdsMinted).toEqual([]);
+    // …and NO candidate either: a figure the brief never states is a model
+    // invention, and an invention is not something to ask the user about.
+    expect(res.goal_target_candidate).toBeUndefined();
   });
 
   it("does not overwrite a threshold a factor route already minted", async () => {
@@ -312,11 +328,13 @@ describe("the draft path mints the founder's target", () => {
 
     expect(goal.goal_threshold).toBe(0.42);
     expect(res.goalThresholdsMinted).toEqual([]);
+    // FIRST WRITER WINS one level up: no candidate on a node that carries a target.
+    expect(res.goal_target_candidate).toBeUndefined();
   });
 });
 
 describe("the minted target SURVIVES Stage 4b (threshold sweep)", () => {
-  it("is not stripped by the sweep that exists to delete fabricated thresholds", async () => {
+  it("ROUND 6: a candidate is not on the graph, so the sweep has nothing to strip and nothing to protect", async () => {
     // A mint one stage later deletes is indistinguishable from no mint at all
     // (CLAUDE.md trap 16-inverse: reachable inside one function is not reachable
     // in the pipeline). So the two stages are run in their real order, with the
@@ -329,21 +347,23 @@ describe("the minted target SURVIVES Stage 4b (threshold sweep)", () => {
       minConfidence: 0.6,
       maxFactors: 10,
     });
-    expect(res.goalThresholdsMinted).toEqual(["552bd1c0"]);
+    // ROUND 6: the label route mints nothing, so the sweep has nothing of ours
+    // to protect or to strip; the candidate is the only artefact, and it is
+    // not on the graph at all.
+    expect(res.goalThresholdsMinted).toEqual([]);
+    expect(res.goal_target_candidate).toMatchObject({ goal_node_id: "552bd1c0", binding: "governed" });
 
     const ctx: any = {
       graph: res.graph,
       requestId: "goal-label-target-sweep",
-      // Exactly the derivation at `stages/enrich.ts` — never re-inferred here.
       enricherMintedGoalIds: new Set(res.goalThresholdsMinted ?? []),
       nodeRenames: new Map(),
     };
     await runStageThresholdSweep(ctx);
 
     const goal: any = ctx.graph.nodes.find((n: any) => n.kind === "goal");
-    expect(goal.goal_threshold_raw).toBe(30000);
-    expect(goal.goal_threshold_unit).toBe("£");
-    expect(goal.goal_threshold_frame).toBeDefined();
+    expect(goal.goal_threshold_raw).toBeUndefined();
+    expect(goal.goal_threshold).toBeUndefined();
     expect(ctx.thresholdSweepTrace.strips_applied).toBe(0);
   });
 });
@@ -708,17 +728,17 @@ describe("round 4 — this route defers to the projector's upstream mint", () =>
     expect(res.goalThresholdsMinted).toEqual([]);
   });
 
-  it("⭐ THE TWIN, opposite direction: a goal node with NO upstream mint STILL mints", async () => {
+  it("⭐ THE TWIN, opposite direction: a goal node with NO upstream mint yields a CANDIDATE (round 6: never a mint)", async () => {
     // Without this, both cases above pass just as well on a module that has
-    // stopped minting altogether (trap 13b — a guard agreeing with itself).
+    // stopped deriving altogether (trap 13b — a guard agreeing with itself).
     const res = await enrichGraphWithFactorsAsync(founderGraph(), FOUNDER_BRIEF, {
       minConfidence: 0.6,
     });
     const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
 
-    expect(goal.goal_threshold_raw).toBe(30000);
-    expect(goal.goal_threshold_unit).toBe("£");
-    expect(res.goalThresholdsMinted).toEqual(["552bd1c0"]);
+    expect(goal.goal_threshold_raw).toBeUndefined();
+    expect(res.goalThresholdsMinted).toEqual([]);
+    expect(res.goal_target_candidate).toMatchObject({ goal_node_id: "552bd1c0", value_user_units: 30000, unit: "£", binding: "governed" });
   });
 
   it("⭐ THE TWIN, second direction: a PARTIAL quad blocks the FACTOR route too, not just the label route", async () => {
@@ -1104,6 +1124,9 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
       expect(goal.goal_threshold).toBeUndefined();
       expect(goal.goal_threshold_raw).toBeUndefined();
       expect(res.goalThresholdsMinted).toEqual([]);
+      // ROUND 6: present but unbound — a candidate the user can be asked about,
+      // with the reason attached; never a write.
+      expect(res.goal_target_candidate).toMatchObject({ goal_node_id: "552bd1c0", value_user_units: 42000, unit: "£", binding: "present_unbound", reason: "stated_as_spend" });
     });
 
     it("S2 ⛔ the current churn level is NOT minted with NO upstream mint (the route round 4 could not cover)", async () => {
@@ -1117,6 +1140,7 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
       expect(goal.goal_threshold).toBeUndefined();
       expect(goal.goal_threshold_raw).toBeUndefined();
       expect(res.goalThresholdsMinted).toEqual([]);
+      expect(res.goal_target_candidate).toMatchObject({ goal_node_id: "552bd1c0", value_user_units: 5, unit: "%", binding: "present_unbound", reason: "stated_as_current_level" });
     });
 
     it("S2 ⛔ …and on the v4-complete-skip route", async () => {
@@ -1131,16 +1155,24 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
       const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
       expect(goal.goal_threshold_raw).toBeUndefined();
       expect(res.goalThresholdsMinted).toEqual([]);
+      expect(res.goal_target_candidate).toMatchObject({ goal_node_id: "552bd1c0", binding: "present_unbound", reason: "stated_as_current_level" });
     });
 
-    it("S18/S19 ⛔ Codex's P1 cases through BOTH routes, with the projector's stated provenance on the goal", async () => {
-      const cases: Array<[label: string, brief: string, mints: boolean]> = [
-        ["Reach £64k MRR", "For ARR, we want to reach £64k.", false],
-        ["Reach £64k ARR", "For ARR, we want to reach £64k.", true],
-        ["Reach £64k MRR", "We want to increase MRR by £64k.", false],
-        ["Reach £64k MRR", "We want to increase MRR to £64k.", true],
+    it("S18/S19/S20 ⛔ Codex's cases through BOTH routes, with the projector's stated provenance on the goal — round 6: NOTHING mints; the candidate carries the binding", async () => {
+      // `governed` = the helper would have minted before round 6; it is now a
+      // suggestion the user is asked about. `present_unbound` = the figure is
+      // in the brief but the user's words do not bind it. Either way the node
+      // is untouched: the rejected proposal (S20) can no longer be written as
+      // the user's target, and neither can anything else on this route.
+      const cases: Array<[label: string, brief: string, binding: "governed" | "present_unbound"]> = [
+        ["Reach £64k MRR", "For ARR, we want to reach £64k.", "present_unbound"],
+        ["Reach £64k ARR", "For ARR, we want to reach £64k.", "governed"],
+        ["Reach £64k MRR", "We want to increase MRR by £64k.", "present_unbound"],
+        ["Reach £64k MRR", "We want to increase MRR to £64k.", "governed"],
+        ["Reach £64k MRR", "We rejected the proposal to reach £64k MRR.", "governed"],
+        ["Reach £64k MRR", "We approved the proposal to reach £64k MRR.", "governed"],
       ];
-      for (const [label, brief, mints] of cases) {
+      for (const [label, brief, binding] of cases) {
         for (const skipRoute of [false, true]) {
           const graph = founderGraph();
           const goalNode = graph.nodes.find((n: any) => n.id === "552bd1c0");
@@ -1155,26 +1187,23 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
           const res = await enrichGraphWithFactorsAsync(graph, brief, { minConfidence: 0.6 });
           const goal: any = res.graph.nodes.find((n: any) => n.id === "552bd1c0");
           const tag = `${label} / ${brief} / ${skipRoute ? "skip" : "loop"}`;
-          if (mints) {
-            expect(goal.goal_threshold_raw, tag).toBe(64_000);
-            expect(res.goalThresholdsMinted, tag).toEqual(["552bd1c0"]);
-          } else {
-            expect(goal.goal_threshold_raw, tag).toBeUndefined();
-            expect(goal.goal_threshold, tag).toBeUndefined();
-            expect(res.goalThresholdsMinted, tag).toEqual([]);
-          }
+          expect(goal.goal_threshold_raw, tag).toBeUndefined();
+          expect(goal.goal_threshold, tag).toBeUndefined();
+          expect(res.goalThresholdsMinted, tag).toEqual([]);
+          expect(res.goal_target_candidate, tag).toMatchObject({ goal_node_id: "552bd1c0", value_user_units: 64_000, unit: "£", binding });
         }
       }
     });
 
     it("⭐ the user's own goal sentence, stamped by the projector, is READ by this route", async () => {
-      // Inside the quote: mints (the founder positive, now with its provenance).
+      // Inside the quote: governed candidate (the founder positive, now with its provenance).
       const inside = founderGraph();
       inside.nodes.find((n: any) => n.id === "552bd1c0").provenance = {
         source_quote: "I want to reach £30k MRR within 18 months.",
       };
       const r1 = await enrichGraphWithFactorsAsync(inside, FOUNDER_BRIEF, { minConfidence: 0.6 });
-      expect(r1.goalThresholdsMinted).toEqual(["552bd1c0"]);
+      expect(r1.goalThresholdsMinted).toEqual([]);
+      expect(r1.goal_target_candidate).toMatchObject({ binding: "governed", reason: "governed" });
 
       // Outside the quote: the same brief, the same label, and the goal sentence
       // the user wrote is about runway — withhold.
@@ -1186,6 +1215,7 @@ describe("round 5 — a figure must be STATED AS THE TARGET, not merely occur", 
       expect(r2.goalThresholdsMinted).toEqual([]);
       const goal: any = r2.graph.nodes.find((n: any) => n.id === "552bd1c0");
       expect(goal.goal_threshold_raw).toBeUndefined();
+      expect(r2.goal_target_candidate).toMatchObject({ binding: "present_unbound", reason: "outside_goal_statement" });
     });
   });
 });
