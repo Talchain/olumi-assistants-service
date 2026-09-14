@@ -356,9 +356,31 @@ describe("the brief→saved-model conversion puts each figure on its own subject
         `"${price!.label}" must carry the user's stated £49`,
       ).toContain(49);
 
-      // ── AND the churn factor keeps its OWN stated figure: refusing the price
-      // must not cost the user the 4% they actually stated about churn.
-      expect(churnData.value, `"${churn!.label}" must still carry its own stated 4%`).toBe(0.04);
+      // ── AND refusing the price must not cost the user the 4% they stated
+      // about churn: the figure must still reach this node's subject.
+      //
+      // ⛔⛔ DELIBERATELY NOT `expect(churnData.value).toBe(0.04)`, AND THIS IS
+      // THE LOAD-BEARING PART OF THE ASSERTION.
+      //
+      // `value` is the field for WHAT IS CURRENTLY TRUE. The user wrote "keep
+      // monthly churn under 4%" — a LIMIT. Writing 0.04 into `value` makes the
+      // model assert that churn IS 4%, which the user never said, and
+      // `schema-v3.ts:362` then badges it `source: "brief_extraction"` — the
+      // product's own words for "the user told us this". That is an OPEN DEFECT
+      // on a different seam (the constraint-binding path), not something this
+      // change closes.
+      //
+      // Pinning `value === 0.04` here would CEMENT it: the fix that stops
+      // asserting a limit as an observation would have to break this test to
+      // land. So this asserts only what is true under BOTH the current
+      // behaviour and the corrected one — the 4% is not lost, and it is not
+      // denominated in currency. A test written to guard one defect must not
+      // quietly ratify its neighbour.
+      expect(
+        [churnData.value, churnData.raw_value, churnData.goal_threshold],
+        `"${churn!.label}" must still carry the user's stated 4% somewhere`,
+      ).toContain(0.04);
+      expect(churnData.unit, `"${churn!.label}"'s own figure is a percentage`).not.toBe("£");
     });
   }
 });
