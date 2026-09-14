@@ -34,6 +34,7 @@ import {
 import {
   deriveGoalTargetFromLabel,
   deriveGoalTargetCandidate,
+  unitIsTemporal,
   type GoalTargetCandidate,
   type GoalLabelTargetRefusal,
 } from "./goal-label-target.js";
@@ -1328,7 +1329,24 @@ function qualifyExtractedFactors(
  * factor-skip path can reach it. Every line of arithmetic and every stamped
  * field below is unchanged from the in-loop version; only its address moved.
  */
-function applyGoalTargetRedirect(
+/**
+ * ⭐ EXPORTED FOR ITS GUARD, and the reason is that the harm it now refuses is
+ * NOT REACHABLE THROUGH `enrichGraphWithFactorsAsync(graph, brief)`.
+ *
+ * Measured: `extractFactors("Our target is 12 months.")` returns
+ * `{label:"Target", value:12}` with **NO unit** — the regex path never emits a
+ * temporal unit at all, so no brief string can drive a duration-united factor
+ * into this function. The unit that produced the live defect
+ * (`goal_threshold_unit: "months"`, 2/5 draws on staging `50cb5d5f`) comes from
+ * the LLM-assisted factor path, which a unit test cannot call.
+ *
+ * So the screen is exercised against the shape the WIRE demonstrated, injected
+ * directly, with its contrast twin (`unit: "£"` must still mint) proving the
+ * route was narrowed and not broken. Testing the predicate alone would be
+ * "presence of a guard is not coverage of its input" (trap 22b); this tests the
+ * function that writes.
+ */
+export function applyGoalTargetRedirect(
   enrichedGraph: GraphT,
   goalNodeIndex: number,
   factor: ExtractedFactor,
@@ -1372,6 +1390,57 @@ function applyGoalTargetRedirect(
     typeof currentGoalNode.goal_threshold_raw === "number" &&
     Number.isFinite(currentGoalNode.goal_threshold_raw)
   ) {
+    return false;
+  }
+
+  // ── ⛔⛔ A DEADLINE IS NOT A SUCCESS TARGET, AND THIS FUNCTION SHIPPED ONE ──
+  //
+  // MEASURED, 5 identical draws on staging `50cb5d5f` (2026-09-14), brief
+  // "Given our goal of reaching £20k MRR within 12 months while keeping monthly
+  // churn under 4%, …". In 2 of the 5 the goal node "Reach £20k MRR Within 12
+  // Months" shipped:
+  //
+  //     goal_threshold_raw: 12   goal_threshold_unit: "months"
+  //     goal_threshold_cap: 15   goal_threshold: 0.8
+  //
+  // — arithmetic confirmed against `resolveGoalThresholdCap` (12 × 1.25 = 15,
+  // 12 / 15 = 0.8), so the route is this function and not an inference. The
+  // product then reported `goal_target_stated: true` and ISL scored every
+  // option's `probability_of_goal` against **twelve months** on a node measured
+  // in £. The other 3 of 5 carried no threshold at all.
+  //
+  // ⚠ NOTE WHICH WAY THAT CUTS. "Target not captured" is a visible gap; a
+  // registered deadline is a CONFIDENT LIE wearing the same field, and the user
+  // has no way to tell them apart. A lie outranks a gap — this module's sibling
+  // `goal-label-target.ts` excluded temporal quantities for exactly this reason
+  // ("Admitting it here would mint `goal_threshold_raw: 18, unit: 'months'`
+  // onto a node measured in £") while the factor route beside it, which is the
+  // one that actually fires, never had the screen. Trap 22b: one harm closed on
+  // one route and left open on its neighbour, and neither route's tests can see
+  // the other.
+  //
+  // ⚠ THE QUESTION IS ASKED OF THE QUANTITY'S OWN UNIT, NOT OF A NEARBY WORD.
+  // "4% year on year" and "£200k year on year" are a percentage and a sum of
+  // money measured annually, not durations; classifying by an adjacent time
+  // word deleted attested targets when the sibling module tried it. `unitIsTemporal`
+  // composes the shared `TIME_UNIT_ALT` vocabulary and is anchor-asserted at
+  // load, so it cannot decay into a silent always-false (trap 15).
+  //
+  // ⭐ AND THE REFUSAL CASCADES USEFULLY. Both callers reach this function from
+  // inside a scan over extracted factors, so declining a duration lets a later
+  // non-temporal target quantity have its turn instead of the deadline
+  // consuming the single mint. The refusal removes a lie without closing a door.
+  if (unitIsTemporal(factor.unit)) {
+    log.info(
+      {
+        goalNodeId: currentGoalNode.id,
+        factor_label: factor.label,
+        factor_unit: factor.unit,
+        factor_value: factor.value,
+        event: "cee.factor_enrichment.goal_threshold_refused_temporal",
+      },
+      `Refused a temporal quantity as the goal threshold on "${currentGoalNode.id}" — a deadline is not a success target`,
+    );
     return false;
   }
 

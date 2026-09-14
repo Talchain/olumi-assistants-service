@@ -1158,3 +1158,97 @@ export function deriveGoalTargetCandidate(
     reason: r.refusal,
   };
 }
+
+/* ===========================================================================
+ * ⭐⭐ THE SPAN THE MODEL ITSELF DESIGNATED — exported for the ONE projector
+ * mint, so the record path can read a target the model put in its quote rather
+ * than in its `value` field.
+ *
+ * ⛔ THIS IS NOT THE LABEL ROUTE, AND THE DIFFERENCE IS THE WHOLE SAFETY CASE.
+ * Round 6 removed the label mint because `deriveGoalTargetFromLabel` read a
+ * model-COMPOSED display string and then attested its figure against ANY
+ * occurrence in the brief — which is why "We rejected the proposal to reach
+ * £64k MRR." returned `ok: true` after sixteen defects and four oscillating
+ * rounds. The attestation scope was the whole brief; the harm lived there.
+ *
+ * What is exported here scans ONE SPAN and nothing else. Its caller supplies a
+ * `stated_items[]` entry the model marked `kind: "goal"` — the grammar's own
+ * resolution of which words are the objective — and the caller additionally
+ * requires an explicit `role: "target"`. That is the remedy this module's
+ * header names as KNOWN AND DUE: *"binding the brief attestation to a span that
+ * grammar resolved as a TARGET, rather than to any occurrence of the figure,
+ * closes the class"*. Here the grammar resolves the span, so identity is
+ * position and no string rule stands in for it.
+ *
+ * ⚠ IT STILL MINTS NOTHING. It answers one arithmetic question about one span
+ * and returns `undefined` on every doubt; the caller owns the decision, the
+ * attestation and the write.
+ * ========================================================================= */
+
+/**
+ * The SINGLE non-temporal quantity a span carries, in USER UNITS, or
+ * `undefined` when the span carries none or more than one.
+ *
+ * ⚠ TWO OR MORE REFUSES — it never picks. "reaching £20k MRR within 12 months"
+ * is one non-temporal quantity (the deadline is excluded by the scanner's own
+ * unit test, not by a nearby word); "£30k MRR and 4% churn" is two, and two
+ * targets under one goal is the ask-don't-guess case (ROADMAP 2.1051, trap
+ * 22f). A wrong threshold is a confident lie, an absent one is a gap, and a lie
+ * outranks a gap.
+ *
+ * USER UNITS, because that is the convention every `goal_threshold_raw` writer
+ * shares (`add-constraint.ts`, `applyGoalTargetRedirect`, `applyStatedGoalTarget`):
+ * 20000 for "£20k", 4 for "4%". The scanner's own fraction convention is
+ * converted through `classifyUnitScaleClass`, the same call
+ * `deriveGoalTargetCandidate` already makes, so this module cannot answer
+ * "what is 4%?" two different ways.
+ */
+export function soleStatedQuantityInSpan(
+  span: string | undefined | null,
+): { readonly value: number; readonly unit: string; readonly matchedText: string } | undefined {
+  if (typeof span !== "string" || span.trim().length === 0) return undefined;
+  const found = scanQuantities(canonicalise(span)).filter((q) => !q.temporal);
+  if (found.length !== 1) return undefined;
+  const only = found[0]!;
+  return {
+    value: toUserUnits(only.value, only.unit),
+    unit: only.unit,
+    matchedText: only.matchedText,
+  };
+}
+
+/**
+ * ⭐ IS THIS UNIT A DURATION? — asked of the unit itself, never of a nearby word.
+ *
+ * The enricher's `applyGoalTargetRedirect` mints whatever quantity an extracted
+ * factor carries, and an extracted factor's `unit` is a free string ("months"),
+ * not one of the five the scanner emits. So the scanner's own `temporal` flag
+ * cannot answer this question and the vocabulary has to be asked directly.
+ *
+ * ⚠ THE VOCABULARY IS IMPORTED, NOT RESTATED — `TIME_UNIT_ALT` comes from
+ * `compound-goal/extractor.ts` and is itself derived from `WORD_UNITS`'
+ * `temporal` flag. A second list of time words here would be the
+ * hand-maintained mirror this estate keeps paying for (trap 12), and it would
+ * drift in the direction that RE-ADMITS a deadline as a success threshold.
+ *
+ * Anchored, not trusted: `ANCHOR_TEMPORAL_UNIT` below is asserted at module
+ * load, so a `TIME_UNIT_ALT` rename cannot turn this into a silent always-false
+ * (trap 15 — a guard that cannot fire is theatre).
+ */
+export function unitIsTemporal(unit: string | undefined | null): boolean {
+  if (typeof unit !== "string") return false;
+  const trimmed = unit.trim();
+  if (trimmed.length === 0) return false;
+  return new RegExp(`^(?:${TIME_UNIT_ALT})$`, "i").test(trimmed);
+}
+
+/** The anchor `unitIsTemporal` is asserted against at load. */
+const ANCHOR_TEMPORAL_UNIT = "months";
+
+if (!unitIsTemporal(ANCHOR_TEMPORAL_UNIT)) {
+  throw new Error(
+    `[goal-label-target] ANCHOR MISSING: unitIsTemporal("${ANCHOR_TEMPORAL_UNIT}") is false, so ` +
+      `TIME_UNIT_ALT no longer spells the time units this predicate composes. The goal-threshold ` +
+      `temporal refusal would silently pass every duration through. Re-derive the import.`,
+  );
+}
