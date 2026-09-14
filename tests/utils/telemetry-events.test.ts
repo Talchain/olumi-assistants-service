@@ -714,6 +714,9 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // enforcement (same contract as V5DecisionReviewContractViolation).
         V5LeadingOptionClaimAtEgress: "v5.egress.leading_option_claim_withheld_violated",
         V5ClaimSafetyFailClosedUnavailable: "v5.claim_safety.fail_closed_unavailable",
+        // A user-visible refusal, counted as a refusal. Emitted at the same
+        // exactly-once egress seam as the fail-closed counter above.
+        CeeTurnRefused: "cee.turn.refused",
         V5WithheldExplanationAnswerProjected: "v5.explanation.withheld_answer_projected",
         V5WithheldLeaderClaimNeutralisedAtFinalise: "v5.egress.leading_option_claim_neutralised_at_finalise",
         // ROADMAP 2.149 — the third member of the family. Covers the eighteen
@@ -805,8 +808,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // session.*, and v5.* namespaces for V5 additions.
       // wave1-mint (2026-08-09): added v5.collab and cee.context_integrity
       // namespace tokens for the four-lane wave's step-zero registry mint.
+      // refusals-countable (2026-09-14): added the `cee.turn` namespace for
+      // `cee.turn.refused`. It is deliberately NOT under `v5.*`: the claim is
+      // about what a USER received on a turn, which outlives any one
+      // orchestrator generation, and a refusal must stay greppable across one.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|context_integrity|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$|jsonb_column_degraded$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|claim_safety|collab|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|typed_coaching_intent_route|typed_coaching_intent_unrouted|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|selection|session|structural_edit_tool|summary)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|context_integrity|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline|turn)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$|jsonb_column_degraded$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|claim_safety|collab|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|typed_coaching_intent_route|typed_coaching_intent_unrouted|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|selection|session|structural_edit_tool|summary)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1534,6 +1541,11 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5EditGraphNoOpRecovery,
         TelemetryEvents.V5EditGraphPartAccounting,
         TelemetryEvents.V5EditGraphTurn,
+        // A user-visible refusal, counted as a refusal (2026-09-14). Structured
+        // log only for now — the query that matters is a log search joining
+        // `request_id` + `scenario_id`, which is what was impossible before.
+        // No Datadog metric until a dashboard picks it up.
+        TelemetryEvents.CeeTurnRefused,
         // R2 (2026-08-16) — post-draft auto-run outcome. Diagnostic-only:
         // structured logs are the operational signal; no Datadog metric
         // mapping until dashboards pick the event up.
@@ -2395,6 +2407,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.egress.process_narration_detected",
         "v5.egress.leading_option_claim_withheld_violated",
         "v5.claim_safety.fail_closed_unavailable",
+        // A user-visible refusal, counted as a refusal.
+        "cee.turn.refused",
         // The ENFORCING sibling of the line above: same subject, same
         // namespace, opposite posture. The `..._withheld_violated` alarm
         // observes and changes nothing; this one is emitted by the third
