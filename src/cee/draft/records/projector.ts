@@ -263,6 +263,36 @@ export interface RecordProvenance {
   /** Present iff `ai_inferred`. Minted ids of the stated items it builds on. */
   readonly basis?: readonly string[];
   /**
+   * ⭐⭐ THE STATED FIGURES THIS CLAIM IS BASED ON — the SUBJECT IDENTITY that
+   * survives the conversion, present iff `ai_inferred` and iff the basis names
+   * at least one `figure`.
+   *
+   * `basis` above names the stated items by their MINTED IDS, and a stated
+   * `figure` is minted and then pruned (`unconnected_to_goal`), so those ids
+   * resolve to nothing in the saved graph. A downstream reader holding a node
+   * and a number therefore had no way to ask the only question that matters —
+   * *is this one of the figures this node is based on?* — and the factor
+   * enricher answered it with `labelsMatch`, a substring-and-synonym test over
+   * labels, instead. That is how the user's £49 was written onto a factor
+   * measuring churn (`enricher.ts`, and the test named below).
+   *
+   * So the figures themselves ride alongside the ids. This is the same fact the
+   * projector already computed, conserved rather than re-derived: no consumer
+   * has to re-open the record set, and no consumer has to guess from a label.
+   *
+   * ⚠ ABSENCE MEANS "THIS CLAIM NAMES NO STATED FIGURE", never "no figure
+   * matched". A claim with an empty or figure-less basis carries the key not at
+   * all, and a reader must treat that as *unknown*, never as *excluded* — the
+   * same rule `unbased` states one field up.
+   *
+   * Pinned by `factor-extraction/__tests__/enhance-binds-to-declared-basis.test.ts`.
+   */
+  readonly basis_figures?: readonly {
+    readonly value: number;
+    readonly unit?: string;
+    readonly source_quote?: string;
+  }[];
+  /**
    * Present iff `ai_inferred`. TRUE when `basis` is empty — pure invention,
    * and marked so. Explicit rather than inferable from an empty array,
    * because "no basis supplied" and "basis supplied but empty" must not be
@@ -3048,14 +3078,33 @@ function projectOnce(
     // has to infer provenance from a label or a value (trap 19).
     if (nodeKind === "option") optionClaimIndexById.set(id, index);
 
-    const basisIds = (claim.basis ?? [])
-      .filter((i) => Number.isInteger(i) && statedIdByIndex.has(i))
-      .map((i) => statedIdByIndex.get(i)!);
+    const basisIndices = (claim.basis ?? []).filter(
+      (i) => Number.isInteger(i) && statedIdByIndex.has(i),
+    );
+    const basisIds = basisIndices.map((i) => statedIdByIndex.get(i)!);
+    // The stated FIGURES behind those ids, conserved beside them. See
+    // `RecordProvenance.basis_figures` for why the ids alone are not enough.
+    const basisFigures = basisIndices
+      .map((i) => statedItems[i])
+      .filter(
+        (item): item is DraftStatedItem =>
+          item?.kind === "figure" && typeof item.value === "number",
+      )
+      .map((item) => ({
+        value: item.value as number,
+        ...(typeof item.unit === "string" && item.unit.length > 0 ? { unit: item.unit } : {}),
+        ...(typeof item.source_quote === "string" && item.source_quote.length > 0
+          ? { source_quote: item.source_quote }
+          : {}),
+      }));
 
     const prov: RecordProvenance = {
       provenance_class: "ai_inferred",
       basis: basisIds,
       unbased: basisIds.length === 0,
+      // Omitted entirely when the claim names no stated figure — absent means
+      // "unknown", never "excluded".
+      ...(basisFigures.length > 0 ? { basis_figures: basisFigures } : {}),
     };
     provenance[id] = prov;
 
