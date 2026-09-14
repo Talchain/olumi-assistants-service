@@ -315,6 +315,46 @@ import {
   EDIT_GRAPH_POSITIVE_REGEX,
 } from './routing/edit-graph-intent-regex.js';
 
+/**
+ * ⛔⛔ PROGRESSIVE DISCLOSURE — OFF. The founder could not see his own answer.
+ *
+ * MEASURED ON THE LIVE WIRE, 14 Sep 2026, staging `78515b95`. A real pre-mortem
+ * turn driven against `cee-staging`:
+ *
+ *     assistant_text      1,372 chars   <- the whole answer, three scenarios
+ *     _answer_shape.headline  138 chars <- ONE sentence
+ *     _answer_shape.bullets   874 chars
+ *     _answer_shape.detail    360 chars
+ *
+ * The founder saw the 138 characters and a "Show more". His words on the
+ * session: useful output "is being hidden".
+ *
+ * ⭐ THE SIDECAR IS THE INSTRUCTION THAT HIDES IT, and the UI honours it:
+ * `MessageBubble.tsx:323` is `showStructuredAnswer = !isUser && !isStreaming &&
+ * Boolean(message.answerShape)`, and `:404` then renders `<AnswerBody>` — the
+ * collapsed form — INSTEAD of the plain text. So the full answer is already on
+ * the wire in `assistant_text`; withholding the sidecar reveals text CEE sends
+ * today and changes nothing else. There is no UI change in this repair and none
+ * is needed.
+ *
+ * ⚠ WHY A CONSTANT AND NOT A DELETION. Both blocks below carry the reasoning of
+ * four prior fixes (ROADMAP 1.132 F1, the egress-default inversion, the
+ * fail-closed tie re-verification). Deleting ~120 commented lines to change one
+ * behaviour is a worse diff to review and a worse thing to restore. Flip this to
+ * `true` and the previous behaviour returns byte for byte.
+ *
+ * ⚠ WHAT IS GIVEN UP, stated rather than argued away: long answers now arrive
+ * whole rather than headline-first. That is the trade the founder asked for
+ * explicitly — rough presentation, visible substance — and it is the reason this
+ * is a constant rather than a decision baked into the control flow.
+ *
+ * ⛔ NOT TOUCHED: `AnswerShapeSchema` and the tool property that make the MODEL
+ * write headline-first. That authoring constraint is what stops a wall of prose
+ * and it is doing useful work. Only the WIRE DIRECTIVE telling the UI to hide
+ * everything after sentence one is withheld.
+ */
+const PROGRESSIVE_DISCLOSURE_ON = false;
+
 // ───────────────────────────────────────────────────────────────────
 // Chip-click resume-intent detector
 // ───────────────────────────────────────────────────────────────────
@@ -1476,7 +1516,8 @@ async function sendFinalised200(
   // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
   // it edits the answer rather than relying on this comparison to notice.
   // Neither guard is now the last word alone; read them together.
-  if (egress.ok && !analysisAuthorityUnavailable && ctx.answerShape) {
+  // ⛔⛔ PROGRESSIVE DISCLOSURE IS OFF. See PROGRESSIVE_DISCLOSURE_ON below.
+  if (PROGRESSIVE_DISCLOSURE_ON && egress.ok && !analysisAuthorityUnavailable && ctx.answerShape) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _answer_shape: ctx.answerShape,
@@ -1545,7 +1586,9 @@ async function sendFinalised200(
   // perturbed the derived text (entity-id scrub), we REVERT to the original
   // `wireBody` entirely — never ship a mutated assistant_text without its
   // matching sidecar.
+  // ⛔⛔ PROGRESSIVE DISCLOSURE IS OFF. See PROGRESSIVE_DISCLOSURE_ON below.
   if (
+    PROGRESSIVE_DISCLOSURE_ON &&
     egress.ok &&
     !analysisAuthorityUnavailable &&
     ctx.answerKind !== 'functional' &&
