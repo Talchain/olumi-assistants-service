@@ -28,7 +28,8 @@ import {
   STATED_KIND_PRODUCERS,
 } from "../not-modelled-manifest.js";
 import { OBSERVED_STATE_STATED_ROLES } from "../stated-role-vocabulary.js";
-import { ObservedStateV3 } from "../../../schemas/cee-v3.js";
+import { ObservedStateV3, NodeV3 } from "../../../schemas/cee-v3.js";
+import { NodeV3Schema, ObservedStateSchema } from "@talchain/schemas";
 import { compactGraph } from "../../../orchestrator/context/graph-compact.js";
 import type { GraphV3T } from "../../../schemas/cee-v3.js";
 
@@ -230,6 +231,41 @@ describe("the wire carries the role", () => {
 
   it("treats absence as undeclared, not as an observation", () => {
     expect(ObservedStateV3.parse({ value: 0.04 }).stated_role).toBeUndefined();
+  });
+
+  it("survives every validator between the stamp and the consumer", () => {
+    // ⚠ A DECLARED FIELD CAN STILL SHIP DARK. `GoalConstraintSchema` carries the
+    // estate's own account of exactly this: a plain `z.object` "SILENTLY
+    // DELETES" an undeclared key "at every parse hop between the mint site and
+    // the payload, and the stamp would reach nothing with no error anywhere."
+    // The stamp lands at the V3 boundary and is read from the STORED graph, so
+    // the hops in between are asserted by execution rather than by reading.
+    const stamped = {
+      id: "ab78e513",
+      kind: "factor",
+      label: "Monthly Churn Rate",
+      observed_state: {
+        value: 0.04,
+        unit: "%",
+        source: "brief_extraction",
+        extractionType: "explicit",
+        stated_role: "constraint",
+      },
+    };
+
+    // CEE's own node validator — a plain `z.object` that strips unknown keys,
+    // but whose `observed_state` is the passthrough object declaring the field.
+    expect((NodeV3.parse(stamped) as Record<string, any>).observed_state.stated_role).toBe(
+      "constraint",
+    );
+    // The shared contract, both levels.
+    expect((ObservedStateSchema.parse(stamped.observed_state) as Record<string, any>).stated_role)
+      .toBe("constraint");
+    const viaContract = NodeV3Schema.safeParse(stamped);
+    expect(viaContract.success).toBe(true);
+    expect(
+      (viaContract as { data: Record<string, any> }).data.observed_state.stated_role,
+    ).toBe("constraint");
   });
 });
 
