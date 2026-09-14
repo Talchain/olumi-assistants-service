@@ -166,11 +166,25 @@ describe("mechanism 3 — MISSING_BRIDGE is predicted, and it is predicted for t
     // is the entire reason a discriminator pins its own precondition (trap 13b).
     // `constraint → goal` is legal: it is `risk → goal` post-normalisation
     // (ALLOWED_EDGES rule :301).
+    //
+    // ⚠ AND ONLY ONE OPTION MAY QUANTIFY THE PIPELINE FACTOR HERE — the second
+    // `sets_to` is dropped below, deliberately, to keep this fixture producing
+    // the state the assertions need. Pass 3b(i) of the projector bridges a
+    // factor to the goal when TWO OR MORE options set it to a value AND the
+    // model's own links already reach the goal; the constraint link added here
+    // satisfies the second condition, so with both `sets_to` present the
+    // projector mints exactly the `factor → goal` edge whose ABSENCE this case
+    // exists to isolate. The assertions are untouched — only the input is
+    // restored to the shape they were written against (trap 13b: a
+    // discriminator must keep reproducing its own precondition).
     const base = recordsWithNoGoalTermination();
     const records: DraftRecordSet = {
       stated_items: [...base.stated_items, { kind: "constraint", source_quote: "we cannot spend more than £2m", direction: "ceiling", value: 2 }],
       claims: [
-        ...base.claims,
+        base.claims[0]!,
+        base.claims[1]!,
+        // `partnering builds pipeline`, minus its magnitude — see the note above.
+        { claim_kind: "causal_link", label: "partnering builds pipeline", from_stated: 2, to_claim: 0, effect: "positive" },
         { claim_kind: "causal_link", label: "the spend ceiling bears on the ARR goal", from_stated: 3, to_stated: 1, effect: "negative" },
       ],
     };
