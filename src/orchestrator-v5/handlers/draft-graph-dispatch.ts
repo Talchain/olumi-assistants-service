@@ -85,6 +85,7 @@ import { normaliseBriefText } from '../session/normalise-brief-text.js';
 import { checkDraftNarrationCounts } from './narration-count-guard.js';
 import { buildPostDraftNarrative, buildModelReceiptSummary } from '../coaching/post-draft-narrative.js';
 import { buildReadinessEffectPending, buildReadinessRecoveryChip } from '../coaching/readiness-recovery.js';
+import { buildGoalTargetAskPending } from '../goal-target/decide-goal-target-ask.js';
 import { projectGraphForPersistence } from '../persisted-graph-projection.js';
 import {
   attachModelVersionMutationReceipt,
@@ -944,6 +945,38 @@ export async function dispatchDraftGraph(
         })
       : null;
 
+    /**
+     * ⭐ THE GOAL-TARGET ASK — the draft-turn consumer of
+     * `goalTargetCandidate` (CEE #1328, Codex disposition 14 Sep).
+     *
+     * ⛔ IT NEVER WRITES AND NEVER PROPOSES A VALUE. `elicit_goal_target`
+     * carries no value field; the target is parsed from the user's ANSWER at
+     * resume through the one canonical writer. A candidate the brief did not
+     * actually offer as a target therefore cannot be adopted by a careless
+     * reply — the user supplies the number or nothing happens.
+     *
+     * Bound to `draftGraphForCommit`, which on this path IS the graph the next
+     * turn loads, and to `postDraftGraphHash`, computed from it — so the
+     * precondition is verifiable rather than asserted.
+     */
+    const goalTargetAsk = draftGraphForCommit != null && postDraftGraphHash !== null
+      ? buildGoalTargetAskPending({
+          candidate: draftResult.goalTargetCandidate,
+          graphNodes: draftGraphForCommit.nodes,
+          scenarioId: payload.scenario_id,
+          graphHash: postDraftGraphHash,
+          emittedAtIso: new Date().toISOString(),
+        })
+      : null;
+    /**
+     * ⚠ ONE ARRAY, NOT TWO SPREADS. `pending_actions` is a single field; a
+     * second conditional spread would SILENTLY REPLACE the first, dropping the
+     * readiness ask whenever a goal-target ask existed.
+     */
+    const draftPendingActions = [askedEffect, goalTargetAsk].filter(
+      (x): x is NonNullable<typeof x> => x !== null,
+    );
+
     // Capture persistence_ms for the diagnostic trace's substage timings.
     // Cheap: two Date.now() calls regardless of flag state — the timing is
     // only surfaced when the trace is built (flag-on); flag-off path
@@ -1007,7 +1040,7 @@ export async function dispatchDraftGraph(
         // carry-forward runs on this path; graph_hash is the NEW draft's
         // analysis-affecting hash (only when a graph is actually written).
         priorPendingActions: holdThread.threaded,
-        ...(askedEffect !== null ? { pending_actions: [askedEffect] } : {}),
+        ...(draftPendingActions.length > 0 ? { pending_actions: draftPendingActions } : {}),
         // ROADMAP 2.63 C3/C4 — retire the honoured draft-offer pending
         // atomically with the draft it produced (see the param doc).
         ...(params.consumedPendingRefs !== undefined

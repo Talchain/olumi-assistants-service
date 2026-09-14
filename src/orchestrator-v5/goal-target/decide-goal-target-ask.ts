@@ -24,7 +24,13 @@
  * Measured case it defends: "We rejected the proposal to reach £64k MRR." mints
  * 64000 in the legacy parser.
  */
+import { randomUUID } from 'node:crypto';
 import type { GoalTargetCandidate } from '../../cee/factor-extraction/goal-label-target.js';
+import {
+  PENDING_ACTION_DEFAULT_TURN_TTL,
+  PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+  type PendingAction,
+} from '../session/pending-action.js';
 
 /** Why no question is put. Every arm is a REFUSAL, never a silent no-op. */
 export type GoalTargetAskRefusal =
@@ -123,4 +129,48 @@ export function decideGoalTargetAsk(
     question: composeGoalTargetQuestion(candidate),
     ...(isUserEstablishedUnit(candidate.unit) ? { unit: candidate.unit } : {}),
   };
+}
+
+/**
+ * ⭐ BUILD THE PENDING, OR NULL. The draft-turn twin of the turn executor's
+ * swap-route arming, using the SAME `chip_id` so a re-ask SUPERSEDES its
+ * predecessor by key rather than accumulating a row per turn.
+ *
+ * ⚠ `graphNodes` IS THE GRAPH BEING COMMITTED, and on this path that is the
+ * graph the next turn will load — `graphHash` is computed from it, so the
+ * precondition is verifiable. This is deliberately a DIFFERENT question from
+ * the producer's first-writer-wins check: the producer reads the graph at
+ * ENRICH time, before repair and projection; this reads what is actually
+ * persisted. They can differ, and the one that binds the resume is this one.
+ *
+ * Returns `null` — never a partial pending — when no question is warranted, so
+ * the caller's `pending_actions` array stays absent rather than empty.
+ */
+export function buildGoalTargetAskPending(input: {
+  readonly candidate: GoalTargetCandidate | undefined;
+  readonly graphNodes: readonly PersistedGoalView[];
+  readonly scenarioId: string;
+  readonly graphHash: string;
+  readonly emittedAtIso: string;
+}): PendingAction | null {
+  const decision = decideGoalTargetAsk(input.candidate, input.graphNodes);
+  if (!decision.ask) return null;
+  return {
+    id: randomUUID(),
+    scenario_id: input.scenarioId,
+    // Server-only pending (no rendered chip), matching the executor's route.
+    chip_id: 'chip_elicit_goal_target',
+    action: {
+      kind: 'elicit_goal_target',
+      goal_node_id: decision.goal_node_id,
+      question: decision.question,
+      ...(decision.unit !== undefined ? { unit: decision.unit } : {}),
+    },
+    preconditions: { graph_hash: input.graphHash },
+    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+    expires_at_iso: new Date(
+      Date.parse(input.emittedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+    ).toISOString(),
+    emitted_at_iso: input.emittedAtIso,
+  } as PendingAction;
 }
