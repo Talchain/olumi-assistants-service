@@ -344,7 +344,34 @@ export function askItemIdentity(item: CompletionAskItem): string {
 export function completionRegressesProtectedContent(
   before: RecordProjection,
   after: RecordProjection,
+  opts?: {
+    /**
+     * ⭐⭐ THE PASS-1 OPTION EFFECTS ARE NOT TRUSTWORTHY ON THIS EMISSION, so
+     * this guard must not defend them against the repair path.
+     *
+     * MEASURED 15 Sep 2026. On a compound brief every option→factor link was
+     * off by +1; two were provably invalid and refused, and the other four were
+     * KEPT WRONG — the person was shown "hold at £49" priced at £59. The
+     * completion pass then ASKED the right question (`ref_out_of_range` →
+     * `unresolved_reference`, model-answerable) and RETURNED THE RIGHT ANSWER
+     * (`0.59→0.49`, `0.7→0.6`) — and THIS GUARD DISCARDED THE WHOLE COMPLETION
+     * as a preservation violation.
+     *
+     * So the repair path already worked and the guard threw it away. The guard
+     * was not wrong in general: overwriting a pass-1 intervention IS normally a
+     * regression. It was wrong to treat a DEMONSTRABLY UNRELIABLE value as
+     * protected content.
+     *
+     * ⛔ SCOPED TO OPTION-NODE INTERVENTIONS AND NOTHING ELSE. Every other limb
+     * — `intervention_removed`, `removed_undisclosed`, the two absorption
+     * receipts, and the same check on non-option nodes — is untouched, so a
+     * completion still cannot delete content or reclassify an absorption.
+     * Absent ⇒ byte-identical to before.
+     */
+    readonly optionEffectsUnreliable?: boolean;
+  },
 ): readonly string[] {
+  const optionEffectsUnreliable = opts?.optionEffectsUnreliable === true;
   const violations: string[] = [];
   const afterById = new Map(after.graph.nodes.map((n) => [n.id, n]));
 
@@ -489,9 +516,14 @@ export function completionRegressesProtectedContent(
         if (!(factorId in afterInterventions)) {
           violations.push(`intervention_removed:${node.id}:${factorId}`);
         } else if (afterInterventions[factorId] !== value) {
-          violations.push(
-            `intervention_overwritten:${node.id}:${factorId}:${value}->${afterInterventions[factorId]}`,
-          );
+          // ⭐ THE ONE EXEMPTION — see `optionEffectsUnreliable` on the signature.
+          // A restatement of a provably-suspect option effect is the repair, not
+          // a regression. Non-option nodes stay fully protected either way.
+          if (!(optionEffectsUnreliable && node.kind === "option")) {
+            violations.push(
+              `intervention_overwritten:${node.id}:${factorId}:${value}->${afterInterventions[factorId]}`,
+            );
+          }
         }
       }
     }

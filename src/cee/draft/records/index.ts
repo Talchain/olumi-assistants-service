@@ -120,3 +120,7 @@ export type {
   OptionFactorMagnitudeCensus,
   OptionMagnitudeCensusPoint,
 } from "./option-magnitude-census.js";
+export {
+  countInvalidOptionEffectSources,
+  optionEffectReferencesUnreliable,
+} from "./option-effect-reference-trust.js";

@@ -83,6 +83,7 @@ import {
   countBlockingAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
+  optionEffectReferencesUnreliable,
   buildRecordsCompletionPrompt,
   buildRecordsCompletionSchema,
   mergeCompletionClaims,
@@ -2129,10 +2130,17 @@ export async function draftGraphWithAnthropic(
           // ⭐ THE PROJECTIONS ARE PASSED BECAUSE THE PRESERVATION QUESTION NEEDS
           // THEM. `activeProjection` is pass 1 — the content the completion is
           // forbidden to overwrite, disconnect, reclassify or delete.
+          // ⭐ PASS-1 OPTION EFFECTS ARE DEFENDED ONLY WHEN THEY ARE CREDIBLE.
+          // Derived from the PASS-1 records (`seam.records`), never from pass 2:
+          // the question is whether the values this guard is about to protect
+          // were reliably referenced in the first place.
+          const optionEffectsUnreliable = optionEffectReferencesUnreliable(seam.records);
           const preservationViolations = completionRegressesProtectedContent(
             activeProjection,
             reprojected,
+            { optionEffectsUnreliable },
           );
+          completionMeta.option_effect_refs_unreliable = optionEffectsUnreliable;
           const notWorse = shouldKeepCompletion(completionAsk, askAfter, {
             before: activeProjection,
             after: reprojected,
