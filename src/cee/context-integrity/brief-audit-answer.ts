@@ -194,9 +194,13 @@ const AUDIT_FRAME_PATTERNS: readonly RegExp[] = [
  * ⚠ NOT a synonym list for "the model". "the graph"/"the model" are what the
  * brief was turned INTO; naming those is not an audit of fidelity to the input.
  */
-const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
+const NOMINAL_BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
   /\b(?:my|the|that|this)\s+brief\b/i,
   /\bmy\s+(?:input|notes|write-?up|description|summary|context)\b/i,
+];
+
+const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
+  ...NOMINAL_BRIEF_REFERENT_PATTERNS,
   // "what I told you", "what I gave you", "anything I wrote", "the parts I
   // described". The determiner is generalised because "anything I wrote" refers
   // to the submitted text exactly as "what I wrote" does, and pinning only the
@@ -212,8 +216,10 @@ const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
  * "the numbers I wrote in my brief" from "the numbers I set on the canvas", so
  * it is only ever admitted together with {@link RETENTION_VERB_PATTERNS}.
  */
+const NOMINAL_DATA_REFERENT = /\bmy\s+(?:numbers|figures|data|estimates|assumptions|targets|constraints)\b/i;
+
 const WEAK_INPUT_REFERENT_PATTERNS: readonly RegExp[] = [
-  /\bmy\s+(?:numbers|figures|data|estimates|assumptions|targets|constraints)\b/i,
+  NOMINAL_DATA_REFERENT,
   /\bthe\s+(?:numbers|figures)\s+i\s+\w+/i,
 ];
 
@@ -381,10 +387,21 @@ function hasSystemDispositionInQuestion(message: string): boolean {
     const reportStart = politeReport !== null ? interrogative!.index : report.index;
     const content = message.slice(reportStart + report[0].length);
     const contentSubject = /\byou\b/i.exec(content);
-    // "Tell me what I should keep from the figures you used" still asks
-    // about I, not the embedded handling fact. Keep the main subject bound.
-    if (contentSubject === null || /\b(?:i|we|he|she|they|it)\b/i.test(content.slice(0, contentSubject.index))) return false;
-    return hasSystemDispositionInQuestion(content);
+    if (contentSubject === null) return false;
+    // Admit a whole nominal object before this subject, not arbitrary text
+    // containing a later "you". Thus "which assumptions you kept" is a
+    // factual question, but "which assumptions the team should keep from
+    // what you included" is not. Reuse only NON-CLAUSAL input referents;
+    // the broad referent detector also admits relative clauses and cannot
+    // establish this boundary. Unknown objects fall through to reasoning.
+    const object = content.slice(0, contentSubject.index).trim().replace(/^of\s+/i, '');
+    const nominalPatterns = [...NOMINAL_BRIEF_REFERENT_PATTERNS, NOMINAL_DATA_REFERENT];
+    const nominal = (part: string): boolean => nominalPatterns.some((pattern) => {
+      const whole = new RegExp(`^(?:${pattern.source})$`, pattern.flags);
+      return whole.test(part) || whole.test(`my ${part}`);
+    });
+    if (object !== '' && !object.split(/\s+(?:from|in|of)\s+/i).every(nominal)) return false;
+    return hasSystemDispositionInQuestion(content.slice(contentSubject.index));
   }
   const subjectIndex = interrogative !== null
     ? interrogative.index + interrogative[0].length - 'you'.length

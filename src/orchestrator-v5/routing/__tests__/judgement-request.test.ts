@@ -104,6 +104,21 @@ const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
 
 describe('independent review — control complements retain the system subject', () => {
   it.each([
+    // Outside review5674373071: an embedded handling fact is not the request.
+    'Can you tell me what to use from the figures you kept in my brief?',
+    'Could you explain whether to use the assumptions you inferred from my brief?',
+    'Would you show me which figures Paul should rely on from those you used in my brief?',
+    'Can you list which assumptions the team should keep from what you included from my brief?',
+    'As you know, tell me what to use from the figures you kept in my brief.',
+    'Before you answer, explain whether to use the assumptions you inferred from my brief.',
+  ])('does not turn the requested human judgement into a report on a relative clause: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
     // Outside review5674195175: requesting a report is not recalling one.
     'Can you tell me which of my figures you used?',
     'Could you explain what you left out of my brief?',
@@ -113,6 +128,9 @@ describe('independent review — control complements retain the system subject',
     'As you know, tell me which of my figures you used.',
     'Given what you said, show me what you left out of my brief.',
     'Before you answer, list which assumptions you kept from my brief.',
+    'Can you tell me which estimates from my brief you used?',
+    'Could you explain whether you used my figures?',
+    'Would you show me which of my constraints you kept?',
   ])('recognises the current request to report a handling fact: %j', (message) => {
     for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
       const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
@@ -127,6 +145,12 @@ describe('independent review — control complements retain the system subject',
     'Could you explain what you planned to use from my brief?',
     'Can you tell me what I should keep from the figures you used in my brief?',
     'As you know, tell me what I should infer from my brief.',
+    'Can you tell me which figures Paul favours from those you used in my brief?',
+    'Could you explain what the team recommends from the assumptions you kept in my brief?',
+    // An unrecognised nominal object is not proof of a current handling
+    // question. This bounded classifier may leave a real audit to reasoning;
+    // it must not invent a subject or a deterministic answer to claim it.
+    'Can you tell me which contractual milestones you used from my brief?',
   ])('requesting a report does not make its content actual system handling: %j', (message) => {
     expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
     expect(hasMutationWarrantSignal(message)).toBe(false);
