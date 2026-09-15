@@ -107,8 +107,13 @@ describe('the divergence note asks rather than offering a move it cannot make', 
     expect(note).toContain('changed the label text only');
     expect(note).toContain('£59');
     expect(note).toContain('£69');
-    // And it asks, so the turn is not merely silent about the gap.
-    expect(note).toMatch(/tell me which/i);
+    // And it ASKS, so the turn is not merely silent about the gap.
+    expect(note).toMatch(/which value on this option did you mean/i);
+    // ⛔ AND IT PROMISES NOTHING. "and I will set it" was removed after review:
+    // executed on the captured graph, the fully identified request still declines
+    // `no_single_unit_scale_value`, so the promise was unsupported. Rewording an
+    // unsupported offer does not make it supported.
+    expect(note).not.toMatch(/I will set it/i);
   });
 
   it('the option keeps its IDENTIFICATION control, which is answerable', () => {
@@ -125,13 +130,22 @@ describe('the divergence note asks rather than offering a move it cannot make', 
     expect(actions[0]!.prompt).toBe(identification.message);
   });
 
-  it('AMBIGUITY: two £-denominated slots are NAMED in the ask, not guessed between', () => {
+  it('AMBIGUITY: the candidate census is GONE — it claimed an equivalence we cannot establish', () => {
+    // ⛔ REMOVED AFTER REVIEW, and the reason matters more than the sentence.
+    // The note used to say the option "carries N values measured that way" and
+    // list them. The predicate compares only broad currency-KIND, so a £/month
+    // price and a USD/year annual budget produce that same claim and are listed
+    // together as if comparable. `unit` is an optional FREE STRING in the
+    // contract with no denomination type anywhere, so the census is dropped
+    // rather than qualified — a unit parser does not belong in a withdrawal.
     const divs = divergences('£/month');
     expect(divs[0]!.optionValueCandidates).toHaveLength(2);
     const note = buildLabelValueDivergenceNote(divs)!;
-    expect(note).toContain(PRICE_LABEL);
-    expect(note).toContain(RELEASE_LABEL);
-    expect(note).toContain('tell me which one £69 belongs to');
+    expect(note).not.toMatch(/measured that way/i);
+    expect(note).not.toMatch(/carries \d+ values/i);
+    // The ASK survives, and so does the disclosure it rests on.
+    expect(note).toMatch(/which value on this option did you mean/i);
+    expect(note).toContain('changed the label text only');
   });
 
   it('FACTOR TWIN: the factor branch is untouched — it already had a value control', () => {

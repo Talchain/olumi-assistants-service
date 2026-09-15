@@ -662,18 +662,27 @@ export function buildLabelValueDivergenceNote(divergences: readonly LabelValueDi
     // No value-bearing control exists on this path (see the action branch), so
     // the note ASKS. Copy and control stay in lockstep — which is the entire
     // point, and needs no claim about whose number it is.
-    const rest = d.optionValueCandidates.slice(1);
-    if (rest.length > 0) {
-      const named = d.optionValueCandidates.map((c) => `"${c.factorLabel}"`).join(' and ');
-      return (
-        `${disclosure} This option carries ${rest.length + 1} values measured that way — ` +
-        `${named} — so tell me which one ${d.newValueToken} belongs to and I will set it.`
-      );
-    }
-    return (
-      `${disclosure} Tell me which value on this option ${d.newValueToken} refers to ` +
-      `and I will set it.`
-    );
+    // ⛔ TWO CLAIMS REMOVED HERE, both found by independent review, both things
+    // this module cannot establish:
+    //
+    //  1. "and I will set it" PROMISED FOLLOW-THROUGH. Executed on the captured
+    //     pricing graph: the fully identified request still declines
+    //     `no_single_unit_scale_value` at `resolveOptionEffectWrite`. Rewording
+    //     an unsupported offer does not make it supported — it changes the
+    //     wording of the promise, not the capability. So the note ASKS WHAT THE
+    //     PERSON INTENDS and promises nothing.
+    //
+    //  2. "values measured that way" CLAIMED EQUIVALENCE the predicate does not
+    //     establish. It compares only broad currency-KIND, so a £/month price
+    //     and a USD/year annual budget produce that same sentence and are listed
+    //     together as if comparable. `unit` is an optional FREE STRING in the
+    //     contract and there is no denomination type, so the census is dropped
+    //     rather than qualified — adding a unit parser to a bounded withdrawal
+    //     would be the wrong fix in the wrong PR.
+    //
+    // What survives is the part that is TRUE and was the point: the label
+    // changed, the modelled value did not, and here is which value is meant.
+    return `${disclosure} Which value on this option did you mean by ${d.newValueToken}?`;
   });
   return sentences.join('\n\n');
 }
