@@ -195,6 +195,11 @@
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { evaluateConfigureOptionOutcome } from './configure-option-outcome.js';
+import {
+  detectConfigureOptionIntent,
+  projectOptionLabels,
+} from './configure-option-intent.js';
+import { resolveConfigureOptionTarget } from './configure-option-clarify.js';
 
 /** Why the write was allowed to proceed. Every value is today's behaviour. */
 export type OptionInterventionWriteAllowReason =
@@ -243,6 +248,53 @@ export type OptionInterventionWriteVerdict =
        * unqualified sentence rather than naming the factor.
        */
       readonly optionEdgeKeys: readonly string[];
+    }
+  | {
+      /**
+       * ⭐⭐ THE SCOPE COULD NOT BE RESOLVED, SO THE WRITE MUST NOT LAND.
+       *
+       * MEASURED on deployed `a3b0548d`, wire-level, FRESH. The user typed
+       * "Change the buy option so the vendor cost is £150,000 per year instead
+       * of £120,000." The turn MINTED a model-wide baseline on factor
+       * `8f788330` (`observed_state` null → `{raw_value:150000,
+       * source:"user_override"}`), left the named option's own intervention at
+       * 60000, replied "Updated Vendor Licensing Cost", and COMMITTED
+       * (`graph_hash` a0b39d86 → 84013c95). Contrast control, same battery: the
+       * pricing shape moved ZERO baselines.
+       *
+       * WHY THE EXISTING ARMS MISSED IT, executed against the real message and
+       * the real captured graph:
+       *   evaluateConfigureOptionOutcome -> {status:"not_applicable",
+       *                                     reason:"not_configure_intent"}
+       *   decideOptionInterventionWrite  -> {verdict:"allow",
+       *                                     reason:"outcome_not_unhonoured"}
+       * The OPTION ANCHOR matches — the sentence contains the word "option" —
+       * and `classifyConfigureOptionTrigger` returns null, so the whole
+       * detection reads "not about configuring an option" and the write arm,
+       * gating on `matched`, permits it. This module's header already records
+       * fixing one inheritance of exactly this shape ("the WRITE protection
+       * inherit[ed] the COPY predicate's domain"); the INTENT-DETECTOR
+       * inheritance was never removed.
+       *
+       * ⚠ AN ANCHOR IS NOT AN IDENTITY. This verdict deliberately carries no
+       * `optionId`, because none resolved: the resolver matches an option by its
+       * FULL LABEL phrase and "the buy option" is not "Buy Off-the-Shelf
+       * Reporting Tool". Guessing which option was meant is the fabricated-write
+       * this module exists to prevent, and a sole-candidate tie-break is
+       * forbidden by `resolveConfigureOptionTarget`'s own header. So the turn
+       * ASKS instead — unresolved identity asks, it does not write.
+       *
+       * ⚠ AND IT IS NOT "EVERY BASELINE EDIT IS FORBIDDEN". An explicit
+       * model-wide edit ("set Vendor Licensing Cost to £150,000") carries no
+       * option anchor at all, so it never reaches this arm and still lands. The
+       * anchor is what separates the two, and it is computed from the message
+       * the user actually sent, not from the write.
+       */
+      readonly verdict: 'scope_unresolved';
+      /** Node ids whose model-wide value this turn moved — what is withheld. */
+      readonly baselineNodeIds: readonly string[];
+      /** Option labels the user could pick between, for the ask. */
+      readonly optionLabels: readonly string[];
     };
 
 /** Every effect value the graph holds, keyed `<optionId>::<factorId>`. */
@@ -501,6 +553,50 @@ export function resolveNodeLabels(graph: GraphV3T, nodeIds: readonly string[]): 
 }
 
 /**
+ * The scope check that runs when the outcome arm does not apply.
+ *
+ * Returns a verdict only in the narrow state where ALL of these hold:
+ *   1. the message ANCHORS on an option (it contains "option(s)", or a full
+ *      option label) — so the turn is recognisably about one;
+ *   2. no option IDENTITY resolves from it — so which one is unknown;
+ *   3. a model-wide baseline write landed;
+ *   4. no intervention write landed — so the user did not get an option-scoped
+ *      change either.
+ *
+ * Any one of those failing returns null and the caller proceeds unchanged. In
+ * particular (1) is what keeps explicit model-wide edits working: a message
+ * that never mentions an option is not in scope here at all.
+ *
+ * ⚠ CONDITION 4 IS LOAD-BEARING, not defensive. A turn that moved a baseline
+ * AND landed an intervention is a compound edit that partly did what was asked,
+ * and discarding it would destroy the user's work — the measured false positive
+ * this module's identity-binding note already warns about.
+ */
+function decideUnresolvedOptionScope(
+  message: string,
+  before: GraphV3T,
+  after: GraphV3T,
+): OptionInterventionWriteVerdict | null {
+  const detection = detectConfigureOptionIntent(message, projectOptionLabels(before.nodes));
+  if (detection.matched || !detection.optionAnchored) return null;
+
+  // If an identity DOES resolve, this is not the unresolved case and the
+  // existing arms own it. Asking here would pre-empt a verdict they can give.
+  const target = resolveConfigureOptionTarget({ message, detection, graph: before });
+  if (target.matched) return null;
+
+  if (anyInterventionWriteLanded(before, after)) return null;
+  const baselineNodeIds = baselineWritesLanded(before, after);
+  if (baselineNodeIds.length === 0) return null;
+
+  return {
+    verdict: 'scope_unresolved',
+    baselineNodeIds,
+    optionLabels: projectOptionLabels(before.nodes),
+  };
+}
+
+/**
  * Decide whether this edit turn's graph write may persist.
  *
  * Pure: no I/O, no LLM, no telemetry. The caller owns emission and the
@@ -544,6 +640,13 @@ export function decideOptionInterventionWrite(params: {
   // graph arrives populated, so every later edit is a revision. Measured live,
   // 46 of 46 real captured turns reached no verdict at all.
   if (outcome.status !== 'not_honoured' && outcome.status !== 'not_honoured_no_copy') {
+    // ⭐ BEFORE PERMITTING: the outcome arm above answers "was a RESOLVED
+    // option's write not honoured?". It says nothing about a turn that is
+    // recognisably ABOUT an option whose identity never resolved — and that is
+    // the state in which a model-wide baseline write is least defensible,
+    // because nothing has established the scope the user asked for.
+    const scoped = decideUnresolvedOptionScope(params.message, before, after);
+    if (scoped !== null) return scoped;
     return { verdict: 'allow', reason: 'outcome_not_unhonoured' };
   }
 

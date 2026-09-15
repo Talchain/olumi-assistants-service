@@ -3467,6 +3467,20 @@ export async function dispatchEditGraph(
     appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
   });
   const optionInterventionWriteWithheld = optionInterventionWriteVerdict.verdict === 'withhold';
+  /**
+   * ⭐ THE SCOPE-UNRESOLVED ARM. A turn that is recognisably ABOUT an option
+   * whose identity never resolved, which moved a model-wide baseline and landed
+   * no intervention. Measured on deployed `a3b0548d`: it MINTED
+   * `observed_state` on "Vendor Licensing Cost" and COMMITTED, while the option
+   * the user named kept its own value.
+   *
+   * ⚠ NAMED APART from `optionInterventionWriteWithheld` rather than folded into
+   * it (trap 21). They answer different questions — "was a RESOLVED option's
+   * write not honoured?" versus "do we know which option this was for at all?"
+   * — and they carry different payloads: this one has no `optionId`, because
+   * none resolved, which is the whole reason it must ASK rather than assert.
+   */
+  const optionScopeUnresolved = optionInterventionWriteVerdict.verdict === 'scope_unresolved';
   // ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION, witnessed on deployed
   // `91d39119` (30 Aug 2026, scenario `0fe8c040`, request `1a0ba66d`): a plain
   // English revision wrote each OPTION node's OWN `observed_state` (Pilot 30 /
@@ -3499,6 +3513,10 @@ export async function dispatchEditGraph(
     !gmBlockedApply &&
     !paSubstitutionBlocked &&
     !optionInterventionWriteWithheld &&
+    // Same reason as its sibling above: a write whose SCOPE was never
+    // established may not surface an applied-mutation signal either, or it
+    // persists exactly as the measured buy turn did.
+    !optionScopeUnresolved &&
     !optionOwnValueWithheld &&
     !recordedAnswerNotLanded;
   if (optionInterventionWriteWithheld) {
@@ -4330,6 +4348,37 @@ export async function dispatchEditGraph(
       `I could not record that value for "${recordedAnswer.pair.optionLabel}" on "${recordedAnswer.pair.factorLabel}". Nothing has changed.`,
       suggested_actions: [] };
   }
+  if (optionInterventionWriteVerdict.verdict === 'scope_unresolved') {
+    // ⭐ NOTHING FAILS SILENTLY, AND THE FAILURE IS OURS (Paul, 2026-09-15).
+    // The write is already withheld by the gate above; this is the half the
+    // user sees. It ASKS, because the one thing we genuinely do not know is
+    // which option they meant — and guessing is the fabricated write the whole
+    // guard exists to prevent.
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_scope_unresolved',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // Counts and ids only — never the user's prose in telemetry.
+        baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        option_count: optionInterventionWriteVerdict.optionLabels.length,
+      },
+      'edit_graph: option-anchored turn with no resolved option — write withheld, asking',
+    );
+    const moved = resolveNodeLabels(parsedGraph, optionInterventionWriteVerdict.baselineNodeIds);
+    const movedNamed = moved.length > 0 ? `"${moved[0]}"` : 'that value';
+    const choices = optionInterventionWriteVerdict.optionLabels
+      .map((l) => `"${l}"`)
+      .join(', ');
+    response = {
+      ...response,
+      assistant_text:
+        `That would have changed ${movedNamed} for every option, and I do not think that is ` +
+        `what you meant — so I have not changed the model. Which option did you mean? ` +
+        `${choices}.`,
+    };
+  }
+
   if (optionInterventionWriteVerdict.verdict === 'withhold') {
     // ⛔⛔ A WITHHELD TURN MUST NOT CONFIRM AND THEN DENY — and this is the
     // hole withholding itself opened.
