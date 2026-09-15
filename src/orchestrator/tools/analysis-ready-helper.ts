@@ -39,6 +39,13 @@ import { stableStringify } from "../context/stable-stringify.js";
 // `cee/transforms/analysis-ready.ts`. See the kernel's header for why the
 // discriminator is `origin` and not `provenance.source` (measured: the V3
 // transform coerces `"synthetic"` to `"cee_hypothesis"`).
+//
+// Re-imported here as a VALUE (it had been reduced to the prose reference at
+// :882 when the adjacency build moved). It is read for DISCLOSURE only — to
+// tell the user that a link already exists and whose inference it is — and
+// never to decide status. The status decision stays where it is, with exactly
+// one owner. See `appendSemanticIssues` for why those are different questions.
+import { isRepairAuthoredOptionFactorEdge } from "../../graph/repair-authored-edge.js";
 // ⭐ INV-P6 — the SOLE derivation of "may this gap be demanded of the user?".
 // Type-only for the vocabulary, value import for the classifier; the classifier
 // module imports `CanonicalReadinessIssue` back as a TYPE, so there is no runtime
@@ -938,9 +945,73 @@ function projectSemanticAnalysisReadyFromGraph(
   return projectCanonicalPayloadToWire(canonical);
 }
 
+/**
+ * How many DISTINCT factors the deterministic connectivity repair wired each
+ * option to — links the PRODUCT drew for itself.
+ *
+ * ⚠ THIS IS NOT A SECOND OPINION ABOUT STATUS, AND THE DISTINCTION IS THE
+ * WHOLE POINT. `connectedFactorCount` (`cee/transforms/option-status.ts:276`)
+ * deliberately EXCLUDES these edges, so the product can never count its own
+ * wiring as a mapping the user made; that exclusion is correct, is documented
+ * at its own site, and is untouched here. The question this map answers is a
+ * different one: *"has the product already drawn a link here that it is about
+ * to ask the user to draw from scratch?"* Answering it is presentation, not
+ * adjudication — trap 21, where two authorities under similar names were
+ * reconciled instead of being named apart.
+ *
+ * Derived through `isRepairAuthoredOptionFactorEdge`, the ONE authority, so a
+ * second definition of "the repair invented this edge" cannot appear here.
+ * `origin` survives the `GraphV3` parse (`schemas/cee-v3.ts:380`,
+ * `origin: z.string().optional()`) — verified at the bytes, because a stripped
+ * field would make this map read empty forever and the disclosure would go
+ * silently dark rather than fail loud.
+ */
+function repairWiredFactorCountByOption(graph: GraphV3T): ReadonlyMap<string, number> {
+  const nodeKindById = new Map(graph.nodes.map((node) => [node.id, node.kind] as const));
+  const targetsByOption = new Map<string, Set<string>>();
+  for (const edge of graph.edges) {
+    if (!isRepairAuthoredOptionFactorEdge(edge, nodeKindById)) continue;
+    const targets = targetsByOption.get(edge.from) ?? new Set<string>();
+    targets.add(edge.to);
+    targetsByOption.set(edge.from, targets);
+  }
+  return new Map([...targetsByOption].map(([id, targets]) => [id, targets.size] as const));
+}
+
+/**
+ * The mapping ask, plus the disclosure it needs when the product has already
+ * wired this option itself.
+ *
+ * ⭐ THE ASK IS UNCHANGED AND IS STILL THE FIRST SENTENCE, VERBATIM. The user
+ * genuinely has not said which factor this option moves, so the question is
+ * correct in KIND and must keep being put — suppressing it, or counting repair
+ * edges as connections to make it disappear, would inflate readiness and
+ * silence a legitimate question. What was wrong is that it was asked FROM
+ * SCRATCH about an option the product had already wired, which reads as the
+ * product not knowing its own state.
+ *
+ * ⚠ IT DISCLOSES RATHER THAN ASKING FOR CONFIRMATION, AND THAT IS DELIBERATE.
+ * The repair wires each disconnected option to the UNION of every factor the
+ * connected options target (`stages/repair/status-quo-fix.ts:162-192`), so the
+ * link is a connectivity fallback, not a considered judgement about THIS
+ * option. Inviting the user to "confirm" it would ask them to bless an
+ * arbitrary link the product holds no evidence for — a worse failure than the
+ * one being fixed. Naming it, disowning it, and leaving the choice open is the
+ * honest form.
+ */
+function optionMappingAsk(label: string, repairWiredFactorCount: number): string {
+  const ask = `Choose which factor "${label}" changes and by how much.`;
+  if (repairWiredFactorCount <= 0) return ask;
+  const factors = repairWiredFactorCount === 1
+    ? "one factor"
+    : `${repairWiredFactorCount} factors`;
+  return `${ask} Olumi has already linked it to ${factors} to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.`;
+}
+
 function appendSemanticIssues(
   payload: AnalysisReadyPayload | undefined,
   out: CanonicalReadinessIssue[],
+  repairWiredFactorCount: ReadonlyMap<string, number> = new Map<string, number>(),
 ): void {
   if (!payload || payload.status === 'ready') return;
   const exactKey = (issue: CanonicalReadinessIssue): string => [
@@ -989,7 +1060,10 @@ function appendSemanticIssues(
       code: mapping ? 'OPTION_NEEDS_MAPPING' : 'OPTION_NEEDS_ENCODING',
       category: mapping ? 'option_mapping' : 'option_values',
       message: mapping
-        ? `Choose which factor "${option.label}" changes and by how much.`
+        ? optionMappingAsk(
+            option.label,
+            repairWiredFactorCount.get(option.option_id) ?? 0,
+          )
         : `Choose how "${option.label}" should be represented on the effect scale.`,
       repairability: 'human_input_required',
       option_id: option.option_id,
@@ -1121,7 +1195,14 @@ export function assessCanonicalAnalysisReadiness(
     });
 
     const semantic = projectSemanticAnalysisReadyFromGraph(proposalGraph);
-    appendSemanticIssues(semantic, blockingIssues);
+    // Derived from `parsed.data` — the SAME graph `projectSemanticAnalysisReadyFromGraph`
+    // reads, schema-validated, so the disclosure can never describe a different
+    // model than the ask it rides on.
+    appendSemanticIssues(
+      semantic,
+      blockingIssues,
+      repairWiredFactorCountByOption(parsed.data),
+    );
 
     // ⭐ INV-P6 — stamp provenance + obligation on EVERY issue, at the one point
     // where the complete issue set exists.
