@@ -598,7 +598,7 @@ function decideUnresolvedOptionScope(
   // classifier does, which is the class this estate has paid four oscillation
   // rounds for (trap 22f). It says "the user quantified over ALL options", and
   // nothing about what they want done.
-  if (UNIVERSAL_OPTION_SCOPE.test(message)) return null;
+  if (isAffirmativeGlobalRequest(message)) return null;
 
   // ⭐ PLURAL IS NOT UNRESOLVED — and conflating them made this arm pre-empt a
   // guard that already owns the turn.
@@ -614,7 +614,17 @@ function decideUnresolvedOptionScope(
   //
   // Zero resolved options is the unresolved case this arm exists for. TWO is a
   // multi-target request, and `detectOptionOwnValueSubstitution` owns it.
-  if (resolvedOptionLabels(message, optionLabels).length !== 0) return null;
+  // ⛔ ESCAPE 2 (reviewer, executed): standing down because an identity RESOLVED
+  // was wrong. "Change Buy Off-the-Shelf Reporting Tool so the vendor cost is
+  // £150,000…" resolved its label and returned allow — because the existing arms
+  // do NOT protect that write either. Merely resolving a label is not evidence
+  // that a downstream guard owns the mutation, and I had assumed it was.
+  //
+  // The PLURAL case that forced the previous change is handled by the FACTOR
+  // restriction below instead: it moved the OPTIONS' OWN `observed_state`, not a
+  // factor's, and an option's own value belongs to
+  // `detectOptionOwnValueSubstitution`. So the arm is now scoped by WHAT MOVED
+  // rather than by how many labels the sentence happened to contain.
 
   // ⭐ IDENTITY, RESOLVED INDEPENDENTLY OF THE VOCABULARY GATE.
   //
@@ -625,11 +635,62 @@ function decideUnresolvedOptionScope(
   // A guard agreeing with itself. The maximal-label rule is applied directly
   // instead, on the same normalisation, so identity is a real question here.
   if (anyInterventionWriteLanded(before, after)) return null;
-  const baselineNodeIds = baselineWritesLanded(before, after);
+
+  // ⭐ FACTORS ONLY. `baselineWritesLanded` reads `observed_state` on ANY node,
+  // so an OPTION's own baseline counts — and that is a different harm with a
+  // different owner. This arm exists for the MODEL-WIDE value every option
+  // reads: the factor baseline.
+  const factorIds = new Set(
+    before.nodes.filter((n) => n.kind === 'factor').map((n) => n.id),
+  );
+  const baselineNodeIds = baselineWritesLanded(before, after).filter((id) => factorIds.has(id));
   if (baselineNodeIds.length === 0) return null;
 
   return { verdict: 'scope_unresolved', baselineNodeIds, optionLabels };
 }
+
+/**
+ * Is this an AFFIRMATIVE request for a model-wide change?
+ *
+ * ⛔ THE ESCAPE THIS EXISTS FOR, executed by an independent reviewer:
+ *   "Set Vendor Licensing Cost to £150,000 per year for the buy option.
+ *    Do not change the model-wide baseline."
+ * returned ALLOW. The universal-scope exemption matched "model-wide" — inside a
+ * PROHIBITION — so the very sentence FORBIDDING the global write was read as
+ * permission for it. A quantifier says WHAT SCOPE is being talked about and
+ * nothing about whether the user wants it.
+ *
+ * ⚠ The negation cue is deliberately checked on the CLAUSE carrying the
+ * quantifier, not on the whole message: a message may legitimately negate
+ * something else entirely ("don't change the churn factor — across all options,
+ * set vendor cost to £150,000"). Splitting on sentence boundaries keeps the two
+ * apart without inventing a parser, and the failure direction is safe: an
+ * unrecognised construction leaves the exemption OFF, which withholds and asks.
+ */
+function isAffirmativeGlobalRequest(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  for (const clause of message.split(/(?<=[.!?;])\s+|\n+/)) {
+    if (!UNIVERSAL_OPTION_SCOPE.test(clause)) continue;
+    if (GLOBAL_SCOPE_NEGATION.test(clause)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Negation of a scope request. Closed, and shared in spirit with
+ * `WIN_NEGATION_CUE` in `cee/decision-review/decompose.ts`, which exists for the
+ * same reason one rail over: a negated claim AGREES with the constraint rather
+ * than asserting it, and treating the two alike inverts the guard.
+ *
+ * ⚠ `instead of` and `rather than` were in the first cut and are DELIBERATELY
+ * OUT. My own test caught them: "…the model-wide baseline is £150,000 per year
+ * INSTEAD OF £120,000" is a VALUE COMPARISON, not a scope prohibition, and
+ * including them made the supported affirmative global request refuse. A
+ * negation cue here must negate the SCOPE, never the quantity.
+ */
+const GLOBAL_SCOPE_NEGATION =
+  /\b(?:do\s+not|does\s+not|never|without|avoid)\b|\bn['’]t\b/i;
 
 /**
  * A universal quantifier over the option word: "all options", "every option",
@@ -642,42 +703,6 @@ function decideUnresolvedOptionScope(
 const UNIVERSAL_OPTION_SCOPE =
   /\b(?:all|every|each|both)\s+(?:of\s+(?:the|these|those)\s+)?options?\b|\bacross\s+(?:all\s+|the\s+)?options?\b|\bmodel[-\s]?wide\b|\bevery\s+option\b/i;
 
-/**
- * Which options does this message name, by their FULL labels?
- *
- * Deliberately the same rule `resolveConfigureOptionTarget` applies — normalise,
- * require a contained phrase, then keep only MAXIMAL matches so a label nested
- * inside a longer one is one reading rather than two candidates. Duplicated here
- * ONLY because that function refuses to run without a matched detection; the
- * rule itself is not re-invented, and if it ever diverges the union test below
- * is what should catch it.
- *
- * Returns EVERY maximal match, so the caller can tell the three states apart:
- * none (unresolved), one (identified), several (a deliberate multi-target
- * request, which is not the same thing as not knowing).
- */
-function resolvedOptionLabels(message: string, optionLabels: readonly string[]): string[] {
-  const normalisedMessage = ` ${normaliseOptionLabel(message)} `;
-  const matches: Array<{ label: string; normalised: string }> = [];
-  for (const label of optionLabels) {
-    const normalised = normaliseOptionLabel(label);
-    if (normalised.length < 3) continue;
-    if (!normalisedMessage.includes(` ${normalised} `) && !normalisedMessage.includes(normalised)) {
-      continue;
-    }
-    if (matches.some((m) => m.normalised === normalised)) continue;
-    matches.push({ label, normalised });
-  }
-  if (matches.length === 0) return [];
-  const maximal = matches.filter(
-    (m) => !matches.some((other) => other !== m && other.normalised.includes(m.normalised)),
-  );
-  return maximal.map((m) => m.label);
-}
-
-function normaliseOptionLabel(text: string): string {
-  return text.toLowerCase().replace(/\s+/g, ' ').trim();
-}
 
 /**
  * Decide whether this edit turn's graph write may persist.

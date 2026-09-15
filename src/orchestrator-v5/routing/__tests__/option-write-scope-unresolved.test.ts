@@ -185,15 +185,74 @@ describe('an option-anchored turn with no resolved identity asks instead of writ
     //
     // Zero resolved options is unresolved. TWO is plural. They are different
     // questions and must not share one predicate (trap 21).
+    // ⚠ NOW HOLDS FOR A DIFFERENT AND BETTER REASON. Standing down on "an
+    // identity resolved" was itself an escape (see the reviewer twin below), so
+    // that rule is gone. The turn this pinned moved the OPTIONS' OWN
+    // observed_state, not a FACTOR's — and this arm is now scoped to factor
+    // baselines, so it stands down on WHAT MOVED rather than on how many labels
+    // the sentence contained.
+    const optionOwnValueMoved = clone(CAPTURE);
+    for (const n of optionOwnValueMoved.nodes) {
+      if (n.kind === 'option') n.observed_state = { value: 0.3, source: 'user_override' };
+    }
     const verdict = decideOptionInterventionWrite({
       message:
         'Revise Buy Off-the-Shelf Reporting Tool down, and keep ' +
         'Build Reporting In-House where it is.',
       before: CAPTURE,
-      after: afterBaselineMinted(),
+      after: optionOwnValueMoved,
       appliedMutation: true,
     });
     expect(verdict.verdict).not.toBe('scope_unresolved');
+  });
+
+  // ── REVIEWER DELTA (comment 5685196455, executed on this capture) ──────────
+
+  it('ESCAPE 1: a PROHIBITION of the global write is not permission for it', () => {
+    // ⛔ The nastiest of the three. The universal-scope exemption matched
+    // "model-wide" INSIDE A NEGATION, so the very sentence FORBIDDING the global
+    // write granted it. A quantifier says what scope is being discussed, never
+    // whether the user wants it.
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Set Vendor Licensing Cost to £150,000 per year for the buy option. ' +
+        'Do not change the model-wide baseline.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('scope_unresolved');
+  });
+
+  it('ESCAPE 1 TWIN: an AFFIRMATIVE global request is still allowed', () => {
+    // The supported case must survive the fix, or this trades one harm for
+    // another — the reviewer said so explicitly and it is the easy way to get
+    // this wrong.
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Across all options, change Vendor Licensing Cost so the model-wide baseline ' +
+        'is £150,000 per year instead of £120,000.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('allow');
+  });
+
+  it('ESCAPE 2: resolving a full label is NOT evidence another guard owns the write', () => {
+    // ⛔ I stood down whenever an identity resolved, assuming the existing arms
+    // would own it. They do not — the reviewer executed this and got allow. A
+    // resolved label says who the user named, nothing about who protects the
+    // mutation.
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Change Buy Off-the-Shelf Reporting Tool so the vendor cost is £150,000 ' +
+        'per year instead of £120,000.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('scope_unresolved');
   });
 
   it('CONTRAST 3: an option-anchored turn that moved NO baseline is untouched', () => {
