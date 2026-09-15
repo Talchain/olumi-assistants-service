@@ -34,11 +34,13 @@
  * divergent the moment either is edited.
  */
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { OlumiResponseSchema } from '@talchain/schemas/boundary';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact, RunAnalysisHandlerFact } from '@talchain/schemas/orchestrator';
 
 import { finaliseV5Response } from '../response-finaliser.js';
 import { buildAnalysisResultBlock } from '../compose.js';
+import { sanitiseOlumiResponseForEgress } from '../compose/output-safety.js';
 import { deriveAnalysisFreshness } from '../context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
@@ -139,7 +141,7 @@ function finalise(priorFacts: readonly HandlerFact[] | undefined, newest: Handle
 }
 
 describe('run_delta outcome disclosure', () => {
-  it('names echoes_incomplete when a producer echo is absent — exactly once', () => {
+  it('names echoes_incomplete when a producer echo is absent — once per finalise', () => {
     // The NEWEST keeps its echoes (so identity binds); the older loses one, which
     // is precisely the state `readRunEchoes` refuses on.
     const newest = BOUND_PAIR[0]!;
@@ -148,6 +150,9 @@ describe('run_delta outcome disclosure', () => {
     finalise(pair, newest);
 
     const got = outcomeEvents();
+    // ONE finalise call ⇒ one event. NOT a claim about a turn: `sendFinalised200`
+    // re-finalises once per enabled debug surface, so a turn can legitimately
+    // produce N identical events (see the event's docblock in telemetry.ts).
     expect(got).toHaveLength(1);
     // Bind by the IDENTITY of the reason, never "some refusal happened" — a bare
     // length check passes on every one of the other seven causes.
@@ -216,6 +221,45 @@ describe('run_delta outcome disclosure', () => {
     const got = outcomeEvents();
     expect(got).toHaveLength(1);
     expect(got[0].scenario_id).toBeNull();
+  });
+
+  /**
+   * ⭐ THE DISCLOSURE WOULD BE WORSE THAN USELESS IF `run_delta` DID NOT REACH
+   * THE WIRE. Telemetry saying `emitted` while the UI shows nothing is a NEW
+   * two-way ambiguity — smaller than the eight this PR closes, the same shape,
+   * and on the very seam the disclosure was built for.
+   *
+   * ⚠ NOTE THE LEVEL. `run_delta` is a TOP-LEVEL ENVELOPE key; the deep-strip
+   * that removes `meta`/`_meta` operates on `blocks[i].enrichment` inside
+   * `buildAnalysisResultBlock`. Different levels — which is exactly why this
+   * must be executed rather than reasoned about, in both directions.
+   */
+  it('WIRE SURVIVAL: run_delta survives the egress chokepoint AND the strict wire schema', () => {
+    const finalised = finalise(BOUND_PAIR, BOUND_PAIR[0]!);
+    expect('run_delta' in finalised).toBe(true);
+
+    // Hop 1 — the real V5 egress chokepoint every 200-OK exit funnels through.
+    const egressed = sanitiseOlumiResponseForEgress(finalised, {
+      graph: null,
+      requestId: 'req-wire-survival',
+      exitPath: 'turn_executor_finalise',
+      userMessage: 'anything',
+      mayNameLeadingOption: true,
+    } as unknown as Parameters<typeof sanitiseOlumiResponseForEgress>[1]);
+    expect(egressed.run_delta).toBeDefined();
+
+    // Hop 2 — the strict wire schema DGAI parses against.
+    const parsed = OlumiResponseSchema.parse(egressed);
+    expect(parsed.run_delta).toBeDefined();
+    // Survives byte-identical, not merely present-in-some-form.
+    expect(parsed.run_delta).toEqual(finalised.run_delta);
+
+    // CONTRAST CONTROL. The schema is `.strict()`, so it genuinely discriminates:
+    // an undeclared sibling key THROWS. Without this, "run_delta survived" would
+    // be equally consistent with a parser that passes everything through.
+    expect(() =>
+      OlumiResponseSchema.parse({ ...egressed, __not_a_declared_key__: 1 }),
+    ).toThrow();
   });
 
   it('LEAK GUARD: no user label, quote or id reaches the event', () => {

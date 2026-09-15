@@ -1872,9 +1872,20 @@ export const TelemetryEvents = {
 
   // ── WHY THE RUN-OVER-RUN CONSEQUENCE DID OR DID NOT SHIP ──────────────────
   //
-  // Emitted exactly once per finalised turn from `attachRunDelta`
+  // Emitted once per `finaliseV5Response` CALL, from `attachRunDelta`
   // (`orchestrator-v5/response-finaliser.ts`), the sole caller of
   // `buildRunDelta`.
+  //
+  // ⚠ ONCE PER CALL IS NOT ONCE PER TURN, AND THE DIFFERENCE IS FLAG-DEPENDENT.
+  // `route-v2.ts`'s `sendFinalised200` RE-FINALISES: each debug surface it
+  // re-attaches (`_timings`, `_diagnostic_trace`, `_context_summary`, …) spreads
+  // onto `wireBody` and finalises again, SEQUENTIALLY, each behind its own
+  // config gate. Under the default posture those gates are off and a turn
+  // finalises once; with any of them on, expect N>1 IDENTICAL events for one
+  // turn. So COUNT DISTINCT TURNS, never raw event rows — a rate built on rows
+  // silently tracks debug posture rather than product behaviour. (`request_id`
+  // would be the natural dedupe key and is deliberately absent — see the scope
+  // note below; dedupe on `scenario_id` + timestamp window instead.)
   //
   // ⛔ THE DEFECT IT CLOSES. The caller discarded the producer's discriminated
   // refusal with a bare `if (built.kind !== 'ok') return response;`, and nothing

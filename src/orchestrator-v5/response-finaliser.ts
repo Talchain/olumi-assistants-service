@@ -653,21 +653,34 @@ function attachRunDelta(
     reason: RunDeltaDisclosureReason | null,
     out: T,
   ): T => {
-    emit(TelemetryEvents.V5RunDeltaOutcome, {
-      // Honest null, never a placeholder: the system-event exit reaches the
-      // finaliser with no scenario, and `sanitizeTelemetryData` DROPS undefined
-      // while preserving null — so a bare `ctx.scenarioId` would make the field
-      // vanish from the log line rather than read as unknown.
-      scenario_id: ctx.scenarioId ?? null,
-      outcome,
-      reason,
-      // Structural counts only. They separate "no facts in scope" from "facts,
-      // but not enough run_analysis ones" WITHOUT naming any of them — entity
-      // ids here are slug renderings of the user's own labels, so an id is user
-      // content, not structure.
-      prior_facts_count: priorFactsCount,
-      run_analysis_facts_count: runAnalysisFactsCount,
-    });
+    // ⛔ AN OBSERVABILITY PATH MUST NOT BE ABLE TO BREAK THE THING IT OBSERVES.
+    // Before this change `attachRunDelta` could not fail a response; it now
+    // makes a call that could. `emit` wraps only its Datadog block —
+    // `sanitizeTelemetryData`, the test sink and `log.info` all sit OUTSIDE any
+    // try. The payload here is five scalars, so nothing exotic reaches pino and
+    // a throw is close to impossible; but "close to impossible" is the wrong
+    // trade against silently 500-ing a good turn for the sake of a log line.
+    // Swallowing is correct HERE and nowhere else on this file's paths: the
+    // whole point of the disclosure is that its absence is now noticeable.
+    try {
+      emit(TelemetryEvents.V5RunDeltaOutcome, {
+        // Honest null, never a placeholder: the system-event exit reaches the
+        // finaliser with no scenario, and `sanitizeTelemetryData` DROPS
+        // undefined while preserving null — so a bare `ctx.scenarioId` would
+        // make the field vanish from the log line rather than read as unknown.
+        scenario_id: ctx.scenarioId ?? null,
+        outcome,
+        reason,
+        // Structural counts only. They separate "no facts in scope" from
+        // "facts, but not enough run_analysis ones" WITHOUT naming any of them —
+        // entity ids here are slug renderings of the user's own labels, so an id
+        // is user content, not structure.
+        prior_facts_count: priorFactsCount,
+        run_analysis_facts_count: runAnalysisFactsCount,
+      });
+    } catch {
+      // Deliberately swallowed. The response is the product; the log line is not.
+    }
     return out;
   };
 
