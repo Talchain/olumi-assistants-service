@@ -116,6 +116,49 @@ import {
 import type { JudgementSignals } from './judgement-signals.js';
 import { ENTITY_ID_LEAK_RE } from '../../orchestrator/shared/entity-id-pattern.js';
 import { isSlugShapedEntityId } from '../../orchestrator/shared/output-safety.js';
+
+// ⭐⭐ THE REFERENT RESOLVER MOVED OUT — `src/orchestrator/shared/referent-resolver.ts`.
+//
+// It is the ONE authority for "which stored element does this phrase name?",
+// and it now sits beside `entity-id-pattern.ts` (the canonical owner of the
+// INVERSE direction, id → label) rather than inside this 3,600-line composer.
+// It lived here for one reason — this is where prose linking needed it — and
+// that address is exactly why eight server-side WRITE lanes never found it and
+// grew fourteen private normalisers instead, which disagree on 8 of 10
+// realistic labels.
+//
+// ⛔ NOTHING BELOW CHANGED. The move was a fold: every rail, normalisation and
+// matching primitive is the same text at a new address, re-exported here so
+// every existing consumer keeps its import path and prose output is
+// byte-identical.
+import {
+  buildLabelIndex,
+  containsWholePhrase,
+  GENERIC_LEVER_TOKENS,
+  hasAmbiguousProseEntityReference,
+  hasAmbiguousProseEntityReferenceWithOptions,
+  LEVER_LABEL_MIN_LEN,
+  normaliseForPhraseMatch,
+  resolveLabelToId,
+  resolveProseEntityRefs,
+  resolveProseEntityRefsWithOptions,
+  AMBIGUOUS_LABEL,
+  type GraphNodeLookup,
+  type GraphNodeRef,
+  type LabelIndex,
+} from "../../orchestrator/shared/referent-resolver.js";
+
+export {
+  AMBIGUOUS_LABEL,
+  buildLabelIndex,
+  hasAmbiguousProseEntityReference,
+  resolveLabelToId,
+  resolveProseEntityRefs,
+  type GraphNodeLookup,
+  type GraphNodeRef,
+  type LabelIndex,
+};
+
 import { bandConfidence } from './confidence-bands.js';
 import { deterministicBlockId } from './block-id.js';
 import {
@@ -288,50 +331,8 @@ function isLeverFactor(
   return id.length > 0 && interventionControlledFactorIds.has(id);
 }
 
-/**
- * Minimum lever-label length used for the NAMING scan below. A 1–2 char label
- * (an unlabelled or degenerate node) would over-match arbitrary prose, so it is
- * ignored for detection — structural membership (`isLeverFactor`) is unaffected.
- * The length is measured on the NORMALISED, punctuation-stripped label so a
- * label like `"C#"` (one letter after normalisation) is treated as too short.
- */
-const LEVER_LABEL_MIN_LEN = 3;
 
-/**
- * Finding 5 (over-suppression): generic single-word lever labels that collide
- * with ordinary decision prose. A lever whose WHOLE label normalises to just
- * one of these bare words ("Cost", "Time") cannot be distinguished from
- * incidental use of the word in a NON-lever assumption ("Implementation cost
- * estimates are uncertain"), so the free-text NAME scan refuses to suppress on
- * such a label alone — stronger identity (a multi-word phrase, or a distinctive
- * single word) is required. This is a fail-closed choice: err toward keeping an
- * honest surface over silently dropping it on a weak-identity match. STRUCTURAL
- * factor_id suppression (`isLeverFactor`, used by the evidence surfaces) is
- * unaffected — this guard only tempers label-based detection in free text.
- */
-const GENERIC_LEVER_TOKENS: ReadonlySet<string> = new Set([
-  'cost', 'costs', 'time', 'price', 'prices', 'value', 'values', 'risk',
-  'risks', 'quality', 'revenue', 'budget', 'scope', 'speed', 'effort',
-  'resource', 'resources', 'team', 'size', 'rate', 'growth', 'demand',
-  'supply', 'margin', 'profit', 'sales', 'people', 'timeline', 'timelines',
-]);
 
-/**
- * Finding 5 (under-suppression + Unicode): normalise a label / free-text body
- * for whole-phrase matching. NFKC folds Unicode compatibility forms (curly
- * apostrophes, full-width chars, non-breaking spaces); lower-casing folds case;
- * every run of non-letter/non-number is collapsed to a single space so
- * punctuation cannot block a match — `"Time-to-market"` and `"Time to market"`
- * both normalise to `"time to market"`. Result is trimmed; interior words are
- * single-space separated.
- */
-function normaliseForPhraseMatch(s: string): string {
-  return s
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
 
 /**
  * Doctrine D-U F2 (assumption surface): resolve the option-set LEVER factor_ids
@@ -362,55 +363,7 @@ function collectLeverLabels(
   return labels;
 }
 
-/**
- * Offset of the FIRST whole-phrase occurrence of `needle` in `haystack`, with
- * letter/number word boundaries on BOTH ends — or `-1` when there is none.
- * Both arguments are expected to be pre-normalised via `normaliseForPhraseMatch`
- * (so only Unicode letters/numbers and single spaces remain). Scans every
- * occurrence so a first boundary-failing hit cannot mask a later valid one.
- * Boundaries use the Unicode letter/number classes so accented words ("café")
- * are bounded correctly.
- *
- * The offset is into the NORMALISED haystack, not the original prose. That is
- * sufficient for ORDERING and nothing else reads it: `normaliseForPhraseMatch`
- * is monotone (NFKC, lower-case, collapse non-alphanumeric runs, trim all map a
- * prefix to a prefix), so relative order is preserved exactly even though
- * absolute positions shift.
- */
-function firstBoundedPhraseAt(haystack: string, needle: string, from = 0): number {
-  if (needle.length === 0) return -1;
-  for (;;) {
-    const at = haystack.indexOf(needle, from);
-    if (at < 0) return -1;
-    const before = at === 0 ? '' : haystack[at - 1]!;
-    const afterIdx = at + needle.length;
-    const after = afterIdx >= haystack.length ? '' : haystack[afterIdx]!;
-    const boundedBefore = before === '' || !/[\p{L}\p{N}]/u.test(before);
-    const boundedAfter = after === '' || !/[\p{L}\p{N}]/u.test(after);
-    if (boundedBefore && boundedAfter) return at;
-    from = at + 1;
-  }
-}
 
-/**
- * Whole-phrase containment — the boolean face of {@link firstBoundedPhraseAt},
- * which is the single owner of the scan (one derivation, two read points, so a
- * boundary-rule change can never apply to one caller and not the other).
- *
- * A bare shared token must NOT match a DIFFERENT phrase — on live staging the
- * lever "Equity Offered to CTO" and a non-lever assumption both contain "CTO",
- * so a token match would over-suppress.
- *
- * ⚠ NOTE WHAT THIS DOES NOT DO, because a docstring here previously claimed it
- * did: bounded matching stops "CTO" matching inside "director", it does NOT
- * stop a node genuinely LABELLED "CTO" from matching prose that names "Equity
- * Offered to CTO" — there, "CTO" is a bounded whole word and both labels match.
- * Choosing between them is an ORDERING question, settled in
- * {@link resolveProseEntityRefs} by the longer-label tie-break.
- */
-function containsWholePhrase(haystack: string, needle: string): boolean {
-  return firstBoundedPhraseAt(haystack, needle) >= 0;
-}
 
 /**
  * Doctrine D-U F2: does this free-text prose NAME an option-set lever? True when
@@ -467,14 +420,6 @@ export interface BlockBuildCtx {
   readonly freshness?: 'fresh' | 'stale';
 }
 
-export interface GraphNodeRef {
-  readonly id: string;
-  readonly label: string;
-  readonly kind: TargetRefKindLiteral;
-}
-
-/** factor_id → {id, label, kind} resolved from `enrichment.graph.nodes[]`. */
-export type GraphNodeLookup = ReadonlyMap<string, GraphNodeRef>;
 
 /**
  * Build a lookup table from `fact.result.enrichment.graph.{nodes,edges}[]`
@@ -614,237 +559,6 @@ function populateGraphNodeLookup(
   }
 }
 
-// ============================================================================
-// Wave-4 δ1 — the ONE shared entity→node-id resolver (ROADMAP 1.202 + 1.135).
-//
-// DERIVED (not mirrored, trap-12) from the forward `GraphNodeLookup` above: the
-// reverse `label → id` index is a pure O(nodes) derivation of the SAME map, so it
-// cannot desync — it has no independent source. Two consumers share it:
-//   - 1.202 (the ui_directive emitter, δ2) uses the FORWARD path (id → ref) it
-//     already has — every deterministic fact names its subject by id;
-//   - 1.135 (clickable coach copy) uses this REVERSE path (label → id) to link
-//     entity NAMES inside LLM-authored prose to their nodes.
-// Fail-closed everywhere: a duplicate normalised label is AMBIGUOUS → never
-// linked (we do not guess which node the prose meant); a too-short / bare-generic
-// label is not linked in prose (reusing the shipped over-match rails); a miss is
-// unlinked. Reuses `normaliseForPhraseMatch` + `containsWholePhrase` +
-// `LEVER_LABEL_MIN_LEN` + `GENERIC_LEVER_TOKENS` — the exact matching rails the
-// lever-naming guard already ships, so a producer label change or new node kind
-// flows through automatically (one input, no second list to maintain).
-// ============================================================================
-
-/**
- * Sentinel: a normalised label shared by TWO OR MORE nodes. Such a label resolves
- * to nothing (fail-closed unlinked) — the required ambiguity ruling. A unique
- * `symbol` so it can never collide with a real string id.
- */
-export const AMBIGUOUS_LABEL: unique symbol = Symbol('AMBIGUOUS_LABEL');
-
-/** Reverse index: normalised label → the single node id that owns it, or
- *  `AMBIGUOUS_LABEL` when two+ nodes share the normalised label. */
-export type LabelIndex = ReadonlyMap<string, string | typeof AMBIGUOUS_LABEL>;
-
-/**
- * Narrow override for a caller that already carries a typed canonical-identity
- * warrant. Generic single-word labels stay blocked by default because ordinary
- * prose cannot establish that a word such as "cost" names a model element.
- */
-interface ProseEntityReferenceOptions {
-  readonly allowGenericSingleWordLabels?: boolean;
-  readonly genericAllowedIds?: ReadonlySet<string>;
-  readonly preferLongestMention?: boolean;
-}
-
-/**
- * Build the reverse `label → id` index from a forward `GraphNodeLookup`. One
- * pass; duplicate normalised label → `AMBIGUOUS_LABEL`. Pure + deterministic;
- * derived every build from the forward map (no hand-maintained mirror).
- */
-export function buildLabelIndex(lookup: GraphNodeLookup): LabelIndex {
-  const index = new Map<string, string | typeof AMBIGUOUS_LABEL>();
-  for (const ref of lookup.values()) {
-    const key = normaliseForPhraseMatch(ref.label);
-    if (key.length === 0) continue;
-    // First writer wins the id slot; the SECOND collision flips the key to
-    // AMBIGUOUS and it never reverts (fail-closed on duplicate labels).
-    index.set(key, index.has(key) ? AMBIGUOUS_LABEL : ref.id);
-  }
-  return index;
-}
-
-/**
- * Resolve a single candidate label token to its node id, or `null`. Fail-closed
- * on: too-short / bare-generic label (would over-match), ambiguous (duplicate)
- * label, or a miss. Reuses the shipped normalisation + over-match rails so a lone
- * "Cost" / "AI" / "C#" never links.
- */
-export function resolveLabelToId(index: LabelIndex, rawLabel: string): string | null {
-  const key = normaliseForPhraseMatch(rawLabel);
-  if (key.length < LEVER_LABEL_MIN_LEN) return null;
-  if (!key.includes(' ') && GENERIC_LEVER_TOKENS.has(key)) return null;
-  const resolved = index.get(key);
-  if (resolved === undefined || resolved === AMBIGUOUS_LABEL) return null;
-  return resolved;
-}
-
-/**
- * True when prose names a label that the canonical reverse index marks as
- * ambiguous. This is the fail-closed companion to
- * {@link resolveProseEntityRefs}: that resolver deliberately omits ambiguous
- * references, while callers answering an explicit relationship question need
- * to distinguish "no second model element was named" from "a named element
- * maps to more than one canonical identity".
- *
- * Uses the exact same normalisation, whole-phrase and over-match rails as the
- * resolver. It does not create a second label-matching authority.
- */
-function hasAmbiguousProseEntityReferenceWithOptions(
-  index: LabelIndex,
-  prose: string,
-  options: ProseEntityReferenceOptions = {},
-): boolean {
-  const hay = normaliseForPhraseMatch(prose);
-  if (hay.length === 0) return false;
-  for (const [needle, resolved] of index) {
-    if (resolved !== AMBIGUOUS_LABEL) continue;
-    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
-    if (
-      options.allowGenericSingleWordLabels !== true &&
-      !needle.includes(' ') &&
-      GENERIC_LEVER_TOKENS.has(needle)
-    ) continue;
-    if (firstBoundedPhraseAt(hay, needle) >= 0) return true;
-  }
-  return false;
-}
-
-export function hasAmbiguousProseEntityReference(
-  index: LabelIndex,
-  prose: string,
-): boolean {
-  return hasAmbiguousProseEntityReferenceWithOptions(index, prose);
-}
-
-/**
- * 1.135 — scan LLM-authored prose for the graph node labels it NAMES and return
- * one deduped `TargetRef` per unambiguously-resolved node, **ordered by first
- * mention in the prose**.
- *
- * Whole-phrase, both-ends-bounded matching; too-short / bare-generic
- * single-word labels are skipped; a label shared by two nodes
- * (`AMBIGUOUS_LABEL`) links to NEITHER. Pure; no producer value is read — only
- * the node's own display label.
- *
- * ⭐ WHY THE ORDER IS PROSE ORDER AND NOT LOOKUP ORDER (ROADMAP 2.1023).
- * This function used to return refs in `lookup.values()` order — i.e. the order
- * the PRODUCER happened to emit its nodes in, which the reader cannot see and
- * which has nothing to do with the sentence. Two consumers read `[0]` as "the
- * entity this card is about": the card's own `target_refs` pills, and
- * `ui_directive` row 7, which MOVES THE USER'S VIEWPORT. Measured across the 14
- * committed captures (`olumi-docs/PHASE0-EVIDENCE-2026-07-28/
- * mutation-witness-2026-08-10`): **12 of 21 multi-ref coaching cards listed
- * their entities in an order that contradicted their own sentence**, the
- * dominant shape being `"The link from <factor> to <goal> assumes…"` rendered
- * as `[goal, factor]`.
- *
- * ⚠ THIS IS A PURE REORDERING. The set of resolved refs is byte-identical —
- * every rail above still decides membership, and this function still cannot
- * add, drop, or invent a ref. Only the sequence changes. That is deliberate:
- * salience is NOT inferred from graph structure (influence, degree, rank).
- * The card named these entities in prose; the prose is the only evidence, and a
- * structural salience score would be a fabricated number wearing computed
- * clothes.
- *
- * TIE-BREAK — LONGER LABEL FIRST, and it is load-bearing. When a node labelled
- * `"CTO"` and one labelled `"Equity Offered to CTO"` both exist, prose naming
- * the longer phrase matches BOTH (see {@link containsWholePhrase} — bounded
- * matching does not prevent this). Ordering by offset alone already prefers the
- * longer one whenever the shorter sits INSIDE it and starts later; the
- * tie-break covers the remaining case, prefix containment
- * (`"Onboarding"` vs `"Onboarding friction"`), where both start at the same
- * offset. Together they make a separate longest-match rule unnecessary.
- *
- * Final tie-break is the original lookup order, so the result stays TOTAL and
- * DETERMINISTIC (never dependent on `Array.prototype.sort` stability).
- */
-function resolveProseEntityRefsWithOptions(
-  lookup: GraphNodeLookup,
-  index: LabelIndex,
-  prose: string,
-  options: ProseEntityReferenceOptions = {},
-): readonly TargetRef[] {
-  const hay = normaliseForPhraseMatch(prose);
-  if (hay.length === 0) return [];
-  const matched: Array<{
-    ref: TargetRef;
-    at: number;
-    len: number;
-    ordinal: number;
-  }> = [];
-  const seen = new Set<string>();
-  let ordinal = 0;
-  for (const ref of lookup.values()) {
-    ordinal++;
-    const needle = normaliseForPhraseMatch(ref.label);
-    if (needle.length < LEVER_LABEL_MIN_LEN) continue;
-    // A bare generic single word ("cost") over-matches ordinary decision prose —
-    // require a distinctive single word or a multi-word phrase (same rule as the
-    // lever-naming guard's Finding-5 tempering).
-    if (
-      !needle.includes(' ') &&
-      GENERIC_LEVER_TOKENS.has(needle) &&
-      !(
-        options.allowGenericSingleWordLabels === true &&
-        options.genericAllowedIds?.has(ref.id) === true
-      )
-    ) continue;
-    let at = firstBoundedPhraseAt(hay, needle);
-    if (at < 0) continue;
-    // Fail-closed on ambiguity: a duplicate normalised label resolves to
-    // AMBIGUOUS_LABEL → link to neither node.
-    const resolved = index.get(needle);
-    if (resolved === undefined || resolved === AMBIGUOUS_LABEL) continue;
-    if (seen.has(resolved)) continue;
-    seen.add(resolved);
-    do {
-      matched.push({
-        ref: { id: ref.id, label: ref.label, kind: ref.kind },
-        at,
-        len: needle.length,
-        ordinal,
-      });
-      // A second standalone "Cost" must remain visible even when its first
-      // occurrence was nested inside "Engineering Build Cost".
-      at = options.preferLongestMention === true
-        ? firstBoundedPhraseAt(hay, needle, at + needle.length)
-        : -1;
-    } while (at >= 0);
-  }
-  matched.sort(
-    (a, b) => a.at - b.at || b.len - a.len || a.ordinal - b.ordinal,
-  );
-  if (options.preferLongestMention !== true) return matched.map((m) => m.ref);
-  let coveredUntil = -1;
-  const visibleIds = new Set<string>();
-  const visible: TargetRef[] = [];
-  for (const match of matched) {
-    const end = match.at + match.len;
-    if (end <= coveredUntil) continue;
-    coveredUntil = end;
-    if (visibleIds.has(match.ref.id)) continue;
-    visibleIds.add(match.ref.id);
-    visible.push(match.ref);
-  }
-  return visible;
-}
-
-export function resolveProseEntityRefs(
-  lookup: GraphNodeLookup,
-  index: LabelIndex,
-  prose: string,
-): readonly TargetRef[] {
-  return resolveProseEntityRefsWithOptions(lookup, index, prose);
-}
 
 /**
  * Resolve exact canonical labels for a typed identity-bearing question.
