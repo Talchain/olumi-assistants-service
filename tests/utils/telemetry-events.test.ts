@@ -532,6 +532,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
         V5CoachingEmptyAnswerRecovered: "v5.coaching.empty_answer_recovered",
         V5CoachingAnswerSource: "v5.coaching.answer_source",
+        V5RunDeltaOutcome: "v5.coaching.run_delta_outcome",
         // ROADMAP 1.132 (F2) — answer-shape enforcement (unconditional since
         // the F1 flag deletion): shape-capture signal for the `_answer_shape`
         // sidecar (lengths/counts only).
@@ -1751,6 +1752,12 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // now: structured logs are the operational signal used to quantify
         // v42.2g's population lift; no Datadog metric mapping yet.
         TelemetryEvents.V5CoachingAnswerSource,
+        // Why the run-over-run consequence did or did not ship, emitted once per
+        // finalised turn from `attachRunDelta`. Diagnostic-only: the operational
+        // signal is the structured log line (grep `run_delta_outcome`), used to
+        // tell the eight previously byte-identical silent outcomes apart. No
+        // Datadog metric mapping.
+        TelemetryEvents.V5RunDeltaOutcome,
         // Answer-shape enforcement (ROADMAP 1.132; unconditional since the F1
         // flag deletion) — diagnostic-only shape-capture signal
         // (lengths/counts only); no Datadog metric mapping (structured logs
@@ -2260,6 +2267,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching.output_postcheck",
         "v5.coaching.empty_answer_recovered",
         "v5.coaching.answer_source",
+        "v5.coaching.run_delta_outcome",
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
         "v5.decision_review.contract_violation",
