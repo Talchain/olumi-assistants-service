@@ -628,9 +628,9 @@ export interface TurnExecutorRunResult {
    */
   mayNameLeadingOptionProvenance: MayNameLeadingOptionProvenance;
   /**
-   * ROADMAP 1.233 — which branch the withheld-explanation claim gate took on
-   * this turn, or ABSENT when the gate never ran (non-explanation handler, or
-   * a permitted verdict).
+   * Which branch the withheld-explanation projection took at the in-flow or
+   * finalise gate. Absent when neither applied a projection; a non-explanation
+   * handler can still be projected at finalise.
    *
    * Exists for one reason: to make the gate OBSERVABLE AT THE WIRE. Route-v2
    * stamps it onto `_diagnostic_trace.claim_safety.withheld_projection_reason`.
@@ -1871,8 +1871,9 @@ export async function runTurnExecutor(
   // HTTP-level acceptance walk can observe the gate at all: the POST-#713 walk
   // could prove REPLACE only because that branch happens to substitute a
   // byte-identifiable constant, and could NOT verify APPEND at any price
-  // (§4.3, "UNVERIFIED — not a pass"). `null` = the gate did not run or made
-  // no change.
+  // (§4.3, "UNVERIFIED — not a pass"). Both projection sites record their
+  // result here. `null` means neither applied a projection; the in-flow gate
+  // records `unchanged` explicitly when it examines an already-clean answer.
   let withheldExplanationReasonForRun: WithheldExplanationReason | null = null;
   // ROADMAP 2.104 (F2) — may the withheld-reason copy NAME the user's ratified
   // conditions on this turn? Only when the analysis is `fresh`: the verdict is
@@ -14656,7 +14657,7 @@ export async function runTurnExecutor(
       // cannot vary reads as a measured population when it is a tautology.
       //
       // `in_flow_gate_eligible` was `withheldExplanationReasonForRun !== null`.
-      // That variable's ONLY assignment site is inside the execute block, which
+      // At the time, that variable's only assignment was inside the execute block, which
       // the scope check above (`proposedHandlerIdForOutcome !== null → return`)
       // excludes by construction — so it was always `null` at this emit and the
       // tag was always `false`. Removed on the same reasoning that removed
@@ -14673,6 +14674,10 @@ export async function runTurnExecutor(
       ...response,
       assistant_text: projected.text,
     };
+    // Record the same projection that supplied the replacement bytes. Without
+    // this, the wire diagnostic reported null after a finalise replacement and
+    // a captured reply could not distinguish model text from guard output.
+    withheldExplanationReasonForRun = projected.reason;
     // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: same reasoning as the
     // structural-success swap directly above. The substitution replaces the
     // answer with short withheld copy; mark it functional so the egress does
