@@ -200,6 +200,7 @@ import {
   type ProposalRejectionReason,
 } from './tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
 import { mergeMutatedGraphForPersistence } from './tools/handlers/d1-shared/apply-graph-mutation.js';
+import { collectNotCheckableConstraintIds } from './tools/handlers/d1-shared/constraint-write-admissibility.js';
 import {
   applyCompoundValueUpdateChain,
   preflightCompoundBatch,
@@ -2703,6 +2704,36 @@ export async function runTurnExecutor(
       const compactedConstraints = compactedGraph
         ? (contextGraphForReasoning?.goal_constraints ?? null)
         : null;
+      // ⭐⭐ THE EVALUABILITY VERDICT, DERIVED WHERE THE RAW GRAPH STILL EXISTS.
+      //
+      // #1484 made the WRITE-TIME receipt say when a limit's target records no
+      // number, so the analysis cannot check it. The same claim is then
+      // re-rendered on every LATER turn by `recent-changes.ts`, from a site
+      // that holds no graph — so the ContextPack went on saying "Added
+      // constraint: …" unqualified for the rest of the conversation. This is
+      // the one line that carries the verdict across that gap.
+      //
+      // ⚠ DERIVED FROM `contextGraphForReasoning`, THE SELECTOR'S RAW
+      // SNAPSHOT — the same authority `compactedConstraints` above reads, and
+      // deliberately NOT from `compactedGraph`. `compactGraph` flattens
+      // `observed_state` and drops `prior`/`display_value`/`intercept`/
+      // `goal_threshold*`/`scale_frame`/`data`, so a compact node classifies as
+      // recording nothing and EVERY limit would be reported unevaluable. Nor
+      // from the assembler's own `graph` input, which is `undefined` on every
+      // turn that has a graph (see the note on the line below `graph:`).
+      //
+      // ⚠ CANONICAL-ONLY, for the same reason `selection` and `goal_target`
+      // are: this SPEAKS about the saved model. A provisional first-touch
+      // request graph is not the saved model, and a verdict read off caller
+      // bytes would tell a user their limit is ignored on the strength of a
+      // graph nobody has committed.
+      const notCheckableConstraintIds =
+        contextGraphSelection.status === 'canonical'
+          ? collectNotCheckableConstraintIds(
+              contextGraphForReasoning?.goal_constraints ?? null,
+              contextGraphForReasoning,
+            )
+          : undefined;
       const contextPackStartedAt = timingsEnabled ? Date.now() : 0;
       // Coaching Context Pack v1: project the live `deriveAnalysisFreshness`
       // verdict (already computed this turn) + readiness into the hash-free,
@@ -2993,6 +3024,20 @@ export async function runTurnExecutor(
             : undefined,
         graphContext: { status: contextGraphSelection.status },
         graph: compactedGraph ? undefined : contextGraphForReasoning,
+        // ⚠ THIS LINE IS THE WIRE — same pin as `compactedConstraints` below,
+        // and for the same reason: the projection it feeds is defended by its
+        // own unit suite, but a defended pure function with a dark call site is
+        // this estate's chronic failure #1. Cutting this line does not remove a
+        // `recent_changes` entry; it silently strips the qualification from it,
+        // restoring the pre-#1484 product on every turn after the write.
+        //
+        // Neutering it MUST turn
+        // context/__tests__/constraint-evaluability-wire.route-level.test.ts
+        // red. That suite pins its own PRECONDITION first — it asserts from
+        // telemetry that the turn took the COMPACT path, because on the
+        // non-compact path the assembler's `graph` input is populated and a
+        // future reader might believe the verdict could have come from there.
+        notCheckableConstraintIds,
         compactedGraph,
         // ⚠ THIS LINE IS THE WIRE — the same pin as `selection` above, and for
         // the same reason. `compactGraph` produces a `GraphV3Compact`

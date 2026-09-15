@@ -858,6 +858,33 @@ export interface AssembleContextPackInput {
   readonly graphContext?: ContextPackGraphContext;
   readonly graph?: GraphWithOptions | null;
   /**
+   * ⭐⭐ THE CONSTRAINT-EVALUABILITY VERDICT FOR THIS TURN.
+   *
+   * The `constraint_id`s the analysis cannot check on the graph as it stands,
+   * derived by `collectNotCheckableConstraintIds` from the SELECTOR'S RAW
+   * SNAPSHOT at the turn-executor call site and passed in already-decided. The
+   * assembler places it; it does not derive it, and it holds nothing it could
+   * derive it from.
+   *
+   * ⚠⚠ IT IS A SEPARATE INPUT BECAUSE `graph` ABOVE IS DARK IN PRODUCTION, AND
+   * THAT IS MEASURED, NOT ASSUMED. The turn-executor passes
+   * `graph: compactedGraph ? undefined : contextGraphForReasoning`, and
+   * `compactGraphForContextPack` returns `absent` ONLY for a null/undefined
+   * graph — so on every turn that HAS a graph, `graph` here is `undefined`.
+   * (`decision-constraints-wire.route-level.test.ts` states the same fact for
+   * the constraints wire, independently.) Deriving this verdict from `graph`
+   * would produce a feature that is correct, tested, and reaches no user.
+   *
+   * ⚠ AND THE COMPACT GRAPH CANNOT SUBSTITUTE: `compactGraph` flattens
+   * `observed_state` into `{value, raw_value, unit, cap}` and drops `prior`,
+   * `display_value`, `intercept`, `goal_threshold*`, `scale_frame` and `data`,
+   * so classifying a compact node would report EVERY target as recording
+   * nothing — telling users their perfectly good limits will be ignored.
+   *
+   * Omission is byte-identical to the behaviour before this existed.
+   */
+  readonly notCheckableConstraintIds?: ReadonlySet<string>;
+  /**
    * The already-derived model-facing claim-safety decision for this turn.
    * Production supplies this from the same scenario-scoped verdict that gates
    * deterministic response copy. The assembler does not re-select or infer it.
@@ -1832,6 +1859,13 @@ export function assembleContextPackWithSummary(
   // degraded and stay so.
   const projectedRecentChanges = projectRecentChanges(
     recentMutationFacts, recentMutationHistory?.recent_mutation_entries,
+    // ⚠ THIS IS THE WIRE for the later-turn evaluability verdict. Cutting it
+    // does NOT remove a `recent_changes` entry — it silently strips the
+    // qualification from it, which is the quieter failure and is exactly the
+    // pre-#1484 product: an unqualified "Added constraint: …" re-grounding the
+    // routing model on every subsequent turn. Neutering it MUST turn
+    // `__tests__/constraint-evaluability-wire.route-level.test.ts` red.
+    input.notCheckableConstraintIds,
   );
   const effectiveRecentChangesStatus: RecentChangesHistoryStatus =
     recentChangesStatus !== 'degraded' &&

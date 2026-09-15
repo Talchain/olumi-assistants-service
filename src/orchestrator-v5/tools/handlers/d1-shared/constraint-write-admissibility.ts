@@ -205,3 +205,113 @@ export function findUnevaluatedDurationSpan(input: DurationSpanScanInput): strin
   }
   return null;
 }
+
+/* ===========================================================================
+ * ⭐⭐ THE SAME VERDICT, ON EVERY LATER TURN.
+ *
+ * `classifyConstraintWriteAdmissibility` above is asked once, about the one row
+ * being written. The claim it qualifies is then RE-RENDERED on every subsequent
+ * turn by `context/recent-changes.ts` (`formatConstraintAdded`, a second
+ * production call site of the same receipt copy), from a site that holds no
+ * graph and therefore cannot qualify anything. So the write said "the analysis
+ * cannot check this" and the ContextPack went on saying "Added constraint: …"
+ * for the rest of the conversation — which is how the product comes to restate
+ * a limit as applied after correctly disclaiming it.
+ *
+ * This collector answers the same question over a WHOLE graph so the later-turn
+ * projection can speak from the write-time verdict rather than from a second
+ * derivation. One verdict function, two moments (CLAUDE.md trap 12 — derive,
+ * don't mirror).
+ *
+ * ⚠⚠ IT IS NOT A RENAMED `collectUnmeasuredConstraintTargetIds`, AND CONFLATING
+ * THEM WOULD REINTRODUCE THE DEFECT THAT FUNCTION'S DOCSTRING WARNS ABOUT
+ * (CLAUDE.md trap 21 — name the question each authority answers):
+ *
+ *   · `collectUnmeasuredConstraintTargetIds` (constraint-feasibility.ts) asks
+ *     *"which constraint targets record no number?"* to RELAX a withholding.
+ *     It deliberately has NO goal exemption, because including the goal node
+ *     there costs at most a withholding it would have made anyway.
+ *   · THIS one asks *"which limits may we TELL THE USER the analysis cannot
+ *     check?"*. The verdict is SPOKEN, so the goal exemption is mandatory:
+ *     PLoT skips PU injection for the goal node with reason `goal_node`
+ *     precisely because ISL computes that node's outcome distribution and the
+ *     constraint IS evaluated against it. Speaking without the exemption would
+ *     tell a user their perfectly good limit will be ignored — the one error
+ *     this disclosure must never make.
+ *
+ * It is therefore built on `classifyConstraintWriteAdmissibility`, which owns
+ * the exemption, rather than on the bare predicate underneath it.
+ *
+ * ⚠ FEED IT THE **RAW** SELECTED GRAPH, NOT A PARSED ONE, AND IT IS NOT A
+ * DETAIL. `NodeV3` is a plain `z.object`, so it STRIPS undeclared keys — and
+ * the V1 quantity carrier `data` is undeclared (8 of the 9 fields in
+ * `NODE_QUANTITY_FIELDS` are declared; `data` is not). The compact
+ * context-pack graph is worse still: `compactGraph` flattens `observed_state`
+ * into `{value, raw_value, unit, cap}` and DROPS `prior`, `display_value`,
+ * `intercept`, `goal_threshold*`, `scale_frame` and `data` outright, so every
+ * node in it would classify as carrying nothing. The correct input is the
+ * selector's own snapshot (`selectContextGraphSnapshot`), whose ingress schema
+ * is `.passthrough()` and which is the same input class the run_analysis-time
+ * collector consumes.
+ *
+ * ⚠ AND IT FAILS TOWARD TODAY'S BEHAVIOUR AT EVERY STEP. No graph, an
+ * unreadable graph, no constraints, a row missing either id, or a target the
+ * graph does not contain all yield "not in the set", i.e. no claim. A sweep
+ * that could not look returns the same clean answer as one that looked and
+ * found nothing, so it must not be allowed to speak.
+ *
+ * PURE. No I/O, no clock, no config.
+ * ========================================================================= */
+
+function readIdString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * The `constraint_id`s on this graph whose limit the analysis cannot check.
+ *
+ * @param constraintsSource either the `goal_constraints` array itself or an
+ *   object carrying one — the same two shapes the read-time collector accepts,
+ *   because the row's `node_id` is needed and the ratified projection drops it.
+ * @param graphSource an object carrying RAW `nodes[]` (see the warning above).
+ */
+export function collectNotCheckableConstraintIds(
+  constraintsSource: unknown,
+  graphSource: unknown,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+
+  const rawConstraints = Array.isArray(constraintsSource)
+    ? constraintsSource
+    : constraintsSource !== null && typeof constraintsSource === 'object'
+      ? (constraintsSource as Record<string, unknown>).goal_constraints
+      : undefined;
+  if (!Array.isArray(rawConstraints) || rawConstraints.length === 0) return out;
+
+  const rawNodes =
+    graphSource !== null && typeof graphSource === 'object'
+      ? (graphSource as Record<string, unknown>).nodes
+      : undefined;
+  if (!Array.isArray(rawNodes) || rawNodes.length === 0) return out;
+
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const node of rawNodes) {
+    if (node === null || typeof node !== 'object') continue;
+    const id = readIdString((node as Record<string, unknown>).id);
+    if (id !== null) byId.set(id, node as Record<string, unknown>);
+  }
+
+  for (const row of rawConstraints) {
+    if (row === null || typeof row !== 'object') continue;
+    const obj = row as Record<string, unknown>;
+    const constraintId = readIdString(obj.constraint_id);
+    const nodeId = readIdString(obj.node_id);
+    if (constraintId === null || nodeId === null) continue;
+    const node = byId.get(nodeId);
+    // Absent target ⇒ we could not look ⇒ no claim. Same rule as the read-time
+    // collector, for the same reason.
+    if (node === undefined) continue;
+    if (!classifyConstraintWriteAdmissibility(node).checkable) out.add(constraintId);
+  }
+  return out;
+}
