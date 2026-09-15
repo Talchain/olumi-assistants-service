@@ -600,6 +600,22 @@ function decideUnresolvedOptionScope(
   // nothing about what they want done.
   if (UNIVERSAL_OPTION_SCOPE.test(message)) return null;
 
+  // ⭐ PLURAL IS NOT UNRESOLVED — and conflating them made this arm pre-empt a
+  // guard that already owns the turn.
+  //
+  // MEASURED: "Revise Coverage Pilot to staff 30% of support hours, down from
+  // 70%. Keep Current Coverage at 40%…" names TWO options DELIBERATELY. The
+  // first cut resolved identity as `maximal.length === 1 ? label : null`, so two
+  // named targets read as "we do not know which option" and this arm refused a
+  // turn whose premise another module is built on — `option-observed-state-
+  // substitution.test.ts` pins that the write guard ALLOWS it, and its comment
+  // says outright that a change there means "the premise of this whole module
+  // has changed". It had.
+  //
+  // Zero resolved options is the unresolved case this arm exists for. TWO is a
+  // multi-target request, and `detectOptionOwnValueSubstitution` owns it.
+  if (resolvedOptionLabels(message, optionLabels).length !== 0) return null;
+
   // ⭐ IDENTITY, RESOLVED INDEPENDENTLY OF THE VOCABULARY GATE.
   //
   // The first cut called `resolveConfigureOptionTarget`, which returns at
@@ -608,8 +624,6 @@ function decideUnresolvedOptionScope(
   // here was declared unresolved by construction, a full option label included.
   // A guard agreeing with itself. The maximal-label rule is applied directly
   // instead, on the same normalisation, so identity is a real question here.
-  if (resolvedOptionLabel(message, optionLabels) !== null) return null;
-
   if (anyInterventionWriteLanded(before, after)) return null;
   const baselineNodeIds = baselineWritesLanded(before, after);
   if (baselineNodeIds.length === 0) return null;
@@ -629,7 +643,7 @@ const UNIVERSAL_OPTION_SCOPE =
   /\b(?:all|every|each|both)\s+(?:of\s+(?:the|these|those)\s+)?options?\b|\bacross\s+(?:all\s+|the\s+)?options?\b|\bmodel[-\s]?wide\b|\bevery\s+option\b/i;
 
 /**
- * Which option does this message name, by its FULL label?
+ * Which options does this message name, by their FULL labels?
  *
  * Deliberately the same rule `resolveConfigureOptionTarget` applies — normalise,
  * require a contained phrase, then keep only MAXIMAL matches so a label nested
@@ -638,10 +652,11 @@ const UNIVERSAL_OPTION_SCOPE =
  * rule itself is not re-invented, and if it ever diverges the union test below
  * is what should catch it.
  *
- * Returns null when nothing matches OR when two maximal labels match — an
- * ambiguity is not an identity.
+ * Returns EVERY maximal match, so the caller can tell the three states apart:
+ * none (unresolved), one (identified), several (a deliberate multi-target
+ * request, which is not the same thing as not knowing).
  */
-function resolvedOptionLabel(message: string, optionLabels: readonly string[]): string | null {
+function resolvedOptionLabels(message: string, optionLabels: readonly string[]): string[] {
   const normalisedMessage = ` ${normaliseOptionLabel(message)} `;
   const matches: Array<{ label: string; normalised: string }> = [];
   for (const label of optionLabels) {
@@ -653,11 +668,11 @@ function resolvedOptionLabel(message: string, optionLabels: readonly string[]): 
     if (matches.some((m) => m.normalised === normalised)) continue;
     matches.push({ label, normalised });
   }
-  if (matches.length === 0) return null;
+  if (matches.length === 0) return [];
   const maximal = matches.filter(
     (m) => !matches.some((other) => other !== m && other.normalised.includes(m.normalised)),
   );
-  return maximal.length === 1 ? maximal[0]!.label : null;
+  return maximal.map((m) => m.label);
 }
 
 function normaliseOptionLabel(text: string): string {

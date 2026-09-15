@@ -175,6 +175,27 @@ describe('an option-anchored turn with no resolved identity asks instead of writ
     expect(verdict.verdict).not.toBe('scope_unresolved');
   });
 
+  it('PLURAL TWIN: a turn naming TWO options is a multi-target request, not an unknown one', () => {
+    // ⛔ CI CAUGHT THIS ONE. The first cut resolved identity as "exactly one
+    // maximal match, else null", so a message naming TWO options deliberately
+    // read as "we do not know which option" and this arm refused it — pre-empting
+    // `detectOptionOwnValueSubstitution`, which owns that turn. The spec that
+    // broke says so itself: "If that ever stops being true the premise of this
+    // whole module has changed and this spec is the place that says so."
+    //
+    // Zero resolved options is unresolved. TWO is plural. They are different
+    // questions and must not share one predicate (trap 21).
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Revise Buy Off-the-Shelf Reporting Tool down, and keep ' +
+        'Build Reporting In-House where it is.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).not.toBe('scope_unresolved');
+  });
+
   it('CONTRAST 3: an option-anchored turn that moved NO baseline is untouched', () => {
     const verdict = decideOptionInterventionWrite({
       message: MSG, before: CAPTURE, after: clone(CAPTURE), appliedMutation: true,
