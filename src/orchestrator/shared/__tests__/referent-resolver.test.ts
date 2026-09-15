@@ -116,6 +116,14 @@ describe('ReferentScope — same authority, question-specific rails', () => {
     // turns green and the user is exactly as stuck", i.e. a resolver that buys
     // its safety by asking more often. This asserts the opposite direction as a
     // PROPERTY over a corpus, not as an anecdote.
+    //
+    // ⛔ THIS TEST SHIPPED WITH A VACUOUS ARM AND A REVIEWER CAUGHT IT. The
+    // original corpus had NO duplicate normalised label, so it measured
+    // `bound=4 ambiguous=0 unknown=5` and `if (scan.kind === 'ambiguous')`
+    // NEVER EXECUTED — a mutant narrowing `candidate` only in the ambiguous
+    // direction left this test GREEN. The corpus below carries duplicates on
+    // purpose, and every arm PINS ITS OWN PRECONDITION below, so the test fails
+    // loudly if it ever stops exercising a branch it claims to cover.
     const lookup = lookupOf(
       node('fac_1', 'Cost'),
       node('fac_2', 'AI'),
@@ -123,24 +131,42 @@ describe('ReferentScope — same authority, question-specific rails', () => {
       node('fac_4', 'Time-to-market'),
       node('fac_5', 'Churn rate (%)'),
       node('opt_1', '顧客離脱率'),
+      // Duplicates, so `scan` can actually REACH the ambiguous branch:
+      // multi-word (clears the generic rail) and >= LEVER_LABEL_MIN_LEN.
+      node('fac_7', 'Churn rate'),
+      node('fac_8', 'churn  RATE'),
+      node('opt_2', 'Premium tier'),
+      node('opt_3', 'PREMIUM TIER'),
     );
     const ri = buildReferentIndex(lookup);
     const phrases = [
       'Cost', 'AI', 'Gross margin', 'Time to market', 'Churn rate (%)',
       '顧客離脱率', 'Discount rate', '', 'C#',
+      'Churn rate', 'churn rate', 'Premium Tier', 'premium tier',
     ];
 
+    const seen = { bound: 0, ambiguous: 0, unknown: 0 };
     for (const p of phrases) {
       const scan = resolveReferent(ri, p, 'scan');
       const cand = resolveReferent(ri, p, 'candidate');
+      seen[scan.kind]++;
       if (scan.kind === 'bound') {
         // Anything scan binds, candidate binds to the SAME id.
         expect(cand).toEqual(scan);
       }
       if (scan.kind === 'ambiguous') {
+        // candidate must NOT narrow an ambiguous answer into a silent unknown.
         expect(cand.kind).toBe('ambiguous');
       }
+      // candidate may never REFUSE something scan answered.
+      if (scan.kind !== 'unknown') expect(cand.kind).not.toBe('unknown');
     }
+
+    // ⭐ PIN THE PRECONDITION. Without these three, an arm that stops firing is
+    // invisible and the test passes by testing nothing (trap 13b).
+    expect(seen.bound, 'corpus must exercise the BOUND arm').toBeGreaterThan(0);
+    expect(seen.ambiguous, 'corpus must exercise the AMBIGUOUS arm').toBeGreaterThan(0);
+    expect(seen.unknown, 'corpus must exercise the UNKNOWN arm').toBeGreaterThan(0);
   });
 
   it('ambiguity is a genuine identity fact and is reported in BOTH scopes', () => {

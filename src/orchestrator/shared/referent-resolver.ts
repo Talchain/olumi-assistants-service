@@ -417,27 +417,65 @@ export type Resolution =
  * wrote, where "cost" appears incidentally in text that was not referring to
  * anything. Fail-closed is free there — a wrong answer costs a bad hyperlink.
  *
- * A write lane is not scanning a haystack. It holds a CANDIDATE: the phrase
- * the user themselves used to refer to something. There is no incidental-match
- * risk to defend against, because the user typed the word *in order to* name
- * the element. Applying the scan rails there answers a question the write lane
- * never asked — and fail-closed is expensive, because a wrong answer costs the
- * user their edit.
+ * A caller that holds a CANDIDATE — the phrase the user themselves used to
+ * refer to something — has no incidental-match risk to defend against, because
+ * the user typed the word *in order to* name the element. Applying the scan
+ * rails there answers a question that caller never asked, and fail-closed is
+ * expensive: a wrong answer costs the user their edit.
  *
- * ⭐ NOTE THE DIRECTION, because the predicted failure mode of this whole
- * change was "every symptom metric turns green and the user is exactly as
- * stuck". `candidate` scope resolves STRICTLY MORE phrases than `scan`, never
- * fewer. It does not buy its safety by asking more often. What it changes is
- * that an AMBIGUOUS phrase stops being an indistinguishable `null` and becomes
- * an answer a caller can act on.
+ * ⛔⛔ AND HERE IS THE CORRECTION THAT MATTERS, because the first version of
+ * this docstring got it wrong in a way that would have made the product WORSE.
+ *
+ * It said "a WRITE LANE is not scanning a haystack". **That is false, and it is
+ * false for the lane this module was extracted to serve.** Measured at the
+ * bytes:
+ *
+ *   - `option-effect-write.ts` — `matchLabels` runs `phraseOccurrences` over
+ *     `params.message` and carries **its own `normalised.length < 3` rail**;
+ *   - `whatif/resolve-target-option.ts:290` — its variable is literally named
+ *     `haystack`;
+ *   - `repair-value-binding.ts:932` — `padded.includes(...)`, and its comment
+ *     states the incidental-collision rationale outright: *"shorter labels
+ *     collide with ordinary words and would decline every sentence containing
+ *     one"*;
+ *   - `edit-graph.ts:992` — same shape.
+ *
+ * **Four of the eight write lanes scan haystacks, and already carry the rail.**
+ * ⇒ Converting one of them to `candidate` would STRIP A RAIL FROM A HAYSTACK
+ * SCAN and produce MORE WRONG BINDING — worse than the "more asking" failure
+ * this design was written to avoid, and in the opposite direction.
+ *
+ * ⭐ **The scope is a property of WHAT THE CALL SITE DOES, never of which layer
+ * it lives in.** Ask of each site: does it hold a referring phrase, or is it
+ * hunting labels inside a sentence? `post-analysis-label-intercept.ts:150` is
+ * the write-side site that genuinely holds a candidate — and applies the rail
+ * anyway. That is the shape `candidate` exists for.
+ *
+ * ⚠ TWO LIMITS ON THE "STRICTLY MORE" PROPERTY, both load-bearing:
+ *  1. It is proven against `scan` — **a comparator no write lane uses today.**
+ *     Against the matcher those lanes actually use (`fuzzyMatchNodeId`),
+ *     `candidate` is NARROWER in 5 of 16 realistic cases, and in 0 of 5 does it
+ *     return `ambiguous`: all five are `unknown`, **which cannot be settled by
+ *     asking.** Before converting any lane, re-prove the property against the
+ *     matcher THAT LANE uses, and treat a move from a binding to `unknown` as a
+ *     REGRESSION, not a safe refusal.
+ *  2. The three-state answer exists only on the EXACT-KEY path, so it is
+ *     unavailable to the four haystack lanes as they stand — the ask it was
+ *     meant to enable cannot fire there without a span-matching entry point.
  *
  * Ambiguity and miss are genuine identity facts and are reported in BOTH
  * scopes. Only their CONSEQUENCE differs, and that belongs to the caller.
  */
 export type ReferentScope =
-  /** Prose: hunting labels inside text we did not write. Scan rails ON. */
+  /**
+   * Hunting labels inside text we did not write (LLM prose, or a user message
+   * scanned for any label it happens to contain). Over-match rails ON.
+   */
   | "scan"
-  /** Write: the user handed us this phrase as a referring expression. Rails OFF. */
+  /**
+   * The caller already holds this phrase as a referring expression. Rails OFF.
+   * ⛔ Not "a write lane" — four of the eight write lanes are `scan` sites.
+   */
   | "candidate";
 
 /**
