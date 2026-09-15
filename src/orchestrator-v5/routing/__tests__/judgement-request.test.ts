@@ -104,6 +104,35 @@ const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
 
 describe('independent review — control complements retain the system subject', () => {
   it.each([
+    // Outside review5674195175: requesting a report is not recalling one.
+    'Can you tell me which of my figures you used?',
+    'Could you explain what you left out of my brief?',
+    'Would you show me which assumptions you kept from my brief?',
+    'Can you list what you omitted from my brief?',
+    'Could you tell me what you inferred from my brief?',
+    'As you know, tell me which of my figures you used.',
+    'Given what you said, show me what you left out of my brief.',
+    'Before you answer, list which assumptions you kept from my brief.',
+  ])('recognises the current request to report a handling fact: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
+      expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    'Did you tell me which of my figures you used?',
+    'Can you remember which of my figures you used?',
+    'Could you explain what you planned to use from my brief?',
+    'Can you tell me what I should keep from the figures you used in my brief?',
+    'As you know, tell me what I should infer from my brief.',
+  ])('requesting a report does not make its content actual system handling: %j', (message) => {
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
     // Outside review5674116183: the question subject follows the preamble.
     'As you know, which of my figures did you decide to use?',
     'Given what you said, which figures from my brief did you start using?',

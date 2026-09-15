@@ -366,6 +366,26 @@ function hasSystemDispositionInQuestion(message: string): boolean {
   // so an outer "did you mention ..." cannot hand authority to its content.
   // Direct/non-inverted requests retain the existing first-subject fallback.
   const interrogative = /\b(?:do|did|have|had|are|were|can|could|would|will|should)\s+you\b/i.exec(message);
+  // A current request TO report facts is transparent to its factual content;
+  // a question ABOUT reporting/remembering them is not. Do not generalise
+  // this to arbitrary higher predicates or to past "did you tell me ...".
+  const reportVerb = '(?:tell\\s+me|show\\s+me|explain|list)';
+  const politeReport = interrogative !== null
+    ? new RegExp(`^(?:can|could|would)\\s+you\\s+(?:please\\s+)?${reportVerb}\\s+(?:what|which|whether)\\b`, 'i').exec(message.slice(interrogative.index))
+    : null;
+  const directReport = interrogative === null
+    ? new RegExp(`(?:^|[,;:—–])\\s*(?:please\\s+)?${reportVerb}\\s+(?:what|which|whether)\\b`, 'i').exec(message)
+    : null;
+  const report = politeReport ?? directReport;
+  if (report !== null) {
+    const reportStart = politeReport !== null ? interrogative!.index : report.index;
+    const content = message.slice(reportStart + report[0].length);
+    const contentSubject = /\byou\b/i.exec(content);
+    // "Tell me what I should keep from the figures you used" still asks
+    // about I, not the embedded handling fact. Keep the main subject bound.
+    if (contentSubject === null || /\b(?:i|we|he|she|they|it)\b/i.test(content.slice(0, contentSubject.index))) return false;
+    return hasSystemDispositionInQuestion(content);
+  }
   const subjectIndex = interrogative !== null
     ? interrogative.index + interrogative[0].length - 'you'.length
     : /\byou\b/i.exec(message)?.index;
