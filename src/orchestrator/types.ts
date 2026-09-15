@@ -10,6 +10,7 @@
  * - PLoT V2 run response (narrow structural type)
  */
 
+import type { EditFailureDisclosure } from './tools/edit-failure-disclosure.js';
 import type { GraphV3T, EdgeV3T, NodeV3T, OptionV3T } from "../schemas/cee-v3.js";
 
 // ============================================================================
@@ -595,6 +596,16 @@ export interface GraphPatchBlockData {
     plot_violations?: unknown[];
     /** Total LLM attempts before rejection (1 = no retry, 2 = one retry, etc.) */
     attempts?: number;
+    /**
+     * ⭐ NOTHING FAILS SILENTLY (Paul's ruling, 2026-09-15). The user-facing
+     * account of this refusal: a copyable `request_id`, whose `fault` it was
+     * (defaulting to `olumi` — never blamed on the user by elimination) and a
+     * plain-English `readable`. Forwarded onto the wire by
+     * `buildBoundaryBlocks` inside the `ErrorBlock`'s PASSTHROUGH `details`,
+     * so no schema release is involved. Content-free by construction — see
+     * `tools/edit-failure-disclosure.ts`.
+     */
+    disclosure?: EditFailureDisclosure;
   };
   validation_warnings?: string[];
   /**

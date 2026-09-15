@@ -1640,6 +1640,21 @@ function buildBoundaryBlocks(result: EditGraphResult): OlumiResponse['blocks'] {
       if (violationCodes && violationCodes.length > 0) {
         details.violation_codes = violationCodes;
       }
+      // ⭐ NOTHING FAILS SILENTLY (Paul's ruling, 2026-09-15). The three fields
+      // a person actually needs when a change of theirs is discarded: a
+      // `request_id` they can copy, whose `fault` it was, and a `readable`
+      // sentence that is English rather than a code. They ride in `details`,
+      // which is `z.object({}).passthrough().optional()` while the block itself
+      // is `.strict()` — so this widens no boundary enum and needs no schema
+      // release. Content-free: `readable` is fixed copy selected by a closed
+      // reason enum, never interpolated from the model, the graph or the op,
+      // so the redaction rule the codes above obey is not weakened here.
+      const disclosure = rej.disclosure;
+      if (disclosure) {
+        details.request_id = disclosure.request_id;
+        details.fault = disclosure.fault;
+        details.readable = disclosure.readable;
+      }
       return [
         {
           type: 'error',

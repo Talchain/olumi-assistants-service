@@ -24,6 +24,8 @@
  * never silently rewritten into the operations array.
  */
 
+import { buildNonLandingDisclosure } from './edit-failure-disclosure.js';
+import type { EditFailureDisclosure } from './edit-failure-disclosure.js';
 import { createHash } from "node:crypto";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
@@ -4003,6 +4005,14 @@ export async function handleEditGraph(
           undefined,
           attempt,
           diagnostics(),
+          // ⭐ THE SECOND HALF OF THE FIX: make the strip LOUD. The sentence
+          // above is all the user got for 100 of 100 measured refusals in a
+          // 20h window — no request id to quote, no statement of whose fault
+          // it was, no account of what happened to their change. The reason
+          // enum the guard already computed is right here; the disclosure is
+          // derived from it rather than re-diagnosed, so the wire and the warn
+          // line above cannot disagree about why this turn refused.
+          buildNonLandingDisclosure(requestId, nonLanding.reason),
         );
       }
 
@@ -4401,6 +4411,15 @@ function buildRejectionResult(
   plotDetails?: { plot_code?: string; plot_violations?: unknown[] },
   attempts?: number,
   diagnostics?: EditGraphTraceDiagnostics,
+  /**
+   * ⭐ NOTHING FAILS SILENTLY. The user-facing account of this refusal —
+   * request id, fault, plain English. Optional because it is being threaded
+   * one refusal class at a time (the measured dominant one first), and an
+   * ABSENT disclosure is honestly absent rather than a manufactured default:
+   * "we did not state whose fault it was" and "it was nobody's fault" are
+   * different claims and must not share a representation.
+   */
+  disclosure?: EditFailureDisclosure,
 ): EditGraphResult {
   const patchData: GraphPatchBlockData = {
     patch_type: 'edit',
@@ -4409,6 +4428,7 @@ function buildRejectionResult(
     base_graph_hash: baseGraphHash,
     rejection: {
       reason,
+      ...(disclosure && { disclosure }),
       ...(code && { code }),
       ...(plotDetails?.plot_code && { plot_code: plotDetails.plot_code }),
       ...(plotDetails?.plot_violations && plotDetails.plot_violations.length > 0 && { plot_violations: plotDetails.plot_violations }),
