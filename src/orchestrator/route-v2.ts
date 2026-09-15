@@ -240,6 +240,14 @@ import {
 import { randomUUID } from 'node:crypto';
 import { composeGoalNeverStatedAsk } from '../orchestrator-v5/clarify-v2/goal-never-stated-ask.js';
 import {
+  composeDraftFailureRecoveryTurn,
+  isPostEnforcementBlock,
+  DRAFT_FAILURE_RETRY_CHIP_ID,
+  DRAFT_FAILURE_RETRY_CHIP_LABEL,
+  DRAFT_FAILURE_RETRY_CHIP_MESSAGE,
+  type DraftFailureFault,
+} from '../orchestrator-v5/draft-failure-recovery-turn.js';
+import {
   commitDirectAnswer,
   computeRequestHash,
   computeSurvivingPriorPendings,
@@ -5055,6 +5063,233 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
                   ? { name: askErr.name, message: askErr.message }
                   : { message: String(askErr) },
               }, 'V5 draft goal-never-stated ask — commit failed; falling back to the 500 BoundaryError');
+            }
+          }
+        }
+
+        // ⭐⭐⭐ NO BARE 500 ON THIS PATH. (Paul's ruling, 2026-09-15)
+        //
+        // ── THE DEFECT THIS CLOSES ──────────────────────────────────────
+        // Roughly one fresh brief in three came back HTTP 500 with NO MODEL
+        // AT ALL. Measured on this build (`07da2c0b`): 30/96 at concurrency
+        // <= 4, and 3/8 on a SEQUENTIAL concurrency=1 control, so it is the
+        // product and not harness load. IDENTICAL brief bytes gave
+        // 200 / 200 / 500 across three runs.
+        //
+        // The user got nothing, learnt nothing, and was handed no reference
+        // they could send us. WE learnt nothing either: a `BoundaryError` has
+        // no `assistant_text`, so the honest recovery sentence the pipeline
+        // had ALREADY COMPOSED rode the wire unread. This file confessed it in
+        // terms ~50 lines below and named the exact remedy — *"a turn
+        // committing direct_answer 200 here"*. This is that turn.
+        //
+        // Paul's ruling: *"Nothing should fail silently. Everything should be
+        // an opportunity to coach the user and get them to help correct the
+        // data, unless it is Olumi's fault, and then we just need to know that
+        // error."* Both arms are served: `details.fault` says WHICH arm, read
+        // off the producer's own stamp, and `details.readable` carries the
+        // producer's own sentence.
+        //
+        // ── WHY IT IS A REFUSAL AND NOT A REPAIR ────────────────────────
+        // Nothing here invents model content. No edge is synthesised, no
+        // strength/mean/std is minted, and no partial graph is shipped — the
+        // drafted graph is discarded exactly as it is discarded today. Shipping
+        // a graph with stranded nodes is precisely what the enforcement gate
+        // fails closed to prevent (`graph-enforcement.ts:804-805`), and
+        // `retry-directive.ts:130` already rules that *"an unsupported link is
+        // worse than an omitted one"*. The safety argument is therefore
+        // STRUCTURAL, not a matter of care: there is no gutted model to mistake
+        // for a whole one.
+        //
+        // ── THE THREE CONJUNCTS, EACH LOAD-BEARING ──────────────────────
+        //  1. `!previewWasStreamed` — if a GRAPH_READY frame already reached
+        //     this client the user HAS SEEN a model, and replacing it with an
+        //     error turn would silently retract something on their screen.
+        //     That case keeps the existing draft-loss disclosure, untouched.
+        //  2. the prior-pending read must SUCCEED — committing without
+        //     carry-forward silently wipes an unrelated live hold, and losing
+        //     the memory of this failure is strictly better than losing the
+        //     user's own state. Same reasoning as the goal ask above.
+        //  3. the commit must SUCCEED — an unrecorded turn is worse than the
+        //     500, because the user's next message arrives at a route with no
+        //     memory of what was said. Any failure falls through to the
+        //     UNCHANGED 500 below.
+        //
+        // ⚠ ORDERING. This sits AFTER the goal-never-stated ask, which is
+        // strictly better where it applies (it asks the one question measured
+        // to flip 11/15 failures to 0/10). This is the floor underneath it,
+        // reached when that exit does not apply OR could not commit — which is
+        // also the only way `fault: 'your_data'` is reachable here.
+        //
+        // ── THE CLASS, NAMED BY THE PRODUCER AND NOT BY ME ──────────────
+        // `validation_error_codes` is emitted by exactly one site — the
+        // post-enforcement block gate (`graph-enforcement.ts:~905`) — and it is
+        // the same site whose `selectEnforcementBlockRecovery` composed the
+        // sentence this turn speaks. So the gate below is the producer's own
+        // signature, not a code list restated here that could drift from it
+        // (trap 12). Absent is false, so EVERY other failure class on this path
+        // keeps today's 500 exactly: timeouts, rate limits, upstream errors,
+        // truncations and plain throws are different failures with different
+        // remedies, and speaking for them is a separate, separately-ruled
+        // increment. THAT IS THE RESIDUAL, and it is stated rather than buried.
+        const recoveryCodes = Array.isArray(pipelineDetails?.validation_error_codes)
+          ? (pipelineDetails.validation_error_codes as unknown[]).filter(
+              (c): c is string => typeof c === 'string',
+            )
+          : [];
+        if (!previewWasStreamed && isPostEnforcementBlock(recoveryCodes)) {
+          let recoveryPriorPendings: readonly PendingAction[] | null = null;
+          try {
+            recoveryPriorPendings = await loadMostRecentPendingActionsStrict(
+              ingress.scenario_id,
+              requestId,
+            );
+          } catch (err) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: ingress.scenario_id,
+                err:
+                  err instanceof Error
+                    ? { name: err.name, message: err.message }
+                    : { message: String(err) },
+              },
+              'V5 draft-failure recovery turn — prior-pending read failed; not speaking, because a commit without carry-forward would wipe live proposals',
+            );
+          }
+          if (recoveryPriorPendings !== null) {
+            try {
+              const mappedRecovery =
+                pipelineStatusCode != null && pipelineErrorCode != null
+                  ? mapDraftGraphPipelineReason(
+                      pipelineStatusCode,
+                      pipelineErrorCode,
+                      pipelineReason,
+                      pipelineRetryable,
+                    )
+                  : { reason: 'draft_graph_pipeline_threw', retryable: true };
+              // READ, never re-derived. Only the goal NODE knows who authored
+              // the goal, and the graph is gone by the time we hold this
+              // failure. Absent is `'olumi'` and that is the fail-safe
+              // direction — see the composer's header for the measurement.
+              const recoveryFault: DraftFailureFault =
+                pipelineDetails?.goal_never_stated === true ? 'your_data' : 'olumi';
+              const recoverySuggestion =
+                typeof pipelineRecovery?.suggestion === 'string'
+                  ? pipelineRecovery.suggestion
+                  : null;
+              const recoveryHints = Array.isArray(pipelineRecovery?.hints)
+                ? (pipelineRecovery.hints as unknown[]).filter(
+                    (h): h is string => typeof h === 'string',
+                  )
+                : [];
+              // ⚠ `draftEffectiveBrief`, NOT `ingress.message`: with a live
+              // override those differ and the message is the lossy one. The
+              // floor is the draft input schema's own minimum — a seed below it
+              // cannot be drafted from, so offering the retry would be an
+              // affordance we could not honour.
+              const retrySeed =
+                draftEffectiveBrief.length >= DRAFT_GRAPH_MIN_BRIEF_LENGTH
+                  ? draftEffectiveBrief
+                  : null;
+              const offerRetry = mappedRecovery.retryable && retrySeed !== null;
+              const recoveryResponse = composeDraftFailureRecoveryTurn({
+                requestId,
+                fault: recoveryFault,
+                suggestion: recoverySuggestion,
+                hints: recoveryHints,
+                reason: mappedRecovery.reason,
+                validationErrorCodes: recoveryCodes,
+                retryable: mappedRecovery.retryable,
+                offerRetry,
+              });
+              // The retry is the EXISTING `draft_graph` pending, not a new
+              // continuation channel: its resume already lives at
+              // `route-v2.ts:4092` and claims the offer by exact copy replay of
+              // the chip's own label/message. A `clarify_v2_round` would be
+              // wrong here — it folds the reply into the BRIEF, and "Try again"
+              // is not an answer to anything.
+              const recoveryPendings: readonly PendingAction[] =
+                offerRetry && retrySeed !== null
+                  ? [
+                      buildDraftOfferPending({
+                        scenarioId: ingress.scenario_id,
+                        chipId: DRAFT_FAILURE_RETRY_CHIP_ID,
+                        publicLabel: DRAFT_FAILURE_RETRY_CHIP_LABEL,
+                        publicMessage: DRAFT_FAILURE_RETRY_CHIP_MESSAGE,
+                        briefSeed: retrySeed,
+                        nowMs: Date.now(),
+                      }),
+                    ]
+                  : [];
+              const recoveryCommit = await commitDirectAnswer(recoveryResponse, {
+                scenario_id: ingress.scenario_id,
+                turn_id: ingress.turn_id,
+                // It answers rather than asks — the goal exit's `'clarify'` is
+                // right for a question and wrong for a report.
+                turn_class: 'direct_answer',
+                handler_id: null,
+                request_hash: computeRequestHash(ingress),
+                // The failed draft's own LLM spend is attributed to the draft,
+                // not to this exit: composing the turn is deterministic and
+                // calls nothing.
+                llm_calls_used: 0,
+                duration_ms: Date.now() - routeStartedAt,
+                handler_facts: [],
+                pending_actions: [...recoveryPendings],
+                // …and the prior turn's set, so the carry-forward runs over the
+                // REAL prior state instead of the empty default.
+                priorPendingActions: recoveryPriorPendings,
+                coaching_state: null,
+                userMessage: ingress.message,
+              });
+              log.info(
+                {
+                  event: 'v5.recovery_response.draft_failure_spoken',
+                  request_id: requestId,
+                  scenario_id: ingress.scenario_id,
+                  reason: mappedRecovery.reason,
+                  fault: recoveryFault,
+                  codes: recoveryCodes,
+                  retry_offered: offerRetry,
+                },
+                'Draft pipeline failed before any preview — committing a speaking 200 instead of a dead 500',
+              );
+              return sendFinalised200(
+                reply,
+                requestId,
+                'draft_graph_failure_spoken',
+                recoveryCommit.response,
+                {
+                  graph: null,
+                  // T1 claim safety — INHERITED from the turn-entry read. Never
+                  // a literal: the permission belongs to the fact this response
+                  // DISPLAYS, and this one displays no analysis at all.
+                  ...(await claimSafety.forExit()),
+                  // ROADMAP 1.132 (F1) — EGRESS-DEFAULT INVERSION: a
+                  // deterministic failure report is functional copy and must
+                  // ship plain.
+                  answerKind: 'functional',
+                  requestStartedAt: routeStartedAt,
+                  scenarioId: ingress.scenario_id,
+                  turnId: ingress.turn_id,
+                  userMessage: ingress.message,
+                },
+              );
+            } catch (recoveryErr) {
+              // FALL THROUGH to the unchanged 500. Conjunct 3: an unrecorded
+              // turn is worse than an error.
+              log.warn(
+                {
+                  request_id: requestId,
+                  scenario_id: ingress.scenario_id,
+                  err:
+                    recoveryErr instanceof Error
+                      ? { name: recoveryErr.name, message: recoveryErr.message }
+                      : { message: String(recoveryErr) },
+                },
+                'V5 draft-failure recovery turn — commit failed; falling back to the 500 BoundaryError',
+              );
             }
           }
         }

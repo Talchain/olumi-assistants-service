@@ -371,6 +371,16 @@ export type V5DiagnosticExitPath =
   // volume must not silently absorb post-draft-failure asks — the two have
   // different causes and different fixes.
   | 'draft_graph_goal_never_stated'
+  // Paul's ruling 2026-09-15 — NO BARE 500 ON THE DRAFT PATH. The draft
+  // pipeline failed, no GRAPH_READY frame had reached the client, and instead
+  // of an `assistant_text`-less BoundaryError the turn COMMITS and SPEAKS: the
+  // pipeline's own recovery sentence, an ErrorBlock carrying `request_id` /
+  // `fault` / `readable` in its passthrough `details`, and a one-tap retry.
+  // Its OWN member, not `draft_graph_goal_never_stated`: that exit ASKS a
+  // question the user can answer, this one REPORTS a failure that is usually
+  // ours, and a dashboard that folded them together could not tell the
+  // coaching arm of Paul's ruling from the it-is-our-fault arm.
+  | 'draft_graph_failure_spoken'
   | 'draft_graph_error';
 
 /**

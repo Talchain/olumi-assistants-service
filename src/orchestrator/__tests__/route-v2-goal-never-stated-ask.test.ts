@@ -300,7 +300,22 @@ describe('POST /orchestrate/v2/turn — a draft blocked on CEE\'s OWN goal asks 
    * admit cases above while swallowing genuine defects into a question about
    * the user's goal.
    */
-  it('REFUSES: an ordinary block with the SAME codes but no stamp still 500s', async () => {
+  /**
+   * ⚠⚠ THIS CASE CHANGED SHAPE ON 2026-09-15 AND THE FENCE IS STILL HERE.
+   *
+   * It used to assert a 500. Paul's ruling that day — *"Nothing should fail
+   * silently"* — made the bare 500 unreachable for the post-enforcement block
+   * class, so asserting one would now pin the defect rather than the fence.
+   *
+   * What the fence was FOR is unchanged and is still asserted: a block WITHOUT
+   * the producer's stamp must NOT be swallowed into a question about the
+   * user's goal. Both arms are now 200, so the discriminator is the arm of
+   * Paul's ruling each one takes — coach the user (`your_data`, the goal
+   * question) versus tell them it is ours (`olumi`, the failure report). That
+   * is a STRONGER discriminator than the status code was: a blanket fence
+   * would have to emit the goal question here to pass, and it cannot.
+   */
+  it('REFUSES the ASK: an ordinary block with the SAME codes but no stamp reports OUR failure instead of asking about the goal', async () => {
     dispatchDraftGraphMock.mockRejectedValue(pipelineThrow(ORDINARY_DETAILS));
 
     const res = await app.inject({
@@ -309,11 +324,22 @@ describe('POST /orchestrate/v2/turn — a draft blocked on CEE\'s OWN goal asks 
       payload: messagePayload(COMPLETE_BRIEF),
     });
 
-    expect(res.statusCode).toBe(500);
+    expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');
-    // The unchanged path still leaves its server-side trace.
-    expect(markGraphWriteFailedMock).toHaveBeenCalled();
+    // THE FENCE: not the goal ask. Bound to the ask's own exported lead, so a
+    // reword there moves this with it.
+    expect(body.assistant_text).not.toContain(GOAL_NEVER_STATED_LEAD);
+    expect(body.assistant_text).not.toContain(
+      'What outcome would make this decision a success?',
+    );
+    // …and it takes the other arm of the ruling, named by the producer's
+    // absent stamp rather than guessed.
+    const errorBlock = (body.blocks ?? []).find(
+      (b: { type?: string }) => b.type === 'error',
+    );
+    expect(errorBlock?.details?.fault).toBe('olumi');
+    // The turn is a real answer, so it is NOT marked dead.
+    expect(markGraphWriteFailedMock).not.toHaveBeenCalled();
   });
 
   it('REFUSES: a pipeline throw carrying no details at all still 500s', async () => {
