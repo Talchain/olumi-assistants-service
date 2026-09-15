@@ -37,11 +37,12 @@
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import {
-  hasDispositionVerb,
+  hasSystemDisposition,
   isBriefAuditQuestion,
   tryBriefAuditAnswer,
 } from '../../cee/context-integrity/brief-audit-answer.js';
 import { asksForOwnJudgement } from './judgement-request.js';
+import { computeQuoteMask } from './edit-part-decomposition.js';
 // The ratified "your model records no value to test this limit" voice. A leaf
 // with no imports of its own, precisely so a non-coaching caller can read it.
 import { unmeasuredTargetReadbackSentence } from '../coaching/constraint-gap-copy.js';
@@ -376,6 +377,24 @@ export interface TryStateQueryGuardInput {
   };
 }
 
+/**
+ * The audit can report a past handling decision, not propose the next one.
+ * These clauses also decline a mixed audit + advice request: returning the
+ * tally as the entire answer would silently discard its second half.
+ * This is an ANSWER-coverage check only; never use it to authorise a mutation.
+ */
+const BRIEF_ADVICE_REQUEST_PATTERNS: readonly RegExp[] = [
+  /\b(?:do|would|could|can)\s+you\s+(?:\w+\s+){0,2}(?:recommend|suggest|advise|propose)\b/i,
+  /(?:^|[.!?;:]|\band\b|\balso\b)\s*(?:please\s+)?(?:recommend|suggest|advise|propose)\b/i,
+  /\b(?:what|which|how)\b[^.!?;\n]*\b(?:should|would|could)\s+(?:i|we|you)\b/i,
+  // Require an actual question about a prospective action. A bare "we should"
+  // also occurs inside the ITEM being audited ("the margin we should protect")
+  // and is not evidence that the user requested advice. The explicit second-
+  // person question keeps "do you think I should use ..." out of the audit;
+  // the inverted modal keeps "should I use ..." on the same reasoning path.
+  /\b(?:do|would|could|can)\s+you\s+think\s+(?:that\s+)?(?:i|we)\s+(?:should|could)\b|\b(?:should|would|could)\s+(?:i|we)\b/i,
+];
+
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
@@ -405,28 +424,20 @@ export function tryStateQueryGuard(
     if (FRESH_EDIT_BAIL_OUT_PATTERNS.some((pat) => pat.test(input.message))) {
       return { matched: false };
     }
-    // ⭐⭐ THE USER ASKED FOR OUR JUDGEMENT, AND A MANIFEST TALLY IS NOT ONE.
-    //
-    // Measured at `de254398`: *"Do you actually disagree with anything I
-    // said?"* satisfies the audit frame on `do you` and the brief referent on
-    // **"anything I said"**, and was answered with *"I found 8 stated figures.
-    // 0 of them are carried in the model…"* — a fidelity report to a request
-    // for disagreement, at `llm_calls: 0`. On the same scenario and build,
-    // *"Argue the opposite case as strongly as you can."* reached the reasoning
-    // layer and answered well. The capability was there; the phrasing decided
-    // whether the user reached it.
-    //
-    // ⚠ THE SECOND CONJUNCT IS LOAD-BEARING, NOT DEFENSIVE. Declining a GENUINE
-    // audit question re-opens loss class 7 (this module's header: explanation
-    // layers re-read the brief rather than the model). `hasDispositionVerb`
-    // keeps the decline to messages that attribute NO handling action to us —
-    // there is then nothing for the manifest to report on, whatever else the
-    // sentence contains. *"Do you agree you left out my deadline?"* keeps its
-    // manifest answer; both directions are pinned by execution in
-    // `__tests__/judgement-request.test.ts`.
+    // `isBriefAuditQuestion` is deliberately broad for mutation protection:
+    // "do you" + "my brief" is enough. It is NOT sufficient permission to
+    // replace the answer with a numeric audit. Require an unquoted disposition
+    // attributed to the system, not a verb inside the user's proposed action.
+    // Keep the protective predicate above unchanged. A question that falls
+    // through here must not gain permission to edit the thing it asks about.
+    const quoteMask = computeQuoteMask(input.message);
+    const outsideQuotes = input.message.split('').map((ch, i) => quoteMask[i] ? ' ' : ch).join('');
+    // A whole-message quote is still a request; embedded quoted content is an
+    // object of discussion, not another instruction from the current speaker.
+    const requestText = /[\p{L}\p{N}]/u.test(outsideQuotes) ? outsideQuotes : input.message;
     if (
-      asksForOwnJudgement(input.message) &&
-      !hasDispositionVerb(input.message)
+      !hasSystemDisposition(requestText) ||
+      BRIEF_ADVICE_REQUEST_PATTERNS.some((pat) => pat.test(requestText))
     ) {
       return { matched: false };
     }

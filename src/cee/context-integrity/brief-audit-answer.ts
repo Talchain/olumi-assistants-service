@@ -194,9 +194,13 @@ const AUDIT_FRAME_PATTERNS: readonly RegExp[] = [
  * ⚠ NOT a synonym list for "the model". "the graph"/"the model" are what the
  * brief was turned INTO; naming those is not an audit of fidelity to the input.
  */
-const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
+const NOMINAL_BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
   /\b(?:my|the|that|this)\s+brief\b/i,
   /\bmy\s+(?:input|notes|write-?up|description|summary|context)\b/i,
+];
+
+const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
+  ...NOMINAL_BRIEF_REFERENT_PATTERNS,
   // "what I told you", "what I gave you", "anything I wrote", "the parts I
   // described". The determiner is generalised because "anything I wrote" refers
   // to the submitted text exactly as "what I wrote" does, and pinning only the
@@ -212,8 +216,10 @@ const BRIEF_REFERENT_PATTERNS: readonly RegExp[] = [
  * "the numbers I wrote in my brief" from "the numbers I set on the canvas", so
  * it is only ever admitted together with {@link RETENTION_VERB_PATTERNS}.
  */
+const NOMINAL_DATA_REFERENT = /\bmy\s+(?:numbers|figures|data|estimates|assumptions|targets|constraints)\b/i;
+
 const WEAK_INPUT_REFERENT_PATTERNS: readonly RegExp[] = [
-  /\bmy\s+(?:numbers|figures|data|estimates|assumptions|targets|constraints)\b/i,
+  NOMINAL_DATA_REFERENT,
   /\bthe\s+(?:numbers|figures)\s+i\s+\w+/i,
 ];
 
@@ -345,6 +351,99 @@ export function hasDispositionVerb(message: string): boolean {
     RETENTION_VERB_PATTERNS.some((p) => p.test(message)) ||
     INFERENCE_VERB_PATTERNS.some((p) => p.test(message))
   );
+}
+
+/**
+ * Answer coverage, not mutation permission: the handling verb must belong to
+ * the system's predicate. "Do you believe we should use my figures?" contains
+ * "use", but its subject is "we", not "you". Reuse the disposition vocabulary
+ * without inheriting the broader protective question detector's admission.
+ * The caller removes quoted mentions before using this answer-only check.
+ */
+export function hasSystemDisposition(message: string): boolean {
+  // A preamble about a prior interaction must not hide a following, separate
+  // factual question. Quoted spans have already been removed by the caller.
+  return message.split(/[.!?](?:\s+|$)|\n+/).some(hasSystemDispositionInQuestion);
+}
+
+function hasSystemDispositionInQuestion(message: string): boolean {
+  // An inverted question identifies its own subject even after a preamble
+  // ("as you know, which figures did you use?"). Bind the FIRST such question
+  // so an outer "did you mention ..." cannot hand authority to its content.
+  // Direct/non-inverted requests retain the existing first-subject fallback.
+  const interrogative = /\b(?:do|did|have|had|are|were|can|could|would|will|should)\s+you\b/i.exec(message);
+  // A current request TO report facts is transparent to its factual content;
+  // a question ABOUT reporting/remembering them is not. Do not generalise
+  // this to arbitrary higher predicates or to past "did you tell me ...".
+  const reportVerb = '(?:tell\\s+me|show\\s+me|explain|list)';
+  const politeReport = interrogative !== null
+    ? new RegExp(`^(?:can|could|would)\\s+you\\s+(?:please\\s+)?${reportVerb}\\s+(?:what|which|whether)\\b`, 'i').exec(message.slice(interrogative.index))
+    : null;
+  const directReport = interrogative === null
+    ? new RegExp(`(?:^|[,;:—–])\\s*(?:please\\s+)?${reportVerb}\\s+(?:what|which|whether)\\b`, 'i').exec(message)
+    : null;
+  const report = politeReport ?? directReport;
+  if (report !== null) {
+    const reportStart = politeReport !== null ? interrogative!.index : report.index;
+    const content = message.slice(reportStart + report[0].length);
+    const contentSubject = /\byou\b/i.exec(content);
+    if (contentSubject === null) return false;
+    // Admit a whole nominal object before this subject, not arbitrary text
+    // containing a later "you". Thus "which assumptions you kept" is a
+    // factual question, but "which assumptions the team should keep from
+    // what you included" is not. Reuse only NON-CLAUSAL input referents;
+    // the broad referent detector also admits relative clauses and cannot
+    // establish this boundary. Unknown objects fall through to reasoning.
+    const object = content.slice(0, contentSubject.index).trim().replace(/^of\s+/i, '');
+    const nominalPatterns = [...NOMINAL_BRIEF_REFERENT_PATTERNS, NOMINAL_DATA_REFERENT];
+    const nominal = (part: string): boolean => nominalPatterns.some((pattern) => {
+      const whole = new RegExp(`^(?:${pattern.source})$`, pattern.flags);
+      return whole.test(part) || whole.test(`my ${part}`);
+    });
+    if (object !== '' && !object.split(/\s+(?:from|in|of)\s+/i).every(nominal)) return false;
+    return hasSystemDispositionInQuestion(content.slice(contentSubject.index));
+  }
+  const subjectIndex = interrogative !== null
+    ? interrogative.index + interrogative[0].length - 'you'.length
+    : /\byou\b/i.exec(message)?.index;
+  if (subjectIndex === undefined) return false;
+  const question = message.slice(subjectIndex);
+  const verbs = [
+    ...OMISSION_VERB_PATTERNS,
+    ...RETENTION_VERB_PATTERNS,
+    new RegExp(`\\b(?:${INFERENCE_VERB})\\b`, 'i'),
+  ];
+  // Only recognised selection/completion and aspectual links may qualify a
+  // handling verb. An arbitrary "verb + to" preserves the subject but does
+  // NOT establish handling: promising, planning, claiming and refusing to use
+  // something are questions the manifest cannot answer. Unknown predicates
+  // therefore fall through to reasoning; this is not a general intent parser.
+  const modifiers = '(?:(?:have|had|not|never|ever|just|already|also|[a-z]+ly)\\s+)*';
+  const selection = '(?:decid(?:e[ds]?|ing)|cho(?:ose[sn]?|se[n]?|osing)|opt(?:ed|ing|s)?|elect(?:ed|ing|s)?)\\s+to\\s+';
+  const completion = '(?:end(?:ed|ing|s)?\\s+up|(?:go(?:es|ing)?|went|gone)\\s+on\\s+to)\\s+';
+  const coordination = '[a-z]+\\s+(?:or|and)\\s+';
+  // Bind to the outer question's system subject, not any embedded
+  // "you used ..." inside a question about mentioning or believing it.
+  // Preserve the existing explicit CURRENT assent request ("Do you agree
+  // you left it out?"); past agreement is a different event, not this check.
+  const currentAssent = /\bdo\s+$/i.test(message.slice(0, subjectIndex))
+    ? `(?:agree\\s+(?:that\\s+)?you\\s+${modifiers})?`
+    : '';
+  const predicate = `^you\\s+${modifiers}${currentAssent}(?:(?:${selection}|${completion}|${coordination})${modifiers})*`;
+  const systemPrefix = new RegExp(`${predicate}$`, 'i');
+  // Bare gerund complements preserve a started/ongoing/completed action,
+  // unlike "consider using". This branch is available only to an -ing
+  // handling verb, never to the user's separate "we should ..." predicate.
+  const aspect = '(?:start(?:ed|ing|s)?|begin(?:ning|s)?|began|begun|continu(?:e[ds]?|ing)|finish(?:ed|ing|es)?|be(?:en|ing)?|are|were)\\s+';
+  const progressivePrefix = new RegExp(`${predicate}(?:${aspect}${modifiers})?$`, 'i');
+  return verbs.some((verb) => {
+    const occurrences = new RegExp(verb.source, `${verb.flags}g`);
+    return [...question.matchAll(occurrences)].some((match) => {
+      const prefix = question.slice(0, match.index);
+      return systemPrefix.test(prefix) ||
+        (/^[a-z]+ing\b/i.test(match[0]) && progressivePrefix.test(prefix));
+    });
+  });
 }
 
 // ── the composer ────────────────────────────────────────────────────────────
