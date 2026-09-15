@@ -2637,7 +2637,55 @@ function projectOnce(
     };
 
     const statedDirection = item.direction;
-    if (kind === "constraint" && typeof item.value === "number" && statedDirection === undefined) {
+    /**
+     * ⭐⭐ THE LIMIT'S FIGURE, READ FROM WHERE THE MODEL ACTUALLY PUT IT.
+     *
+     * MEASURED 15 Sep 2026 — 13 of 13 captured constraints at served prompt v201
+     * / `claude-sonnet-4-6` carried `direction: "ceiling"` and NO numeric
+     * `value`: the brief's "keeping monthly churn under 4%" arrives as
+     * `{kind:"constraint", source_quote:"keeping monthly churn under 4%",
+     * direction:"ceiling"}`, with the 4% left in the span and duplicated as a
+     * separate `figure` item.
+     *
+     * Both constraint branches below gate on `typeof item.value === "number"`,
+     * so NEITHER fires. `statedConstraintBindings` stays empty, the binding loop
+     * never runs, and `constraint_target_not_measurable` — the refusal written
+     * for exactly this case — cannot fire at all: 0 occurrences across 23
+     * captures while the limit was pruned as generic `unconnected_to_goal` 20
+     * times. The user was told "a detail was not connected" about their own
+     * stated limit.
+     *
+     * ⭐ THIS IS #1489's HABIT, ON A SECOND ITEM KIND. That fix recorded the
+     * same shape for goals — "the model marks the goal `role: 'target'` and puts
+     * the figure in its `source_quote` rather than its `value` field, so
+     * `applyStatedGoalTarget`'s `typeof item.value === 'number'` gate never
+     * fires" — and its remedy was to read the span and hand it to THE SAME
+     * writer. This reuses that reader rather than minting a second one.
+     *
+     * ⛔ IT PICKS NO TARGET AND COMPARES NO NAMES. `soleStatedQuantityInSpan`
+     * reads a quantity out of THIS item's OWN span, bound to it by identity. It
+     * returns a value only when the span holds EXACTLY ONE non-temporal
+     * quantity, so an ambiguous span still yields nothing and stays explicit.
+     * Nothing here goes near which metric the limit bounds — that remains
+     * whatever the model wrote in `applies_to_*`, and the existing
+     * `MINTABLE_TARGET_KINDS` and unit-family safeties still judge it. The
+     * settled ruling that this pass does NO string comparison of metric names
+     * is untouched.
+     *
+     * ⚠ WHAT IT DOES NOT FIX, STATED PLAINLY: it gives the limit a numeric home
+     * and makes a mis-targeted limit REFUSE VISIBLY instead of vanishing. It
+     * does not make an unlinked constraint survive the connectivity prune, and
+     * it cannot correct a wrong `applies_to_*` — the completion grammar carries
+     * no `stated_items` axis, by design.
+     */
+    const constraintSpanQuantity =
+      kind === "constraint" && typeof item.value !== "number"
+        ? soleStatedQuantityInSpan(item.source_quote)
+        : undefined;
+    const constraintValue =
+      typeof item.value === "number" ? item.value : constraintSpanQuantity?.value;
+    const constraintUnit = item.unit ?? constraintSpanQuantity?.unit;
+    if (kind === "constraint" && typeof constraintValue === "number" && statedDirection === undefined) {
       // ⭐⭐ ROOT 2(a) — DO NOT GUESS A DIRECTION. ASK.
       //
       // `direction` is OPTIONAL in the grammar (`required: ["kind",
@@ -2663,16 +2711,16 @@ function projectOnce(
         node_id: id,
         reason: "constraint_direction_unstated",
       });
-    } else if (kind === "constraint" && typeof item.value === "number" && statedDirection !== undefined) {
+    } else if (kind === "constraint" && typeof constraintValue === "number" && statedDirection !== undefined) {
       const operator = directionToOperator(statedDirection);
       // PLoT reads the operator in BOTH places (graph.ts:176-178, 252-258).
       node.data = { operator };
       node.observed_state = {
-        value: item.value,
+        value: constraintValue,
         metadata: {
           operator,
-          original_value: item.value,
-          ...(item.unit ? { unit: item.unit } : {}),
+          original_value: constraintValue,
+          ...(constraintUnit ? { unit: constraintUnit } : {}),
         },
       };
       // ⭐⭐ THE DIRECTION GATE STAYS IN FRONT OF THE MODEL'S BINDING, NEVER
@@ -2690,8 +2738,8 @@ function projectOnce(
           node,
           quote,
           operator,
-          value: item.value,
-          unit: item.unit,
+          value: constraintValue,
+          unit: constraintUnit,
           appliesToStated: item.applies_to_stated,
           appliesToClaim: item.applies_to_claim,
         });
