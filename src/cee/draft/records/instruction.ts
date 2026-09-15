@@ -240,6 +240,18 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   resting on a basis that does not hold.
   Who said it makes no difference. "Sales says cut the price, product says hold
   and ship the integrations" names two real acts, and both are options.
+  An option often names more than one thing: "raise the price to £59 with the
+  next feature release" names a price move AND the release it is tied to. Keep
+  the whole sentence as the option's \`source_quote\`, and emit a \`factor\` for the
+  other part too when it is something that varies or bears on what happens.
+  Without it the release exists nowhere in the model, and the user is shown their
+  proposal reduced to its price while the option's name still says otherwise.
+  When the SAME condition runs through more than one alternative — "ship the same
+  release either way" — it is a shared condition, not what separates them. Emit
+  it once. Do not give each option a different effect on it to make it look like
+  a difference, and do not stretch to make every part of a sentence into
+  something an option acts on: an option need not move every clause of its own
+  name.
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
   they must stay below.
