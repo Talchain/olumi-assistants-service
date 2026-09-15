@@ -617,6 +617,83 @@ export function narrativeNamesOption(narrative: string, label: string): boolean 
   return tokensNameOption(normaliseTokens(narrative), normaliseTokens(label));
 }
 
+/**
+ * Does `narrative` RESTATE `label` but with a DIFFERENT NUMERAL?
+ *
+ * ## Why this exists, and why it is not a cue-word rule (measured 2026-09-15)
+ *
+ * The three captured defects all share one shape: the review prose repeats the
+ * winner's own label verbatim except for the figure — stored "Raise the Pro plan
+ * price to £49", shipped "…to £44". `narrativeNamesOption` correctly returns
+ * false (numerals match EXACTLY), but false is also what it returns for a
+ * perfectly honest narrative that crowns nobody, so absence alone cannot tell a
+ * lie from a legitimate silence.
+ *
+ * ⛔ Gating on a win-cue does NOT separate them. MEASURED: `WIN_CUE` does not
+ * match "produced the best outcome in N% of runs of this model" — the exact
+ * template all three defects use — so a crowning-sentence gate stands the guard
+ * down on 3 of 3 real defects. Widening that cue list is the banned move
+ * (CLAUDE.md trap 22f): it is a natural-language predicate with no stable
+ * boundary, and this estate has already paid for four oscillation rounds on one.
+ *
+ * ⭐ So the binding is by IDENTITY against the winner's OWN label (trap 19), not
+ * by any predicate another object could satisfy: every non-numeric token must
+ * match (inflection-tolerant, {@link labelTokenMatches}) and at least one
+ * numeric token must differ. That is decidable, needs no roster, and cannot be
+ * satisfied by prose that simply does not discuss the winner.
+ *
+ * ## What it deliberately does NOT catch
+ *
+ * A crowning of a wholly different phrase ("Discounting aggressively produced
+ * the best outcome") is NOT detected here — it is the `claimedNonWinnerLeaders`
+ * case, which needs the option roster. Stated so the gap is pinned rather than
+ * silently assumed closed.
+ */
+export function narrativeRestatesLabelWithDifferentNumeral(
+  narrative: string,
+  label: string,
+): boolean {
+  const labelToks = normaliseTokens(label);
+  // No numeral in the label ⇒ no numeral can differ. Cheap, and it keeps the
+  // rule inapplicable (rather than accidentally true) for labels like
+  // "Switch to HubSpot".
+  if (!labelToks.some((t) => /[0-9]/.test(t))) return false;
+  const narrToks = normaliseTokens(narrative);
+  if (narrToks.length < labelToks.length) return false;
+
+  for (let i = 0; i <= narrToks.length - labelToks.length; i += 1) {
+    let all = true;
+    let numeralDiffers = false;
+    for (let j = 0; j < labelToks.length; j += 1) {
+      const labelTok = labelToks[j]!;
+      const narrTok = narrToks[i + j]!;
+      if (/[0-9]/.test(labelTok)) {
+        if (narrTok === labelTok) continue;
+        // A numeral replaced by ANOTHER numeral is the restatement we hunt. A
+        // numeral replaced by a WORD is a different sentence altogether.
+        if (/[0-9]/.test(narrTok)) {
+          numeralDiffers = true;
+          continue;
+        }
+        all = false;
+        break;
+      }
+      if (!labelTokenMatches(narrTok, labelTok)) {
+        all = false;
+        break;
+      }
+    }
+    if (all && numeralDiffers) return true;
+  }
+  return false;
+}
+
+/** Split prose into sentences. Exported so an egress guard can operate
+ *  PER-SENTENCE rather than replacing a whole field. */
+export function splitNarrativeSentences(text: string): string[] {
+  return sentenceList(text);
+}
+
 function sentenceList(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+|\n+/)
