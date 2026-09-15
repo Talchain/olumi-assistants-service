@@ -99,6 +99,8 @@ export {
   modelAnswerableAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
+  applyConstraintCorrections,
+  type ConstraintCorrection,
   askItemIdentity,
   buildRecordsCompletionSchema,
   buildRecordsCompletionPrompt,

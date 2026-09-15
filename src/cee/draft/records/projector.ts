@@ -623,6 +623,31 @@ export interface DroppedRecordRef {
      */
     | "constraint_direction_unstated"
     /**
+     * ⭐⭐ A STATED LIMIT CARRIES NO THRESHOLD WE CAN USE — so it cannot be
+     * enforced, and until now nobody said so.
+     *
+     * MEASURED 15 Sep 2026: 13 of 13 captured constraints arrived with a
+     * `direction` and NO numeric `value` — the figure sat in the span, or in a
+     * separate `figure` item. Both binding branches gate on
+     * `typeof item.value === "number"`, so the limit never reached the binding
+     * path and its only disclosure was the generic `unconnected_to_goal`. The
+     * limit reached the graph in 0 of 20 pricing drafts.
+     *
+     * ⛔ THIS READS NOTHING OUT OF THE SPAN, and that is deliberate. An earlier
+     * attempt (#1513) recovered the sole quantity from the quote and FABRICATED
+     * a 60% floor out of "…dead in enterprise, which is 60% of revenue" — a
+     * descriptive aside in a qualitative constraint. Which quantity a sentence
+     * BOUNDS is a semantic judgement, and the only routes to it are comparative-
+     * word parsing or name matching, both of which this estate has already paid
+     * for. So this disclosure states the ABSENCE and asks; it never guesses.
+     *
+     * ⚠ IT FIRES ON A GENUINELY QUALITATIVE LIMIT TOO, and that is correct
+     * rather than noise: "legal has NOT confirmed this" IS a constraint we
+     * cannot enforce, and saying so is honest. The completion turn is told
+     * explicitly to leave such a limit alone.
+     */
+    | "constraint_value_unstated"
+    /**
      * ⭐ A STATED `constraint` NAMED WHAT IT LIMITS, AND THE TARGET CANNOT
      * CARRY A THRESHOLD.
      *
@@ -2637,6 +2662,17 @@ function projectOnce(
     };
 
     const statedDirection = item.direction;
+    // ⭐ THE ABSENCE, DISCLOSED. Derived from the record alone: a limit was
+    // stated, a direction was given, and no usable threshold came with it.
+    if (kind === "constraint" && typeof item.value !== "number" && statedDirection !== undefined) {
+      dropped.push({
+        claim_index: -1,
+        claim_kind: STATED_ITEM_DROP_KIND,
+        label: quote,
+        node_id: id,
+        reason: "constraint_value_unstated",
+      });
+    }
     if (kind === "constraint" && typeof item.value === "number" && statedDirection === undefined) {
       // ⭐⭐ ROOT 2(a) — DO NOT GUESS A DIRECTION. ASK.
       //

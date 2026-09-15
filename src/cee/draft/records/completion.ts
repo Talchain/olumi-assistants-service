@@ -225,19 +225,34 @@ export interface CompletionAsk {
  */
 const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem["kind"]> = new Set([
   "no_goal",
-  // ⭐ SAME GATE, SAME REASON, DIFFERENT VERB. `no_goal` needs a `stated_items`
-  // entry ADDED; a refused limit needs a field on an EXISTING one CHANGED. Both
-  // are writes to the `stated_items` axis, and the completion grammar has no
-  // such axis — so both are withheld by the same derived verdict, and both
-  // become answerable automatically on the day it gains one.
+]);
+
+/**
+ * ⭐⭐ THE TWO VERBS, NAMED APART — this set used to hold both, and that was
+ * trap 21 in miniature (its own comment said "SAME GATE, SAME REASON, DIFFERENT
+ * VERB", which is the tell).
+ *
+ * `no_goal` needs a `stated_items` entry ADDED, and remains withheld: this
+ * grammar still cannot mint the user's words.
+ * A refused limit needs fields on an EXISTING entry CHANGED, which
+ * `constraint_corrections` now expresses without touching `source_quote` or
+ * `kind` — so it is answerable, and only it.
+ */
+const ASK_KINDS_NEEDING_A_CONSTRAINT_CORRECTION: ReadonlySet<CompletionAskItem["kind"]> = new Set([
   "constraint_target_unbindable",
 ]);
 
 export function isModelAnswerableAskItem(item: CompletionAskItem): boolean {
-  if (!ASK_KINDS_NEEDING_A_STATED_ITEM.has(item.kind)) return true;
   const properties = buildRecordsCompletionSchema().properties as Record<string, unknown> | undefined;
-  return properties !== undefined
-    && Object.prototype.hasOwnProperty.call(properties, "stated_items");
+  const has = (k: string): boolean =>
+    properties !== undefined && Object.prototype.hasOwnProperty.call(properties, k);
+  // ⚠ STILL DERIVED FROM THE GRAMMAR, NEVER HARDCODED — same reason as before:
+  // a literal `true` here would go stale in the fail-OPEN direction, putting an
+  // ask to the model that it has no field to answer with, which is an advertised
+  // action terminating in refusal.
+  if (ASK_KINDS_NEEDING_A_STATED_ITEM.has(item.kind)) return has("stated_items");
+  if (ASK_KINDS_NEEDING_A_CONSTRAINT_CORRECTION.has(item.kind)) return has("constraint_corrections");
+  return true;
 }
 
 /**
@@ -807,6 +822,13 @@ export function enumerateCompletionAsk(
           validatorCode: null,
         });
         break;
+      case "constraint_value_unstated":
+        push({
+          kind: "constraint_target_unbindable",
+          detail: `"${d.label}" — this limit has no threshold we can apply, so it is not being enforced; if it states one, give its value, its direction and what it bounds`,
+          validatorCode: null,
+        });
+        break;
       case "constraint_target_unit_mismatch":
         push({
           kind: "constraint_target_unbindable",
@@ -1100,11 +1122,58 @@ export function enumerateCompletionAsk(
  * even if it wanted to. Built from the draft grammar's own claim-item builder,
  * so a change to the claim shape moves both passes together.
  */
+/**
+ * ⭐⭐⭐ THE CORRECTION AXIS — SUBJECT, ROLE AND VALUE TRAVEL TOGETHER OR NOT AT ALL.
+ *
+ * WHY IT EXISTS. `constraint_target_unbindable` is raised today, is correct
+ * today, and was UNANSWERABLE today: repairing a refused limit is a change to
+ * `applies_to_*` on an existing `stated_items[]` entry, and this grammar carried
+ * only `claims`. So the pipeline asked the one question it could not accept an
+ * answer to. Measured: the brief's "keeping monthly churn under 4%" reached the
+ * graph in 0 of 20 pricing drafts while the goal from the same sentence bound.
+ *
+ * ⛔ IT IS NOT `stated_items`, AND THAT IS THE WHOLE POINT. Exposing
+ * `stated_items` would let the second turn restate the user's words. This axis
+ * cannot: it carries no `source_quote` and no `kind`, so a correction can only
+ * say WHAT AN EXISTING LIMIT APPLIES TO and WHAT IT BOUNDS — never what the user
+ * said. `mergeCompletionConstraintCorrections` enforces that at the bytes, and
+ * `stated_items_disturbed` still refuses a wholesale rewrite.
+ *
+ * ⭐ `direction` AND `value` ARE REQUIRED ALONGSIDE THE SUBJECT. A subject
+ * without a role is a limit with no operator — and this projector has already
+ * paid for that: an unstated direction defaulted to `<=` turns "must stay above"
+ * into its exact opposite. A subject without a value is a bound with nothing to
+ * bound. Requiring all three means the model cannot half-answer.
+ *
+ * ⭐ AND OMISSION IS A LEGAL ANSWER — the negative control this mechanism must
+ * keep passing. "legal has NOT confirmed this… which is 60% of revenue" is a
+ * QUALITATIVE limit whose span happens to contain a number that is not its
+ * threshold. A previous attempt (#1513) read that 60% deterministically and
+ * fabricated a floor. The model declines here by emitting no entry, and a
+ * qualitative constraint stays qualitative.
+ */
+function buildConstraintCorrectionSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      stated_index: { type: "integer" },
+      direction: { type: "string", enum: ["floor", "ceiling"] },
+      value: { type: "number" },
+      unit: { type: "string" },
+      applies_to_claim: { type: "integer" },
+      applies_to_stated: { type: "integer" },
+    },
+    required: ["stated_index", "direction", "value"],
+    additionalProperties: false,
+  };
+}
+
 export function buildRecordsCompletionSchema(): Record<string, unknown> {
   return {
     type: "object",
     properties: {
       claims: { type: "array", items: buildDraftClaimItemSchema() },
+      constraint_corrections: { type: "array", items: buildConstraintCorrectionSchema() },
     },
     required: ["claims"],
     additionalProperties: false,
@@ -1407,6 +1476,32 @@ export function buildRecordsCompletionPrompt(args: {
     `Emit ONLY new claims. Your first new claim will be claims[${ask.baseClaimIndex}], the next`,
     `claims[${ask.baseClaimIndex + 1}], and so on. Everything above keeps the index it already has.`,
     "",
+    // ⭐⭐ SHOWN ONLY WHEN A LIMIT WAS ACTUALLY REFUSED. Every draft would
+    // otherwise pay tokens for an instruction about a situation it is not in,
+    // and an instruction present on turns where it cannot apply is how a prompt
+    // teaches the model to use a field speculatively.
+    ...(ask.items.some((i) => i.kind === "constraint_target_unbindable")
+      ? [
+          "### A limit that could not be attached to anything",
+          "For each limit listed above as unattached, you may emit one `constraint_corrections`",
+          "entry saying what it bounds:",
+          "- `stated_index` — that limit's position in `stated_items`.",
+          "- `applies_to_claim` OR `applies_to_stated` — EXACTLY ONE — the position of the thing",
+          "  the limit bounds. Not the goal: a goal is what is being reached, not a measured",
+          "  quantity a limit can bound.",
+          "- `direction` — `ceiling` if the user must stay below it, `floor` if above.",
+          "- `value`, plus `unit` where the user gave one.",
+          "Subject, direction and value travel together. A subject with no value bounds nothing,",
+          "and a value with no direction is as likely to invert the user's meaning as honour it.",
+          "",
+          "LEAVE THE ENTRY OUT when the limit states no number. \"Legal has not confirmed this\" is",
+          "a real constraint with no threshold, and a number elsewhere in the same sentence — as in",
+          "\"...dead in enterprise, which is 60% of revenue\" — is usually describing something else,",
+          "not the limit. An omitted correction keeps the limit qualitative, which is correct and",
+          "costs nothing. A wrong one asserts a bound the user never set.",
+          "",
+        ]
+      : []),
     "### Which list a reference points into — the field says which, and it is not interchangeable",
     "- `from_stated` / `to_stated` — a position in `stated_items`, the list of things the USER said.",
     "- `from_claim` / `to_claim` — a position in `claims`, the list of things YOU said.",
@@ -1491,8 +1586,72 @@ export function buildRecordsCompletionPrompt(args: {
 }
 
 export type CompletionMergeResult =
-  | { ok: true; records: DraftRecordSet; added: number }
+  | { ok: true; records: DraftRecordSet; added: number; corrections_applied?: number }
   | { ok: false; reason: "stated_items_disturbed" | "no_new_claims" };
+
+/** One model-supplied repair of a limit the projector refused to bind. */
+export interface ConstraintCorrection {
+  readonly stated_index: number;
+  readonly direction: "floor" | "ceiling";
+  readonly value: number;
+  readonly unit?: string;
+  readonly applies_to_claim?: number;
+  readonly applies_to_stated?: number;
+}
+
+/**
+ * ⭐⭐⭐ APPLY A CORRECTION TO AN EXISTING LIMIT — AND TO NOTHING ELSE.
+ *
+ * Four refusals, each closing a way this could become a rewrite of the user:
+ *
+ *  1. THE TARGET MUST ALREADY BE A `constraint`. A correction cannot convert a
+ *     goal, an option or a figure into a limit, and cannot mint one.
+ *  2. `source_quote` AND `kind` ARE NEVER READ. They are not on the correction
+ *     schema, so the user's own words are structurally out of reach — not merely
+ *     unmodified by convention.
+ *  3. EXACTLY ONE SUBJECT NAMESPACE, or the correction is dropped. Both or
+ *     neither is the same contradiction the projector already refuses to resolve
+ *     by preference on a causal link; it is refused here for the same reason.
+ *  4. ONE CORRECTION PER CONSTRAINT. A second entry for the same index is
+ *     dropped rather than allowed to win by arriving later — an ordering-
+ *     dependent result is not a result.
+ *
+ * ⛔ IT VALIDATES NOTHING ABOUT WHETHER THE SUBJECT IS RIGHT, deliberately. The
+ * projector's existing safeties — `MINTABLE_TARGET_KINDS` and the unit-family
+ * check — are the authority on that and run unchanged afterwards. A correction
+ * naming a goal will be refused there exactly as the original was. This function
+ * decides only that a correction is SHAPED like a repair, never that it is true.
+ */
+export function applyConstraintCorrections(
+  base: DraftRecordSet,
+  corrections: readonly ConstraintCorrection[],
+): { stated_items: DraftRecordSet["stated_items"]; applied: number } {
+  const seen = new Set<number>();
+  const items = base.stated_items.map((item) => item);
+  let applied = 0;
+  for (const c of corrections) {
+    const i = c.stated_index;
+    if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
+    if (seen.has(i)) continue;
+    const target = items[i]!;
+    if ((target as { kind?: string }).kind !== "constraint") continue;
+    if ((c.applies_to_claim === undefined) === (c.applies_to_stated === undefined)) continue;
+    if (typeof c.value !== "number" || !Number.isFinite(c.value)) continue;
+    if (c.direction !== "floor" && c.direction !== "ceiling") continue;
+    seen.add(i);
+    items[i] = {
+      ...target,
+      direction: c.direction,
+      value: c.value,
+      ...(c.unit !== undefined ? { unit: c.unit } : {}),
+      ...(c.applies_to_claim !== undefined
+        ? { applies_to_claim: c.applies_to_claim, applies_to_stated: undefined }
+        : { applies_to_stated: c.applies_to_stated, applies_to_claim: undefined }),
+    } as typeof target;
+    applied += 1;
+  }
+  return { stated_items: items, applied };
+}
 
 /**
  * APPEND-ONLY MERGE. Existing claims keep their indices; `stated_items` is
@@ -1506,14 +1665,28 @@ export type CompletionMergeResult =
  */
 export function mergeCompletionClaims(
   base: DraftRecordSet,
-  completion: { stated_items?: unknown; claims?: DraftInferenceClaim[] },
+  completion: {
+    stated_items?: unknown;
+    claims?: DraftInferenceClaim[];
+    constraint_corrections?: readonly ConstraintCorrection[];
+  },
 ): CompletionMergeResult {
   if (completion.stated_items !== undefined) return { ok: false, reason: "stated_items_disturbed" };
   const added = completion.claims ?? [];
-  if (added.length === 0) return { ok: false, reason: "no_new_claims" };
+  const { stated_items, applied } = applyConstraintCorrections(
+    base,
+    completion.constraint_corrections ?? [],
+  );
+  // ⭐ A CORRECTION ON ITS OWN IS A REAL ANSWER. `no_new_claims` used to be the
+  // only verdict when `claims` was empty, and it is still correct when nothing
+  // at all came back — but a turn that repaired a refused limit and proposed no
+  // new claim has done exactly what was asked of it, and discarding that as
+  // "empty" would make the ask unanswerable again by a different route.
+  if (added.length === 0 && applied === 0) return { ok: false, reason: "no_new_claims" };
   return {
     ok: true,
-    records: { stated_items: base.stated_items, claims: [...base.claims, ...added] },
+    records: { stated_items, claims: [...base.claims, ...added] },
     added: added.length,
+    ...(applied > 0 ? { corrections_applied: applied } : {}),
   };
 }

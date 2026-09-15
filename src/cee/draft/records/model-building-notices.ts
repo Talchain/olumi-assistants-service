@@ -138,6 +138,11 @@ export const NOTICE_KIND_BY_REASON: Record<
   // declined to assert rather than guessing a direction — the conservative
   // resolution of an ambiguity, which is what this kind names.
   constraint_direction_unstated: "conflict_resolved_conservatively",
+  // "A stated limit carries no threshold we can use, so it cannot be enforced."
+  // Same family as the direction case above and for the same reason: the user's
+  // limit is on the model in their own words and is NOT being applied, which is
+  // a conservative resolution of an ambiguity rather than a lost detail.
+  constraint_value_unstated: "conflict_resolved_conservatively",
   // "A stated limit named the part of the model it applies to, and that part
   // cannot carry a threshold — a goal is the thing being achieved, an option is
   // a course of action, and neither is the measured quantity a limit bounds. The

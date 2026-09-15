@@ -40,6 +40,9 @@ const PRODUCER_REASONS = [
   "endpoint_demoted_duplicate",
   "disconnected_by_shape_gate",
   "constraint_direction_unstated",
+    // A stated limit with a direction and no usable threshold: asked about, and
+    // now answerable via `constraint_corrections`.
+    "constraint_value_unstated",
   // The two refusals a model-supplied constraint reference can produce. Both are
   // "the projector declined to assert" rather than "something was lost", which is
   // why both map to `conflict_resolved_conservatively` beside the reason above.

@@ -1,0 +1,206 @@
+{
+  "stated_items": [
+    {
+      "kind": "goal",
+      "source_quote": "reaching £20k MRR within 12 months",
+      "role": "target",
+      "is_baseline": false
+    },
+    {
+      "kind": "option",
+      "source_quote": "increase the Pro plan price to £59 with the next Pro feature release",
+      "is_baseline": false
+    },
+    {
+      "kind": "option",
+      "source_quote": "hold at £49 and ship the same feature release to drive volume",
+      "is_baseline": false
+    },
+    {
+      "kind": "constraint",
+      "source_quote": "keeping monthly churn under 4%",
+      "direction": "ceiling",
+      "applies_to_stated": 0
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£20k MRR",
+      "value": 20000,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£59",
+      "value": 59,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£49",
+      "value": 49,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "12 months",
+      "value": 12,
+      "unit": "months"
+    }
+  ],
+  "claims": [
+    {
+      "claim_kind": "factor",
+      "label": "Pro Plan Price",
+      "basis": [
+        1,
+        2,
+        5,
+        6
+      ],
+      "value": 49,
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Volume Growth Rate",
+      "basis": [
+        2
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Monthly Churn Rate",
+      "basis": [
+        3
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Feature Release Quality",
+      "basis": [
+        1,
+        2
+      ]
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Monthly Recurring Revenue",
+      "basis": [
+        0,
+        4
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Subscriber Volume Loss",
+      "basis": [
+        1,
+        3
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Churn Acceleration",
+      "basis": [
+        3
+      ]
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Price Elasticity of Demand",
+      "basis": []
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price increases ARPU component of MRR",
+      "from_claim": 0,
+      "to_claim": 4,
+      "effect": "positive",
+      "strength": 0.65,
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher price reduces new subscriber conversion rate",
+      "from_claim": 0,
+      "to_claim": 5,
+      "effect": "positive",
+      "strength": 0.55
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher price may increase churn among price-sensitive existing subscribers",
+      "from_claim": 0,
+      "to_claim": 6,
+      "effect": "positive",
+      "strength": 0.45
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Volume growth rate drives MRR through subscriber count",
+      "from_claim": 1,
+      "to_claim": 4,
+      "effect": "positive",
+      "strength": 0.7
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Subscriber volume loss reduces MRR",
+      "from_claim": 5,
+      "to_stated": 0,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Churn acceleration reduces MRR and threatens the £20k target",
+      "from_claim": 6,
+      "to_stated": 0,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "MRR outcome bridges to goal",
+      "from_claim": 4,
+      "to_stated": 0,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Feature release quality supports volume growth by improving conversion and retention",
+      "from_claim": 3,
+      "to_claim": 1,
+      "effect": "positive",
+      "strength": 0.5
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Feature release quality reduces churn by improving product value",
+      "from_claim": 3,
+      "to_claim": 6,
+      "effect": "negative",
+      "strength": 0.35
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Status Quo — Hold Price, No Feature Push",
+      "basis": [],
+      "is_baseline": true
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Status quo holds price at £49 with no incremental volume push",
+      "from_claim": 19,
+      "to_claim": 0,
+      "effect": "positive",
+      "sets_to": 49
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Status quo volume growth remains at current baseline rate",
+      "from_claim": 19,
+      "to_claim": 1,
+      "effect": "positive",
+      "sets_to": 0.3
+    }
+  ]
+}
