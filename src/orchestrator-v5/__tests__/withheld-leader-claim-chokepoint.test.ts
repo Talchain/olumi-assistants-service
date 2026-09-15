@@ -95,7 +95,7 @@ const READY_GRAPH = {
   nodes: [
     { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8 },
     { id: 'dec_growth', kind: 'decision', label: 'Growth approach' },
-    { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
+    { id: 'fac_capacity', kind: 'factor', label: 'Capacity', provenance: 'ai_inferred' },
     { id: 'fac_market', kind: 'factor', label: 'Market demand' },
     { id: 'opt_hire', kind: 'option', label: LEADER_LABEL, interventions: { fac_capacity: 1 } },
     {
@@ -487,6 +487,30 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
   afterEach(() => {
     setTestSink(null);
     vi.clearAllMocks();
+  });
+
+  describe('mixed origin and advice reaches reasoning and survives final output', () => {
+    it('returns the substantive advice, not just a provenance stamp', async () => {
+      const answer = 'Capacity is an assumption to check. Use measured available staff hours for this input; without that evidence, keep its value uncertain rather than treating a guess as observed.';
+      routeWithToolUseMock.mockResolvedValue(converseTextOnly(answer));
+      const { status, body } = await postTurn(app, 'Why is Capacity in the model? Please suggest a sensible value.');
+      expect(status).toBe(200);
+      expect(routeWithToolUseMock).toHaveBeenCalledTimes(1);
+      // The ordinary answer formatter may insert paragraph breaks; it must
+      // preserve every word of the substantive advice.
+      expect(body.assistant_text.replace(/\s+/g, ' ')).toBe(answer);
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(eventsNamed(TelemetryEvents.V5StateQueryGuard).some((event) => event.data.matched === false)).toBe(true);
+    });
+
+    it('still answers a pure origin question directly from the saved provenance', async () => {
+      routeWithToolUseMock.mockResolvedValue(converseTextOnly('This should not be used.'));
+      const { status, body } = await postTurn(app, 'Why is Capacity in the model?');
+      expect(status).toBe(200);
+      expect(routeWithToolUseMock).not.toHaveBeenCalled();
+      expect(body.assistant_text).toContain('my suggestion');
+      expect(body.assistant_text).toContain('Capacity');
+    });
   });
 
   // ══ INSTRUMENT CHECKS — every assertion below is vacuous without these ════
