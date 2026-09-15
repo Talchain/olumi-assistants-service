@@ -31,6 +31,7 @@ import { OBSERVED_STATE_STATED_ROLES } from "../stated-role-vocabulary.js";
 import { ObservedStateV3, NodeV3 } from "../../../schemas/cee-v3.js";
 import { NodeV3Schema, ObservedStateSchema } from "@talchain/schemas";
 import { compactGraph } from "../../../orchestrator/context/graph-compact.js";
+import { editCompactGraph } from "../../../orchestrator/context/serialise.js";
 import { computeAnalysisAffectingGraphHash } from "../../../orchestrator-v5/context/graph-hash.js";
 import type { GraphV3T } from "../../../schemas/cee-v3.js";
 
@@ -623,6 +624,61 @@ describe("the consumer honours it — the model's own view of the graph", () => 
     expect(node.source).toBe("user");
     expect(node.provenance).toBe("from_brief");
     expect(node.value).toBe(0.04);
+  });
+
+  // ── the EDIT pack is a SECOND consumer, and it was dark ──────────────────
+  // ⚠ THE REASONING PACK IS NOT THE PACK THAT WRITES. `editCompactGraph`
+  // (`orchestrator/context/serialise.ts`) builds the graph the EDITING model
+  // sees, and its `observed_state` is a CLOSED destructure — a field absent
+  // from that list reaches the editing model not at all, with no error
+  // anywhere. `stated_role` was declared on the wire, accepted by every
+  // validator, and honoured by `compactGraph`, and still arrived at the edit
+  // path as nothing. The editing path is where the wrong-entity and
+  // non-baseline edit defects were measured, so this is the surface that
+  // needed it most. Asserted by EXECUTION against the real projection, never
+  // by reading the field list.
+
+  it("reaches the EDITING model, not only the reasoning model", () => {
+    const pack = editCompactGraph(nodeWith({ ...OBSERVED_AS_SERVED, stated_role: "constraint" }));
+    const node = pack.nodes.find((n) => n.id === "n_churn")!;
+    expect(node.observed_state?.stated_role).toBe("constraint");
+    // The magnitude still travels — the role qualifies it, it does not replace it.
+    expect(node.observed_state?.value).toBe(0.04);
+  });
+
+  it("DISCRIMINATING TWIN — an unstamped node carries no role into the edit pack", () => {
+    // Without this, the arm above passes on a projection that hardcodes the
+    // value, or on one that copies `observed_state` wholesale for every node.
+    const pack = editCompactGraph(nodeWith(OBSERVED_AS_SERVED));
+    const node = pack.nodes.find((n) => n.id === "n_churn")!;
+    expect(node.observed_state?.stated_role).toBeUndefined();
+    expect(node.observed_state?.value).toBe(0.04);
+  });
+
+  it("DISCLOSED: the edit pack gates observed_state on kind, and the stamp does not", () => {
+    // ⚠ MEASURED, AND IT IS A LIMIT RATHER THAN A PASS. The boundary stamp
+    // (`boundary.ts`) writes `stated_role` on ANY node carrying a numeric
+    // `observed_state.value` — it does not look at `kind`. `compactGraph` also
+    // does not. `editCompactGraph` projects `observed_state` only inside
+    // `if (node.kind === 'factor')`, so for a constraint bound to a non-factor
+    // node the edit pack drops the WHOLE observed_state, this field with it.
+    //
+    // That gate is pre-existing and far wider than this field — widening it
+    // would change the edit pack for `value`, `cap` and nine others — so it is
+    // recorded here rather than quietly changed. This assertion REDs if the
+    // gate moves, making any such change a visible decision.
+    const risk = {
+      nodes: [{ id: "n_risk", kind: "risk", label: "Churn Spike",
+        observed_state: { ...OBSERVED_AS_SERVED, stated_role: "constraint" } }],
+      edges: [], options: [],
+    } as unknown as GraphV3T;
+
+    expect(editCompactGraph(risk).nodes.find((n) => n.id === "n_risk")!.observed_state)
+      .toBeUndefined();
+    // Positive control, same payload: the REASONING pack has no such gate, so
+    // this is the edit pack's own exclusion and not an invalid fixture.
+    expect(compactGraph(risk).nodes.find((n) => n.id === "n_risk")!.stated_role)
+      .toBe("constraint");
   });
 });
 

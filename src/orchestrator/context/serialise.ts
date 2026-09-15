@@ -80,10 +80,15 @@ export function editCompactGraph(graph: GraphV3T): EditCompactGraph {
     }
     if (node.kind === 'factor') {
       if (node.observed_state !== undefined) {
+        // ⚠ CLOSED DESTRUCTURE — an `observed_state` field absent here reaches
+        // the editing model not at all, with no error anywhere. `stated_role`
+        // says the stored level is a LIMIT the user set, not a level they
+        // asserted; a model about to WRITE to this node needs that more than
+        // the reasoning model does.
         const { value, raw_value, baseline, unit, cap, source, extractionType,
-          factor_type, uncertainty_drivers, std, confidence } = node.observed_state;
+          factor_type, uncertainty_drivers, std, confidence, stated_role } = node.observed_state;
         result.observed_state = { value, raw_value, baseline, unit, cap, source,
-          extractionType, factor_type, uncertainty_drivers, std, confidence };
+          extractionType, factor_type, uncertainty_drivers, std, confidence, stated_role };
       }
       if (node.scale_frame !== undefined) result.scale_frame = node.scale_frame;
       if (node.encoding_map !== undefined) result.encoding_map = node.encoding_map;
