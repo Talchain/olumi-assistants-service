@@ -102,6 +102,33 @@ function ctx(
 
 const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
 
+describe('coaching requests are not answered with only a provenance stamp', () => {
+  it.each([
+    'Why is Enterprise ACV target in the model, and what would you recommend?',
+    'Why is Enterprise ACV target in the model? Please suggest a sensible value.',
+  ])('leaves the whole mixed request for reasoning: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    // Declining an incomplete answer must not create permission to edit.
+    expect(isStateQueryQuestionShape(message)).toBe(true);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it('still answers a pure origin question containing quoted advice', () => {
+    const graph = {
+      nodes: [{ id: 'quoted-advice', kind: 'factor', label: 'Please recommend a sensible value', provenance: 'ai_inferred' }],
+      edges: [],
+    };
+    const outcome = tryStateQueryGuard({
+      message: 'Why is "Please recommend a sensible value" in the model?',
+      contextPack: ctx([]),
+      briefAudit: { briefText: null, graph },
+    });
+    expect(outcome.matched && outcome.dispatch).toBe('structure_origin');
+  });
+});
+
 describe('independent review — control complements retain the system subject', () => {
   it.each([
     // Outside review5674373071: an embedded handling fact is not the request.

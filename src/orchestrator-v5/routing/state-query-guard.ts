@@ -378,12 +378,12 @@ export interface TryStateQueryGuardInput {
 }
 
 /**
- * The audit can report a past handling decision, not propose the next one.
- * These clauses also decline a mixed audit + advice request: returning the
- * tally as the entire answer would silently discard its second half.
+ * Brief and origin records can report facts, not propose the next step.
+ * Answering either as the entire reply discards the requested advice.
+ * Saved-edit effect readbacks keep their separate quantitative safeguards.
  * This is an ANSWER-coverage check only; never use it to authorise a mutation.
  */
-const BRIEF_ADVICE_REQUEST_PATTERNS: readonly RegExp[] = [
+const ADVICE_REQUEST_PATTERNS: readonly RegExp[] = [
   /\b(?:do|would|could|can)\s+you\s+(?:\w+\s+){0,2}(?:recommend|suggest|advise|propose)\b/i,
   /(?:^|[.!?;:]|\band\b|\balso\b)\s*(?:please\s+)?(?:recommend|suggest|advise|propose)\b/i,
   /\b(?:what|which|how)\b[^.!?;\n]*\b(?:should|would|could)\s+(?:i|we|you)\b/i,
@@ -398,6 +398,13 @@ const BRIEF_ADVICE_REQUEST_PATTERNS: readonly RegExp[] = [
 export function tryStateQueryGuard(
   input: TryStateQueryGuardInput,
 ): StateQueryGuardOutcome {
+  const quoteMask = computeQuoteMask(input.message);
+  const outsideQuotes = input.message.split('').map((ch, i) => quoteMask[i] ? ' ' : ch).join('');
+  // An embedded quotation is content under discussion, not a second request.
+  // A whole-message quotation is still the user's request.
+  const requestText = /[\p{L}\p{N}]/u.test(outsideQuotes) ? outsideQuotes : input.message;
+  const asksForAdvice = ADVICE_REQUEST_PATTERNS.some((pat) => pat.test(requestText));
+
   // Production ContextPacks always carry this status. Legacy/direct callers
   // may omit it, and malformed JS callers can still evade the TypeScript
   // boundary; both resolve to the weakest interpretation rather than silently
@@ -430,15 +437,7 @@ export function tryStateQueryGuard(
     // attributed to the system, not a verb inside the user's proposed action.
     // Keep the protective predicate above unchanged. A question that falls
     // through here must not gain permission to edit the thing it asks about.
-    const quoteMask = computeQuoteMask(input.message);
-    const outsideQuotes = input.message.split('').map((ch, i) => quoteMask[i] ? ' ' : ch).join('');
-    // A whole-message quote is still a request; embedded quoted content is an
-    // object of discussion, not another instruction from the current speaker.
-    const requestText = /[\p{L}\p{N}]/u.test(outsideQuotes) ? outsideQuotes : input.message;
-    if (
-      !hasSystemDisposition(requestText) ||
-      BRIEF_ADVICE_REQUEST_PATTERNS.some((pat) => pat.test(requestText))
-    ) {
+    if (!hasSystemDisposition(requestText) || asksForAdvice) {
       return { matched: false };
     }
     if (input.briefAudit === undefined) return { matched: false };
@@ -503,7 +502,7 @@ export function tryStateQueryGuard(
     // those words. Swept across `src/` for *"best provenance answer"*: three
     // hits, being this citation, its twin in `judgement-request.ts`, and that
     // comment. Both citations pointed at bytes that do not exist.
-    if (asksForOwnJudgement(input.message)) {
+    if (asksForOwnJudgement(input.message) || asksForAdvice) {
       return { matched: false };
     }
     // ⭐⭐ THE DEFERRAL IS NARROWED TO THE CASE IT WAS WRITTEN FOR — measured on
