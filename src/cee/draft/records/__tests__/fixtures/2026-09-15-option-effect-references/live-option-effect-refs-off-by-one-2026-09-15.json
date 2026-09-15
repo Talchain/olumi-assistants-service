@@ -1,0 +1,259 @@
+{
+  "stated_items": [
+    {
+      "kind": "goal",
+      "source_quote": "reaching £20k MRR within 12 months",
+      "role": "target",
+      "is_baseline": false
+    },
+    {
+      "kind": "constraint",
+      "source_quote": "keeping monthly churn under 4%",
+      "direction": "ceiling",
+      "applies_to_stated": 0
+    },
+    {
+      "kind": "option",
+      "source_quote": "increase the Pro plan price to £59 with the next Pro feature release",
+      "is_baseline": false
+    },
+    {
+      "kind": "option",
+      "source_quote": "hold at £49 and ship the same feature release to drive volume",
+      "is_baseline": true
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£59",
+      "value": 59,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£49",
+      "value": 49,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "£20k MRR",
+      "value": 20000,
+      "unit": "£"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "12 months",
+      "value": 12,
+      "unit": "months"
+    },
+    {
+      "kind": "figure",
+      "source_quote": "4%",
+      "value": 4,
+      "unit": "%"
+    }
+  ],
+  "claims": [
+    {
+      "claim_kind": "factor",
+      "label": "Pro Plan Price",
+      "basis": [
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Volume Growth Rate",
+      "basis": [
+        3
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Churn Sensitivity to Price",
+      "basis": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Monthly Recurring Revenue",
+      "basis": [
+        0,
+        2,
+        3
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Monthly Churn Rate",
+      "basis": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "New Customer Conversion Rate",
+      "basis": [
+        2,
+        3
+      ]
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Price Elasticity of Demand",
+      "basis": []
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raising price increases revenue per customer but reduces conversion",
+      "from_claim": 0,
+      "to_claim": 3,
+      "effect": "positive",
+      "strength": 0.6
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher price increases churn risk among price-sensitive customers",
+      "from_claim": 0,
+      "to_claim": 4,
+      "effect": "positive",
+      "strength": 0.45
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Higher price reduces new customer conversion",
+      "from_claim": 0,
+      "to_claim": 5,
+      "effect": "positive",
+      "strength": 0.5
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Volume growth drives MRR through more customers at current price",
+      "from_claim": 1,
+      "to_claim": 3,
+      "effect": "positive",
+      "strength": 0.65
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Volume growth reduces churn risk by broadening customer base",
+      "from_claim": 1,
+      "to_claim": 4,
+      "effect": "negative",
+      "strength": 0.2
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Volume growth improves conversion by signalling product-market fit",
+      "from_claim": 1,
+      "to_claim": 5,
+      "effect": "negative",
+      "strength": 0.25
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "MRR outcome drives progress toward £20k MRR goal",
+      "from_claim": 3,
+      "to_stated": 0,
+      "effect": "positive",
+      "strength": 0.85
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Churn rate threatens MRR goal by eroding customer base",
+      "from_claim": 4,
+      "to_stated": 0,
+      "effect": "negative",
+      "strength": 0.55
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Poor conversion rate undermines MRR goal by slowing new customer acquisition",
+      "from_claim": 5,
+      "to_stated": 0,
+      "effect": "negative",
+      "strength": 0.45
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Raise to £59 on Feature Release",
+      "basis": [
+        2
+      ],
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Hold at £49, Drive Volume",
+      "basis": [
+        3
+      ],
+      "sets_to": 49
+    },
+    {
+      "claim_kind": "option_refinement",
+      "label": "Staged Increase: £54 Now, £59 at Next Release",
+      "basis": [
+        2,
+        3
+      ]
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Staged price increase sets Pro Plan Price to intermediate level",
+      "from_claim": 19,
+      "to_claim": 0,
+      "effect": "positive",
+      "sets_to": 54
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raise to £59 option sets Pro Plan Price",
+      "from_claim": 17,
+      "to_claim": 0,
+      "effect": "positive",
+      "sets_to": 59
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hold at £49 option sets Pro Plan Price",
+      "from_claim": 18,
+      "to_claim": 0,
+      "effect": "positive",
+      "sets_to": 49
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Raise to £59 option sets Volume Growth Rate lower due to price barrier",
+      "from_claim": 17,
+      "to_claim": 1,
+      "effect": "negative",
+      "sets_to": 0.3
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hold at £49 option sets Volume Growth Rate higher due to lower price barrier",
+      "from_claim": 18,
+      "to_claim": 1,
+      "effect": "positive",
+      "sets_to": 0.7
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Staged increase sets Volume Growth Rate at moderate level",
+      "from_claim": 19,
+      "to_claim": 1,
+      "effect": "positive",
+      "sets_to": 0.5
+    }
+  ]
+}

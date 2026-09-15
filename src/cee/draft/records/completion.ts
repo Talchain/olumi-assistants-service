@@ -344,7 +344,34 @@ export function askItemIdentity(item: CompletionAskItem): string {
 export function completionRegressesProtectedContent(
   before: RecordProjection,
   after: RecordProjection,
+  opts?: {
+    /**
+     * ⭐⭐ THE PASS-1 OPTION EFFECTS ARE NOT TRUSTWORTHY ON THIS EMISSION, so
+     * this guard must not defend them against the repair path.
+     *
+     * MEASURED 15 Sep 2026. On a compound brief every option→factor link was
+     * off by +1; two were provably invalid and refused, and the other four were
+     * KEPT WRONG — the person was shown "hold at £49" priced at £59. The
+     * completion pass then ASKED the right question (`ref_out_of_range` →
+     * `unresolved_reference`, model-answerable) and RETURNED THE RIGHT ANSWER
+     * (`0.59→0.49`, `0.7→0.6`) — and THIS GUARD DISCARDED THE WHOLE COMPLETION
+     * as a preservation violation.
+     *
+     * So the repair path already worked and the guard threw it away. The guard
+     * was not wrong in general: overwriting a pass-1 intervention IS normally a
+     * regression. It was wrong to treat a DEMONSTRABLY UNRELIABLE value as
+     * protected content.
+     *
+     * ⛔ SCOPED TO OPTION-NODE INTERVENTIONS AND NOTHING ELSE. Every other limb
+     * — `intervention_removed`, `removed_undisclosed`, the two absorption
+     * receipts, and the same check on non-option nodes — is untouched, so a
+     * completion still cannot delete content or reclassify an absorption.
+     * Absent ⇒ byte-identical to before.
+     */
+    readonly optionEffectsUnreliable?: boolean;
+  },
 ): readonly string[] {
+  const optionEffectsUnreliable = opts?.optionEffectsUnreliable === true;
   const violations: string[] = [];
   const afterById = new Map(after.graph.nodes.map((n) => [n.id, n]));
 
@@ -489,9 +516,36 @@ export function completionRegressesProtectedContent(
         if (!(factorId in afterInterventions)) {
           violations.push(`intervention_removed:${node.id}:${factorId}`);
         } else if (afterInterventions[factorId] !== value) {
-          violations.push(
-            `intervention_overwritten:${node.id}:${factorId}:${value}->${afterInterventions[factorId]}`,
-          );
+          // ⭐ THE ONE EXEMPTION — see `optionEffectsUnreliable` on the signature.
+          // A restatement of a provably-suspect option effect is the repair, not
+          // a regression. Non-option nodes stay fully protected either way.
+          //
+          // ⛔⛔ AND IT IS BOUNDED TO AI-AUTHORED MAGNITUDES, on an independent
+          // review finding (Codex, 15 Sep): the emission-level signal would
+          // otherwise let ONE invalid reference license overwriting an
+          // UNRELATED, USER-GROUNDED intervention elsewhere on the graph. A
+          // magnitude stamped `brief_extraction` is a number the projector
+          // VERIFIED against the brief bytes; it stays protected whatever the
+          // reference set is doing, because overwriting the user's own figure is
+          // a fabrication risk and this estate does not trade one for the other.
+          //
+          // ⚠ RESIDUE, NAMED RATHER THAN SWALLOWED: a `brief_extraction`
+          // magnitude attached to the WRONG option by a bad reference is now
+          // preserved on that wrong option. That is misattribution rather than
+          // fabrication — the lesser harm, and the disclosure path still reports
+          // the invalid references. Pinned by `C2` in the trust spec.
+          const magnitudeSource = (
+            node.data as { intervention_details?: Record<string, { source?: string }> } | undefined
+          )?.intervention_details?.[factorId]?.source;
+          const exemptible =
+            optionEffectsUnreliable
+            && node.kind === "option"
+            && magnitudeSource === "cee_hypothesis";
+          if (!exemptible) {
+            violations.push(
+              `intervention_overwritten:${node.id}:${factorId}:${value}->${afterInterventions[factorId]}`,
+            );
+          }
         }
       }
     }
@@ -559,13 +613,40 @@ export function shouldKeepCompletion(
   before: CompletionAsk,
   after: CompletionAsk,
   projections: { readonly before: RecordProjection; readonly after: RecordProjection },
+  /**
+   * ⭐⭐ ONE PRESERVATION DERIVATION, REUSED — NOT A SECOND ONE THAT CAN DRIFT.
+   *
+   * P1 found by independent review (Codex, 15 Sep) on the first version of this
+   * change, and it made the whole repair INERT: the adapter computed
+   * `completionRegressesProtectedContent(...)` WITH the trust exemption for its
+   * telemetry, and this function then re-ran the SAME guard WITHOUT it for the
+   * decision that actually matters. So `violationsWithExemption` read `[]` while
+   * `shouldKeepCompletion` still returned false, and the completion carrying the
+   * correct magnitudes was discarded exactly as before.
+   *
+   * Two call sites answering one question is trap 12. The remedy is not to
+   * thread the flag twice and hope they stay in step: the caller passes the
+   * violations it ALREADY derived, and this function reuses them. A future
+   * caller that passes nothing still gets a correct, conservative answer,
+   * because the fallback derives with the same options.
+   */
+  opts?: {
+    readonly optionEffectsUnreliable?: boolean;
+    /** Already derived by the caller — reused verbatim so the two cannot disagree. */
+    readonly preservationViolations?: readonly string[];
+  },
 ): boolean {
   const blockingBefore = new Set(before.items.filter(isBlockingAskItem).map(askItemIdentity));
   for (const item of after.items) {
     if (!isBlockingAskItem(item)) continue;
     if (!blockingBefore.has(askItemIdentity(item))) return false;
   }
-  return completionRegressesProtectedContent(projections.before, projections.after).length === 0;
+  const preservationViolations =
+    opts?.preservationViolations
+    ?? completionRegressesProtectedContent(projections.before, projections.after, {
+      optionEffectsUnreliable: opts?.optionEffectsUnreliable === true,
+    });
+  return preservationViolations.length === 0;
 }
 
 /**
