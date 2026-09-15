@@ -143,6 +143,31 @@ describe('independent review — control complements retain the system subject',
 
 describe('outside-corpus blockers — disposition ownership and reported speech', () => {
   it.each([
+    // Outside follow-up5674055262: an embedded handling proposition is not
+    // permission to replace the outer question about saying/thinking it.
+    'Did you say that you decided to use my figures?',
+    'Did you mention that you started using my figures?',
+    'Do you think you decided to keep my assumptions?',
+    'Did you deny that you had decided to use my figures?',
+    'Did you agree that you used my figures?',
+  ])('does not answer the inner proposition instead of the current question: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    // Current assent to the handling fact remains the existing contract;
+    // past agreement above asks about a different event.
+    'Do you agree you left out my ARR figure?',
+    'Do you agree that you left out my ARR figure?',
+  ])('retains an explicit current request to check the handling fact: %j', (message) => {
+    const outcome = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
+    expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+  });
+
+  it.each([
     // Independent delta review 5673979510: subject continuity alone does not
     // prove that a promise, intention or claim was actually carried out.
     'Did you promise to use my figures?',

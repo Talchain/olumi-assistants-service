@@ -355,6 +355,15 @@ export function hasDispositionVerb(message: string): boolean {
  * The caller removes quoted mentions before using this answer-only check.
  */
 export function hasSystemDisposition(message: string): boolean {
+  // A preamble about a prior interaction must not hide a following, separate
+  // factual question. Quoted spans have already been removed by the caller.
+  return message.split(/[.!?](?:\s+|$)|\n+/).some(hasSystemDispositionInQuestion);
+}
+
+function hasSystemDispositionInQuestion(message: string): boolean {
+  const subject = /\byou\b/i.exec(message);
+  if (subject === null) return false;
+  const question = message.slice(subject.index);
   const verbs = [
     ...OMISSION_VERB_PATTERNS,
     ...RETENTION_VERB_PATTERNS,
@@ -369,7 +378,14 @@ export function hasSystemDisposition(message: string): boolean {
   const selection = '(?:decid(?:e[ds]?|ing)|cho(?:ose[sn]?|se[n]?|osing)|opt(?:ed|ing|s)?|elect(?:ed|ing|s)?)\\s+to\\s+';
   const completion = '(?:end(?:ed|ing|s)?\\s+up|(?:go(?:es|ing)?|went|gone)\\s+on\\s+to)\\s+';
   const coordination = '[a-z]+\\s+(?:or|and)\\s+';
-  const predicate = `\\byou\\s+${modifiers}(?:(?:${selection}|${completion}|${coordination})${modifiers})*`;
+  // Bind to the outer question's first system subject, not any embedded
+  // "you used ..." inside a question about mentioning or believing it.
+  // Preserve the existing explicit CURRENT assent request ("Do you agree
+  // you left it out?"); past agreement is a different event, not this check.
+  const currentAssent = /\bdo\s+$/i.test(message.slice(0, subject.index))
+    ? `(?:agree\\s+(?:that\\s+)?you\\s+${modifiers})?`
+    : '';
+  const predicate = `^you\\s+${modifiers}${currentAssent}(?:(?:${selection}|${completion}|${coordination})${modifiers})*`;
   const systemPrefix = new RegExp(`${predicate}$`, 'i');
   // Bare gerund complements preserve a started/ongoing/completed action,
   // unlike "consider using". This branch is available only to an -ing
@@ -378,8 +394,8 @@ export function hasSystemDisposition(message: string): boolean {
   const progressivePrefix = new RegExp(`${predicate}(?:${aspect}${modifiers})?$`, 'i');
   return verbs.some((verb) => {
     const occurrences = new RegExp(verb.source, `${verb.flags}g`);
-    return [...message.matchAll(occurrences)].some((match) => {
-      const prefix = message.slice(0, match.index);
+    return [...question.matchAll(occurrences)].some((match) => {
+      const prefix = question.slice(0, match.index);
       return systemPrefix.test(prefix) ||
         (/^[a-z]+ing\b/i.test(match[0]) && progressivePrefix.test(prefix));
     });
