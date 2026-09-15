@@ -450,7 +450,7 @@ function eventsNamed(name: string) {
   return events.filter((e) => e.name === name);
 }
 
-/** The CHOKEPOINT guard's only observable. */
+/** The CHOKEPOINT guard's telemetry event. */
 const CHOKEPOINT_EVENT = TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise;
 /** The IN-FLOW gate's only observable — the branch discriminator. */
 const IN_FLOW_GATE_EVENT = TelemetryEvents.V5WithheldExplanationAnswerProjected;
@@ -615,7 +615,10 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
 
       it('the chokepoint reports itself, tagged as an exit the in-flow gate could not cover', async () => {
         routeWithToolUseMock.mockResolvedValue(exit.routingResult(LEAK_TEXT));
-        await postTurn(app, NEUTRAL_MESSAGE);
+        const { body } = await postTurn(app, NEUTRAL_MESSAGE);
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBe(
+          'leader_claim_replaced',
+        );
         const fired = eventsNamed(CHOKEPOINT_EVENT);
         expect(fired, 'the guard must be observable, or a live walk is the only instrument again').toHaveLength(1);
         expect(fired[0]?.data.dispatch_path).toBe('turn_executor_finalise');
@@ -642,6 +645,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
           'a blanket suppression would be a WORSE defect than the leak — this arm is what catches it',
         ).toContain('leads with a win probability');
         expect(eventsNamed(CHOKEPOINT_EVENT)).toHaveLength(0);
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBeNull();
       });
 
       it('CLEAN-TEXT CONTROL: a withheld turn with no leader claim is untouched', async () => {
@@ -650,6 +654,7 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         expect(String(body.assistant_text ?? '')).toContain('genuine trade-off');
         expect(String(body.assistant_text ?? '')).not.toContain(WITHHELD_EXPLANATION_OPENING);
         expect(eventsNamed(CHOKEPOINT_EVENT)).toHaveLength(0);
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBeNull();
       });
 
       it('FALSE-POSITIVE CONTROL: "leads to" / "team leads" survive a withheld turn intact', async () => {
