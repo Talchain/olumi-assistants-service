@@ -447,6 +447,7 @@ import {
 // use. Two same-named predicates is how this estate got burned before
 // (CLAUDE.md trap #12) — this is a call, not a copy.
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
+import { optionRosterFromGraph } from './compose/leading-option-wire-enforcement.js';
 import { deriveRerunReadiness } from './coaching/compare-runs.js';
 import {
   selectCanonicalAnalysisState,
@@ -12115,6 +12116,7 @@ export async function runTurnExecutor(
           // rest of this executor reads the brief from; absent ⇒ the quote
           // stands down, never a fabricated attribution.
           context.scenarioBriefText,
+          optionRosterFromGraph(context.persistedGraph ?? graphStateForTurn ?? null),
         );
         // ROADMAP 1.233 — record the outcome WHETHER OR NOT it changed the
         // text. `null` (the initial value) means the gate never ran; a
@@ -14688,6 +14690,7 @@ export async function runTurnExecutor(
       // copy pass the brief, or the finalise chokepoint would keep making the
       // unverified attribution the in-flow gate now refuses to make.
       context.scenarioBriefText,
+      optionRosterFromGraph(context.persistedGraph ?? graphStateForTurn ?? null),
     );
     // Structurally unreachable given the `textAssertsLeadingOption` check above
     // (the projection branches on the SAME predicate), but asserted rather than
