@@ -308,6 +308,7 @@ import {
 } from './compose/proposed-change.js';
 import {
   buildWarrantDemotion,
+  buildIncompleteOfferRefusalText,
   findUnsupportedOfferTargetKind,
   isProductMintedOfferCopy,
   type PersistedConstraintRow,
@@ -10500,6 +10501,24 @@ export async function runTurnExecutor(
               unsupportedTargetKind.nodeKind,
             ),
           ];
+        } else if (!demotion.ok && demotion.reason === 'required_parameter_missing') {
+          // PARAMETER-SUFFICIENCY PRECONDITION — the third sibling of the
+          // registry-executable and target-kind checks. The handler requires a
+          // parameter this proposal does not usably carry, so a chip would
+          // promise a change the resumer must refuse, and (witnessed on
+          // staging 2026-09-14) would ALSO accumulate beside the complete
+          // offer under a different id, rendering as a second, identical
+          // "Add this limit" the user cannot choose between.
+          //
+          // Its own copy, deliberately: the generic branch below closes with
+          // "Say the word and I will make it.", and there is nothing here to
+          // say the word to. No chip and no pending are emitted, so the
+          // "persisted pending ⟹ rendered chip" invariant holds trivially.
+          demotionOutcome = `emit_refused:${demotion.reason}:${demotion.parameterName}`;
+          demotionText = buildIncompleteOfferRefusalText(
+            demotion.parameterName,
+            action.entity.label,
+          );
         } else if (!demotion.ok) {
           // A mutating handler outside the three proposable intents. There is
           // no chip channel for it, so the honest outcome is a refusal that
