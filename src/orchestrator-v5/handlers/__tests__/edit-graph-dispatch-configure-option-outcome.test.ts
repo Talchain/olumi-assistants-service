@@ -25,6 +25,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
 import { _resetConfigCache } from '../../../config/index.js';
+import { appendLapseNotice } from '../hold-thread-through.js';
+import { formatWithheldWriteNotice } from '../../routing/option-intervention-write-guard.js';
 import type { FastifyRequest } from 'fastify';
 import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
 import type { GraphV3T } from '../../../schemas/cee-v3.js';
@@ -302,6 +304,39 @@ const EXPECTED_RECOVERY_TEXT = composeConfigureOptionClarifyResponse({
   blockedNextStep: CAPTURE_ADMISSION.willProceed ? null : CAPTURE_ADMISSION.strict.nextStep,
 }).assistant_text;
 
+/**
+ * ⭐⭐⭐ THE SAME RECOVERY COPY, PLUS THE ADMISSION THAT NOTHING WAS SAVED —
+ * and the second half is NEW BEHAVIOUR THIS FILE'S OWN FIXTURE EARNED.
+ *
+ * `wrongEntityAppliedResult` applies an EDGE-STRENGTH write
+ * (`opt_cloud_native → fac_adoption_complexity`, 1.0 → 0.7) — the captured
+ * 2.427 defect, verbatim. Until the deliberate-edit lane,
+ * `option-intervention-write-guard.ts` read only node `observed_state.value`,
+ * so an edge-only write produced `no_baseline_write` and **PERSISTED**. This
+ * file therefore pinned a reply that said *"Cloud-Native CRM still has no
+ * effect value … Answer here and I'll set it"* while an edge write had
+ * silently landed underneath it: honest text over a persisted wrong mutation,
+ * which is precisely the state the write guard exists to prevent.
+ *
+ * The write is now withheld, so the graph and the reply finally agree, and the
+ * user is told plainly that nothing was saved. The copy itself is BYTE-
+ * IDENTICAL — the recovery sentence did not move, and that is the point: the
+ * TEXT guard was always right, and it was the WRITE that was wrong.
+ *
+ * DERIVED, never transcribed — from the two shipped producers and the shipped
+ * joiner. A hand-written literal here would go on agreeing with nothing the
+ * moment either producer moved, which is the defect the comment above this
+ * constant records (ROADMAP 2.1267).
+ *
+ * `formatWithheldWriteNotice([])` takes an EMPTY label list on purpose: an
+ * edge write moves no node, so there is no node the notice could truthfully
+ * call unchanged, and the unqualified sentence is the honest one.
+ */
+const EXPECTED_RECOVERY_TEXT_WITHHELD = appendLapseNotice(
+  EXPECTED_RECOVERY_TEXT,
+  formatWithheldWriteNotice([]),
+);
+
 describe('L-25 — the repair loop terminates', () => {
   it('the fixture message genuinely carries a value (precondition for every recovery assertion)', () => {
     expect(carriesConfigureOptionValuePayload(T12C)).toBe(true);
@@ -387,9 +422,26 @@ describe('ROADMAP 2.427 — branch (b): the wrong-entity write H5 cannot see', (
     expect(out.response.assistant_text).not.toContain('edge strength');
     expect(out.response.assistant_text).not.toContain(CAPTURED_FALSE_SUCCESS);
     // And what replaces it names the option, the unset factors, and the
-    // sentence that writes them.
-    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT);
+    // sentence that writes them — now followed by the admission that the
+    // edge write this fixture applies was NOT saved. See
+    // `EXPECTED_RECOVERY_TEXT_WITHHELD`: the copy is byte-identical and the
+    // notice is new, because the write guard's edge arm now withholds the
+    // captured 2.427 mutation instead of letting it persist under honest text.
+    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT_WITHHELD);
+    expect(out.response.assistant_text).toContain(EXPECTED_RECOVERY_TEXT);
     expect(out.response.assistant_text).toContain('Cloud-Native CRM');
+
+    // ⭐⭐ AND AT THE STORED OBJECT, WHICH IS THE HALF THIS ROW NEVER HAD.
+    // `assistant_text` has been honest since 2.427; the EDGE WRITE underneath
+    // it persisted anyway. A reply is not evidence about a graph, so the
+    // non-commitment is asserted directly: on every build before this one,
+    // `metadata.graph` was DEFINED here and carried
+    // `opt_cloud_native → fac_adoption_complexity` at strength 0.7.
+    expect(commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .toHaveBeenCalledTimes(1);
+    const metadata = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mock.calls[0]![1];
+    expect(metadata.graph).toBeUndefined();
     // L-25: this message CARRIES a value, so the reply must not re-demand the
     // format the user just used. It names the option and a route out instead.
     expect(out.response.assistant_text).not.toContain("option's effect on");
@@ -578,7 +630,9 @@ describe('ROADMAP 2.427 — P1 regression pair: the verdict may only name a NAME
     // defect-kill this row exists for.
     const out = await dispatch(T12C, wrongEntityAppliedResult(CAPTURED_FALSE_SUCCESS));
 
-    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT);
+    // Same copy, now carrying the withheld-write admission — the fixture is an
+    // edge write, which the guard's edge arm withholds.
+    expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT_WITHHELD);
     expect(out.response.assistant_text).toContain('Cloud-Native CRM');
     const call = (emit as MockedFunction<typeof emit>).mock.calls.find(
       ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
