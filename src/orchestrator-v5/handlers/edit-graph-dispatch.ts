@@ -3494,9 +3494,15 @@ export async function dispatchEditGraph(
         scenario_id: payload.scenario_id,
         option_id: optionInterventionWriteVerdict.optionId,
         baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        // ⭐ NAMED APART because they are two different facts, and because the
+        // message below was FALSE without it: an edge-only withhold moves no
+        // node baseline at all, so a reader of this line was told the wrong
+        // thing about what had been discarded. A log line that misdescribes the
+        // event is how the next session inherits a wrong model of the guard.
+        option_edge_count: optionInterventionWriteVerdict.optionEdgeKeys.length,
         operations_count: editResult.operations?.length ?? 0,
       },
-      'V5 edit_graph — the applied mutation moved a node baseline while writing no effect value for the option the user named; write withheld so the graph matches the honest reply (mutation NOT persisted)',
+      'V5 edit_graph — the applied mutation moved a node baseline the named option is wired to, or one of that option\'s own edges, while writing no effect value for the option the user named; write withheld so the graph matches the honest reply (mutation NOT persisted)',
     );
   }
   if (optionOwnValueWithheld) {
@@ -4310,6 +4316,47 @@ export async function dispatchEditGraph(
       suggested_actions: [] };
   }
   if (optionInterventionWriteVerdict.verdict === 'withhold') {
+    // ⛔⛔ A WITHHELD TURN MUST NOT CONFIRM AND THEN DENY — and this is the
+    // hole withholding itself opened.
+    //
+    // V5 H5, the false-success invariant, is gated on
+    // `!successfulAppliedMutation`. That predicate asks *"did the applier
+    // apply?"* — and on a withheld turn it is TRUE, because it did. The
+    // predicate that says *"did anything PERSIST?"* is
+    // `effectiveAppliedMutation`, and H5 does not consult it. So for a
+    // `not_honoured_no_copy` verdict — the REVISION class, which carries no
+    // copy and therefore gets no wholesale replacement — the LLM's own
+    // *"Updated … edge strength from 1.0 to 0.7"* survived to the wire, with
+    // the notice below appended underneath it. Measured through this
+    // dispatcher: both sentences, one reply.
+    //
+    // That is worse than the silent wrong-entity write it replaced: there the
+    // reply at least matched the graph. **Withholding the write obliges us to
+    // withdraw the claim.**
+    //
+    // DERIVED, not a phrase list (trap 12): `findSuccessClaimHit` is the
+    // repo's own detector, already used by H5 sub-case B, and it catches the
+    // captured sentence. Scoped deliberately to the success-claim rewrite and
+    // NOT by widening H5's gate — that `else` branch also runs the no-op
+    // RECOVERY layer, which is written for legitimate no-ops and has no
+    // business composing copy for a withheld wrong-entity turn.
+    //
+    // ⚠ SIBLING WITHHOLDS ARE NOT COVERED HERE AND ARE NOT CLAIMED TO BE.
+    // `optionOwnValueWithheld`, `gmBlockedApply`, `paSubstitutionBlocked` and
+    // `recordedAnswerNotLanded` clear `effectiveAppliedMutation` the same way
+    // and are outside this lane's ownership; each owns its own text path. The
+    // general form — H5 asking the wrong question for every withhold — is
+    // reported rather than fixed here.
+    const withheldSuccessHit = findSuccessClaimHit(response.assistant_text ?? '');
+    if (withheldSuccessHit !== null) {
+      emit(TelemetryEvents.V5EditGraphFalseSuccessRewritten, {
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        original_phrase: withheldSuccessHit,
+        dispatch_path: 'option_intervention_write_withheld',
+      });
+      response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+    }
     response = {
       ...response,
       assistant_text: appendLapseNotice(

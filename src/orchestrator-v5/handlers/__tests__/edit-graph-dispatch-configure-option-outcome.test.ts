@@ -26,6 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockedFunction } from 'vitest';
 import { _resetConfigCache } from '../../../config/index.js';
 import { appendLapseNotice } from '../hold-thread-through.js';
+import { findSuccessClaimHit } from '../../compose/forbidden-user-facing-phrases.js';
 import { formatWithheldWriteNotice } from '../../routing/option-intervention-write-guard.js';
 import type { FastifyRequest } from 'fastify';
 import type { EditGraphResult } from '../../../orchestrator/tools/edit-graph.js';
@@ -579,6 +580,23 @@ describe('ROADMAP 2.427 — P1 regression pair: the verdict may only name a NAME
     } as GraphV3T;
   }
 
+  /**
+   * The same configured graph, with the WRONG ENTITY moved: the
+   * `opt_cloud_native → fac_adoption_complexity` EDGE, not the option's own
+   * effect value. This is the capture's shape on a REVISION.
+   */
+  function crmConfiguredWrongEntityEdge(): GraphV3T {
+    const base = crmConfiguredBasicBlocked(0.7);
+    return {
+      ...base,
+      edges: base.edges.map((e) =>
+        e.from === 'opt_cloud_native' && e.to === 'fac_adoption_complexity'
+          ? { ...e, strength: { mean: 0.7, std: 0.01 } }
+          : e,
+      ),
+    } as GraphV3T;
+  }
+
   const REVISION =
     'Under the Cloud-Native CRM option, set its effect on Adoption Complexity to 0.9.';
   const TRUE_CONFIRMATION =
@@ -636,6 +654,78 @@ describe('ROADMAP 2.427 — P1 regression pair: the verdict may only name a NAME
         ([e]) => e === TelemetryEvents.V5ConfigureOptionOutcomeUnhonoured,
       ),
     ).toBe(false);
+  });
+
+  /**
+   * ⛔⛔ F1 — A WITHHELD REVISION MUST NOT CONFIRM AND THEN DENY.
+   *
+   * ── THE REGRESSION, and it was INTRODUCED by withholding ─────────────────
+   * Before the write guard reached revisions, this turn shipped the LLM's
+   * *"Updated … edge strength from 1.0 to 0.7"* AND persisted the edge. The
+   * sentence was wrong-entity but it was TRUE about the graph. Withholding the
+   * write made it FALSE — and nothing replaced it:
+   *
+   *   `not_honoured_no_copy` deliberately skips the wholesale text replacement
+   *   (it carries no copy, because no true sentence exists for a revision), and
+   *   the V5 H5 false-success invariant is gated on `!successfulAppliedMutation`
+   *   — which is TRUE on a withheld turn, because the applier really did apply.
+   *   It is `effectiveAppliedMutation` that goes false.
+   *
+   * So the user got a confirmation and a denial in one reply. **We withheld the
+   * corrupting write and replaced it with a contradictory receipt**, which is
+   * arguably worse than the silent refusal it replaced.
+   *
+   * ⭐ THE TELL, and why no existing test caught it: every test in this file
+   * pinned either the `not_honoured` path (text replaced wholesale) or the
+   * verdict in isolation. **No test pinned the COMPOSED REPLY for the
+   * `not_honoured_no_copy` class** — the class this lane created.
+   */
+  it('F1 — a withheld REVISION never confirms and denies in the same reply', async () => {
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue({
+      blocks: [],
+      assistantText: CAPTURED_FALSE_SUCCESS,
+      latencyMs: 1000,
+      appliedGraph: crmConfiguredWrongEntityEdge() as unknown as EditGraphResult['appliedGraph'],
+      wasRejected: false,
+      operations: [
+        {
+          op: 'update_edge',
+          path: 'opt_cloud_native->fac_adoption_complexity',
+          value: { strength: { mean: 0.7, std: 0.01 } },
+        },
+      ],
+      operation_meta: [{ impact: 'medium', rationale: '' }],
+    } as unknown as EditGraphResult);
+    (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mockResolvedValue(makeCommitResult() as Awaited<ReturnType<typeof commitDirectAnswer>>);
+
+    const out = await dispatchEditGraph({
+      payload: makePayload(REVISION),
+      requestId: 'req-2427-f1',
+      request: STUB_REQUEST,
+      graphState: crmConfiguredBasicBlocked(0.7) as unknown as GraphStateIngress,
+      analysisState: null,
+    });
+
+    const text = out.response.assistant_text ?? '';
+
+    // PRECONDITION: the write really is withheld, or this asserts nothing about
+    // a contradiction — a persisted write would make the confirmation true.
+    const metadata = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
+      .mock.calls[0]![1];
+    expect(metadata.graph, 'precondition: the write must be withheld').toBeUndefined();
+
+    // PRECONDITION: the denial really is present, so "no contradiction" cannot
+    // pass by the notice having silently stopped being appended.
+    expect(text).toContain('nothing from this message was saved');
+
+    // ⭐ THE ASSERTION. Derived from the repo's OWN success-claim detector, not
+    // from a hand-listed set of sentences — a literal list would go stale the
+    // first time the model phrases it differently (trap 12).
+    expect(
+      findSuccessClaimHit(text),
+      `reply both confirms and denies:\n${text}`,
+    ).toBeNull();
   });
 
   it('PAIR/2 — the motivating failure still gets recovery copy about the NAMED option', async () => {

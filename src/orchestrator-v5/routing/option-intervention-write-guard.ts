@@ -397,13 +397,27 @@ export function optionEdgeWritesLanded(
   }
 
   const moved: string[] = [];
+  const seen = new Set<string>();
   for (const edge of after.edges) {
     if (edge.from !== optionId) continue;
     const key = `${edge.from}->${edge.to}`;
+    seen.add(key);
     // A NEW edge is a structural add, not a rewrite of an existing claim —
     // same posture as the node arm's treatment of a new node.
     if (!pre.has(key)) continue;
     if (pre.get(key) !== claims(edge)) moved.push(key);
+  }
+
+  // ⭐ A DELETED EDGE IS A WRITE TOO, and omitting it was a hole in this arm.
+  //
+  // The first cut of this function only walked `after.edges`, so an edge
+  // present in `before` and ABSENT afterwards was never looked at: severing
+  // the option's link to the factor the user named — the most destructive
+  // wrong-entity outcome available — read as "no edge write" and was ALLOWED.
+  // `anyInterventionWriteLanded` already treats a REMOVED effect value as a
+  // write for exactly this reason; this arm now matches that posture.
+  for (const key of pre.keys()) {
+    if (!seen.has(key)) moved.push(key);
   }
   return moved;
 }

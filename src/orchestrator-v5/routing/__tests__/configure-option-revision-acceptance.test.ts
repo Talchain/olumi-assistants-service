@@ -353,14 +353,38 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
    */
   it('ARM E: names no option ⇒ no verdict, and the write is ALLOWED (residual)', () => {
     const after = edgeStrengthWrite();
-    const AMBIGUOUS = 'Set the effect to 79%.';
+    // ⚠⚠ RE-GROUNDED. This arm previously used *"Set the effect to 79%."*,
+    // which the shipped detector does NOT match at all — so the verdict was
+    // `not_configure_intent` and the case never reached option resolution.
+    // **It asserted `not_applicable` and passed while pinning a different
+    // residual than the one its name claims** (a true measurement of an
+    // irrelevant thing). This phrasing is the CAPTURE'S OWN trigger family
+    // (`option_value_set`) with the option's name removed, so intent matches,
+    // resolution IS attempted, and the decline is the one this arm is about.
+    const SUBJECTLESS = "Change the option's Pro Plan Monthly Price to 79%";
 
+    // PRECONDITION: the turn really does reach the component.
     expect(
-      evaluateConfigureOptionOutcome({ message: AMBIGUOUS, before: CAPTURE.before, after }).status,
-    ).toBe('not_applicable');
+      detectConfigureOptionIntent(
+        SUBJECTLESS,
+        projectOptionLabels(CAPTURE.before.nodes as never),
+      ).matched,
+      'precondition: intent must match, or this measures the detector',
+    ).toBe(true);
+    // PRECONDITION: no option label is present, which is what makes it subjectless.
+    expect(SUBJECTLESS).not.toContain(OPTION_LABEL);
+
+    const verdict = evaluateConfigureOptionOutcome({
+      message: SUBJECTLESS,
+      before: CAPTURE.before,
+      after,
+    });
+    expect(verdict.status).toBe('not_applicable');
+    // THE RESIDUAL, NAMED: resolution was attempted and found no option.
+    expect(verdict.status === 'not_applicable' && verdict.reason).toBe('option_not_identified');
 
     const write = decideOptionInterventionWrite({
-      message: AMBIGUOUS,
+      message: SUBJECTLESS,
       before: CAPTURE.before,
       after,
       appliedMutation: true,
@@ -368,6 +392,21 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     expect(write.verdict).toBe('allow');
     // Bound by IDENTITY: nothing here is attributed to the option.
     expect(JSON.stringify(write)).not.toContain(OPTION_ID);
+  });
+
+  /**
+   * ⭐ THE INTENT-LEVEL CONTROL, kept separately and labelled for what it is.
+   * *"Set the effect to 79%."* is not recognised as configure intent at all, so
+   * it declines one layer EARLIER. Two different facts, two different names —
+   * collapsing them is what made ARM E claim more than it measured.
+   */
+  it('a message that is not configure intent declines earlier, and says so', () => {
+    const verdict = evaluateConfigureOptionOutcome({
+      message: 'Set the effect to 79%.',
+      before: CAPTURE.before,
+      after: edgeStrengthWrite(),
+    });
+    expect(verdict).toEqual({ status: 'not_applicable', reason: 'not_configure_intent' });
   });
 
   /**
@@ -505,6 +544,118 @@ describe('the guard still DISCRIMINATES (controls, not acceptance)', () => {
     // The LONGER label is the user's reading, and it is the one that binds.
     expect(verdict.status).toBe('not_honoured_no_copy');
     expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
+  });
+
+  /**
+   * ⛔⛔ F2/a — A WRONG-**FACTOR** WRITE IS `honoured` AND COMMITS.
+   *
+   * The user names the option AND a factor; the edit writes an effect value on
+   * the SAME option but a DIFFERENT factor. `interventionsWriteLandedFor` is
+   * bound to the OPTION by identity and asks only *"did this option gain or
+   * change any key?"* — so a write to the wrong factor satisfies it, the
+   * verdict is `honoured`, and the mutation commits.
+   *
+   * ⚠ THIS IS NOT COVERED BY THIS LANE AND IS PINNED, NOT FIXED. Closing it
+   * means resolving WHICH FACTOR the user named — a second natural-language
+   * referring-expression predicate, which is precisely the class this estate
+   * has ruled unwinnable by better rules (trap 22f). The exit is to ask, not to
+   * widen.
+   *
+   * Pinned exactly so the suite REDs if the class GROWS or SHRINKS. A gap
+   * recorded in the suite is honest; a gap invisible to it is how the
+   * wrong-entity write survived two guards written against it.
+   */
+  it('RESIDUAL F2/a: a wrong-FACTOR write on the named option is honoured and COMMITS', () => {
+    const after = clone(CAPTURE.before);
+    const node = after.nodes.find((n) => n.id === OPTION_ID)!;
+    // The user asked about FACTOR_ID; the edit writes a different factor key.
+    (node.interventions as Record<string, { value: number }>)['a9f8b0b7'] = { value: 0.79 };
+
+    // PRECONDITIONS: the factor the user NAMED did not move, and a different
+    // one did — without both, this is not the wrong-factor shape.
+    expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
+    expect(optionInterventionValue(after, OPTION_ID, 'a9f8b0b7')).toBe(0.79);
+    expect(MESSAGE).toContain('Pro Plan Monthly Price');
+
+    expect(
+      evaluateConfigureOptionOutcome({ message: MESSAGE, before: CAPTURE.before, after }).status,
+    ).toBe('honoured');
+    expect(
+      decideOptionInterventionWrite({
+        message: MESSAGE, before: CAPTURE.before, after, appliedMutation: true,
+      }).verdict,
+    ).toBe('allow');
+    // AT THE STORED OBJECT: the wrong factor's value is what the user keeps.
+    expect(optionInterventionValue(storedGraph(CAPTURE.before, after, MESSAGE), OPTION_ID, 'a9f8b0b7'))
+      .toBe(0.79);
+  });
+
+  /**
+   * ⛔⛔ F2/b — A WRONG-**OPTION** WRITE REACHES A PROTECTING VERDICT AND STILL
+   * COMMITS.
+   *
+   * The outcome verdict is correct — `not_honoured_no_copy` for the option the
+   * user named, which gained nothing. The WRITE guard then allows it, because
+   * `anyInterventionWriteLanded` is true: an effect value landed SOMEWHERE.
+   *
+   * ⚠ PINNED, NOT FIXED, AND THE CONJUNCT IS DELIBERATE. The module header
+   * states why: *"if an interventions write DID land somewhere, the turn
+   * accomplished a real option edit and discarding it would be a new harm."*
+   * Removing it would withhold legitimate multi-option edits wholesale — the
+   * W1 direction, which destroys user work. Changing that conjunct is a
+   * judgement with a blast radius beyond this lane, so it is disclosed.
+   */
+  it('RESIDUAL F2/b: a wrong-OPTION write is protected in the verdict but COMMITS', () => {
+    const before = twoOptionGraph();
+    const after = clone(before);
+    const other = after.nodes.find((n) => n.id === SECOND_OPTION_ID)!;
+    (other.interventions as Record<string, { value: number }>)[FACTOR_ID] = { value: 0.79 };
+
+    // PRECONDITIONS: the NAMED option gained nothing; a DIFFERENT option did.
+    expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
+    expect(optionInterventionValue(after, SECOND_OPTION_ID, FACTOR_ID)).toBe(0.79);
+
+    // The verdict is right — it is about the option the user named.
+    const verdict = evaluateConfigureOptionOutcome({ message: MESSAGE, before, after });
+    expect(verdict.status).toBe('not_honoured_no_copy');
+    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
+
+    // The write is allowed anyway, for the stated reason.
+    const write = decideOptionInterventionWrite({
+      message: MESSAGE, before, after, appliedMutation: true,
+    });
+    expect(write.verdict).toBe('allow');
+    expect(write.verdict === 'allow' && write.reason).toBe('interventions_write_landed');
+    // AT THE STORED OBJECT: the other option's value persists.
+    expect(optionInterventionValue(storedGraph(before, after, MESSAGE), SECOND_OPTION_ID, FACTOR_ID))
+      .toBe(0.79);
+  });
+
+  /**
+   * ⭐⭐ F7 — A DELETED EDGE IS A WRITE TOO, and the first cut of the edge arm
+   * was blind to it: it walked `after.edges` only, so severing the option's
+   * link to the factor the user named — the most destructive wrong-entity
+   * outcome available — read as "no edge write" and was ALLOWED.
+   */
+  it('ARM H: DELETING one of the option’s own edges is withheld, and nothing moves', () => {
+    const after = clone(CAPTURE.before);
+    after.edges = after.edges.filter((e) => !(e.from === OPTION_ID && e.to === FACTOR_ID));
+
+    // PRECONDITIONS: the edge really is gone, and the option's value did not move.
+    expect(edgeField(CAPTURE.before, OPTION_ID, FACTOR_ID, 'strength.mean')).toBe(1);
+    expect(edgeField(after, OPTION_ID, FACTOR_ID, 'strength.mean')).toBeUndefined();
+    expect(optionInterventionValue(after, OPTION_ID, FACTOR_ID)).toBe(0.49);
+
+    const write = decideOptionInterventionWrite({
+      message: MESSAGE, before: CAPTURE.before, after, appliedMutation: true,
+    });
+    expect(write.verdict).toBe('withhold');
+    expect(write.verdict === 'withhold' && write.optionEdgeKeys)
+      .toEqual([`${OPTION_ID}->${FACTOR_ID}`]);
+
+    // AT THE STORED OBJECT: the link survives.
+    expect(edgeField(storedGraph(CAPTURE.before, after, MESSAGE), OPTION_ID, FACTOR_ID, 'strength.mean'))
+      .toBe(1);
   });
 
   /**

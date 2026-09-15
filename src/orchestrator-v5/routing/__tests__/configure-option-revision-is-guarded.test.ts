@@ -196,12 +196,32 @@ describe('a revision to an already-configured option is guarded', () => {
    * A message naming no option must reach no verdict, exactly as today.
    */
   it('names no option ⇒ still no verdict', () => {
+    // ⚠⚠ RE-GROUNDED. This case was written with *"Set the effect to 79%."*,
+    // which the shipped detector does NOT match — so it declined
+    // `not_configure_intent` and never reached option resolution at all. It
+    // asserted `not_applicable` and PASSED while pinning a different thing
+    // than its name claims: a true measurement of an irrelevant state.
+    //
+    // This phrasing is the capture's OWN trigger family (`option_value_set`)
+    // with the option's name removed, so intent matches, resolution IS
+    // attempted, and the decline is the one this case is about.
+    const SUBJECTLESS = "Change the option's Pro Plan Monthly Price to 79%";
+
+    // PRECONDITION — without it this cannot discriminate.
+    expect(
+      detectConfigureOptionIntent(
+        SUBJECTLESS,
+        projectOptionLabels(CAPTURE.before.nodes as never),
+      ).matched,
+    ).toBe(true);
+
     const verdict = evaluateConfigureOptionOutcome({
-      message: 'Set the effect to 79%.',
+      message: SUBJECTLESS,
       before: CAPTURE.before,
       after: CAPTURE.after,
     });
     expect(verdict.status).toBe('not_applicable');
+    expect(verdict.status === 'not_applicable' && verdict.reason).toBe('option_not_identified');
   });
 
   /**
