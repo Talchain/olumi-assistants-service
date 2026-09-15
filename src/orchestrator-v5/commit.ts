@@ -1100,6 +1100,7 @@ export async function commitDirectAnswer(
   response: OlumiResponse,
   metadata: CommitMetadata,
   sessionStore?: SessionStore,
+  projectPublicResponse?: (response: OlumiResponse) => OlumiResponse,
 ): Promise<CommitResult> {
   // Invariant guard: the TurnExecutor seven-step assembly must produce a
   // composed OlumiResponse before reaching COMMIT. A falsy response here
@@ -1396,6 +1397,12 @@ export async function commitDirectAnswer(
   // NULL (system-event turns, blank answers, and the draft_graph path whose
   // provisional response carries empty assistant_text — its narrative is
   // reconstructable from the persisted graph in context).
+  // The conversation owner can apply its existing public-answer policy here:
+  // after pending/lapse composition, before the SAME response is stored and
+  // returned. No second write or alternative conversation history is created.
+  if (projectPublicResponse) {
+    responseForCommit = projectPublicResponse(responseForCommit);
+  }
   const userMessage = capConversationText(metadata.userMessage, 'user_message');
   // F-HELD: derived from `responseForCommit` (not the raw input response) so
   // the durable copy includes the lapse notice / excludes suppressed chips'
