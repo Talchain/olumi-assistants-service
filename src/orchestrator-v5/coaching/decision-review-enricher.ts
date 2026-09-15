@@ -55,6 +55,9 @@ import {
   logRunnerUpGapRedaction,
   redactRunnerUpGapStatistic,
 } from '../compose/runner-up-gap-statistic.js';
+// The narrative must name the winner the run actually stored. Installed at the
+// same single egress seam, immediately before the review is attached.
+import { applyWinnerNamingEgressGuard } from '../compose/winner-naming-egress-guard.js';
 // Graph-label readers relocated to a lean, dependency-free context module so
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
@@ -600,7 +603,49 @@ export async function enrichRunAnalysisWithDecisionReview(
         ...summariseProseFactViolations(proseFact.violations),
       });
     }
-    const reviewOutput = proseFact.output as DecisionReviewOutput;
+    // WINNER-NAMING GUARD — the last mutation before the review is attached, so
+    // it binds the text that actually SHIPS rather than an intermediate. Placed
+    // at the SAME single egress seam as the DSK grounding policy and the
+    // runner-up gap redaction above, so both invoke paths (decomposed and
+    // monolithic, INCLUDING the decomposed path's fallback INTO the monolith)
+    // are covered by one rule rather than two drifting copies.
+    //
+    // The narrative is the primary review_card body — the first sentence a user
+    // reads after an analysis — and until now nothing on the live path compared
+    // it against the winner stored on the run. Measured: three captured runs
+    // whose headline stated a price that exists on no option in the model.
+    //
+    // A substitution here is an OLUMI FAULT and says so, with a copyable
+    // reference, in the replacement sentence itself AND in a machine-readable
+    // `narrative_summary_substitution` record. Never a silent drop: dropping
+    // would take out the whole review (bias findings, evidence enhancements,
+    // flip thresholds) and tell the user nothing. See
+    // `compose/winner-naming-egress-guard.ts` for the full reasoning.
+    const winnerNaming = applyWinnerNamingEgressGuard(
+      proseFact.output as Record<string, unknown>,
+      invokeInput.winner,
+      input.requestId,
+    );
+    if (winnerNaming.substituted && winnerNaming.details !== null) {
+      // Not routine. This is a review that named something the analysed model
+      // does not contain — the condition the live path could not previously see.
+      log.warn(
+        {
+          request_id: input.requestId,
+          scenario_id: input.scenarioId,
+          reason: winnerNaming.details.reason,
+          fault: winnerNaming.details.fault,
+          // The STORED label, never the model's prose (no free text in telemetry).
+          winner_label: winnerNaming.details.winner_label,
+        },
+        'v5.decision_review.narrative_did_not_name_winner',
+      );
+    }
+    const reviewOutput = (
+      winnerNaming.substituted
+        ? { ...winnerNaming.value, narrative_summary_substitution: winnerNaming.details }
+        : winnerNaming.value
+    ) as DecisionReviewOutput;
 
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:
     // Run the parent-level enrichment through the sanitiser BEFORE
