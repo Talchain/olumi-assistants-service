@@ -1258,44 +1258,157 @@ function isInterventionSubtreeKey(key: string): boolean {
  * entity. Anything else that was stripped still refuses. When `preEntity` is
  * absent (the held path) the check is strictly #509's.
  */
-function updateWritesSurvived(
+function firstWriteThatDidNotSurvive(
   value: unknown,
   identityKeys: readonly string[],
   rawEntity: Record<string, unknown> | undefined,
   canonEntity: Record<string, unknown> | undefined,
   preEntity: Record<string, unknown> | undefined,
-): boolean {
-  if (rawEntity === undefined || canonEntity === undefined) return false;
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return true;
+): string | null {
+  // Entity missing entirely. There is no per-key culprit to name, and
+  // inventing one would be worse than the empty line this replaces.
+  if (rawEntity === undefined || canonEntity === undefined) return MISSING_ENTITY_KEY;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   for (const key of Object.keys(value as Record<string, unknown>)) {
     if (identityKeys.includes(key)) continue;
     if (deepEqualJson(rawEntity[key], canonEntity[key])) continue;
 
     // The write was stripped by canonicalisation.
-    if (preEntity === undefined) return false;
-    if (!isInterventionSubtreeKey(key)) return false;
+    if (preEntity === undefined) return key;
+    if (!isInterventionSubtreeKey(key)) return key;
     // The intervention encoder owns this spelling — it landed iff the
     // canonical intervention state actually changed.
-    if (deepEqualJson(canonEntity.interventions, preEntity.interventions)) return false;
+    if (deepEqualJson(canonEntity.interventions, preEntity.interventions)) return key;
   }
-  return true;
+  return null;
 }
 
 /**
- * True iff EVERY operation in the batch has an observable effect on the
- * canonical applied graph. `rawApplied` is the pre-canonicalisation candidate
- * (the applier's raw writes); `canonical` is the GraphV3-parsed
- * persisted-shape graph the commit will store and the UI/analysis will read.
- *
- * `preEdit` is optional — see {@link updateWritesSurvived}. Omitting it gives
- * the strict #509 held-path semantics unchanged.
+ * Sentinel for "the target entity was not in the graph at all", so the
+ * descriptor can distinguish that from "a named field was stripped". Not a
+ * real op key: it is masked like any other and reports as `*`.
  */
-export function batchFullyLanded(
+const MISSING_ENTITY_KEY = '\u0000missing_entity';
+
+/**
+ * WHY THE REFUSAL NAMES THE OPERATION.
+ *
+ * `batchFullyLanded` used to return a bare boolean, so the warn line it drives
+ * could say only THAT an operation did not land, never WHICH. Measured cost,
+ * 2026-09-14: on staging `8e4efce0` an edit refused at request
+ * `20eec8c9-…`, and a discriminator over the deployed logs returned
+ *   "encoded option interventions to the canonical"  -> 0
+ *   option_interventions_encoded                     -> 0
+ *   "did not survive canonicalisation" (contrast)    -> 1
+ * i.e. the intervention encoder never fired — and the log could not say whether
+ * the op spelling was outside the recogniser or the encoder was not on the path
+ * at all. Those have OPPOSITE remedies, and nothing on the line discriminated
+ * them. This descriptor does.
+ *
+ * ⛔ REDACTION — WHY NEITHER THE PATH NOR THE RAW KEY IS LOGGED. The obvious
+ * call is "log the key/path, not the value; a path is structural". In THIS
+ * codebase that is false, twice over:
+ *
+ *   1. A path IS an entity id, and entity ids here are slug-shaped SEMANTIC
+ *      WORDS derived from the user's own labels — `fac_delivery_cost`,
+ *      `factor_team_morale`, `goal_revenue` (see
+ *      `orchestrator/shared/output-safety.ts`, which documents exactly this
+ *      shape). So `op.path` for an `update_node` is the user's factor name,
+ *      slugified. Logging it publishes the user's model.
+ *   2. The failing KEY embeds an id too: the intervention spellings are
+ *      `interventions/<id>`, `data/interventions/<id>`,
+ *      `observed_state.interventions.<id>`. The id is the LAST segment, so a
+ *      raw key leaks the same content one level down.
+ *
+ * And the keys are not even a closed set: this module's own
+ * `FORBIDDEN_PATH_SEGMENTS` comment states that "Op keys are model-controlled"
+ * (a key like `__proto__/value` is reachable). A key allowlist must therefore
+ * FAIL CLOSED rather than assume a vocabulary.
+ *
+ * So the descriptor reports the key's SHAPE: each segment is kept only if it
+ * is in this module's own structural vocabulary, and every other segment —
+ * which is where an id can be — is masked to `*`. `interventions/fac_acme_x`
+ * becomes `interventions/*`. That is exactly the discrimination the incident
+ * needed (which spelling family was used) with none of the content.
+ *
+ * Everything else on the descriptor is a closed enum: the op kind (the
+ * `PatchOperation` union) and the reason (the switch arm that refused).
+ * `op.value` is never read.
+ */
+export type NonLandingReason =
+  /** add_node: the node is absent from the canonical graph. */
+  | 'added_entity_missing_from_canonical'
+  /** remove_node / remove_edge: the entity is still present after canonicalisation. */
+  | 'removed_entity_still_present'
+  /** add_edge: the edge is absent from the canonical graph. */
+  | 'added_edge_missing_from_canonical'
+  /** remove_edge / update_edge: `op.path` did not parse as an edge target. */
+  | 'edge_target_path_unparseable'
+  /** update_node / update_edge: a written field did not survive canonicalisation. */
+  | 'update_writes_did_not_survive'
+  /** An op kind this checker cannot verify. Fails closed, as it always did. */
+  | 'unknown_op_kind'
+  /** The per-op check threw. Fails closed, as it always did. */
+  | 'check_threw';
+
+export interface NonLandingOperation {
+  /** Position in the batch. Structural. */
+  readonly index: number;
+  /** The `PatchOperation` union member. Closed set. */
+  readonly op: string;
+  readonly reason: NonLandingReason;
+  /**
+   * The failing write's key with every non-structural segment masked to `*`
+   * (see the redaction note above). Null when the reason is not key-specific.
+   */
+  readonly key_shape: string | null;
+  /**
+   * Whether the failing key is one the intervention encoder owns — evaluated
+   * with `isInterventionSubtreeKey`, the ENCODER'S OWN predicate, so this
+   * answers "was this spelling inside the recogniser?" without re-deriving it.
+   * Null when the reason is not key-specific.
+   */
+  readonly key_is_intervention_subtree: boolean | null;
+}
+
+/**
+ * Segments that are this module's own structural vocabulary and therefore
+ * carry no user content. DERIVED from the sets the canonicaliser already uses
+ * (CLAUDE.md trap 12 — not a second hand-kept list): if a spelling is added
+ * there, it is recognised here automatically.
+ */
+const STRUCTURAL_KEY_SEGMENTS: ReadonlySet<string> = new Set<string>([
+  ...OBSERVED_ROOT_SPELLINGS,
+  ...ALLOWED_OBSERVED_SUBKEYS,
+  ...NODE_IDENTITY_KEYS,
+  ...EDGE_IDENTITY_KEYS,
+  'interventions',
+]);
+
+/**
+ * Mask a model-controlled op key down to its structural shape. Separators are
+ * normalised to `/` so `data.interventions.x` and `data/interventions/x`
+ * aggregate as one shape in the logs.
+ */
+export function describeKeyShape(key: string): string {
+  const segments = key.split(/[/.]/).filter((s) => s.length > 0);
+  if (segments.length === 0) return '*';
+  return segments.map((s) => (STRUCTURAL_KEY_SEGMENTS.has(s) ? s : '*')).join('/');
+}
+
+/**
+ * The first operation in the batch with no observable effect on the canonical
+ * applied graph, or `null` when every operation landed.
+ *
+ * This is the whole check; {@link batchFullyLanded} is a boolean view of it, so
+ * the two cannot drift apart.
+ */
+export function firstOperationThatDidNotLand(
   operations: readonly PatchOperation[],
   rawApplied: GraphV3T,
   canonical: GraphV3T,
   preEdit?: GraphV3T | null,
-): boolean {
+): NonLandingOperation | null {
   const rawNodes = rawApplied.nodes as ReadonlyArray<Record<string, unknown>>;
   const rawEdges = rawApplied.edges as ReadonlyArray<Record<string, unknown>>;
   const canonNodes = canonical.nodes as ReadonlyArray<Record<string, unknown>>;
@@ -1316,62 +1429,104 @@ export function batchFullyLanded(
     to: unknown,
   ): Record<string, unknown> | undefined => arr?.find((e) => e.from === from && e.to === to);
 
-  for (const op of operations) {
+  const describe = (
+    index: number,
+    op: PatchOperation,
+    reason: NonLandingReason,
+    key?: string,
+  ): NonLandingOperation => ({
+    index,
+    op: String(op.op),
+    reason,
+    key_shape: key === undefined ? null : describeKeyShape(key),
+    key_is_intervention_subtree: key === undefined ? null : isInterventionSubtreeKey(key),
+  });
+
+  for (let index = 0; index < operations.length; index += 1) {
+    const op = operations[index]!;
     try {
       switch (op.op) {
         case 'add_node':
-          if (findNode(canonNodes, op.path) === undefined) return false;
+          if (findNode(canonNodes, op.path) === undefined) {
+            return describe(index, op, 'added_entity_missing_from_canonical');
+          }
           break;
         case 'remove_node':
-          if (findNode(canonNodes, op.path) !== undefined) return false;
+          if (findNode(canonNodes, op.path) !== undefined) {
+            return describe(index, op, 'removed_entity_still_present');
+          }
           break;
         case 'add_edge': {
           const v = op.value as Record<string, unknown>;
-          if (findEdge(canonEdges, v?.from, v?.to) === undefined) return false;
+          if (findEdge(canonEdges, v?.from, v?.to) === undefined) {
+            return describe(index, op, 'added_edge_missing_from_canonical');
+          }
           break;
         }
         case 'remove_edge': {
           const ep = parseEdgeTargetPath(op.path);
-          if (ep === null) return false;
-          if (findEdge(canonEdges, ep.from, ep.to) !== undefined) return false;
-          break;
-        }
-        case 'update_node':
-          if (
-            !updateWritesSurvived(
-              op.value,
-              NODE_IDENTITY_KEYS,
-              findNode(rawNodes, op.path),
-              findNode(canonNodes, op.path),
-              preNodes === undefined ? undefined : findNode(preNodes, op.path),
-            )
-          ) {
-            return false;
+          if (ep === null) return describe(index, op, 'edge_target_path_unparseable');
+          if (findEdge(canonEdges, ep.from, ep.to) !== undefined) {
+            return describe(index, op, 'removed_entity_still_present');
           }
           break;
+        }
+        case 'update_node': {
+          const failedKey = firstWriteThatDidNotSurvive(
+            op.value,
+            NODE_IDENTITY_KEYS,
+            findNode(rawNodes, op.path),
+            findNode(canonNodes, op.path),
+            preNodes === undefined ? undefined : findNode(preNodes, op.path),
+          );
+          if (failedKey !== null) {
+            return describe(index, op, 'update_writes_did_not_survive', failedKey);
+          }
+          break;
+        }
         case 'update_edge': {
           const ep = parseEdgeTargetPath(op.path);
-          if (ep === null) return false;
-          if (
-            !updateWritesSurvived(
-              op.value,
-              EDGE_IDENTITY_KEYS,
-              findEdge(rawEdges, ep.from, ep.to),
-              findEdge(canonEdges, ep.from, ep.to),
-              preEdges === undefined ? undefined : findEdge(preEdges, ep.from, ep.to),
-            )
-          ) {
-            return false;
+          if (ep === null) return describe(index, op, 'edge_target_path_unparseable');
+          const failedKey = firstWriteThatDidNotSurvive(
+            op.value,
+            EDGE_IDENTITY_KEYS,
+            findEdge(rawEdges, ep.from, ep.to),
+            findEdge(canonEdges, ep.from, ep.to),
+            preEdges === undefined ? undefined : findEdge(preEdges, ep.from, ep.to),
+          );
+          if (failedKey !== null) {
+            return describe(index, op, 'update_writes_did_not_survive', failedKey);
           }
           break;
         }
         default:
           // Unknown op kind — cannot verify its effect, so fail closed.
-          return false;
+          return describe(index, op, 'unknown_op_kind');
       }
     } catch {
-      return false;
+      return describe(index, op, 'check_threw');
     }
   }
-  return true;
+  return null;
+}
+
+/**
+ * True iff EVERY operation in the batch has an observable effect on the
+ * canonical applied graph. `rawApplied` is the pre-canonicalisation candidate
+ * (the applier's raw writes); `canonical` is the GraphV3-parsed
+ * persisted-shape graph the commit will store and the UI/analysis will read.
+ *
+ * `preEdit` is optional — see {@link firstWriteThatDidNotSurvive}. Omitting it gives
+ * the strict #509 held-path semantics unchanged.
+ *
+ * A boolean VIEW of {@link firstOperationThatDidNotLand}, never a second
+ * implementation, so the refusal and the reason it reports cannot disagree.
+ */
+export function batchFullyLanded(
+  operations: readonly PatchOperation[],
+  rawApplied: GraphV3T,
+  canonical: GraphV3T,
+  preEdit?: GraphV3T | null,
+): boolean {
+  return firstOperationThatDidNotLand(operations, rawApplied, canonical, preEdit) === null;
 }

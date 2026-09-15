@@ -308,6 +308,7 @@ import {
 } from './compose/proposed-change.js';
 import {
   buildWarrantDemotion,
+  buildIncompleteOfferRefusalText,
   findUnsupportedOfferTargetKind,
   isProductMintedOfferCopy,
   type PersistedConstraintRow,
@@ -10500,6 +10501,24 @@ export async function runTurnExecutor(
               unsupportedTargetKind.nodeKind,
             ),
           ];
+        } else if (!demotion.ok && demotion.reason === 'required_parameter_missing') {
+          // PARAMETER-SUFFICIENCY PRECONDITION — the third sibling of the
+          // registry-executable and target-kind checks. The handler requires a
+          // parameter this proposal does not usably carry, so a chip would
+          // promise a change the resumer must refuse, and (witnessed on
+          // staging 2026-09-14) would ALSO accumulate beside the complete
+          // offer under a different id, rendering as a second, identical
+          // "Add this limit" the user cannot choose between.
+          //
+          // Its own copy, deliberately: the generic branch below closes with
+          // "Say the word and I will make it.", and there is nothing here to
+          // say the word to. No chip and no pending are emitted, so the
+          // "persisted pending ⟹ rendered chip" invariant holds trivially.
+          demotionOutcome = `emit_refused:${demotion.reason}:${demotion.parameterName}`;
+          demotionText = buildIncompleteOfferRefusalText(
+            demotion.parameterName,
+            action.entity.label,
+          );
         } else if (!demotion.ok) {
           // A mutating handler outside the three proposable intents. There is
           // no chip channel for it, so the honest outcome is a refusal that
@@ -12051,6 +12070,15 @@ export async function runTurnExecutor(
         stage: context.stage,
         handlerFacts: handlerFactsForCommit,
         analysisReadyStatus: analysisReadyForTurn?.status,
+        // ⭐ THE WHOLE PAYLOAD, NOT A SECOND NARROWING. `analysisReadyForTurn`
+        // already carries `analysis_admission` (it is built by
+        // `canonicalAnalysisReadyFrom`); until now compose only ever saw
+        // `.status`, so the unrequested-run summary asserted "nothing in it is
+        // confirmed yet" with no way to check whether the admission had already
+        // recorded the opposite. Measured contradicting itself on a founder
+        // session, 2026-09-14 — see `compose/unrequested-analysis-confinement.ts`
+        // :: unrequestedSummaryPremiseHolds.
+        analysisReady: analysisReadyForTurn,
         suggested_actions: executeChips,
         // R4 lookup fix — persisted-snapshot fallback for graph-node
         // ID→{label,kind} resolution. The PLoT envelope on the fact has no

@@ -62,6 +62,10 @@
  */
 
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+import {
+  UNMEASURED_TARGET_LEAD_IN,
+  unmeasuredTargetRepairStep,
+} from './constraint-gap-copy.js';
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
 import { locateEvidence } from '../../cee/compound-goal/direction-gate.js';
 import type {
@@ -316,36 +320,15 @@ const UNRESOLVED_LEAD_IN =
  */
 const OUT_OF_SCOPE_LEAD_IN = 'This analysis does not test ';
 
-/**
- * Constant lead-in for the UNMEASURED_TARGET voice; escaped into the grammar
- * below. It states the OBSERVABLE and nothing more: the node the limit points
- * at records no value. It does not say the engine failed (it was never asked a
- * question it could answer), and it does not say the limit is wrong (it is not
- * — the user's sentence was clear; our model has no number to test it against).
+/*
+ * `UNMEASURED_TARGET_LEAD_IN` and `unmeasuredTargetRepairStep` now live in
+ * `constraint-gap-copy.ts` (imported above) — UNCHANGED, byte for byte. They
+ * moved because the same fact is now also stated at CONSTRAINT-WRITE time, and
+ * one set of words said in two places must have one definition (CLAUDE.md
+ * trap 12). The grammar below still derives from them, so nothing here needs to
+ * know where they are declared.
  */
-const UNMEASURED_TARGET_LEAD_IN = 'Your model records no value to test ';
 
-/**
- * The repair step for the UNMEASURED_TARGET voice.
- *
- * It asks for the REFERENT, which is the one thing missing and the one thing
- * only the user knows. "I will record it there" is the same live capability
- * {@link UNEVALUATED_REPAIR_STEP} already claims (`add_constraint`, a
- * registered V5 handler pinned against the registry by this module's tests) —
- * the same verb deliberately, so the two repair steps cannot drift into
- * promising different things.
- *
- * ⚠ IT DISCLOSES THE SAME RESIDUAL its sibling does. There is no conversational
- * remove/replace constraint operation (ROADMAP 2.659), so a correction APPENDS
- * beside the existing row rather than replacing it. Saying so is the INV-2
- * discipline: a repair that cannot touch the defective row must disclose that
- * the row remains.
- */
-function unmeasuredTargetRepairStep(total: number): string {
-  return total === 1
-    ? ' Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.'
-    : ' Tell me which parts of your model they apply to and I will record them there; these stay on the model. Then run the analysis again.';
-}
 
 /**
  * The sentence that states WHAT the disclosure is about, optionally naming the

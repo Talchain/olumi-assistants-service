@@ -157,6 +157,7 @@ import type { TurnClaimSafetyResolver } from '../orchestrator-v5/context/turn-cl
 // re-enters 2–8 times per response and always upstream of `finaliseV5Response`.
 import { guardLeadingOptionClaimsAtEgress } from '../orchestrator-v5/compose/leading-option-egress-guard.js';
 import { enforceLeadingOptionClaimsAtWire } from '../orchestrator-v5/compose/leading-option-wire-enforcement.js';
+import { classifyUserVisibleRefusal } from '../orchestrator-v5/compose/user-visible-refusal.js';
 import {
   ANALYSIS_AUTHORITY_UNAVAILABLE_FRESHNESS,
   enforceAnalysisAuthorityUnavailableAtEgress,
@@ -1905,6 +1906,31 @@ async function sendFinalised200(
     emit(TelemetryEvents.V5ClaimSafetyFailClosedUnavailable, {
       exit_path: exitPath,
       outcome: analysisAuthorityUnavailableEgressMode,
+    });
+  }
+  // ── A REFUSAL THE USER CAN SEE IS COUNTED AS A REFUSAL ────────────────────
+  //
+  // Same exactly-once seam and the same argument as the fail-closed counter
+  // immediately above: the question is "what did the USER receive?", and
+  // `wireBody` is the only artefact that answers it. A producer-side emit
+  // would count refusals that were recovered upstream and never shipped.
+  //
+  // Read AFTER every pass that can edit the body, so this classifies the bytes
+  // that are about to be sent rather than an object that no longer ships.
+  // Observe-only: it cannot alter a wire byte.
+  const refusal = classifyUserVisibleRefusal(wireBody);
+  if (refusal) {
+    emit(TelemetryEvents.CeeTurnRefused, {
+      request_id: requestId,
+      // Honest null, never a placeholder: the system-event exit can reach here
+      // without a scenario, and "we do not know which session" must not be
+      // spelled the same way as a real id.
+      scenario_id: ctx.scenarioId ?? null,
+      exit_path: exitPath,
+      error_code: refusal.error_code,
+      severity: refusal.severity,
+      refusal_source: refusal.source,
+      refusal_code: refusal.refusal_code,
     });
   }
   logFinalisedResponse(requestId, exitPath, wireBody, egress.ok, ctx.analysisReady == null);

@@ -32,6 +32,24 @@ const SUPPRESS_CASES: ReadonlyArray<Case> = [
   { label: 'set numeric',                       message: 'set churn to 5%',                                                expect: true },
   { label: 'update categorical',                message: 'update existing team maturity to mid-weight developers',         expect: true },
   { label: 'update categorical with "to be"',   message: 'update the existing team maturity to be mid-weight developers',  expect: true },
+  // Clause A — `change` X to <numeric or fuzzy non-structural Y>.
+  // Admitted 2026-09-14. The first two are VERBATIM LIVE CAPTURES, not
+  // invented phrasings: both were label-only renames in production.
+  {
+    label: 'change + currency (live capture 20260811T012704Z-fresh-5e036e)',
+    message: 'Change Annual CRM Spend to £63,000.',
+    expect: true,
+  },
+  {
+    label: 'change + "from X to Y" (live capture, label-value-divergence.ts:7)',
+    message: 'change the raise option from $49 to $39',
+    expect: true,
+  },
+  { label: 'change + bare numeric',              message: 'change churn to 79',                                            expect: true },
+  { label: 'change + currency',                  message: 'change churn to £79',                                           expect: true },
+  { label: 'change + percentage',                message: 'change churn to 79%',                                           expect: true },
+  { label: 'change + possessive option price',   message: "Change the Premium option's price to £79",                      expect: true },
+  { label: 'change + categorical (set/update twin)', message: 'change the existing team maturity to mid-weight developers', expect: true },
   // Clause B — increase/decrease/etc X by Y
   { label: 'increase by numeric',               message: 'increase price by 10%',                                          expect: true },
   { label: 'decrease by fuzzy',                 message: 'decrease the cost by half',                                      expect: true },
@@ -125,8 +143,32 @@ const NON_SUPPRESS_CASES: ReadonlyArray<Case> = [
   { label: 'kind change "to become an option"', message: 'update node X to become an option',                              expect: false },
   { label: 'kind change "to factor" no article', message: 'set X to factor',                                               expect: false },
   // Verbs deliberately excluded from the gate
-  { label: 'verb "change" excluded',            message: 'change risk X to outcome',                                       expect: false },
   { label: 'verb "remove" excluded',            message: 'remove salary cost pressure',                                    expect: false },
+  // `change` KIND/STRUCTURAL twins. ⚠ LABEL CORRECTED 2026-09-14: this row
+  // read 'verb "change" excluded' and was passing for the WRONG REASON —
+  // the verb exclusion made EVERY `change` message false, so the row proved
+  // nothing about kind discrimination. `change` is now in
+  // VALUE_UPDATE_VERBS_TO and these rows are load-bearing for the first
+  // time: each one reaches the pattern and is rejected by
+  // STRUCTURAL_OR_KIND_LOOKAHEAD / META_NOUN_GUARD on the MESSAGE.
+  // Opposite-direction twins of the `change` SUPPRESS rows above — the
+  // gate guards two opposite harms (GAP: a value instruction renames a
+  // label; LIE: a kind instruction writes a number) and one direction
+  // alone cannot validate it.
+  { label: 'change kind target (no article)',   message: 'change risk X to outcome',                                       expect: false },
+  { label: 'change kind target "to a factor"',  message: 'change X to a factor',                                           expect: false },
+  { label: 'change kind filler "to be a risk"', message: 'change X to be a risk',                                          expect: false },
+  { label: 'change kind bare "to factor"',      message: 'change X to factor',                                             expect: false },
+  { label: 'change plural kind "to become options"', message: 'change nodes to become options',                            expect: false },
+  { label: 'change structural "to include"',    message: 'change the model to include market dynamics',                    expect: false },
+  { label: 'change structural filler "to also include"', message: 'change the model to also include market dynamics',      expect: false },
+  { label: 'change meta-noun "the model"',      message: 'change the model to be more realistic',                          expect: false },
+  { label: 'change meta-noun "the graph"',      message: 'change the graph to be more accurate',                           expect: false },
+  { label: 'change meta-noun "the diagram"',    message: 'change the diagram to be cleaner',                               expect: false },
+  { label: 'change meta-noun no article',       message: 'change model to better represent churn',                         expect: false },
+  // `change` is NOT admitted to clause B (`by`) — that verb set is
+  // quantity-directional (increase/decrease/reduce/raise/lower).
+  { label: 'change + "by" not admitted',        message: 'change churn by 10',                                             expect: false },
   { label: 'verb "add" excluded',               message: 'add market competition as a factor',                             expect: false },
   // Edge-strength phrasing — `raise` without `by` is not a value-update
   { label: 'raise X (no by)',                   message: 'raise the strength of the market risk edge',                     expect: false },
@@ -286,6 +328,112 @@ describe('isValueUpdatePhrasing — table-driven gate behaviour', () => {
       expect(
         shouldSuppressEditDispatchForValueUpdate('add a new factor called Shipping costs'),
       ).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // Clause-A verb parity (2026-09-14, the `change` admission).
+  // -------------------------------------------------------------------
+  describe('clause-A verb parity — the discrimination is per-MESSAGE, not per-VERB', () => {
+    // PRECONDITION PIN. Without this, every assertion below passes
+    // VACUOUSLY if `change` is ever removed from the array again: the
+    // DISCRIMINATED table would still agree (all three false) and the
+    // VALUE table would simply not be reached with a third verb. This
+    // makes such a removal fail loudly, by name.
+    it('clause A carries exactly set / update / change', () => {
+      expect([...__testOnly.VALUE_UPDATE_VERBS_TO]).toEqual(['set', 'update', 'change']);
+    });
+
+    // Messages whose KIND / STRUCTURAL / META-NOUN character is carried by
+    // the MESSAGE. Every clause-A verb must agree that these stay on
+    // edit_graph. Measured at the pristine tip BEFORE `change` was
+    // admitted: all three verbs were already false on every row here —
+    // which is the evidence that the verb exclusion bought no
+    // discrimination it did not already have.
+    const DISCRIMINATED = [
+      'X to a factor',
+      'risk X to outcome',
+      'X to be a risk',
+      'X to factor',
+      'nodes to become options',
+      'the model to be more realistic',
+      'the model to include market dynamics',
+      'the graph to be more accurate',
+      'the diagram to be cleaner',
+    ] as const;
+
+    // Messages that are unambiguously value-bearing.
+    const VALUE_BEARING = [
+      'churn to 79%',
+      'churn to £79',
+      'Annual CRM Spend to £63,000.',
+      'the existing team maturity to mid-weight developers',
+    ] as const;
+
+    it.each(DISCRIMINATED)(
+      'every clause-A verb keeps a kind/structural message on edit_graph: "<verb> %s"',
+      (tail) => {
+        for (const verb of __testOnly.VALUE_UPDATE_VERBS_TO) {
+          expect(isValueUpdatePhrasing(`${verb} ${tail}`)).toBe(false);
+        }
+      },
+    );
+
+    it.each(VALUE_BEARING)(
+      'every clause-A verb routes a value message to the value path: "<verb> %s"',
+      (tail) => {
+        for (const verb of __testOnly.VALUE_UPDATE_VERBS_TO) {
+          expect(isValueUpdatePhrasing(`${verb} ${tail}`)).toBe(true);
+        }
+      },
+    );
+  });
+
+  // -------------------------------------------------------------------
+  // KNOWN GAP — pinned honestly rather than left invisible.
+  // -------------------------------------------------------------------
+  describe('KNOWN GAP: clause A over-reaches on "the constraint on X to <qty>"', () => {
+    /**
+     * `<verb> the constraint on churn to 5%` is claimed by clause A and
+     * routed to the value path, where it can set churn's VALUE to 5%
+     * instead of registering a 5% CEILING — the exact harm documented at
+     * CONSTRAINT_INTENT_VERBS (which excludes `set` from clause D for this
+     * reason, while clause A admits it one clause earlier).
+     *
+     * ⚠ THIS IS PRE-EXISTING AND VERB-GENERAL, NOT INTRODUCED BY THE
+     * `change` ADMISSION — measured at the pristine tip, the `set` and
+     * `update` arms were ALREADY true there. Admitting `change` extends an
+     * existing over-reach from two verbs to three; it does not create it.
+     * Closing it requires teaching the deterministic pre-route to stand
+     * down on constraint phrasings first (the precondition
+     * CONSTRAINT_INTENT_VERBS already names), which is a separate change
+     * with its own review — deliberately NOT bundled here.
+     *
+     * Pinned as an EXACT set so the suite REDs if it grows OR shrinks: a
+     * new verb joining clause A shows up here, and the day the pre-route
+     * is taught, these flip and this block must be revisited rather than
+     * silently continuing to pass.
+     */
+    const CONSTRAINT_OVERREACH = ['set', 'update', 'change'] as const;
+
+    it('every clause-A verb currently over-claims the constraint phrasing', () => {
+      const claimed = [...__testOnly.VALUE_UPDATE_VERBS_TO].filter((verb) =>
+        isValueUpdatePhrasing(`${verb} the constraint on churn to 5%`),
+      );
+      expect(claimed).toEqual([...CONSTRAINT_OVERREACH]);
+    });
+
+    it('the over-reach is the " to <qty>" form ONLY — "of at most" stays out', () => {
+      // ⚠ MEASURED, not assumed — the first assertion here was written from
+      // the author's head as `true` and the measurement refuted it.
+      // "of at most 5%" carries NO ` to `, so clause A cannot fire and
+      // clause D's `set` exclusion holds: it stays on edit_graph, exactly
+      // as CONSTRAINT_INTENT_VERBS intends. The two phrasings differ by one
+      // preposition and route to opposite lanes.
+      expect(isValueUpdatePhrasing('Set a constraint on churn of at most 5%')).toBe(false);
+      // Contrast control — the probe can see a TRUE in the same family, so
+      // the `false` above is a discrimination and not a dead assertion.
+      expect(isValueUpdatePhrasing('Add a constraint on Key Talent Attrition.')).toBe(true);
     });
   });
 

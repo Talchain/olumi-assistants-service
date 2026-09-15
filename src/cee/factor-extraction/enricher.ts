@@ -26,6 +26,7 @@ import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { synthesiseDisplayValue } from "./display-value.js";
+import { unitPinnedScaleFrame } from "../draft/records/unit-scale-class.js";
 import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCap,
@@ -33,6 +34,7 @@ import {
 import {
   deriveGoalTargetFromLabel,
   deriveGoalTargetCandidate,
+  unitIsTemporal,
   type GoalTargetCandidate,
   type GoalLabelTargetRefusal,
 } from "./goal-label-target.js";
@@ -634,6 +636,187 @@ function enhanceWriteIsSpanContained(
   return canonicalQuote.includes(matched);
 }
 
+/** A stated figure a claim declared itself to be based on (`projector.ts`). */
+interface DeclaredFigure {
+  readonly value: number;
+  readonly unit?: string;
+  readonly source_quote?: string;
+}
+
+/**
+ * ⭐⭐ THE STATED FIGURES THIS NODE IS BASED ON, OR `undefined`.
+ *
+ * Read from an untyped key for the same reason `statedSourceQuote` is: `Node`
+ * declares no `provenance` field — it is `.passthrough()`, and the record
+ * projector writes provenance through that gap.
+ *
+ * ⚠ `undefined` MEANS "THIS NODE DECLARES NOTHING", never "declares none".
+ * Absence is the unknown case and must never be read as an exclusion — it is
+ * what an LLM-authored graph, a structural node, or an `unbased` claim returns.
+ */
+function declaredBasisFigures(node: NodeT): readonly DeclaredFigure[] | undefined {
+  const provenance = (node as { provenance?: unknown }).provenance;
+  if (typeof provenance !== "object" || provenance === null) return undefined;
+  const raw = (provenance as { basis_figures?: unknown }).basis_figures;
+  if (!Array.isArray(raw)) return undefined;
+  const figures = raw.filter(
+    (f): f is DeclaredFigure =>
+      typeof f === "object" &&
+      f !== null &&
+      typeof (f as DeclaredFigure).value === "number" &&
+      Number.isFinite((f as DeclaredFigure).value),
+  );
+  return figures.length > 0 ? figures : undefined;
+}
+
+/** Equal to within float noise, scaled to the magnitudes being compared. */
+function sameMagnitude(a: number, b: number): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) <= Math.max(Math.abs(a), Math.abs(b), 1) * 1e-9;
+}
+
+/**
+ * ⭐⭐⭐ IS THIS FIGURE ONE THE NODE IS BASED ON? — the SEMANTIC test that
+ * replaces label overlap as the thing deciding which subject a number lands on.
+ *
+ * Every level the extractor can be carrying is offered, because a `from X to Y`
+ * brief arrives as `{value: Y, baseline: X}` and a range as `{rangeMin,
+ * rangeMax}`: the user stated all of them, and the records name them
+ * individually, so any one of them establishes the subject.
+ *
+ * ⚠ THE PERCENT CASE IS NOT A SPECIAL CASE, IT IS THE SAME MAGNITUDE TWICE.
+ * A stated "4%" is recorded as `{value: 4, unit: "%"}` and extracted as the
+ * FRACTION `0.04`. Comparing those raw would refuse a user their own stated
+ * figure — the exact harm this function exists to prevent, arriving through the
+ * denominator instead of through the label.
+ *
+ * ⚠ AND THE DIVISOR IS ASKED FOR, NEVER ASSUMED. `unitPinnedScaleFrame` is this
+ * estate's ONE authority on unit-pinned scales, and it ABSTAINS on exactly the
+ * case an inline `unit === "%"` gets wrong: this repo's own producer convention
+ * already stores "4%" as `{value: 0.04}`, so dividing again is a 100× lie. When
+ * it abstains, the declared value is compared as it stands — which is the
+ * correct reading of an already-levelled figure. Reusing it also keeps this out
+ * of the KNOWN-UNMIGRATED inline-percent registry that `unit-scale-class`
+ * pins — a guard that REDs when that set grows, and did.
+ */
+function figureIsDeclared(
+  declared: readonly DeclaredFigure[],
+  factor: ExtractedFactor,
+): boolean {
+  const levels = [factor.value, factor.baseline, factor.rangeMin, factor.rangeMax].filter(
+    (v): v is number => typeof v === "number" && Number.isFinite(v),
+  );
+  if (levels.length === 0) return false;
+  return declared.some((d) => {
+    const frame = unitPinnedScaleFrame(d.unit, d.value);
+    const spellings = frame === undefined ? [d.value] : [d.value, d.value / frame];
+    return spellings.some((s) => levels.some((l) => sameMagnitude(l, s)));
+  });
+}
+
+/**
+ * ⭐⭐⭐ WHICH EXISTING FACTOR THIS FIGURE BELONGS TO — and the answer "none of
+ * them", which `find()` could not express.
+ *
+ * ── THE DEFECT THIS REPLACES (two fresh drafts, 14 Sep 2026)
+ * The selection was `existingFactors.find((n) => labelsMatch(n.label, factor.label))`.
+ * `labelsMatch` is a bidirectional substring test over labels stripped of
+ * non-alphanumerics, plus synonym groups holding BOTH `["price", …]` and
+ * `["churn", …]`. A factor node labelled "Price-Driven Churn Rate" therefore
+ * matches an extracted "Price", and being FIRST in the array it won: the user's
+ * £49 was stamped onto the factor measuring churn — `unit: "£"`, `raw_value:
+ * 49`, `extractionType: "explicit"` — while "Pro Plan Monthly Price", the node
+ * the records actually bind those figures to, was left with no value at all.
+ * The figure was not merely misplaced; it was CONSUMED, so the right subject
+ * could never receive it.
+ *
+ * Two properties of that selection made it wrong, and neither is fixable by a
+ * better string test:
+ *   - it is ORDER-DEPENDENT — swapping two nodes in the array moves the user's
+ *     price onto a different subject, and a correct binding cannot depend on
+ *     array position;
+ *   - it asks a question about LABELS when the records already answered the
+ *     question about SUBJECTS.
+ *
+ * ── WHY `enhanceWriteIsSpanContained` DID NOT CATCH IT
+ * That gate is the designated rejection test, but it opens
+ * `if (quote === undefined) return true` — and a claim-derived node has no
+ * `source_quote` by construction (`projector.ts` mints `ai_inferred` with
+ * `basis`/`unbased` and no quote). It was vacuous for precisely the nodes the
+ * model invents, which is every factor in the measured drafts. It still runs
+ * below, unchanged, for the stated nodes it was written for.
+ *
+ * ── THE THREE ANSWERS, AND WHY "REFUSE" HAD TO BE ONE OF THEM
+ * A node that declares `basis_figures` has already answered which stated
+ * figures it is based on. So:
+ *   - a candidate that NAMES this figure is the target;
+ *   - if every candidate declares a basis and none names it, the records have
+ *     said NO, and the answer is REFUSE — not "fall back to the label overlap",
+ *     which is the mechanism that gave the wrong answer;
+ *   - if no candidate declares a basis, nothing has been established and
+ *     behaviour is UNCHANGED (the span gate still applies).
+ *
+ * ⚠ BOUNDARY, STATED RATHER THAN PAPERED OVER: a node with no declared basis —
+ * an `unbased` claim, or any LLM-authored graph that never went through the
+ * record projector — still selects by `labelsMatch`, and the cross-subject
+ * write remains reachable there. This closes the path the harm was measured on
+ * and does not claim more.
+ */
+/**
+ * ⭐⭐⭐ THE NODE THE RECORDS ALREADY PLACED THIS FIGURE ON, or `undefined` —
+ * the same question `selectEnhanceTarget` asks, put to the CREATE branch.
+ *
+ * ── THE SECOND SITE, MEASURED ON THE SAME DRAFT
+ * The enhance branch is not the only way a figure reaches the wrong subject.
+ * `extractFactors` labels by proximity, and in "…keeping monthly churn under 4%
+ * and reaching £20k MRR within 12 months" it returns the £20k MRR goal figure
+ * under the label **"Churn Rate"**. No existing factor matched, so the create
+ * branch below minted a NEW node — `factor_churn_rate_0`, labelled "Churn
+ * Rate", denominated `unit: "£"`, `raw_value: 20000`, badged
+ * `extractionType: "explicit"`. A churn factor measured in pounds, invented
+ * from the user's revenue target, and certified as their own words.
+ *
+ * ── WHY THE ANSWER IS "DO NOT MINT", NOT "MINT IT SOMEWHERE BETTER"
+ * The records already say where £20k belongs: the outcome "Monthly Recurring
+ * Revenue" declares it (`basis: [0, 5]`), as does the goal it serves. A figure
+ * the model has already attached to a subject does not need a second, rival
+ * node invented for it by a regex — that is how one stated quantity becomes two
+ * disagreeing nodes. Minting nothing is not a loss: `deriveNotModelledManifest`
+ * still names every unmodelled brief magnitude to the user.
+ *
+ * ⚠ SCOPE: this ranges over ALL nodes, not just factors, precisely because the
+ * placing node is usually an outcome or a goal rather than a factor.
+ */
+function figureAlreadyPlacedBy(
+  nodes: readonly NodeT[],
+  factor: ExtractedFactor,
+): NodeT | undefined {
+  return nodes.find((n) => {
+    const declared = declaredBasisFigures(n);
+    return declared !== undefined && figureIsDeclared(declared, factor);
+  });
+}
+
+function selectEnhanceTarget(
+  existingFactors: readonly NodeT[],
+  factor: ExtractedFactor,
+): { readonly node?: NodeT; readonly refusedBy?: NodeT } {
+  const candidates = existingFactors.filter((n) => n.label && labelsMatch(n.label, factor.label));
+  if (candidates.length === 0) return {};
+
+  const bound = candidates.find((n) => {
+    const declared = declaredBasisFigures(n);
+    return declared !== undefined && figureIsDeclared(declared, factor);
+  });
+  if (bound !== undefined) return { node: bound };
+
+  const undeclared = candidates.find((n) => declaredBasisFigures(n) === undefined);
+  if (undeclared !== undefined) return { node: undeclared };
+
+  // Every candidate declared a basis and none of them names this figure.
+  return { refusedBy: candidates[0] };
+}
+
 /**
  * Check if units are compatible for duplicate detection.
  * Units match if: both undefined, both equal, or one undefined and semantic label matches.
@@ -793,10 +976,29 @@ export function enrichGraphWithFactors(
   for (const factor of qualified) {
     if (factorsAdded >= maxFactors) break;
 
-    // Check if a similar factor already exists
-    const existingNode = existingFactors.find(
-      (n) => n.label && labelsMatch(n.label, factor.label)
-    );
+    // Same selection as the async twin, so the two cannot drift apart on the
+    // one question they both answer (see `selectEnhanceTarget`). This path
+    // keeps no warnings array, so the refusal is logged and counted only.
+    const selection = selectEnhanceTarget(existingFactors, factor);
+
+    if (selection.refusedBy !== undefined) {
+      factorsSkipped++;
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_off_basis",
+          nodeId: selection.refusedBy.id,
+          nodeLabel: selection.refusedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+        },
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not base that node on it`,
+      );
+      continue;
+    }
+
+    const existingNode = selection.node;
 
     if (existingNode) {
       if (hasUnboundQuantityLabel(existingNode, factor)) {
@@ -849,6 +1051,28 @@ export function enrichGraphWithFactors(
     }
 
     // Create new factor node
+    // ⭐⭐⭐ THE RECORDS MAY HAVE ALREADY PLACED THIS FIGURE ON A SUBJECT.
+    // Minting a rival factor for it is how one stated quantity becomes two
+    // disagreeing nodes — and how the £20k MRR goal figure became a factor
+    // called "Churn Rate" denominated in pounds. See `figureAlreadyPlacedBy`.
+    const placedBy = figureAlreadyPlacedBy(graph.nodes, factor);
+    if (placedBy !== undefined) {
+      factorsSkipped++;
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_already_placed",
+          nodeId: placedBy.id,
+          nodeLabel: placedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+        },
+        `Refusing to mint "${factor.label}" for "${factor.matchedText}": the records already place that figure on "${placedBy.id}"`,
+      );
+      continue;
+    }
+
     const nodeId = generateFactorId(factor.label, factorsAdded);
     const factorData: FactorDataT = {
       // ⭐ Where the factor IS — see `statedCurrentRaw`.
@@ -1105,7 +1329,24 @@ function qualifyExtractedFactors(
  * factor-skip path can reach it. Every line of arithmetic and every stamped
  * field below is unchanged from the in-loop version; only its address moved.
  */
-function applyGoalTargetRedirect(
+/**
+ * ⭐ EXPORTED FOR ITS GUARD, and the reason is that the harm it now refuses is
+ * NOT REACHABLE THROUGH `enrichGraphWithFactorsAsync(graph, brief)`.
+ *
+ * Measured: `extractFactors("Our target is 12 months.")` returns
+ * `{label:"Target", value:12}` with **NO unit** — the regex path never emits a
+ * temporal unit at all, so no brief string can drive a duration-united factor
+ * into this function. The unit that produced the live defect
+ * (`goal_threshold_unit: "months"`, 2/5 draws on staging `50cb5d5f`) comes from
+ * the LLM-assisted factor path, which a unit test cannot call.
+ *
+ * So the screen is exercised against the shape the WIRE demonstrated, injected
+ * directly, with its contrast twin (`unit: "£"` must still mint) proving the
+ * route was narrowed and not broken. Testing the predicate alone would be
+ * "presence of a guard is not coverage of its input" (trap 22b); this tests the
+ * function that writes.
+ */
+export function applyGoalTargetRedirect(
   enrichedGraph: GraphT,
   goalNodeIndex: number,
   factor: ExtractedFactor,
@@ -1149,6 +1390,57 @@ function applyGoalTargetRedirect(
     typeof currentGoalNode.goal_threshold_raw === "number" &&
     Number.isFinite(currentGoalNode.goal_threshold_raw)
   ) {
+    return false;
+  }
+
+  // ── ⛔⛔ A DEADLINE IS NOT A SUCCESS TARGET, AND THIS FUNCTION SHIPPED ONE ──
+  //
+  // MEASURED, 5 identical draws on staging `50cb5d5f` (2026-09-14), brief
+  // "Given our goal of reaching £20k MRR within 12 months while keeping monthly
+  // churn under 4%, …". In 2 of the 5 the goal node "Reach £20k MRR Within 12
+  // Months" shipped:
+  //
+  //     goal_threshold_raw: 12   goal_threshold_unit: "months"
+  //     goal_threshold_cap: 15   goal_threshold: 0.8
+  //
+  // — arithmetic confirmed against `resolveGoalThresholdCap` (12 × 1.25 = 15,
+  // 12 / 15 = 0.8), so the route is this function and not an inference. The
+  // product then reported `goal_target_stated: true` and ISL scored every
+  // option's `probability_of_goal` against **twelve months** on a node measured
+  // in £. The other 3 of 5 carried no threshold at all.
+  //
+  // ⚠ NOTE WHICH WAY THAT CUTS. "Target not captured" is a visible gap; a
+  // registered deadline is a CONFIDENT LIE wearing the same field, and the user
+  // has no way to tell them apart. A lie outranks a gap — this module's sibling
+  // `goal-label-target.ts` excluded temporal quantities for exactly this reason
+  // ("Admitting it here would mint `goal_threshold_raw: 18, unit: 'months'`
+  // onto a node measured in £") while the factor route beside it, which is the
+  // one that actually fires, never had the screen. Trap 22b: one harm closed on
+  // one route and left open on its neighbour, and neither route's tests can see
+  // the other.
+  //
+  // ⚠ THE QUESTION IS ASKED OF THE QUANTITY'S OWN UNIT, NOT OF A NEARBY WORD.
+  // "4% year on year" and "£200k year on year" are a percentage and a sum of
+  // money measured annually, not durations; classifying by an adjacent time
+  // word deleted attested targets when the sibling module tried it. `unitIsTemporal`
+  // composes the shared `TIME_UNIT_ALT` vocabulary and is anchor-asserted at
+  // load, so it cannot decay into a silent always-false (trap 15).
+  //
+  // ⭐ AND THE REFUSAL CASCADES USEFULLY. Both callers reach this function from
+  // inside a scan over extracted factors, so declining a duration lets a later
+  // non-temporal target quantity have its turn instead of the deadline
+  // consuming the single mint. The refusal removes a lie without closing a door.
+  if (unitIsTemporal(factor.unit)) {
+    log.info(
+      {
+        goalNodeId: currentGoalNode.id,
+        factor_label: factor.label,
+        factor_unit: factor.unit,
+        factor_value: factor.value,
+        event: "cee.factor_enrichment.goal_threshold_refused_temporal",
+      },
+      `Refused a temporal quantity as the goal threshold on "${currentGoalNode.id}" — a deadline is not a success target`,
+    );
     return false;
   }
 
@@ -1584,10 +1876,37 @@ export async function enrichGraphWithFactorsAsync(
     }
 
 
-    // Check if a similar factor already exists
-    const existingNode = existingFactors.find(
-      (n) => n.label && labelsMatch(n.label, factor.label)
-    );
+    // ⭐⭐⭐ WHICH SUBJECT THIS FIGURE BELONGS TO — answered from the records'
+    // own declared basis, not from label overlap. See `selectEnhanceTarget`.
+    const selection = selectEnhanceTarget(existingFactors, factor);
+
+    if (selection.refusedBy !== undefined) {
+      // The records name the figures this node is based on, and this is not one
+      // of them. Writing it anyway is how the user's £49 reached their churn
+      // factor. Write NOTHING, and do NOT fall through to node creation — the
+      // figure is still surfaced by `deriveNotModelledManifest`, which is where
+      // an unbindable magnitude belongs.
+      factorsSkipped++;
+      warnings.push(
+        `"${factor.matchedText}" was not written to "${selection.refusedBy.label}": that factor is not based on it.`,
+      );
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_off_basis",
+          nodeId: selection.refusedBy.id,
+          nodeLabel: selection.refusedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+          declaredBasis: declaredBasisFigures(selection.refusedBy),
+        },
+        `Refusing to write "${factor.matchedText}" onto "${selection.refusedBy.id}": the records do not base that node on it`,
+      );
+      continue;
+    }
+
+    const existingNode = selection.node;
 
     if (existingNode) {
       if (hasUnboundQuantityLabel(existingNode, factor)) {
@@ -1754,6 +2073,28 @@ export async function enrichGraphWithFactorsAsync(
     }
 
     // Create new factor node with V3 fields
+    // ⭐⭐⭐ THE RECORDS MAY HAVE ALREADY PLACED THIS FIGURE ON A SUBJECT.
+    // Minting a rival factor for it is how one stated quantity becomes two
+    // disagreeing nodes — and how the £20k MRR goal figure became a factor
+    // called "Churn Rate" denominated in pounds. See `figureAlreadyPlacedBy`.
+    const placedBy = figureAlreadyPlacedBy(graph.nodes, factor);
+    if (placedBy !== undefined) {
+      factorsSkipped++;
+      log.info(
+        {
+          event: "cee.factor_enrichment.refused_already_placed",
+          nodeId: placedBy.id,
+          nodeLabel: placedBy.label,
+          refusedLabel: factor.label,
+          refusedValue: factor.value,
+          refusedUnit: factor.unit,
+          refusedMatchedText: factor.matchedText,
+        },
+        `Refusing to mint "${factor.label}" for "${factor.matchedText}": the records already place that figure on "${placedBy.id}"`,
+      );
+      continue;
+    }
+
     const nodeId = generateFactorId(factor.label, factorsAdded);
     const newFactorType = inferFactorType(factor.unit, factor.label);
     const factorData: FactorDataT = {

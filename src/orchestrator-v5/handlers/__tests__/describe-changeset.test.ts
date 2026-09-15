@@ -78,12 +78,12 @@ describe('describeChangeset — every operation is named, never a count', () => 
     expect(described!.items[0]).toBe(
       "add factor 'Wasted time searching for a co-founder'",
     );
-    expect(described!.items[1]).toBe("change 'Marketing' to 0.8");
+    expect(described!.items[1]).toBe("make 'Marketing' 0.8");
     expect(described!.items[2]).toBe("link 'Revenue' to 'Goal'");
     // The joined subject enumerates all three.
     expect(described!.subject).toBe(
       "add factor 'Wasted time searching for a co-founder', " +
-        "change 'Marketing' to 0.8 and link 'Revenue' to 'Goal'",
+        "make 'Marketing' 0.8 and link 'Revenue' to 'Goal'",
     );
     // The opaque-count vocabulary is dead.
     expect(described!.subject).not.toMatch(/\d+\s+more\s+change/i);
@@ -162,7 +162,7 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
     expect(d!.subject).toBe('remove a part of the model');
   });
 
-  it("update_node with observed_state.value names the value → change 'X' to 0.8", () => {
+  it("update_node with observed_state.value names the value → make 'X' 0.8", () => {
     const d = describeChangeset(
       [
         {
@@ -173,7 +173,7 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
       ],
       GRAPH,
     );
-    expect(d!.subject).toBe("change 'Marketing' to 0.8");
+    expect(d!.subject).toBe("make 'Marketing' 0.8");
   });
 
   it('update_node with observed_state value+unit renders the unit', () => {
@@ -187,10 +187,10 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
       ],
       GRAPH,
     );
-    expect(d!.subject).toBe("change 'Revenue' to £50,000");
+    expect(d!.subject).toBe("make 'Revenue' £50,000");
   });
 
-  it("update_node with goal_threshold names the target → change the target for 'Goal' to 15%", () => {
+  it("update_node with goal_threshold names the target → make the target for 'Goal' 15%", () => {
     const d = describeChangeset(
       [
         {
@@ -201,7 +201,7 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
       ],
       GRAPH,
     );
-    expect(d!.subject).toBe("change the target for 'Goal' to 15%");
+    expect(d!.subject).toBe("make the target for 'Goal' 15%");
   });
 
   it("update_node with a new label is a rename → rename 'Old' to 'New'", () => {
@@ -240,7 +240,7 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
       ],
       GRAPH,
     );
-    expect(d!.items[1]).toBe("change 'Churn' to 0.3");
+    expect(d!.items[1]).toBe("make 'Churn' 0.3");
   });
 
   it("add_edge resolves both endpoint labels → link 'A' to 'B'", () => {
@@ -291,7 +291,7 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
       GRAPH,
     );
     expect(d!.subject).toBe(
-      "change the strength of the link from 'Marketing' to 'Goal' to 0.4",
+      "make the strength of the link from 'Marketing' to 'Goal' 0.4",
     );
   });
 
@@ -357,7 +357,7 @@ describe('describeChangeset — per-operation vocabulary coverage', () => {
       GRAPH,
     );
     expect(d!.subject).toBe(
-      "change the strength of the link from 'Marketing' to 'Goal' to 0.4",
+      "make the strength of the link from 'Marketing' to 'Goal' 0.4",
     );
   });
 
@@ -399,7 +399,7 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
   it('hold ask carries every named operation', () => {
     const text = buildGmHeldAssistantText(subject(), F7_BATCH.length);
     expect(text).toContain("add factor 'Wasted time searching for a co-founder'");
-    expect(text).toContain("change 'Marketing' to 0.8");
+    expect(text).toContain("make 'Marketing' 0.8");
     expect(text).toContain("link 'Revenue' to 'Goal'");
     expect(text).toContain('Nothing in the model moves until you confirm');
     expect(text).not.toMatch(/\d+\s+more\s+change/i);
@@ -428,7 +428,7 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
     const copy = buildGmHeldPublicCopy(subject());
     expect(copy.message).toBe(
       "Yes, add factor 'Wasted time searching for a co-founder', " +
-        "change 'Marketing' to 0.8 and link 'Revenue' to 'Goal'.",
+        "make 'Marketing' 0.8 and link 'Revenue' to 'Goal'.",
     );
     expect(copy.label.length).toBeLessThanOrEqual(60);
     // The label is a PREFIX of the capitalised subject (+ ellipsis) — same
@@ -442,7 +442,7 @@ describe('all three surfaces render the SAME specific copy (the never-diverge pi
     const text = buildGmHeldAppliedReceipt([subject()]);
     expect(text).toContain(
       "Confirmed: add factor 'Wasted time searching for a co-founder', " +
-        "change 'Marketing' to 0.8 and link 'Revenue' to 'Goal'.",
+        "make 'Marketing' 0.8 and link 'Revenue' to 'Goal'.",
     );
     expect(text).toContain('Run the analysis again');
     expect(text).not.toMatch(/\d+\s+more\s+change/i);
@@ -510,7 +510,7 @@ describe('routing safety — the new copy must not trip the value-update gate', 
       GRAPH,
     );
     const copy = buildGmHeldPublicCopy(subject);
-    expect(copy.message).toBe("Yes, change 'Marketing' to 0.8.");
+    expect(copy.message).toBe("Yes, make 'Marketing' 0.8.");
     expect(isValueUpdatePhrasing(copy.message)).toBe(false);
     expect(isValueUpdatePhrasing(copy.label)).toBe(false);
   });
@@ -518,6 +518,48 @@ describe('routing safety — the new copy must not trip the value-update gate', 
   it('the multi-op F7 chip message also stays outside the gate', () => {
     const copy = buildGmHeldPublicCopy(describeHeldOperationsSubject(F7_BATCH, GRAPH));
     expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+  });
+
+  // ⚠ CONTRAST CONTROL (added 2026-09-14 with the `change` admission).
+  // Without it, every assertion above passes if the gate simply goes dead —
+  // an absence probe that cannot see a presence proves nothing. These are
+  // genuine USER value-instructions and MUST stay claimed, in the same run.
+  it('CONTRAST: a genuine user value-instruction IS still claimed by the gate', () => {
+    for (const message of [
+      "change Marketing to 0.8",
+      "set Marketing to 0.8",
+      "update Marketing to 0.8",
+      "Change Annual CRM Spend to £63,000.",
+    ]) {
+      expect(isValueUpdatePhrasing(message)).toBe(true);
+    }
+  });
+
+  // EVERY value-bearing clause shape, not just the tunable one. The copy
+  // constraint applies to all of them, and only the tunable shape was
+  // covered before — so the goal-target and edge-strength clauses were
+  // relying on the same exclusion with nothing pinning them.
+  it('every value-bearing clause shape stays outside the gate', () => {
+    const shapes = [
+      "make 'Marketing' 0.8",
+      'make a part of the model 0.8',
+      "make the target for 'Revenue' 0.8",
+      'make a target 0.8',
+      "make the strength of the link from 'Sales' to 'Revenue' 0.3",
+    ];
+    for (const subject of shapes) {
+      const copy = buildGmHeldPublicCopy(subject);
+      expect(isValueUpdatePhrasing(copy.message)).toBe(false);
+      expect(isValueUpdatePhrasing(copy.label)).toBe(false);
+      // DISCRIMINATION PIN — the PRE-fix wording of this same clause (the
+      // only difference being `make <subject> <v>` vs `change <subject> to
+      // <v>`) IS claimed. So the `false` above is the reword doing work, not
+      // a dead gate. ⚠ Written backwards first (`toBe(false)`) and caught by
+      // the test failing; the reword is load-bearing precisely because this
+      // is true.
+      const preFix = subject.replace(/^make /, 'change ').replace(/ ([^ ]+)$/, ' to $1');
+      expect(isValueUpdatePhrasing(`Yes, ${preFix}.`)).toBe(true);
+    }
   });
 });
 

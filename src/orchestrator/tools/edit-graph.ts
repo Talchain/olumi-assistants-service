@@ -84,7 +84,7 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
-import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -3948,13 +3948,40 @@ export async function handleEditGraph(
       // intervention-subtree spelling that `encodeOptionInterventionsForEdit`
       // translated into canonical `interventions`. Everything else that was
       // stripped is refused.
-      if (!batchFullyLanded(opsToApply, rawApplied, canonicalApplied, context.graph as GraphV3T)) {
+      const nonLanding = firstOperationThatDidNotLand(
+        opsToApply,
+        rawApplied,
+        canonicalApplied,
+        context.graph as GraphV3T,
+      );
+      if (nonLanding !== null) {
         log.warn(
           {
             request_id: requestId,
             scenario_id: context.scenario_id ?? null,
             attempt,
             operations_count: operations.length,
+            // ⭐ WHICH operation, not merely THAT one failed. Without this the
+            // line cannot distinguish "the op spelling is outside the
+            // intervention recogniser" from "the encoder is not on this path" —
+            // two causes with OPPOSITE remedies — and answering it cost an hour
+            // of log archaeology plus a source dive on 2026-09-14.
+            //
+            // Content-free by construction: `op` and `reason` are closed enums,
+            // and `key_shape` masks every non-structural segment to `*` because
+            // op keys are model-controlled AND embed entity ids, which in this
+            // codebase are slug-shaped renderings of the user's own labels. See
+            // the redaction note on `firstOperationThatDidNotLand`. The op's
+            // `value` and `path` are never read here.
+            //
+            // ⚠ QUERY NOTE FOR OPERATORS. Render's log `text=` filter is
+            // CASE-INSENSITIVE, so searching `did_not_land` also matches the
+            // long-standing rejection code `OPERATION_DID_NOT_LAND` — measured
+            // 2026-09-14: 33 hits over 24h, every one of them the old code and
+            // none of them this field. Grep `key_is_intervention_subtree`
+            // instead: it is unique to this descriptor and is always present
+            // (null when the reason is not key-specific).
+            did_not_land: nonLanding,
           },
           'edit_graph B5 — an operation did not survive canonicalisation onto the persisted graph; refusing the WHOLE edit (no silent partial, no false success)',
         );
@@ -4644,6 +4671,33 @@ export function mapCodeToRejectionReason(code?: EditRejectionCode): EditRejectio
  * true split/continuation. The user-facing prose stays banned-token clean
  * (no operation counts / schema language — see edit-rejection-text.test.ts).
  */
+/**
+ * Recovery chips for the over-cap split refusal, exported so the no-dead-end
+ * rule can be pinned as an EXACT SET (see
+ * `tests/unit/orchestrator-v5/compose/recovery-chip-actionability.test.ts`).
+ *
+ * ⭐ NAMES A MOVE, NOT A MANNER OF SPEAKING. The first prompt used to read
+ * "Let's start with the single most important change." — which tells the
+ * product nothing it can act on, because only the user knows which change that
+ * is. Clicking it re-submits that sentence as a fresh user turn and the router
+ * has no referent, so the product refuses the move it just offered. Measured on
+ * the sibling edit-rejection path (staging 2026-09-14, scenario 9677de7d,
+ * request 809d0ee2). The replacement is an INSTRUCTION over the batch the
+ * product is already holding.
+ */
+export const OVER_CAP_SPLIT_CHIPS: readonly SuggestedAction[] = [
+  {
+    label: 'Start with the key change',
+    prompt: 'Make just the most important part of that change and leave the rest for now.',
+    role: 'facilitator',
+  },
+  {
+    label: 'Split into smaller edits',
+    prompt: 'Help me break this into a few smaller edits.',
+    role: 'challenger',
+  },
+];
+
 function buildOverCapSplitResult(
   reason: string,
   operations: PatchOperation[],
@@ -4680,18 +4734,7 @@ function buildOverCapSplitResult(
   const assistantText =
     "That's more than I can change in a single step. Let's do it in a couple of " +
     'smaller passes — tell me the change that matters most and we can take it from there.';
-  const suggestedActions: SuggestedAction[] = [
-    {
-      label: 'Start with the key change',
-      prompt: "Let's start with the single most important change.",
-      role: 'facilitator',
-    },
-    {
-      label: 'Split into smaller edits',
-      prompt: 'Help me break this into a few smaller edits.',
-      role: 'challenger',
-    },
-  ];
+  const suggestedActions: SuggestedAction[] = [...OVER_CAP_SPLIT_CHIPS];
 
   return {
     blocks: [block],

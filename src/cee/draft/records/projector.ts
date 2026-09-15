@@ -102,6 +102,7 @@ import { isNameShapedLabel } from "./claim-label-shape.js";
 import { MINTABLE_TARGET_KINDS } from "../../compound-goal/mintable-target-kinds.js";
 import { generateConstraintId } from "../../compound-goal/extractor.js";
 import { classifyUnitScaleClass } from "./unit-scale-class.js";
+import { soleStatedQuantityInSpan } from "../../factor-extraction/goal-label-target.js";
 import { CURRENCY_SYMBOL_TO_CODE } from "../../../utils/currency-alphabet.js";
 import type { GoalConstraintT } from "../../../schemas/assist.js";
 import {
@@ -262,6 +263,36 @@ export interface RecordProvenance {
   readonly source_quote?: string;
   /** Present iff `ai_inferred`. Minted ids of the stated items it builds on. */
   readonly basis?: readonly string[];
+  /**
+   * ⭐⭐ THE STATED FIGURES THIS CLAIM IS BASED ON — the SUBJECT IDENTITY that
+   * survives the conversion, present iff `ai_inferred` and iff the basis names
+   * at least one `figure`.
+   *
+   * `basis` above names the stated items by their MINTED IDS, and a stated
+   * `figure` is minted and then pruned (`unconnected_to_goal`), so those ids
+   * resolve to nothing in the saved graph. A downstream reader holding a node
+   * and a number therefore had no way to ask the only question that matters —
+   * *is this one of the figures this node is based on?* — and the factor
+   * enricher answered it with `labelsMatch`, a substring-and-synonym test over
+   * labels, instead. That is how the user's £49 was written onto a factor
+   * measuring churn (`enricher.ts`, and the test named below).
+   *
+   * So the figures themselves ride alongside the ids. This is the same fact the
+   * projector already computed, conserved rather than re-derived: no consumer
+   * has to re-open the record set, and no consumer has to guess from a label.
+   *
+   * ⚠ ABSENCE MEANS "THIS CLAIM NAMES NO STATED FIGURE", never "no figure
+   * matched". A claim with an empty or figure-less basis carries the key not at
+   * all, and a reader must treat that as *unknown*, never as *excluded* — the
+   * same rule `unbased` states one field up.
+   *
+   * Pinned by `factor-extraction/__tests__/enhance-binds-to-declared-basis.test.ts`.
+   */
+  readonly basis_figures?: readonly {
+    readonly value: number;
+    readonly unit?: string;
+    readonly source_quote?: string;
+  }[];
   /**
    * Present iff `ai_inferred`. TRUE when `basis` is empty — pure invention,
    * and marked so. Explicit rather than inferable from an empty array,
@@ -2759,6 +2790,87 @@ function projectOnce(
       // no probability, which the contract itself calls honest; a guessed one
       // yields a confident wrong probability. Not symmetric harms, so not a
       // symmetric default (trap 22b).
+    } else if (kind === "goal" && item.value === undefined && item.role === "target") {
+      // ── ⭐⭐ THE TARGET THE MODEL PUT IN ITS QUOTE INSTEAD OF ITS FIELD ──
+      //
+      // MEASURED, 5 identical draws on the live staging build `50cb5d5f`
+      // (2026-09-14), brief "Given our goal of reaching £20k MRR within 12
+      // months while keeping monthly churn under 4%, should we increase the Pro
+      // plan price from £49 to £59…":
+      //
+      //   £20,000 registered as the goal's target ............ 0 / 5
+      //   goal carried NO threshold at all .................. 3 / 5
+      //   goal carried `raw: 12, unit: "months"` ............ 2 / 5   ⛔ the DEADLINE
+      //
+      // and in all 5 the goal node carried `source_quote: "reaching £20k MRR
+      // within 12 months"` — the user's own words, verbatim. The number was
+      // never lost; it never had a field to land in, because the model wrote
+      // the span and omitted the `value` it could have copied out of it. Two
+      // banked REAL emissions show the same shape and are the reason this is
+      // treated as the model's habit rather than one draw's accident:
+      // `fixtures/live-emission-round11-set12.json` item 0 is
+      // `{kind:"goal", source_quote:"15% ARR growth next year…", role:"target"}`
+      // — `role: "target"` asserted, `value` absent — while every `figure`
+      // beside it carries one.
+      //
+      // ── ⛔ WHY THIS IS NOT #1328's LABEL ROUTE, WHICH IS FORBIDDEN ──
+      // That route read the model-COMPOSED LABEL ("Reach £20k MRR Within 12
+      // Months") and attested its figure against ANY occurrence in the brief.
+      // The attestation scope was the whole brief, which is precisely why "We
+      // rejected the proposal to reach £64k MRR." still minted 64000 after four
+      // oscillating rounds and sixteen defects. Round 6 removed the write.
+      //
+      // This reads `source_quote` on a `stated_items[]` entry the model marked
+      // `kind: "goal"` — the grammar's own resolution of which words are the
+      // objective — and requires `role: "target"` EXPLICITLY. The model has
+      // therefore made both assertions itself: *these user words are the goal*,
+      // and *the role of this goal's number is target*. Nothing here decides
+      // which sentence is the target; it does arithmetic on the span the model
+      // designated. That is the remedy `goal-label-target.ts`'s own header names
+      // as KNOWN AND DUE — bind the attestation to a span the grammar resolved
+      // as a target, not to an occurrence of the figure.
+      //
+      // ── ⚠ STRICTER THAN THE BRANCH ABOVE, DELIBERATELY ──
+      // The valued branch accepts `goalValueIsATarget(item.role)`, which admits
+      // an UNSTATED role, because the model's own `value` corroborates it there.
+      // Here there is no corroboration, so an unstated role is refused. That
+      // keeps #1411's `DISCUSSION ONLY` and `WRONG TARGET` contrasts — both
+      // `{kind:"goal", source_quote}` with NO role — meaning exactly what they
+      // say, and it is pinned in both directions by the discriminating pair in
+      // `goal-target-from-stated-span.test.ts`.
+      const spanTarget = soleStatedQuantityInSpan(item.source_quote);
+      // ⚠ TWO QUANTITIES REFUSE, and that is not a corner: this very brief's
+      // goal span carries "£20k" and "12 months". The deadline is excluded by
+      // the scanner's own unit test, so ONE survives and the mint proceeds. A
+      // span stating two genuine targets ("£30k MRR and 4% churn") yields two,
+      // and the ask-don't-guess exit applies (ROADMAP 2.1051, trap 22f).
+      if (spanTarget !== undefined) {
+        // ⭐ THE QUOTE MUST BE THE USER'S. `bindStatedItemToBrief` is the
+        // estate's existing attestation primitive and is used here rather than
+        // a second containment rule (trap 12). The LOAD-BEARING limb is
+        // `isQuoteStatedInBrief`: a model that invents a span mints nothing.
+        // ⚠ Stated honestly — the magnitude limb is CORROBORATIVE ONLY here,
+        // because the value was read out of the same quote it is checked
+        // against, so it cannot discriminate. It is kept because the two
+        // scanners are independent and a disagreement should refuse, which is
+        // the safe direction; it is NOT evidence, and a reviewer should not read
+        // it as one (trap 13b — a guard agreeing with itself).
+        const spanBinding = bindStatedItemToBrief({
+          quote: item.source_quote,
+          value: spanTarget.value,
+          unit: spanTarget.unit,
+          brief,
+        });
+        if (bindingEarnsBriefClaim(spanBinding)) {
+          // The SAME writer as the valued branch. raw · cap · normalised ·
+          // frame · unit travel together from one derivation, or not at all —
+          // a second mint site would be a second authority on the denominator
+          // ISL divides by (trap 12), and `applyStatedGoalTarget` is bound to
+          // `node`, i.e. to the goal BY IDENTITY, never by a predicate another
+          // node could satisfy (trap 19).
+          applyStatedGoalTarget(node, spanTarget.value, spanTarget.unit);
+        }
+      }
     }
 
     // ⭐⭐ THE USER'S OWN STATUS QUO, CARRIED. `is_baseline` was structurally
@@ -3048,14 +3160,33 @@ function projectOnce(
     // has to infer provenance from a label or a value (trap 19).
     if (nodeKind === "option") optionClaimIndexById.set(id, index);
 
-    const basisIds = (claim.basis ?? [])
-      .filter((i) => Number.isInteger(i) && statedIdByIndex.has(i))
-      .map((i) => statedIdByIndex.get(i)!);
+    const basisIndices = (claim.basis ?? []).filter(
+      (i) => Number.isInteger(i) && statedIdByIndex.has(i),
+    );
+    const basisIds = basisIndices.map((i) => statedIdByIndex.get(i)!);
+    // The stated FIGURES behind those ids, conserved beside them. See
+    // `RecordProvenance.basis_figures` for why the ids alone are not enough.
+    const basisFigures = basisIndices
+      .map((i) => statedItems[i])
+      .filter(
+        (item): item is DraftStatedItem =>
+          item?.kind === "figure" && typeof item.value === "number",
+      )
+      .map((item) => ({
+        value: item.value as number,
+        ...(typeof item.unit === "string" && item.unit.length > 0 ? { unit: item.unit } : {}),
+        ...(typeof item.source_quote === "string" && item.source_quote.length > 0
+          ? { source_quote: item.source_quote }
+          : {}),
+      }));
 
     const prov: RecordProvenance = {
       provenance_class: "ai_inferred",
       basis: basisIds,
       unbased: basisIds.length === 0,
+      // Omitted entirely when the claim names no stated figure — absent means
+      // "unknown", never "excluded".
+      ...(basisFigures.length > 0 ? { basis_figures: basisFigures } : {}),
     };
     provenance[id] = prov;
 
