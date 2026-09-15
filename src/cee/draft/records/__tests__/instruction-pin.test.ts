@@ -508,9 +508,24 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * records connect, so the connect half is byte-identical to v14 (asserted
  * below).
  */
-const PREREGISTERED_V15_INSTRUCTION_SHA256 =
+const PREREGISTERED_V16_INSTRUCTION_SHA256 =
+  "76d71513e0f1b2a65369559a58fa3eef51df8880806719c89cfc2459f6d4b55b";
+const PREREGISTERED_V16_INSTRUCTION_BYTES = 14848;
+/**
+ * SUPERSEDED — v15's bytes, AND THE ARTEFACT THE QUALITATIVE-CONJUNCT LOSS WAS
+ * WITNESSED UNDER. Five fresh draws on 15 Sep 2026 at served prompt v201 /
+ * `claude-sonnet-4-6` showed the non-numeric half of a compound proposal —
+ * "…with the next Pro feature release" — reaching an option's interventions in
+ * ONE draw and reaching the PERSON'S OWN option in NONE. In the shared-release
+ * brief the model emitted no release node at all.
+ *
+ * Re-pointing this literal would let that finding read as a finding about v16,
+ * which is the version written to remove its cause. The raw record sets are
+ * banked at `__tests__/fixtures/2026-09-15-option-effect-references/`.
+ */
+const SUPERSEDED_V15_INSTRUCTION_SHA256 =
   "b0701296dbb67606a174b40d7886467aff3ca768e138170e41da34defa425532";
-const PREREGISTERED_V15_INSTRUCTION_BYTES = 13966;
+const SUPERSEDED_V15_INSTRUCTION_BYTES = 13966;
 /**
  * SUPERSEDED — v14's bytes. Retained and asserted DISTINCT for the same reason
  * every superseded literal below is: v14 is the artefact the DROPPED-LIMIT
@@ -544,10 +559,17 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v15 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V15_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v16 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V16_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V15_INSTRUCTION_BYTES,
+      PREREGISTERED_V16_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v15 bytes, so the conjunct-loss witness stays its own", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V15_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V15_INSTRUCTION_BYTES,
     );
   });
 
@@ -736,10 +758,22 @@ describe("the draft records instruction is the measured artefact", () => {
     // is byte-identical to v14 (asserted in the next test). The asymmetry is
     // again the point: this edit is legible as "the constraint bullet learned to
     // name its target" without reading a diff.
+    // ⚠⚠ AND AGAIN IN v16 — the NINTH version to touch it, and the THIRD
+    // consecutive one. What a compound option's OTHER clause becomes is a
+    // statement about what goes in a record, not about how two records connect,
+    // so v16 is shape-half in its entirety and the connect half is byte-identical
+    // to v15 (asserted in the next test). The edit is legible as "an option's
+    // non-numeric clause must reach the model too" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
+      "90a29f43ad7f6bf6efecf6872022b900a511833c5f6f03641ce2be3468d1a099",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(10304);
+    // SUPERSEDED — v15's shape half, the bytes the qualitative-conjunct loss was
+    // witnessed under (release reached the person's own option in 0 of 5 draws).
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "8a25b547b6cf8d936da09e561e2096868cb6cff9c879e8c7bb0f7be2af9fad84",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(9422);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(9422);
     // SUPERSEDED — v14's shape half, the bytes the dropped-limit defect was
     // witnessed under.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
