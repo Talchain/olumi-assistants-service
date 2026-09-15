@@ -383,9 +383,12 @@ const BRIEF_ADVICE_REQUEST_PATTERNS: readonly RegExp[] = [
   /\b(?:do|would|could|can)\s+you\s+(?:\w+\s+){0,2}(?:recommend|suggest|advise|propose)\b/i,
   /(?:^|[.!?;:]|\band\b|\balso\b)\s*(?:please\s+)?(?:recommend|suggest|advise|propose)\b/i,
   /\b(?:what|which|how)\b[^.!?;\n]*\b(?:should|would|could)\s+(?:i|we|you)\b/i,
-  // The user's prospective action is not a past action by the system:
-  // "do you think I should use ..." contains `use`, but is still advice.
-  /\b(?:i|we)\s+(?:should|could)\b|\b(?:should|would|could)\s+(?:i|we)\b/i,
+  // Require an actual question about a prospective action. A bare "we should"
+  // also occurs inside the ITEM being audited ("the margin we should protect")
+  // and is not evidence that the user requested advice. The explicit second-
+  // person question keeps "do you think I should use ..." out of the audit;
+  // the inverted modal keeps "should I use ..." on the same reasoning path.
+  /\b(?:do|would|could|can)\s+you\s+think\s+(?:that\s+)?(?:i|we)\s+(?:should|could)\b|\b(?:should|would|could)\s+(?:i|we)\b/i,
 ];
 
 export function tryStateQueryGuard(

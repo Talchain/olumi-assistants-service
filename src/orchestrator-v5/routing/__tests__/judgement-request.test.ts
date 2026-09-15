@@ -102,6 +102,38 @@ function ctx(
 
 const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
 
+describe('independent review — a modal naming the audited item is not advice', () => {
+  const auditQuestions = [
+    // CCT's independent contrast corpus, review of 32cbaf45.
+    'Which of my figures did you use for the margin we should protect?',
+    'What did you leave out that I should know about?',
+    'Which of my figures do you use?',
+    'What did you leave out of my brief?',
+    // Same distinction with the other modal admitted by the former rule.
+    'Which of my figures did you use for the margin we could protect?',
+    'What did you leave out that I could know about?',
+  ];
+
+  it.each(auditQuestions)('keeps the grounded audit and mutation protection for %j', (message) => {
+    const outcome = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
+    expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    expect(isStateQueryQuestionShape(message)).toBe(true);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+
+  it.each([
+    'Which of my figures did you use for the margin we should protect? What should we use instead?',
+    'What did you leave out that I should know about? Recommend what I should add.',
+    'Given my brief, do you think that we could use £59?',
+    'Given my brief, should I use £59?',
+  ])('still sends an actual advice request to reasoning: %j', (message) => {
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+});
+
 describe('a brief reference is not permission to replace a conversation with an audit', () => {
   const reasoningRequests = [
     // Paul, served CEE 78515b95, request ef2da921-cc66-4a53-9506-e23d79554489.
