@@ -647,7 +647,7 @@ describe("the consumer honours it — the model's own view of the graph", () => 
     // entirely. Asserting a value is not the same as asserting the field is
     // present, so both are asserted here.
     const compact = compactGraph(nodeWith({ ...OBSERVED_AS_SERVED, stated_role: "constraint" }));
-    const node = compact.nodes.find((n) => n.id === "n_churn")! as Record<string, unknown>;
+    const node = compact.nodes.find((n) => n.id === "n_churn")! as unknown as Record<string, unknown>;
     expect(Object.prototype.hasOwnProperty.call(node, "source")).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(node, "provenance")).toBe(true);
     expect(node.source).not.toBeUndefined();
@@ -660,9 +660,9 @@ describe("the consumer honours it — the model's own view of the graph", () => 
     // that authorship does NOT move, so the twin must show the two projections
     // differing in exactly one key.
     const stamped = compactGraph(nodeWith({ ...OBSERVED_AS_SERVED, stated_role: "constraint" }))
-      .nodes.find((n) => n.id === "n_churn")! as Record<string, unknown>;
+      .nodes.find((n) => n.id === "n_churn")! as unknown as Record<string, unknown>;
     const plain = compactGraph(nodeWith(OBSERVED_AS_SERVED))
-      .nodes.find((n) => n.id === "n_churn")! as Record<string, unknown>;
+      .nodes.find((n) => n.id === "n_churn")! as unknown as Record<string, unknown>;
 
     expect(plain.stated_role).toBeUndefined();
     expect(plain.source).toBe("user");
