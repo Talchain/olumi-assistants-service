@@ -196,7 +196,7 @@ import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { evaluateConfigureOptionOutcome } from './configure-option-outcome.js';
 import {
-  detectConfigureOptionIntent,
+  messageAnchorsOnOption,
   projectOptionLabels,
 } from './configure-option-intent.js';
 
@@ -255,8 +255,8 @@ export type OptionInterventionWriteVerdict =
        * MEASURED on deployed `a3b0548d`, wire-level, FRESH. The user typed
        * "Change the buy option so the vendor cost is £150,000 per year instead
        * of £120,000." The turn MINTED a model-wide baseline on factor
-       * `8f788330` (`observed_state` null → `{raw_value:150000,
-       * source:"user_override"}`), left the named option's own intervention at
+       * `8f788330` — `observed_state` moved from null to a raw value of 150000
+       * stamped as a user override — left the named option's own intervention at
        * 60000, replied "Updated Vendor Licensing Cost", and COMMITTED
        * (`graph_hash` a0b39d86 → 84013c95). Contrast control, same battery: the
        * pricing shape moved ZERO baselines.
@@ -577,7 +577,6 @@ function decideUnresolvedOptionScope(
   after: GraphV3T,
 ): OptionInterventionWriteVerdict | null {
   const optionLabels = projectOptionLabels(before.nodes);
-  const detection = detectConfigureOptionIntent(message, optionLabels);
 
   // ⭐ REVIEWER FINDING 1 (REVIEW1512), and it is the load-bearing correction.
   //
@@ -585,8 +584,9 @@ function decideUnresolvedOptionScope(
   // baseline mutation was allowed for "Set Vendor Licensing Cost to £150,000 per
   // year for the buy option." — matched vocabulary, unresolved identity, write
   // permitted. The gate is about SCOPE, and scope does not depend on whether the
-  // mutation vocabulary happened to classify. So `matched` is no longer consulted.
-  if (!detection.optionAnchored) return null;
+  // mutation vocabulary happened to classify. So the classifier is not consulted
+  // here at all: the ANCHOR is asked directly, from its one owner.
+  if (!messageAnchorsOnOption(message, optionLabels)) return null;
 
   // ⭐ REVIEWER FINDING 2. An EXPLICITLY model-wide request is not an unknown
   // target — it is a known one. "Across all options, change Vendor Licensing Cost

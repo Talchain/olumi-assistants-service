@@ -54,36 +54,9 @@ export type ConfigureOptionIntentTrigger =
   | 'option_value_set';
 
 export type ConfigureOptionIntentDetection =
-  | {
-      readonly matched: true;
-      readonly trigger: ConfigureOptionIntentTrigger;
-      /** See the note on the `matched: false` arm's `optionAnchored`. */
-      readonly optionAnchored: boolean;
-    }
+  | { readonly matched: true; readonly trigger: ConfigureOptionIntentTrigger }
   | {
       readonly matched: false;
-      /**
-       * ⭐ DID THE MESSAGE ANCHOR ON AN OPTION AT ALL — independently of whether
-       * the effect/value VOCABULARY classified?
-       *
-       * Measured on deployed `a3b0548d`: "Change the buy option so the vendor
-       * cost is £150,000 per year instead of £120,000." anchors (it contains the
-       * word "option") but `classifyConfigureOptionTrigger` returns null, so the
-       * whole detection reads `not_configure_intent`. The write guard gates on
-       * `matched`, so it allowed a factor-baseline write that PERSISTED while the
-       * named option's own intervention stayed put.
-       *
-       * The two facts were previously indistinguishable to every consumer:
-       * "this turn is not about an option" and "this turn is about an option and
-       * I do not recognise the phrasing" are different, and the second is the one
-       * where a write needs checking rather than permitting.
-       *
-       * ⚠ AN ANCHOR IS NOT AN IDENTITY, and must never be treated as one. It says
-       * the sentence mentions an option, nothing about WHICH. Resolving which is
-       * the target resolver's job, and when that fails the answer is to ASK, never
-       * to guess or to forbid every baseline edit.
-       */
-      readonly optionAnchored: boolean;
       /**
        * ROADMAP 2.308 / S1 — would an option LABEL anchor have flipped this
        * verdict? True only when the message carries one of the anchored
@@ -118,9 +91,6 @@ export type ConfigureOptionIntentDetection =
 
 const NO_MATCH: ConfigureOptionIntentDetection = {
   matched: false,
-  // Every NO_MATCH exit is taken BEFORE the anchor is computed (empty message,
-  // non-string, question shape), so `false` here is a fact and not a default.
-  optionAnchored: false,
   labelAnchorWouldDecide: false,
   labelAnchorWouldDecideTrigger: null,
 };
@@ -284,6 +254,43 @@ function classifyConfigureOptionTrigger(
 }
 
 /**
+ * ⭐ DOES THIS MESSAGE ANCHOR ON AN OPTION AT ALL — the word "option(s)", or a
+ * full option label — INDEPENDENTLY of whether the effect/value vocabulary
+ * classifies?
+ *
+ * Exported because a second consumer needs exactly this question and must not
+ * re-spell it (trap 12). MEASURED on deployed `a3b0548d`: "Change the buy option
+ * so the vendor cost is £150,000 per year…" anchors, yet
+ * `classifyConfigureOptionTrigger` returns null, so the whole detection reads
+ * "not about configuring an option" — and the write guard, gating on that,
+ * permitted a model-wide baseline write that PERSISTED.
+ *
+ * ⚠ AN ANCHOR IS NOT AN IDENTITY. It says the sentence mentions an option and
+ * nothing about WHICH. Where identity has no answer the product must ask.
+ *
+ * ⚠ A FUNCTION, not a field on {@link ConfigureOptionIntentDetection}. Hanging it
+ * on the `matched: true` arm broke 16 assertions across four specs that compare
+ * the whole verdict with `toEqual` — CI caught what focused local runs could not.
+ * A widely-compared union is the wrong place to answer a second question.
+ */
+export function messageAnchorsOnOption(
+  message: string,
+  optionLabels: readonly string[],
+): boolean {
+  if (typeof message !== 'string') return false;
+  const normalised = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (normalised.length === 0) return false;
+  if (OPTION_WORD.test(normalised)) return true;
+  const padded = ` ${normalised} `;
+  for (const raw of optionLabels) {
+    if (typeof raw !== 'string') continue;
+    const label = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (label.length >= 3 && containsPhrase(padded, label)) return true;
+  }
+  return false;
+}
+
+/**
  * Detect configure-option intent. `optionLabels` are the CURRENT graph's
  * option labels; an empty list disables the label anchor but keeps the
  * chip-prefix and option-word anchors.
@@ -306,8 +313,7 @@ export function detectConfigureOptionIntent(
 
   // Trigger 1 — the product's own configure chip shape.
   if (normalised.startsWith(CONFIGURE_OPTION_CHIP_MESSAGE_PREFIX.toLowerCase())) {
-    // The product's own chip message always names its option, by construction.
-    return { matched: true, trigger: 'chip_prefix', optionAnchored: true };
+    return { matched: true, trigger: 'chip_prefix' };
   }
 
   // Question shapes never claim the edit lane (see QUESTION_LEAD_PATTERN).
@@ -315,22 +321,10 @@ export function detectConfigureOptionIntent(
     return NO_MATCH;
   }
 
-  // Option anchor: the word "option(s)", or a full option label.
-  let anchored = OPTION_WORD.test(normalised);
-  if (!anchored) {
-    const padded = ` ${normalised} `;
-    for (const raw of optionLabels) {
-      if (typeof raw !== 'string') continue;
-      const label = raw.toLowerCase().replace(/\s+/g, ' ').trim();
-      if (label.length >= 3 && containsPhrase(padded, label)) {
-        anchored = true;
-        break;
-      }
-    }
-  }
+  const anchored = messageAnchorsOnOption(normalised, optionLabels);
 
   const trigger = classifyConfigureOptionTrigger(normalised, anchored);
-  if (trigger !== null) return { matched: true, trigger, optionAnchored: anchored };
+  if (trigger !== null) return { matched: true, trigger };
 
   // Derived from the same classifier, with the anchor granted, in ONE call.
   // Nothing to keep in sync: adding a trigger below the `!anchored` guard
@@ -340,7 +334,6 @@ export function detectConfigureOptionIntent(
     : classifyConfigureOptionTrigger(normalised, true);
   return {
     matched: false,
-    optionAnchored: anchored,
     labelAnchorWouldDecide: anchorGrantedTrigger !== null,
     labelAnchorWouldDecideTrigger: anchorGrantedTrigger,
   };
