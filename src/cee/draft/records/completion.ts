@@ -519,7 +519,29 @@ export function completionRegressesProtectedContent(
           // ⭐ THE ONE EXEMPTION — see `optionEffectsUnreliable` on the signature.
           // A restatement of a provably-suspect option effect is the repair, not
           // a regression. Non-option nodes stay fully protected either way.
-          if (!(optionEffectsUnreliable && node.kind === "option")) {
+          //
+          // ⛔⛔ AND IT IS BOUNDED TO AI-AUTHORED MAGNITUDES, on an independent
+          // review finding (Codex, 15 Sep): the emission-level signal would
+          // otherwise let ONE invalid reference license overwriting an
+          // UNRELATED, USER-GROUNDED intervention elsewhere on the graph. A
+          // magnitude stamped `brief_extraction` is a number the projector
+          // VERIFIED against the brief bytes; it stays protected whatever the
+          // reference set is doing, because overwriting the user's own figure is
+          // a fabrication risk and this estate does not trade one for the other.
+          //
+          // ⚠ RESIDUE, NAMED RATHER THAN SWALLOWED: a `brief_extraction`
+          // magnitude attached to the WRONG option by a bad reference is now
+          // preserved on that wrong option. That is misattribution rather than
+          // fabrication — the lesser harm, and the disclosure path still reports
+          // the invalid references. Pinned by `C2` in the trust spec.
+          const magnitudeSource = (
+            node.data as { intervention_details?: Record<string, { source?: string }> } | undefined
+          )?.intervention_details?.[factorId]?.source;
+          const exemptible =
+            optionEffectsUnreliable
+            && node.kind === "option"
+            && magnitudeSource === "cee_hypothesis";
+          if (!exemptible) {
             violations.push(
               `intervention_overwritten:${node.id}:${factorId}:${value}->${afterInterventions[factorId]}`,
             );

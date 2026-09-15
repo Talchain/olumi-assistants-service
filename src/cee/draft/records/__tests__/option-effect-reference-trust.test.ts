@@ -60,11 +60,25 @@ describe("A — the detector discriminates, measured on five live captures", () 
   });
 });
 
-const optionNode = (interventions: Record<string, number>, kind = "option") =>
+const optionNode = (
+  interventions: Record<string, number>,
+  kind = "option",
+  source: string = "cee_hypothesis",
+) =>
   ({
     graph: {
       version: "1",
-      nodes: [{ id: "opt1", kind, label: "hold at £49", data: { interventions } }],
+      nodes: [{
+        id: "opt1",
+        kind,
+        label: "hold at £49",
+        data: {
+          interventions,
+          intervention_details: Object.fromEntries(
+            Object.entries(interventions).map(([f, v]) => [f, { raw_value: v, source }]),
+          ),
+        },
+      }],
       edges: [],
       meta: { roots: [], leaves: [], source: "assistant", suggested_positions: {} },
     },
@@ -142,5 +156,51 @@ describe("C — the undetectable residue is bounded, and shrinking it is allowed
     } as unknown as DraftRecordSet;
     // Every source is a legal `option_refinement`, so nothing is provable here.
     expect(countInvalidOptionEffectSources(records)).toBeLessThanOrEqual(0);
+  });
+});
+
+/**
+ * ⭐⭐ THE REVIEW FINDING (Codex, 15 Sep), PINNED.
+ *
+ * The suspicion signal is EMISSION-level: one provably invalid reference makes
+ * the whole option→factor set suspect. Left there, it would let a single bad
+ * reference license overwriting an UNRELATED, USER-GROUNDED magnitude somewhere
+ * else on the graph. A `brief_extraction` value is one the projector VERIFIED
+ * against the brief bytes, so it stays protected regardless.
+ */
+describe("D — a user-grounded magnitude is never exempted", () => {
+  it("D1: `brief_extraction` stays protected even when the references are suspect", () => {
+    expect(
+      completionRegressesProtectedContent(
+        optionNode({ price: 0.49 }, "option", "brief_extraction"),
+        optionNode({ price: 0.59 }, "option", "brief_extraction"),
+        { optionEffectsUnreliable: true },
+      ),
+    ).toContain("intervention_overwritten:opt1:price:0.49->0.59");
+  });
+
+  it("D2: the AI-authored twin of the same case IS exempted — the pair discriminates", () => {
+    expect(
+      completionRegressesProtectedContent(
+        optionNode({ price: 0.49 }, "option", "cee_hypothesis"),
+        optionNode({ price: 0.59 }, "option", "cee_hypothesis"),
+        { optionEffectsUnreliable: true },
+      ),
+    ).toEqual([]);
+  });
+
+  it("D3: an UNSTAMPED magnitude is protected — the exemption is opt-in, fail-closed", () => {
+    const before = { graph: { version: "1", nodes: [{ id: "opt1", kind: "option", label: "x", data: { interventions: { price: 0.49 } } }], edges: [], meta: { roots: [], leaves: [], source: "assistant", suggested_positions: {} } }, provenance: { opt1: { provenance_class: "stated" } }, dropped: [] } as any;
+    const after = { graph: { version: "1", nodes: [{ id: "opt1", kind: "option", label: "x", data: { interventions: { price: 0.59 } } }], edges: [], meta: { roots: [], leaves: [], source: "assistant", suggested_positions: {} } }, provenance: { opt1: { provenance_class: "stated" } }, dropped: [] } as any;
+    expect(
+      completionRegressesProtectedContent(before, after, { optionEffectsUnreliable: true }),
+    ).toContain("intervention_overwritten:opt1:price:0.49->0.59");
+  });
+
+  it("C2: the residue is recorded — the two suspect magnitudes in the live capture are BOTH cee_hypothesis, so this bound does not reopen the defect", () => {
+    const capture = JSON.parse(
+      readFileSync(join(FIXTURES, "live-option-effect-refs-off-by-one-2026-09-15.json"), "utf8"),
+    );
+    expect(optionEffectReferencesUnreliable(capture)).toBe(true);
   });
 });
