@@ -70,6 +70,11 @@
  * same "cover the family, not the instance" reasoning
  * `validator-explanation.ts` rule 5 was rewritten for.
  *
+ * Historical whole-answer fallback (retained when identity is unavailable).
+ * With current option identities, both executor call sites now reuse the wire
+ * guard's selective removal so independent coaching is not discarded too.
+ * No permission or option-identity vocabulary changes with that reuse.
+ *
  * WHY REPLACE AND NOT REWRITE. compose.ts drops leader-presuming Phase-3 cards
  * WHOLE, for the stated reason that the prose is LLM-authored and "there is no
  * template to gate and no substitution that can make that prose honest". The
@@ -104,6 +109,7 @@
  */
 
 import { textAssertsLeadingOption } from './leading-option-egress-guard.js';
+import { projectLeadingOptionProse } from './leading-option-prose-projection.js';
 import { composeWithheldReasonTail } from './withheld-reason-tail.js';
 import {
   MAY_NAME_LEADING_OPTION,
@@ -236,7 +242,7 @@ export const WITHHELD_EXPLANATION_NO_DISCLOSURE_TAIL =
 
 /** Why an answer was projected. Bounded — this is the telemetry cardinality. */
 export type WithheldExplanationReason =
-  /** The answer named or presumed a leader; it was replaced wholesale. */
+  /** The answer named or presumed a leader; the assertion was removed. */
   | 'leader_claim_replaced'
   /** The answer was already leader-free; only the missing disclosure was added. */
   | 'disclosure_appended'
@@ -278,6 +284,8 @@ export interface WithheldExplanationProjection {
  *                    `locateEvidence` report `located: false`, so the quote
  *                    stands down and the disclosure degrades to its labelled
  *                    form. The forgotten value here is the SAFE one.
+ * @param optionLabels Current graph option identities. Omission or an unresolved
+ *                    designation keeps the conservative whole-answer fallback.
  */
 export function projectExplanationAnswerForWithheldClaim(
   answerText: string,
@@ -286,6 +294,7 @@ export function projectExplanationAnswerForWithheldClaim(
   conditionsAreCurrent: boolean,
   analysisExistenceProven: boolean,
   brief?: string | null,
+  optionLabels?: readonly string[],
 ): WithheldExplanationProjection {
   const original = typeof answerText === 'string' ? answerText : '';
 
@@ -363,10 +372,18 @@ export function projectExplanationAnswerForWithheldClaim(
       ? WITHHELD_EXPLANATION_OPENING
       : WITHHELD_EXPLANATION_OPENING_CURRENCY_UNKNOWN;
 
-  // LEADER CLAIM ⇒ replace wholesale. A leader-naming answer cannot be
-  // repaired by appending to it: the contradiction the walk photographed
-  // (`case1g`) was exactly a leader claim followed by the disclosure.
+  // Reuse the wire guard's selective removal when the current graph supplies
+  // option identities. Independent advice survives; anaphoric designations
+  // receive the same escalation as at egress. An unrecognised designation is
+  // NOT permission: retain the existing conservative whole-answer fallback.
   if (textAssertsLeadingOption(original)) {
+    const selective = optionLabels?.length
+      ? projectLeadingOptionProse(original, optionLabels, tail.trim())
+      : null;
+    if (selective && selective.text.trim() !== tail.trim()) {
+      return { text: selective.text, changed: true, reason: 'leader_claim_replaced' };
+    }
+    // Nothing independent survived: keep the established whole-answer copy.
     return {
       // `tail` is a LEADING-SPACE fragment by contract, so tail-alone is
       // trimmed rather than shipped with a stray leading space.
