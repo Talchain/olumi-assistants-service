@@ -102,6 +102,39 @@ function ctx(
 
 const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
 
+describe('independent review — control complements retain the system subject', () => {
+  it.each([
+    // Outside corpus from exact-head review of e5ab279e, comment 5673875752.
+    'Which of my figures did you decide to use?',
+    'Which of my assumptions did you choose to keep?',
+    'What parts of my brief did you end up omitting?',
+    'What did you choose to infer from my brief?',
+    'Which parts of my brief did you opt to incorporate?',
+    'Which figures from my brief did you go on to include?',
+  ])('keeps the factual audit in both edit-history states: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
+      expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    }
+    expect(isStateQueryQuestionShape(message)).toBe(true);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+
+  it.each([
+    'Do you believe we should choose to use my figures?',
+    'Do you reckon I should decide to keep my estimates?',
+    'Do you believe we should go on to infer a target from my brief?',
+    'What did you choose to infer from my brief? What should we use instead?',
+  ])('does not transfer the human\'s prospective action to the system: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+    expect(isEditRequestShape(message)).toBe(false);
+  });
+});
+
 describe('outside-corpus blockers — disposition ownership and reported speech', () => {
   it.each([
     'Do you believe we should use my figures?',

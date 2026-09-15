@@ -360,10 +360,15 @@ export function hasSystemDisposition(message: string): boolean {
     ...RETENTION_VERB_PATTERNS,
     new RegExp(`\\b(?:${INFERENCE_VERB})\\b`, 'i'),
   ];
-  // Auxiliaries, negation and adverbs may intervene; another subject or a
-  // prospective modal may not. Coordinated verbs retain the same subject:
-  // "you add or infer" and "you change or reinterpret" are existing audits.
-  const systemPrefix = /\byou\s+(?:(?:have|had|not|never|ever|just|already|also|[a-z]+ly)\s+)*(?:[a-z]+\s+(?:or|and)\s+)*$/i;
+  // Keep subject continuity through auxiliaries, coordination and controlled
+  // complements ("you decide to use", "you go on to include", "you end up
+  // omitting"). Match their grammatical links, not a list of decision verbs.
+  // A new subject or prospective modal cannot occupy any link: "you believe
+  // we should choose to use" still does not attribute "use" to the system.
+  // This bounded answering grammar does not determine mutation permission.
+  const modifiers = '(?:(?:have|had|not|never|ever|just|already|also|[a-z]+ly)\\s+)*';
+  const predicateLink = '[a-z]+\\s+(?:(?:(?:on|up)\\s+)?to|up|or|and)\\s+';
+  const systemPrefix = new RegExp(`\\byou\\s+${modifiers}(?:${predicateLink}${modifiers})*$`, 'i');
   return verbs.some((verb) => {
     const occurrences = new RegExp(verb.source, `${verb.flags}g`);
     return [...message.matchAll(occurrences)].some((match) =>
