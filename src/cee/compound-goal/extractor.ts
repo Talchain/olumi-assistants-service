@@ -1786,6 +1786,55 @@ export interface RemapResult {
  * @param requestId - Optional request ID for telemetry
  * @param goalNodeId - Optional goal node ID for temporal constraint binding
  */
+/**
+ * Node ids whose LABEL restates this constraint's own `sourceQuote`.
+ *
+ * ⭐ WHY THIS EXISTS. A draft routinely mints a node whose label IS the limit
+ * sentence ("Churn must not exceed 7% for more than 3 months"). That node is
+ * the limit RESTATED, never the metric the limit is ABOUT, so it can never be
+ * a valid target. But it contains the metric's word ("churn"), so it matches
+ * the same fuzzy predicate the real metric node matches — and
+ * `fuzzyMatchNodeId` binds only when EXACTLY ONE node matches. Two matches ⇒
+ * it returns undefined ⇒ the row is dropped and the user's stated limit never
+ * reaches `goal_constraints[]`.
+ *
+ * WIRE-MEASURED on serving build 07da2c0b, 4 of 4 pricing runs (request_ids
+ * e9a3d7a9, badef8e1, 10faa1d0, 996a1eae): each logged
+ * `target_no_match {target_node_id:"fac_churn", available_node_count:12}`,
+ * then `remap_summary 0/1 survived`, and no `integrated` event at all.
+ * CONTRAST, same code: the hiring and buy briefs bind 4/4, because their
+ * metric name matches a label word-for-word and takes the earlier exact-label
+ * path (step 3) which returns the FIRST hit and never asks about uniqueness.
+ *
+ * ⛔ THIS IS AN IDENTITY TEST ON THE CONSTRAINT'S OWN QUOTE, NOT A LABEL
+ * HEURISTIC. It cannot oscillate the way "widen the matcher" would (trap 22f):
+ * it asks one falsifiable question — does this label restate the sentence this
+ * limit came from? — and nothing about what labels ought to look like.
+ *
+ * REFUTED while deriving this, recorded so it is not re-proposed: the duration
+ * qualifier ("for more than 3 months") is NOT the cause. With and without it
+ * the extractor produces the BYTE-SAME row (`fac_churn <= 0.07`,
+ * `deadlineMetadata` absent), so every temporal gate is inert here.
+ */
+function selfReferentialNodeIds(
+  sourceQuote: string,
+  nodeLabels: Map<string, string> | undefined,
+): Set<string> {
+  const out = new Set<string>();
+  if (!nodeLabels || nodeLabels.size === 0) return out;
+  const norm = (v: string): string => v.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const quote = norm(sourceQuote);
+  // A short quote would match far too much. 12 normalised chars is well below
+  // any real limit sentence and well above an incidental collision.
+  if (quote.length < 12) return out;
+  for (const [id, label] of nodeLabels) {
+    const l = norm(label);
+    if (l.length < 12) continue;
+    if (l.includes(quote) || quote.includes(l)) out.add(id);
+  }
+  return out;
+}
+
 export function remapConstraintTargets(
   constraints: ExtractedGoalConstraint[],
   nodeIds: string[],
@@ -1888,8 +1937,34 @@ export function remapConstraintTargets(
       continue;
     }
 
-    // Step 5: Fuzzy match — try stem then label-based matching
-    const fuzzyMatch = fuzzyMatchNodeId(constraint.targetNodeId, nodeIds, nodeLabels);
+    // Step 5: Fuzzy match — try stem then label-based matching.
+    // ⭐ First remove any node that merely RESTATES this constraint's own source
+    // quote: it is the limit written down, not the metric the limit governs, and
+    // its presence is what makes the real metric ambiguous. See
+    // `selfReferentialNodeIds`. Never filter down to nothing — if every
+    // candidate looks self-referential the exclusion is the suspect, not the graph.
+    const selfRef = selfReferentialNodeIds(constraint.sourceQuote, nodeLabels);
+    const keep = (id: string): boolean => !selfRef.has(id);
+    const narrowedIds = selfRef.size > 0 ? nodeIds.filter(keep) : nodeIds;
+    const narrowedLabels =
+      selfRef.size > 0 && nodeLabels
+        ? new Map([...nodeLabels].filter(([id]) => keep(id)))
+        : nodeLabels;
+    const useNarrowed = narrowedIds.length > 0;
+    if (selfRef.size > 0) {
+      log.info({
+        event: "cee.compound_goal.self_referential_targets_excluded",
+        request_id: requestId,
+        excluded_count: selfRef.size,
+        remaining_count: narrowedIds.length,
+        applied: useNarrowed,
+      }, `Excluded ${selfRef.size} node(s) restating the constraint's own quote`);
+    }
+    const fuzzyMatch = fuzzyMatchNodeId(
+      constraint.targetNodeId,
+      useNarrowed ? narrowedIds : nodeIds,
+      useNarrowed ? narrowedLabels : nodeLabels,
+    );
     if (fuzzyMatch) {
       remapCount++;
       log.info({
