@@ -45,7 +45,7 @@ describe("A — the limit's figure is read from its own span", () => {
   });
 
   it("A2: and the limit's own quantity is carried on the disclosure", () => {
-    const dropped = project(captured()).dropped as ReadonlyArray<Record<string, unknown>>;
+    const dropped = project(captured()).dropped as unknown as ReadonlyArray<Record<string, unknown>>;
     const withValue = dropped.filter(
       (d) => d.label === "keeping monthly churn under 4%" && typeof d.value === "number",
     );
@@ -100,7 +100,7 @@ describe("C — it guesses nothing, and changes nothing it should not", () => {
 
   it("C1: an AMBIGUOUS span yields no figure — two quantities means no guess", () => {
     const records = base({ source_quote: "keep churn under 4% and CAC under 200" });
-    const dropped = project(records).dropped as ReadonlyArray<Record<string, unknown>>;
+    const dropped = project(records).dropped as unknown as ReadonlyArray<Record<string, unknown>>;
     const valued = dropped.filter((d) => typeof d.value === "number" && String(d.label).includes("CAC"));
     expect(valued.length).toBe(0);
     // and it did not silently pick one of the two either
