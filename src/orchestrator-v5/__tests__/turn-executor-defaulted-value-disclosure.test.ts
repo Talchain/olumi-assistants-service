@@ -287,7 +287,7 @@ describe('turn-executor finaliser — defaulted-value disclosure guard (WIRING)'
 
     const evt = egressEvent();
     expect(evt, 'F6 egress telemetry should fire').toBeDefined();
-    expect(evt!.data.dispatch_path).toBe('turn_executor_finalise');
+    expect(evt!.data.dispatch_path).toBe('turn_executor_commit');
     expect(evt!.data.defaulted_count).toBe(1);
     expect(evt!.data.disclosure_added).toBe(true);
   });

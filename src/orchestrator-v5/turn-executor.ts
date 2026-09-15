@@ -1520,6 +1520,11 @@ export async function runTurnExecutor(
     lastCommitConflictError = null;
     zeroResolvedSelectionGuardAppliedAtCommit = false;
     zeroResolvedSelectionMutationReceiptPersistedAtCommit = false;
+    const projectionStateBeforeCommit = {
+      functionalAnswerText,
+      capturedReasoning,
+      withheldExplanationReasonForRun,
+    };
     let result: Awaited<ReturnType<typeof commitDirectAnswer>>;
     try {
       // The finaliser's zero-resolved-selection guard used to run only AFTER
@@ -1578,11 +1583,24 @@ export async function runTurnExecutor(
           contentGraph: effectiveTurnGraph,
         },
         store,
+        // Ordinary conversation must remember its public answer, not the
+        // candidate that the finaliser will replace. Executed handlers and
+        // graph writes retain their existing receipt/fact ordering unchanged.
+        proposedHandlerIdForOutcome === null &&
+          !handlerEmittedMutatedGraph &&
+          !graphWasProvided(meta.graph)
+          ? projectConversationResponseForCommit
+          : undefined,
       );
       zeroResolvedSelectionGuardAppliedAtCommit = zeroSelectionProjection.applied;
       zeroResolvedSelectionMutationReceiptPersistedAtCommit =
         mutationReceiptCandidate && result.graphPersisted;
     } catch (error) {
+      // An attempted projection is not a committed answer. Do not leak its
+      // classification/reason into the existing failed-commit recovery.
+      functionalAnswerText = projectionStateBeforeCommit.functionalAnswerText;
+      capturedReasoning = projectionStateBeforeCommit.capturedReasoning;
+      withheldExplanationReasonForRun = projectionStateBeforeCommit.withheldExplanationReasonForRun;
       if (
         error instanceof TurnFenceRejectedError ||
         error instanceof GraphStaleWriteError
@@ -14107,35 +14125,18 @@ export async function runTurnExecutor(
    * place the moment the disclosure flags are opened. Flipping either flag is
    * a product decision and is not taken here.
    *
-   * ⛔ WHAT THIS DOES NOT REACH — THE DURABLE COPY, AND IT IS FED BACK TO THE
-   * MODEL. Every `commitTurn` site in this executor runs BEFORE `finalizeRun`,
-   * and `commit.ts:332 durablePublicAssistantText` re-applies only the
-   * forbidden-phrase guard and the entity scrub. So `assistant_message`
-   * persists the UNGUARDED text for these turns, and that value is read back
-   * as prior-turn context by `context/context-pack-assembler.ts`,
-   * `rolling-summary/build-input.ts` and `handlers/edit-graph-dispatch.ts`
-   * (as `{ role: 'assistant', content: turn.assistant_message }`).
-   * `session/store.ts:189-193` describes that field as *"the egress-validated,
-   * user-visible prose … `assistant_text` is what the user saw"*, which stops
-   * being true on a turn this guard rewrites.
-   *
-   * ⚠ SCOPE, STATED PRECISELY. This guard WIDENS a gap the leader-claim and
-   * structural-success guards already have; it does not create one. It matters
-   * more here only because the retained content is the exact monologue this
-   * guard exists to suppress, and the model is then re-shown it as its own
-   * prior answer. NO REINFORCEMENT EFFECT HAS BEEN MEASURED — in the single
-   * available capture the model recovered on the following turn, and one data
-   * point is not a finding. The repo names the remedy in two places
-   * (`turn-executor.ts:12384`, `edit-graph-dispatch.ts:4583`: *"runs BEFORE
-   * commitTurn so the stored assistant_message equals the honest wire copy"*),
-   * and applying it belongs with the sibling guards that share the gap rather
-   * than in this change.
+   * Conversation-only commits now run this same ordered policy before storing
+   * assistant_message, so later context does not receive the blocked candidate
+   * as though the user saw it. Executed-handler receipts keep their existing
+   * commit ordering; this is not a universal history/egress parity claim.
+   * Later route-level rewriting and the conversation-storage cap remain outside
+   * this seam. No model-reinforcement effect has been measured.
    *
    * Idempotent: neither the surviving answer sentences nor the fallback copy
    * carries a narration marker.
    */
   function enforceProcessNarrationGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -14191,7 +14192,7 @@ export async function runTurnExecutor(
    * because the neutral fallback contains no forbidden phrase.
    */
   function enforceEgressForbiddenPhraseGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -14240,7 +14241,7 @@ export async function runTurnExecutor(
    * text carries no claim, so a second pass is a no-op.
    */
   function enforceStructuralSuccessClaimGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -14320,7 +14321,7 @@ export async function runTurnExecutor(
    * presence cannot suppress this persisted-fact disclosure path.
    */
   function enforceDefaultedValueDisclosureGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -14398,7 +14399,7 @@ export async function runTurnExecutor(
    * pointed at).
    */
   function enforceBlockedSlotClaimGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     const assistantText = response.assistant_text;
@@ -14507,7 +14508,7 @@ export async function runTurnExecutor(
    * ═══════════════════════════════════════════════════════════════════════════
    */
   function enforceWithheldLeaderClaimGuard(
-    dispatchPath: 'turn_executor_finalise',
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
   ): void {
     if (!response) return;
     // PERMITTED ⇒ no-op, byte-identical. Same short-circuit shape (and same
@@ -14821,6 +14822,31 @@ export async function runTurnExecutor(
     functionalAnswerText = projected.response.assistant_text;
   }
 
+  // One ordered public-answer policy, shared by the conversation commit and
+  // the finaliser. Keep finalise as the fallback for failures/handler exits;
+  // do not move commit-conflict remapping or receipt construction before save.
+  function enforcePublicAnswerGuards(
+    dispatchPath: 'turn_executor_finalise' | 'turn_executor_commit',
+  ): void {
+    enforceProcessNarrationGuard(dispatchPath);
+    enforceWithheldLeaderClaimGuard(dispatchPath);
+    enforceEgressForbiddenPhraseGuard(dispatchPath);
+    enforceStructuralSuccessClaimGuard(dispatchPath);
+    enforceDefaultedValueDisclosureGuard(dispatchPath);
+    enforceBlockedSlotClaimGuard(dispatchPath);
+  }
+
+  function projectConversationResponseForCommit(candidate: OlumiResponse): OlumiResponse {
+    const previousResponse = response;
+    response = candidate;
+    try {
+      enforcePublicAnswerGuards('turn_executor_commit');
+      return response;
+    } finally {
+      response = previousResponse;
+    }
+  }
+
   function finalizeRun(): TurnExecutorRunResult {
     // ── ROADMAP 2.301 secondary fix — HOISTED conflict remap ─────────────
     // Runs FIRST, before the egress guards below, so the remapped envelope
@@ -14910,48 +14936,12 @@ export async function runTurnExecutor(
     // freshness derivation so the response-finaliser can thread freshness
     // onto the analysis_ready wire fields without re-deriving.
     //
-    // V5 stale-aware explain recovery — finaliser-level egress guard.
-    // Runs as the LAST step before the response leaves this function,
-    // so it backstops EVERY emit path: deterministic templates, LLM
-    // output, fallback copy, recoverable-handler recovery, state-query
-    // guard. An upstream hook would miss new emit paths added later;
-    // a finaliser hook cannot. See FORBIDDEN_USER_FACING_PHRASES for
-    // the contradiction list this enforces.
-    // ⭐ CLAIM SAFETY AT THE CHOKEPOINT — the THIRD guard, and deliberately the
-    // FIRST to run. It performs a WHOLE-TEXT substitution, so running it ahead
-    // of the other two means its replacement copy is itself subject to the
-    // forbidden-phrase and structural-success guards below rather than
-    // bypassing them. (`withheld-leader-claim-chokepoint.test.ts` pins the
-    // converse: that the other two guards' own substitution constants are
-    // leader-free, so this ordering cannot silently rot.) See
-    // `enforceWithheldLeaderClaimGuard` for why a finaliser hook and not
-    // another in-flow gate.
-    // ⭐⭐⭐ PROCESS NARRATION — FIRST OF ALL THE PROSE GUARDS. It is the only
-    // one that can substitute the WHOLE reply with new copy of its own, so it
-    // runs ahead of the other three and its replacement is then judged by
-    // them. See `enforceProcessNarrationGuard` for the witnessed leaks, for
-    // why the branch-level `stripPlanningPreamble` could not cover them, and
-    // for where the excised deliberation goes.
-    enforceProcessNarrationGuard('turn_executor_finalise');
-    enforceWithheldLeaderClaimGuard('turn_executor_finalise');
-    enforceEgressForbiddenPhraseGuard('turn_executor_finalise');
-    // AI Harness capability 1 — always-on false-success neutralisation. Runs
-    // alongside the forbidden-phrase guard so EVERY emit path (incl. the
-    // deterministic short-circuits and the new post-analysis composer, which
-    // bypass STEP 6.6) is backstopped against a first-person mutation-success
-    // claim with no committed mutation. Commit-anchored, precision-first, not
-    // flag-gated. See `enforceStructuralSuccessClaimGuard`.
-    enforceStructuralSuccessClaimGuard('turn_executor_finalise');
-    // F6 — LAST, after every whole-text substitution above, so the disclosure
-    // qualifies the text that actually ships rather than one a later guard
-    // discards. See `enforceDefaultedValueDisclosureGuard` for the ordering
-    // argument and for why it reads `context.prior_facts` directly.
-    enforceDefaultedValueDisclosureGuard('turn_executor_finalise');
-    // ⭐⭐ 2.1265 — LAST. The mutual-exclusion invariant judges the text that
-    // actually ships, after every whole-text substitution above. See
-    // `enforceBlockedSlotClaimGuard` for the ordering argument and for why the
-    // authoritative read is `canonicalReadinessGraphForRun` and nothing else.
-    enforceBlockedSlotClaimGuard('turn_executor_finalise');
+    // Backstop every executor exit, including handlers and failed commits that
+    // are intentionally excluded from pre-commit conversation projection.
+    // The shared policy preserves the existing guard order: narration, leader
+    // claim, forbidden phrase, structural success, defaulted value, blocked slot.
+    // Later substitutions therefore cannot bypass the guards that judge them.
+    enforcePublicAnswerGuards('turn_executor_finalise');
     const turnOutcome = buildTurnOutcome();
     // Fix 4 (observability): finalise turn timings only when V5_TIMING_DEBUG
     // is enabled. Default-OFF production paths skip the telemetry emit and
