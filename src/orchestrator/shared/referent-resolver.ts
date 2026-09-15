@@ -430,20 +430,35 @@ export type Resolution =
  * false for the lane this module was extracted to serve.** Measured at the
  * bytes:
  *
+ * TWO SCAN AND CARRY THEIR OWN RAIL:
  *   - `option-effect-write.ts` — `matchLabels` runs `phraseOccurrences` over
- *     `params.message` and carries **its own `normalised.length < 3` rail**;
- *   - `whatif/resolve-target-option.ts:290` — its variable is literally named
- *     `haystack`;
- *   - `repair-value-binding.ts:932` — `padded.includes(...)`, and its comment
- *     states the incidental-collision rationale outright: *"shorter labels
- *     collide with ordinary words and would decline every sentence containing
- *     one"*;
- *   - `edit-graph.ts:992` — same shape.
+ *     `params.message`, gated by `normalised.length < 3`;
+ *   - `repair-value-binding.ts:932` — `padded.includes(...)` gated by
+ *     `label.length < 3`, and its comment states the incidental-collision
+ *     rationale outright: *"shorter labels collide with ordinary words and
+ *     would decline every sentence containing one"*.
  *
- * **Four of the eight write lanes scan haystacks, and already carry the rail.**
- * ⇒ Converting one of them to `candidate` would STRIP A RAIL FROM A HAYSTACK
- * SCAN and produce MORE WRONG BINDING — worse than the "more asking" failure
- * this design was written to avoid, and in the opposite direction.
+ * ⛔ AND TWO SCAN WITH NO RAIL AT ALL — which is the more important half, and
+ * an earlier version of this very docstring got it wrong by lumping all four
+ * together as "already carry the rail". That error ran in the direction that
+ * makes the estate look SAFER than it is, so it is corrected explicitly:
+ *   - `whatif/resolve-target-option.ts:290` — variable literally named
+ *     `haystack`; **it has no label-length rail.** Every `label.length` in that
+ *     file is span arithmetic (`haystack.length - label.length`,
+ *     `start + label.length`), not a minimum-length guard;
+ *   - `edit-graph.ts:992` — **UNGATED**:
+ *     `normalisedMessage.includes(normaliseMatchingText(target.label))`, a bare
+ *     substring containment with no length bound, which then SHORT-CIRCUITS on
+ *     `exactMatches.length > 0`. The `length > 2` + stopword rail in this file
+ *     lives at `:917`/`:924`, inside `resolveTokenOverlapMatches` — a path this
+ *     scan returns before ever reaching.
+ *
+ * **So: four of the eight write lanes scan haystacks; two of those four are
+ * unprotected today.** ⇒ Converting a RAILED one to `candidate` would strip its
+ * rail and produce MORE WRONG BINDING — worse than the "more asking" failure
+ * this design was written to avoid, and in the opposite direction. The two
+ * UNRAILED ones are a separate, pre-existing exposure that this module does not
+ * fix and must not be read as fixing.
  *
  * ⭐ **The scope is a property of WHAT THE CALL SITE DOES, never of which layer
  * it lives in.** Ask of each site: does it hold a referring phrase, or is it
@@ -459,6 +474,16 @@ export type Resolution =
  *     asking.** Before converting any lane, re-prove the property against the
  *     matcher THAT LANE uses, and treat a move from a binding to `unknown` as a
  *     REGRESSION, not a safe refusal.
+ *
+ *     ⭐ THAT CONSTRAINT HAS ALREADY EARNED ITS KEEP. Run pre-emptively against
+ *     `post-analysis-label-intercept.ts`'s own matcher over 14 cases:
+ *     **5 WIDENED** (edits users lose today, recovered), 4 agree, 2 bind→ask
+ *     (honest, recoverable), and **2 bind→`unknown` REGRESSIONS** — symbol-only
+ *     labels that normalise to the EMPTY STRING, which cannot be settled by
+ *     asking. The conversion also FIXES A SILENT WRONG-BIND: on a genuine
+ *     duplicate that lane binds to the FIRST match, where the resolver asks.
+ *     ⛔ Close the empty-normalisation case BEFORE move 3, not after — it is
+ *     concrete, it is fixable, and it is the whole reason the constraint exists.
  *  2. The three-state answer exists only on the EXACT-KEY path, so it is
  *     unavailable to the four haystack lanes as they stand — the ask it was
  *     meant to enable cannot fire there without a span-matching entry point.
