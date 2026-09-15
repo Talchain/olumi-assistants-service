@@ -1870,6 +1870,56 @@ export const TelemetryEvents = {
   // the signal_id + turn_id so evaluators can correlate with coaching text.
   V5CoachingSignalFired: "v5.coaching.signal_fired",
 
+  // ── WHY THE RUN-OVER-RUN CONSEQUENCE DID OR DID NOT SHIP ──────────────────
+  //
+  // Emitted exactly once per finalised turn from `attachRunDelta`
+  // (`orchestrator-v5/response-finaliser.ts`), the sole caller of
+  // `buildRunDelta`.
+  //
+  // ⛔ THE DEFECT IT CLOSES. The caller discarded the producer's discriminated
+  // refusal with a bare `if (built.kind !== 'ok') return response;`, and nothing
+  // on the path logged anything at all. All five `RunDeltaRefusal` reasons, plus
+  // `priorFacts` absent, plus the identity-unbound strip, plus "it emitted and
+  // something downstream dropped it" were therefore BYTE-IDENTICAL SILENCE —
+  // seven consecutive probes into the dark outcome clause failed on exactly
+  // this, and an eighth would have too.
+  //
+  // ⭐ IT MINTS NO TAXONOMY FOR THE PRODUCER'S OWN REASONS. `RunDeltaRefusal`'s
+  // docblock already says the reason exists because "the caller emits it as
+  // telemetry (this module stays pure)" — the producer kept its half of that
+  // contract and the caller never kept its. The five arrive as passthrough; only
+  // the three the CALLER owns (and the producer cannot see) are added here.
+  //
+  // Payload:
+  //   - scenario_id: string | null — `?? null`, never a placeholder. The
+  //     system-event exit reaches the finaliser with no scenario, and "we do not
+  //     know which session" must not be spelled like a real id.
+  //   - outcome: 'emitted' | 'refused' | 'skipped'
+  //   - reason: string | null — null IFF outcome is 'emitted'. One of the five
+  //     `RunDeltaRefusal` members, or the caller's own `prior_facts_absent` /
+  //     `run_identity_unconfirmed` / `run_identity_conflict`.
+  //   - prior_facts_count / run_analysis_facts_count: number | null — STRUCTURAL
+  //     counts. They separate "no facts in scope" from "facts, but not enough
+  //     run_analysis ones" without naming a single one of them.
+  //
+  // ⛔ REDACTION: reason code and counts ONLY. No label, quote or id — entity ids
+  // in this estate are slug renderings of the user's own labels
+  // (`fac_delivery_cost`), so an id IS user content. Pinned by the leak arm of
+  // `__tests__/run-delta-outcome-disclosure.test.ts`, which carries a positive
+  // control proving the token was in the input.
+  //
+  // ⚠ QUERY NOTE FOR OPERATORS: grep `run_delta_outcome`. Measured 15 Sep 2026,
+  // it appears nowhere else in the tree (case-insensitive), so it is not
+  // shadowed by an existing constant the way `did_not_land` is by
+  // `OPERATION_DID_NOT_LAND`. The bare token `run_delta` IS shadowed — it is the
+  // wire field name — so do not grep that.
+  //
+  // ⚠ SCOPE, STATED EXACTLY: this reports what the FINALISER decided. It is not
+  // evidence that the bytes reached the UI. `request_id` is deliberately absent
+  // because `FinaliserContext` does not carry one; join to the same turn's
+  // `cee.turn.refused` / `v5.*` events on `scenario_id`.
+  V5RunDeltaOutcome: "v5.coaching.run_delta_outcome",
+
   // V5 Phase 1 brief persistence — fires from draft-graph-dispatch when the
   // user-supplied free-text brief is truncated by normaliseBriefText (input
   // length exceeded MAX_BRIEF_TEXT_LENGTH). Payload: { request_id,

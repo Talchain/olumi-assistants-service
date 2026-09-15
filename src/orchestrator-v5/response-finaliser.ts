@@ -82,6 +82,7 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
 import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { config } from '../config/index.js';
+import { emit, TelemetryEvents } from '../utils/telemetry.js';
 
 import {
   attachComputedAt,
@@ -100,8 +101,33 @@ import {
 import { sanitiseEnrichment } from './compose/sanitise-enrichment.js';
 import { projectEvidenceAssessment } from './compose/project-evidence-assessment.js';
 import { canonicalStateFromFreshness } from './context/canonical-analysis-state.js';
-import { buildRunDelta } from './coaching/build-run-delta.js';
+import { buildRunDelta, type RunDeltaRefusal } from './coaching/build-run-delta.js';
 import { selectRunAnalysisFact } from './context/freshness.js';
+
+/**
+ * Why the run-over-run consequence did or did not ship.
+ *
+ * ⭐ A UNION OF TWO OWNERSHIPS, AND THE SPLIT IS THE POINT. The five
+ * {@link RunDeltaRefusal} members are the PRODUCER's and arrive by passthrough —
+ * re-spelling them here would be a second list free to drift from the one
+ * `buildRunDelta` actually returns (this estate's dominant defect: the
+ * hand-maintained mirror). The three below are the CALLER's, and the producer
+ * cannot see them: it is never invoked on these paths, so it has no reason to
+ * offer.
+ *
+ * They are NOT interchangeable and must not be collapsed. `prior_facts_absent`
+ * says the exit had no facts in scope; the two identity members say a pair
+ * existed but this turn was not entitled to compare them. Same absent
+ * `run_delta` on the wire, different findings, different remedies.
+ */
+export type RunDeltaDisclosureReason =
+  | RunDeltaRefusal
+  /** `ctx.priorFacts` was undefined — the exit carried no facts at all. */
+  | 'prior_facts_absent'
+  /** The composer could not confirm the two runs are the same subject. */
+  | 'run_identity_unconfirmed'
+  /** The composer found the two runs are demonstrably different subjects. */
+  | 'run_identity_conflict';
 
 // ─── Mechanism A: type brand ──────────────────────────────────────────────
 
@@ -603,21 +629,72 @@ function attachRunDelta(
   response: OlumiResponse,
   ctx: FinaliserContext,
 ): OlumiResponse {
+  // ⛔ DISCLOSE WHICH PRECONDITION FAILED, ALWAYS, ON EVERY EXIT FROM THIS
+  // FUNCTION. Until 15 Sep this function had four exits and all four were
+  // byte-identical silence: the producer returns a DISCRIMINATED refusal and
+  // the old `if (built.kind !== 'ok') return response;` threw the reason away,
+  // while nothing anywhere on the path logged, counted or emitted.
+  //
+  // An absence that reads the same whether the producer correctly REFUSED or
+  // simply could not PRODUCE is two findings wearing one reading, and they have
+  // opposite remedies. Seven probes into the dark outcome clause died on this.
+  //
+  // Observe-only: `disclose` returns its argument, so it cannot alter a wire
+  // byte, and every exit routes through it so a future fifth exit that forgets
+  // is a visible omission rather than more silence.
+  const priorFactsCount = ctx.priorFacts === undefined ? null : ctx.priorFacts.length;
+  const runAnalysisFactsCount =
+    ctx.priorFacts === undefined
+      ? null
+      : ctx.priorFacts.filter((f) => f.fact_type === 'run_analysis').length;
+
+  const disclose = <T extends OlumiResponse>(
+    outcome: 'emitted' | 'refused' | 'skipped',
+    reason: RunDeltaDisclosureReason | null,
+    out: T,
+  ): T => {
+    emit(TelemetryEvents.V5RunDeltaOutcome, {
+      // Honest null, never a placeholder: the system-event exit reaches the
+      // finaliser with no scenario, and `sanitizeTelemetryData` DROPS undefined
+      // while preserving null — so a bare `ctx.scenarioId` would make the field
+      // vanish from the log line rather than read as unknown.
+      scenario_id: ctx.scenarioId ?? null,
+      outcome,
+      reason,
+      // Structural counts only. They separate "no facts in scope" from "facts,
+      // but not enough run_analysis ones" WITHOUT naming any of them — entity
+      // ids here are slug renderings of the user's own labels, so an id is user
+      // content, not structure.
+      prior_facts_count: priorFactsCount,
+      run_analysis_facts_count: runAnalysisFactsCount,
+    });
+    return out;
+  };
+
   // Read the composer's identity verdict. An unbound pair must not add a new
   // comparative delta after the analysis block has been confined.
   const bindingReason = response.analysis_state?.leader_claim.withheld_reason;
   if (bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED || bindingReason === WITHHELD_RUN_IDENTITY_CONFLICT) {
     const { run_delta: _unboundDelta, ...withoutDelta } = response;
-    return withoutDelta;
+    return disclose(
+      'skipped',
+      bindingReason === WITHHELD_RUN_IDENTITY_UNCONFIRMED
+        ? 'run_identity_unconfirmed'
+        : 'run_identity_conflict',
+      withoutDelta as OlumiResponse,
+    );
   }
-  if (ctx.priorFacts === undefined) return response;
+  if (ctx.priorFacts === undefined) return disclose('skipped', 'prior_facts_absent', response);
   const built = buildRunDelta({
     priorFacts: ctx.priorFacts,
     // Fail-closed on absence, per this member's own documented semantics.
     mayNameLeadingOption: ctx.mayNameLeadingOption === true,
   });
-  if (built.kind !== 'ok') return response;
-  return { ...response, run_delta: built.delta };
+  // The producer's own union, passed through. This caller mints no taxonomy for
+  // the five: re-spelling them here would be a second list free to drift from
+  // the one the producer actually returns.
+  if (built.kind !== 'ok') return disclose('refused', built.reason, response);
+  return disclose('emitted', null, { ...response, run_delta: built.delta });
 }
 
 function stripCeeTrace(response: OlumiResponse): OlumiResponse {
