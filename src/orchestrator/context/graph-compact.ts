@@ -21,6 +21,7 @@ import {
 } from "../../cee/transforms/provenance-display.js";
 import { collectDirectedReachable } from "../../graph/reachability.js";
 import type { ObservedStateStatedRole } from "../../cee/context-integrity/stated-role-vocabulary.js";
+import { mergeInterventionSourceObjects } from "../tools/analysis-ready-helper.js";
 
 // ============================================================================
 // Output Types
@@ -353,12 +354,12 @@ export function projectUncertaintyDriversForContext(
  * Build a human-readable intervention summary for an option node.
  * Format: "sets Label1=0.9, Label2=0.7" (capped at 5 entries).
  *
- * @param interventions - factor_id → numeric value map (from data.interventions)
+ * @param interventions - entries selected by the existing intervention authority
  * @param labelMap - node id → label lookup built from graph nodes
  * @returns summary string, or undefined if no interventions
  */
 function buildInterventionSummary(
-  interventions: Record<string, number>,
+  interventions: Record<string, unknown>,
   labelMap: Map<string, string>,
 ): string | undefined {
   const entries = Object.entries(interventions);
@@ -374,7 +375,23 @@ function buildInterventionSummary(
   const shown = resolved.slice(0, MAX_INTERVENTION_ENTRIES);
   const remaining = resolved.length - shown.length;
 
-  const parts = shown.map(([factorId, value]) => `${labelMap.get(factorId)!}=${value}`);
+  const parts = shown.map(([factorId, entry]) => {
+    // Legacy bare values retain their established representation. Canonical
+    // objects must not stringify as [object Object] or attach native units to
+    // a model-scale value. Carry the stored pair without doing any conversion.
+    if (typeof entry === 'number') return `${labelMap.get(factorId)!}=${entry}`;
+    const value = entry as Record<string, unknown>;
+    const unit = typeof value.unit === 'string' ? value.unit.trim() : '';
+    const native = value.raw_value;
+    const rawScalar = (typeof native === 'number' && Number.isFinite(native)) ||
+      typeof native === 'string' || typeof native === 'boolean';
+    const nativeValue = typeof native === 'number' && Number.isFinite(native) && unit
+      ? `${native} ${unit} (model value ${value.value})`
+      : rawScalar
+        ? `raw value ${JSON.stringify(native)} (model value ${value.value}; ${unit ? `unit ${JSON.stringify(unit)}` : 'unit not established'})`
+        : `model value ${value.value} (native quantity not established)`;
+    return `${labelMap.get(factorId)!}=${nativeValue}`;
+  });
 
   let summary = `sets ${parts.join(', ')}`;
   if (remaining > 0) {
@@ -806,21 +823,18 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         }
       }
 
-      // Intervention summary for option nodes with data.interventions
+      // One summary of the settings the saved option actually carries.
       if (node.kind === 'option') {
         // Structural reachability. ALWAYS emitted on an option (empty included)
         // so absence of the key means "not an option", never "not computed".
         n.reaches = buildOptionReachability(node.id, graph.edges, knownNodeIds);
 
-        const data = anyNode.data as Record<string, unknown> | undefined;
-        if (data && typeof data.interventions === 'object' && data.interventions !== null) {
-          const summary = buildInterventionSummary(
-            data.interventions as Record<string, number>,
-            labelMap,
-          );
-          if (summary) {
-            n.intervention_summary = summary;
-          }
+        const summary = buildInterventionSummary(
+          mergeInterventionSourceObjects(anyNode),
+          labelMap,
+        );
+        if (summary) {
+          n.intervention_summary = summary;
         }
       }
 
