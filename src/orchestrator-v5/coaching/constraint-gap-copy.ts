@@ -98,3 +98,64 @@ export const UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE = ', so it will not be part 
 export function durationNotEvaluatedSentence(span: string): string {
   return `This limit is checked as a single threshold, so the “${span}” in it is recorded as wording and is not part of that check.`;
 }
+
+/**
+ * ⭐⭐ THE SAME CLAIM, ON EVERY LATER TURN'S READBACK — THE THIRD MOMENT.
+ *
+ * The two moments above are both about the turn that WRITES the row. A user who
+ * then asks *"did you add that constraint?"*, *"what changed?"* or *"I can't see
+ * the 7% limit"* is answered by the DETERMINISTIC state-query guard
+ * (`routing/state-query-guard.ts` → `composeRecentChangeAnswer`) at
+ * `llm_calls: 0`, from `ContextPack.recent_changes` — and before this sentence
+ * existed that answer quoted the receipt VERBATIM and said nothing about
+ * evaluability.
+ *
+ * ── MEASURED, AT ROUTE LEVEL, BEFORE THE FIX ──────────────────────────────
+ * Six natural follow-ups on the `44e349fa` shape (a `risk` target recording
+ * nothing), driven through `runTurnExecutor`: ALL SIX answered
+ *
+ *     "From the saved model history: Added constraint: Subscriber churn must be
+ *      at most 7%. If you want to see the other saved model edits, just ask."
+ *
+ * at `llm_calls: 0` — the change CLAIMED, UNQUALIFIED, six times out of six,
+ * while the very same `recent_changes` array carried
+ * `constraint_not_checkable: "target_records_no_value"` on that entry. The write
+ * told the truth; every readback afterwards took it back.
+ *
+ * ── WHY IT IS A THIRD SPELLING AND NOT A REUSE OF `formatConstraintNotCheckable`
+ * That function names the TARGET (`…this limit: <targetLabel> has no number
+ * recorded against it…`). Here the receipt being qualified sits IMMEDIATELY
+ * BEFORE this sentence in the same reply and has already named the limit, so
+ * repeating the label buys nothing — and it would WIDEN what the deterministic
+ * surface emits verbatim. That widening is measured, not hypothetical:
+ * `RecentMutation.summary` is `cap("Added constraint: " + label + " must be …")`
+ * and `RecentMutation.target_label` is `cap(label)`, both at 80 chars, so the
+ * LABEL is truncated inside `summary` while `target_label` carries it whole. On
+ * a 64-character label that is 61 characters of persisted text on screen today
+ * against 64 if this sentence named the target, and the gap grows with the
+ * label. A disclosure must not be the thing that lengthens a verbatim emission.
+ *
+ * So the SUBJECT, the CONSEQUENCE and the REPAIR are the ratified atoms above,
+ * byte-identical; the only new token in the product is the referent word, and it
+ * is a pronoun pointing at the sentence before it rather than a new claim.
+ *
+ * ⚠ THE CONSEQUENCE IS THE **WRITE-TIME** ONE ON PURPOSE. The verdict that
+ * reaches here is derived against the graph AS IT STANDS THIS TURN (see
+ * `context/recent-changes.ts`), so "it will not be part of the analysis" is a
+ * statement about the model the user has right now, and stays true however many
+ * turns have passed. The run_analysis voice's past tense (" It was not part of
+ * the comparison.") would assert a comparison that may never have happened.
+ *
+ * ⚠ THE REPAIR ASK IS REACHABLE FROM HERE, WHICH IS WHY IT IS KEPT. It asks the
+ * user to name the referent and promises to record it; `add_constraint` is a
+ * registered V5 handler reached from an ordinary following turn, and the
+ * write-time site (`add-constraint.ts`) already ships this exact ask. A
+ * disclosure that named no move would be the "truthful about a state, not
+ * executable as an action" defect.
+ */
+export function unmeasuredTargetReadbackSentence(): string {
+  return (
+    `${UNMEASURED_TARGET_LEAD_IN}that limit` +
+    `${UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE}${unmeasuredTargetRepairAsk(1)}`
+  );
+}
