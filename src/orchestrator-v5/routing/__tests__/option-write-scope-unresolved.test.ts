@@ -127,6 +127,54 @@ describe('an option-anchored turn with no resolved identity asks instead of writ
     expect(verdict.verdict).toBe('allow');
   });
 
+  // ── REVIEWER CONTRASTS (REVIEW1512, codex-reviewer, executed on this capture) ──
+  // Each of these was measured WRONG on the first cut and is pinned here so it
+  // cannot regress. They are the reviewer's sentences verbatim, not paraphrases.
+
+  it('REVIEWER 1: "…for the buy option" — matched vocabulary, unresolved identity, still refused', () => {
+    // First cut returned allow/outcome_not_unhonoured: the arm skipped every
+    // detection.matched turn, so mutation vocabulary bought a bypass of the
+    // scope check. The buy option remained unchanged while the baseline moved.
+    const verdict = decideOptionInterventionWrite({
+      message: 'Set Vendor Licensing Cost to £150,000 per year for the buy option.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('scope_unresolved');
+  });
+
+  it('REVIEWER 2: an EXPLICIT model-wide request is a KNOWN target, not an unknown one', () => {
+    // First cut returned scope_unresolved — a false positive. The only global
+    // control was a sentence that never said "options", so it could not
+    // discriminate scope at all.
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Across all options, change Vendor Licensing Cost so the model-wide baseline ' +
+        'is £150,000 per year instead of £120,000.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('allow');
+  });
+
+  it('REVIEWER 1b: the FULL option label RESOLVES, so this arm stands down', () => {
+    // The sharpest half of finding 1: resolveConfigureOptionTarget returns at
+    // clarify.ts:378 on !detection.matched, so the first cut's identity attempt
+    // was a NO-OP and even a full label was called unresolved — a guard agreeing
+    // with itself. Identity is now a real question here, so the existing arms
+    // own this turn rather than this one pre-empting them.
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Set Vendor Licensing Cost to £150,000 per year on Buy Off-the-Shelf Reporting Tool.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).not.toBe('scope_unresolved');
+  });
+
   it('CONTRAST 3: an option-anchored turn that moved NO baseline is untouched', () => {
     const verdict = decideOptionInterventionWrite({
       message: MSG, before: CAPTURE, after: clone(CAPTURE), appliedMutation: true,

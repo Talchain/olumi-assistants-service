@@ -3550,7 +3550,16 @@ export async function dispatchEditGraph(
       "V5 edit_graph — the applied mutation wrote an option's OWN observed_state while that option's effect values did not move; write withheld so the reply cannot confirm a change the analysis will never see (mutation NOT persisted)",
     );
   }
-  if (optionInterventionWriteWithheld || optionOwnValueWithheld || recordedAnswerNotLanded) {
+  if (
+    optionInterventionWriteWithheld ||
+    // Reviewer finding 3 (REVIEW1512): without this, freshness at :3088/:3137 is
+    // derived from the REJECTED post-edit graph and returned to the user beside
+    // "I have not changed the model" — a worse lie than the one this verdict was
+    // added to prevent, because it is staleness claimed off a write we refused.
+    optionScopeUnresolved ||
+    optionOwnValueWithheld ||
+    recordedAnswerNotLanded
+  ) {
     // The graph did NOT change this turn — re-derive the wire freshness against
     // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
     // branches below do, so staleness is never claimed off an unpersisted
@@ -4684,7 +4693,13 @@ export async function dispatchEditGraph(
   // `scenarios.graph`.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
-    : (!successfulAppliedMutation || optionInterventionWriteWithheld || recordedAnswerNotLanded) && graphStrictlyCanonical
+    : (!successfulAppliedMutation ||
+        optionInterventionWriteWithheld ||
+        // Same reviewer finding: a turn that refused the write must still hand
+        // back readiness for the UNCHANGED model, or the user is told nothing
+        // changed and given no readiness at all.
+        optionScopeUnresolved ||
+        recordedAnswerNotLanded) && graphStrictlyCanonical
       ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
       : undefined;
 

@@ -47,6 +47,11 @@ vi.mock('../../build-turn-context.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../build-turn-context.js')>();
   return { ...actual, loadPersistedGraphStrict: vi.fn().mockResolvedValue(null) };
 });
+vi.mock('../../context/freshness.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../context/freshness.js')>();
+  return { ...actual, deriveAnalysisFreshness: vi.fn(actual.deriveAnalysisFreshness) };
+});
+
 vi.mock('../../../utils/telemetry.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/telemetry.js')>();
   return { ...actual, emit: vi.fn() };
@@ -56,6 +61,7 @@ import { dispatchEditGraph } from '../edit-graph-dispatch.js';
 import { handleEditGraph } from '../../../orchestrator/tools/edit-graph.js';
 import { commitDirectAnswer } from '../../commit.js';
 import type { GraphStateIngress } from '../../boundary/request-extensions.js';
+import { deriveAnalysisFreshness } from '../../context/freshness.js';
 
 const CAPTURE = JSON.parse(
   readFileSync(fileURLToPath(new URL('./buy-capture-a3b0548d.json', import.meta.url)), 'utf8'),
@@ -170,6 +176,42 @@ describe('an option-anchored turn with no resolved option: the DISPATCHER acts o
     expect(text).toContain('Buy Off-the-Shelf Reporting Tool');
     // The false success headline does not survive alongside the ask.
     expect(text).not.toContain('Updated Vendor Licensing Cost.');
+  });
+
+  it('REVIEWER FINDING 3: freshness is RE-DERIVED against the unchanged graph', async () => {
+    // The reviewer's sharpest point, and one I had not considered: freshness at
+    // :3088/:3137 is derived from the REJECTED post-edit graph and returned at
+    // :5330. Without the new verdict in the unchanged-state consumers the user
+    // receives "I have not changed the model" beside freshness computed FROM the
+    // change we refused — a worse lie than the one this verdict prevents.
+    //
+    // ⚠ PROVEN BY THE RE-DERIVATION ITSELF, not by `analysis_ready`. MEASURED:
+    // this harness produces no readiness on EITHER arm (the committing contrast
+    // is also undefined), so asserting its presence would measure the fixture
+    // rather than the fix — a control catching a vacuous assertion before it
+    // shipped. The observable fact at this boundary is that the refusal path
+    // derives freshness a SECOND time, against the unchanged frame base.
+    const spy = deriveAnalysisFreshness as unknown as MockedFunction<
+      typeof deriveAnalysisFreshness
+    >;
+
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      appliedResult(baselineMintedGraph(), 'Updated Vendor Licensing Cost'),
+    );
+    spy.mockClear();
+    await dispatch(MSG, 'req-scope-freshness-refused');
+    const refusedCalls = spy.mock.calls.length;
+
+    // CONTRAST in the same run: the committing turn must NOT re-derive, or the
+    // count above proves nothing about the refusal.
+    (handleEditGraph as MockedFunction<typeof handleEditGraph>).mockResolvedValue(
+      appliedResult(baselineMintedGraph(), 'Updated Vendor Licensing Cost'),
+    );
+    spy.mockClear();
+    await dispatch(MODEL_WIDE_MSG, 'req-scope-freshness-committed');
+    const committedCalls = spy.mock.calls.length;
+
+    expect(refusedCalls).toBeGreaterThan(committedCalls);
   });
 
   it('CONTRAST: an EXPLICIT model-wide edit still commits', async () => {

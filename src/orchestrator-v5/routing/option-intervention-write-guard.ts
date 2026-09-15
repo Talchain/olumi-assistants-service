@@ -199,7 +199,6 @@ import {
   detectConfigureOptionIntent,
   projectOptionLabels,
 } from './configure-option-intent.js';
-import { resolveConfigureOptionTarget } from './configure-option-clarify.js';
 
 /** Why the write was allowed to proceed. Every value is today's behaviour. */
 export type OptionInterventionWriteAllowReason =
@@ -577,23 +576,92 @@ function decideUnresolvedOptionScope(
   before: GraphV3T,
   after: GraphV3T,
 ): OptionInterventionWriteVerdict | null {
-  const detection = detectConfigureOptionIntent(message, projectOptionLabels(before.nodes));
-  if (detection.matched || !detection.optionAnchored) return null;
+  const optionLabels = projectOptionLabels(before.nodes);
+  const detection = detectConfigureOptionIntent(message, optionLabels);
 
-  // If an identity DOES resolve, this is not the unresolved case and the
-  // existing arms own it. Asking here would pre-empt a verdict they can give.
-  const target = resolveConfigureOptionTarget({ message, detection, graph: before });
-  if (target.matched) return null;
+  // ⭐ REVIEWER FINDING 1 (REVIEW1512), and it is the load-bearing correction.
+  //
+  // This arm previously returned early on `detection.matched`, so the SAME wrong
+  // baseline mutation was allowed for "Set Vendor Licensing Cost to £150,000 per
+  // year for the buy option." — matched vocabulary, unresolved identity, write
+  // permitted. The gate is about SCOPE, and scope does not depend on whether the
+  // mutation vocabulary happened to classify. So `matched` is no longer consulted.
+  if (!detection.optionAnchored) return null;
+
+  // ⭐ REVIEWER FINDING 2. An EXPLICITLY model-wide request is not an unknown
+  // target — it is a known one. "Across all options, change Vendor Licensing Cost
+  // so the model-wide baseline is £150,000" was newly REFUSED by the first cut,
+  // because the only global control was a sentence that never said "options".
+  //
+  // ⚠ This is a CLOSED set of universal quantifiers over the option word, not a
+  // mutation vocabulary: it cannot grow with phrasings the way an intent
+  // classifier does, which is the class this estate has paid four oscillation
+  // rounds for (trap 22f). It says "the user quantified over ALL options", and
+  // nothing about what they want done.
+  if (UNIVERSAL_OPTION_SCOPE.test(message)) return null;
+
+  // ⭐ IDENTITY, RESOLVED INDEPENDENTLY OF THE VOCABULARY GATE.
+  //
+  // The first cut called `resolveConfigureOptionTarget`, which returns at
+  // `configure-option-clarify.ts:378` whenever `!detection.matched` — so on this
+  // arm it could only ever answer "not_configure_intent", and EVERY turn reaching
+  // here was declared unresolved by construction, a full option label included.
+  // A guard agreeing with itself. The maximal-label rule is applied directly
+  // instead, on the same normalisation, so identity is a real question here.
+  if (resolvedOptionLabel(message, optionLabels) !== null) return null;
 
   if (anyInterventionWriteLanded(before, after)) return null;
   const baselineNodeIds = baselineWritesLanded(before, after);
   if (baselineNodeIds.length === 0) return null;
 
-  return {
-    verdict: 'scope_unresolved',
-    baselineNodeIds,
-    optionLabels: projectOptionLabels(before.nodes),
-  };
+  return { verdict: 'scope_unresolved', baselineNodeIds, optionLabels };
+}
+
+/**
+ * A universal quantifier over the option word: "all options", "every option",
+ * "each option", "across options", "all of the options".
+ *
+ * Closed by construction — it enumerates QUANTIFIERS, never mutation verbs or
+ * value phrasings, so it does not reopen the intent-classifier problem. It marks
+ * a request whose scope the user stated explicitly.
+ */
+const UNIVERSAL_OPTION_SCOPE =
+  /\b(?:all|every|each|both)\s+(?:of\s+(?:the|these|those)\s+)?options?\b|\bacross\s+(?:all\s+|the\s+)?options?\b|\bmodel[-\s]?wide\b|\bevery\s+option\b/i;
+
+/**
+ * Which option does this message name, by its FULL label?
+ *
+ * Deliberately the same rule `resolveConfigureOptionTarget` applies — normalise,
+ * require a contained phrase, then keep only MAXIMAL matches so a label nested
+ * inside a longer one is one reading rather than two candidates. Duplicated here
+ * ONLY because that function refuses to run without a matched detection; the
+ * rule itself is not re-invented, and if it ever diverges the union test below
+ * is what should catch it.
+ *
+ * Returns null when nothing matches OR when two maximal labels match — an
+ * ambiguity is not an identity.
+ */
+function resolvedOptionLabel(message: string, optionLabels: readonly string[]): string | null {
+  const normalisedMessage = ` ${normaliseOptionLabel(message)} `;
+  const matches: Array<{ label: string; normalised: string }> = [];
+  for (const label of optionLabels) {
+    const normalised = normaliseOptionLabel(label);
+    if (normalised.length < 3) continue;
+    if (!normalisedMessage.includes(` ${normalised} `) && !normalisedMessage.includes(normalised)) {
+      continue;
+    }
+    if (matches.some((m) => m.normalised === normalised)) continue;
+    matches.push({ label, normalised });
+  }
+  if (matches.length === 0) return null;
+  const maximal = matches.filter(
+    (m) => !matches.some((other) => other !== m && other.normalised.includes(m.normalised)),
+  );
+  return maximal.length === 1 ? maximal[0]!.label : null;
+}
+
+function normaliseOptionLabel(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 /**
