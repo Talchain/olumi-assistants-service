@@ -2141,10 +2141,14 @@ export async function draftGraphWithAnthropic(
             { optionEffectsUnreliable },
           );
           completionMeta.option_effect_refs_unreliable = optionEffectsUnreliable;
-          const notWorse = shouldKeepCompletion(completionAsk, askAfter, {
-            before: activeProjection,
-            after: reprojected,
-          });
+          // ⭐ THE SAME VIOLATIONS OBJECT THE TELEMETRY REPORTS — never a second
+          // derivation. See the note on `shouldKeepCompletion`'s `opts`.
+          const notWorse = shouldKeepCompletion(
+            completionAsk,
+            askAfter,
+            { before: activeProjection, after: reprojected },
+            { optionEffectsUnreliable, preservationViolations },
+          );
           completionMeta.ask_items_after = askAfter.items.length;
           completionMeta.blocking_before = blockingBefore;
           completionMeta.blocking_after = blockingAfter;

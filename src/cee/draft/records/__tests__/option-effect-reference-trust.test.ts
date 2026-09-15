@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { completionRegressesProtectedContent } from "../completion.js";
+import { completionRegressesProtectedContent, shouldKeepCompletion } from "../completion.js";
 import {
   countInvalidOptionEffectSources,
   optionEffectReferencesUnreliable,
@@ -202,5 +202,69 @@ describe("D — a user-grounded magnitude is never exempted", () => {
       readFileSync(join(FIXTURES, "live-option-effect-refs-off-by-one-2026-09-15.json"), "utf8"),
     );
     expect(optionEffectReferencesUnreliable(capture)).toBe(true);
+  });
+});
+
+/**
+ * ⭐⭐⭐ THE PRODUCTION KEEP DECISION — the test this kit was MISSING, and its
+ * absence made the whole repair inert.
+ *
+ * P1 from independent review (Codex, 15 Sep). `anthropic.ts` passed the trust
+ * exemption into `completionRegressesProtectedContent` for TELEMETRY, and
+ * `shouldKeepCompletion` — the function that actually decides — re-ran the same
+ * guard WITHOUT it. `violationsWithExemption` read `[]` while the production
+ * decision stayed `false`, so the completion carrying the correct magnitudes was
+ * discarded exactly as before the fix.
+ *
+ * ⛔ WHY FOUR MUTANTS DID NOT CATCH IT. Every one targeted the GUARD. A guard
+ * can be perfectly sensitive and still be wired to nothing — the kit measured
+ * the component and never the decision. So this block asserts through
+ * `shouldKeepCompletion` itself, and nothing else in this file does.
+ */
+describe("E — the exemption reaches the decision, not just the telemetry", () => {
+  const ask = { items: [], baseClaimIndex: 0 };
+  const before = optionNode({ price: 0.59 });
+  const after = optionNode({ price: 0.49 });
+
+  it("E1: the production keep decision KEEPS the repair when references are suspect", () => {
+    expect(
+      shouldKeepCompletion(ask, ask, { before, after }, { optionEffectsUnreliable: true }),
+    ).toBe(true);
+  });
+
+  it("E2: control — with credible references the same completion is still discarded", () => {
+    expect(
+      shouldKeepCompletion(ask, ask, { before, after }, { optionEffectsUnreliable: false }),
+    ).toBe(false);
+  });
+
+  it("E3: default (no opts) is unchanged — discarded, fail-closed", () => {
+    expect(shouldKeepCompletion(ask, ask, { before, after })).toBe(false);
+  });
+
+  it("E4: caller-supplied violations are REUSED, not re-derived — the two cannot drift", () => {
+    // A caller that already derived `[]` gets `true` even with the flag absent,
+    // because the single derivation is the authority. This is what pins the
+    // "derive once and reuse" property rather than re-threading a flag twice.
+    expect(
+      shouldKeepCompletion(ask, ask, { before, after }, { preservationViolations: [] }),
+    ).toBe(true);
+    expect(
+      shouldKeepCompletion(ask, ask, { before, after }, { preservationViolations: ["x"] }),
+    ).toBe(false);
+  });
+
+  it("E5: a user-grounded magnitude still blocks the keep, even when suspect", () => {
+    expect(
+      shouldKeepCompletion(
+        ask,
+        ask,
+        {
+          before: optionNode({ price: 0.49 }, "option", "brief_extraction"),
+          after: optionNode({ price: 0.59 }, "option", "brief_extraction"),
+        },
+        { optionEffectsUnreliable: true },
+      ),
+    ).toBe(false);
   });
 });

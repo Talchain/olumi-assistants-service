@@ -613,13 +613,40 @@ export function shouldKeepCompletion(
   before: CompletionAsk,
   after: CompletionAsk,
   projections: { readonly before: RecordProjection; readonly after: RecordProjection },
+  /**
+   * ⭐⭐ ONE PRESERVATION DERIVATION, REUSED — NOT A SECOND ONE THAT CAN DRIFT.
+   *
+   * P1 found by independent review (Codex, 15 Sep) on the first version of this
+   * change, and it made the whole repair INERT: the adapter computed
+   * `completionRegressesProtectedContent(...)` WITH the trust exemption for its
+   * telemetry, and this function then re-ran the SAME guard WITHOUT it for the
+   * decision that actually matters. So `violationsWithExemption` read `[]` while
+   * `shouldKeepCompletion` still returned false, and the completion carrying the
+   * correct magnitudes was discarded exactly as before.
+   *
+   * Two call sites answering one question is trap 12. The remedy is not to
+   * thread the flag twice and hope they stay in step: the caller passes the
+   * violations it ALREADY derived, and this function reuses them. A future
+   * caller that passes nothing still gets a correct, conservative answer,
+   * because the fallback derives with the same options.
+   */
+  opts?: {
+    readonly optionEffectsUnreliable?: boolean;
+    /** Already derived by the caller — reused verbatim so the two cannot disagree. */
+    readonly preservationViolations?: readonly string[];
+  },
 ): boolean {
   const blockingBefore = new Set(before.items.filter(isBlockingAskItem).map(askItemIdentity));
   for (const item of after.items) {
     if (!isBlockingAskItem(item)) continue;
     if (!blockingBefore.has(askItemIdentity(item))) return false;
   }
-  return completionRegressesProtectedContent(projections.before, projections.after).length === 0;
+  const preservationViolations =
+    opts?.preservationViolations
+    ?? completionRegressesProtectedContent(projections.before, projections.after, {
+      optionEffectsUnreliable: opts?.optionEffectsUnreliable === true,
+    });
+  return preservationViolations.length === 0;
 }
 
 /**
