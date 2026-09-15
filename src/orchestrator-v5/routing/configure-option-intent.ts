@@ -254,6 +254,43 @@ function classifyConfigureOptionTrigger(
 }
 
 /**
+ * ⭐ DOES THIS MESSAGE ANCHOR ON AN OPTION AT ALL — the word "option(s)", or a
+ * full option label — INDEPENDENTLY of whether the effect/value vocabulary
+ * classifies?
+ *
+ * Exported because a second consumer needs exactly this question and must not
+ * re-spell it (trap 12). MEASURED on deployed `a3b0548d`: "Change the buy option
+ * so the vendor cost is £150,000 per year…" anchors, yet
+ * `classifyConfigureOptionTrigger` returns null, so the whole detection reads
+ * "not about configuring an option" — and the write guard, gating on that,
+ * permitted a model-wide baseline write that PERSISTED.
+ *
+ * ⚠ AN ANCHOR IS NOT AN IDENTITY. It says the sentence mentions an option and
+ * nothing about WHICH. Where identity has no answer the product must ask.
+ *
+ * ⚠ A FUNCTION, not a field on {@link ConfigureOptionIntentDetection}. Hanging it
+ * on the `matched: true` arm broke 16 assertions across four specs that compare
+ * the whole verdict with `toEqual` — CI caught what focused local runs could not.
+ * A widely-compared union is the wrong place to answer a second question.
+ */
+export function messageAnchorsOnOption(
+  message: string,
+  optionLabels: readonly string[],
+): boolean {
+  if (typeof message !== 'string') return false;
+  const normalised = message.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (normalised.length === 0) return false;
+  if (OPTION_WORD.test(normalised)) return true;
+  const padded = ` ${normalised} `;
+  for (const raw of optionLabels) {
+    if (typeof raw !== 'string') continue;
+    const label = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (label.length >= 3 && containsPhrase(padded, label)) return true;
+  }
+  return false;
+}
+
+/**
  * Detect configure-option intent. `optionLabels` are the CURRENT graph's
  * option labels; an empty list disables the label anchor but keeps the
  * chip-prefix and option-word anchors.
@@ -284,19 +321,7 @@ export function detectConfigureOptionIntent(
     return NO_MATCH;
   }
 
-  // Option anchor: the word "option(s)", or a full option label.
-  let anchored = OPTION_WORD.test(normalised);
-  if (!anchored) {
-    const padded = ` ${normalised} `;
-    for (const raw of optionLabels) {
-      if (typeof raw !== 'string') continue;
-      const label = raw.toLowerCase().replace(/\s+/g, ' ').trim();
-      if (label.length >= 3 && containsPhrase(padded, label)) {
-        anchored = true;
-        break;
-      }
-    }
-  }
+  const anchored = messageAnchorsOnOption(normalised, optionLabels);
 
   const trigger = classifyConfigureOptionTrigger(normalised, anchored);
   if (trigger !== null) return { matched: true, trigger };
