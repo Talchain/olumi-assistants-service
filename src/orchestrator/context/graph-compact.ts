@@ -718,9 +718,8 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         // table, so emitting it would just burn LLM context tokens.
         const et = obsState.extractionType;
         const authored = valueSourceAuthorship(obsState.source);
-        // ⭐⭐ A LIMIT IS NOT A LEVEL THE USER STATED — the role outranks both
-        // authorship routes below, and this is where it has to, because this is
-        // the object the MODEL reads its own graph from.
+        // ⭐⭐ A LIMIT IS NOT A LEVEL THE USER STATED — AND SAYING SO IS THE
+        // ROLE'S JOB, NOT THE AUTHORSHIP FIELD'S.
         //
         // MEASURED on live staging 14 Sep 2026. A brief saying *"keeping
         // monthly churn under 4%"* put `{ value: 0.04, source:
@@ -728,31 +727,47 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         // `brief_extraction` maps to `null` in `SOURCE_AUTHORSHIP` (the table's
         // own note: the `extractionType` mapping is the finer instrument), so
         // the `authored` route declines and the `explicit` arm below fires:
-        // **`source: 'user' / provenance: 'from_brief'`**. The assistant is
-        // therefore told the USER stated that churn IS 4% — and it will say so
-        // back to them, about a number they gave as a ceiling.
+        // **`source: 'user' / provenance: 'from_brief'`**. The model is
+        // therefore told the USER stated that churn IS 4% — about a number they
+        // gave as a ceiling. `stated_role: 'constraint'`, set here and carried
+        // into BOTH prompt packs, is what corrects that.
         //
-        // WHAT THE ROLE CHANGES, AND WHAT IT DELIBERATELY DOES NOT. `value`,
-        // `raw_value`, `unit` and `cap` are untouched: the magnitude is real,
-        // it is the user's, and the compute reads it. What is withdrawn is the
-        // AUTHORSHIP of the LEVEL — CEE, not the user, decided to stand the
-        // node at its own limit — so this lands on the same rung the
-        // `inferred` arm already uses (`assumption` / `ai_inferred`), which is
-        // the truthful one: an assumption CEE made with the user's own
-        // evidence behind it. `stated_role` rides alongside so the positive
-        // fact survives too — the user DID state 4%, as a limit — rather than
-        // the model being left to infer a bare estimate from a demotion.
+        // ⛔⛔ THIS BRANCH USED TO REWRITE AUTHORSHIP TOO (`source:
+        // 'assumption'`, `provenance: 'ai_inferred'`) AND THAT IS WITHDRAWN. An
+        // independent review (Codex) established the case it cannot survive:
+        // *"monthly churn must stay below 4%, and that is where it sits today"*
+        // states ONE magnitude in TWO true roles — a limit AND an observation.
+        // Rewriting authorship there withdraws a claim the user genuinely made.
+        // Measured at the previous head, 3 of 4 such phrasings demoted a real
+        // observation.
         //
-        // This is the same shape as `schema-v3.ts`'s ROADMAP 2.972 withdrawal
-        // (a value-free node cannot have come from the brief) applied one
-        // question along: a node whose only brief information is a BOUND
-        // carries no brief information about its LEVEL.
+        // ⭐ AND THE REASON NO BETTER RULE FIXES IT, which is why this is a
+        // withdrawal rather than another attempt: the demotion is justified
+        // only where the user stated NO observation — and **that absence cannot
+        // be established.** The two sentences above are identical in graph,
+        // quote extent, occurrence count and `operator`; only the English
+        // differs. So the evidence the destructive act requires cannot be
+        // produced, and the act is therefore unjustified IN PRINCIPLE, not
+        // merely unimplemented. A future session arriving with a better regex
+        // has not found the missing evidence — it has found a better guess.
+        //
+        // ⭐ WHAT REPLACES IT: the two questions are named apart (trap 21). The
+        // ROLE of a quantity and the AUTHORSHIP of a quantity were conflated in
+        // one field; `stated_role` answers the first and is additive and true,
+        // and the authorship chain below answers the second, undisturbed. The
+        // model is told *"this is a constraint"* without us lying about who
+        // supplied the number. `value`, `raw_value`, `unit` and `cap` were
+        // always untouched and remain so.
         const statedRole = obsState.stated_role;
         if (statedRole === 'constraint') {
+          // ⚠ ADDITIVE, AND DELIBERATELY OUTSIDE THE CHAIN BELOW. As an
+          // `if/else if` arm this consumed the authorship decision, so a
+          // stamped node that fell through to it received NO `source` and NO
+          // `provenance` at all once the two rewrites were removed. Hoisted, so
+          // the role is added and the authorship chain still runs to a verdict.
           n.stated_role = 'constraint';
-          n.source = 'assumption';
-          n.provenance = 'ai_inferred';
-        } else if (authored !== undefined) {
+        }
+        if (authored !== undefined) {
           n.source = authored.source;
           n.provenance = authored.provenance;
         } else if (et === 'explicit') {

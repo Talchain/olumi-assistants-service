@@ -603,27 +603,76 @@ describe("the consumer honours it — the model's own view of the graph", () => 
 
   const OBSERVED_AS_SERVED = { value: 0.04, unit: "%", source: "brief_extraction", extractionType: "explicit" };
 
-  it("stops telling the model the user stated this level", () => {
+  it("tells the model the magnitude is a limit — in the projection the model reads", () => {
+    // ⭐ THE LOAD-BEARING ASSERTION OF THE WHOLE CHANGE. The role must reach the
+    // MODEL-FACING object, not merely the stored graph: this is what makes "a
+    // limit is not an observation" true for the assistant rather than for a
+    // field nobody reads.
     const compact = compactGraph(nodeWith({ ...OBSERVED_AS_SERVED, stated_role: "constraint" }));
     const node = compact.nodes.find((n) => n.id === "n_churn")!;
     expect(node.stated_role).toBe("constraint");
-    expect(node.source).toBe("assumption");
-    expect(node.provenance).toBe("ai_inferred");
     // The magnitude itself is the user's and is untouched.
     expect(node.value).toBe(0.04);
     expect(node.unit).toBe("%");
   });
 
-  it("DISCRIMINATING TWIN — the same node without the stamp still reads as the user's own", () => {
-    // Without this arm the arm above proves only that the compact is sensitive
-    // to SOMETHING. The pair proves it is sensitive to the ROLE, on this node,
-    // and that nothing else in the payload moved authorship.
-    const compact = compactGraph(nodeWith(OBSERVED_AS_SERVED));
+  it("⛔ WITHDRAWN: the role no longer rewrites who supplied the number", () => {
+    // ⛔ THIS ASSERTED THE OPPOSITE UNTIL THIS COMMIT (`source: 'assumption'`,
+    // `provenance: 'ai_inferred'`). An independent review established the case
+    // that rewrite cannot survive: *"monthly churn must stay below 4%, and that
+    // is where it sits today"* states ONE magnitude in TWO true roles, and
+    // demoting there withdraws a claim the user genuinely made.
+    //
+    // The demotion is justified only where the user stated NO observation, and
+    // THAT ABSENCE CANNOT BE ESTABLISHED — the sentence above and the honest
+    // limit-only one are identical in graph, quote extent, occurrence count and
+    // `operator`, differing only in English. So the evidence the destructive
+    // act requires cannot be produced, and the act is unjustified in principle
+    // rather than merely unimplemented.
+    //
+    // This assertion exists so that re-adding the demotion REDs here, and so a
+    // future session must answer the evidence argument rather than arrive with
+    // a better regex.
+    const compact = compactGraph(nodeWith({ ...OBSERVED_AS_SERVED, stated_role: "constraint" }));
     const node = compact.nodes.find((n) => n.id === "n_churn")!;
-    expect(node.stated_role).toBeUndefined();
     expect(node.source).toBe("user");
     expect(node.provenance).toBe("from_brief");
-    expect(node.value).toBe(0.04);
+  });
+
+  it("the authorship chain still runs to a verdict for a stamped node", () => {
+    // ⚠ NOT A DUPLICATE OF THE ARM ABOVE, AND IT CAUGHT A REAL DEFECT. The
+    // withdrawn rewrite was an `if/else if` ARM, so simply deleting its two
+    // lines left a stamped node falling into a branch that assigned NOTHING —
+    // the role would have survived while `source` and `provenance` vanished
+    // entirely. Asserting a value is not the same as asserting the field is
+    // present, so both are asserted here.
+    const compact = compactGraph(nodeWith({ ...OBSERVED_AS_SERVED, stated_role: "constraint" }));
+    const node = compact.nodes.find((n) => n.id === "n_churn")! as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(node, "source")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(node, "provenance")).toBe(true);
+    expect(node.source).not.toBeUndefined();
+    expect(node.provenance).not.toBeUndefined();
+  });
+
+  it("DISCRIMINATING TWIN — an unstamped node is projected identically but for the role", () => {
+    // The pair now proves the stamp changes the ROLE and NOTHING ELSE. Before
+    // the withdrawal this twin discriminated authorship; now the whole point is
+    // that authorship does NOT move, so the twin must show the two projections
+    // differing in exactly one key.
+    const stamped = compactGraph(nodeWith({ ...OBSERVED_AS_SERVED, stated_role: "constraint" }))
+      .nodes.find((n) => n.id === "n_churn")! as Record<string, unknown>;
+    const plain = compactGraph(nodeWith(OBSERVED_AS_SERVED))
+      .nodes.find((n) => n.id === "n_churn")! as Record<string, unknown>;
+
+    expect(plain.stated_role).toBeUndefined();
+    expect(plain.source).toBe("user");
+    expect(plain.provenance).toBe("from_brief");
+
+    const differing = new Set<string>();
+    for (const k of new Set([...Object.keys(stamped), ...Object.keys(plain)])) {
+      if (JSON.stringify(stamped[k]) !== JSON.stringify(plain[k])) differing.add(k);
+    }
+    expect([...differing]).toEqual(["stated_role"]);
   });
 
   // ── the EDIT pack is a SECOND consumer, and it was dark ──────────────────
