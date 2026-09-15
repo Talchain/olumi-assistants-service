@@ -12086,7 +12086,15 @@ export async function runTurnExecutor(
       // template copy that is already gated at its own producer, and running
       // this over it would risk replacing an honest receipt.
       let confirmationForCompose = confirmationText;
-      if (isExplanationHandler && !mayNameLeadingOptionForRun) {
+      // Structural coaching does not explain a computed result. Preserve its
+      // useful answer without appending result-only constraint repair steps.
+      // An unsupported leader claim is still suppressed on EVERY explanation
+      // handler, using the projector's own predicate. Result explanations keep
+      // both the replacement and disclosure branches unchanged.
+      const needsWithheldExplanationProjection =
+        proposedHandlerId !== 'explain_from_structure' ||
+        textAssertsLeadingOption(confirmationText);
+      if (isExplanationHandler && !mayNameLeadingOptionForRun && needsWithheldExplanationProjection) {
         // Read the STATE off the SAME fact the permission came from, via the
         // SAME canonical selector — so the sentence and the permission describe
         // one analysis. Labels come from the persisted `goal_constraints`, the

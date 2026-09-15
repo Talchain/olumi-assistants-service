@@ -255,7 +255,10 @@ vi.mock('../routing/route-with-tool-use.js', async () => {
  * `chip_action_explain_results` absent from `suggested_actions` exactly on
  * those bodies.
  */
-function routedExplainResults(answerText: string) {
+function routedExplainResults(
+  answerText: string,
+  handlerId: 'explain_results' | 'explain_from_structure' = 'explain_results',
+) {
   return {
     type: 'tool_call' as const,
     orientationText: '',
@@ -271,7 +274,7 @@ function routedExplainResults(answerText: string) {
     proposal: {
       intent_class: 'execute' as const,
       action: {
-        handler_id: 'explain_results',
+        handler_id: handlerId,
         entity: {
           id: 'goal_growth',
           kind: 'goal' as const,
@@ -281,6 +284,9 @@ function routedExplainResults(answerText: string) {
         parameters: [],
         cited_context_fields: [],
         explanation: { answer_text: answerText },
+        ...(handlerId === 'explain_from_structure'
+          ? { structure_query: { kind: 'general' as const } }
+          : {}),
       },
     },
   };
@@ -295,7 +301,10 @@ interface WireTurn {
   readonly blocks: Array<Record<string, any>>;
 }
 
-async function rerunTurn(app: FastifyInstance): Promise<WireTurn> {
+async function rerunTurn(
+  app: FastifyInstance,
+  message = 'Run the analysis',
+): Promise<WireTurn> {
   const res = await app.inject({
     method: 'POST',
     url: '/orchestrate/v2/turn',
@@ -304,7 +313,7 @@ async function rerunTurn(app: FastifyInstance): Promise<WireTurn> {
       turn_id: randomUUID(),
       scenario_id: SCENARIO_ID,
       stage: 'analyse',
-      message: 'Run the analysis',
+      message,
       turn_class: 'decide',
       source: 'composer',
       graph_state: READY_GRAPH,
@@ -464,6 +473,44 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
         // the least.
         const occurrences = turn.assistantText.split('could not be checked').length - 1;
         expect(occurrences, 'the disclosure was appended to an answer that already had it').toBe(1);
+      });
+    });
+
+    describe('structural coaching is not a request to explain analysis results', () => {
+      beforeEach(() => vi.stubEnv('CEE_DIAGNOSTIC_TRACE_ENABLED', 'true'));
+      afterEach(() => vi.unstubAllEnvs());
+
+      const STRUCTURE_QUESTION =
+        'What does each option actually change in my current model, and what should I clarify next? ' +
+        "Don't change anything or run an analysis.";
+      const STRUCTURE_ANSWER =
+        'Hire Marketing Manager changes capacity while Hold retains the baseline. ' +
+        'Both connect to customer growth. Clarify what capacity represents before deciding how to estimate it.';
+
+      it.each([STRUCTURE_QUESTION, 'Explain how the alternatives connect to customer growth.'])(
+        'keeps structural advice without an unrelated constraint repair: %s', async (question) => {
+        routeWithToolUseMock.mockResolvedValue(
+          routedExplainResults(STRUCTURE_ANSWER, 'explain_from_structure'),
+        );
+        const turn = await rerunTurn(app, question);
+        expect(turn.status).toBe(200);
+        expect(routeWithToolUseMock).toHaveBeenCalledOnce();
+        expect(turn.assistantText.replace(/\s+/g, ' ').trim()).toBe(STRUCTURE_ANSWER);
+        expect(turn.assistantText).not.toContain('Tell me the limit');
+        expect(turn.assistantText).not.toContain('run the analysis again');
+        expect(JSON.parse(turn.raw)._diagnostic_trace.claim_safety.may_name_leading_option).toBe(false);
+      });
+
+      it('still suppresses an unsupported recommendation inside structural coaching', async () => {
+        routeWithToolUseMock.mockResolvedValue(
+          routedExplainResults(SONNET_LEADER_ANSWER, 'explain_from_structure'),
+        );
+        const turn = await rerunTurn(app, STRUCTURE_QUESTION);
+        expect(turn.status).toBe(200);
+        expect(turn.assistantText).not.toContain('comes out ahead');
+        expect(turn.assistantText).not.toContain('leading in 72%');
+        expect(turn.assistantText).toContain('could not be checked');
+        expect(findLeaderClaims(JSON.parse(turn.raw)).filter(h => h.path === 'assistant_text')).toEqual([]);
       });
     });
 
