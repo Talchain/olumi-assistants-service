@@ -496,7 +496,9 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
       const { status, body } = await postTurn(app, 'Why is Capacity in the model? Please suggest a sensible value.');
       expect(status).toBe(200);
       expect(routeWithToolUseMock).toHaveBeenCalledTimes(1);
-      expect(body.assistant_text).toBe(answer);
+      // The ordinary answer formatter may insert paragraph breaks; it must
+      // preserve every word of the substantive advice.
+      expect(body.assistant_text.replace(/\s+/g, ' ')).toBe(answer);
       expect(permissionOnTheWire(body)).toBe(false);
       expect(eventsNamed(TelemetryEvents.V5StateQueryGuard).some((event) => event.data.matched === false)).toBe(true);
     });
