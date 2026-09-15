@@ -2241,6 +2241,20 @@ export async function runTurnExecutor(
   // opt out. `finalizeRun` classifies `'functional'` iff this captured text (or
   // a failure response) survives to the final text; everything else is
   // `'substantive'`. See TurnExecutorRunResult.answerKind + the route egress.
+  // ⭐ THE ANALYSIS-ELECTION OFFER (15 Sep 2026). Armed at ONE place — the
+  // analysis-election gate's demotion arm, ~4.7k lines below — and consumed at
+  // ONE place, the converse compose branch that owns the synthesised demotion
+  // turn. Hoisted because those two sites sit in the same function body but
+  // thousands of lines apart, and `routingResult` (which is try-scoped and
+  // reassigned by the demotion itself) cannot carry it.
+  //
+  // It is a CHIP, not a pending action, and that is deliberate: `commit.ts`
+  // derives exactly one `run_analysis` pending from a rendered `run_analysis`
+  // chip (the atomic-emit contract), so arming the chip arms the pending and
+  // the "persisted pending ⟹ rendered chip" invariant cannot be broken by
+  // this path. Arming a pending directly would have created the orphan that
+  // invariant exists to forbid.
+  let analysisElectionOfferChip: SuggestedAction | undefined;
   let functionalAnswerText: string | undefined;
 
   // ROADMAP 1.132 (F1) — the SINGLE capture chokepoint for direct-answer
@@ -8958,12 +8972,34 @@ export async function runTurnExecutor(
               handler_id: GATED_ANALYSIS_HANDLER_ID,
               outcome: electionOutcome.kind,
               reason: electionOutcome.reason,
+              // Which of the two demotion arms ran. Without this the offer arm
+              // and the refusal arm are indistinguishable in telemetry, and a
+              // silently-unarmed offer would look like a clean refusal.
+              offered:
+                electionOutcome.kind === 'demoted' && electionOutcome.offer !== undefined,
             });
           }
           if (
             electionOutcome.kind === 'demoted' &&
             !isBoundedNonMutationAnalyticalRequest(payload.message)
           ) {
+            // ⭐ ARM THE OFFER. Present iff the gate judged this a PHRASING
+            // MISS rather than an explicit refusal ("Don't run it." arms
+            // nothing and is answered with the acknowledgement copy). The chip
+            // is prepended to the converse turn's chips below, and the commit
+            // derives the matching `run_analysis` pending from it, so a bare
+            // "yes" on the NEXT turn resumes through `tryShortConfirmResume`.
+            //
+            // The gate stays MONOTONE: this offers an analysis, it never runs
+            // one. Nothing computes until the user consents on a later turn.
+            if (electionOutcome.offer !== undefined) {
+              analysisElectionOfferChip = {
+                id: 'chip_action_analysis_election_offer',
+                label: 'Run analysis',
+                message: 'Run the analysis.',
+                action_type: 'run_analysis',
+              };
+            }
             routingResult = {
               type: 'tool_call',
               proposal: {
@@ -12641,10 +12677,24 @@ export async function runTurnExecutor(
         sanitised.output,
         converseComposedChips,
       );
+      // ⭐ THE ANALYSIS-ELECTION OFFER, rendered. Prepended so a chip budget
+      // that truncates can never be what silently removes the product's own
+      // question-and-answer pair, and suppressed when the turn already carries
+      // a `run_analysis` chip — two identical offers is a worse surface than
+      // one, and either chip derives the same pending.
+      //
+      // Applied AFTER the coaching output guard on purpose: if that guard
+      // degraded the model's prose to recovery copy, the offer is still the
+      // honest next step and must survive the degrade.
+      const converseChipsWithOffer =
+        analysisElectionOfferChip !== undefined &&
+        !converseGuarded.suggested_actions.some((c) => c.action_type === 'run_analysis')
+          ? [analysisElectionOfferChip, ...converseGuarded.suggested_actions]
+          : converseGuarded.suggested_actions;
       composedOk = composeAnswer({
         assistant_text: converseGuarded.assistant_text,
         stage: context.stage,
-        suggested_actions: converseGuarded.suggested_actions,
+        suggested_actions: converseChipsWithOffer,
         answerKind: 'substantive',
         // Same rationale as the coach branch above — one helper, one rule, so
         // the two substantive branches cannot drift apart about when a prose

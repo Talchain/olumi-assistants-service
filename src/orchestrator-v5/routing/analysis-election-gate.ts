@@ -152,6 +152,35 @@
  * `__tests__/analysis-election-gate.test.ts`, together with every
  * run-analysis chip message the product emits anywhere in `src/`.
  *
+ * ⭐⭐ AMENDED 15 Sep 2026 — THE DEMOTION IS NOW AN ASK, NOT A REFUSAL.
+ * Everything above describes the gate as shipped in Aug 2026 and is still an
+ * accurate account of the ADMISSION rule, which is UNCHANGED. What changed is
+ * the PAYOFF, which is what the code's own note below already prescribed.
+ *
+ * MEASURED at the serving tip 07da2c0b, one run with its contrast control
+ * inside it: thirteen ordinary English ways of asking for the numbers ("ok
+ * lets see the numbers", "show me the results", "so which one wins?", "go on
+ * then", "crunch it", …) were demoted 13/13, while five literal commands
+ * ("Run the analysis now.", "Rerun.", "Analyse it.", …) were admitted 5/5.
+ * Target 0, contrast 5 — the predicate discriminates exactly as designed, and
+ * the ordinary sentences were being answered with a sentence that TEACHES THE
+ * USER OUR VOCABULARY instead of asking them a question.
+ *
+ * ⚠ THE FIX IS NOT A WIDER VERB LIST, and that round is banned by the sibling
+ * predicate's own ruling in `analytical-intent.ts` (four measured oscillation
+ * rounds; trap 22f's exit is to ASK the user, not to widen again). The
+ * admission predicate, the negation veto, the interrogative veto and the
+ * verb-position allowlist are all untouched by this change.
+ *
+ * WHAT CHANGED, and only this: a demotion that is NOT an explicit refusal now
+ * carries {@link ANALYSIS_ELECTION_DEMOTION_TEXT} as a QUESTION plus an
+ * `offer` the caller arms as a chip, from which the atomic-emit contract
+ * derives a `run_analysis` pending — so a bare "yes" next turn resumes it via
+ * `tryShortConfirmResume`, path 4 of the table above, already SANCTIONED. An
+ * explicit refusal takes {@link ANALYSIS_ELECTION_REFUSAL_ACK_TEXT} and is
+ * offered nothing. ONE authority still decides: the LLM election is the intent
+ * signal, and the gate now converts it into consent rather than discarding it.
+ *
  * ─────────────────────────────────────────────────────────────────────────
  * REJECTED ALTERNATIVE, recorded so it is not re-proposed
  * ─────────────────────────────────────────────────────────────────────────
@@ -164,7 +193,10 @@
  * it is trap 22b's shape — closing one direction by opening the other.
  */
 
-import { looksLikeExplicitAnalysisRequest } from './analytical-intent.js';
+import {
+  carriesExplicitAnalysisRefusal,
+  looksLikeExplicitAnalysisRequest,
+} from './analytical-intent.js';
 
 /** The one handler id this gate governs. */
 export const GATED_ANALYSIS_HANDLER_ID = 'run_analysis' as const;
@@ -188,9 +220,28 @@ export const GATED_ANALYSIS_HANDLER_ID = 'run_analysis' as const;
  *    English, sentence case, no em dashes.
  */
 export const ANALYSIS_ELECTION_DEMOTION_TEXT =
-  'I have not run the analysis, because I did not read that as a request to run one. '
-  + 'Tell me what you would like added, changed or filled in and I will work on the model with you. '
-  + 'Say "run the analysis" whenever you want the results computed.';
+  'I have not run the analysis, because I was not sure whether that was a request to run one. '
+  + 'Do you want me to run it now? Say "run the analysis" or just say yes, and I will. '
+  + 'If you meant something else, tell me what to add or change in the model.';
+
+/**
+ * The reply a demoted turn carries when the user EXPLICITLY REFUSED a run.
+ *
+ * ⚠ THIS ARM MUST NOT OFFER. Answering "Don't run the analysis." with "do you
+ * want me to run it now?" is the product arguing with a clear instruction, and
+ * it is a worse failure than the refusal this change is removing. The split is
+ * the whole reason {@link carriesExplicitAnalysisRefusal} exists: one boolean
+ * could not tell a refusal apart from a phrasing miss, so both were answered
+ * as refusals.
+ *
+ * Same honesty rules as the offer copy above — it claims nothing about what
+ * the model contains, states only this system's own reading, and names the
+ * acceptance path in words so the user is never left without a next move.
+ */
+export const ANALYSIS_ELECTION_REFUSAL_ACK_TEXT =
+  'I have not run the analysis, because I read that as you telling me not to. '
+  + 'Say "run the analysis" whenever you do want it computed, '
+  + 'or tell me what to add or change in the model.';
 
 /** Why an election was admitted or demoted. Structural enums only. */
 export type AnalysisElectionOutcome =
@@ -208,6 +259,22 @@ export type AnalysisElectionOutcome =
       readonly kind: 'demoted';
       readonly reason: 'no_explicit_analysis_request';
       readonly assistant_text: string;
+      /**
+       * Present iff the demotion is an OFFER rather than a decline — i.e. the
+       * user did not refuse, the phrasing merely missed the four-verb rule.
+       *
+       * The caller arms this as a rendered chip plus the pending action the
+       * atomic-emit contract derives from it, so a bare "yes" next turn
+       * resumes it through `tryShortConfirmResume` (path 4 of the gate's own
+       * path table — SANCTIONED). ABSENT on the refusal arm, which is the one
+       * structural difference between the two demotions.
+       *
+       * ⭐ THE GATE STAYS MONOTONE. This never runs an analysis: it offers
+       * one. The run still requires a fresh, explicit consent turn, so no
+       * reachable input makes the product compute something nobody asked for
+       * — the property the anti-oscillation argument above rests on.
+       */
+      readonly offer?: { readonly kind: 'run_analysis' };
     };
 
 export interface AnalysisElectionGateInput {
@@ -244,9 +311,21 @@ export function evaluateAnalysisElection(
   if (looksLikeExplicitAnalysisRequest(input.message)) {
     return { kind: 'admitted', reason: 'explicit_analysis_request' };
   }
+  // ⭐ THE PAYOFF SPLIT. Both arms still SUPPRESS the handler — the admission
+  // rule is untouched, and so is every veto ahead of it. What differs is what
+  // the suppressed turn says: an explicit refusal is acknowledged, and a
+  // phrasing the four-verb rule simply did not spell is ASKED about.
+  if (carriesExplicitAnalysisRefusal(input.message)) {
+    return {
+      kind: 'demoted',
+      reason: 'no_explicit_analysis_request',
+      assistant_text: ANALYSIS_ELECTION_REFUSAL_ACK_TEXT,
+    };
+  }
   return {
     kind: 'demoted',
     reason: 'no_explicit_analysis_request',
     assistant_text: ANALYSIS_ELECTION_DEMOTION_TEXT,
+    offer: { kind: 'run_analysis' },
   };
 }
