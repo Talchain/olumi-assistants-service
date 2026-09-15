@@ -361,9 +361,16 @@ export function hasSystemDisposition(message: string): boolean {
 }
 
 function hasSystemDispositionInQuestion(message: string): boolean {
-  const subject = /\byou\b/i.exec(message);
-  if (subject === null) return false;
-  const question = message.slice(subject.index);
+  // An inverted question identifies its own subject even after a preamble
+  // ("as you know, which figures did you use?"). Bind the FIRST such question
+  // so an outer "did you mention ..." cannot hand authority to its content.
+  // Direct/non-inverted requests retain the existing first-subject fallback.
+  const interrogative = /\b(?:do|did|have|had|are|were|can|could|would|will|should)\s+you\b/i.exec(message);
+  const subjectIndex = interrogative !== null
+    ? interrogative.index + interrogative[0].length - 'you'.length
+    : /\byou\b/i.exec(message)?.index;
+  if (subjectIndex === undefined) return false;
+  const question = message.slice(subjectIndex);
   const verbs = [
     ...OMISSION_VERB_PATTERNS,
     ...RETENTION_VERB_PATTERNS,
@@ -378,11 +385,11 @@ function hasSystemDispositionInQuestion(message: string): boolean {
   const selection = '(?:decid(?:e[ds]?|ing)|cho(?:ose[sn]?|se[n]?|osing)|opt(?:ed|ing|s)?|elect(?:ed|ing|s)?)\\s+to\\s+';
   const completion = '(?:end(?:ed|ing|s)?\\s+up|(?:go(?:es|ing)?|went|gone)\\s+on\\s+to)\\s+';
   const coordination = '[a-z]+\\s+(?:or|and)\\s+';
-  // Bind to the outer question's first system subject, not any embedded
+  // Bind to the outer question's system subject, not any embedded
   // "you used ..." inside a question about mentioning or believing it.
   // Preserve the existing explicit CURRENT assent request ("Do you agree
   // you left it out?"); past agreement is a different event, not this check.
-  const currentAssent = /\bdo\s+$/i.test(message.slice(0, subject.index))
+  const currentAssent = /\bdo\s+$/i.test(message.slice(0, subjectIndex))
     ? `(?:agree\\s+(?:that\\s+)?you\\s+${modifiers})?`
     : '';
   const predicate = `^you\\s+${modifiers}${currentAssent}(?:(?:${selection}|${completion}|${coordination})${modifiers})*`;

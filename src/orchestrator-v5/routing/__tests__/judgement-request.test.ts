@@ -104,6 +104,31 @@ const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
 
 describe('independent review — control complements retain the system subject', () => {
   it.each([
+    // Outside review5674116183: the question subject follows the preamble.
+    'As you know, which of my figures did you decide to use?',
+    'Given what you said, which figures from my brief did you start using?',
+    'Before you answer, what did you leave out of my brief?',
+    'You mentioned the model earlier; which of my assumptions did you choose to keep?',
+    'What you told me was useful — which figures did you use from my brief?',
+    'You gave me a tally before: what parts of my brief did you end up omitting?',
+  ])('binds the current interrogative rather than a preamble subject: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
+      expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
+    'As you know, did you mention that you started using my figures?',
+    'You mentioned a draft earlier; did you claim to have used my figures?',
+    'Before you answer, do you think we should use my figures?',
+  ])('a preamble does not make an outer report or advice request factual handling: %j', (message) => {
+    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
+  it.each([
     // Outside corpus from exact-head review of e5ab279e, comment 5673875752.
     'Which of my figures did you decide to use?',
     'Which of my assumptions did you choose to keep?',
