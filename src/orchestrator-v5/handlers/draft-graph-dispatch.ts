@@ -97,6 +97,7 @@ import { buildDraftBiasSignalBlocks } from './draft-bias-signal-blocks.js';
 import { buildDraftFramingBlocks } from './draft-framing-blocks.js';
 import { buildDraftCalibrationBlocks } from './draft-calibration-blocks.js';
 import { buildDraftOptionWideningBlocks } from './draft-option-widening-blocks.js';
+import { draftModelBuildingReceipt } from './draft-model-building-receipt.js';
 import {
   buildV5DiagnosticTrace,
   buildErrorV5DiagnosticTrace,
@@ -1088,6 +1089,7 @@ export async function dispatchDraftGraph(
     // discards the value at the build site without allocating the trace.
     const commitStartedAt = Date.now();
     const framingNotice = draftOptionFramingNotice(draftResult);
+    const modelBuildingReceipt = draftModelBuildingReceipt(draftResult.modelBuildingNotices);
     const commitResult = await commitDirectAnswer(
       // Provisional response — the real response is built below once we know
       // graphPersisted. This value is recorded in the turn row but is NOT
@@ -1114,7 +1116,11 @@ export async function dispatchDraftGraph(
       // The code-owned missing-effect referent DOES persist below, atomically
       // with this graph: no prose parsing or second write is needed to retain
       // the exact question that the successful response will render.
-      { response_version: 2, assistant_text: [framingNotice, holdThread.notice, goalTargetQuestionText].filter(Boolean).join('\n\n'), blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
+      // Preserve the public omission/handling categories too: the graph cannot
+      // reconstruct rejected records. Put the bounded receipt first so a long
+      // framing notice cannot push it beyond the existing conversation cap.
+      // It makes no saved-state claim and is reattached to the public reply.
+      { response_version: 2, assistant_text: [modelBuildingReceipt, framingNotice, holdThread.notice, goalTargetQuestionText].filter(Boolean).join('\n\n'), blocks: [], suggested_actions: [], insights: [], stage_indicator: payload.stage },
       {
         scenario_id: payload.scenario_id,
         turn_id: payload.turn_id,
@@ -1266,8 +1272,9 @@ export async function dispatchDraftGraph(
       // The exact framing notice already heads the native narrative. Reattach
       // only the remaining committed notices, including any commit-time TTL
       // lapse. Do not duplicate the framing gap or discard a different notice.
-      const remainingNotice = framingNotice && committedText.startsWith(framingNotice)
-        ? committedText.slice(framingNotice.length).trim()
+      const framingPrefix = [modelBuildingReceipt, framingNotice].filter(Boolean).join('\n\n');
+      const remainingNotice = framingNotice && committedText.startsWith(framingPrefix)
+        ? [modelBuildingReceipt, committedText.slice(framingPrefix.length).trim()].filter(Boolean).join('\n\n')
         : committedText.trim();
       if (remainingNotice) {
         response = {
