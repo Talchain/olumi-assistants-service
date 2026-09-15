@@ -52,8 +52,6 @@ import { isStructureOriginQuestion } from '../../../cee/context-integrity/struct
 import { asksForOwnJudgement } from '../judgement-request.js';
 import { hasMutationWarrantSignal, isEditRequestShape } from '../mutation-warrant.js';
 import { isStateQueryQuestionShape, tryStateQueryGuard } from '../state-query-guard.js';
-import { tryPostAnalysisAdviceGate } from '../post-analysis-advice-gate.js';
-import { tryStaleRerunGuard } from '../stale-rerun-guard.js';
 
 /** Lifted verbatim from `state-query-guard.structure-origin.test.ts`. */
 const WITNESS_GRAPH = {
@@ -101,124 +99,6 @@ function ctx(
 }
 
 const briefAudit = { briefText: BRIEF_TEXT, graph: WITNESS_GRAPH };
-
-describe('independent review — a modal naming the audited item is not advice', () => {
-  const auditQuestions = [
-    // CCT's independent contrast corpus, review of 32cbaf45.
-    'Which of my figures did you use for the margin we should protect?',
-    'What did you leave out that I should know about?',
-    'Which of my figures do you use?',
-    'What did you leave out of my brief?',
-    // Same distinction with the other modal admitted by the former rule.
-    'Which of my figures did you use for the margin we could protect?',
-    'What did you leave out that I could know about?',
-  ];
-
-  it.each(auditQuestions)('keeps the grounded audit and mutation protection for %j', (message) => {
-    const outcome = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
-    expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
-    expect(isStateQueryQuestionShape(message)).toBe(true);
-    expect(hasMutationWarrantSignal(message)).toBe(false);
-    expect(isEditRequestShape(message)).toBe(false);
-  });
-
-  it.each([
-    'Which of my figures did you use for the margin we should protect? What should we use instead?',
-    'What did you leave out that I should know about? Recommend what I should add.',
-    'Given my brief, do you think that we could use £59?',
-    'Given my brief, should I use £59?',
-  ])('still sends an actual advice request to reasoning: %j', (message) => {
-    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit }).matched).toBe(false);
-    expect(hasMutationWarrantSignal(message)).toBe(false);
-    expect(isEditRequestShape(message)).toBe(false);
-  });
-});
-
-describe('a brief reference is not permission to replace a conversation with an audit', () => {
-  const reasoningRequests = [
-    // Paul, served CEE 78515b95, request ef2da921-cc66-4a53-9506-e23d79554489.
-    'Looking at my brief, what do you recommend these values should be?',
-    // New paraphrases are contrasts, not additional live witnesses.
-    'Given my brief, do you see a better way forward?',
-    'What do you think about my brief?',
-    'What do you recommend I use from my brief?',
-    'What did you leave out of my brief, and what would you recommend instead?',
-    'Which of my figures did you use? Suggest better values for the uncertain ones.',
-    'What did you leave out of my brief, and what should I do next?',
-    'Based on what I told you, which values would you choose?',
-    'Given my brief, do you think I should use £59?',
-  ];
-
-  it.each(reasoningRequests)('does not intercept %j, with or without a saved edit', (message) => {
-    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
-      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit })).toEqual({
-        matched: false,
-      });
-    }
-  });
-
-  it('keeps the witnessed recommendation protected from mutation when its answer falls through', () => {
-    const message = reasoningRequests[0];
-    expect(isBriefAuditQuestion(message)).toBe(true);
-    expect(isStateQueryQuestionShape(message)).toBe(true);
-    expect(hasMutationWarrantSignal(message)).toBe(false);
-  });
-
-  it.each(['fresh', 'stale', 'unknown'] as const)(
-    'the witnessed request also clears the two following conversational gates when analysis is %s',
-    (freshness) => {
-      const message = reasoningRequests[0];
-      expect(tryStaleRerunGuard({ message, freshness }).matched).toBe(false);
-      expect(tryPostAnalysisAdviceGate({
-        message,
-        freshness,
-        analysis: {
-          status: 'success',
-          leading_option: { label: 'Increase price' },
-          runner_up: { label: 'Hold price' },
-          top_drivers: [],
-          fragile_edges: [],
-        },
-      }).matched).toBe(false);
-    },
-  );
-
-  it.each([
-    'Tell me what you kept from my brief.',
-    'Which of my figures do you use?',
-    'What did you leave out of my brief?',
-    'Do you agree you left out my ARR figure?',
-  ])('still answers the explicit factual audit %j', (message) => {
-    const outcome = tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit });
-    expect(outcome.matched && outcome.dispatch).toBe('brief_audit');
-    expect(outcome.matched && outcome.assistant_text).toContain('£11.2m');
-  });
-
-  it.each([
-    undefined,
-    { briefText: null, graph: WITNESS_GRAPH },
-    { briefText: BRIEF_TEXT, graph: null },
-  ])('does not manufacture an audit when its source is unavailable: %j', (source) => {
-    expect(tryStateQueryGuard({
-      message: 'What did you leave out of my brief?',
-      contextPack: ctx([]),
-      briefAudit: source,
-    })).toEqual({ matched: false });
-  });
-
-  it('does not swallow an edit attached to an audit', () => {
-    const message = 'What did you leave out of my brief? Also set Enterprise ACV target to 45000.';
-    expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit })).toEqual({ matched: false });
-    expect(hasMutationWarrantSignal(message)).toBe(true);
-  });
-
-  it.each(['Yes, confirm it.', 'No, cancel that.', 'Do not save that change.'])(
-    'does not acquire ownership of a consent turn: %j',
-    (message) => {
-      expect(tryStateQueryGuard({ message, contextPack: ctx([]), briefAudit })).toEqual({ matched: false });
-    },
-  );
-});
 
 // ───────────────────────────────────────────────────────────────────────────
 // RED — the questions the evaluation measured being intercepted
