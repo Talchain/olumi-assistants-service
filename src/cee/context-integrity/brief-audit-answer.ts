@@ -360,20 +360,29 @@ export function hasSystemDisposition(message: string): boolean {
     ...RETENTION_VERB_PATTERNS,
     new RegExp(`\\b(?:${INFERENCE_VERB})\\b`, 'i'),
   ];
-  // Keep subject continuity through auxiliaries, coordination and controlled
-  // complements ("you decide to use", "you go on to include", "you end up
-  // omitting"). Match their grammatical links, not a list of decision verbs.
-  // A new subject or prospective modal cannot occupy any link: "you believe
-  // we should choose to use" still does not attribute "use" to the system.
-  // This bounded answering grammar does not determine mutation permission.
+  // Only recognised selection/completion and aspectual links may qualify a
+  // handling verb. An arbitrary "verb + to" preserves the subject but does
+  // NOT establish handling: promising, planning, claiming and refusing to use
+  // something are questions the manifest cannot answer. Unknown predicates
+  // therefore fall through to reasoning; this is not a general intent parser.
   const modifiers = '(?:(?:have|had|not|never|ever|just|already|also|[a-z]+ly)\\s+)*';
-  const predicateLink = '[a-z]+\\s+(?:(?:(?:on|up)\\s+)?to|up|or|and)\\s+';
-  const systemPrefix = new RegExp(`\\byou\\s+${modifiers}(?:${predicateLink}${modifiers})*$`, 'i');
+  const selection = '(?:decid(?:e[ds]?|ing)|cho(?:ose[sn]?|se[n]?|osing)|opt(?:ed|ing|s)?|elect(?:ed|ing|s)?)\\s+to\\s+';
+  const completion = '(?:end(?:ed|ing|s)?\\s+up|(?:go(?:es|ing)?|went|gone)\\s+on\\s+to)\\s+';
+  const coordination = '[a-z]+\\s+(?:or|and)\\s+';
+  const predicate = `\\byou\\s+${modifiers}(?:(?:${selection}|${completion}|${coordination})${modifiers})*`;
+  const systemPrefix = new RegExp(`${predicate}$`, 'i');
+  // Bare gerund complements preserve a started/ongoing/completed action,
+  // unlike "consider using". This branch is available only to an -ing
+  // handling verb, never to the user's separate "we should ..." predicate.
+  const aspect = '(?:start(?:ed|ing|s)?|begin(?:ning|s)?|began|begun|continu(?:e[ds]?|ing)|finish(?:ed|ing|es)?|be(?:en|ing)?|are|were)\\s+';
+  const progressivePrefix = new RegExp(`${predicate}(?:${aspect}${modifiers})?$`, 'i');
   return verbs.some((verb) => {
     const occurrences = new RegExp(verb.source, `${verb.flags}g`);
-    return [...message.matchAll(occurrences)].some((match) =>
-      systemPrefix.test(message.slice(0, match.index)),
-    );
+    return [...message.matchAll(occurrences)].some((match) => {
+      const prefix = message.slice(0, match.index);
+      return systemPrefix.test(prefix) ||
+        (/^[a-z]+ing\b/i.test(match[0]) && progressivePrefix.test(prefix));
+    });
   });
 }
 

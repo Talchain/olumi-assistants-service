@@ -111,6 +111,11 @@ describe('independent review — control complements retain the system subject',
     'What did you choose to infer from my brief?',
     'Which parts of my brief did you opt to incorporate?',
     'Which figures from my brief did you go on to include?',
+    // Self-review after the outside corpus: a bare gerund complement carries
+    // the same subject too; do not fix only the six infinitive/particle forms.
+    'Which figures from my brief did you start using?',
+    'Which figures from my brief have you been using?',
+    'Which figures from my brief did you continue using?',
   ])('keeps the factual audit in both edit-history states: %j', (message) => {
     for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
       const outcome = tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit });
@@ -125,6 +130,7 @@ describe('independent review — control complements retain the system subject',
     'Do you believe we should choose to use my figures?',
     'Do you reckon I should decide to keep my estimates?',
     'Do you believe we should go on to infer a target from my brief?',
+    'Do you believe we should start using my figures?',
     'What did you choose to infer from my brief? What should we use instead?',
   ])('does not transfer the human\'s prospective action to the system: %j', (message) => {
     for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
@@ -136,6 +142,28 @@ describe('independent review — control complements retain the system subject',
 });
 
 describe('outside-corpus blockers — disposition ownership and reported speech', () => {
+  it.each([
+    // Independent delta review 5673979510: subject continuity alone does not
+    // prove that a promise, intention or claim was actually carried out.
+    'Did you promise to use my figures?',
+    'Did you plan to keep my assumptions?',
+    'Did you hope to include the targets from my brief?',
+    'Did you claim to have used my figures?',
+    'Did you pretend to use my estimates?',
+    'Did you bring up using my figures?',
+    'Did you refuse to use my figures?',
+    // Same semantic distinction, not seven phrase exclusions.
+    'What parts of my brief did you consider omitting?',
+    'Did you try to use my figures?',
+    'Did you expect to use my figures?',
+    'Did you ask us to use my figures?',
+  ])('leaves non-completed or other-person handling to reasoning: %j', (message) => {
+    for (const recent of [[], [ADD_CONSTRAINT_50K]]) {
+      expect(tryStateQueryGuard({ message, contextPack: ctx(recent), briefAudit }).matched).toBe(false);
+    }
+    expect(hasMutationWarrantSignal(message)).toBe(false);
+  });
+
   it.each([
     'Do you believe we should use my figures?',
     'Do you reckon I should use my estimates?',
