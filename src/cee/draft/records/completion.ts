@@ -1650,7 +1650,22 @@ export function applyConstraintCorrections(
     } as typeof target;
     applied += 1;
   }
-  return { stated_items: items, applied };
+  // ⭐⭐ NOTHING CHANGED ⇒ THE ORIGINAL ARRAY, BY REFERENCE — one guard, not two.
+  //
+  // `namespace-merge-and-completion.test.ts` asserts this pass-through with
+  // `Object.is`, because "the user's items are untouched" is a claim about
+  // IDENTITY; a fresh array with equal contents is a weaker claim that would
+  // slip past deep equality. My first version rebuilt unconditionally and broke
+  // it on turns with NO corrections at all — CI caught that, my own suite did not.
+  //
+  // ⚠ A SECOND, EARLIER `corrections.length === 0` RETURN WAS REMOVED RATHER
+  // THAN KEPT. It read as belt-and-braces and was strictly redundant: a mutant
+  // deleting it killed nothing, because this guard already covers the empty
+  // case. An unreachable branch is one no test can ever kill, which is the shape
+  // this module's own tests exist to hunt.
+  return applied === 0
+    ? { stated_items: base.stated_items, applied: 0 }
+    : { stated_items: items, applied };
 }
 
 /**

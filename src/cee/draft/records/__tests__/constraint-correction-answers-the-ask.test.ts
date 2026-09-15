@@ -247,3 +247,45 @@ describe("C — every way a correction could smuggle something is refused", () =
     expect(apply({ value: Number.NaN, applies_to_claim: 0 })).toBe(0);
   });
 });
+
+/**
+ * ⭐⭐ IDENTITY, NOT EQUALITY — the guarantee my own suite missed and CI caught.
+ *
+ * `namespace-merge-and-completion.test.ts` asserts the `stated_items`
+ * pass-through with `Object.is`, because "the user's words are untouched" is a
+ * claim about IDENTITY; a fresh array with equal contents is a weaker claim that
+ * would slip past a deep-equality check. My first version rebuilt the array
+ * unconditionally and broke it even on turns with no corrections at all. Pinned
+ * here too, so it cannot regress on this side.
+ */
+describe("D — with nothing to apply, the user's items come back BY REFERENCE", () => {
+  const base = () => load(CAPTURE);
+
+  it("D1: no corrections at all ⇒ the very same array", () => {
+    const b = base();
+    expect(applyConstraintCorrections(b, []).stated_items).toBe(b.stated_items);
+  });
+
+  it("D2: every correction REFUSED ⇒ still the very same array", () => {
+    const b = base();
+    const out = applyConstraintCorrections(b, [
+      { stated_index: 9999, direction: "ceiling", value: 1, applies_to_claim: 0 },
+      { stated_index: 0, direction: "ceiling", value: 1, applies_to_claim: 0 },
+    ]);
+    expect(out.applied).toBe(0);
+    expect(out.stated_items).toBe(b.stated_items);
+  });
+
+  it("D3: one applied ⇒ a new array, and every OTHER item still by reference", () => {
+    const b = base();
+    const ci = b.stated_items.findIndex((x) => (x as { kind?: string }).kind === "constraint");
+    const out = applyConstraintCorrections(b, [
+      { stated_index: ci, direction: "ceiling", value: 0.04, applies_to_claim: 0 },
+    ]);
+    expect(out.stated_items).not.toBe(b.stated_items);
+    b.stated_items.forEach((item, i) => {
+      if (i === ci) return;
+      expect(out.stated_items[i], `stated_items[${i}] must not be rebuilt`).toBe(item);
+    });
+  });
+});
