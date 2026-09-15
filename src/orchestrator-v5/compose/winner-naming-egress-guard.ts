@@ -51,13 +51,33 @@
  * and the substitution DISCLOSES ITSELF in the same sentence with a copyable
  * reference. The failure is Olumi's, never the user's data.
  *
- * ## Why the WHOLE narrative, not just its first sentence
+ * ## Why PER-SENTENCE, not the whole narrative (CORRECTED 2026-09-15)
  *
- * The predicate reads the whole string: when it fires, the winner is named
- * NOWHERE in the narrative, so every option name inside it is unvouched.
- * Replacing the whole field cannot leave half a wrong claim standing. The
- * direction of error is over-removal, never under — the same discipline as
- * `runner-up-gap-statistic.ts`.
+ * This guard originally replaced the WHOLE field, reasoning that "when it fires
+ * the winner is named nowhere, so every option name inside it is unvouched".
+ * ⛔ THAT WAS FALSE, and it shipped two defects:
+ *
+ *  1. Absence of the winner's name is NOT presence of a lie. A narrative that
+ *     crowns nobody ("The size of the lead is not reported as a gap between
+ *     options… ICP Clarity stands out as a key unknown") is honest and contains
+ *     no wrong claim, yet was replaced wholesale.
+ *  2. Worse, the replacement DISCLOSES AN OLUMI FAULT. Firing it on a healthy
+ *     run tells the user Olumi broke when it did not, and invites them to quote
+ *     a reference for a turn that was fine. Paul's 2026-09-15 ruling makes the
+ *     fault channel load-bearing; a false positive there costs more than
+ *     silence, because it spends the credibility the channel runs on.
+ *
+ * The ordering compounded it: `redactRunnerUpGapStatistic` runs FIRST in the
+ * enricher and removes the very sentence that named the winner — so the first
+ * policy manufactured this one's trigger, and the surgical result it had just
+ * preserved was then demolished (CLAUDE.md trap 21: two policies answering
+ * different questions under similar names).
+ *
+ * So the action is now the one `runner-up-gap-statistic.ts` actually takes, and
+ * the one its sibling rule states 40 lines up in the enricher — ⚠ PER-FIELD,
+ * PER-SENTENCE, NOT A DROP. The contradicting sentences are removed, the true
+ * stored-winner claim leads, the honest remainder SURVIVES, and the
+ * substitution discloses itself once.
  *
  * ## The one thing this guard must NOT do
  *
@@ -68,7 +88,11 @@
  * substitution and stops.
  */
 
-import { narrativeNamesOption } from '../../cee/decision-review/decompose.js';
+import {
+  narrativeNamesOption,
+  narrativeRestatesLabelWithDifferentNumeral,
+  splitNarrativeSentences,
+} from '../../cee/decision-review/decompose.js';
 import { COACHING_BLOCK_BODY_MAX } from '../coaching/fragile-edge-offer-text.js';
 
 /**
@@ -121,6 +145,25 @@ export interface StoredWinner {
 }
 
 /**
+ * The deterministic crowning sentence, composed from the STORED winner.
+ *
+ * Returns '' when the run's leader claim is WITHHELD (`recommendation_suppressed`)
+ * or the label is empty — in that state the guard must not AUTHOR the very
+ * sentence the withhold exists to prevent, so the caller discloses and stops.
+ */
+function buildWinnerNamingLead(winner: StoredWinner): string {
+  if (winner.recommendation_suppressed === true) return '';
+  const label = winner.label.trim();
+  if (label.length === 0) return '';
+  const p = winner.win_probability;
+  const pct =
+    typeof p === 'number' && Number.isFinite(p) && p > 0 && p <= 1 ? Math.round(p * 100) : null;
+  return pct === null || pct < 1
+    ? `${label} is the option the stored result for this run records as scoring highest.`
+    : `${label} ${LEAD_CLAUSE_OPENING} ${pct}% of runs of this model.`;
+}
+
+/**
  * Compose the replacement narrative from the STORED winner.
  *
  * Exported for the seam test. Pure; never throws.
@@ -147,9 +190,7 @@ export function buildWinnerNamingReplacement(
     return `${SUBSTITUTION_NOTICE} ${reference}`;
   }
 
-  const lead = pct === null || pct < 1
-    ? `${label} is the option the stored result for this run records as scoring highest.`
-    : `${label} ${LEAD_CLAUSE_OPENING} ${pct}% of runs of this model.`;
+  const lead = buildWinnerNamingLead(winner);
 
   const full = `${lead} ${SUBSTITUTION_NOTICE} ${reference}`;
   if (full.length <= COACHING_BLOCK_BODY_MAX) return full;
@@ -182,7 +223,38 @@ export function applyWinnerNamingEgressGuard<T extends Record<string, unknown>>(
   if (typeof narrative !== 'string' || narrative.trim().length === 0) return clean;
   if (narrativeNamesOption(narrative, label)) return clean;
 
-  const replacement = buildWinnerNamingReplacement(winner, requestId);
+  // ⭐ THE DISCRIMINATION. Not naming the winner is not, by itself, a fault: an
+  // honest narrative may crown nobody. Fire only on a sentence that RESTATES the
+  // winner's own label with a different numeral — the measured shape of all
+  // three captured defects, bound to the winner by IDENTITY.
+  //
+  // ⛔ Deliberately NOT gated on a win-cue: MEASURED, `WIN_CUE` does not match
+  // "produced the best outcome in N% of runs of this model", the template all
+  // three defects use, so a crowning-sentence gate would stand this guard down
+  // on 3 of 3 real defects. See the note on
+  // `narrativeRestatesLabelWithDifferentNumeral`.
+  const sentences = splitNarrativeSentences(narrative);
+  const offending = sentences.filter((sentence) =>
+    narrativeRestatesLabelWithDifferentNumeral(sentence, label),
+  );
+  // No contradicting sentence ⇒ the narrative is silent about the winner, not
+  // wrong about it. Leave it BYTE-IDENTICAL and raise no fault.
+  if (offending.length === 0) return clean;
+
+  const offendingSet = new Set(offending);
+  const survivors = sentences.filter((sentence) => !offendingSet.has(sentence));
+  const lead = buildWinnerNamingLead(winner);
+  const reference = `Olumi fault — ref ${requestId}.`;
+  const disclosure = `${SUBSTITUTION_NOTICE} ${reference}`;
+
+  const rebuilt = [...(lead === '' ? [] : [lead]), ...survivors, disclosure].join(' ');
+  // Budget fallback: keep the two load-bearing halves — who won, and the
+  // reference — and shed the surviving discussion rather than the disclosure.
+  const replacement =
+    rebuilt.length <= COACHING_BLOCK_BODY_MAX
+      ? rebuilt
+      : buildWinnerNamingReplacement(winner, requestId);
+
   return {
     value: { ...output, narrative_summary: replacement },
     substituted: true,
