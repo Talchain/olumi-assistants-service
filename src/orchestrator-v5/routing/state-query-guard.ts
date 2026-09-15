@@ -43,6 +43,9 @@ import {
 } from '../../cee/context-integrity/brief-audit-answer.js';
 import { asksForOwnJudgement } from './judgement-request.js';
 import { computeQuoteMask } from './edit-part-decomposition.js';
+// The ratified "your model records no value to test this limit" voice. A leaf
+// with no imports of its own, precisely so a non-coaching caller can read it.
+import { unmeasuredTargetReadbackSentence } from '../coaching/constraint-gap-copy.js';
 import {
   findRecentChangeAboutOriginSubject,
   isStructureOriginQuestion,
@@ -729,7 +732,43 @@ function composeRecentChangeAnswer(
       ? `Recorded an edit to the saved model. That saved edit does not include a trustworthy before-and-after value and unit, so I can't quantify its effect without guessing.`
       : head.summary.trimEnd();
   const terminated = /[.!?…]$/u.test(receipt) ? receipt : `${receipt}.`;
-  return `${RECENT_CHANGE_RECORD_PREFIX}${terminated}${tail}`;
+  // ⭐⭐ THE RECEIPT MAY NOT BE READ BACK AS AN UNQUALIFIED CLAIM.
+  //
+  // `constraint_not_checkable` is the write-time evaluability verdict, carried
+  // onto every later turn on the very entry being quoted above. Until this
+  // line existed it had ZERO production readers: the receipt was re-emitted
+  // verbatim here at `llm_calls: 0`, so a user asking "did you add that
+  // constraint?" was told yes, six phrasings out of six, about a limit the
+  // analysis structurally cannot evaluate. The write disclosed it; every
+  // readback afterwards took it back.
+  //
+  // ⚠ THE TWO DIRECTIONS DO NOT SHARE A THRESHOLD, WHICH IS WHY THIS READS THE
+  // FIELD AND NOTHING ELSE. Saying "your limit will not be checked" about a
+  // limit that IS checked is a LIE and is the one error this disclosure must
+  // never make; saying nothing about one that is not checked is a GAP, and is
+  // merely the product as it shipped. So the ONLY thing that speaks is the
+  // verdict's own literal. ABSENCE IS UNKNOWN, NOT "this limit is fine" — the
+  // field is absent when the turn read no graph, when the target is not in the
+  // graph, when no verdict was derived AND when the limit is genuinely
+  // checkable, and only the last of those is evidence. On absence this path is
+  // byte-identical to what it emitted before, deliberately.
+  //
+  // ⚠ NOT gated on `head.action`. The field's contract is "the analysis cannot
+  // check this limit", and that claim is true of whatever entry carries it;
+  // adding an action conjunct would invent a second, narrower question under
+  // the same name. It is `summariseAddConstraint` that decides who carries it.
+  //
+  // ⚠ THIS IS A TYPED-FIELD READ, NOT A NEW RULE OVER NATURAL LANGUAGE. The
+  // guard mints no predicate here and asks no new question of the message; it
+  // forwards a verdict another authority already decided
+  // (`classifyConstraintWriteAdmissibility`, one function, now three moments).
+  const evaluability =
+    head.constraint_not_checkable === 'target_records_no_value'
+      ? ` ${unmeasuredTargetReadbackSentence()}`
+      : '';
+  // Order is load-bearing: the qualification belongs to the receipt it
+  // qualifies, so it goes BEFORE the history tail, which is about other edits.
+  return `${RECENT_CHANGE_RECORD_PREFIX}${terminated}${evaluability}${tail}`;
 }
 
 // V5 stale-aware explain recovery — neutral honest copy that contains

@@ -1,4 +1,25 @@
 /**
+ * ⭐⭐⭐ ⚠ READ THIS FIRST — THE DEFECT THIS FILE DIAGNOSED IS CLOSED (15 Sep
+ * 2026, the deliberate-edit lane). Everything below the next rule is the
+ * DIAGNOSIS that led to the fix, and it is kept verbatim because it names the
+ * mechanism and the instrument failure that found it. **The assertions have
+ * been inverted; the prose describing the old behaviour has NOT been rewritten
+ * to match, because it is a record of what the product did on a dated build.**
+ *
+ * WHAT CHANGED: `configure-option-outcome.ts` now resolves the target with
+ * `resolveConfigureOptionTarget` — `readiness.options` WHOLE, no
+ * outstanding-slot bound, no sole-unconfigured fallback — and emits a new
+ * `not_honoured_no_copy` verdict when the option is resolvable but the recovery
+ * copy has no true sentence for it. The COPY domain bound is untouched. So a
+ * REVISION is protected on the same terms as a first configuration, and the
+ * product still says nothing untrue about it.
+ *
+ * ⚠ THE TWO ASSERTIONS THIS FILE WAS BUILT AROUND WENT RED, AND THAT IS WHAT
+ * LANDING LOOKED LIKE. They now pin the new behaviour, each carrying the
+ * superseded expectation beside it so the before/after is legible.
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ *
  * ⭐⭐ THE WRONG-ENTITY GUARD CAN ONLY SPEAK WHILE SOME OPTION×FACTOR SLOT IS
  * STILL UNSET — so it protects the FIRST configuration of a model and never a
  * REVISION, which is where the harm it was built for actually lives.
@@ -55,10 +76,13 @@
  * `strength`/`exists_probability` or a factor's shared `observed_state` and
  * told the user it had worked.
  *
- * ⚠⚠ THIS SPEC PINS CURRENT BEHAVIOUR. It is GREEN at pristine and is NOT a
+ * ⚠⚠ ~~THIS SPEC PINS CURRENT BEHAVIOUR. It is GREEN at pristine and is NOT a
  * fix — widening the candidate set changes which options the 2.427 TEXT guard
  * speaks about, which `option-intervention-write-guard.ts` explicitly calls a
- * bigger blast radius than one lane owns. That is re-briefed, not done here.
+ * bigger blast radius than one lane owns. That is re-briefed, not done here.~~
+ * It WAS re-briefed and it IS done — and the blast radius that worried this
+ * paragraph was handled not by widening the TEXT guard but by splitting the
+ * verdict, so the text guard's domain never moved at all.
  * RED-first does not apply to a characterisation spec; the discipline that
  * replaces it is the DISCRIMINATING PAIR below — the same message, the same
  * wrong-entity write, differing only in whether a slot is outstanding. The
@@ -153,25 +177,44 @@ describe('configure-option outcome guard — the configured-option domain', () =
   });
 
   /**
-   * ⭐⭐ THE MEASURED GAP, AND ITS TRUE CAUSE BESIDE ITS REPORTED ONE.
+   * ⭐⭐ THE MEASURED GAP — NOW CLOSED. THIS PIN GOING RED WAS THE FIX LANDING.
    *
-   * Nothing is outstanding on this graph, so the resolver declines
-   * `no_unconfigured_option` and the outcome layer reports that as
-   * `option_not_identified`. Both are asserted: the flattened value is what
-   * telemetry and callers see, the true one is what a fix must address.
+   * ── WHAT THIS CASE ASSERTED AT `1690c1f3`, AND WHY IT WAS RIGHT THEN ─────
+   * ~~`expect(verdict.status).toBe('not_applicable')`~~ with the true cause one
+   * layer down, ~~`resolved.reason === 'no_unconfigured_option'`~~: nothing was
+   * outstanding on this graph, so `resolveConfigureOptionFacts` declined before
+   * resolution was ever attempted, and `evaluateConfigureOptionOutcome`
+   * flattened that to `option_not_identified` — a name that says the option
+   * could not be resolved when in fact nobody had looked.
+   *
+   * ── WHAT CHANGED ─────────────────────────────────────────────────────────
+   * `resolveConfigureOptionTarget` now answers *which option did the user
+   * name?* from `readiness.options` WHOLE, so a configured option is a
+   * perfectly good answer and this revision is resolved by name. The COPY
+   * predicate keeps its domain bound — the recovery sentence is still false of
+   * this option — so the verdict is `not_honoured_no_copy`: the write is
+   * protected and the product says nothing new.
+   *
+   * The FLATTENING is gone too: the verdict now carries the copy predicate's
+   * own decline reason rather than a catch-all, which is the second defect this
+   * file pinned.
    */
-  it('reaches NO verdict for an already-configured option, so the wrong-entity write ships', () => {
+  it('reaches a write-protecting verdict for an already-configured option', () => {
     const verdict = evaluateConfigureOptionOutcome({
       message: MESSAGE,
       before: CAPTURE.before,
       after: CAPTURE.after,
     });
 
-    expect(verdict.status).toBe('not_applicable');
-    expect(verdict.status === 'not_applicable' && verdict.reason).toBe('option_not_identified');
+    expect(verdict.status).toBe('not_honoured_no_copy');
+    // IDENTITY (trap 19) — about the option the user NAMED, never "an option".
+    expect(verdict.status === 'not_honoured_no_copy' && verdict.optionId).toBe(OPTION_ID);
+    expect(verdict.status === 'not_honoured_no_copy' && verdict.copyDeclineReason).toBe(
+      'option_already_partially_configured',
+    );
 
-    // The TRUE reason, one layer down: resolution was never attempted, because
-    // the graph has no outstanding option×factor slot for the guard to be about.
+    // The copy bound, one layer down, asserted directly: the recovery predicate
+    // still refuses this option, so the untrue sentence stays uncomposable.
     const resolved = buildConfigureOptionRecoveryCopy({
       message: MESSAGE,
       detection: detectConfigureOptionIntent(
@@ -181,7 +224,7 @@ describe('configure-option outcome guard — the configured-option domain', () =
       graph: CAPTURE.before,
     });
     expect(resolved.matched).toBe(false);
-    expect(!resolved.matched && resolved.reason).toBe('no_unconfigured_option');
+    expect(!resolved.matched && resolved.reason).toBe('option_already_partially_configured');
   });
 
   /**
@@ -211,14 +254,20 @@ describe('configure-option outcome guard — the configured-option domain', () =
   });
 
   /**
-   * ⭐ THE KNOWN-UNPROTECTED SET, PINNED EXACTLY.
+   * ⭐ THE SET THAT WAS KNOWN-UNPROTECTED, PINNED EXACTLY — NOW PROTECTED.
    *
-   * The skip reason observed across every configured-graph phrasing. Pinned so
-   * the suite REDs if it GROWS (a new way to abstain) or SHRINKS (the candidate
-   * set was widened — the fix). A gap recorded in the suite is honest; a gap
-   * invisible to it is how this one survived two guards written against it.
+   * ~~The skip reason observed across every configured-graph phrasing~~ was
+   * `['option_not_identified']` for all four live phrasings at `1690c1f3`. It
+   * was pinned so the suite would RED if the set GREW (a new way to abstain) or
+   * SHRANK (the candidate set widened — the fix). **It shrank to empty, which
+   * is the fix.**
+   *
+   * The pin stays, inverted: all four phrasings must now reach the SAME
+   * write-protecting verdict about the SAME option. Kept as a set over four
+   * real phrasings rather than one, because the original defect was uniform
+   * across them and a regression would not be.
    */
-  it('pins the exact skip reasons measured live on a configured graph', () => {
+  it('pins the verdict across every phrasing measured live on a configured graph', () => {
     const labels = projectOptionLabels(CAPTURE.before.nodes as never);
     const phrasings = [
       MESSAGE,
@@ -228,6 +277,7 @@ describe('configure-option outcome guard — the configured-option domain', () =
     ];
 
     const observed = new Set<string>();
+    const optionIds = new Set<string>();
     for (const message of phrasings) {
       // Every phrasing must reach the edit lane, or this test is measuring the
       // detector rather than the domain bound.
@@ -238,10 +288,14 @@ describe('configure-option outcome guard — the configured-option domain', () =
         before: CAPTURE.before,
         after: CAPTURE.after,
       });
-      expect(verdict.status).toBe('not_applicable');
-      observed.add(verdict.status === 'not_applicable' ? verdict.reason : verdict.status);
+      observed.add(
+        verdict.status === 'not_applicable' ? `not_applicable:${verdict.reason}` : verdict.status,
+      );
+      if (verdict.status === 'not_honoured_no_copy') optionIds.add(verdict.optionId);
     }
 
-    expect([...observed].sort()).toEqual(['option_not_identified']);
+    expect([...observed].sort()).toEqual(['not_honoured_no_copy']);
+    // IDENTITY, not merely "a verdict was reached" (trap 19).
+    expect([...optionIds]).toEqual([OPTION_ID]);
   });
 });
