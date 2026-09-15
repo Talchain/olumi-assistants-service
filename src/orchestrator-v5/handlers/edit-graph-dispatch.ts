@@ -4412,8 +4412,22 @@ export async function dispatchEditGraph(
     // a reply that both confirms and denies the same write, with the
     // confirmation FIRST. That is worse than the defect, not better.
     //
-    // The sibling factor-baseline withhold does not need this because 2.427's
-    // recovery copy has already replaced the narration wholesale on its branch.
+    // ⚠⚠ A CLAIM ABOUT THE SIBLING BRANCH STOOD HERE AND WAS FALSE. It read:
+    // ~~"The sibling factor-baseline withhold does not need this because
+    // 2.427's recovery copy has already replaced the narration wholesale on its
+    // branch."~~ **Refuted by execution.** That wholesale replacement is gated
+    // on `=== 'not_honoured'`, and the REVISION class reaches
+    // `not_honoured_no_copy` — which carries no copy and therefore gets no
+    // replacement. So the sibling branch appended a denial under a surviving
+    // success sentence: a reply that confirmed and denied the same write, the
+    // exact harm this comment describes. It is now fixed at that branch, with
+    // its own `findSuccessClaimHit` withdrawal.
+    //
+    // The durable lesson is the one this file keeps relearning: **a comment
+    // asserting that a NEIGHBOURING branch is safe is a claim about code
+    // nobody re-derives**, and it stayed true only until that branch grew a
+    // verdict it did not have when the sentence was written.
+    //
     // This branch has no text guard in front of it, so the edit LLM's own
     // success sentence survives unless it is replaced here. Nothing is lost:
     // the turn was withheld WHOLESALE, so every success claim in that text is

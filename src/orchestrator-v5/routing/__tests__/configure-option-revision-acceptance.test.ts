@@ -1,8 +1,23 @@
 /**
  * ⭐⭐⭐ THE DELIBERATE-EDIT COMPONENT'S JOINED ACCEPTANCE — RED-first.
  *
- *   *An ordinary, clear revision to an option's effect WORKS — and its
- *    ambiguous and wrong-entity counterparts CANNOT mutate anything.*
+ *   *An ordinary, clear revision to an option's effect WORKS — and the
+ *    wrong-entity counterparts that rewrite the NAMED OPTION'S OWN LINKS, or a
+ *    node baseline it is wired to, CANNOT mutate.*
+ *
+ * ⚠⚠ THAT SENTENCE IS NARROW ON PURPOSE, AND AN EARLIER VERSION OF IT WAS NOT.
+ * It read *"its ambiguous and wrong-entity counterparts CANNOT mutate
+ * anything"* — **false as stated, and contradicted by three of the tests in
+ * this very file**: `RESIDUAL F2/a` (a wrong-FACTOR write on the named option)
+ * and `RESIDUAL F2/b` (a wrong-OPTION write) both still COMMIT, and `ARM E`
+ * shows a message naming no option is not protected at all.
+ *
+ * **"Nothing regresses, and every residual is pinned" and "the class is
+ * covered" are different statements, and only the first is true.** An
+ * acceptance sentence that overclaims is the artefact every later session
+ * inherits — it reads as settled, so nobody re-derives it. That is the
+ * hand-maintained-mirror defect this estate keeps paying for, and the
+ * narrowing is the whole remedy.
  *
  * BOTH HALVES, OR THE COMPONENT IS NOT COMPLETE. A guard that refuses
  * everything passes the second half and fails the first; a permissive resolver
@@ -253,7 +268,7 @@ describe('ACCEPTANCE half 1 — an ordinary, clear revision WORKS', () => {
 // HALF TWO — THE WRONG-ENTITY COUNTERPARTS CANNOT MUTATE.
 // ---------------------------------------------------------------------------
 
-describe('ACCEPTANCE half 2 — the wrong-entity counterparts CANNOT mutate', () => {
+describe('ACCEPTANCE half 2 — the WITHHELD wrong-entity classes cannot mutate', () => {
   /**
    * ARM B — THE LIVE CAPTURE, VERBATIM. `exists_probability` 1 → 0.79 on
    * `32b7e30c → 6d9a37f3`: *"this causal link exists with 79% probability"*,

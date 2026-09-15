@@ -32,11 +32,36 @@
  *   option with NO effect values   → `not_honoured`          → **withhold**
  *   option with ONE effect value   → `not_honoured_no_copy`  → **withhold**
  *
- * ⚠ WHAT IS STILL OUT OF SCOPE, and it is a real residual, not a footnote: a
- * message that names NO option, or names TWO, reaches no verdict and the write
- * is **allowed**. That is deliberate — see W1 below; withholding on an unnamed
- * subject discards correct, explicitly-requested edits wholesale, which is the
- * direction that destroys user work. The rowed exit is to ASK, not to widen.
+ * ⚠⚠ WHAT IS STILL OUT OF SCOPE — FOUR CLASSES, NOT A FOOTNOTE, AND AN EARLIER
+ * VERSION OF THIS PARAGRAPH LISTED ONLY THE FIRST. A scope statement that is
+ * short is read as a scope statement that is complete.
+ *
+ *   1. A message naming NO option, or TWO, reaches no verdict ⇒ **allowed**.
+ *      Deliberate — see W1; withholding on an unnamed subject discards
+ *      correct, explicitly-requested edits wholesale, the direction that
+ *      destroys user work.
+ *   2. A wrong-**FACTOR** write on the named option is `honoured` ⇒ **commits**.
+ *      `interventionsWriteLandedFor` binds to the OPTION and asks only whether
+ *      any key moved. Closing it needs a referring-expression predicate over
+ *      FACTOR labels — class (4).
+ *   3. A wrong-**OPTION** write reaches a correct verdict and still
+ *      **commits**, because `anyInterventionWriteLanded` is true. That
+ *      conjunct is load-bearing (see below); removing it withholds legitimate
+ *      multi-option edits.
+ *   4. **The protected domain is "the message contains the option's full
+ *      label, verbatim."** Measured: 6 of 8 natural referring expressions —
+ *      pronouns, partial labels, positional references, paraphrases — leave
+ *      the identical witnessed corruption in place.
+ *
+ * Classes 2 and 3 are pinned at the STORED OBJECT in
+ * `configure-option-revision-acceptance.test.ts` (`RESIDUAL F2/a`, `F2/b`).
+ * ⚠ Those pins catch the class SHRINKING, not GROWING — a new way to leak past
+ * the guard leaves them green; the surrounding suite is what catches growth.
+ *
+ * ⛔ THE EXIT FOR ALL FOUR IS TO **ASK**, NOT TO WIDEN. Widening the
+ * referring-expression class is the natural-language predicate CLAUDE.md trap
+ * 22f rules unwinnable by better rules — four rounds oscillated on one such
+ * predicate, each fixing one direction and opening the other.
  *
  * **A narrowed true claim is worth more than a broad one that is false**, and
  * the overclaim enters at the moment of recording (trap 20), which is why the
