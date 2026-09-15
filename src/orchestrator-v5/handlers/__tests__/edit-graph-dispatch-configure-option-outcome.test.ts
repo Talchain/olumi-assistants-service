@@ -430,21 +430,34 @@ describe('ROADMAP 2.427 — branch (b): the wrong-entity write H5 cannot see', (
     expect(out.response.assistant_text).toBe(EXPECTED_RECOVERY_TEXT_WITHHELD);
     expect(out.response.assistant_text).toContain(EXPECTED_RECOVERY_TEXT);
     expect(out.response.assistant_text).toContain('Cloud-Native CRM');
+    // L-25: this message CARRIES a value, so the reply must not re-demand the
+    // format the user just used. It names the option and a route out instead.
+    expect(out.response.assistant_text).not.toContain("option's effect on");
+  });
 
-    // ⭐⭐ AND AT THE STORED OBJECT, WHICH IS THE HALF THIS ROW NEVER HAD.
-    // `assistant_text` has been honest since 2.427; the EDGE WRITE underneath
-    // it persisted anyway. A reply is not evidence about a graph, so the
-    // non-commitment is asserted directly: on every build before this one,
-    // `metadata.graph` was DEFINED here and carried
-    // `opt_cloud_native → fac_adoption_complexity` at strength 0.7.
+  /**
+   * ⭐⭐ THE HALF THIS ROW NEVER HAD — ASSERTED AT THE STORED OBJECT.
+   *
+   * `assistant_text` has been honest since 2.427. The EDGE WRITE underneath it
+   * persisted anyway, which is exactly why the defect survived two guards
+   * written against it: **a reply is not evidence about a graph.** On every
+   * build before this lane, `metadata.graph` was DEFINED here and carried
+   * `opt_cloud_native → fac_adoption_complexity` at strength 0.7 — the model
+   * the user would have reloaded into.
+   *
+   * Its own `it` on purpose, so it is reached and proven independently of the
+   * copy assertion above rather than sheltering behind it (a failing earlier
+   * expectation would stop this one ever running, and an assertion that never
+   * runs is not evidence).
+   */
+  it('the captured EDGE write is NOT committed — the graph matches the reply', async () => {
+    await dispatch(T12C, wrongEntityAppliedResult(CAPTURED_FALSE_SUCCESS));
+
     expect(commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .toHaveBeenCalledTimes(1);
     const metadata = (commitDirectAnswer as MockedFunction<typeof commitDirectAnswer>)
       .mock.calls[0]![1];
     expect(metadata.graph).toBeUndefined();
-    // L-25: this message CARRIES a value, so the reply must not re-demand the
-    // format the user just used. It names the option and a route out instead.
-    expect(out.response.assistant_text).not.toContain("option's effect on");
   });
 
   it('emits the unhonoured-outcome meter with applied_something=true', async () => {
