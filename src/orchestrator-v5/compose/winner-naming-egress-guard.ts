@@ -180,10 +180,6 @@ export function buildWinnerNamingReplacement(
   const reference = `Olumi fault — ref ${requestId}.`;
   const suppressed = winner.recommendation_suppressed === true;
   const label = winner.label.trim();
-  const p = winner.win_probability;
-  const pct = typeof p === 'number' && Number.isFinite(p) && p > 0 && p <= 1
-    ? Math.round(p * 100)
-    : null;
 
   // Withheld leader claim: name no option, make no claim, still disclose.
   if (suppressed || label.length === 0) {
