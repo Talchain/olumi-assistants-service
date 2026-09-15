@@ -3501,6 +3501,59 @@ export async function dispatchEditGraph(
     !optionInterventionWriteWithheld &&
     !optionOwnValueWithheld &&
     !recordedAnswerNotLanded;
+
+  // ⭐⭐ THE HEADLINE MAY NOT OUTRUN THE GATE. Measured on deployed `a3b0548d`,
+  // wire-level, FRESH. One turn shipped BOTH of these:
+  //
+  //   "2 model parameters updated: Pro Plan Monthly Price, Model is raising the
+  //    Pro plan price from £49 to £69 per month with the next Pro feature release"
+  //   "Note: nothing from this message was saved, so \"Pro Plan Monthly Price\"
+  //    is unchanged."
+  //
+  // The second is true — `graph_hash` did not move across the whole session, and
+  // the option's stored value read 59 at save, rerun AND reopen.
+  //
+  // WHY IT IS AN ORDERING DEFECT, NOT A WORDING ONE. The headline is
+  // `buildAppliedChanges`'s summary, composed from the PARSED OPERATIONS and the
+  // in-memory post-apply graph — its signature has no persistence input at all —
+  // and it is fixed into `response.assistant_text` long before the withhold
+  // verdict exists. It is STRUCTURALLY INCAPABLE of knowing the write was
+  // withheld, so no rewording can fix it; only reading the gate can.
+  //
+  // ⚠ A GUARD ALREADY SAT HERE AND MISSED IT. `findSuccessClaimHit` against
+  // `SUCCESS_CLAIM_PATTERNS` replaces a false success sentence on this lane —
+  // but it is bound by PHRASE. EXECUTED against the real wire string: it returns
+  // null for "2 model parameters updated: …" while returning "Updated V" for
+  // "Updated Vendor Licensing Cost". So the list is a hand-maintained mirror of
+  // `edit-graph.ts`'s summary composer (trap 12) and goes stale the day the
+  // headline is reworded. When it misses, the code falls through to
+  // `appendLapseNotice` and the honest note is appended UNDER the false claim.
+  //
+  // This binds by IDENTITY instead — string equality against the very object
+  // that produced the text (trap 19) — so it cannot go stale, and it covers the
+  // five sibling withholds the phrase arm never reached.
+  if (
+    !effectiveAppliedMutation &&
+    editResult.appliedChanges?.summary &&
+    response.assistant_text === editResult.appliedChanges.summary
+  ) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.proposal_headline_withdrawn',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // The GATE's conjuncts, never the model's prose — no free text here.
+        gm_blocked_apply: gmBlockedApply,
+        pa_substitution_blocked: paSubstitutionBlocked,
+        option_intervention_write_withheld: optionInterventionWriteWithheld,
+        option_own_value_withheld: optionOwnValueWithheld,
+        recorded_answer_not_landed: recordedAnswerNotLanded,
+      },
+      'edit_graph: withdrew an applied-changes headline for a turn that persisted nothing',
+    );
+    response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+  }
+
   if (optionInterventionWriteWithheld) {
     log.warn(
       {
