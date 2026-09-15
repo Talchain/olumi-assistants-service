@@ -1811,6 +1811,79 @@ function sameStatedQuantity(a: Quantity, b: Quantity): boolean {
 }
 
 /**
+ * The words that make a magnitude a BOUND rather than a reading.
+ *
+ * ⚠ DELIBERATELY NORMATIVE ONLY. Comparatives that a reader uses to REPORT a
+ * level ("churn is above 4%", "spend exceeded £2m") are absent: they describe
+ * where a number sits, which is an observation, and admitting them would let
+ * the stamp fire on one. Both directions of bound are here — a floor is as much
+ * a limit as a ceiling.
+ */
+const LIMIT_CUES: readonly string[] = [
+  "under",
+  "below",
+  "beneath",
+  "at most",
+  "no more than",
+  "not exceed",
+  "without exceeding",
+  "max",
+  "maximum",
+  "cap",
+  "capped",
+  "ceiling",
+  "keep",
+  "keeps",
+  "keeping",
+  "kept",
+  "stay",
+  "stays",
+  "staying",
+  "remain",
+  "remains",
+  "within",
+  "less than",
+  "fewer than",
+  "up to",
+  "at least",
+  "no less than",
+  "no fewer than",
+  "minimum",
+  "floor",
+];
+
+const LIMIT_CUE_RE = new RegExp(`\\b(?:${LIMIT_CUES.map(escapeRe).join("|")})\\b`, "i");
+
+/**
+ * ⭐⭐ Does the brief state THIS occurrence of a magnitude as a LIMIT?
+ *
+ * ⚠ THIS ASKS FOR POSITIVE EVIDENCE, AND THE DIRECTION IS THE WHOLE POINT. The
+ * first version of the surrounding guard reasoned from an ABSENCE — "no
+ * identical literal appears outside the quoted span, therefore no observation
+ * was stated" — and an independent review refuted it: absence of a restatement
+ * is not proof of anything. The claim this module stamps is that the user wrote
+ * this number AS A BOUND, so the evidence demanded is the words that make it
+ * one, sitting in the same clause as the number.
+ *
+ * The clause is cut at the nearest `[.;:,]` before the magnitude, so cue words
+ * cannot be borrowed from a neighbouring sentence — *"we must stay under
+ * budget. Churn is currently 4%"* offers "stay"/"under" to the wrong clause,
+ * and the cut is what stops it.
+ *
+ * ⚠ ITS FAILURE DIRECTION IS A GAP, NOT A LIE, AND THAT IS WHY IT IS SHAPED
+ * THIS WAY ROUND. A phrasing this list does not carry (*"churn: 4% max by Q3"*
+ * reads, *"keep it beneath a four percent line"*) withholds a stamp that was
+ * warranted — a silence. The inverse shape, a detector for OBSERVATION language
+ * used to withhold, fails toward stamping a genuine observation, which is the
+ * lie this change exists to prevent. A list of cues will always be incomplete;
+ * only one of the two arrangements makes incompleteness safe.
+ */
+function statesALimitAt(briefText: string, at: number): boolean {
+  const clause = briefText.slice(0, at).split(/[.;:,]/).pop() ?? "";
+  return LIMIT_CUE_RE.test(clause);
+}
+
+/**
  * ⭐⭐ A STATED LIMIT SITTING IN THE FIELD FOR WHAT IS CURRENTLY TRUE.
  *
  * MEASURED, 14 Sep 2026, 11 fresh live drafts of one brief containing
@@ -1931,6 +2004,14 @@ export function deriveStatedQuantityRoles(
       (q) => quantities.filter((other) => sameStatedQuantity(q, other)).length > 1,
     );
     if (roleAmbiguous) continue;
+
+    // POSITIVE EVIDENCE. Uniqueness alone still reasons from an absence, and
+    // one occurrence can carry both roles at once — *"monthly churn is
+    // currently 4%, and that is also our maximum"* writes the magnitude once
+    // and states it as a reading. So the occurrence must also be WORDED as a
+    // bound in its own clause. Nothing infers a limit from the producer's
+    // `operator`: that is the row's claim, and the user's words are the oracle.
+    if (!inSpan.some((q) => statesALimitAt(briefText, q.at))) continue;
 
     seen.add(span.nodeId);
     bindings.push({ node_id: span.nodeId, stated_role: "constraint" });

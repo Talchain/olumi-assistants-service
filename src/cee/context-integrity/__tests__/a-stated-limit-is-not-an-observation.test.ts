@@ -260,6 +260,52 @@ describe("the reviewer's corpus — a genuine observation must survive the stamp
     const brief = `monthly churn is currently 4%, while ${CAP}`;
     expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual([]);
   });
+
+  // ── the reviewer's SECOND round, at the repaired head ────────────────────
+  // The four cases above were answered by counting occurrences of a magnitude.
+  // That is still reasoning from an ABSENCE, and this pair is what showed the
+  // limit of it: one occurrence can carry both roles at once. It is the reason
+  // the guard now asks for the words that make a number a bound.
+
+  it("one written magnitude may explicitly carry both observation and limit roles", () => {
+    // ⛔ RED against the occurrence-count rule alone. `4%` is written ONCE, so
+    // nothing is restated — and the user still plainly stated the observation.
+    const brief = "monthly churn is currently 4%, and that is also our maximum";
+    expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual([]);
+  });
+
+  it("positive twin: one limit with an unknown observation remains a limit", () => {
+    // The reviewer's own twin, and the control that stops the repair above
+    // degenerating into "a whole-brief quote never stamps". Same quote extent,
+    // same single occurrence — the wording is the whole difference.
+    const brief = "monthly churn must stay below 4%; its current value is unknown";
+    expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual(STAMPED);
+  });
+});
+
+describe("the stamp asks for the words that make a number a bound", () => {
+  it("withholds where the magnitude's own clause states a reading", () => {
+    // "is currently 4%" — a reading. No cue, no stamp, however the row is
+    // worded: the producer's `operator` is its claim, the user's words are the
+    // oracle.
+    const brief = "monthly churn is currently 4% and we plan to hold it there";
+    expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual([]);
+  });
+
+  it("will not borrow a cue from a neighbouring clause", () => {
+    // ⚠ THE CLAUSE CUT IS LOAD-BEARING. "keep ... under" sits in the first
+    // clause and the magnitude in the second; a cue search over the whole quote
+    // would find it and stamp a reading.
+    const brief = "we must keep spend under control, monthly churn is currently 4%";
+    expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual([]);
+  });
+
+  it("recognises a floor as a limit, not only a ceiling", () => {
+    // A bound is a bound in both directions. A cue list carrying only ceiling
+    // words would silently drop every floor a user states.
+    const brief = "monthly churn must not fall below 4%; its current value is unknown";
+    expect(deriveStatedQuantityRoles(brief, codexChurnGraph(brief))).toEqual(STAMPED);
+  });
 });
 
 describe("the opposite direction — the repair must not answer a lie with silence", () => {
