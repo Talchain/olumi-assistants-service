@@ -92,7 +92,10 @@
 
 import type { SuggestedAction } from '../orchestrator/types.js';
 import { CURRENCY_SYMBOL_TO_CODE } from '../cee/extraction/numeric-parser.js';
-import { buildConfigureOptionChip } from './configure-option-chip-text.js';
+import {
+  buildConfigureOptionAdvisedFormat,
+  buildConfigureOptionChip,
+} from './configure-option-chip-text.js';
 import { thousands } from './compose/format-factor-value.js';
 
 type Dict = Record<string, unknown>;
@@ -116,6 +119,30 @@ export interface LabelValueDivergence {
   readonly newValueToken: string;
   /** True when the node is an option (drives the configure-option affordance). */
   readonly isOption: boolean;
+  /**
+   * For an OPTION: the intervention slots whose recorded `unit` is denominated
+   * the SAME WAY as `newValueToken`. Empty for a factor, and empty for an option
+   * whose slots cannot be told apart.
+   *
+   * ⭐ WHY THIS EXISTS. The note asks "Want me to update the modelled value to
+   * £69?" and the option branch answered it with the IDENTIFICATION chip, which
+   * `configure-option-chip-text.ts` says outright it "DELIBERATELY DOES NOT
+   * carry a value". So the product asked a direct question and offered no
+   * control that answers it. Measured on deployed `a3b0548d`: the value stayed
+   * 59 through save, rerun AND reopen while the label read £69.
+   *
+   * The value-bearing sibling was always permitted — the same header adds that
+   * those "fire only once the user has supplied one", and here the user
+   * supplied it. What was missing is WHICH SLOT the value belongs to, and that
+   * is what this field resolves.
+   */
+  readonly optionValueCandidates: readonly OptionValueCandidate[];
+}
+
+/** One option→factor intervention slot that could receive the stated value. */
+export interface OptionValueCandidate {
+  readonly factorId: string;
+  readonly factorLabel: string;
 }
 
 function isPlainObject(v: unknown): v is Dict {
@@ -381,6 +408,74 @@ function collectMagnitudeCandidates(node: Dict): { magnitude: ModelledMagnitude;
 }
 
 /**
+ * ⭐ WHICH intervention slot does the stated value belong to?
+ *
+ * Resolved by UNIT AGREEMENT, not by a label heuristic. Each intervention
+ * records its own native `unit` on the node — measured on the captured draft,
+ * option `619f3099` carries
+ *   `{ "6d9a37f3": { value: 0.59, raw_value: 59, unit: "£/month" }, "7852745d": { … } }`
+ * — so a currency token can only belong to a currency-denominated slot. That is
+ * a type check on data the graph already holds, which is why it does not reopen
+ * the natural-language matching class this repo has paid for repeatedly, and it
+ * is the same discipline LEG 2 above already applies via {@link unitKindOfToken}.
+ *
+ * ⚠ RETURNS EVERY MATCH, and the caller decides. Exactly one is a binding; two
+ * is an ambiguity the product must ASK about rather than guess at; zero means no
+ * slot is denominated that way and there is nothing defensible to offer. A
+ * silent pick among several would be precisely the fabricated intervention the
+ * identification chip's header refuses.
+ */
+function optionValueCandidatesFor(
+  node: Dict,
+  newValueToken: string,
+  graph: unknown,
+): OptionValueCandidate[] {
+  if (node.kind !== 'option') return [];
+  const wanted = unitKindOfToken(newValueToken);
+  if (wanted === 'none') return [];
+  const interventions = node.interventions;
+  if (!isPlainObject(interventions)) return [];
+
+  const out: OptionValueCandidate[] = [];
+  for (const [factorId, slot] of Object.entries(interventions)) {
+    if (!isPlainObject(slot)) continue;
+    const unit = typeof slot.unit === 'string' ? slot.unit : '';
+    if (unit.trim().length === 0) continue;
+    if (unitKindOfUnitString(unit) !== wanted) continue;
+    // Render-safe label, never the raw id — the id is internal and is never
+    // shown to a user anywhere in this module.
+    const factorNode = nodeById(graph, factorId);
+    const factorLabel =
+      factorNode && typeof factorNode.label === 'string' && factorNode.label.trim().length > 0
+        ? factorNode.label
+        : null;
+    if (factorLabel === null) continue; // unnameable slot — nothing defensible to offer
+    out.push({ factorId, factorLabel });
+  }
+  return out;
+}
+
+/**
+ * The unit kind of a RECORDED unit string, which arrives in several spellings
+ * across this estate — a bare symbol ("£"), an ISO code ("GBP"), or a rate
+ * ("£/month", "%/yr"). Derived off the canonical currency map rather than a
+ * second hand-written vocabulary (trap 12), the same rule the formatter above
+ * already follows.
+ */
+function unitKindOfUnitString(unit: string): UnitKind {
+  const t = unit.trim();
+  if (t.length === 0) return 'none';
+  if (t.startsWith('%') || t.endsWith('%')) return 'percent';
+  for (const symbol of CURRENCY_SYMBOLS) {
+    if (t.includes(symbol)) return 'currency';
+  }
+  for (const code of CURRENCY_CODE_TO_SYMBOL.keys()) {
+    if (t.toUpperCase().includes(code)) return 'currency';
+  }
+  return 'none';
+}
+
+/**
  * The single magnitude this node can be honestly said to hold, or null when
  * there isn't one. Null when no source states a magnitude, and null when the
  * sources DISAGREE — a node whose `display_value` has drifted from its
@@ -492,6 +587,8 @@ function detectOne(
     oldValueToken,
     newValueToken: newOnly[0]!.raw,
     isOption: node.kind === 'option',
+    // Resolved off the POST graph: the slots as they stand after the rename.
+    optionValueCandidates: optionValueCandidatesFor(postNode ?? node, newOnly[0]!.raw, postGraph),
   };
 }
 
@@ -543,10 +640,41 @@ export function buildLabelValueDivergenceNote(divergences: readonly LabelValueDi
   if (divergences.length === 0) return null;
   const sentences = divergences.map((d) => {
     const kind = d.isOption ? 'option' : 'factor';
-    return (
+    const disclosure =
       `Heads up — that changed the label text only. The ${kind} now reads "${d.newLabel}", ` +
       `but its modelled value is unchanged, so re-running the analysis will still use ${d.oldValueToken}, ` +
-      `not ${d.newValueToken}. Want me to update the modelled value to ${d.newValueToken}?`
+      `not ${d.newValueToken}.`;
+
+    // ⭐ THE CLOSING SENTENCE MUST MATCH THE CONTROL THE TURN ACTUALLY OFFERS.
+    //
+    // A sentence that is TRUTHFUL ABOUT A STATE is not the same as one that is
+    // EXECUTABLE AS AN ACTION. This note asked "Want me to update the modelled
+    // value to £69?" on every branch, including ones where the only affordance
+    // shipped was the valueless identification chip — an offer with nothing
+    // that could accept it. The offer is now made only where the accept control
+    // exists, and where it does not the ambiguity becomes a QUESTION rather
+    // than a promise the turn cannot keep.
+    if (!d.isOption) return `${disclosure} Want me to update the modelled value to ${d.newValueToken}?`;
+
+    const [only, ...rest] = d.optionValueCandidates;
+    if (only !== undefined && rest.length === 0) {
+      // Name the slot, so the user is agreeing to something specific rather
+      // than to "the modelled value" of an option with several.
+      return (
+        `${disclosure} Want me to set ${only.factorLabel} to ${d.newValueToken} ` +
+        `on this option?`
+      );
+    }
+    if (rest.length > 0) {
+      const named = [only!, ...rest].map((c) => `"${c.factorLabel}"`).join(' and ');
+      return (
+        `${disclosure} This option carries ${rest.length + 1} values measured that way — ` +
+        `${named} — so tell me which one ${d.newValueToken} belongs to and I will set it.`
+      );
+    }
+    return (
+      `${disclosure} Tell me which value on this option ${d.newValueToken} refers to ` +
+      `and I will set it.`
     );
   });
   return sentences.join('\n\n');
@@ -565,8 +693,38 @@ export function buildLabelValueDivergenceActions(divergences: readonly LabelValu
     if (seen.has(d.path)) continue;
     seen.add(d.path);
     if (d.isOption) {
-      const chip = buildConfigureOptionChip(d.label);
-      actions.push({ label: chip.label, prompt: chip.message, role: 'facilitator' });
+      // ⭐ THE OFFER NOW HAS A CONTROL THAT ANSWERS IT.
+      //
+      // The note asks "Want me to update the modelled value to £69?". This
+      // branch used to answer it with `buildConfigureOptionChip`, whose own
+      // header says it "DELIBERATELY DOES NOT carry a value" — it completes the
+      // IDENTIFICATION and leaves the number to the user. So the product asked a
+      // direct question and offered nothing that could say yes, and the value
+      // stayed 59 through save, rerun and reopen while the label read £69.
+      //
+      // The same header records the permission: the value-bearing siblings
+      // "fire only once the user has supplied one". Here the user supplied it.
+      // The message is built by the estate's ONE routable spelling,
+      // `buildConfigureOptionAdvisedFormat`, so it returns to the lane that
+      // offered it rather than to a phrasing minted here (trap 12).
+      //
+      // ⚠ EXACTLY ONE CANDIDATE, OR NO VALUE IS CARRIED. With several
+      // same-denominated slots the product cannot know which one the figure
+      // belongs to, and picking one would put a fabricated intervention a click
+      // away behind a control that reads as a recommendation — the precise harm
+      // the identification chip exists to prevent. Ambiguity falls back to
+      // identification, and the note (above) asks instead of promising.
+      const [only, ...rest] = d.optionValueCandidates;
+      if (only !== undefined && rest.length === 0) {
+        actions.push({
+          label: `Apply ${d.newValueToken} to ${only.factorLabel}`,
+          prompt: `${buildConfigureOptionAdvisedFormat(d.label, only.factorLabel, d.newValueToken)}.`,
+          role: 'facilitator',
+        });
+      } else {
+        const chip = buildConfigureOptionChip(d.label);
+        actions.push({ label: chip.label, prompt: chip.message, role: 'facilitator' });
+      }
     } else {
       actions.push({
         label: `Update ${d.label}`,
