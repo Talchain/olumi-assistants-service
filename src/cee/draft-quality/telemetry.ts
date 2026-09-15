@@ -122,6 +122,7 @@ export function emitDraftQuality(input: DraftQualityEventInput): void {
           edge_count: a.coverage.edge_count,
           causal_waist: a.coverage.causal_waist,
           private_factor_count: a.coverage.private_factor_count,
+          deviating_private_factor_count: a.coverage.deviating_private_factor_count,
           shared_factor_count: a.coverage.shared_factor_count,
           max_causal_depth: a.coverage.max_causal_depth,
         }
