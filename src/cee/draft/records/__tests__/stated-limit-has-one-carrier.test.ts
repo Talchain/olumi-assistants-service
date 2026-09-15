@@ -8,9 +8,11 @@
  * corpus of REAL staging drafts in this repo and did not survive:
  *
  *   · `unified-pipeline/stages/repair/__tests__/fixtures/`
- *     `staging-budget-brief-node-sets-2026-08-30.json` — 9 genuine drafts of
- *     one budget brief: a node naming the limit's subject is present in
- *     **9 of 9**, and the limit is still recorded correctly in **0** of them.
+ *     `staging-budget-brief-node-sets-2026-08-30.json` — **10 captures, of
+ *     which 9 are genuine drafts of that budget brief**; the 10th (`4fd953`)
+ *     is a 4-node CRM/sales-adoption graph mis-filed in the corpus. Across the
+ *     9: a node naming the limit's subject is present in **9 of 9**, and the
+ *     limit is still recorded correctly in **0** of them.
  *   · `transforms/__tests__/fixtures/sendable-variance-draws-2026-08-19.json`
  *     — 3 draws: the `Burn Rate` subject node is present in **3 of 3**.
  *
@@ -43,6 +45,21 @@
  * THE CANONICAL OWNER AND SUPERSEDE THE COMPETING LOGIC, never to add a
  * parallel rule; carrying (1) while (2) still speaks is the parallel rule.
  *
+ * ── ⛔⛔ TWO OPPOSITE HARMS MAY NOT SHARE ONE BOUND (trap 22b) ─────────────
+ * The first version of this file asserted `<= 1`. That guards only the INVENT
+ * direction — two rows for one limit — and **it is satisfied by ZERO**. An
+ * independent review proved it by execution: suppress the string-matched row
+ * while the carrier is still absent at either discard hop, and the user's
+ * stated limit leaves the graph entirely (`wire_row_count = 0`) while this
+ * file stayed GREEN. Strictly worse than today, and silent.
+ *
+ * Not a hypothetical class — THIS repo's measured prior failure. CEE #888
+ * suppressed too widely and dropped **13 of 14 legitimate ceilings** under a
+ * green suite. And DROP is the direction the eventual fix will fail in,
+ * because every candidate fix here is a SUPERSEDE.
+ *
+ * So the bound is `toBe(1)`: never two, and never none.
+ *
  * ── WHAT THE INVARIANT BELOW IS, AND WHY IT IS SHAPED THIS WAY ────────────
  * It is deliberately NOT "the carrier has not landed". An assertion of that
  * shape is satisfied by DELETING it, so the lane that lands the carrier would
@@ -50,7 +67,7 @@
  * property of the END STATE that is true today, stays true once the carrier
  * lands CORRECTLY, and is false for exactly the naive version:
  *
- *   THE NUMBER A USER STATED ONCE AS A LIMIT IS RECORDED AGAINST AT MOST ONE
+ *   THE NUMBER A USER STATED ONCE AS A LIMIT IS RECORDED AGAINST EXACTLY ONE
  *   NODE.
  *
  * ⚠ WHAT IT DELIBERATELY DOES NOT ASSERT, stated rather than glossed. Today's
@@ -223,7 +240,7 @@ describe("a stated limit has ONE carrier", () => {
    * supersede (one row, correctly targeted). FALSE for the naive carrier, which
    * is the only version anyone would write without this file.
    */
-  it("INTERLOCK — the number the user stated once is recorded against AT MOST ONE node", async () => {
+  it("INTERLOCK — the number the user stated once is recorded against EXACTLY ONE node", async () => {
     const prior: Record<string, string | undefined> = {};
     for (const k of ["ANTHROPIC_API_KEY", "CEE_ANTHROPIC_STRUCTURED_OUTPUTS"]) prior[k] = process.env[k];
     process.env.ANTHROPIC_API_KEY = "sk-ant-test-one-carrier";
@@ -249,7 +266,31 @@ describe("a stated limit has ONE carrier", () => {
       // What `parse.ts:895` will put on `ctx.llmGoalConstraints` — whatever the
       // adapter chooses to hand it, today or after the carrier lands.
       const asParseWouldSee = result.goal_constraints;
-      const wire = wireAfterCompoundGoals(project(), asParseWouldSee);
+
+      // ⭐ THE WIRE IS BUILT FROM THE ADAPTER'S OWN GRAPH, not a second
+      // projection. `parse.ts` carries THIS object downstream; building the
+      // graph from one source while taking the rows from another leaves the two
+      // free to disagree about node ids for reasons that are the fixture's
+      // rather than the code's.
+      const wire = wireAfterCompoundGoals(
+        { graph: result.graph, goalConstraints: [] },
+        asParseWouldSee,
+      );
+      const wireNodeIds = new Set(result.graph.nodes.map((n) => n.id));
+
+      // ⭐⭐ S1 — THE PRECONDITION THE RED DEPENDS ON, PINNED RATHER THAN
+      // ASSUMED (trap 13b). `compound-goals.ts:370` SILENTLY drops any carried
+      // row whose `node_id` is not a node on the graph (`existingNodeIds`), so
+      // a carrier landing with a divergent id produces EXACTLY the same visible
+      // outcome as no carrier at all — measured: `llm_skipped: 1`, suite green.
+      // Without this, the interlock's discrimination would be luck of id
+      // agreement rather than a property of the code.
+      const projectorRow = project().goalConstraints[0]!;
+      expect(
+        wireNodeIds.has(String(projectorRow.node_id)),
+        `the projector binds to ${String(projectorRow.node_id)}, which is not a node on the graph ` +
+          "the wire is built from — a correctly-built carrier could not be seen here at all",
+      ).toBe(true);
 
       const forTheUsersLimit = rowsForTheStatedLimit(wire);
       expect(
@@ -257,12 +298,29 @@ describe("a stated limit has ONE carrier", () => {
         `one stated limit produced ${forTheUsersLimit.length} rows: ` +
           JSON.stringify(forTheUsersLimit.map((r) => ({ node_id: r.node_id, value: r.value, unit: r.unit }))) +
           " — carrying the projector's bound row WITHOUT superseding the string-matched one records the " +
-          "same user limit twice, on two nodes, at two scales. Name the canonical owner and supersede the other.",
-      ).toBeLessThanOrEqual(1);
+          "same user limit twice, on two nodes, at two scales; suppressing WITHOUT carrying removes it " +
+          "from the graph altogether. EXACTLY one — never two, never none.",
+      ).toBe(1);
 
-      // The rows must also not disagree with themselves about WHICH node: two
-      // distinct targets for one quote is the same defect counted differently.
-      expect(new Set(forTheUsersLimit.map((r) => String(r.node_id))).size).toBeLessThanOrEqual(1);
+      // ⭐ S1(b) — NOTHING THE ADAPTER CARRIES FOR THIS LIMIT MAY BE DROPPED IN
+      // SILENCE. Scoped to rows describing the USER'S limit: an unrelated row
+      // failing the existence filter is not this file's business, and scoping
+      // it is what keeps the M2 control honest.
+      //
+      // ⚠ It iterates an EMPTY list today, by construction — the adapter
+      // carries nothing. That is NOT the unreachable-line defect the previous
+      // version of this file was pulled up for: that line sat after an
+      // assertion which aborts, so it could never run in any world. This one
+      // becomes live in exactly the world the file exists to guard, and it is
+      // the only assertion here that catches a carrier landing with a divergent
+      // id.
+      for (const carried of rowsForTheStatedLimit(asParseWouldSee ?? [])) {
+        expect(
+          wireNodeIds.has(String(carried.node_id)),
+          `a carried row for the user's limit names ${String(carried.node_id)}, which is not on the ` +
+            "graph — `compound-goals.ts` will drop it in silence and the limit will read as uncarried",
+        ).toBe(true);
+      }
     } finally {
       for (const [k, v] of Object.entries(prior)) {
         if (v === undefined) delete process.env[k];
