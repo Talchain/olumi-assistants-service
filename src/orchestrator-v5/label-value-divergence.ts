@@ -96,6 +96,8 @@ import {
   buildConfigureOptionAdvisedFormat,
   buildConfigureOptionChip,
 } from './configure-option-chip-text.js';
+import { readOptionEffectValue } from './routing/option-effect-write.js';
+import { buildFactorScaleMap } from './tools/plot-intervention-scale.js';
 import { thousands } from './compose/format-factor-value.js';
 
 type Dict = Record<string, unknown>;
@@ -143,6 +145,28 @@ export interface LabelValueDivergence {
 export interface OptionValueCandidate {
   readonly factorId: string;
   readonly factorLabel: string;
+  /**
+   * The chip message, ALREADY PROVEN to route back into the lane that would
+   * write it — or null when no such sentence exists for this slot.
+   *
+   * ⛔ MEASURED, and it is why this field is not just a label. The first cut
+   * emitted `Set the "<option>" option's "<factor>" effect to £69.` on the claim
+   * that it "routes back to the lane that offered it". EXECUTED against the real
+   * grammar (`routing/option-effect-write.ts:400`), it returns NULL twice over:
+   *
+   *   1. the writer REFUSES a currency amount outright — "a currency amount is
+   *      not on the model's scale and this writer performs no conversion for it"
+   *      (`:437`) — and then rejects anything outside 0..1 (`:446`);
+   *   2. worse and independently, `VALUE_ASSIGNMENT` is GLOBAL, so it finds
+   *      `to £69` inside THE OPTION'S OWN LABEL — which a label/value divergence
+   *      GUARANTEES carries a currency figure — and nulls the whole message.
+   *
+   * A chip that does not route does not merely fail: it drops the turn to the
+   * edit LLM, which is the wrong-entity-write path. So the sentence is now
+   * round-tripped through the REAL reader before it is offered, and the estate
+   * cannot drift away from it — there is no second copy of the grammar here.
+   */
+  readonly routableMessage: string | null;
 }
 
 function isPlainObject(v: unknown): v is Dict {
@@ -408,6 +432,69 @@ function collectMagnitudeCandidates(node: Dict): { magnitude: ModelledMagnitude;
 }
 
 /**
+ * Compose the accept sentence and PROVE it routes, or return null.
+ *
+ * Two independent reasons a sentence fails, both MEASURED against the real
+ * grammar rather than reasoned about:
+ *
+ *  1. THE VALUE CLASS. The writer takes a 0–1 model-scale level (or a
+ *     percentage) and refuses a currency amount outright. So the user's "£69"
+ *     must become `magnitude / cap`, and the cap comes from the factor's own
+ *     scale info — which many factors simply do not have. Where it is missing,
+ *     or the normalised convention is unproven, there is no defensible level and
+ *     the honest answer is no chip at all: the alternative puts a fabricated
+ *     magnitude one click away behind a control that reads as a recommendation.
+ *
+ *  2. THE OPTION'S OWN LABEL. `VALUE_ASSIGNMENT` is global, and a label/value
+ *     divergence GUARANTEES the label carries a currency figure. A label spelling
+ *     it with "to" — "raising the Pro plan price from £49 to £69 per month" — is
+ *     found first, seen as a currency, and nulls the whole message. That is not
+ *     something this module can compose around, because the label is the option's
+ *     identity and the router needs it.
+ *
+ * ⚠ SO THIS ASKS THE ROUTER, IT DOES NOT PREDICT IT. Re-implementing either rule
+ * here would be a second spelling of the grammar (trap 12) that drifts on the day
+ * the router changes — and would drift silently, because the failure mode is a
+ * chip that looks fine and drops the turn to the edit LLM.
+ */
+function buildRoutableAcceptMessage(
+  optionLabel: string,
+  factorLabel: string,
+  newValueToken: string,
+  scale: { readonly cap?: number; readonly normalisedConvention?: boolean } | undefined,
+): string | null {
+  const magnitude = magnitudeOfToken(newValueToken);
+  if (magnitude === null) return null;
+
+  // The scale convention must be PROVEN, not merely present — a cap alone does
+  // not establish that this factor is stored downscaled.
+  const cap = scale?.cap;
+  if (scale?.normalisedConvention !== true || cap === undefined || !(cap > 0)) return null;
+
+  const level = magnitude / cap;
+  if (!Number.isFinite(level) || level < 0 || level > 1) return null;
+
+  // Trim trailing zeros so "0.690" does not reach the user or the router.
+  const rendered = String(Number(level.toFixed(6)));
+  const message = `${buildConfigureOptionAdvisedFormat(optionLabel, factorLabel, rendered)}.`;
+
+  // THE ROUND TRIP. Normalise exactly as the router does, then ask the router.
+  const routed = readOptionEffectValue(message.toLowerCase().replace(/\s+/g, ' ').trim());
+  if (routed === null) return null;
+  // And it must resolve to the level we meant, not merely to something.
+  if (Math.abs(routed - level) > 1e-6) return null;
+  return message;
+}
+
+/** The bare number a render-safe token carries, e.g. "£69" -> 69, "7%" -> 7. */
+function magnitudeOfToken(raw: string): number | null {
+  const digits = raw.replace(/[^0-9.]/g, '');
+  if (digits.length === 0) return null;
+  const n = Number.parseFloat(digits);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * ⭐ WHICH intervention slot does the stated value belong to?
  *
  * Resolved by UNIT AGREEMENT, not by a label heuristic. Each intervention
@@ -429,6 +516,7 @@ function optionValueCandidatesFor(
   node: Dict,
   newValueToken: string,
   graph: unknown,
+  optionLabel: string,
 ): OptionValueCandidate[] {
   if (node.kind !== 'option') return [];
   const wanted = unitKindOfToken(newValueToken);
@@ -436,6 +524,8 @@ function optionValueCandidatesFor(
   const interventions = node.interventions;
   if (!isPlainObject(interventions)) return [];
 
+  // The scale authority, PLoT-verified — never a cap read by hand here.
+  const scales = buildFactorScaleMap(isPlainObject(graph) ? graph.nodes : undefined);
   const out: OptionValueCandidate[] = [];
   for (const [factorId, slot] of Object.entries(interventions)) {
     if (!isPlainObject(slot)) continue;
@@ -450,7 +540,11 @@ function optionValueCandidatesFor(
         ? factorNode.label
         : null;
     if (factorLabel === null) continue; // unnameable slot — nothing defensible to offer
-    out.push({ factorId, factorLabel });
+    out.push({
+      factorId,
+      factorLabel,
+      routableMessage: buildRoutableAcceptMessage(optionLabel, factorLabel, newValueToken, scales.get(factorId)),
+    });
   }
   return out;
 }
@@ -588,7 +682,7 @@ function detectOne(
     newValueToken: newOnly[0]!.raw,
     isOption: node.kind === 'option',
     // Resolved off the POST graph: the slots as they stand after the rename.
-    optionValueCandidates: optionValueCandidatesFor(postNode ?? node, newOnly[0]!.raw, postGraph),
+    optionValueCandidates: optionValueCandidatesFor(postNode ?? node, newOnly[0]!.raw, postGraph, label),
   };
 }
 
@@ -656,17 +750,20 @@ export function buildLabelValueDivergenceNote(divergences: readonly LabelValueDi
     // than a promise the turn cannot keep.
     if (!d.isOption) return `${disclosure} Want me to update the modelled value to ${d.newValueToken}?`;
 
-    const [only, ...rest] = d.optionValueCandidates;
-    if (only !== undefined && rest.length === 0) {
+    const accept = acceptableCandidate(d);
+    if (accept !== null) {
       // Name the slot, so the user is agreeing to something specific rather
-      // than to "the modelled value" of an option with several.
+      // than to "the modelled value" of an option with several. Reached ONLY
+      // when the accept control is genuinely shipping — copy and control move
+      // together, which is the whole point of this change.
       return (
-        `${disclosure} Want me to set ${only.factorLabel} to ${d.newValueToken} ` +
+        `${disclosure} Want me to set ${accept.factorLabel} to ${d.newValueToken} ` +
         `on this option?`
       );
     }
+    const rest = d.optionValueCandidates.slice(1);
     if (rest.length > 0) {
-      const named = [only!, ...rest].map((c) => `"${c.factorLabel}"`).join(' and ');
+      const named = d.optionValueCandidates.map((c) => `"${c.factorLabel}"`).join(' and ');
       return (
         `${disclosure} This option carries ${rest.length + 1} values measured that way — ` +
         `${named} — so tell me which one ${d.newValueToken} belongs to and I will set it.`
@@ -678,6 +775,24 @@ export function buildLabelValueDivergenceNote(divergences: readonly LabelValueDi
     );
   });
   return sentences.join('\n\n');
+}
+
+/**
+ * The ONE candidate this divergence may offer an accept control for, or null.
+ *
+ * ⭐ ONE PREDICATE, TWO CONSUMERS, DELIBERATELY. The note and the action read
+ * the SAME answer, so a sentence offering a move can never ship beside a control
+ * that cannot make it — which is the defect this whole change exists to close,
+ * and it would be trivially reintroduced by letting the two branches decide
+ * separately (trap 21: two questions under one name).
+ *
+ * Requires exactly one same-denominated slot AND a sentence proven to route.
+ * Either missing means the honest outcome is a question, not an offer.
+ */
+function acceptableCandidate(d: LabelValueDivergence): OptionValueCandidate | null {
+  if (d.optionValueCandidates.length !== 1) return null;
+  const only = d.optionValueCandidates[0]!;
+  return only.routableMessage === null ? null : only;
 }
 
 /**
@@ -714,11 +829,12 @@ export function buildLabelValueDivergenceActions(divergences: readonly LabelValu
       // away behind a control that reads as a recommendation — the precise harm
       // the identification chip exists to prevent. Ambiguity falls back to
       // identification, and the note (above) asks instead of promising.
-      const [only, ...rest] = d.optionValueCandidates;
-      if (only !== undefined && rest.length === 0) {
+      const accept = acceptableCandidate(d);
+      if (accept !== null) {
         actions.push({
-          label: `Apply ${d.newValueToken} to ${only.factorLabel}`,
-          prompt: `${buildConfigureOptionAdvisedFormat(d.label, only.factorLabel, d.newValueToken)}.`,
+          label: `Apply ${d.newValueToken} to ${accept.factorLabel}`,
+          // The sentence PROVEN to route, never one composed here on faith.
+          prompt: accept.routableMessage!,
           role: 'facilitator',
         });
       } else {

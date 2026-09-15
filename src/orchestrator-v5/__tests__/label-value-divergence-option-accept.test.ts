@@ -109,29 +109,198 @@ describe('an option divergence offers a control that answers its own question', 
     expect(divs[0]!.oldValueToken).toBe('£59');
   });
 
-  it('ONE £-denominated slot ⇒ a VALUE-BEARING accept chip naming that slot', () => {
+  it('⛔ KNOWN-DROPPED: a label spelling "to £69" cannot be offered an accept chip', () => {
+    // MEASURED, and the reason this class is pinned rather than hidden.
+    // `VALUE_ASSIGNMENT` (routing/option-effect-write.ts:400) is GLOBAL, so it
+    // finds "to £69" inside THE OPTION'S OWN LABEL — which a label/value
+    // divergence GUARANTEES carries a currency figure — sees a currency, and
+    // returns null for the whole message. No sentence naming this option can
+    // route, so no accept control exists for it.
+    //
+    // The first cut shipped a chip here anyway, on the composer header's claim
+    // that the message "routes back to the lane that offered it". It does not:
+    // a chip that fails to route DROPS THE TURN TO THE EDIT LLM, the
+    // wrong-entity-write path. Offering it was worse than offering nothing.
     const divs = divergences('release');
-    expect(divs[0]!.optionValueCandidates).toEqual([
-      { factorId: PRICE_FACTOR, factorLabel: PRICE_LABEL },
-    ]);
+    expect(divs[0]!.optionValueCandidates).toHaveLength(1);
+    expect(divs[0]!.optionValueCandidates[0]!.factorLabel).toBe(PRICE_LABEL);
+    // The slot is identified; the SENTENCE is what is unavailable.
+    expect(divs[0]!.optionValueCandidates[0]!.routableMessage).toBeNull();
 
     const actions = buildLabelValueDivergenceActions(divs);
     expect(actions).toHaveLength(1);
-    // THE CLAIM: the chip carries the user's own figure and names the slot.
-    expect(actions[0]!.label).toBe(`Apply £69 to ${PRICE_LABEL}`);
-    expect(actions[0]!.prompt).toContain('£69');
-    // Routable spelling, owned by buildConfigureOptionAdvisedFormat — it must
-    // anchor on the literal word "option" or it cannot return to the lane that
-    // offered it (configure-option-chip-text.ts states this at length).
-    expect(actions[0]!.prompt).toMatch(/option/i);
-    expect(actions[0]!.prompt).toContain(PRICE_LABEL);
+    expect(actions[0]!.label).not.toMatch(/^Apply /);
   });
 
-  it('and the note asks about THAT slot, not about "the modelled value"', () => {
+  it('and the note ASKS rather than offering, because no control exists', () => {
+    // Copy and control in lockstep — both read `acceptableCandidate`. An offer
+    // beside a control that cannot make the move is the defect being closed.
     const note = buildLabelValueDivergenceNote(divergences('release'))!;
     expect(note).toContain('£59');
     expect(note).toContain('£69');
+    expect(note).not.toContain('Want me to set');
+    expect(note).toMatch(/tell me which value|tell me which one/i);
+  });
+
+  /**
+   * ⭐⭐ THE POSITIVE CONTROL, and the most important test in this file.
+   *
+   * Everything above proves the accept chip correctly DOES NOT fire. Without a
+   * case where it DOES, this whole change could be dead code that never emits
+   * anything — this estate's most-repeated failure, and exactly what the
+   * known-dropped case above would disguise.
+   *
+   * The discriminator is the LABEL's spelling, measured: a label carrying its
+   * figure in parentheses rather than after "to" leaves no `to £N` for the
+   * router's global regex to trip on, so the composed sentence routes.
+   */
+  function parenGraph(): unknown {
+    const g = {
+      nodes: [
+        {
+          id: OPTION_ID, kind: 'option', label: PAREN_PRE, is_baseline: false,
+          interventions: {
+            [PRICE_FACTOR]: { value: 0.59, raw_value: 59, unit: '£/month', source: 'cee_hypothesis' },
+          },
+        },
+        {
+          id: PRICE_FACTOR, kind: 'factor', label: PRICE_LABEL,
+          // cap + a PROVEN normalised convention: value*cap ≈ raw_value, non-zero
+          // baseline. A cap alone is deliberately not enough.
+          observed_state: { value: 0.49, raw_value: 49, baseline: 49, cap: 100, unit: '£' },
+        },
+      ],
+    };
+    return g;
+  }
+  const PAREN_PRE = 'Pro plan price rise (£59/month)';
+  const PAREN_POST = 'Pro plan price rise (£69/month)';
+
+  it('POSITIVE CONTROL: a label with no "to £N" DOES get a routable accept chip', () => {
+    const divs = detectLabelValueDivergences(
+      [{ op: 'update_node', path: OPTION_ID, value: { label: PAREN_POST },
+         old_value: { label: PAREN_PRE } }],
+      parenGraph(),
+      JSON.parse(JSON.stringify(parenGraph()).replace(PAREN_PRE, PAREN_POST)),
+    );
+    expect(divs).toHaveLength(1);
+    expect(divs[0]!.newValueToken).toBe('£69');
+
+    const only = divs[0]!.optionValueCandidates[0];
+    expect(only).toBeDefined();
+    // THE CLAIM: a sentence exists AND the real router resolves it to 69/100.
+    expect(only!.routableMessage).not.toBeNull();
+    expect(only!.routableMessage).toContain('0.69');
+    // ⚠ The VALUE is the level, not the user's figure — the writer refuses a
+    // currency amount. The £69 that remains is inside the option's own LABEL,
+    // which is the option's identity and must be there for the router to bind.
+    // What must NOT appear is the routing-killer shape "to £N", which is the
+    // measured reason the captured label above can never be offered a chip.
+    expect(only!.routableMessage).not.toMatch(/\bto\s+£\d/);
+    expect(only!.routableMessage).toMatch(/\bto\s+0\.69\b/);
+
+    const actions = buildLabelValueDivergenceActions(divs);
+    expect(actions[0]!.label).toBe(`Apply £69 to ${PRICE_LABEL}`);
+    expect(actions[0]!.prompt).toBe(only!.routableMessage);
+
+    // And the note OFFERS here, because the control exists — the lockstep.
+    const note = buildLabelValueDivergenceNote(divs)!;
     expect(note).toContain(`Want me to set ${PRICE_LABEL} to £69`);
+  });
+
+  it('⭐ THE ROUND TRIP IS LOAD-BEARING: a VALID cap + an unroutable label ⇒ no chip', () => {
+    // ⛔ THE CASE A MUTANT EXPOSED. Every other unroutable fixture here fails at
+    // the CAP check first, so skipping the round trip left the suite green and
+    // the guard was pinned by nothing. This is the only combination that reaches
+    // it: a factor with a proven convention (so a level IS derivable) on an
+    // option whose label spells "to £69" (so no sentence naming it can route).
+    //
+    // Without the round trip this emits a chip that returns NULL at the router
+    // and drops the turn to the edit LLM — the wrong-entity-write path.
+    const TO_PRE = 'Raise the Pro plan price to £59';
+    const TO_POST = 'Raise the Pro plan price to £69';
+    const g = {
+      nodes: [
+        {
+          id: OPTION_ID, kind: 'option', label: TO_PRE, is_baseline: false,
+          interventions: {
+            [PRICE_FACTOR]: { value: 0.59, raw_value: 59, unit: '£/month', source: 'cee_hypothesis' },
+          },
+        },
+        {
+          id: PRICE_FACTOR, kind: 'factor', label: PRICE_LABEL,
+          observed_state: { value: 0.49, raw_value: 49, baseline: 49, cap: 100, unit: '£' },
+        },
+      ],
+    };
+    const divs = detectLabelValueDivergences(
+      [{ op: 'update_node', path: OPTION_ID, value: { label: TO_POST }, old_value: { label: TO_PRE } }],
+      g,
+      JSON.parse(JSON.stringify(g).replace(TO_PRE, TO_POST)),
+    );
+    expect(divs).toHaveLength(1);
+    const only = divs[0]!.optionValueCandidates[0];
+    // PRECONDITION: the cap IS usable here — otherwise this test would pass for
+    // the wrong reason, which is exactly how the guard went unpinned.
+    expect(only).toBeDefined();
+    expect(only!.factorLabel).toBe(PRICE_LABEL);
+    // THE CLAIM: a level is derivable, and the sentence STILL does not route.
+    expect(only!.routableMessage).toBeNull();
+    expect(buildLabelValueDivergenceActions(divs)[0]!.label).not.toMatch(/^Apply /);
+  });
+
+  it('⭐ A CAP IS NOT PROOF: cap present but ZERO baseline ⇒ no chip', () => {
+    // ⛔ A SECOND CASE A MUTANT EXPOSED. Dropping the `normalisedConvention`
+    // requirement left the suite green, because the only negative fixture removed
+    // observed_state ENTIRELY and failed at the cap check first. So the evidence
+    // gate was pinned by nothing.
+    //
+    // A zero baseline is scale-ambiguous — 0 == 0/anything — so it carries no
+    // evidence that this factor is stored downscaled, and buildFactorScaleMap
+    // correctly refuses to grant the convention. Dividing by the cap anyway would
+    // put a fabricated magnitude one click away behind a control that reads as a
+    // recommendation. The routable label makes this reach the convention check
+    // rather than dying earlier.
+    const g = {
+      nodes: [
+        {
+          id: OPTION_ID, kind: 'option', label: PAREN_PRE, is_baseline: false,
+          interventions: {
+            [PRICE_FACTOR]: { value: 0.59, raw_value: 59, unit: '£/month', source: 'cee_hypothesis' },
+          },
+        },
+        {
+          id: PRICE_FACTOR, kind: 'factor', label: PRICE_LABEL,
+          // cap IS present — and the baseline is zero, so it proves nothing.
+          observed_state: { value: 0, raw_value: 0, baseline: 0, cap: 100, unit: '£' },
+        },
+      ],
+    };
+    const divs = detectLabelValueDivergences(
+      [{ op: 'update_node', path: OPTION_ID, value: { label: PAREN_POST }, old_value: { label: PAREN_PRE } }],
+      g,
+      JSON.parse(JSON.stringify(g).replace(PAREN_PRE, PAREN_POST)),
+    );
+    expect(divs).toHaveLength(1);
+    const only = divs[0]!.optionValueCandidates[0];
+    expect(only).toBeDefined();
+    expect(only!.routableMessage).toBeNull();
+    expect(buildLabelValueDivergenceActions(divs)[0]!.label).not.toMatch(/^Apply /);
+  });
+
+  it('NO CAP ⇒ no chip, even with a routable label — a level cannot be derived', () => {
+    // The majority state on real graphs. Without a proven convention there is no
+    // defensible level, and inventing one puts a fabricated magnitude a click away.
+    const g = JSON.parse(JSON.stringify(parenGraph())) as { nodes: Record<string, unknown>[] };
+    for (const n of g.nodes) if (n.id === PRICE_FACTOR) n.observed_state = { value: 0.49, unit: '£' };
+    const divs = detectLabelValueDivergences(
+      [{ op: 'update_node', path: OPTION_ID, value: { label: PAREN_POST },
+         old_value: { label: PAREN_PRE } }],
+      g, JSON.parse(JSON.stringify(g).replace(PAREN_PRE, PAREN_POST)),
+    );
+    expect(divs).toHaveLength(1);
+    expect(divs[0]!.optionValueCandidates[0]?.routableMessage ?? null).toBeNull();
+    expect(buildLabelValueDivergenceActions(divs)[0]!.label).not.toMatch(/^Apply /);
   });
 
   it('AMBIGUITY TWIN: two £-denominated slots ⇒ NO value chip, and the note ASKS', () => {
