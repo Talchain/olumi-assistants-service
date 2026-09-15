@@ -54,8 +54,8 @@
  * **That structure is absent here, and the absence is provable rather than
  * argued:**
  *
- *   · This predicate has exactly ONE consumer — `tryStateQueryGuard`, at the
- *     two ANSWERING arms — where its only effect is `{ matched: false }`.
+ *   · This predicate has exactly ONE consumer — `tryStateQueryGuard`, at its
+ *     origin ANSWERING arm — where its only effect is `{ matched: false }`.
  *   · `isStateQueryQuestionShape`, the PROTECTIVE predicate that denies a
  *     mutation warrant (`mutation-warrant.ts:1052`) and suppresses `edit_graph`
  *     dispatch (`route-v2.ts:4879`), **does not consult this module and is
@@ -85,12 +85,14 @@
  * ── THE ONE REAL COST, STATED RATHER THAN PAPERED OVER ──────────────────────
  * `brief-audit-answer.ts` exists because explanation layers *"re-read the brief
  * (or nothing) rather than the model"* (loss class 7). Declining a GENUINE
- * audit question to the LLM re-opens that. So the brief-audit arm applies this
- * predicate together with a second conjunct — `hasDispositionVerb` — and
- * declines only when the message attributes NO handling action to the system:
+ * audit question to the LLM re-opens that. The brief-audit arm now independently
+ * requires `hasSystemDisposition` before it can answer at all; mentioning a brief
+ * is not permission to return a tally. It also declines mixed audit/advice
+ * requests, whose advice portion the manifest cannot answer:
  *
  *   "Do you agree you left out my deadline?"  → `left out` → still AUDITED
  *   "Do you actually disagree with anything I said?" → no disposition → DECLINED
+ *   "What did you leave out, and what should I do next?" → advice → DECLINED
  *
  * The origin arm needs no such conjunct: its answer is a single provenance
  * sentence, and the reasoning layer is measured to answer origin questions at

@@ -310,7 +310,7 @@ function isLetterOrDigit(ch: string | undefined): boolean {
  * opens or closes a span (keeps "don't" / "it's" from masking real seams).
  * An unbalanced opener masks nothing — the char is treated as ordinary.
  */
-function computeQuoteMask(s: string): boolean[] {
+export function computeQuoteMask(s: string): boolean[] {
   const mask = new Array<boolean>(s.length).fill(false);
   let i = 0;
   while (i < s.length) {

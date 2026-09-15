@@ -347,6 +347,31 @@ export function hasDispositionVerb(message: string): boolean {
   );
 }
 
+/**
+ * Answer coverage, not mutation permission: the handling verb must belong to
+ * the system's predicate. "Do you believe we should use my figures?" contains
+ * "use", but its subject is "we", not "you". Reuse the disposition vocabulary
+ * without inheriting the broader protective question detector's admission.
+ * The caller removes quoted mentions before using this answer-only check.
+ */
+export function hasSystemDisposition(message: string): boolean {
+  const verbs = [
+    ...OMISSION_VERB_PATTERNS,
+    ...RETENTION_VERB_PATTERNS,
+    new RegExp(`\\b(?:${INFERENCE_VERB})\\b`, 'i'),
+  ];
+  // Auxiliaries, negation and adverbs may intervene; another subject or a
+  // prospective modal may not. Coordinated verbs retain the same subject:
+  // "you add or infer" and "you change or reinterpret" are existing audits.
+  const systemPrefix = /\byou\s+(?:(?:have|had|not|never|ever|just|already|also|[a-z]+ly)\s+)*(?:[a-z]+\s+(?:or|and)\s+)*$/i;
+  return verbs.some((verb) => {
+    const occurrences = new RegExp(verb.source, `${verb.flags}g`);
+    return [...message.matchAll(occurrences)].some((match) =>
+      systemPrefix.test(message.slice(0, match.index)),
+    );
+  });
+}
+
 // ── the composer ────────────────────────────────────────────────────────────
 
 /**
