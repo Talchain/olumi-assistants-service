@@ -600,11 +600,20 @@ function boundedGraphJsonBlock(graph: Record<string, unknown>): string {
     json = render();
   }
 
+  // ⚠ `additional graph.nodes entries omitted` IS A PINNED PHRASE, and it is
+  // pinned in `tools/`, OUTSIDE `src/` — a scoped run of the touched source
+  // directories collects none of it and reads green. The denominator is added
+  // AROUND the existing wording rather than replacing it, so the disclosure
+  // gains information without breaking the contract its readers grep for.
   const notes: string[] = [];
   const droppedNodes = originalNodeCount - nodes.length;
   const droppedEdges = originalEdgeCount - edges.length;
-  if (droppedNodes > 0) notes.push(`${droppedNodes} of ${originalNodeCount} graph.nodes entries omitted`);
-  if (droppedEdges > 0) notes.push(`${droppedEdges} of ${originalEdgeCount} graph.edges entries omitted`);
+  if (droppedNodes > 0) {
+    notes.push(`${droppedNodes} additional graph.nodes entries omitted (of ${originalNodeCount})`);
+  }
+  if (droppedEdges > 0) {
+    notes.push(`${droppedEdges} additional graph.edges entries omitted (of ${originalEdgeCount})`);
+  }
   return notes.length > 0 ? `${json}\n[TRUNCATED: ${notes.join('; ')}]` : json;
 }
 
