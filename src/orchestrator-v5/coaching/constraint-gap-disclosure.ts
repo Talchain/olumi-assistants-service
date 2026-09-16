@@ -435,7 +435,26 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
     // was rewritten to remove. It also says less than it seems: the observable
     // is that the limit was not scored, not that any particular component was
     // unable to evaluate it.
-    return ` We could not line ${total === 1 ? 'it' : 'them'} up with anything this analysis measures, so no option can be put forward yet.`;
+    // ⛔⛔ THE CONSEQUENCE CLAUSE WAS FALSE, AND THIS MODULE ALREADY KNEW IT.
+    // Witnessed live 16 Sep 2026: this sentence reached a user FOUR times in one
+    // conversation while `cee.analysis_ready.built` logged
+    // `{ status: "ready", readyOptionsCount: 5, blockerCount: 0 }` and the
+    // enrichment carried a five-row `option_comparison`. Five options were
+    // ranked and the user was told none could be put forward.
+    //
+    // Both sibling voices below already refuse this exact clause, each with a
+    // comment saying it is FALSE there for the same reason it is false here: the
+    // comparison ran on every dimension the model does carry. `unevaluated` and
+    // the identity fallback simply never got that treatment.
+    //
+    // ⚠ WHETHER A LEADING OPTION MAY BE NAMED IS A DIFFERENT QUESTION AND IS NOT
+    // CHANGED. `MAY_NAME_LEADING_OPTION` (constraint-feasibility.ts) gates that,
+    // consumed through `ctx.mayNameLeadingOption` by
+    // `compose/leading-option-egress-guard.ts`. That withholding is legitimate
+    // and stays. "We are not naming a winner" and "there is no ranking" are
+    // different propositions and this sentence may only make the second one when
+    // it is true (trap 21).
+    return ` We could not line ${total === 1 ? 'it' : 'them'} up with anything this analysis measures, so ${total === 1 ? 'it was' : 'they were'} not part of the comparison.`;
   }
   if (voice === 'unmeasured_target') {
     // NOT "so no option can be put forward" — that consequence is FALSE here,
@@ -456,9 +475,14 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
       ? ' It was not part of the comparison.'
       : ' They were not part of the comparison.';
   }
+  // Same correction as the `unevaluated` voice above, and for the same reason —
+  // but this voice's PRECISION is preserved exactly: it still says neither that
+  // the limit went unchecked nor that it held. "Cannot be counted as part of the
+  // comparison" is the strongest true statement available when we do not know
+  // whether it was checked; "was not part of" would assert more than we know.
   return total === 1
-    ? ' So it cannot be confirmed whether it was checked, and no option can be put forward yet.'
-    : ' So it cannot be confirmed whether they were checked, and no option can be put forward yet.';
+    ? ' So it cannot be confirmed whether it was checked, and it cannot be counted as part of the comparison.'
+    : ' So it cannot be confirmed whether they were checked, and they cannot be counted as part of the comparison.';
 }
 
 function repairStep(voice: DisclosureVoice, total: number): string {
