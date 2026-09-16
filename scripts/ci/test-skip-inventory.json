@@ -1,6 +1,10 @@
 {
   "$comment": "Per-file inventory of test-skip constructs (see scripts/ci/test-skip-inventory.mjs). Counts must match the AST scan EXACTLY (growth and staleness both fail) and every entry needs a non-empty reason. Regenerate with --write; the ratchet direction is DOWN.",
   "files": {
+    "src/cee/context-integrity/__tests__/not-modelled-manifest.anchored-vs-unanchored.test.ts": {
+      "skip": 1,
+      "reason": "1 describe.skip \u2014 an OPEN PRODUCT DECISION, not a broken or flaky test. composeDroppedFigureNotice gates on `absent === 0`, so the pushed draft footer says nothing about an `in_model` figure that names no node. Whether it SHOULD is not a clear defect: measured on the four committed cold-read captures, 5 of the 11 unanchored figures are date/period, for which a null match is the only possible state and which that footer already excludes via isDisclosableInDraftNotice; all six remaining are carried in a GOAL or OPTION LABEL, so naming them is the cry-wolf direction brief-audit-answer.ts already refuted with a measurement. The existing sentence is not reusable either \u2014 'I could not find it in the model' is false of an unanchored figure. The block comment above the describe states the question in full. Un-skip and write the expectation once the copy is ruled."
+    },
     "src/orchestrator-v5/compose/__tests__/graph-patch-clean-payload.test.ts": {
       "todo": 11,
       "reason": "11 it.todo placeholders enumerating planned clean-payload assertions (spec-first stubs)."
