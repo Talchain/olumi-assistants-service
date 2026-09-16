@@ -1679,7 +1679,20 @@ export function repairableConstraintFields(
       || (item.applies_to_claim === undefined && item.applies_to_stated === undefined)) fields.add("target");
     if (typeof item.value !== "number") fields.add("value");
     if (item.direction === undefined) fields.add("direction");
-    if (item.unit === undefined || d.reason === "constraint_target_unit_mismatch") fields.add("unit");
+    // ⛔⛔ A KNOWN UNIT IS NEVER EDITABLE — not even on a unit MISMATCH.
+    //
+    // This line used to add "unit" whenever `constraint_target_unit_mismatch`
+    // fired, on the reasoning that a unit refusal is about the unit. It is not:
+    // the mismatch says the LIMIT and its TARGET measure different quantities,
+    // and the likely fault is the TARGET. Independent review reproduced the
+    // consequence — keep the wrong cost target, change the unit to £, and
+    // "keeping monthly churn under 4%" binds as `<= £4` with the user's own
+    // quote and `provenance: "explicit"`, kept, no preservation violations.
+    //
+    // So the unit the user stated is preserved, and only an ABSENT unit may be
+    // supplied. Repairing a stated unit needs its own evidence and its own
+    // path; it is not a side effect of fixing a reference.
+    if (item.unit === undefined) fields.add("unit");
     out.set(i, fields);
   }
   return out;

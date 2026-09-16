@@ -183,3 +183,73 @@ describe("P1c — only the faulty or missing datum may change", () => {
     expect(row!.value).toBe(0.04);
   });
 });
+
+/**
+ * ⭐⭐⭐ P1d — A KNOWN UNIT SURVIVES A REFERENCE REPAIR.
+ *
+ * Reviewer's reproduction, CX-86. A limit stated in "%" pointed at a COST
+ * factor measured in "£" is refused `constraint_target_unit_mismatch`. I had
+ * read that refusal as permission to edit the unit, so a correction could keep
+ * the wrong cost target and change the unit to "£" instead — binding
+ * "keeping monthly churn under 4%" as `<= £4`, with the user's own quote and
+ * `provenance: "explicit"`, kept, no preservation violations.
+ *
+ * The mismatch says the limit and its target measure DIFFERENT QUANTITIES. The
+ * likely fault is the target. The unit the user stated is evidence; changing it
+ * needs its own.
+ */
+describe("P1d — a unit mismatch licenses fixing the TARGET, never the user's unit", () => {
+  /**
+   * The repo's own SAFETY-3 shape: a stated FIGURE declares a unit, which is what
+   * makes the unit gate able to fire at all (a factor claim carries no unit, so
+   * the pair reads "unknown" and the gate correctly skips). `claims[0]` is the
+   * churn quantity the limit should have pointed at.
+   */
+  const MISMATCHED = (): DraftRecordSet =>
+    ({
+      stated_items: [
+        { kind: "goal", source_quote: "grow net revenue", role: "target" },
+        { kind: "figure", source_quote: "we spend £240,000 a year on support", value: 240000, unit: "£" },
+        { kind: "constraint", source_quote: "keeping monthly churn under 4%", value: 4, unit: "%", direction: "ceiling", applies_to_stated: 1 },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Subscriber Churn Rate" },
+        { claim_kind: "causal_link", label: "churn erodes revenue", from_claim: 0, to_stated: 0, effect: "negative" },
+        { claim_kind: "causal_link", label: "support spend bears on revenue", from_stated: 1, to_stated: 0, effect: "negative" },
+      ],
+    }) as unknown as DraftRecordSet;
+
+  it("D1: the unit is NOT offered as editable — only the target is", () => {
+    const r = MISMATCHED();
+    const scope = repairableConstraintFields(r, project(r));
+    const fields = [...(scope.get(2) ?? [])].sort();
+    expect(fields, "a stated unit is evidence, not a repair slot").not.toContain("unit");
+    expect(fields).toContain("target");
+  });
+
+  it("D2: the reviewer's attack — keeping the wrong target and changing the unit changes nothing", () => {
+    const r = MISMATCHED();
+    const out = applyConstraintCorrections(
+      r,
+      [{ stated_index: 2, direction: "ceiling", value: 4, unit: "£", applies_to_stated: 1 }],
+      repairableConstraintFields(r, project(r)),
+    );
+    const after = out.stated_items[2] as unknown as Record<string, unknown>;
+    expect(after.unit, "the user said percent and it stays percent").toBe("%");
+    expect(after.value).toBe(4);
+    expect(after.direction).toBe("ceiling");
+  });
+
+  it("D3: POSITIVE CONTROL — pointing it at the RIGHT quantity still repairs it", () => {
+    const r = MISMATCHED();
+    const out = applyConstraintCorrections(
+      r,
+      [{ stated_index: 2, direction: "ceiling", value: 4, applies_to_claim: 0 }],
+      repairableConstraintFields(r, project(r)),
+    );
+    expect(out.applied).toBe(1);
+    const after = out.stated_items[2] as unknown as Record<string, unknown>;
+    expect(after.applies_to_claim, "the target moved to the churn factor").toBe(0);
+    expect(after.unit).toBe("%");
+  });
+});
