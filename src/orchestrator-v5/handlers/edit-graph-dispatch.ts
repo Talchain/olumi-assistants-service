@@ -3467,6 +3467,20 @@ export async function dispatchEditGraph(
     appliedMutation: successfulAppliedMutation && !gmBlockedApply && !paSubstitutionBlocked,
   });
   const optionInterventionWriteWithheld = optionInterventionWriteVerdict.verdict === 'withhold';
+  /**
+   * ⭐ THE SCOPE-UNRESOLVED ARM. A turn that is recognisably ABOUT an option
+   * whose identity never resolved, which moved a model-wide baseline and landed
+   * no intervention. Measured on deployed `a3b0548d`: it MINTED
+   * `observed_state` on "Vendor Licensing Cost" and COMMITTED, while the option
+   * the user named kept its own value.
+   *
+   * ⚠ NAMED APART from `optionInterventionWriteWithheld` rather than folded into
+   * it (trap 21). They answer different questions — "was a RESOLVED option's
+   * write not honoured?" versus "do we know which option this was for at all?"
+   * — and they carry different payloads: this one has no `optionId`, because
+   * none resolved, which is the whole reason it must ASK rather than assert.
+   */
+  const optionScopeUnresolved = optionInterventionWriteVerdict.verdict === 'scope_unresolved';
   // ⭐⭐ THE OPTION-`observed_state` SUBSTITUTION, witnessed on deployed
   // `91d39119` (30 Aug 2026, scenario `0fe8c040`, request `1a0ba66d`): a plain
   // English revision wrote each OPTION node's OWN `observed_state` (Pilot 30 /
@@ -3499,8 +3513,65 @@ export async function dispatchEditGraph(
     !gmBlockedApply &&
     !paSubstitutionBlocked &&
     !optionInterventionWriteWithheld &&
+    // Same reason as its sibling above: a write whose SCOPE was never
+    // established may not surface an applied-mutation signal either, or it
+    // persists exactly as the measured buy turn did.
+    !optionScopeUnresolved &&
     !optionOwnValueWithheld &&
     !recordedAnswerNotLanded;
+
+  // ⭐⭐ THE HEADLINE MAY NOT OUTRUN THE GATE. Measured on deployed `a3b0548d`,
+  // wire-level, FRESH. One turn shipped BOTH of these:
+  //
+  //   "2 model parameters updated: Pro Plan Monthly Price, Model is raising the
+  //    Pro plan price from £49 to £69 per month with the next Pro feature release"
+  //   "Note: nothing from this message was saved, so \"Pro Plan Monthly Price\"
+  //    is unchanged."
+  //
+  // The second is true — `graph_hash` did not move across the whole session, and
+  // the option's stored value read 59 at save, rerun AND reopen.
+  //
+  // WHY IT IS AN ORDERING DEFECT, NOT A WORDING ONE. The headline is
+  // `buildAppliedChanges`'s summary, composed from the PARSED OPERATIONS and the
+  // in-memory post-apply graph — its signature has no persistence input at all —
+  // and it is fixed into `response.assistant_text` long before the withhold
+  // verdict exists. It is STRUCTURALLY INCAPABLE of knowing the write was
+  // withheld, so no rewording can fix it; only reading the gate can.
+  //
+  // ⚠ A GUARD ALREADY SAT HERE AND MISSED IT. `findSuccessClaimHit` against
+  // `SUCCESS_CLAIM_PATTERNS` replaces a false success sentence on this lane —
+  // but it is bound by PHRASE. EXECUTED against the real wire string: it returns
+  // null for "2 model parameters updated: …" while returning "Updated V" for
+  // "Updated Vendor Licensing Cost". So the list is a hand-maintained mirror of
+  // `edit-graph.ts`'s summary composer (trap 12) and goes stale the day the
+  // headline is reworded. When it misses, the code falls through to
+  // `appendLapseNotice` and the honest note is appended UNDER the false claim.
+  //
+  // This binds by IDENTITY instead — string equality against the very object
+  // that produced the text (trap 19) — so it cannot go stale, and it covers the
+  // five sibling withholds the phrase arm never reached.
+  if (
+    !effectiveAppliedMutation &&
+    editResult.appliedChanges?.summary &&
+    response.assistant_text === editResult.appliedChanges.summary
+  ) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.proposal_headline_withdrawn',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // The GATE's conjuncts, never the model's prose — no free text here.
+        gm_blocked_apply: gmBlockedApply,
+        pa_substitution_blocked: paSubstitutionBlocked,
+        option_intervention_write_withheld: optionInterventionWriteWithheld,
+        option_own_value_withheld: optionOwnValueWithheld,
+        recorded_answer_not_landed: recordedAnswerNotLanded,
+      },
+      'edit_graph: withdrew an applied-changes headline for a turn that persisted nothing',
+    );
+    response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+  }
+
   if (optionInterventionWriteWithheld) {
     log.warn(
       {
@@ -3532,7 +3603,16 @@ export async function dispatchEditGraph(
       "V5 edit_graph — the applied mutation wrote an option's OWN observed_state while that option's effect values did not move; write withheld so the reply cannot confirm a change the analysis will never see (mutation NOT persisted)",
     );
   }
-  if (optionInterventionWriteWithheld || optionOwnValueWithheld || recordedAnswerNotLanded) {
+  if (
+    optionInterventionWriteWithheld ||
+    // Reviewer finding 3 (REVIEW1512): without this, freshness at :3088/:3137 is
+    // derived from the REJECTED post-edit graph and returned to the user beside
+    // "I have not changed the model" — a worse lie than the one this verdict was
+    // added to prevent, because it is staleness claimed off a write we refused.
+    optionScopeUnresolved ||
+    optionOwnValueWithheld ||
+    recordedAnswerNotLanded
+  ) {
     // The graph did NOT change this turn — re-derive the wire freshness against
     // the UNCHANGED frame base, exactly as the GM-blocked and part-accounting
     // branches below do, so staleness is never claimed off an unpersisted
@@ -4330,6 +4410,37 @@ export async function dispatchEditGraph(
       `I could not record that value for "${recordedAnswer.pair.optionLabel}" on "${recordedAnswer.pair.factorLabel}". Nothing has changed.`,
       suggested_actions: [] };
   }
+  if (optionInterventionWriteVerdict.verdict === 'scope_unresolved') {
+    // ⭐ NOTHING FAILS SILENTLY, AND THE FAILURE IS OURS (Paul, 2026-09-15).
+    // The write is already withheld by the gate above; this is the half the
+    // user sees. It ASKS, because the one thing we genuinely do not know is
+    // which option they meant — and guessing is the fabricated write the whole
+    // guard exists to prevent.
+    log.warn(
+      {
+        event: 'v5.edit_graph.option_scope_unresolved',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // Counts and ids only — never the user's prose in telemetry.
+        baseline_node_count: optionInterventionWriteVerdict.baselineNodeIds.length,
+        option_count: optionInterventionWriteVerdict.optionLabels.length,
+      },
+      'edit_graph: option-anchored turn with no resolved option — write withheld, asking',
+    );
+    const moved = resolveNodeLabels(parsedGraph, optionInterventionWriteVerdict.baselineNodeIds);
+    const movedNamed = moved.length > 0 ? `"${moved[0]}"` : 'that value';
+    const choices = optionInterventionWriteVerdict.optionLabels
+      .map((l) => `"${l}"`)
+      .join(', ');
+    response = {
+      ...response,
+      assistant_text:
+        `That would have changed ${movedNamed} for every option, and I do not think that is ` +
+        `what you meant — so I have not changed the model. Which option did you mean? ` +
+        `${choices}.`,
+    };
+  }
+
   if (optionInterventionWriteVerdict.verdict === 'withhold') {
     // ⛔⛔ A WITHHELD TURN MUST NOT CONFIRM AND THEN DENY — and this is the
     // hole withholding itself opened.
@@ -4635,7 +4746,13 @@ export async function dispatchEditGraph(
   // `scenarios.graph`.
   let analysisReady: AnalysisReadyPayload | undefined = effectiveAppliedMutation
     ? buildCanonicalAnalysisReadyFromGraph(editResult.appliedGraph!)
-    : (!successfulAppliedMutation || optionInterventionWriteWithheld || recordedAnswerNotLanded) && graphStrictlyCanonical
+    : (!successfulAppliedMutation ||
+        optionInterventionWriteWithheld ||
+        // Same reviewer finding: a turn that refused the write must still hand
+        // back readiness for the UNCHANGED model, or the user is told nothing
+        // changed and given no readiness at all.
+        optionScopeUnresolved ||
+        recordedAnswerNotLanded) && graphStrictlyCanonical
       ? buildCanonicalAnalysisReadyFromGraph(parsedGraph)
       : undefined;
 
