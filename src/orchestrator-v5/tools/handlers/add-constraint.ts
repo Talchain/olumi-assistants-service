@@ -189,6 +189,24 @@ interface ResolvedParams {
   readonly value: number;
   readonly label?: string;
   readonly unit?: string;
+  /**
+   * ⭐⭐ THE ROW THIS WRITE CORRECTS — the one thing the writer could not be told.
+   *
+   * The idempotency key is `(node_id, operator)`. A correction MOVES a limit to
+   * a different node, so `existing` is undefined and the write APPENDS — leaving
+   * the original, wrong, un-evaluable constraint in place, still blocking the
+   * same journey it was blocking before (Codex CX-171). `add_constraint` is the
+   * only constraint handler in the estate and `apply-graph-mutation.ts:195`
+   * states it does NOT prune, so nothing else can remove it either.
+   *
+   * ⚠ NAMED, NEVER INFERRED. The obvious alternative — treat a write that
+   * matches an existing row's operator+value+unit on a different node as a
+   * correction of it — was considered and REJECTED: two genuinely different
+   * limits can share all three ("£200k on hiring", "£200k on marketing"), and
+   * replacing one would be silent data loss. Losing a limit the user set is
+   * strictly worse than the duplicate this exists to prevent.
+   */
+  readonly corrects_node_id?: string;
 }
 
 // `resolveGoalThresholdCap` (Lane CEE-W5 Mission B — goal-threshold join,
@@ -265,11 +283,21 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
     unit = unitParse.data;
   }
 
+  // Optional, additive, and absent from every existing caller — a malformed
+  // value is ignored rather than thrown, because a correction that cannot be
+  // identified must degrade to today's behaviour (append), never to a refusal
+  // of the user's limit.
+  const correctsParam = get('corrects_node_id');
+  const correctsRaw = correctsParam?.value;
+  const correctsNodeId =
+    typeof correctsRaw === 'string' && correctsRaw.trim() !== '' ? correctsRaw.trim() : undefined;
+
   return {
     constraint_type: typeParse.data,
     value: valueParse.data,
     ...(label !== undefined ? { label } : {}),
     ...(unit !== undefined ? { unit } : {}),
+    ...(correctsNodeId !== undefined ? { corrects_node_id: correctsNodeId } : {}),
   };
 }
 
@@ -851,13 +879,38 @@ export function createAddConstraintHandler(): HandlerFn {
         // the append in exactly that case; a genuinely NEW constraint
         // (existing undefined, valueUnchanged false) still appends as
         // before.
+        // ⭐⭐ THE CORRECTION ARM (Codex CX-171). Replaces the NAMED row in the
+        // SAME atomic mutation, so there is no window in which the graph holds
+        // both limits and no second write to fail halfway.
+        //
+        // ⚠ It sits BELOW `existing` and ABOVE `valueUnchanged`, and both
+        // placements are load-bearing:
+        //   · below `existing` — a write to the SAME (node, operator) is an
+        //     ordinary update and must stay exactly as it was;
+        //   · above `valueUnchanged` — a correction that moves £200,000 from a
+        //     risk to a factor changes NO value, so the unchanged-skip would
+        //     silently discard the entire correction.
+        //
+        // ⛔ REFUSES ON AMBIGUOUS IDENTITY. 0 matches means the row is already
+        // gone; 2+ means the (node, operator) key is not unique here and
+        // choosing between them would be a guess. Both fall through to today's
+        // behaviour untouched — the user's limit is never lost to this path.
+        const correctsId = params.corrects_node_id;
+        const correctable =
+          correctsId !== undefined && correctsId !== targetId
+            ? list.filter((c) => c.node_id === correctsId && c.operator === operator)
+            : [];
         const next = existing
           ? list.map((c) =>
               c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
             )
-          : valueUnchanged
-            ? list
-            : [...list, constraintParse.data];
+          : correctable.length === 1
+            ? list.map((c) =>
+                c.node_id === correctsId && c.operator === operator ? constraintParse.data : c,
+              )
+            : valueUnchanged
+              ? list
+              : [...list, constraintParse.data];
         clone.goal_constraints = next;
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
