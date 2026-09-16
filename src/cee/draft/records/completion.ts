@@ -1641,6 +1641,62 @@ export interface ConstraintCorrection {
  * maintains: a limit is repairable exactly when the projector refused to bind
  * it and said so.
  */
+export type ConstraintRepairField = "target" | "value" | "direction" | "unit";
+
+/**
+ * ⭐⭐⭐ WHICH FIELDS OF WHICH LIMIT THIS TURN MAY CHANGE.
+ *
+ * Second finding on the same review, and the row was the wrong granularity:
+ * scoping to the ROW still let a TARGET repair arrive carrying `direction:
+ * "floor", value: 0.9` and overwrite a standing `<= 0.04` whose own quote says
+ * "under 4%". Repairing the reference is not licence to restate the limit.
+ *
+ * A field is editable only when it is the faulty or missing datum:
+ *  · `target`    — a target refusal fired, or the item names no target at all
+ *  · `value`     — the item carries no usable threshold
+ *  · `direction` — the item states no direction
+ *  · `unit`      — the unit is absent, or was refused as the wrong quantity
+ *
+ * Everything else is PRESERVED from what the user already had. Derived from the
+ * projection's own refusals plus the record itself, so nothing here is a list
+ * anyone maintains.
+ */
+export function repairableConstraintFields(
+  base: DraftRecordSet,
+  projection: { readonly dropped: ReadonlyArray<{ readonly reason: string; readonly stated_index?: number }> },
+): ReadonlyMap<number, ReadonlySet<ConstraintRepairField>> {
+  const out = new Map<number, Set<ConstraintRepairField>>();
+  for (const d of projection.dropped) {
+    if (!REPAIRABLE_CONSTRAINT_REASONS.has(d.reason)) continue;
+    const i = d.stated_index;
+    if (typeof i !== "number") continue;
+    const item = base.stated_items[i] as
+      | { value?: unknown; unit?: unknown; direction?: unknown; applies_to_claim?: unknown; applies_to_stated?: unknown }
+      | undefined;
+    if (!item) continue;
+    const fields = out.get(i) ?? new Set<ConstraintRepairField>();
+    if (TARGET_REFUSAL_REASONS.has(d.reason)
+      || (item.applies_to_claim === undefined && item.applies_to_stated === undefined)) fields.add("target");
+    if (typeof item.value !== "number") fields.add("value");
+    if (item.direction === undefined) fields.add("direction");
+    if (item.unit === undefined || d.reason === "constraint_target_unit_mismatch") fields.add("unit");
+    out.set(i, fields);
+  }
+  return out;
+}
+
+/** Refusals that are ABOUT the target, so the target is the datum to repair. */
+const TARGET_REFUSAL_REASONS: ReadonlySet<string> = new Set([
+  "constraint_target_not_measurable",
+  "constraint_target_unit_mismatch",
+  "unparseable_ref",
+  "ref_out_of_range",
+  "ref_target_not_a_node",
+  "missing_ref",
+  "ambiguous_ref",
+]);
+
+/** Back-compat view for callers that only need "may this row be touched at all". */
 export function repairableConstraintIndices(
   projection: { readonly dropped: ReadonlyArray<{ readonly reason: string; readonly stated_index?: number }> },
 ): ReadonlySet<number> {
@@ -1678,7 +1734,7 @@ export function applyConstraintCorrections(
    * scope defaults to "anything", which is the P1 this parameter exists to
    * close, and a caller that forgets it would silently restore the hole.
    */
-  repairable: ReadonlySet<number>,
+  repairable: ReadonlyMap<number, ReadonlySet<ConstraintRepairField>>,
 ): { stated_items: DraftRecordSet["stated_items"]; applied: number } {
   /**
    * ⭐⭐ CONFLICTING CORRECTIONS ARE REFUSED, NOT RESOLVED BY POSITION.
@@ -1709,7 +1765,8 @@ export function applyConstraintCorrections(
     if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
     // ⛔ ONLY A LIMIT THIS TURN WAS ASKED ABOUT. An already-bound limit the
     // completion was not questioned on is not its to change.
-    if (!repairable.has(i)) continue;
+    const editable = repairable.get(i);
+    if (editable === undefined) continue;
     if (contested.has(i)) continue;
     if (seen.has(i)) continue;
     const target = items[i]!;
@@ -1717,16 +1774,29 @@ export function applyConstraintCorrections(
     if ((c.applies_to_claim === undefined) === (c.applies_to_stated === undefined)) continue;
     if (typeof c.value !== "number" || !Number.isFinite(c.value)) continue;
     if (c.direction !== "floor" && c.direction !== "ceiling") continue;
+    // ⛔⛔ ONLY THE FAULTY OR MISSING DATUM. A target repair arriving with a
+    // direction and a value does NOT get to restate the limit: the reviewer
+    // reproduced `floor 0.9` overwriting a standing `<= 0.04` whose own quote
+    // reads "under 4%". Repairing a reference is not licence to change what the
+    // user said the limit IS.
+    const t = target as unknown as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...t };
+    let changed = false;
+    if (editable.has("direction")) { next.direction = c.direction; changed = true; }
+    if (editable.has("value")) { next.value = c.value; changed = true; }
+    if (editable.has("unit") && c.unit !== undefined) { next.unit = c.unit; changed = true; }
+    if (editable.has("target")) {
+      if (c.applies_to_claim !== undefined) {
+        next.applies_to_claim = c.applies_to_claim; next.applies_to_stated = undefined;
+      } else {
+        next.applies_to_stated = c.applies_to_stated; next.applies_to_claim = undefined;
+      }
+      changed = true;
+    }
+    // A correction that could change nothing permitted is not an answer.
+    if (!changed) continue;
     seen.add(i);
-    items[i] = {
-      ...target,
-      direction: c.direction,
-      value: c.value,
-      ...(c.unit !== undefined ? { unit: c.unit } : {}),
-      ...(c.applies_to_claim !== undefined
-        ? { applies_to_claim: c.applies_to_claim, applies_to_stated: undefined }
-        : { applies_to_stated: c.applies_to_stated, applies_to_claim: undefined }),
-    } as typeof target;
+    items[i] = next as unknown as typeof target;
     applied += 1;
   }
   // ⭐⭐ NOTHING CHANGED ⇒ THE ORIGINAL ARRAY, BY REFERENCE — one guard, not two.
@@ -1764,8 +1834,8 @@ export function mergeCompletionClaims(
     claims?: DraftInferenceClaim[];
     constraint_corrections?: readonly ConstraintCorrection[];
   },
-  /** The limits this turn was asked to repair. Empty ⇒ no correction applies. */
-  repairable: ReadonlySet<number> = new Set<number>(),
+  /** Which fields of which limits this turn may change. Empty ⇒ nothing applies. */
+  repairable: ReadonlyMap<number, ReadonlySet<ConstraintRepairField>> = new Map(),
 ): CompletionMergeResult {
   if (completion.stated_items !== undefined) return { ok: false, reason: "stated_items_disturbed" };
   const added = completion.claims ?? [];

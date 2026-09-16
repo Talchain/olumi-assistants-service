@@ -87,7 +87,7 @@ import {
   buildRecordsCompletionPrompt,
   buildRecordsCompletionSchema,
   mergeCompletionClaims,
-  repairableConstraintIndices,
+  repairableConstraintFields,
   type ConstraintCorrection,
   RECORDS_COMPLETION_MAX_TOKENS,
   RECORDS_COMPLETION_WALL_MS,
@@ -2105,7 +2105,7 @@ export async function draftGraphWithAnthropic(
                 // ⭐ THE REPAIR SCOPE — derived from the SAME projection that
                 // raised the ask, so the model can only change a limit this turn
                 // actually questioned.
-                repairableConstraintIndices(seam.projection),
+                repairableConstraintFields(seam.records, seam.projection),
               )
             : ({ ok: false, reason: "no_new_claims" } as const);
         completionMeta.parsed = completionParsed !== undefined;

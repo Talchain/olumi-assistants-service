@@ -28,6 +28,7 @@ import {
   mergeCompletionClaims,
   modelAnswerableAskItems,
   type ConstraintCorrection,
+  type ConstraintRepairField,
 } from "../completion.js";
 import { projectDraftRecords } from "../seam.js";
 import type { DraftRecordSet } from "../grammar.js";
@@ -47,9 +48,10 @@ const load = (p: string): DraftRecordSet => JSON.parse(readFileSync(p, "utf8")) 
  * index under test as in-scope and isolates the property it names. Scope itself
  * is covered by `correction-scope-and-conflict.test.ts`.
  */
-const inScope = (...ix: number[]): ReadonlySet<number> => new Set(ix);
-const allIndices = (r: DraftRecordSet): ReadonlySet<number> =>
-  new Set(r.stated_items.map((_, i) => i));
+const ALL: ReadonlySet<ConstraintRepairField> = new Set(["target","value","direction","unit"] as const);
+const inScope = (...ix: number[]) => new Map(ix.map((i) => [i, ALL] as const));
+const allIndices = (r: DraftRecordSet) =>
+  new Map(r.stated_items.map((_, i) => [i, ALL] as const));
 function project(r: DraftRecordSet, brief?: string) {
   const out = projectDraftRecords(r, brief);
   if (!out.ok) throw new Error(`projection failed: ${out.reason}`);

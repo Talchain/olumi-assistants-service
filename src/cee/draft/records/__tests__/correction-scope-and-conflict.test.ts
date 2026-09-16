@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyConstraintCorrections,
   mergeCompletionClaims,
-  repairableConstraintIndices,
+  repairableConstraintFields,
   type ConstraintCorrection,
 } from "../completion.js";
 import { projectDraftRecords } from "../seam.js";
@@ -54,13 +54,13 @@ describe("P1a — a correction reaches ONLY the limit the turn asked about", () 
     const r = RECORDS();
     expect(churnRow(r)?.operator).toBe("<=");
     expect(churnRow(r)?.value).toBe(0.04);
-    const scope = repairableConstraintIndices(project(r));
-    expect([...scope], "only the un-repairable Legal limit is in scope").toEqual([2]);
+    const scope = repairableConstraintFields(r, project(r));
+    expect([...scope.keys()], "only the un-repairable Legal limit is in scope").toEqual([2]);
   });
 
   it("A1: the reviewer's exact attack — a Legal-only ask cannot flip the churn ceiling to a floor", () => {
     const base = RECORDS();
-    const scope = repairableConstraintIndices(project(base));
+    const scope = repairableConstraintFields(base, project(base));
     const merged = mergeCompletionClaims(
       base,
       { claims: [], constraint_corrections: [
@@ -79,7 +79,7 @@ describe("P1a — a correction reaches ONLY the limit the turn asked about", () 
 
   it("A2: POSITIVE CONTROL — the limit that WAS asked about is still repairable", () => {
     const base = RECORDS();
-    const scope = repairableConstraintIndices(project(base));
+    const scope = repairableConstraintFields(base, project(base));
     const out = applyConstraintCorrections(
       base,
       [{ stated_index: 2, direction: "ceiling", value: 5, unit: "days", applies_to_claim: 0 }],
@@ -90,7 +90,7 @@ describe("P1a — a correction reaches ONLY the limit the turn asked about", () 
 });
 
 describe("P1b — conflicting corrections are REFUSED, not ordered", () => {
-  const scope = () => repairableConstraintIndices(project(RECORDS()));
+  const scope = () => repairableConstraintFields(RECORDS(), project(RECORDS()));
   const two = (first: ConstraintCorrection, second: ConstraintCorrection) =>
     applyConstraintCorrections(RECORDS(), [first, second], scope());
 
@@ -115,5 +115,71 @@ describe("P1b — conflicting corrections are REFUSED, not ordered", () => {
 
   it("B4: one unambiguous correction still applies — refusal is scoped to the conflict", () => {
     expect(applyConstraintCorrections(RECORDS(), [CEIL], scope()).applied).toBe(1);
+  });
+});
+
+/**
+ * ⭐⭐⭐ P1c — A REFERENCE REPAIR IS NOT LICENCE TO RESTATE THE LIMIT.
+ *
+ * Third finding on the same review, and the ROW was the wrong granularity: with
+ * the churn limit legitimately in scope for a TARGET refusal, a correction
+ * carrying `direction: "floor", value: 0.9` still overwrote a standing
+ * `<= 0.04` whose own quote reads "keeping monthly churn under 4%".
+ *
+ * A field is now editable only when it is the faulty or missing datum. The
+ * target may move; what the user said the limit IS stays put.
+ */
+describe("P1c — only the faulty or missing datum may change", () => {
+  /** churn names a target the projector refuses (the GOAL), but states its own ceiling. */
+  const MISTARGETED = (): DraftRecordSet =>
+    ({
+      stated_items: [
+        { kind: "goal", source_quote: "reach £20k MRR", role: "target" },
+        { kind: "constraint", source_quote: "keeping monthly churn under 4%", direction: "ceiling", value: 0.04, unit: "%", applies_to_stated: 0 },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Monthly Churn Rate", basis: [] },
+        { claim_kind: "outcome", label: "Monthly Recurring Revenue", basis: [0] },
+        { claim_kind: "causal_link", label: "churn erodes MRR", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.5 },
+        { claim_kind: "causal_link", label: "MRR drives goal", from_claim: 1, to_stated: 0, effect: "positive", strength: 0.8 },
+      ],
+    }) as unknown as DraftRecordSet;
+
+  it("C1: the limit IS in scope — a target refusal fired", () => {
+    const r = MISTARGETED();
+    const scope = repairableConstraintFields(r, project(r));
+    expect([...scope.keys()]).toEqual([1]);
+    expect([...(scope.get(1) ?? [])], "only the target is the faulty datum").toEqual(["target"]);
+  });
+
+  it("C2: the reviewer's attack — a target repair cannot flip the ceiling to a floor", () => {
+    const r = MISTARGETED();
+    const out = applyConstraintCorrections(
+      r,
+      [{ stated_index: 1, direction: "floor", value: 0.9, applies_to_claim: 0 }],
+      repairableConstraintFields(r, project(r)),
+    );
+    expect(out.applied, "the target repair itself must still land").toBe(1);
+    const fixed = out.stated_items[1] as unknown as Record<string, unknown>;
+    expect(fixed.applies_to_claim, "the target moved").toBe(0);
+    expect(fixed.direction, "what the user said the limit IS stays put").toBe("ceiling");
+    expect(fixed.value).toBe(0.04);
+    expect(fixed.source_quote).toBe("keeping monthly churn under 4%");
+  });
+
+  it("C3: and it reaches the wire as the user's limit, not the model's", () => {
+    const r = MISTARGETED();
+    const out = applyConstraintCorrections(
+      r,
+      [{ stated_index: 1, direction: "floor", value: 0.9, applies_to_claim: 0 }],
+      repairableConstraintFields(r, project(r)),
+    );
+    const rows2 = (project({ stated_items: out.stated_items, claims: r.claims } as DraftRecordSet) as unknown as {
+      goalConstraints: ReadonlyArray<Record<string, unknown>>;
+    }).goalConstraints;
+    const row = rows2.find((x) => String(x.source_quote).includes("monthly churn"));
+    expect(row, "the repair actually bound it").toBeDefined();
+    expect(row!.operator).toBe("<=");
+    expect(row!.value).toBe(0.04);
   });
 });

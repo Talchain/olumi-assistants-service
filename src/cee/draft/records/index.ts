@@ -101,6 +101,8 @@ export {
   completionRegressesProtectedContent,
   applyConstraintCorrections,
   repairableConstraintIndices,
+  repairableConstraintFields,
+  type ConstraintRepairField,
   type ConstraintCorrection,
   askItemIdentity,
   buildRecordsCompletionSchema,
