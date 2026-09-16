@@ -92,7 +92,7 @@ describe('the unit-normalisation audit trail survives GoalConstraintSchema', () 
     // Precondition pinned in-test: the rule must actually have fired, or the
     // assertion below would pass on a constraint that was never rewritten
     // (trap 13b — a discriminator must pin its own precondition).
-    expect((normalised as Record<string, unknown>).unit).toBe('fraction');
+    expect(normalised.unit).toBe('fraction');
 
     const [wire] = toGoalConstraints([normalised]);
     const parsed = GoalConstraintSchema.parse(wire) as Record<string, unknown>;
