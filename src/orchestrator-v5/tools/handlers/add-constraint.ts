@@ -271,8 +271,16 @@ function readSameTurnOptions(rawGraph: unknown): ReadonlyArray<{ interventions?:
       if (n?.kind === 'option' && typeof n.id === 'string') optionNodesById.set(n.id, n);
     }
   }
-  return canonical.map((option) => {
-    const row = option as unknown as Record<string, unknown>;
+  // ⚠ The callback parameter is typed structurally rather than cast. A
+  // double cast here would be a 59th `as unknown as` against a baseline of 58
+  // and the boundary ratchet would refuse it — correctly, since nothing about
+  // this read needs to escape the type system.
+  const rows: ReadonlyArray<{
+    readonly option_id?: unknown;
+    readonly id?: unknown;
+    readonly interventions?: unknown;
+  }> = canonical;
+  return rows.map((row) => {
     const id = typeof row.option_id === 'string' ? row.option_id
       : typeof row.id === 'string' ? row.id : undefined;
     const node = id !== undefined ? optionNodesById.get(id) : undefined;
