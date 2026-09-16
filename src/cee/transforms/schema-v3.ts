@@ -476,15 +476,47 @@ export function transformNodeToV3(
     // deriving a new fact. With only a unit, or only one of the pair, there is
     // no valid record to make and this correctly does nothing rather than
     // emitting something the strict re-parse will delete or refuse.
+    // ⭐⭐ AND THE PROVENANCE TRAVELS WITH THE SCALE, OR THE CARRY MOVES NOTHING
+    // THE USER CAN SEE.
+    //
+    // A first cut of this fallback carried `{value, raw_value, cap, unit}` and
+    // stopped there. It restores the SCALE and drops the AUTHORSHIP, and the
+    // authorship is what the product actually gates on:
+    //
+    //   `obligation-provenance.ts` `structureProvenance` reads
+    //   `observed_state.source`, then `observed_state.extractionType`, and
+    //   returns `'unattributed'` when it finds neither
+    //     → `censusConfidenceParameters` does not increment
+    //       `material_parameters_user_stated`
+    //     → `semanticQualitySufficient` is literally
+    //       `signals.material_parameters_user_stated > 0` → false
+    //     → `deriveMode` withholds `comparative_leader`
+    //     → the run is confined: no leading option, no win probabilities, and
+    //       the user is told "Nothing in it is confirmed yet".
+    //
+    // So a restored factor with no `extractionType` reaches the wire carrying a
+    // perfectly good number that counts for NOTHING at the only gate that
+    // decides whether the analysis may say anything. That is this estate's
+    // trap 23 — validating against the symptom's metric (is the scale on the
+    // wire?) while the outcome metric (may the product speak?) never moves.
+    //
+    // `extractionType` is promoted to NODE level by the same repair stage that
+    // promotes the pair (`unreachable-factors.ts:502`), and the `data`-present
+    // branch above already nests it inside `observed_state`. This carries it to
+    // the same place from the same source. ⚠ CARRIES, NEVER INFERS: absent
+    // upstream, it stays absent here — a fabricated authorship is far worse
+    // than a withheld one.
     if (rawOk && capOk) {
       const derived = promotedRaw / promotedCap;
       if (Number.isFinite(derived)) {
+        const promotedExtraction = (node as { extractionType?: unknown }).extractionType;
         (v3Node as { observed_state?: unknown }).observed_state = {
           value: derived,
           raw_value: promotedRaw,
           cap: promotedCap,
           ...(typeof promotedUnit === 'string' && promotedUnit.trim() !== ''
             ? { unit: promotedUnit } : {}),
+          ...(promotedExtraction !== undefined ? { extractionType: promotedExtraction } : {}),
         };
       }
     }

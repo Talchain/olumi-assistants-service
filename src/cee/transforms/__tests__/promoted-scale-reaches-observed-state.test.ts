@@ -25,6 +25,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { structureProvenance } from '../../graph-readiness/obligation-provenance.js';
 import { NodeV3 } from '../../../schemas/cee-v3.js';
 import { transformNodeToV3 } from '../schema-v3.js';
 
@@ -110,5 +111,42 @@ describe('the promoted scale reaches observed_state', () => {
 
   it('ignores non-finite or blank promotions rather than carrying junk', () => {
     expect(observedOf(promotedNode({ raw_value: Number.NaN, cap: undefined, unit: '  ' }))).toBeUndefined();
+  });
+});
+
+/**
+ * ⭐⭐ THE OUTCOME METRIC, NOT THE SYMPTOM METRIC (CLAUDE.md trap 23).
+ *
+ * Every assertion above answers "is the scale on the wire?". That is the
+ * symptom. The question the USER experiences is "may the product say anything
+ * about this analysis?", and it is decided by one counter:
+ *
+ *   structureProvenance reads observed_state.source, then .extractionType
+ *     → censusConfidenceParameters increments material_parameters_user_stated
+ *       → semanticQualitySufficient IS `material_parameters_user_stated > 0`
+ *         → deriveMode returns 'comparative_leader'
+ *           → a leading option and win probabilities may be shown at all.
+ *
+ * A restored factor carrying a perfect scale and no authorship censuses
+ * 'unattributed' and moves that counter by ZERO — the fix would ship, the
+ * field would be on the wire, and the user would still be told "Nothing in it
+ * is confirmed yet". These bind to the consumer, so the suite fails if the
+ * carry is dropped.
+ */
+describe('the promoted scale moves the gate the user actually feels', () => {
+  it('⭐ censuses USER_STATED — the counter that unconfines the analysis', () => {
+    const node = promotedNode({ extractionType: 'explicit' });
+    expect(structureProvenance(parsedOf(node))).toBe('user_stated');
+  });
+
+  it('⭐ carries AI authorship faithfully rather than promoting it', () => {
+    const node = promotedNode({ extractionType: 'inferred' });
+    expect(structureProvenance(parsedOf(node))).toBe('ai_drafted');
+  });
+
+  it('⛔ stays UNATTRIBUTED when nothing upstream stamped it — never invents authorship', () => {
+    // A fabricated provenance is far worse than a withheld one: it would tell
+    // the product a machine-drafted number is the user's own.
+    expect(structureProvenance(parsedOf(promotedNode()))).toBe('unattributed');
   });
 });
