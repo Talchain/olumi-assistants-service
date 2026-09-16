@@ -353,7 +353,19 @@ export function projectUncertaintyDriversForContext(
 
 /**
  * Build a human-readable intervention summary for an option node.
- * Format: "sets Label1=0.9, Label2=0.7" (capped at 5 entries).
+ *
+ * Format, capped at 5 entries:
+ *   banded model value   "sets Evening Footfall Uplift=High (0.7)"
+ *   off the banded scale "sets Headcount Added=42"
+ *   native quantity      "sets Monthly price=69 £/month (model value 0.69)"
+ *
+ * ⚠ SIZE COST, DISCLOSED RATHER THAN DISCOVERED LATER. The band adds roughly
+ * a dozen characters per entry, and `budget.ts` drops this whole field in its
+ * second pass under context pressure. On a graph already over budget that
+ * makes the drop marginally more likely. Accepted: a summary that survives and
+ * is read as an on/off switch is worse than one dropped honestly, and the
+ * numeral alone was what produced the "active"/"inactive baseline" answer in
+ * capture served-coaching-8077853a.
  *
  * @param interventions - entries selected by the existing intervention authority
  * @param labelMap - node id → label lookup built from graph nodes
