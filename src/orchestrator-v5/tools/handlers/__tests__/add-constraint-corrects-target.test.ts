@@ -366,3 +366,54 @@ describe('CX-195 — a move must not quietly become something else', () => {
     expect(after).toMatchObject({ node_id: 'f-hiring-cost' });
   });
 });
+
+/**
+ * ⭐⭐ THE PAYOFF — the reason any of this exists.
+ *
+ * Every other test here proves the WRITE is correct. This one proves the
+ * correction was WORTH MAKING: once the limit sits on a factor that records a
+ * figure, the product must STOP saying it cannot be checked.
+ *
+ * ⚠ It is the outcome metric, not the symptom metric. "The row moved" is the
+ * symptom; "the analysis can now test it, and the product no longer says
+ * otherwise" is what the user experiences. A move that left the
+ * not-checkable disclosure in place would be a correct write and a useless
+ * capability — this estate's habit of converting a silent failure into an
+ * honest failure and stopping there.
+ */
+describe('after the correction, the product stops saying the limit cannot be checked', () => {
+  const graphWithMeasuredFactor = () => {
+    const g = buildD1Fixture();
+    g.nodes.push(
+      { id: 'r-overrun', kind: 'risk', label: 'Budget Overrun Risk' } as GraphV3T['nodes'][number],
+      {
+        id: 'f-hiring-cost', kind: 'factor', label: 'Hiring and Onboarding Cost',
+        observed_state: { value: 0.6, raw_value: 150000, cap: 250000, unit: '\u00a3' },
+      } as unknown as GraphV3T['nodes'][number],
+    );
+    (g as { goal_constraints?: unknown }).goal_constraints = [
+      { constraint_id: 'gc-wrong', node_id: 'r-overrun', operator: '<=', value: 200000, unit: 'GBP', provenance: 'explicit' },
+    ];
+    return g;
+  };
+
+  it('⭐ the not-checkable disclosure is GONE once the limit sits on a measured factor', async () => {
+    const outcome = await run({
+      targetId: 'f-hiring-cost', value: 200000, unit: 'GBP',
+      corrects: 'r-overrun', graph: graphWithMeasuredFactor(),
+    });
+    const text = outcome.assistant_text ?? '';
+    expect(text).not.toMatch(/no number recorded against it/i);
+    expect(text).not.toMatch(/will not be part of the analysis/i);
+  });
+
+  it('⛔ CONTRAST: the SAME limit on the risk still says it cannot be checked', async () => {
+    // Without this arm the test above could pass because the disclosure never
+    // fires on this fixture at all, rather than because the correction fixed
+    // anything. The pair is the discriminator.
+    const g = graphWithMeasuredFactor();
+    (g as { goal_constraints?: unknown }).goal_constraints = [];
+    const outcome = await run({ targetId: 'r-overrun', value: 200000, unit: 'GBP', graph: g });
+    expect(outcome.assistant_text ?? '').toMatch(/no number recorded against it/i);
+  });
+});
