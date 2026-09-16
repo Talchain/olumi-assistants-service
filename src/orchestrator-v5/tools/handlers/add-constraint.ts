@@ -219,6 +219,31 @@ interface ResolvedParams {
 // goal target scores identically regardless of registration path. See that
 // module's doc comment for the full doctrine.
 
+/**
+ * The turn's options, read from the RAW snapshot.
+ *
+ * ⚠ It cannot come from the parsed graph: `GraphV3` declares nodes, edges and
+ * goal_constraints only, so options are stripped at the ingress parse. This
+ * mirrors the sibling raw read already in this file rather than re-parsing.
+ *
+ * Two carriers, preferred in order, because a V3 graph may hold either: the
+ * canonical top-level `options` array, else the option NODES — which is what
+ * `run_analysis` projects into the wire `options` it hands PLoT, so the pin
+ * question is asked against the same population PLoT will see.
+ */
+function readSameTurnOptions(rawGraph: unknown): ReadonlyArray<{ interventions?: unknown }> {
+  const raw = rawGraph as { options?: unknown; nodes?: unknown } | null;
+  if (Array.isArray(raw?.options)) {
+    return raw.options as ReadonlyArray<{ interventions?: unknown }>;
+  }
+  if (Array.isArray(raw?.nodes)) {
+    return (raw.nodes as Array<{ kind?: unknown; interventions?: unknown }>).filter(
+      (n) => n?.kind === 'option',
+    );
+  }
+  return [];
+}
+
 function resolveParams(invocation: HandlerInvocation): ResolvedParams {
   const params = invocation.proposal?.parameters ?? [];
   const get = (name: string) => params.find((p) => p.name === name);
@@ -1441,7 +1466,22 @@ export function createAddConstraintHandler(): HandlerFn {
           constraintUnit: newConstraint.unit ?? null,
           nodes: graph.nodes as never,
           edges: graph.edges as never,
-          options: (graph as { options?: unknown }).options as never,
+          // ⛔⛔ OPTIONS COME FROM THE RAW SNAPSHOT, NOT THE PARSED GRAPH.
+          // `GraphV3` is a plain `z.object` declaring nodes/edges/
+          // goal_constraints and nothing else (schemas/cee-v3.ts:642-655), so
+          // the parse at :353 STRIPS top-level options. Reading `graph.options`
+          // after it always yielded undefined, which silently disabled the
+          // every-option-pin anchor route: a measured non-root factor pinned by
+          // every real option was withheld even though PLoT's own predicate
+          // accepts it. My helper tests injected options directly and so could
+          // not see the boundary — a fixture proving nothing about the producer.
+          // Found by Codex on the real caller, not by my suite.
+          //
+          // Same-turn raw snapshot, no second graph read. Prefer the canonical
+          // top-level carrier; fall back to option NODES, which is how a V3
+          // graph carries them and what run_analysis projects into the wire
+          // `options` it sends PLoT.
+          options: readSameTurnOptions(rawGraph) as never,
         });
         fragments.push(
           alternativeForCorrection === null

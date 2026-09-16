@@ -546,3 +546,82 @@ describe('attested properties travel with the moved row', () => {
     expect(rows[0]).toMatchObject({ constraint_id: 'gc-dest', value_frame: 'level' });
   });
 });
+
+/**
+ * ⭐⭐⭐ THE ANCHOR ROUTES, THROUGH THE REAL HANDLER — not the helper.
+ *
+ * ⚠ THIS SUITE EXISTS BECAUSE MY HELPER TESTS WERE NOT EVIDENCE ABOUT THE
+ * PRODUCER. They injected `options` directly into the finder and passed. The
+ * real handler parses its graph through `GraphV3`, which declares nodes, edges
+ * and goal_constraints and NOTHING ELSE — so top-level options are STRIPPED at
+ * the ingress parse, `graph.options` was always undefined, and the
+ * every-option-pin route could never fire in production. A measured non-root
+ * factor pinned by every real option was withheld even though PLoT's own
+ * predicate accepts it.
+ *
+ * Codex found it on the real caller. A green helper test over an injected
+ * fixture is exactly the shape that hides this, so these drive the handler.
+ */
+describe('anchor routes reach the REAL handler', () => {
+  /** A measured factor that is NOT a root: another factor feeds it. */
+  const nonRootGraph = (options: Array<Record<string, unknown>>) => {
+    const g = buildD1Fixture();
+    // ⚠ REPLACE the fixture's own option, do not add to it. It intervenes on
+    // nothing here, so leaving it in makes "every option pins" false by
+    // construction and the positive arm could never pass — the test would have
+    // been measuring my fixture, not the route.
+    g.nodes = g.nodes.filter((n) => (n as { kind?: unknown }).kind !== 'option') as never;
+    // ⚠ AND STRIP THE FIXTURE'S OTHER £ FACTOR. `buildD1Fixture` ships
+    // `f-budget` in £, so leaving it in gives TWO currency candidates and the
+    // finder correctly refuses the ambiguity — the positive arm would then read
+    // as "the anchor route is broken" when the refusal was right. A probe
+    // showed exactly that before this line existed.
+    for (const n of g.nodes as Array<Record<string, unknown>>) {
+      if (n.id === 'f-budget') delete n.observed_state;
+    }
+    g.nodes.push(
+      { id: 'r-overrun', kind: 'risk', label: 'Budget Overrun Risk' } as never,
+      {
+        id: 'f-hiring-cost', kind: 'factor', label: 'Hiring and Onboarding Cost',
+        observed_state: { value: 0.6, raw_value: 150000, cap: 250000, unit: '£' },
+      } as never,
+      { id: 'f-upstream', kind: 'factor', label: 'Market Rates' } as never,
+      ...(options as never[]),
+    );
+    // The directed edge that un-roots it — from a FACTOR, so PLoT keeps it.
+    g.edges.push({
+      id: 'e-unroot', from: 'f-upstream', to: 'f-hiring-cost',
+      strength: { mean: 0.5, std: 0.1 }, exists_probability: 0.9,
+      effect_direction: 'positive',
+    } as never);
+    return g;
+  };
+  const opt = (id: string, interventions?: Record<string, unknown>) =>
+    ({ id, kind: 'option', label: id, ...(interventions ? { interventions } : {}) });
+
+  const textFor = async (graph: GraphV3T) =>
+    (await run({ targetId: 'r-overrun', value: 200000, unit: 'GBP', graph })).assistant_text ?? '';
+
+  it('⭐⭐ PINNED BY EVERY OPTION: a measured NON-ROOT factor is offered', async () => {
+    // Before the fix this said "has no number recorded against it" and named
+    // nothing, because the pin route was unreachable through the parse.
+    const text = await textFor(nonRootGraph([
+      opt('opt_a', { 'f-hiring-cost': 0.4 }),
+      opt('opt_b', { 'f-hiring-cost': 0.8 }),
+    ]));
+    expect(text).toMatch(/Hiring and Onboarding Cost/);
+  });
+
+  it('⛔ SOME options pin it — not every — so it is NOT offered', async () => {
+    const text = await textFor(nonRootGraph([
+      opt('opt_a', { 'f-hiring-cost': 0.4 }),
+      opt('opt_b', { 'somewhere-else': 0.8 }),
+    ]));
+    expect(text).not.toMatch(/Hiring and Onboarding Cost/);
+  });
+
+  it('⛔ NO options pin it — a bare non-root is unanchored and NOT offered', async () => {
+    const text = await textFor(nonRootGraph([opt('opt_a'), opt('opt_b')]));
+    expect(text).not.toMatch(/Hiring and Onboarding Cost/);
+  });
+});
