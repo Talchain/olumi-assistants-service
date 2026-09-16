@@ -585,6 +585,29 @@ export interface HandlerOutcome {
    *
    * ⚠ Fields are the pending's own, so the two cannot drift.
    */
+  /**
+   * ⭐ Set ONLY by `add_constraint`, and ONLY when the limit landed on a target
+   * that cannot carry it AND exactly one factor in the graph already records
+   * the constraint's own unit. Names both ends of a MOVE the user may confirm.
+   *
+   * Internal channel on the `__option_cost_ask` pattern — never crosses to the
+   * wire envelope. The user-facing half is the sentence already appended to
+   * `assistant_text`; the executor turns this into the chip + pending through
+   * the EXISTING `emitProposedChange`, so the correction rides the
+   * `apply_proposed_change` lifecycle rather than a new one.
+   *
+   * ⚠ It proposes; it never moves. Absent ⇒ nothing was offered ⇒ no pending
+   * persists (fail closed).
+   */
+  readonly __constraint_target_correction?: {
+    readonly misplaced_node_id: string;
+    readonly misplaced_node_label: string;
+    readonly operator: '>=' | '<=';
+    readonly value: number;
+    readonly unit: string;
+    readonly alternative_node_id: string;
+    readonly alternative_label: string;
+  };
   readonly __option_cost_ask?: {
     readonly option_id: string;
     readonly option_label: string;

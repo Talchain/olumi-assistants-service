@@ -66,6 +66,10 @@ import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { sameUnit } from '../../../utils/currency-alphabet.js';
+import {
+  buildCanonicalAnalysisReadyFromGraph,
+  mergeInterventionSourceObjects,
+} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
@@ -75,6 +79,7 @@ import {
   formatConstraintAdded,
   formatConstraintDurationNotEvaluated,
   formatConstraintLabelUpdated,
+  formatConstraintMoved,
   formatConstraintNotCheckable,
   formatConstraintUnchanged,
   formatConstraintUpdated,
@@ -217,6 +222,88 @@ interface ResolvedParams {
 // (cee/factor-extraction/enricher.ts) delegates to the SAME function so a
 // goal target scores identically regardless of registration path. See that
 // module's doc comment for the full doctrine.
+
+/**
+ * The turn's options, read from the RAW snapshot through the CANONICAL
+ * readiness membership — not a third population algorithm.
+ *
+ * ⚠⚠ TWO DEFECTS LIVED HERE, IN OPPOSITE DIRECTIONS, AND BOTH WERE FOUND ON
+ * THE REAL CALLER RATHER THAN BY MY TESTS.
+ *
+ * FIRST, it read the PARSED graph. `GraphV3` declares nodes, edges and
+ * goal_constraints and nothing else, so the ingress parse strips top-level
+ * options: `graph.options` was always undefined and the every-option-pin
+ * anchor route was dead in production while helper tests passed.
+ *
+ * THEN, reading the raw snapshot, it preferred any top-level `options` array
+ * WHOLESALE. That over-anchors, which is the worse direction. Codex's
+ * counterexample: option node A pins hiring cost, node B pins another factor,
+ * and the top-level mirror contains only A. A wholesale read sees one option,
+ * finds it pins, and concludes EVERY option pins — while the real analysis
+ * retains A+B and concludes the opposite. The result is an offer PLoT will
+ * refuse to anchor: exactly the actionable-looking dead end this module exists
+ * to prevent.
+ *
+ * ⭐ So the membership question is answered by the code that already answers it
+ * for the run. `buildCanonicalAnalysisReadyFromGraph` COMPLETES a partial
+ * top-level mirror from the option nodes (analysis-ready-helper.ts:897-942 —
+ * a top-level array owns the population only when it is an exact unique-id
+ * bijection with the option nodes), and it is what `build-turn-context` uses
+ * to load the real run. Asking a different question here would be a third
+ * population that is free to drift from both.
+ *
+ * ⚠ FAILS CLOSED. When canonical readiness cannot build a payload the answer
+ * is NO OPTIONS, so the pin route simply does not fire and the offer is
+ * withheld. Under-offering is the safe error; over-anchoring names a dead end.
+ */
+function readSameTurnOptions(rawGraph: unknown): ReadonlyArray<{ interventions?: unknown }> {
+  const ready = buildCanonicalAnalysisReadyFromGraph(rawGraph);
+  const canonical = ready?.options;
+  if (!Array.isArray(canonical) || canonical.length === 0) return [];
+
+  // Interventions come from the option NODE ONLY — byte-for-byte the projection
+  // the loader submits (`mergeOptionInterventionObjects`, build-turn-context.ts:
+  // "returns the ORIGINAL merged intervention OBJECTS per option", sourced from
+  // `optionNodesById.get(option.option_id)` and nothing else).
+  //
+  // ⛔ THE CANONICAL ROW'S OWN `interventions` ARE DELIBERATELY NOT MERGED IN.
+  // Codex CX-20260916 counterexample: node A pins the measured cost, node B pins
+  // an upstream factor, and a COMPLETE top-level mirror (an exact unique-id
+  // bijection, so it owns the population) pins the cost for BOTH. Unioning the
+  // row over the node certifies an all-option cost pin the loader never submits,
+  // and the offer then names a target PLoT will refuse to anchor.
+  //
+  // Canonical readiness answers MEMBERSHIP (which options exist, completing a
+  // partial mirror from the nodes). The NODE answers WHAT EACH ONE PINS. Two
+  // questions, two authorities, named apart — merging them was one authority
+  // answering a question it does not own (trap 21).
+  const optionNodesById = new Map<string, Record<string, unknown>>();
+  const nodes = (rawGraph as { nodes?: unknown } | null)?.nodes;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes as Array<Record<string, unknown>>) {
+      if (n?.kind === 'option' && typeof n.id === 'string') optionNodesById.set(n.id, n);
+    }
+  }
+  // ⚠ The callback parameter is typed structurally rather than cast. A
+  // double cast here would be a 59th `as unknown as` against a baseline of 58
+  // and the boundary ratchet would refuse it — correctly, since nothing about
+  // this read needs to escape the type system.
+  // Only the IDENTITY fields are declared: the row is read for membership and
+  // nothing else, and a declared-but-unread `interventions` would invite the
+  // merge back.
+  const rows: ReadonlyArray<{
+    readonly option_id?: unknown;
+    readonly id?: unknown;
+  }> = canonical;
+  return rows.map((row) => {
+    const id = typeof row.option_id === 'string' ? row.option_id
+      : typeof row.id === 'string' ? row.id : undefined;
+    const node = id !== undefined ? optionNodesById.get(id) : undefined;
+    // `mergeInterventionSourceObjects` is the loader's own merger, so safely
+    // encoded raw-only node interventions are preserved exactly as submitted.
+    return { interventions: node !== undefined ? mergeInterventionSourceObjects(node) : {} };
+  });
+}
 
 function resolveParams(invocation: HandlerInvocation): ResolvedParams {
   const params = invocation.proposal?.parameters ?? [];
@@ -1311,13 +1398,22 @@ export function createAddConstraintHandler(): HandlerFn {
               value: params.value,
               ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
             })
-        : narratesUnchanged
-          ? labelChanged
-            ? formatConstraintLabelUpdated(formatInput)
-            : formatConstraintUnchanged(formatInput)
-          : existing !== undefined
-            ? formatConstraintUpdated(formatInput)
-            : formatConstraintAdded(formatInput);
+        : isCorrection
+          // A correction destroyed a row on another node. "Added constraint"
+          // would be true of the destination and silent about the deletion.
+          ? formatConstraintMoved({
+              fromLabel:
+                graph.nodes.find((n) => n.id === correctsId)?.label ?? 'the previous target',
+              toLabel: targetNode.label,
+              label: constraintLabel,
+            })
+          : narratesUnchanged
+            ? labelChanged
+              ? formatConstraintLabelUpdated(formatInput)
+              : formatConstraintUnchanged(formatInput)
+            : existing !== undefined
+              ? formatConstraintUpdated(formatInput)
+              : formatConstraintAdded(formatInput);
 
       // ⭐⭐ THE RECEIPT MUST NOT CLAIM AN ENFORCEMENT THAT WILL NOT HAPPEN.
       //
@@ -1387,6 +1483,12 @@ export function createAddConstraintHandler(): HandlerFn {
       //     on the same cell is noise, and two asks in one receipt invite the
       //     user to answer neither.
       //   · otherwise, and only then, the disclosure speaks.
+      // ⭐ Hoisted so the OUTCOME can offer the move, not just describe it.
+      // The sentence alone was the honest-dead-end pattern: it names the node
+      // that could carry the limit and leaves the user to retype the whole
+      // thing, which is what put the limit on the wrong node in the first
+      // place. `null` ⇒ nothing was offered ⇒ no pending (fail closed).
+      let alternativeForCorrection: ReturnType<typeof findConstraintTargetAlternative> = null;
       const fragments: string[] = [constraintText];
       if (unevaluatedDurationSpan !== null) {
         fragments.push(
@@ -1419,18 +1521,35 @@ export function createAddConstraintHandler(): HandlerFn {
         // re-targeted: the user chose a node, and moving their limit under
         // them on a unit match would be the confident wrongness the
         // admissibility check exists to prevent.
-        const alternative = findConstraintTargetAlternative({
+        alternativeForCorrection = findConstraintTargetAlternative({
           chosenIsCheckable: false,
           chosenNodeId: targetId,
           constraintUnit: newConstraint.unit ?? null,
           nodes: graph.nodes as never,
+          edges: graph.edges as never,
+          // ⛔⛔ OPTIONS COME FROM THE RAW SNAPSHOT, NOT THE PARSED GRAPH.
+          // `GraphV3` is a plain `z.object` declaring nodes/edges/
+          // goal_constraints and nothing else (schemas/cee-v3.ts:642-655), so
+          // the parse at :353 STRIPS top-level options. Reading `graph.options`
+          // after it always yielded undefined, which silently disabled the
+          // every-option-pin anchor route: a measured non-root factor pinned by
+          // every real option was withheld even though PLoT's own predicate
+          // accepts it. My helper tests injected options directly and so could
+          // not see the boundary — a fixture proving nothing about the producer.
+          // Found by Codex on the real caller, not by my suite.
+          //
+          // Same-turn raw snapshot, no second graph read. Prefer the canonical
+          // top-level carrier; fall back to option NODES, which is how a V3
+          // graph carries them and what run_analysis projects into the wire
+          // `options` it sends PLoT.
+          options: readSameTurnOptions(rawGraph) as never,
         });
         fragments.push(
-          alternative === null
+          alternativeForCorrection === null
             ? formatConstraintNotCheckable({ targetLabel: targetNode.label })
             : formatConstraintTargetAlternative({
                 chosenLabel: targetNode.label,
-                alternative,
+                alternative: alternativeForCorrection,
               }),
         );
       }
@@ -1441,6 +1560,21 @@ export function createAddConstraintHandler(): HandlerFn {
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
         mutated_graph: result.mutatedGraph,
+        // The move the user may confirm. Fields are the builder's own, so the
+        // sentence and the offer cannot describe different nodes.
+        ...(alternativeForCorrection !== null && newConstraint.unit !== undefined
+          ? {
+              __constraint_target_correction: {
+                misplaced_node_id: targetId,
+                misplaced_node_label: targetNode.label,
+                operator,
+                value: params.value,
+                unit: newConstraint.unit,
+                alternative_node_id: alternativeForCorrection.nodeId,
+                alternative_label: alternativeForCorrection.label,
+              },
+            }
+          : {}),
         // The executor persists the pending question from this channel in the
         // SAME commit as the receipt that asked it (fields shared with the
         // pending-action type so the two cannot drift). `label` is the

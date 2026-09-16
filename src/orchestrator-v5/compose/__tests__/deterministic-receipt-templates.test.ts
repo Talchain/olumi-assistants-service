@@ -133,6 +133,13 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
     receipts.formatConstraintUnchanged({ targetLabel: SLOT, operator: '>=', value: 2 }),
   formatConstraintLabelUpdated: () =>
     receipts.formatConstraintLabelUpdated({ targetLabel: SLOT, operator: '>=', value: 2 }),
+  // The correction receipt. THREE label positions, and all three are slots on
+  // purpose: it names the node the limit LEFT as well as the one it landed on,
+  // because "moved" with one end named is as ambiguous as not saying it. The
+  // third is the constraint's own label, which on a correction carries the
+  // user's attested description rather than a node name.
+  formatConstraintMoved: () =>
+    receipts.formatConstraintMoved({ fromLabel: SLOT, toLabel: SLOT, label: SLOT }),
   // The write-time honesty pair. `formatConstraintNotCheckable` reuses the
   // run_analysis-time `unmeasured_target` voice verbatim (one shared definition
   // in `coaching/constraint-gap-copy.ts`), so a doctrine failure here would

@@ -215,6 +215,30 @@ export function formatConstraintNotCheckable(input: { readonly targetLabel: stri
 }
 
 /**
+ * ⭐⭐ THE LIMIT MOVED — SAY SO, NAMING BOTH ENDS.
+ *
+ * A correction REMOVES the row on one node and writes it on another. Before
+ * this, that turn produced `formatConstraintAdded` ("Added constraint: …") and
+ * `fact.result.before = null`: a row was destroyed and BOTH channels narrated
+ * a fresh add. An independent copy audit found it. Under-reporting a deletion
+ * is the same class as over-claiming a write — the user cannot see what their
+ * model now says.
+ *
+ * Names the node it LEFT as well as the one it landed on, because "moved" with
+ * one end named is exactly as ambiguous as not saying it.
+ */
+export function formatConstraintMoved(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly label: string;
+}): string {
+  return (
+    `Moved that limit off ${input.fromLabel} and onto ${input.toLabel}: `
+    + `${input.label}. It is no longer recorded against ${input.fromLabel}.`
+  );
+}
+
+/**
  * ⭐ THE TIME CONDITION IS RECORDED AS DESCRIPTION, AND SAYS SO.
  *
  * `goal_constraints[]` rows carry `{operator, value, unit}` and no temporal
