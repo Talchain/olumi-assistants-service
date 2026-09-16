@@ -436,6 +436,41 @@ export const GoalConstraintSchema = z.object({
    * own enum rather than restated as a local literal union (trap 12).
    */
   value_frame: GoalThresholdFrame.optional(),
+  /**
+   * Audit trail for the percent→fraction rewrite performed by
+   * `normaliseConstraintUnits` (`cee/compound-goal/extractor.ts`).
+   *
+   * ⚠ DECLARED FOR THE SAME REASON `value_frame` IS, AND IT WAS MISSING FOR
+   * EXACTLY AS LONG AS THE WARNING ABOVE HAS EXISTED. The extractor stamps
+   * this object and `toGoalConstraints` carries it forward explicitly — a
+   * by-presence projection written so the field would not be lost — and then
+   * this plain `z.object` deleted it at the first parse hop, with no error
+   * anywhere. Proven by execution before the fix: parsing a minted constraint
+   * returned `value_frame` and dropped `provenance_unit_normalised`.
+   *
+   * Reported by the Canvas lane, which cannot otherwise tell `value: 1.1,
+   * unit: "%"` meaning 110% from a genuine 1.1%, because BOTH conventions are
+   * live on the wire and a constraint gets no display twin the way
+   * `goal_threshold`/`goal_threshold_raw` does.
+   *
+   * ⚠ BY-PRESENCE, AND NEVER DEFAULTED. Absent means "no rewrite happened",
+   * which is a different fact from "a rewrite happened and was lost".
+   * Synthesising an empty audit trail would manufacture provenance, the same
+   * way a defaulted `value_frame` manufactures an attestation.
+   *
+   * ⚠ THIS DOES NOT WIDEN THE REWRITE RULE, which fires only for
+   * `unit === "%"` with `0 < |value| < 1`. Canvas's reported case (`1.1`)
+   * sits OUTSIDE that window and is therefore still unstamped — deciding
+   * whether `1.1` means 110% or 1.1% is a semantic judgement, not a carrier
+   * fix, and guessing it is how a value silently moves by 100×.
+   */
+  provenance_unit_normalised: z
+    .object({
+      rule: z.string(),
+      original_value: z.number(),
+      original_unit: z.string(),
+    })
+    .optional(),
   /** Deadline metadata for temporal constraints */
   deadline_metadata: z.object({
     deadline_date: z.string().optional(),
