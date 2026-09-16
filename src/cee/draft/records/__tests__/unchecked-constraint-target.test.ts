@@ -169,16 +169,32 @@ describe("U2 — the widening is scoped, proven by the case it must NOT touch", 
 });
 
 /**
- * ⚠ SAID PLAINLY SO NOBODY INFERS A DISCRIMINATION THAT IS NOT THERE: with
- * `constraint_value_unstated` now classified, the two sets between them cover
- * EVERY reason in `REPAIRABLE_CONSTRAINT_REASONS`, so `target` is opened for
- * every limit that reaches the map at all. That is intended — each of those
- * reasons is either "the target was checked and rejected" or "the target was
- * never checked" — but it means the load-bearing guard is no longer the
- * reason-by-reason test. It is the REPAIRABILITY GATE ITSELF, so that is what
- * U2c pins.
+ * ⚠⚠ WHAT THIS PINS, MEASURED RATHER THAN CLAIMED — AND MY FIRST VERSION OF THIS
+ * COMMENT WAS WRONG. It said U2c pins the REPAIRABILITY GATE. It does not: a
+ * mutant that turns that gate into `if (false) continue;` leaves this test
+ * GREEN. So do mutants that remove the `stated_index` gate, and the `item`
+ * lookup gate. Only removing ALL THREE together REDs it.
+ *
+ * The honest statement is therefore: these three gates are JOINTLY load-bearing
+ * and no single one of them is exercisable by any input this projector can
+ * produce — because every disclosure that carries a `stated_index` is already a
+ * repairable reason (contrast-controlled: `constraint_value_unstated` sets
+ * `stated_index`, `constraint_direction_unstated` and the connectivity prune do
+ * not). The reason gate is defence in depth against a FUTURE disclosure that
+ * carries an index, not a discrimination being made today.
+ *
+ * ⭐ Kept anyway, and kept with this note, because a guard whose name overstates
+ * what it proves is how a suite starts agreeing with itself. The all-gates
+ * mutant is the one that bites, and it is the one recorded.
+ *
+ * ⚠ Second thing this makes explicit: with `constraint_value_unstated` now
+ * classified, the two sets between them cover EVERY reason in
+ * `REPAIRABLE_CONSTRAINT_REASONS`, so `target` is opened for every limit that
+ * reaches the map at all. Intended — each reason is either "checked and
+ * rejected" or "never checked" — but nobody should read a live discrimination
+ * into the three-clause shape.
  */
-describe("U2c — the gate that is actually load-bearing: non-repairable stays shut", () => {
+describe("U2c — a disclosure alone opens nothing (three gates, jointly)", () => {
   it("a limit dropped `unconnected_to_goal` opens NOTHING, even though it is disclosed", () => {
     const base = ORPHAN_LIMIT();
     const reasons = dropped(base)
@@ -192,6 +208,8 @@ describe("U2c — the gate that is actually load-bearing: non-repairable stays s
       "precondition: no repairable reason is present to carry it in",
     ).toBe(false);
     const scope = repairableConstraintFields(base, project(base));
+    // Bitten only by the ALL-THREE-GATES mutant; see the note above for why no
+    // single-gate mutant discriminates here.
     expect(scope.get(1), "a disclosure alone must never open a field").toBeUndefined();
   });
 });
