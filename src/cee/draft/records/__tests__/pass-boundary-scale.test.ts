@@ -92,9 +92,26 @@ describe("B1 — a pass-1 magnitude is withheld once completion authors one on t
     expect(iv(p, HYBRID, COST), "the £0.85 priced at effectively zero").toBeCloseTo(0.00000425, 10);
   });
 
-  it("B1b with the boundary, the fabricated near-zero price is GONE", () => {
+  it("B1b with the boundary, the divergence is REPORTED — and the value is left alone", () => {
+    // ⛔ THIS ASSERTION WAS INVERTED, AND THE INVERSION IS THE POINT. It used to
+    // require the value be DELETED. Independent review reproduced the cost:
+    // put penny pricing ACROSS the boundary (£0.50 in pass 1, £50,000 from
+    // completion) and deletion removes a legitimate price — B2d below. Four
+    // detector shapes have now been refuted, so the honest remedy is to say the
+    // scales did not reconcile, not to guess which side is wrong.
     const p = projectRecordsToGraph(CROSS_BOUNDARY(), undefined, 6);
-    expect(iv(p, HYBRID, COST), "withheld rather than normalised into a frame it never belonged to").toBeUndefined();
+    const reasons = dropped(p).map((d) => d.reason);
+    expect(reasons, "the divergence is named").toContain("option_magnitude_scale_unreconciled");
+    expect(iv(p, HYBRID, COST), "and nothing is deleted on a guess").toBeDefined();
+  });
+
+  it("B1b2 WHAT THIS DOES NOT FIX, pinned so nobody reads more into it", () => {
+    // The live harm survives: £0.85 against an £200,000 frame still normalises
+    // to ~4e-06 and can still read as free. Disclosure makes that visible to a
+    // consumer instead of silent. Deciding what the product DOES about the
+    // ranking has an owner; it is not a guess for the projector to make.
+    const p = projectRecordsToGraph(CROSS_BOUNDARY(), undefined, 6);
+    expect(iv(p, HYBRID, COST)).toBeCloseTo(0.00000425, 10);
   });
 
   it("B1c the completion-authored pounds are untouched", () => {
@@ -133,6 +150,31 @@ describe("B2 — single-pass magnitudes are untouched, which is what keeps penny
     const b = projectRecordsToGraph(SINGLE_PASS(), undefined, 6);
     expect(iv(b, HYBRID, COST)).toBe(iv(a, HYBRID, COST));
     expect(dropped(b).map((d) => d.reason).some((r) => r.includes("scale"))).toBe(false);
+  });
+
+  it("B2d CROSS-PASS PENNY PRICING — the twin my own control never built", () => {
+    // ⛔⛔ TRAP 22b, AND IT WAS MINE. B2c below tests penny pricing in the
+    // SINGLE-PASS arm only, so it could never observe the deletion direction.
+    // Independent review supplied the missing door: the £50,000 arrives from
+    // completion and the £0.50 from pass 1, so the conjunction fires on a
+    // perfectly legitimate price. Reproduced before accepting it — the £0.50
+    // came back `undefined`.
+    const penny = {
+      stated_items: [
+        { kind: "goal", source_quote: "price sustainably" },
+        { kind: "option", source_quote: "penny pricing" },
+        { kind: "option", source_quote: "enterprise pricing" },
+      ],
+      claims: [
+        /* 0 */ { claim_kind: "factor", label: "Unit Price" },
+        /* 1 */ { claim_kind: "causal_link", label: "penny sets low", from_stated: 1, to_claim: 0, effect: "negative", sets_to: 0.5 },
+        /* 2 */ { claim_kind: "causal_link", label: "price bears on goal", from_claim: 0, to_stated: 0, effect: "positive" },
+        /* 3 */ { claim_kind: "causal_link", label: "enterprise sets high", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 50000 },
+      ],
+    } as unknown as DraftRecordSet;
+    const p = projectRecordsToGraph(penny, undefined, 3);
+    expect(iv(p, "penny pricing", "Unit Price"), "a legitimate £0.50 price must not be deleted").toBeDefined();
+    expect(iv(p, "enterprise pricing", "Unit Price")).toBeDefined();
   });
 
   it("B2c PENNY PRICING: £0.50 beside £50,000 from ONE pass is preserved exactly", () => {

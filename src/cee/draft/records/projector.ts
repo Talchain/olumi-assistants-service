@@ -4189,11 +4189,34 @@ function projectOnce(
           biggestEarlier > 0 &&
           biggestLater / biggestEarlier >= 1000;
         if (spansBoundary) {
+          // ⛔⛔ DISCLOSE, DO NOT DELETE — AND THIS IS THE FOURTH SHAPE OF THIS
+          // RULE, WITH THE FIRST THREE REFUTED BY EXECUTION.
+          //   1. magnitude alone → refuted by `projector-scale-projection`:
+          //      £0.50 penny pricing beside £50,000 in ONE pass is a real strategy.
+          //   2. the same with zero excluded → still refuted, and it also deleted
+          //      a legitimate £0 status quo.
+          //   3. the pass boundary alone → refuted by `option-framing-adapter`:
+          //      0.4 from completion beside 0.8 and 0.6 from pass 1 is a coherent
+          //      set a boundary rule wrongly stripped.
+          //   4. the conjunction → refuted by independent review: put penny
+          //      pricing ACROSS the boundary (£0.50 in pass 1, £50,000 from
+          //      completion) and it deletes the legitimate £0.50. Reproduced
+          //      before accepting it; the £0.50 came back `undefined`.
+          //
+          // ⭐ SO THE DETECTOR STAYS AND THE REMEDY CHANGES. I cannot separate a
+          // convention clash from a genuine wide-scale quantity using magnitude
+          // and pass origin alone — four attempts say so, not one. What I CAN do
+          // without guessing is say that the scales did not reconcile. Review's
+          // own words were "disclose unresolved scales rather than guessing or
+          // dropping whole useful proposals"; I read "dropping proposals" as
+          // licence to drop the NUMBER, and it was not.
+          //
+          // ⚠ WHAT THIS DOES NOT FIX, STATED PLAINLY: the live £0.85 still
+          // normalises to ~4e-06 and can still read as free. Disclosure makes
+          // that visible to a consumer instead of silent. Choosing what the
+          // product then DOES about the ranking is a decision with an owner, not
+          // a guess for this function to make.
           for (const x of carried.filter((y) => !authoredByCompletion(y))) {
-            delete x.opt.data.interventions[factor.id];
-            const rawBag = (x.opt.data as { raw_interventions?: Record<string, unknown> })
-              .raw_interventions;
-            if (rawBag !== undefined) delete rawBag[factor.id];
             dropped.push({
               claim_index: Math.min(...x.origins),
               claim_kind: "claim",
