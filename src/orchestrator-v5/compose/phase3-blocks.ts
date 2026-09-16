@@ -715,8 +715,35 @@ export function buildReviewCardBlocks(
   // an uncertainty on any of them. Empty ⇒ suppress nothing (byte-identical).
   const leverLabels = collectLeverLabels(interventionControlledFactorIds, lookup);
 
-  // narrative (rank 1) — free-text prose; Finding 1 lever-naming guard applies.
-  const narrative = buildNarrativeCard(dr, ctx, leverLabels);
+  // narrative (rank 1) — free-text prose.
+  //
+  // ⛔⛔ `leverLabels` is deliberately NOT passed, on the SAME reasoning that
+  // scoped out `buildPreMortemCard` below, and after a measured user harm.
+  //
+  // Witnessed live 16 Sep 2026: three `review_card` blocks dropped before egress
+  // in one run, this one as `{ kind: 'narrative', reason: 'lever_named', field:
+  // 'narrative_summary' }`. The user asked three different questions in that
+  // session — including "What updates are you recommending we actually make?" —
+  // and got the same canned paragraph each time, because the card that describes
+  // the analysis never reached them.
+  //
+  // The guard is a SPEECH-ACT rule implemented as STRING CONTAINMENT.
+  // `proseNamesLever` tests only whether a lever LABEL occurs in the prose;
+  // mention and assertion-of-uncertainty read identically to it. `leverLabels`
+  // is the label of EVERY factor any option intervenes on — precisely the
+  // quantities this card exists to describe, and which the served prompt tells
+  // the model to name. One bounded occurrence dropped the whole card, with no
+  // rewrite path.
+  //
+  // ⭐ AND THIS SURFACE CANNOT COMMIT THE HARM THE DOCTRINE BANS. Read at the
+  // candidate it builds: title "How the analysis reads",
+  // `reviewCardSignals('narrative', 'info')`, `target_refs: []`, and NO
+  // `action_intent` of any kind. It offers the reader nothing to "resolve", so a
+  // lever named here is REPORTED, not proposed as an open question — the same
+  // distinction that made a pre-mortem's watch-point coaching rather than
+  // steering. Every OTHER surface in this file still receives `leverLabels`, and
+  // every other rule on this path still applies to this card.
+  const narrative = buildNarrativeCard(dr, ctx, []);
   if (narrative !== null) blocks.push(narrative);
 
   // pre_mortem (rank 2) — optional in the LLM output; free-text failure prose.
