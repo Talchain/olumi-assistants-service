@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildNativeQuantityOperation,
+  formatNativeQuantityAck,
+  readCommittedNativeQuantity,
   readExistingIntervention,
 } from '../native-quantity-operation.js';
 
@@ -122,5 +124,70 @@ describe('readExistingIntervention — binds by identity', () => {
 
   it('refuses when the factor cell is absent', () => {
     expect(readExistingIntervention(graph(CELL), 'opt_tech_lead', 'other_factor')).toBeNull();
+  });
+});
+
+describe('readCommittedNativeQuantity — the native path’s own landing check', () => {
+  const applied = graph({ ...CELL, raw_value: 95000, unit: 'GBP' });
+
+  it('reads the committed native figure and unit', () => {
+    expect(readCommittedNativeQuantity(applied, 'opt_tech_lead', '85dd1a1d')).toEqual({
+      rawValue: 95000,
+      unit: 'GBP',
+    });
+  });
+
+  it('⭐ the ENCODED reader would have reported this successful write as a FAILURE', () => {
+    // The dispatcher's existing check is `readCommittedOptionEffect(...) === value`.
+    // On a native write the encoded value is deliberately untouched, so it
+    // returns 0.7 — never the native figure — and the turn falls into the
+    // `option_effect_write_did_not_land` branch. This asserts the two readers
+    // answer DIFFERENT questions on the same committed graph, which is why the
+    // native path needs its own (trap 21).
+    const encoded = (readExistingIntervention(applied, 'opt_tech_lead', '85dd1a1d') as { value: number }).value;
+    const native = readCommittedNativeQuantity(applied, 'opt_tech_lead', '85dd1a1d')!;
+    expect(encoded).toBe(0.7);
+    expect(native.rawValue).toBe(95000);
+    expect(encoded).not.toBe(native.rawValue);
+  });
+
+  it('undefined when no native landed — so a failure still reads as a failure', () => {
+    expect(readCommittedNativeQuantity(graph(CELL), 'opt_tech_lead', '85dd1a1d')).toBeUndefined();
+  });
+
+  it('undefined when the native landed without a unit', () => {
+    const noUnit = graph({ ...CELL, raw_value: 95000 });
+    expect(readCommittedNativeQuantity(noUnit, 'opt_tech_lead', '85dd1a1d')).toBeUndefined();
+  });
+});
+
+describe('formatNativeQuantityAck', () => {
+  const text = formatNativeQuantityAck({
+    optionLabel: 'Hire a Tech Lead',
+    factorLabel: 'Hiring Cost',
+    rawValue: 95000,
+    unit: 'GBP',
+  });
+
+  it('cites the committed figure, the option and the factor', () => {
+    expect(text).toContain('GBP 95,000');
+    expect(text).toContain('Hire a Tech Lead');
+    expect(text).toContain('Hiring Cost');
+  });
+
+  it('⚠ says what it did NOT do — the model value and the ranking are unchanged', () => {
+    // Recording a cost recalculates nothing. Saying only the first half would
+    // let the reader believe the comparison had moved.
+    expect(text).toMatch(/unchanged/i);
+  });
+
+  it('SURVIVES the egress forbidden-phrase guard, by execution not inspection', async () => {
+    // Copy that trips this guard is replaced wholesale by a neutral fallback,
+    // so an ack can read perfectly and reach nobody.
+    const { applyEgressForbiddenPhraseGuard } = await import(
+      '../../compose/forbidden-user-facing-phrases.js'
+    );
+    const result = applyEgressForbiddenPhraseGuard(text);
+    expect(result.text).toBe(text);
   });
 });

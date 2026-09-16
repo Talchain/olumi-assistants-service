@@ -107,3 +107,68 @@ export function buildNativeQuantityOperation(
       + `on ${write.factorLabel}, beside the existing model value.`,
   };
 }
+
+/**
+ * ⭐ DID THE NATIVE FIGURE LAND? — the native path's own committed read.
+ *
+ * ⚠⚠ IT EXISTS BECAUSE `readCommittedOptionEffect` ANSWERS A DIFFERENT
+ * QUESTION, AND REUSING IT WOULD REPORT A SUCCESSFUL WRITE AS A FAILURE.
+ * That reader returns the ENCODED value, and the dispatcher compares it to the
+ * value it asked to write:
+ *
+ *     const committed = readCommittedOptionEffect(appliedGraph, optionId, factorId);
+ *     if (committed === optionEffectWrite.value) { ...success ack... }
+ *
+ * A native write leaves the encoded value DELIBERATELY unchanged, so `committed`
+ * comes back as the pre-existing `0.7`, never equals the native figure, the
+ * success branch never fires, and the turn falls into the
+ * `option_effect_write_did_not_land` warning and its recovery copy — telling
+ * the user their cost did not save while it sits correctly in the graph. This
+ * lane's own defect class, arriving through the SUCCESS path.
+ *
+ * ⛔ And the tempting fix is wrong: do NOT teach `readCommittedOptionEffect` to
+ * return the native when present. Its existing callers ask "did the ENCODED
+ * value land?" and would start receiving a number in a different scale — two
+ * questions under one reader (trap 21), which is how this estate loses days.
+ */
+export function readCommittedNativeQuantity(
+  appliedGraph: unknown,
+  optionId: string,
+  factorId: string,
+): { readonly rawValue: number; readonly unit: string } | undefined {
+  const cell = readExistingIntervention(appliedGraph, optionId, factorId);
+  if (cell === null) return undefined;
+  const rawValue = cell.raw_value;
+  const unit = cell.unit;
+  if (typeof rawValue !== 'number' || !Number.isFinite(rawValue)) return undefined;
+  if (typeof unit !== 'string' || unit.trim() === '') return undefined;
+  return { rawValue, unit };
+}
+
+/**
+ * The acknowledgement, citing the COMMITTED bytes rather than the request —
+ * the same rule the option-effect ack follows (ROADMAP 2.427 P5).
+ *
+ * ⚠ IT SAYS WHAT IT DID AND WHAT IT DID NOT DO. Recording a cost does not
+ * recalculate anything: the model value is untouched and the ranking still
+ * reflects it. Saying only the first half would let the reader believe the
+ * comparison had moved, which is the overclaim the constraint disclosure
+ * already exists to prevent one level up.
+ *
+ * No forbidden vocabulary: no "recommend", no state-mutation denial, no
+ * "previous analysis". Plain, and it names the option and the factor so the
+ * user can see which cell it landed in.
+ */
+export function formatNativeQuantityAck(input: {
+  readonly optionLabel: string;
+  readonly factorLabel: string;
+  readonly rawValue: number;
+  readonly unit: string;
+}): string {
+  const amount = `${input.unit} ${input.rawValue.toLocaleString('en-GB')}`;
+  return (
+    `Recorded ${amount} as ${input.optionLabel}'s ${input.factorLabel}. `
+    + `The model value for this option is unchanged, so the comparison still `
+    + `reflects it — run the analysis again to check this figure against your limit.`
+  );
+}

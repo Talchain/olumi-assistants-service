@@ -51,6 +51,13 @@ import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outc
 // guard. 2.427 above owns the TEXT on this turn; this owns the WRITE, so a
 // factor-baseline mutation cannot persist behind a reply that says the option's
 // effect value is still unset. See the module header for the wire witness.
+import { decideNativeQuantityAnswer } from '../routing/native-quantity-answer.js';
+import {
+  buildNativeQuantityOperation,
+  formatNativeQuantityAck,
+  readCommittedNativeQuantity,
+  readExistingIntervention,
+} from '../routing/native-quantity-operation.js';
 import {
   decideOptionInterventionWrite,
   formatWithheldWriteNotice,
@@ -1815,6 +1822,39 @@ function canonicaliseOptionEffectOperation(
   return parsedOperations as readonly PatchOperation[];
 }
 
+/**
+ * The native-quantity operation, through the SAME canonicalisation gate as its
+ * option-effect sibling — `parseEditGraphResponse`, which is the parser the LLM
+ * path's own operations go through. A deterministic operation gets no easier
+ * ride than a generated one; if it does not survive the parser it is discarded
+ * and the turn takes the LLM path, exactly as the sibling does.
+ */
+function canonicaliseNativeQuantityOperation(
+  raw: Record<string, unknown>,
+  requestId: string,
+): readonly PatchOperation[] | null {
+  let parsedOperations: unknown[];
+  try {
+    parsedOperations = parseEditGraphResponse(
+      JSON.stringify({ operations: [raw], removed_edges: [], warnings: [], coaching: null }),
+    ).operations;
+  } catch {
+    parsedOperations = [];
+  }
+  if (parsedOperations.length !== 1) {
+    log.error(
+      {
+        event: 'v5.edit_graph.native_quantity_operation_canonicalise_failed',
+        request_id: requestId,
+        operations_count: parsedOperations.length,
+      },
+      'V5 edit_graph — the native-quantity operation did not survive canonicalisation; falling back to the edit LLM',
+    );
+    return null;
+  }
+  return parsedOperations as readonly PatchOperation[];
+}
+
 function editResultToOlumiResponse(
   result: EditGraphResult,
   payload: MessageTurnPayload,
@@ -2668,6 +2708,51 @@ export async function dispatchEditGraph(
         // `interventions` were dropped on the way in. A guard held up by a
         // coincidence in someone else's constant is exactly the kind this
         // estate loses; keeping it costs one boolean.
+        // ⭐ GO(A) — THE NATIVE ANSWER TAKES PRECEDENCE, and it is a SEPARATE
+        // branch rather than a case of the option-effect resolution below.
+        //
+        // The two answer opposite questions about the same cell (trap 21):
+        // `optionEffect` supplies a MISSING model-unit value; this restates an
+        // EXISTING one in the user's own units. Folding them would hand a
+        // currency amount to a [0,1] writer.
+        //
+        // Resolved HERE rather than in the caller (unlike `recordedAnswer`)
+        // because it does not change ROUTING — the turn is an edit either way;
+        // it changes only which operation is composed. `earlyPending` and
+        // `earlyCurrentGraphHash` are already loaded a few lines above for the
+        // proposal resume, so this adds no read.
+        const nativeAnswer = decideNativeQuantityAnswer({
+          message: payload.message,
+          pendings: earlyPending,
+          graph: graphState,
+          currentGraphHash: earlyCurrentGraphHash,
+          nowMs: Date.now(),
+        });
+        const nativeQuantityRaw = nativeAnswer.kind !== 'bind'
+          ? null
+          : buildNativeQuantityOperation(
+              {
+                optionId: nativeAnswer.optionId,
+                optionLabel: nativeAnswer.optionLabel,
+                factorId: nativeAnswer.factorId,
+                factorLabel: nativeAnswer.factorLabel,
+                nativeValue: nativeAnswer.nativeValue,
+                unit: nativeAnswer.unit,
+              },
+              // The cell as it stands, so every existing field survives and the
+              // ENCODED value rides through untouched.
+              readExistingIntervention(graphState, nativeAnswer.optionId, nativeAnswer.factorId),
+            );
+        const nativeQuantityOperation = nativeQuantityRaw === null
+          ? null
+          : canonicaliseNativeQuantityOperation(nativeQuantityRaw, requestId);
+        // Bound to the OPERATIONS, not to the answer — an answer whose operation
+        // did not canonicalise must take the LLM path, and the ack below reads
+        // this one variable so it cannot be left behind.
+        const nativeWrite = nativeQuantityOperation === null || nativeAnswer.kind !== 'bind'
+          ? null
+          : nativeAnswer;
+
         const optionEffect = recordedAnswer !== null
           ? { matched: true as const, kind: 'write' as const,
               ...recordedAnswer.pair, value: Number(recordedAnswer.valueText) }
@@ -2725,10 +2810,62 @@ export async function dispatchEditGraph(
           // (`option-configure-apply-chain.test.ts` hop 2 pins that verdict).
           // No structural operation can be composed by this path — the shape
           // is fixed by `buildOptionEffectRawOperation`.
-          optionEffectOperations === null
+          // The native restatement wins when both resolve: it is an answer to a
+          // question the product ASKED, and the option-effect resolution is a
+          // read of the sentence. A recorded answer outranks a fresh guess.
+          nativeQuantityOperation !== null
+            ? { preComposedOperations: nativeQuantityOperation }
+            : optionEffectOperations === null
             ? undefined
             : { preComposedOperations: optionEffectOperations },
         );
+        // ⭐ THE NATIVE PATH'S OWN LANDING CHECK AND ACK.
+        //
+        // ⚠⚠ IT CANNOT REUSE THE BLOCK BELOW. That one reads
+        // `readCommittedOptionEffect`, which returns the ENCODED value, and
+        // compares it to the value it asked to write. A native write leaves the
+        // encoded value DELIBERATELY unchanged, so the comparison never holds,
+        // the success ack never fires, and the turn falls into
+        // `option_effect_write_did_not_land` — telling the user their cost did
+        // not save while it sits correctly in the graph. Pinned by
+        // `native-quantity-operation.test.ts`, which asserts the two readers
+        // return different numbers from the same committed graph.
+        if (nativeWrite !== null) {
+          const committedNative = readCommittedNativeQuantity(
+            editResult.appliedGraph,
+            nativeWrite.optionId,
+            nativeWrite.factorId,
+          );
+          if (
+            committedNative !== undefined
+            && committedNative.rawValue === nativeWrite.nativeValue
+            && committedNative.unit === nativeWrite.unit
+          ) {
+            editResult = {
+              ...editResult,
+              assistantText: formatNativeQuantityAck({
+                optionLabel: nativeWrite.optionLabel,
+                factorLabel: nativeWrite.factorLabel,
+                rawValue: committedNative.rawValue,
+                unit: committedNative.unit,
+              }),
+            };
+          } else {
+            // Nothing is claimed. The existing recovery machinery composes the
+            // answer, exactly as it does when an option-effect write does not
+            // land.
+            log.warn(
+              {
+                event: 'v5.edit_graph.native_quantity_write_did_not_land',
+                request_id: requestId,
+                scenario_id: payload.scenario_id,
+                option_id: nativeWrite.optionId,
+                factor_id: nativeWrite.factorId,
+              },
+              'V5 native-quantity write did not survive to the applied graph',
+            );
+          }
+        }
         if (optionEffectWrite !== null) {
           // ⭐ P5 — THE ACKNOWLEDGEMENT CITES THE COMMITTED BYTES, NOT THE
           // REQUEST. The value is read back out of the applied graph through
