@@ -52,6 +52,35 @@ describe('sameUnit — one unit, two spellings', () => {
     expect(sameUnit('months', 'FTE')).toBe(false);
     expect(sameUnit('developers', 'developers')).toBe(true);
   });
+
+  it.each([['mW', 'MW'], ['ms', 'Ms'], ['kW', 'KW']])(
+    '⛔ %s and %s are DIFFERENT — case carries meaning outside currency',
+    (a, b) => {
+      // Codex CX-114, executed: my first cut uppercased unconditionally and
+      // collapsed these. Megawatts are not milliwatts.
+      // ⚠ The test above could not see it: it varies LETTERS, not CASE. A
+      // corpus that varies the wrong dimension cannot observe the defect.
+      expect(sameUnit(a, b)).toBe(false);
+    },
+  );
+
+  it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
+    '⛔ %s is a unit string, not an inherited property — it must not throw',
+    (key) => {
+      // The currency map is a plain object, so bracket access returns
+      // INHERITED functions for these and `.toUpperCase()` threw a TypeError.
+      // A unit comes from stored data, so such a key is reachable, not
+      // theoretical.
+      expect(() => sameUnit(key, 'GBP')).not.toThrow();
+      expect(sameUnit(key, 'GBP')).toBe(false);
+      expect(sameUnit(key, key)).toBe(true);
+    },
+  );
+
+  it('an unrecognised code is NOT uppercased into a match', () => {
+    // 'xyz' is not a currency, so it keeps its own spelling.
+    expect(sameUnit('xyz', 'XYZ')).toBe(false);
+  });
 });
 
 describe('the write accepts the REAL captured shape', () => {

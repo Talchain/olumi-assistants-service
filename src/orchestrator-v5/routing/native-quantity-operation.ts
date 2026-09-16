@@ -51,11 +51,39 @@ import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
  * USD vs GBP still refuses, and no rate is ever applied.
  */
 export function sameUnit(a: string, b: string): boolean {
-  const norm = (u: string) => {
-    const t = u.trim();
-    return (CURRENCY_SYMBOL_TO_CODE[t] ?? t).toUpperCase();
-  };
-  return norm(a) === norm(b);
+  return normaliseUnitForComparison(a) === normaliseUnitForComparison(b);
+}
+
+/** The recognised currency CODES, derived from the map rather than restated. */
+const CURRENCY_CODES: ReadonlySet<string> = new Set(Object.values(CURRENCY_SYMBOL_TO_CODE));
+
+/**
+ * ⚠⚠ RECOGNISED CURRENCIES ONLY. Everything else stays CASE-SENSITIVE.
+ *
+ * My first cut uppercased unconditionally, and Codex's executed witness showed
+ * it silently widened units that are not currencies at all: `mW`/`MW` and
+ * `ms`/`Ms` collapsed into one. Megawatts are not milliwatts. My own "does not
+ * widen non-currency units" test could not see it, because it compared
+ * `months` against `FTE` — strings that differ in LETTERS, not in CASE. A
+ * corpus that varies the wrong dimension cannot observe the defect (trap 22).
+ *
+ * ⚠ AND OWN-PROPERTY LOOKUP, NOT BRACKET ACCESS. `CURRENCY_SYMBOL_TO_CODE` is a
+ * plain object, so `map['constructor']` and `map['toString']` return INHERITED
+ * functions; the old `?? t` never fired and `.toUpperCase()` threw a TypeError
+ * on them. A unit string comes from stored data, so a key like `constructor`
+ * is reachable rather than theoretical.
+ */
+function normaliseUnitForComparison(unit: string): string {
+  const trimmed = unit.trim();
+  // A symbol maps to its code — `£` and `GBP` are one unit, two spellings.
+  if (Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOL_TO_CODE, trimmed)) {
+    return CURRENCY_SYMBOL_TO_CODE[trimmed]!;
+  }
+  // A recognised code in any case is still that code (`gbp` -> `GBP`).
+  const upper = trimmed.toUpperCase();
+  if (CURRENCY_CODES.has(upper)) return upper;
+  // Anything else is compared as written. `mW` is not `MW`.
+  return trimmed;
 }
 
 /** The intervention cell as it stands, read from the graph by the caller. */
