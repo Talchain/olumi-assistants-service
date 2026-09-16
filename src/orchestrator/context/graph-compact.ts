@@ -355,17 +355,26 @@ export function projectUncertaintyDriversForContext(
  * Build a human-readable intervention summary for an option node.
  *
  * Format, capped at 5 entries:
- *   banded model value   "sets Evening Footfall Uplift=High (0.7)"
- *   off the banded scale "sets Headcount Added=42"
- *   native quantity      "sets Monthly price=69 £/month (model value 0.69)"
+ *   bare, in [0,1]   "sets Evening Footfall Uplift=model value 0.7
+ *                     (display band High; real-world meaning not established)"
+ *   bare, off scale  "sets Headcount Added=model value 42
+ *                     (real-world meaning not established)"
+ *   native quantity  "sets Monthly price=69 £/month (model value 0.69)"
  *
- * ⚠ SIZE COST, DISCLOSED RATHER THAN DISCOVERED LATER. The band adds roughly
- * a dozen characters per entry, and `budget.ts` drops this whole field in its
- * second pass under context pressure. On a graph already over budget that
- * makes the drop marginally more likely. Accepted: a summary that survives and
- * is read as an on/off switch is worse than one dropped honestly, and the
- * numeral alone was what produced the "active"/"inactive baseline" answer in
- * capture served-coaching-8077853a.
+ * ⚠ SIZE COST, DISCLOSED RATHER THAN DISCOVERED LATER — AND RESTATED AFTER THE
+ * REVIEW CORRECTION, BECAUSE IT GREW. The qualified form runs roughly 80–100
+ * characters per entry against the bare numeral's handful, so a 5-entry option
+ * costs a few hundred characters it did not before. `budget.ts` drops this
+ * whole field in its second pass under context pressure, so on a graph already
+ * over budget the drop becomes more likely than it was.
+ *
+ * Accepted deliberately, and the trade is the honest one: a summary that
+ * SURVIVES while asserting a meaning the stored value does not establish is
+ * worse than one dropped cleanly. The bare numeral is what produced the
+ * "active" / "inactive baseline" answer in capture served-coaching-8077853a,
+ * and an unqualified band would have produced a confident wrong scale instead.
+ * If this field starts being dropped in practice, the fix is a shorter honest
+ * form, never a shorter dishonest one.
  *
  * @param interventions - entries selected by the existing intervention authority
  * @param labelMap - node id → label lookup built from graph nodes
@@ -389,7 +398,8 @@ function buildInterventionSummary(
   const remaining = resolved.length - shown.length;
 
   const parts = shown.map(([factorId, entry]) => {
-    // ⚠ A BARE MODEL VALUE WITHOUT ITS BAND IS READ AS ON/OFF.
+    // ⚠ A BARE MODEL VALUE CARRIES NO ESTABLISHED MEANING, AND SAYING SO IS
+    // THE POINT — corrected by review CX-20260916-90.
     //
     // Served capture `served-coaching-8077853a` (16 Sep 2026): the owned
     // bookshop options carry bare `1` and `0`, so this line sent
@@ -397,28 +407,31 @@ function buildInterventionSummary(
     // saying each option "sets Friday extended hours ACTIVE" and that the
     // baseline "sets Friday extended hours to its INACTIVE baseline".
     //
-    // The model was not fabricating — it was reading a bare 1/0 the only way a
-    // bare 1/0 can be read. The product's own `intervention_details` renders
-    // exactly these two values as "Very high (1)" and "Low (0)": a position on
-    // an ORDINAL scale, not a switch. So the user's screen and the model's
-    // context disagreed about what the user's own option means, and the model
-    // took the reading its context supported.
+    // ⚠⚠ MY FIRST REPAIR MADE THE MODEL'S OWN MISTAKE. It sent
+    // "Very high (1)" and argued the value was ORDINAL because the UI renders
+    // it that way. The reviewer's correction is right and is the rule here: a
+    // bare 1/0 establishes NEITHER a binary NOR an ordinal reading, and a
+    // display band is a FORMATTER FALLBACK, not semantic evidence. Replacing
+    // the model's unwarranted "active" with our own unwarranted "Very high"
+    // would have moved the fabrication one layer upstream and made it look
+    // authoritative, which is worse — the model can hedge a number it was
+    // given raw, and cannot hedge a label we asserted.
     //
-    // `qualitativeBand` is the shared banding rule, exported for precisely this
-    // ("so orchestrator surfaces can render a qualitative label for unitless
-    // 0–1 factors without reimplementing the banding rule"). Reused, not
-    // restated. The numeral is KEPT alongside the band — the band alone would
-    // lose the precision the model needs to compare two options that differ
-    // within one band.
+    // So the context now states all three things separately and lets the model
+    // see which is which: the MODEL VALUE (fact), the DISPLAY BAND (how the UI
+    // renders it, `qualitativeBand`, the shared rule reused rather than
+    // restated), and that the REAL-WORLD MEANING IS NOT ESTABLISHED (the
+    // actual epistemic state). An unknown scale is named as unknown.
     //
-    // Range-gated: a value outside [0,1] is not on the banded scale, so it
-    // keeps its established bare representation rather than being given a label
-    // the rule does not warrant. No conversion, no new field, no prompt change.
+    // Outside [0,1] no band is claimed at all, because `qualitativeBand` is
+    // documented for normalised values and a label outside its domain would be
+    // exactly the unwarranted promotion this comment exists to prevent.
     if (typeof entry === 'number') {
       const label = labelMap.get(factorId)!;
-      return Number.isFinite(entry) && entry >= 0 && entry <= 1
-        ? `${label}=${qualitativeBand(entry)} (${entry})`
-        : `${label}=${entry}`;
+      if (!Number.isFinite(entry)) return `${label}=${entry}`;
+      return entry >= 0 && entry <= 1
+        ? `${label}=model value ${entry} (display band ${qualitativeBand(entry)}; real-world meaning not established)`
+        : `${label}=model value ${entry} (real-world meaning not established)`;
     }
     const value = entry as Record<string, unknown>;
     const unit = typeof value.unit === 'string' ? value.unit.trim() : '';

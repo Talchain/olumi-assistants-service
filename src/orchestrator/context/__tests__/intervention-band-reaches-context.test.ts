@@ -1,5 +1,5 @@
 /**
- * A bare model value in the AI-facing context is read as on/off.
+ * A bare model value carries no established meaning, and the context says so.
  *
  * SERVED EVIDENCE, not a hypothesis. Capture
  * `served-coaching-8077853a-2ffc-4979-95fe-412eee6799c7` (16 Sep 2026, stable
@@ -12,16 +12,19 @@
  *   "Keeping the current schedule sets Friday extended hours to its INACTIVE
  *    baseline"
  *
- * The model was not fabricating. A bare 1/0 admits no other reading. But the
- * product's OWN `intervention_details` renders those same two values as
- * "Very high (1)" and "Low (0)" — a position on an ordinal scale, not a switch.
- * The user's screen and the model's context disagreed about what the user's own
- * option means, and the answer followed the context.
+ * ⚠ THE FIRST VERSION OF THIS FILE ARGUED THE VALUE WAS ORDINAL, because the
+ * UI renders it "Very high (1)". Review CX-20260916-90 corrected that and the
+ * correction is the substance here: a bare 1/0 establishes NEITHER a binary
+ * NOR an ordinal reading, and a display band is a formatter fallback, not
+ * semantic evidence. Asserting "Very high" in the model's context would have
+ * moved the model's unwarranted reading one layer upstream and given it our
+ * authority — worse, because the model can hedge a raw number and cannot hedge
+ * a label we asserted.
  *
- * WHAT THIS PINS: the band travels with the value, using the shared
- * `qualitativeBand` rule that already exists for this purpose. The numeral is
- * kept beside it, because the band alone cannot separate two options that
- * differ within one band.
+ * WHAT THIS PINS: the three things are stated separately — the model value
+ * (fact), the display band (how the UI renders it), and that the real-world
+ * meaning is NOT established. The numeral is kept because a band alone cannot
+ * separate two options differing within one band.
  *
  * WHAT IT DOES NOT CLAIM: that the served answer is now correct. This changes
  * one field of the AI-facing context. Whether the next answer stops saying
@@ -70,12 +73,21 @@ describe('an option setting carries its band into the AI-facing context', () => 
   it('the two captured bookshop values read as a scale, not a switch', () => {
     const [high, low] = summariesFor([{ f_friday: 1 }, { f_friday: 0 }]);
     // Exact strings, because the defect was in the exact string the model read.
-    expect(high).toBe('sets Friday Extended Hours=Very high (1)');
-    expect(low).toBe('sets Friday Extended Hours=Low (0)');
-    // The words match what the product already shows the user for these very
-    // values — `intervention_details.display_value` in the served capture.
-    expect(high).toContain('Very high');
-    expect(low).toContain('Low');
+    expect(high).toBe(
+      'sets Friday Extended Hours=model value 1 (display band Very high; real-world meaning not established)',
+    );
+    expect(low).toBe(
+      'sets Friday Extended Hours=model value 0 (display band Low; real-world meaning not established)',
+    );
+    // THE DISCLAIMER IS LOAD-BEARING, NOT DECORATION. Without it this string
+    // asserts an ordinal scale the stored value does not establish — the same
+    // unwarranted reading the model made, moved one layer upstream and given
+    // our authority. Pinned so a future tidy-up cannot quietly drop it.
+    for (const s of [high, low]) {
+      expect(s).toContain('model value');
+      expect(s).toContain('display band');
+      expect(s).toContain('real-world meaning not established');
+    }
   });
 
   it('the numeral survives, so two options inside one band stay distinguishable', () => {
@@ -84,8 +96,8 @@ describe('an option setting carries its band into the AI-facing context', () => 
     const [a, b] = summariesFor([{ f_friday: 0.8 }, { f_friday: 0.95 }]);
     expect(qualitativeBand(0.8)).toBe(qualitativeBand(0.95));
     expect(a).not.toBe(b);
-    expect(a).toBe('sets Friday Extended Hours=Very high (0.8)');
-    expect(b).toBe('sets Friday Extended Hours=Very high (0.95)');
+    expect(a).toContain('model value 0.8');
+    expect(b).toContain('model value 0.95');
   });
 
   it('a value off the banded scale keeps its bare form rather than being mislabelled', () => {
@@ -93,8 +105,15 @@ describe('an option setting carries its band into the AI-facing context', () => 
     // value outside that range would attach a label the rule does not warrant,
     // so the range gate returns the established representation instead.
     const [over, under] = summariesFor([{ f_friday: 42 }, { f_friday: -3 }]);
-    expect(over).toBe('sets Friday Extended Hours=42');
-    expect(under).toBe('sets Friday Extended Hours=-3');
+    expect(over).toBe(
+      'sets Friday Extended Hours=model value 42 (real-world meaning not established)',
+    );
+    expect(under).toBe(
+      'sets Friday Extended Hours=model value -3 (real-world meaning not established)',
+    );
+    // No band is claimed off the normalised domain — asserting one there would
+    // be exactly the unwarranted promotion this change exists to stop.
+    for (const s of [over, under]) expect(s).not.toContain('display band');
   });
 
   it('a canonical intervention with a native unit is untouched', () => {
