@@ -190,6 +190,7 @@ describe('formatNativeQuantityAck', () => {
     factorLabel: 'Hiring Cost',
     rawValue: 95000,
     unit: 'GBP',
+    derivedModelValue: 0.6,
   });
 
   it('cites the committed figure, the option and the factor', () => {
@@ -198,19 +199,40 @@ describe('formatNativeQuantityAck', () => {
     expect(text).toContain('Hiring Cost');
   });
 
-  it('⚠ says what it did NOT do — the model value and the ranking are unchanged', () => {
-    // Recording a cost recalculates nothing. Saying only the first half would
-    // let the reader believe the comparison had moved.
-    expect(text).toMatch(/unchanged/i);
+  it('\u26a0\u26a0 must NOT say the model value is unchanged \u2014 the fix makes it move', () => {
+    // This expectation previously pinned the OPPOSITE. The repair that lets the
+    // native reach the calibration authority is exactly what changes the model
+    // value (0.7 -> 0.6 executed), so the old promise became a lie and the test
+    // was pinning it. Codex CX-68 caught both.
+    expect(text).not.toMatch(/unchanged/i);
+  });
+
+  it('states the DERIVED model value when one was read back', () => {
+    expect(text).toContain('0.6');
+  });
+
+  it('OMITS the derived value when none was observed \u2014 asserts nothing unseen', () => {
+    const noDerived = formatNativeQuantityAck({
+      optionLabel: 'Hire a Tech Lead',
+      factorLabel: 'Hiring Cost',
+      rawValue: 95000,
+      unit: 'GBP',
+    });
+    expect(noDerived).not.toMatch(/model value is now/i);
+    expect(noDerived).toContain('GBP 95,000');
+  });
+
+  it('\u2b50 separates SAVED from RECOMPUTED rather than collapsing them', () => {
+    // The honest pair: the figure and its derived value are stored; the
+    // analysis has not been rerun, so the comparison still shows the last run.
+    expect(text).toMatch(/not rerun the analysis/i);
+    expect(text).toMatch(/last run/i);
   });
 
   it('SURVIVES the egress forbidden-phrase guard, by execution not inspection', async () => {
-    // Copy that trips this guard is replaced wholesale by a neutral fallback,
-    // so an ack can read perfectly and reach nobody.
     const { applyEgressForbiddenPhraseGuard } = await import(
       '../../compose/forbidden-user-facing-phrases.js'
     );
-    const result = applyEgressForbiddenPhraseGuard(text);
-    expect(result.text).toBe(text);
+    expect(applyEgressForbiddenPhraseGuard(text).text).toBe(text);
   });
 });

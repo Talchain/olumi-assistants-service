@@ -2855,6 +2855,23 @@ export async function dispatchEditGraph(
                 factorLabel: nativeWrite.factorLabel,
                 rawValue: committedNative.rawValue,
                 unit: committedNative.unit,
+                // READ BACK, never assumed: the calibration authority derives
+                // this from the figure, so the only honest source is the
+                // committed graph. Absent ⇒ the sentence omits it rather than
+                // asserting a number we did not observe.
+                ...(typeof readCommittedOptionEffect(
+                  editResult.appliedGraph,
+                  nativeWrite.optionId,
+                  nativeWrite.factorId,
+                ) === 'number'
+                  ? {
+                      derivedModelValue: readCommittedOptionEffect(
+                        editResult.appliedGraph,
+                        nativeWrite.optionId,
+                        nativeWrite.factorId,
+                      ) as number,
+                    }
+                  : {}),
               }),
             };
           } else {

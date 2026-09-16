@@ -149,9 +149,11 @@ export function buildNativeQuantityOperation(
  *     const committed = readCommittedOptionEffect(appliedGraph, optionId, factorId);
  *     if (committed === optionEffectWrite.value) { ...success ack... }
  *
- * A native write leaves the encoded value DELIBERATELY unchanged, so `committed`
- * comes back as the pre-existing `0.7`, never equals the native figure, the
- * success branch never fires, and the turn falls into the
+ * A native write does not set the encoded value to the native figure — the
+ * calibration authority DERIVES it (0.7 -> 0.6 in the witnessed arm). So
+ * `readCommittedOptionEffect` returns a number that is neither the old value
+ * nor the figure the user gave, never equals what was written, the success
+ * branch never fires, and the turn falls into the
  * `option_effect_write_did_not_land` warning and its recovery copy — telling
  * the user their cost did not save while it sits correctly in the graph. This
  * lane's own defect class, arriving through the SUCCESS path.
@@ -176,29 +178,42 @@ export function readCommittedNativeQuantity(
 }
 
 /**
- * The acknowledgement, citing the COMMITTED bytes rather than the request —
- * the same rule the option-effect ack follows (ROADMAP 2.427 P5).
+ * The acknowledgement, citing the COMMITTED bytes rather than the request.
  *
- * ⚠ IT SAYS WHAT IT DID AND WHAT IT DID NOT DO. Recording a cost does not
- * recalculate anything: the model value is untouched and the ranking still
- * reflects it. Saying only the first half would let the reader believe the
- * comparison had moved, which is the overclaim the constraint disclosure
- * already exists to prevent one level up.
+ * ⚠⚠ THIS SAID "the model value for this option is unchanged" AND THE WRITE FIX
+ * MADE THAT A LIE (Codex CX-68, executed). The repair that lets the native
+ * reach the calibration authority is exactly what makes the model value MOVE —
+ * 0.7 -> 0.6 in the witnessed arm. The sentence was true of the broken
+ * behaviour and false of the fixed one: a remedy scoped to the instance while
+ * its sibling copy went unswept, one file from where I wrote the fix.
+ *
+ * The honest distinction is between WHAT IS SAVED and WHAT HAS BEEN RECOMPUTED.
+ * The figure and the model value derived from it are both stored; the ANALYSIS
+ * has not been rerun, so the comparison on screen still reflects the last run.
+ * "Unchanged" collapsed those two into one false claim.
+ *
+ * ⚠ The derived value is stated ONLY when the caller read one back from the
+ * committed graph. Nothing is asserted about a number we did not observe.
  *
  * No forbidden vocabulary: no "recommend", no state-mutation denial, no
- * "previous analysis". Plain, and it names the option and the factor so the
- * user can see which cell it landed in.
+ * "previous analysis".
  */
 export function formatNativeQuantityAck(input: {
   readonly optionLabel: string;
   readonly factorLabel: string;
   readonly rawValue: number;
   readonly unit: string;
+  /** The model value derived from this figure, READ BACK from the committed graph. */
+  readonly derivedModelValue?: number;
 }): string {
   const amount = `${input.unit} ${input.rawValue.toLocaleString('en-GB')}`;
+  const derived = typeof input.derivedModelValue === 'number'
+    && Number.isFinite(input.derivedModelValue)
+    ? ` Its model value is now ${input.derivedModelValue}, worked out from that figure.`
+    : '';
   return (
-    `Recorded ${amount} as ${input.optionLabel}'s ${input.factorLabel}. `
-    + `The model value for this option is unchanged, so the comparison still `
-    + `reflects it — run the analysis again to check this figure against your limit.`
+    `Saved ${amount} as ${input.optionLabel}'s ${input.factorLabel}.${derived} `
+    + `I have not rerun the analysis, so the comparison still shows the last run `
+    + `— run it again to check this against your limit.`
   );
 }
