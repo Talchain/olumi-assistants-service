@@ -79,7 +79,9 @@ import {
   formatConstraintUpdated,
   formatGoalTargetSet,
   formatGoalTargetUnchanged,
+  formatValueWithUnit,
 } from './d1-shared/format-confirmation.js';
+import { classifyUnitScaleClass } from '../../../cee/draft/records/unit-scale-class.js';
 import {
   classifyConstraintWriteAdmissibility,
   findUnevaluatedDurationSpan,
@@ -154,11 +156,59 @@ const ALLOWED_TARGET_KIND_SET: ReadonlySet<string> = new Set(ALLOWED_TARGET_KIND
  * deliberately absent: unit-less absolute factor thresholds ("at most
  * 30" on a headcount) are legitimate.
  */
-const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
+export const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
   'goal',
   'outcome',
   'risk',
 ]);
+
+/**
+ * ⭐⭐ GATE-1b's TARGET KINDS — A DELIBERATE PROPER SUBSET OF THE SET ABOVE,
+ * AND THE TWO EXCLUSIONS WERE MEASURED, NOT ASSUMED.
+ *
+ * Gate-1 above refuses a UNIT-LESS value, where the harm is a downstream CLAMP.
+ * Gate-1b refuses a value whose unit is PRESENT and cannot be carried by the
+ * target. Those are different harms with different blast radii, so they get
+ * different populations rather than sharing one name (CLAUDE.md trap 21).
+ *
+ * ⚠⚠ THE FIRST VERSION OF THIS GATE REUSED `PROBABILITY_DOMAIN_KIND_SET`
+ * WHOLESALE AND THAT WAS A FALSE-REFUSAL BUG. The existing suites caught it —
+ * four failures, all of them legitimate rows this gate had started refusing:
+ *
+ *   · `goal-answer-subject-safety.test.ts` — **"Keep revenue below £20k"** on
+ *     the `g-revenue` GOAL node. An entirely ordinary money limit on a revenue
+ *     goal, refused. `classifyConstraintWriteAdmissibility`'s own docstring
+ *     already forbids exactly this: PLoT skips PU injection for the goal node
+ *     with reason `goal_node` **because ISL computes that node's outcome
+ *     distribution and the constraint IS evaluated against it** — a goal is not
+ *     scored on [0,1], it is scored in its own units. The goal exemption is
+ *     load-bearing wherever a verdict is SPOKEN, and refusing is speaking.
+ *   · `add-constraint-baseline-elicitation` / `-stated-baseline-mint` /
+ *     `-value-frame-carry` — `£` rows on the `o-churn-rate` OUTCOME node.
+ *
+ * ⭐ SO WHY `risk` AND ONLY `risk`? Because that is the whole of what the
+ * producer's own warning names, quoted at the gate below: *"targets **risk
+ * node** "dac3fdc3" with threshold 200000 outside [0,1] range"*. Its sibling
+ * `CONSTRAINT_TARGET_UNRELIABLE` gives the reason in the same export — *"Budget
+ * Overrun Risk is calculated from the factors feeding into it, so the analysis
+ * produces a modelled change for it, not a reading on the same scale as your
+ * target"*. A `risk` node is a LIKELIHOOD by construction in this model
+ * (`adapters/llm/normalisation.ts` maps threat / issue / concern / problem onto
+ * it); an `outcome` is a modelled quantity that may legitimately be money.
+ *
+ * ⚠ THE GAP THIS LEAVES, RECORDED RATHER THAN CHASED: an out-of-domain money
+ * limit on an `outcome` node still binds, exactly as it does today. There is no
+ * measured capture of that class, and this estate's rule at this seam is that a
+ * false "your limit will not be used" is worse than the silence we already ship
+ * (see `constraint-write-admissibility.ts`, the same ⚠ block). Widening this to
+ * `outcome` is a product decision that needs its own evidence; it is NOT a
+ * tidy-up, and it must not be taken by deleting a line here.
+ *
+ * ⚠ AND IT IS ASSERTED TO STAY A SUBSET. If PLoT's probability-domain kinds
+ * ever stop including `risk`, this gate must not keep speaking on its own
+ * authority — `add-constraint-out-of-domain-unit.test.ts` pins the containment.
+ */
+export const OUT_OF_DOMAIN_UNIT_GUARDED_KIND_SET: ReadonlySet<string> = new Set(['risk']);
 
 /**
  * User-visible clarify for the unit-ambiguity refusal (Gate-1). Rides
@@ -178,6 +228,37 @@ const PROBABILITY_DOMAIN_KIND_SET: ReadonlySet<string> = new Set([
  */
 function formatUnitAmbiguityClarify(value: number): string {
   return `Did you mean ${value}% or an absolute ${value}? Tell me which, and I'll apply it.`;
+}
+
+/**
+ * ⭐⭐ THE REFUSAL COPY FOR GATE-1b — IT ASKS FOR THE REFERENT, IT DOES NOT
+ * CLAIM THE LIMIT WAS KEPT.
+ *
+ * ⚠ IT DELIBERATELY DOES **NOT** REUSE `unmeasuredTargetRepairAsk`, AND THAT IS
+ * THE WHOLE POINT OF WRITING IT HERE. That ratified sentence ends
+ * "...and I will record it there; **this one stays on the model**" — true of the
+ * DISCLOSURE (which appends to a receipt for a row that WAS written) and FALSE
+ * of a REFUSAL (nothing is persisted; the handler throws before
+ * `applyAndValidateMutation`). Reusing it would be the estate's cheapest lie:
+ * correct-sounding shared copy attached to the opposite outcome. The QUESTION
+ * half — "which part of your model does it apply to" — is reproduced because
+ * it is the same question; the CONSEQUENCE half is not, because it is not the
+ * same consequence.
+ *
+ * ⚠ THE LENGTH GUARD IS NOT COSMETIC. `sanitiseForUser` TRUNCATES at
+ * `MAX_USER_STRING = 100` (compose/helpers.ts:107), so a long rendered amount
+ * ("1,234,567,890 widget-hours") would cut the sentence mid-question and the
+ * user would be shown a prompt with no question in it. Above the budget this
+ * drops the amount rather than the ask — the ask is the load-bearing half.
+ *
+ * Leak-safe per the d1-user-guidance-leak panel: no handler ids, no parameter
+ * names, no enum or operator literals.
+ */
+function formatOutOfDomainUnitClarify(value: number, unit: string): string {
+  const named = `Which part of your model does ${formatValueWithUnit(value, unit)} apply to? Name it and I will record the limit there.`;
+  return named.length <= 100
+    ? named
+    : 'Which part of your model does that limit apply to? Name it and I will record it there.';
 }
 
 interface ResolvedParams {
@@ -704,6 +785,120 @@ export function createAddConstraintHandler(): HandlerFn {
               rejection_reason: 'unit_ambiguous_probability_domain',
             },
             userGuidance: formatUnitAmbiguityClarify(params.value),
+          },
+        );
+      }
+
+      // ⭐⭐ GATE-1b EMIT GUARD — A LIMIT STATED IN A UNIT THE TARGET CANNOT
+      // CARRY MUST NOT BIND. Gate-1 above catches the UNIT-LESS case; this is
+      // its sibling for the case where the unit is PRESENT and WRONG for the
+      // target, which is strictly worse and was measured in production.
+      //
+      // ── THE DEFECT, MEASURED ────────────────────────────────────────────
+      // Debug export `olumi-debug-1dd2133d-20260916.json`, staging, 16 Sep
+      // 2026. The user said the £200,000 was all they had to spend on hiring.
+      // The product persisted
+      //
+      //   goal_constraints[0] = {constraint_id: 'constraint_dac3fdc3_max',
+      //     node_id: 'dac3fdc3', operator: '<=', value: 200000, unit: '£',
+      //     label: 'Total hiring spend this year must not exceed £200,000',
+      //     provenance: 'explicit', value_frame: 'level'}
+      //
+      // onto node `dac3fdc3` "Budget Overrun Risk", `kind: 'risk'` — a
+      // PROBABILITY-DOMAIN node. The next run_analysis came back with, from
+      // the same export's `decision_brief.warnings`:
+      //
+      //   CONSTRAINT_OUT_OF_DOMAIN "Constraint constraint_dac3fdc3_max targets
+      //     risk node "dac3fdc3" with threshold 200000 outside [0,1] range"
+      //   CONSTRAINT_TARGET_UNRELIABLE, CONSTRAINT_UNGROUNDED,
+      //   EVPI_UNAVAILABLE ("at least one goal constraint could not be
+      //     resolved into its target's sample frame")
+      //
+      // — verdict unevaluated, leader withheld, and the coaching answers on
+      // the following turns collapsed (1186 -> 452 chars, 1001 -> 452). ONE
+      // mis-bound row cost the whole conversation.
+      //
+      // ⚠⚠ AND THE DISCLOSURE WAS ALREADY CORRECT AND ALREADY FIRED. The same
+      // export's `add_constraint` turn reads: "…Your model records no value to
+      // test this limit: Budget Overrun Risk has no number recorded against
+      // it, so it will not be part of the analysis. Tell me which part of your
+      // model it applies to and I will record it there; this one stays on the
+      // model." `constraint-write-admissibility.ts` did its job. THE DEFECT IS
+      // NOT A MISSING DISCLOSURE — IT IS THAT THE ROW BINDS ANYWAY, and the
+      // bound row is what poisons the run. Adding more words here would not
+      // have helped; refusing the write is the only thing that does.
+      //
+      // ── THE PREDICATE, DERIVED AT THE PRODUCER'S OWN WORDS ──────────────
+      // ISL's out-of-domain condition, quoted verbatim above, is exactly
+      // "PROBABILITY-DOMAIN TARGET + THRESHOLD OUTSIDE [0,1]". This gate is
+      // that condition, plus one narrowing conjunct:
+      //
+      //   · `PROBABILITY_DOMAIN_KIND_SET` — the SAME constant Gate-1 uses,
+      //     already documented as mirroring PLoT's PROBABILITY_DOMAIN_KINDS.
+      //     `factor` is absent from it, so a £ limit on a factor that carries
+      //     a native cost is untouched by this gate. That is the second
+      //     direction, and it is structural, not incidental.
+      //   · value outside [0,1] — the producer's own bound, so every row this
+      //     refuses is one ISL would have reported OUT OF DOMAIN.
+      //   · `classifyUnitScaleClass(unit) === 'unknown'` — the unit pins NO
+      //     ratio reading. `unit-scale-class.ts` states this in its own words:
+      //     "`unknown` is the honest state for a CURRENCY OR A COUNT". It is
+      //     consulted rather than a fresh currency alphabet being spelled here
+      //     (CLAUDE.md trap 12 — derive, don't mirror), and it is the conjunct
+      //     that keeps a '%' limit binding.
+      //
+      // ⚠ WHY '%' MUST STILL BIND, AND WHY THAT IS EVIDENCE NOT PREFERENCE.
+      // The 14 Sep `44e349fa` capture bound `{value: 7, unit: '%'}` to a risk
+      // node and ISL emitted `missing_observed_state` — NOT
+      // CONSTRAINT_OUT_OF_DOMAIN. 7 is outside [0,1] as a bare number, so the
+      // producer plainly reads the '%' and converts. A gate keyed on magnitude
+      // ALONE would have refused that row, which is a false refusal: telling a
+      // user their good limit is rejected. The unit conjunct is what stops it.
+      //
+      // ⚠ THE EXEMPTIONS ARE GATE-1's OWN, REUSED BY REFERENCE, because they
+      // answer the identical question ("has the scale been declared for this
+      // target?") and a second copy would drift. `declaredCap` already
+      // requires `0 <= value <= cap`, so it cannot exempt an out-of-domain row
+      // on a [0,1]-capped node.
+      //
+      // ⚠ THE ERROR DIRECTION, STATED: a false refusal costs ONE clarifying
+      // round trip and the user's own words are still on screen to restate. A
+      // false acceptance costs the verdict, the leader and the coaching for
+      // the rest of the session — measured above. Same doctrine as Gate-1.
+      //
+      // ⚠ WHAT THIS DOES **NOT** DO, so nobody reads more into it: it does not
+      // itself raise `decideOptionCostAsk`. That ask needs exactly one
+      // native-unit constraint bound to a node with `kind === 'factor'`
+      // (decide-option-cost-ask.ts, the `n.kind === 'factor'` filter). While
+      // the £ row sits on a risk node that filter yields nothing and the ask
+      // is structurally unreachable; refusing the mis-bind and asking for the
+      // referent is what puts the row on a factor, where the ask can fire. The
+      // repair is Core's and is unchanged — this only stops disarming it.
+      if (
+        newConstraint.unit !== undefined &&
+        classifyUnitScaleClass(newConstraint.unit) === 'unknown' &&
+        (params.value > 1 || params.value < 0) &&
+        OUT_OF_DOMAIN_UNIT_GUARDED_KIND_SET.has(targetNode.kind) &&
+        !declaredCap &&
+        capToStamp === null
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          'add_constraint: out-of-domain constraint refused — a threshold of ' +
+            `${params.value} in a non-ratio unit on a probability-domain node ` +
+            'is evaluated by ISL on a [0,1] scale (CONSTRAINT_OUT_OF_DOMAIN), ' +
+            'which leaves the run unevaluated and the leader withheld for the ' +
+            'rest of the session. Ask which part of the model the limit ' +
+            'applies to instead of binding it here.',
+          {
+            details: {
+              handler_id: 'add_constraint',
+              target_id: targetId,
+              target_kind: targetNode.kind,
+              value: params.value,
+              rejection_reason: 'out_of_domain_unit_probability_domain',
+            },
+            userGuidance: formatOutOfDomainUnitClarify(params.value, newConstraint.unit),
           },
         );
       }
