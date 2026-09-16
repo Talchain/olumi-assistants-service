@@ -1,40 +1,36 @@
 /**
- * ⭐⭐⭐ THE ASK AND THE HONESTY HALF, SHIPPED TOGETHER — v10's rule, applied to
- * the mirror image of v10's own defect.
+ * ⭐⭐⭐ THE VALUE IS RECORDED AND IT STAYS OURS — because attribution cannot be
+ * earned from the evidence this record set carries.
  *
  * ⚠⚠ MEASURED ON THE RAW RECORD SETS, before any projection, conversion or
- * debug representation — which is the boundary the retraction of the earlier
- * `full_graph` framing required:
+ * debug representation: five banked live captures, 20 stated figures, 33
+ * quantity claims, `value` set on ZERO of them, and `sets_to` set on 28 causal
+ * links. The model puts a number on a LINK 28 times and on a NODE not once.
+ * v10's docblock diagnosed the mirror image in its own words — "THE MODEL WAS
+ * NOT FAILING TO COMPLY; IT WAS COMPLYING."
  *
- *   5 banked live captures
- *   20 stated figures · 33 quantity claims · `value` set on ZERO of them
- *   28 causal links setting `sets_to`
+ * ⛔⛔ AND THE ATTRIBUTION HALF I FIRST WROTE WAS REFUTED BY INDEPENDENT REVIEW
+ * BEFORE IT SHIPPED. It stamped `extractionType: "explicit"` and borrowed the
+ * cited figure's unit whenever `claim.value` EQUALLED a figure in `basis`. The
+ * reviewer's exact reproductions, both of which that rule would have passed:
  *
- * The model puts a number on a LINK 28 times and on a NODE not once. It says how
- * much an option MOVES a factor and never what the factor IS. v10's docblock
- * explains the shape, about its own mirror image: v9 told the model to withhold
- * `sets_to` where the brief gave no number, the model complied, and 20 of 23
- * journeys raised `MISSING_OPTION_VALUE` — "THE MODEL WAS NOT FAILING TO COMPLY;
- * IT WAS COMPLYING." The three legitimate states are user fact / OUR estimate
- * with its provenance / genuinely unknown, and `value` on a claim had never been
- * given the middle one.
+ *   · "Current Subscriber Count" stamped explicit at 49 £/month from a citation
+ *     of a £49 PRICE — same number, DIFFERENT SUBJECT;
+ *   · a CURRENT level of 59 stamped explicit from a quote PROPOSING 59 — same
+ *     number, DIFFERENT ROLE.
  *
- * ⛔ WHICH IS WHY THE ASK CANNOT SHIP ALONE. A claim `value` carried NO
- * provenance at all. Once the model starts supplying one there are exactly two
- * bad outcomes: our estimate is shown as the user's fact, or it is shown as
- * nobody's and fails to count where a user-stated parameter is what unlocks a
- * comparison.
+ * Numeric equality plus a citation proves neither. Earning `brief_extraction`
+ * needs subject, quantity, unit AND the current/proposed/target/limit role all
+ * to match, and `basis` carries none of that — it means "built on". This is the
+ * TWIN of the fabrication refuted in `claim-carries-its-cited-figure.test.ts`:
+ * I closed that hole in VALUE and opened the same hole one level up, in
+ * ATTRIBUTION.
  *
- * ⭐ EARNED THE SAME WAY `bindDirectStatedMagnitude` earns it for a `sets_to`:
- * `extractionType: "explicit"` ONLY when the number the model asserted equals a
- * figure it CITED. Anything else sets nothing and falls to the safe
- * `ai_inferred`.
- *
- * ⚠ AND THE DIVISION THAT MAKES IT SAFE. The MODEL supplies the number; `basis`
- * decides only ATTRIBUTION. Reading a magnitude OUT of `basis` is the
- * fabrication refuted in `claim-carries-its-cited-figure.test.ts` — it put
- * "Current Subscriber Count = £20,000" on a graph, because `basis` means built
- * on, not equal to. P2 below asserts that refutation still holds.
+ * ⭐ SO THE CONTRACT THIS FILE PINS IS THE NARROW ONE: the number is recorded,
+ * `raw_value` preserves it, and NOTHING claims the user authored it. No
+ * `extractionType` means the safe `ai_inferred`; no unit is borrowed from a
+ * figure whose subject was never established. That deliberately does not lift a
+ * user-authorship permission via an inferred value.
  */
 import { describe, expect, it } from "vitest";
 
@@ -51,64 +47,86 @@ const nodeBy = (r: DraftRecordSet, label: string) =>
     (n) => n.label === label,
   );
 
-const records = (priceClaim: Record<string, unknown>): DraftRecordSet =>
+/** `figures` are extra stated figures; `claim` overrides the first factor claim. */
+const records = (claim: Record<string, unknown>, label = "Pro Plan Monthly Price"): DraftRecordSet =>
   ({
     stated_items: [
       { kind: "goal", source_quote: "reaching £20k MRR within 12 months", role: "target" },
-      { kind: "figure", source_quote: "£49", value: 49, unit: "£/month" },
+      { kind: "figure", source_quote: "the Pro plan is £49 a month today", value: 49, unit: "£/month" },
+      { kind: "figure", source_quote: "we are proposing £59 a month", value: 59, unit: "£/month" },
     ],
     claims: [
-      { claim_kind: "factor", label: "Pro Plan Monthly Price", ...priceClaim },
+      { claim_kind: "factor", label, ...claim },
       { claim_kind: "outcome", label: "Monthly Recurring Revenue", basis: [0] },
-      { claim_kind: "causal_link", label: "price drives MRR", from_claim: 0, to_claim: 1, effect: "positive", strength: 0.6 },
+      { claim_kind: "causal_link", label: "drives MRR", from_claim: 0, to_claim: 1, effect: "positive", strength: 0.6 },
       { claim_kind: "causal_link", label: "MRR drives goal", from_claim: 1, to_stated: 0, effect: "positive", strength: 0.8 },
     ],
   }) as unknown as DraftRecordSet;
 
-describe("P1 — a value the user stated is attributed to them; ours is not", () => {
-  it("P1a the model's number MATCHING a cited figure earns `explicit`", () => {
+describe("P1 — the number is recorded, and it is recorded as OURS", () => {
+  it("P1a a factor claim's value reaches the node, original preserved", () => {
     const n = nodeBy(records({ basis: [1], value: 49 }), "Pro Plan Monthly Price");
-    expect(n?.data?.extractionType, "the user gave this number for this quantity").toBe("explicit");
-    expect(n?.data?.unit, "and the cited figure's unit travels with it").toBe("£/month");
-    expect(n?.observed_state?.raw_value, "the original is preserved beside the normalised one").toBe(49);
+    expect(n?.observed_state?.raw_value, "an estimate is more useful than an absent number").toBe(49);
+    expect(typeof n?.observed_state?.value, "normalised onto [0,1] as every value is").toBe("number");
   });
 
-  it("P1b OUR estimate — no cited figure at all — is recorded and NOT attributed to them", () => {
-    const n = nodeBy(records({ basis: [], value: 52 }), "Pro Plan Monthly Price");
-    expect(n?.observed_state?.raw_value, "an estimate is more useful than an absent number").toBe(52);
-    expect(n?.data?.extractionType, "but it is ours, and falls to the safe ai_inferred").toBeUndefined();
+  it("P1b and NOTHING claims the user authored it", () => {
+    const n = nodeBy(records({ basis: [1], value: 49 }), "Pro Plan Monthly Price");
+    expect(n?.data?.extractionType, "no extractionType means the safe ai_inferred").toBeUndefined();
+    expect(n?.provenance?.provenance_class).toBe("ai_inferred");
   });
 
-  it("P1c citing a figure and asserting a DIFFERENT number is still ours", () => {
-    // The decisive case: `basis` is present, so a rule keyed on citation alone
-    // would stamp this. The stamp is keyed on the NUMBER matching.
-    const n = nodeBy(records({ basis: [1], value: 52 }), "Pro Plan Monthly Price");
-    expect(n?.observed_state?.raw_value).toBe(52);
-    expect(n?.data?.extractionType, "they said 49; 52 is our number whoever we built it on").toBeUndefined();
-    expect(n?.data?.unit, "and no unit is borrowed from a figure we did not match").toBeUndefined();
+  it("P1c no unit is borrowed from a figure whose subject was never established", () => {
+    expect(nodeBy(records({ basis: [1], value: 49 }), "Pro Plan Monthly Price")?.data?.unit).toBeUndefined();
   });
 
   it("P1d a factor with NO value is untouched — the third legitimate state", () => {
     const n = nodeBy(records({ basis: [1] }), "Pro Plan Monthly Price");
     expect(n, "the node still exists").toBeDefined();
-    expect(n?.observed_state?.value).toBeUndefined();
+    expect(n?.observed_state?.value, "unknown stays unknown; nothing is populated to fill a count").toBeUndefined();
+  });
+});
+
+describe("P2 — the reviewer's two reproductions, as contrasts", () => {
+  it("P2a SAME NUMBER, DIFFERENT SUBJECT: a subscriber count citing a £49 PRICE earns nothing", () => {
+    const n = nodeBy(records({ basis: [1], value: 49 }, "Current Subscriber Count"), "Current Subscriber Count");
+    expect(n?.observed_state?.raw_value, "the model asserted it, so it is recorded").toBe(49);
+    expect(
+      n?.data?.extractionType,
+      "but 49 subscribers is not £49 a month — numeric equality proves no subject",
+    ).toBeUndefined();
+    expect(n?.data?.unit, "and £/month must not be welded to a headcount").toBeUndefined();
+  });
+
+  it("P2b SAME NUMBER, DIFFERENT ROLE: a CURRENT level citing a PROPOSED 59 earns nothing", () => {
+    const n = nodeBy(records({ basis: [2], value: 59 }), "Pro Plan Monthly Price");
+    expect(n?.observed_state?.raw_value).toBe(59);
+    expect(
+      n?.data?.extractionType,
+      "'we are proposing £59' says what it WOULD be, never what it IS",
+    ).toBeUndefined();
+  });
+
+  it("P2c MEANINGFUL POSITIVE: even the same subject AND the same number earns nothing today", () => {
+    // Stated deliberately rather than left implicit. The record set carries no
+    // attested subject relationship, so there is no input on which the stamp
+    // could be earned — the capability is absent, not merely unexercised. When
+    // an attested relationship exists, THIS is the case that must flip, and a
+    // reviewer can find it here rather than inferring it from an absence.
+    const n = nodeBy(records({ basis: [1], value: 49 }), "Pro Plan Monthly Price");
     expect(n?.data?.extractionType).toBeUndefined();
   });
 });
 
-describe("P2 — the fabrication refuted earlier today stays refuted", () => {
-  it("P2a `basis` alone still puts no number on a node", () => {
-    // `claim-carries-its-cited-figure.test.ts` pins why: a subscriber count
-    // inferred FROM a revenue figure legitimately cites it and is not equal to
-    // it. The model supplies the number; basis decides only attribution.
-    const n = nodeBy(records({ basis: [1] }), "Pro Plan Monthly Price");
-    expect(n?.data?.value, "citing is not asserting").toBeUndefined();
+describe("P3 — the sibling refutation stays refuted", () => {
+  it("P3a `basis` alone still puts no number on a node", () => {
+    expect(nodeBy(records({ basis: [1] }), "Pro Plan Monthly Price")?.data?.value).toBeUndefined();
   });
 
-  it("P2b and the citation is still recorded as evidence", () => {
+  it("P3b and the citation is still recorded as evidence", () => {
     const n = nodeBy(records({ basis: [1] }), "Pro Plan Monthly Price");
     expect(n?.provenance?.basis_figures).toEqual([
-      { value: 49, unit: "£/month", source_quote: "£49" },
+      { value: 49, unit: "£/month", source_quote: "the Pro plan is £49 a month today" },
     ]);
   });
 });
