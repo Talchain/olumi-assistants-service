@@ -1,0 +1,676 @@
+{
+ "nodes": [
+  {
+   "id": "444a6a29",
+   "kind": "risk",
+   "label": "Subscriber Churn Spike",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "58049320",
+   "kind": "risk",
+   "label": "Churn must not exceed 7% for more than 3 months",
+   "provenance": "from_brief",
+   "source_quote": "Churn must not exceed 7% for more than 3 months"
+  },
+  {
+   "id": "619f3099",
+   "kind": "option",
+   "label": "raising the Pro plan price from \u00a349 to \u00a369 per month with the next Pro feature release",
+   "interventions": {
+    "6d9a37f3": {
+     "unit": "\u00a3/month",
+     "value": 0.59,
+     "source": "cee_hypothesis",
+     "raw_value": 59,
+     "reasoning": "Direct causal value has unresolved stated-item binding via edge 1b74fd8a; candidates stated_items[2]",
+     "target_match": {
+      "node_id": "6d9a37f3",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "low"
+    }
+   },
+   "is_baseline": false,
+   "provenance": "from_brief",
+   "source_quote": "raising the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release"
+  },
+  {
+   "id": "646a044d",
+   "kind": "option",
+   "label": "Keep Price at \u00a349 (Status Quo)",
+   "interventions": {
+    "6d9a37f3": {
+     "unit": "\u00a3",
+     "value": 0.49,
+     "source": "brief_extraction",
+     "raw_value": 49,
+     "reasoning": "Direct from V4 prompt data.interventions; the amount is stated in the brief",
+     "target_match": {
+      "node_id": "6d9a37f3",
+      "confidence": "high",
+      "match_type": "exact_id"
+     },
+     "value_confidence": "high"
+    }
+   },
+   "is_baseline": true,
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "6d9a37f3",
+   "kind": "factor",
+   "label": "Pro Plan Monthly Price",
+   "observed_state": {
+    "value": 0.49,
+    "baseline": 49,
+    "unit": "\u00a3",
+    "source": "brief_extraction",
+    "raw_value": 49,
+    "cap": 100,
+    "extractionType": "explicit",
+    "factor_type": "price",
+    "uncertainty_drivers": [
+     "Extracted from brief \u2014 confirm value"
+    ]
+   },
+   "category": "controllable",
+   "scale_frame": 100,
+   "prior": {
+    "distribution": "uniform",
+    "range_min": 0,
+    "range_max": 1,
+    "prior_is_unquantified": true
+   },
+   "display_value": "\u00a349",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "7852745d",
+   "kind": "factor",
+   "label": "with the next Pro feature release",
+   "category": "external",
+   "provenance": "from_brief",
+   "source_quote": "with the next Pro feature release"
+  },
+  {
+   "id": "94fa174b",
+   "kind": "outcome",
+   "label": "Monthly Recurring Revenue",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "ab78e513",
+   "kind": "factor",
+   "label": "Monthly Churn Rate",
+   "observed_state": {
+    "value": 0.04,
+    "unit": "%",
+    "source": "brief_extraction",
+    "extractionType": "explicit"
+   },
+   "category": "observable",
+   "display_value": "4%",
+   "provenance": "ai_inferred"
+  },
+  {
+   "id": "fee75a8a",
+   "kind": "decision",
+   "label": "Question",
+   "provenance": "ai_inferred",
+   "label_placeholder": true
+  },
+  {
+   "id": "goal_inferred",
+   "kind": "goal",
+   "label": "Model is raising the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release",
+   "provenance": "ai_inferred",
+   "label_authored": true
+  }
+ ],
+ "edges": [
+  {
+   "from": "619f3099",
+   "to": "6d9a37f3",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "646a044d",
+   "to": "6d9a37f3",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai"
+  },
+  {
+   "from": "6d9a37f3",
+   "to": "58049320",
+   "strength": {
+    "mean": 0.3,
+    "std": 0.2
+   },
+   "exists_probability": 0.75,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "repair",
+   "validation": {
+    "pass1": {
+     "strength_std": 0.2,
+     "strength_mean": 0.3,
+     "exists_probability": 0.75
+    },
+    "pass2": {
+     "basis": "structural_inference",
+     "reasoning": "A higher plan price mechanically raises the chance of breaching the churn threshold via customer pushback.",
+     "strength_std": 0.15,
+     "strength_mean": 0.3,
+     "lint_corrected": false,
+     "needs_user_input": true,
+     "exists_probability": 0.9
+    },
+    "status": "contested",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 0.3333333333333333,
+    "pass2_adjusted": {
+     "strength_std": 0.2,
+     "strength_mean": 0.23333333333333336,
+     "exists_probability": 0.8300000000000001
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 1,
+    "contested_reasons": [
+     "strength_band_change"
+    ],
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "6d9a37f3",
+   "to": "94fa174b",
+   "strength": {
+    "mean": 0.7,
+    "std": 0.16799999999999995
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "pass1": {
+     "strength_std": 0,
+     "strength_mean": 0.7,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "basis": "domain_prior",
+     "reasoning": "Increasing the per\u2010unit price directly boosts MRR proportionally under stable subscriber counts.",
+     "strength_std": 0.1,
+     "strength_mean": 0.9,
+     "lint_corrected": false,
+     "needs_user_input": true,
+     "exists_probability": 0.95
+    },
+    "status": "agreed",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 0.6666666666666666,
+    "pass2_adjusted": {
+     "strength_std": 0.15000000000000002,
+     "strength_mean": 0.8333333333333334,
+     "exists_probability": 0.88
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 1,
+    "contested_reasons": [],
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "6d9a37f3",
+   "to": "ab78e513",
+   "strength": {
+    "mean": 0.5,
+    "std": 0.11999999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "pass1": {
+     "strength_std": 0,
+     "strength_mean": 0.5,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "basis": "domain_prior",
+     "reasoning": "A 20% price hike typically yields a modest uptick in churn rate based on subscription\u2010pricing dynamics.",
+     "strength_std": 0.08,
+     "strength_mean": 0.12,
+     "lint_corrected": false,
+     "needs_user_input": true,
+     "exists_probability": 0.9
+    },
+    "status": "contested",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 0.8933333333333333,
+    "pass2_adjusted": {
+     "strength_std": 0.13,
+     "strength_mean": 0.05333333333333337,
+     "exists_probability": 0.8300000000000001
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 2,
+    "contested_reasons": [
+     "raw_magnitude"
+    ],
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "7852745d",
+   "to": "ab78e513",
+   "strength": {
+    "mean": -0.35,
+    "std": 0.08399999999999998
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "pass1": {
+     "strength_std": 0,
+     "strength_mean": -0.35,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "basis": "domain_prior",
+     "reasoning": "Shipping new Pro features generally reduces churn by improving perceived product value.",
+     "strength_std": 0.05,
+     "strength_mean": -0.08,
+     "lint_corrected": false,
+     "needs_user_input": true,
+     "exists_probability": 0.8
+    },
+    "status": "contested",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 0.6666666666666666,
+    "pass2_adjusted": {
+     "strength_std": 0.1,
+     "strength_mean": -0.1466666666666666,
+     "exists_probability": 0.7300000000000001
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 2,
+    "contested_reasons": [
+     "strength_band_change"
+    ],
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "ab78e513",
+   "to": "444a6a29",
+   "strength": {
+    "mean": 0.65,
+    "std": 0.15599999999999997
+   },
+   "exists_probability": 0.8,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Model-inferred causal link (records projector)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "ai",
+   "validation": {
+    "pass1": {
+     "strength_std": 0,
+     "strength_mean": 0.65,
+     "exists_probability": 0
+    },
+    "pass2": {
+     "basis": "domain_prior",
+     "reasoning": "Higher base churn rates strongly increase the likelihood of a churn\u2010spike risk event.",
+     "strength_std": 0.15,
+     "strength_mean": 0.7,
+     "lint_corrected": false,
+     "needs_user_input": true,
+     "exists_probability": 0.9
+    },
+    "status": "agreed",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 0.6666666666666666,
+    "pass2_adjusted": {
+     "strength_std": 0.2,
+     "strength_mean": 0.6333333333333333,
+     "exists_probability": 0.8300000000000001
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 1,
+    "contested_reasons": [],
+    "validation_lint_log": []
+   }
+  },
+  {
+   "from": "fee75a8a",
+   "to": "619f3099",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "fee75a8a",
+   "to": "646a044d",
+   "strength": {
+    "mean": 1,
+    "std": 0.01
+   },
+   "exists_probability": 1,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Decision-to-option scaffold minted by the projector"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default"
+  },
+  {
+   "from": "444a6a29",
+   "to": "goal_inferred",
+   "strength": {
+    "mean": -0.5,
+    "std": 0.15
+   },
+   "exists_probability": 0.9,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Wired risk to goal (synthetic edge)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default",
+   "validation": {
+    "pass1": {
+     "strength_std": 0.15,
+     "strength_mean": -0.5,
+     "exists_probability": 0.9
+    },
+    "pass2": {
+     "basis": "structural_inference",
+     "reasoning": "A subscriber\u2010churn spike directly undermines successful execution of the price\u2010increase plan.",
+     "strength_std": 0.1,
+     "strength_mean": -0.33333333333333337,
+     "lint_corrected": true,
+     "needs_user_input": true,
+     "exists_probability": 0.95
+    },
+    "status": "agreed",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 0.19999999999999996,
+    "pass2_adjusted": {
+     "strength_std": 0.15000000000000002,
+     "strength_mean": -0.4,
+     "exists_probability": 0.88
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 0,
+    "contested_reasons": [],
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "after": -0.33333333333333337,
+      "before": -0.8,
+      "edge_key": "444a6a29->goal_inferred"
+     }
+    ]
+   }
+  },
+  {
+   "from": "58049320",
+   "to": "goal_inferred",
+   "strength": {
+    "mean": -0.5,
+    "std": 0.15
+   },
+   "exists_probability": 0.9,
+   "effect_direction": "negative",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Wired risk to goal (synthetic edge)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default",
+   "validation": {
+    "pass1": {
+     "strength_std": 0.15,
+     "strength_mean": -0.5,
+     "exists_probability": 0.9
+    },
+    "pass2": {
+     "basis": "brief_explicit",
+     "reasoning": "Violating the 7% churn\u2010cap requirement directly constitutes failure of the pricing decision.",
+     "strength_std": 0.05,
+     "strength_mean": -0.4166666666666667,
+     "lint_corrected": true,
+     "needs_user_input": false,
+     "exists_probability": 0.99
+    },
+    "status": "agreed",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 0.03333333333333344,
+    "pass2_adjusted": {
+     "strength_std": 0.1,
+     "strength_mean": -0.4833333333333333,
+     "exists_probability": 0.92
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 0,
+    "contested_reasons": [],
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "after": -0.4166666666666667,
+      "before": -1,
+      "edge_key": "58049320->goal_inferred"
+     }
+    ]
+   }
+  },
+  {
+   "from": "94fa174b",
+   "to": "goal_inferred",
+   "strength": {
+    "mean": 0.7,
+    "std": 0.15
+   },
+   "exists_probability": 0.9,
+   "effect_direction": "positive",
+   "provenance": {
+    "source": "cee_hypothesis",
+    "reasoning": "Wired outcome to goal (synthetic edge)"
+   },
+   "provenance_display": "ai_inferred",
+   "origin": "default",
+   "validation": {
+    "pass1": {
+     "strength_std": 0.15,
+     "strength_mean": 0.7,
+     "exists_probability": 0.9
+    },
+    "pass2": {
+     "basis": "structural_inference",
+     "reasoning": "Higher MRR is generally interpreted as successful fulfillment of the pricing objective.",
+     "strength_std": 0.1,
+     "strength_mean": 0.25,
+     "lint_corrected": true,
+     "needs_user_input": true,
+     "exists_probability": 0.8
+    },
+    "status": "contested",
+    "evoi_rank": null,
+    "was_shown": false,
+    "evoi_impact": null,
+    "resolved_by": "default",
+    "user_action": "pending",
+    "pass1_missing": false,
+    "pass2_missing": false,
+    "sign_unstable": false,
+    "max_divergence": 1,
+    "pass2_adjusted": {
+     "strength_std": 0.15000000000000002,
+     "strength_mean": 0.18333333333333338,
+     "exists_probability": 0.7300000000000001
+    },
+    "resolved_value": null,
+    "bias_correction": {
+     "strength_std_offset": 0.05,
+     "strength_mean_offset": -0.06666666666666662,
+     "exists_probability_offset": -0.06999999999999995
+    },
+    "distance_to_goal": 0,
+    "contested_reasons": [
+     "strength_band_change"
+    ],
+    "validation_lint_log": [
+     {
+      "code": "LINT_BUDGET_RESCALE",
+      "after": 0.25,
+      "before": 0.6,
+      "edge_key": "94fa174b->goal_inferred"
+     }
+    ]
+   }
+  }
+ ],
+ "node_count": 10,
+ "edge_count": 12
+}

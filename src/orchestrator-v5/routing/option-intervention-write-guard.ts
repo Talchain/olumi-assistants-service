@@ -195,6 +195,10 @@
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { evaluateConfigureOptionOutcome } from './configure-option-outcome.js';
+import {
+  messageAnchorsOnOption,
+  projectOptionLabels,
+} from './configure-option-intent.js';
 
 /** Why the write was allowed to proceed. Every value is today's behaviour. */
 export type OptionInterventionWriteAllowReason =
@@ -243,6 +247,53 @@ export type OptionInterventionWriteVerdict =
        * unqualified sentence rather than naming the factor.
        */
       readonly optionEdgeKeys: readonly string[];
+    }
+  | {
+      /**
+       * ⭐⭐ THE SCOPE COULD NOT BE RESOLVED, SO THE WRITE MUST NOT LAND.
+       *
+       * MEASURED on deployed `a3b0548d`, wire-level, FRESH. The user typed
+       * "Change the buy option so the vendor cost is £150,000 per year instead
+       * of £120,000." The turn MINTED a model-wide baseline on factor
+       * `8f788330` — `observed_state` moved from null to a raw value of 150000
+       * stamped as a user override — left the named option's own intervention at
+       * 60000, replied "Updated Vendor Licensing Cost", and COMMITTED
+       * (`graph_hash` a0b39d86 → 84013c95). Contrast control, same battery: the
+       * pricing shape moved ZERO baselines.
+       *
+       * WHY THE EXISTING ARMS MISSED IT, executed against the real message and
+       * the real captured graph:
+       *   evaluateConfigureOptionOutcome -> {status:"not_applicable",
+       *                                     reason:"not_configure_intent"}
+       *   decideOptionInterventionWrite  -> {verdict:"allow",
+       *                                     reason:"outcome_not_unhonoured"}
+       * The OPTION ANCHOR matches — the sentence contains the word "option" —
+       * and `classifyConfigureOptionTrigger` returns null, so the whole
+       * detection reads "not about configuring an option" and the write arm,
+       * gating on `matched`, permits it. This module's header already records
+       * fixing one inheritance of exactly this shape ("the WRITE protection
+       * inherit[ed] the COPY predicate's domain"); the INTENT-DETECTOR
+       * inheritance was never removed.
+       *
+       * ⚠ AN ANCHOR IS NOT AN IDENTITY. This verdict deliberately carries no
+       * `optionId`, because none resolved: the resolver matches an option by its
+       * FULL LABEL phrase and "the buy option" is not "Buy Off-the-Shelf
+       * Reporting Tool". Guessing which option was meant is the fabricated-write
+       * this module exists to prevent, and a sole-candidate tie-break is
+       * forbidden by `resolveConfigureOptionTarget`'s own header. So the turn
+       * ASKS instead — unresolved identity asks, it does not write.
+       *
+       * ⚠ AND IT IS NOT "EVERY BASELINE EDIT IS FORBIDDEN". An explicit
+       * model-wide edit ("set Vendor Licensing Cost to £150,000") carries no
+       * option anchor at all, so it never reaches this arm and still lands. The
+       * anchor is what separates the two, and it is computed from the message
+       * the user actually sent, not from the write.
+       */
+      readonly verdict: 'scope_unresolved';
+      /** Node ids whose model-wide value this turn moved — what is withheld. */
+      readonly baselineNodeIds: readonly string[];
+      /** Option labels the user could pick between, for the ask. */
+      readonly optionLabels: readonly string[];
     };
 
 /** Every effect value the graph holds, keyed `<optionId>::<factorId>`. */
@@ -501,6 +552,169 @@ export function resolveNodeLabels(graph: GraphV3T, nodeIds: readonly string[]): 
 }
 
 /**
+ * The scope check that runs when the outcome arm does not apply.
+ *
+ * Returns a verdict only in the narrow state where ALL of these hold:
+ *   1. the message ANCHORS on an option (it contains "option(s)", or a full
+ *      option label) — so the turn is recognisably about one;
+ *   2. no option IDENTITY resolves from it — so which one is unknown;
+ *   3. a model-wide baseline write landed;
+ *   4. no intervention write landed — so the user did not get an option-scoped
+ *      change either.
+ *
+ * Any one of those failing returns null and the caller proceeds unchanged. In
+ * particular (1) is what keeps explicit model-wide edits working: a message
+ * that never mentions an option is not in scope here at all.
+ *
+ * ⚠ CONDITION 4 IS LOAD-BEARING, not defensive. A turn that moved a baseline
+ * AND landed an intervention is a compound edit that partly did what was asked,
+ * and discarding it would destroy the user's work — the measured false positive
+ * this module's identity-binding note already warns about.
+ */
+function decideUnresolvedOptionScope(
+  message: string,
+  before: GraphV3T,
+  after: GraphV3T,
+): OptionInterventionWriteVerdict | null {
+  const optionLabels = projectOptionLabels(before.nodes);
+
+  // ⭐ REVIEWER FINDING 1 (REVIEW1512), and it is the load-bearing correction.
+  //
+  // This arm previously returned early on `detection.matched`, so the SAME wrong
+  // baseline mutation was allowed for "Set Vendor Licensing Cost to £150,000 per
+  // year for the buy option." — matched vocabulary, unresolved identity, write
+  // permitted. The gate is about SCOPE, and scope does not depend on whether the
+  // mutation vocabulary happened to classify. So the classifier is not consulted
+  // here at all: the ANCHOR is asked directly, from its one owner.
+  if (!messageAnchorsOnOption(message, optionLabels)) return null;
+
+  // ⭐ REVIEWER FINDING 2. An EXPLICITLY model-wide request is not an unknown
+  // target — it is a known one. "Across all options, change Vendor Licensing Cost
+  // so the model-wide baseline is £150,000" was newly REFUSED by the first cut,
+  // because the only global control was a sentence that never said "options".
+  //
+  // ⚠ This is a CLOSED set of universal quantifiers over the option word, not a
+  // mutation vocabulary: it cannot grow with phrasings the way an intent
+  // classifier does, which is the class this estate has paid four oscillation
+  // rounds for (trap 22f). It says "the user quantified over ALL options", and
+  // nothing about what they want done.
+  if (isAffirmativeGlobalRequest(message)) return null;
+
+  // ⭐ PLURAL IS NOT UNRESOLVED — and conflating them made this arm pre-empt a
+  // guard that already owns the turn.
+  //
+  // MEASURED: "Revise Coverage Pilot to staff 30% of support hours, down from
+  // 70%. Keep Current Coverage at 40%…" names TWO options DELIBERATELY. The
+  // first cut resolved identity as `maximal.length === 1 ? label : null`, so two
+  // named targets read as "we do not know which option" and this arm refused a
+  // turn whose premise another module is built on — `option-observed-state-
+  // substitution.test.ts` pins that the write guard ALLOWS it, and its comment
+  // says outright that a change there means "the premise of this whole module
+  // has changed". It had.
+  //
+  // Zero resolved options is the unresolved case this arm exists for. TWO is a
+  // multi-target request, and `detectOptionOwnValueSubstitution` owns it.
+  // ⛔ ESCAPE 2 (reviewer, executed): standing down because an identity RESOLVED
+  // was wrong. "Change Buy Off-the-Shelf Reporting Tool so the vendor cost is
+  // £150,000…" resolved its label and returned allow — because the existing arms
+  // do NOT protect that write either. Merely resolving a label is not evidence
+  // that a downstream guard owns the mutation, and I had assumed it was.
+  //
+  // The PLURAL case that forced the previous change is handled by the FACTOR
+  // restriction below instead: it moved the OPTIONS' OWN `observed_state`, not a
+  // factor's, and an option's own value belongs to
+  // `detectOptionOwnValueSubstitution`. So the arm is now scoped by WHAT MOVED
+  // rather than by how many labels the sentence happened to contain.
+
+  // ⭐ IDENTITY, RESOLVED INDEPENDENTLY OF THE VOCABULARY GATE.
+  //
+  // The first cut called `resolveConfigureOptionTarget`, which returns at
+  // `configure-option-clarify.ts:378` whenever `!detection.matched` — so on this
+  // arm it could only ever answer "not_configure_intent", and EVERY turn reaching
+  // here was declared unresolved by construction, a full option label included.
+  // A guard agreeing with itself. The maximal-label rule is applied directly
+  // instead, on the same normalisation, so identity is a real question here.
+  if (anyInterventionWriteLanded(before, after)) return null;
+
+  // ⭐ FACTORS ONLY. `baselineWritesLanded` reads `observed_state` on ANY node,
+  // so an OPTION's own baseline counts — and that is a different harm with a
+  // different owner. This arm exists for the MODEL-WIDE value every option
+  // reads: the factor baseline.
+  const factorIds = new Set(
+    before.nodes.filter((n) => n.kind === 'factor').map((n) => n.id),
+  );
+  const baselineNodeIds = baselineWritesLanded(before, after).filter((id) => factorIds.has(id));
+  if (baselineNodeIds.length === 0) return null;
+
+  return { verdict: 'scope_unresolved', baselineNodeIds, optionLabels };
+}
+
+/**
+ * Is this an AFFIRMATIVE request for a model-wide change?
+ *
+ * ⛔ THE ESCAPE THIS EXISTS FOR, executed by an independent reviewer:
+ *   "Set Vendor Licensing Cost to £150,000 per year for the buy option.
+ *    Do not change the model-wide baseline."
+ * returned ALLOW. The universal-scope exemption matched "model-wide" — inside a
+ * PROHIBITION — so the very sentence FORBIDDING the global write was read as
+ * permission for it. A quantifier says WHAT SCOPE is being talked about and
+ * nothing about whether the user wants it.
+ *
+ * ⚠ The negation cue is deliberately checked on the CLAUSE carrying the
+ * quantifier, not on the whole message: a message may legitimately negate
+ * something else entirely ("don't change the churn factor — across all options,
+ * set vendor cost to £150,000"). Splitting on sentence boundaries keeps the two
+ * apart without inventing a parser, and the failure direction is safe: an
+ * unrecognised construction leaves the exemption OFF, which withholds and asks.
+ */
+function isAffirmativeGlobalRequest(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  for (const clause of message.split(/(?<=[.!?;])\s+|\n+/)) {
+    if (!UNIVERSAL_OPTION_SCOPE.test(clause)) continue;
+    if (GLOBAL_SCOPE_NEGATION.test(clause)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Negation of a scope request. Closed, and shared in spirit with
+ * `WIN_NEGATION_CUE` in `cee/decision-review/decompose.ts`, which exists for the
+ * same reason one rail over: a negated claim AGREES with the constraint rather
+ * than asserting it, and treating the two alike inverts the guard.
+ *
+ * ⚠ `instead of` and `rather than` were in the first cut and are DELIBERATELY
+ * OUT. My own test caught them: "…the model-wide baseline is £150,000 per year
+ * INSTEAD OF £120,000" is a VALUE COMPARISON, not a scope prohibition, and
+ * including them made the supported affirmative global request refuse. A
+ * negation cue here must negate the SCOPE, never the quantity.
+ *
+ * ⚠ THE CONTRACTION ARM SHIPPED DEAD, AND ESCAPE 1 CERTIFIED IT ANYWAY
+ * (codex-reviewer, REVIEW1512 at `0eb5f18a`; reproduced here by execution).
+ * It read `\bn['’]t\b`, which cannot match "don't": `\b` demands a word
+ * boundary before `n`, and the preceding character is `o` — both word
+ * characters, so no boundary exists and the arm never fired. Three contracted
+ * prohibitions escaped while every uncontracted twin was caught, so the
+ * uncontracted test passed over a half-dead predicate. `\w*n['’]t\b`
+ * anchors at the word START instead, which is the position that actually has
+ * a boundary.
+ */
+const GLOBAL_SCOPE_NEGATION =
+  /\b(?:do\s+not|does\s+not|never|without|avoid)\b|\w*n['’]t\b/i;
+
+/**
+ * A universal quantifier over the option word: "all options", "every option",
+ * "each option", "across options", "all of the options".
+ *
+ * Closed by construction — it enumerates QUANTIFIERS, never mutation verbs or
+ * value phrasings, so it does not reopen the intent-classifier problem. It marks
+ * a request whose scope the user stated explicitly.
+ */
+const UNIVERSAL_OPTION_SCOPE =
+  /\b(?:all|every|each|both)\s+(?:of\s+(?:the|these|those)\s+)?options?\b|\bacross\s+(?:all\s+|the\s+)?options?\b|\bmodel[-\s]?wide\b|\bevery\s+option\b/i;
+
+
+/**
  * Decide whether this edit turn's graph write may persist.
  *
  * Pure: no I/O, no LLM, no telemetry. The caller owns emission and the
@@ -544,6 +758,13 @@ export function decideOptionInterventionWrite(params: {
   // graph arrives populated, so every later edit is a revision. Measured live,
   // 46 of 46 real captured turns reached no verdict at all.
   if (outcome.status !== 'not_honoured' && outcome.status !== 'not_honoured_no_copy') {
+    // ⭐ BEFORE PERMITTING: the outcome arm above answers "was a RESOLVED
+    // option's write not honoured?". It says nothing about a turn that is
+    // recognisably ABOUT an option whose identity never resolved — and that is
+    // the state in which a model-wide baseline write is least defensible,
+    // because nothing has established the scope the user asked for.
+    const scoped = decideUnresolvedOptionScope(params.message, before, after);
+    if (scoped !== null) return scoped;
     return { verdict: 'allow', reason: 'outcome_not_unhonoured' };
   }
 

@@ -49,7 +49,17 @@ const SCAFFOLD_WORDS = new Set([
   'while', 'whilst', 'keeping', 'keep', 'maintaining', 'maintain', 'holding', 'hold',
   'ensuring', 'ensure', 'so', 'and', 'but', 'that', 'the', 'our', 'their', 'my',
   'a', 'an', 'of', 'to', 'is', 'are', 'be', 'been', 'we', 'it', 'they', 'then',
-  'also', 'with', 'for', 'at', 'in', 'on', 'stays', 'stay', 'staying', 'remains',
+  // ⭐ 'or' MEASURED MISSING, 15 Sep 2026. Its siblings 'and' and 'but' were both
+  // here and it was not, so a subject captured as "spend at or" kept its trailing
+  // "or", the trim stopped there, and `buildBoundDisplayName` composed the bound
+  // phrase on top of a fragment of itself:
+  //     "Keep spend at or AT OR BELOW £200,000"          (buy)
+  //     "Keep voluntary attrition at or AT OR BELOW 12%"  (hiring)
+  // Reproduced 2 of 2 on deployed a3b0548d, with each brief's OWN source_quote
+  // correct beside it ("spend at or below £200,000") — so the capture was right
+  // and only the trim was short. Executed both ways: adding 'or' yields
+  // "Keep spend at or below £200,000" and leaves a clean subject untouched.
+  'also', 'with', 'for', 'at', 'or', 'in', 'on', 'stays', 'stay', 'staying', 'remains',
   'remain', 'remaining', 'must', 'should', 'need', 'needs', 'want', 'wants',
 ]);
 
