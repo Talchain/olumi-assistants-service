@@ -186,6 +186,12 @@ describe('dial A — the recorded-ask window', () => {
       'elicit_effect_target',
       'elicit_goal_target',
       'elicit_option_effect',
+      // GO(A) — "what does <option> cost, in <unit>?". A recorded question
+      // awaiting the user's own figure, so it takes the widened ask window for
+      // the same reason its siblings do: a person pricing an option may take
+      // several turns, and expiring at the default would read as "they never
+      // answered".
+      'elicit_option_native_quantity',
       'elicit_target_baseline',
     ]);
     for (const kind of askKinds) {

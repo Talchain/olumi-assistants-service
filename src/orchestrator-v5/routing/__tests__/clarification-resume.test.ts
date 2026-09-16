@@ -484,6 +484,10 @@ describe('tryClarificationResume — kind classification regression', () => {
   > = {
     // Graph-mutating today.
     set_factor_value: 'mutating',
+    // GO(A) — answering "what does <option> cost, in <unit>?" WRITES a native
+    // quantity onto an option->factor cell, so it fails closed as mutating for
+    // the same reason its model-unit sibling does.
+    elicit_option_native_quantity: 'mutating',
     // Reserved graph-mutating kinds (depend on graph_hash per the
     // PendingAction docstring). Classifying as `mutating` now means
     // they fail closed when wired, rather than slipping through the

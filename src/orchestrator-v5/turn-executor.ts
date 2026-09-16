@@ -13454,6 +13454,45 @@ export async function runTurnExecutor(
       // the add-risk clarify's fail-closed posture): the question text still
       // ships, a full-sentence answer still binds through the LLM path, and
       // only the elliptical carry is (safely) unavailable.
+      // GO(A) — the option-cost ask, armed in the SAME commit as the
+      // disclosure that motivates it. Mirrors `__elicit_baseline` exactly:
+      // server-only, fail-closed on an unavailable hash, stable `chip_id` so a
+      // re-ask SUPERSEDES its predecessor by key instead of consuming another
+      // of the column's three slots.
+      const optionCostChannel = handlerOutcome?.__option_cost_ask;
+      const optionCostPendingForCommit: PendingAction | undefined = (() => {
+        if (optionCostChannel === undefined) return undefined;
+        if (llmGraphHash === null) {
+          log.warn(
+            { request_id: requestId, scenario_id: context.session_id },
+            'V5 option-cost ask — graph hash unavailable; no pending question persisted (fail-closed)',
+          );
+          return undefined;
+        }
+        const askedAtIso = new Date().toISOString();
+        return {
+          id: randomUUID(),
+          scenario_id: context.session_id,
+          chip_id: 'chip_elicit_option_native_quantity',
+          action: {
+            kind: 'elicit_option_native_quantity' as const,
+            option_id: optionCostChannel.option_id,
+            option_label: optionCostChannel.option_label,
+            factor_id: optionCostChannel.factor_id,
+            factor_label: optionCostChannel.factor_label,
+            unit: optionCostChannel.unit,
+            ...(optionCostChannel.constraint_label !== null
+              ? { constraint_label: optionCostChannel.constraint_label }
+              : {}),
+          },
+          preconditions: { graph_hash: llmGraphHash },
+          expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
+          expires_at_iso: new Date(
+            Date.parse(askedAtIso) + PENDING_ACTION_DEFAULT_WALL_TTL_MS,
+          ).toISOString(),
+          emitted_at_iso: askedAtIso,
+        };
+      })();
       const elicitChannel = handlerOutcome?.__elicit_baseline;
       const elicitPendingForCommit: PendingAction | undefined = (() => {
         if (elicitChannel === undefined) return undefined;
@@ -13545,9 +13584,14 @@ export async function runTurnExecutor(
       })();
       const pendingForCommit =
         flipProposalPending || elicitPendingForCommit || goalTargetAskPendingForCommit
+        || optionCostPendingForCommit
           ? [
               ...(elicitPendingForCommit ? [elicitPendingForCommit] : []),
               ...(goalTargetAskPendingForCommit ? [goalTargetAskPendingForCommit] : []),
+              // Ahead of the rerun/proposal chips: a rerun offered while the
+              // limit is still uncheckable repeats the same withheld verdict,
+              // so the question that could change it takes the scarcer slot.
+              ...(optionCostPendingForCommit ? [optionCostPendingForCommit] : []),
               ...(flipProposalPending ? [flipProposalPending] : []),
               ...(proposalPendingForCommit ?? []),
             ].slice(0, 3)
