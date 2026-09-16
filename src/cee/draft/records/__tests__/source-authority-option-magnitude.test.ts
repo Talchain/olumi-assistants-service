@@ -577,7 +577,19 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     expect(statusQuoBlocker).toBeDefined();
     expect(statusQuoBlocker).toMatchObject({
       blocker_type: "missing_value",
-      message: `Factor "${COST}" is currently 25,000. What should option "${STATUS_QUO_LABEL}" set it to?`,
+      // ⭐ THE UNIT NOW ARRIVES, AND THAT IS THE POINT OF THE CHANGE THAT MOVED
+      // THIS STRING. The claim carries `value: 25_000` and cites stated_items[4]
+      // ("switching would cost roughly £25,000 one-off"); the projector now
+      // recognises that the asserted number EQUALS the cited figure, stamps the
+      // value `explicit` and carries that figure's unit onto the node. So the
+      // question the user reads went from a bare "25,000" to "£25k".
+      //
+      // ⚠ WHAT THIS TEST EXISTS FOR IS UNCHANGED AND STILL ASSERTED: the
+      // status-quo absence is preserved (`rawInterventionOf(STATUS_QUO)`
+      // undefined, `bindingOf(STATUS_QUO)` undefined above), the blocker still
+      // fires, and it is still `missing_value` / `add_value`. Nothing invented a
+      // status-quo zero. Only the rendering of the factor's own level improved.
+      message: `Factor "${COST}" is currently £25k. What should option "${STATUS_QUO_LABEL}" set it to?`,
       suggested_action: "add_value",
     });
 
@@ -585,7 +597,12 @@ describe("B1 source authority: stated full-switch magnitude vs AI pilot", () => 
     // factor's own `display_value` BY IDENTITY, so this cannot silently drift
     // back to a normalised level even if the fixture's magnitude changes.
     const factorDisplay = (factor as { display_value?: string }).display_value;
-    expect(factorDisplay).toBe("25,000");
+    // "£25k", not "25,000": the claim's asserted value equals the figure it
+    // cited, so the projector stamps it `explicit` and carries that figure's
+    // unit. The identity binding on the line below is what this block is really
+    // for and it is untouched — the message quotes the factor's OWN rendering,
+    // whatever that rendering becomes.
+    expect(factorDisplay).toBe("£25k");
     expect(statusQuoBlocker!.message).toContain(`is currently ${factorDisplay}`);
     expect(statusQuoBlocker!.message).not.toContain("is currently 0.5");
   });
