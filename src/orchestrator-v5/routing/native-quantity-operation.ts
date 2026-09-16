@@ -28,63 +28,11 @@
  * gate and the commit are all the same code every other edit goes through.
  */
 
-import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
-
-/**
- * ⚠⚠ A FACTOR DECLARES ITS UNIT AS A SYMBOL AND A CONSTRAINT AS A CODE, AND
- * COMPARING THEM RAW MAKES THIS FEATURE NEVER FIRE.
- *
- * Measured across real captured graphs: drafts declare monetary factors as
- * `('Hiring and Salary Cost', '£', 200000)`, `('Total Hiring Cost', '£',
- * 120000)`, `('Pro Plan Monthly Price', '£', 59)`. Paul's own ratified
- * constraint declares `unit: "GBP"`. So the legitimate case is `£` vs `GBP`,
- * and a raw equality check REFUSES it — the guard correct and pointed at the
- * wrong bytes (trap 22), which would have made the whole path silently
- * unreachable in production while every test passed.
- *
- * Normalised through `CURRENCY_SYMBOL_TO_CODE`, which the estate already calls
- * "the one currency vocabulary". A non-currency unit (`months`, `FTE`,
- * `developers`) is not in that map and compares on its own trimmed text, so
- * nothing outside currency is widened.
- *
- * ⛔ THIS IS NOT A CONVERSION. `£`→`GBP` is the SAME unit spelled two ways.
- * USD vs GBP still refuses, and no rate is ever applied.
- */
-export function sameUnit(a: string, b: string): boolean {
-  return normaliseUnitForComparison(a) === normaliseUnitForComparison(b);
-}
-
-/** The recognised currency CODES, derived from the map rather than restated. */
-const CURRENCY_CODES: ReadonlySet<string> = new Set(Object.values(CURRENCY_SYMBOL_TO_CODE));
-
-/**
- * ⚠⚠ RECOGNISED CURRENCIES ONLY. Everything else stays CASE-SENSITIVE.
- *
- * My first cut uppercased unconditionally, and Codex's executed witness showed
- * it silently widened units that are not currencies at all: `mW`/`MW` and
- * `ms`/`Ms` collapsed into one. Megawatts are not milliwatts. My own "does not
- * widen non-currency units" test could not see it, because it compared
- * `months` against `FTE` — strings that differ in LETTERS, not in CASE. A
- * corpus that varies the wrong dimension cannot observe the defect (trap 22).
- *
- * ⚠ AND OWN-PROPERTY LOOKUP, NOT BRACKET ACCESS. `CURRENCY_SYMBOL_TO_CODE` is a
- * plain object, so `map['constructor']` and `map['toString']` return INHERITED
- * functions; the old `?? t` never fired and `.toUpperCase()` threw a TypeError
- * on them. A unit string comes from stored data, so a key like `constructor`
- * is reachable rather than theoretical.
- */
-function normaliseUnitForComparison(unit: string): string {
-  const trimmed = unit.trim();
-  // A symbol maps to its code — `£` and `GBP` are one unit, two spellings.
-  if (Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOL_TO_CODE, trimmed)) {
-    return CURRENCY_SYMBOL_TO_CODE[trimmed]!;
-  }
-  // A recognised code in any case is still that code (`gbp` -> `GBP`).
-  const upper = trimmed.toUpperCase();
-  if (CURRENCY_CODES.has(upper)) return upper;
-  // Anything else is compared as written. `mW` is not `MW`.
-  return trimmed;
-}
+// The comparator lives in the currency leaf so both this path and the
+// constraint-write path can use it without importing one another — that cycle
+// surfaced as a test TIMEOUT, not an error (see its doc comment).
+import { sameUnit } from '../../utils/currency-alphabet.js';
+export { sameUnit };
 
 /** The intervention cell as it stands, read from the graph by the caller. */
 export interface ExistingIntervention {
