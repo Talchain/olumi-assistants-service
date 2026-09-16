@@ -189,6 +189,24 @@ function projectPrior(raw: unknown): Record<string, unknown> | undefined {
   ]);
 }
 
+/**
+ * `RawInterventionValue` admits `number | string | boolean`, so one quantity can
+ * arrive spelled two ways (`95000` and `"95000"`). Two spellings of the SAME
+ * figure must hash alike, or the product reports a change nobody made.
+ *
+ * ⚠ NUMERIC STRINGS ONLY, AND ONLY ON AN EXACT ROUND TRIP. A categorical raw
+ * is a CODE, not a magnitude (`"UK"`, `"enterprise"`), and coercing one would
+ * either produce `NaN` or collapse two categories into one identity. Anything
+ * that does not round-trip is preserved verbatim.
+ */
+function normaliseRawValueForIdentity(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  const trimmed = raw.trim();
+  if (trimmed === '') return raw;
+  const asNumber = Number(trimmed);
+  return Number.isFinite(asNumber) && String(asNumber) === trimmed ? asNumber : raw;
+}
+
 function projectIntervention(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
@@ -196,6 +214,39 @@ function projectIntervention(raw: unknown): Record<string, unknown> | undefined 
   if (r.value !== undefined) out.value = r.value;
   if (r.value_type !== undefined) out.value_type = r.value_type;
   if (r.encoding_map !== undefined) out.encoding_map = r.encoding_map;
+  // ⭐ THE NATIVE QUANTITY AND ITS UNIT — in the identity because a consumer
+  // reads them for a DISPLAYED verdict.
+  //
+  // Measured before this line existed, with a live positive control in the
+  // same run: an option's `raw_value` moving 95,000 -> 250,000 produced a
+  // BYTE-IDENTICAL hash (`d4384a59464a5724` both times), while a `value`
+  // change 0.7 -> 0.85 moved it. So a cost could cross a £200,000 limit and
+  // the product would still report the stored analysis as current.
+  //
+  // Tolerable only while nothing consumes the native. A limit check does, so
+  // the identity has to account for it BEFORE that consumer is enabled rather
+  // than after — otherwise the freshness line on screen is asserting over a
+  // verdict it cannot see change.
+  //
+  // ⚠ ONE-TIME COST, DISCLOSED: a stored graph already carrying `raw_value`
+  // hashes differently from here on, so those scenarios read STALE once. That
+  // is the honest direction; they were being called fresh on an identity that
+  // ignored a real field.
+  //
+  // ⚠⚠ `unit` ENTERS ONLY BESIDE A NATIVE VALUE, AND THE EXISTING SPEC IS WHY.
+  // `graph-hash.test.ts` asserts "intervention unit / source / reasoning /
+  // display_value / target_match.confidence → hash unchanged", and that
+  // decision is CORRECT for the encoded case it was written for: beside an
+  // encoded `value: 100`, the unit is metadata ABOUT the number the engine
+  // computes on, so GBP→USD changes no result. Beside a NATIVE `raw_value` the
+  // unit is part of the quantity itself — 95,000 GBP and 95,000 USD are
+  // different amounts to a limit check. Two meanings of one field name
+  // (trap 21), so the projection distinguishes them rather than overriding the
+  // older rule. A unit with no native beside it still hashes to nothing.
+  if (r.raw_value !== undefined) {
+    out.raw_value = normaliseRawValueForIdentity(r.raw_value);
+    if (r.unit !== undefined) out.unit = r.unit;
+  }
   if (r.target_match && typeof r.target_match === 'object') {
     const tm = r.target_match as Record<string, unknown>;
     if (tm.node_id !== undefined) out.target_match = { node_id: tm.node_id };
