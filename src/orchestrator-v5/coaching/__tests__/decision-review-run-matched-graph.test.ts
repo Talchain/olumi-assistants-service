@@ -297,6 +297,78 @@ describe('C3 — a large graph stays parseable, keeps relationships, marks omiss
   });
 });
 
+/**
+ * ⚠ C3g PINS A REGRESSION I SHIPPED AND THEN MEASURED, not a hypothetical.
+ *
+ * The first cut replaced the byte ceiling's mid-JSON `slice` with a "body
+ * omitted" marker object. That IS valid JSON, so it satisfied the letter of the
+ * requirement — and it turned a real 12-fragile-edge `<ISL_RESULTS>` section
+ * into 212 characters of apology, taking `decision-review-prose-fact-wiring`
+ * red. A malformed body at least carries the leading entries; an empty one
+ * carries nothing, and the failure is silent on our side.
+ *
+ * ⛔ Note how it hid: the section MEASURED small afterwards. Sizing the OUTPUT
+ * cannot tell you the INPUT overflowed — the small number was the symptom, and
+ * it reads exactly like "this section was always small".
+ *
+ * The rule the fix now obeys, and this test enforces: an over-budget section is
+ * SHRUNK, never deleted.
+ */
+describe('C3g — an over-budget section keeps its leading content, not a marker', () => {
+  const HEAVY_ISL = {
+    factor_sensitivity: Array.from({ length: 200 }, (_, i) => ({
+      factor_id: `fac_${i}`,
+      factor_label: `Factor ${i} with a label long enough to make this section overflow the ceiling`,
+      elasticity: 0.9 - i / 1000,
+      confidence: 0.5,
+    })),
+    fragile_edges: Array.from({ length: 200 }, (_, i) => ({
+      edge_id: `fac_${i}->out_ship`,
+      from_label: `Factor ${i}`,
+      to_label: 'Ship On Time',
+      switch_probability: 0.4,
+    })),
+  };
+
+  const message = buildDecisionReviewUserMessage(
+    { ...build(RUN_GRAPH)!, isl_results: HEAVY_ISL as never },
+    0.31,
+  );
+  const open = message.indexOf('<ISL_RESULTS>\n');
+  const body = message.slice(open + '<ISL_RESULTS>\n'.length, message.indexOf('\n</ISL_RESULTS>'));
+  const at = body.lastIndexOf('\n[TRUNCATED: ');
+  const json = at === -1 ? body : body.slice(0, at);
+
+  it('C3g-a PRECONDITION: this section really does exceed the ceiling', () => {
+    expect(JSON.stringify(HEAVY_ISL, null, 2).length).toBeGreaterThan(8_000);
+  });
+
+  it('C3g-b PRECONDITION: the section was actually located in the message', () => {
+    expect(open, 'an ISL_RESULTS section exists to measure').toBeGreaterThanOrEqual(0);
+    expect(json.length, 'and its body is non-empty').toBeGreaterThan(0);
+  });
+
+  it('C3g-c it is valid JSON', () => {
+    expect(() => JSON.parse(json)).not.toThrow();
+  });
+
+  it('C3g-d the leading entries SURVIVE — this is a shrink, not a deletion', () => {
+    const parsed = JSON.parse(json) as {
+      factor_sensitivity?: unknown[];
+      fragile_edges?: unknown[];
+    };
+    expect(parsed.factor_sensitivity?.length ?? 0, 'factors retained').toBeGreaterThan(0);
+    expect(parsed.fragile_edges?.length ?? 0, 'edges retained').toBeGreaterThan(0);
+    expect(json, 'the most decision-relevant row is retained').toContain('fac_0');
+    expect(json, 'and it is NOT replaced by an apology').not.toContain('_truncated');
+  });
+
+  it('C3g-e the loss is disclosed', () => {
+    expect(at, 'a truncation marker is present').toBeGreaterThan(-1);
+    expect(body.slice(at)).toContain('omitted');
+  });
+});
+
 // ── C4 ──────────────────────────────────────────────────────────────────────
 
 describe('C4 — a strict-parse failure preserves source facts, never synthesises them', () => {

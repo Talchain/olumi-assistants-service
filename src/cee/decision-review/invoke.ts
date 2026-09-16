@@ -344,6 +344,78 @@ function capArray<T>(
 }
 
 /**
+ * Shrink a JSON value until it fits `maxChars`, WITHOUT ever producing invalid
+ * JSON and without discarding the whole body.
+ *
+ * Arrays lose trailing elements; an object loses one element at a time from
+ * whichever of its array members is currently longest, so a section made of
+ * several lists degrades evenly instead of one list vanishing. Every caller
+ * here has already rank-capped its arrays by decision relevance (highest
+ * |elasticity|, highest switch_probability, closest-to-flip), so "trailing" is
+ * "least relevant" by construction.
+ *
+ * Each round removes exactly one element, so this terminates. If nothing is
+ * left to remove and the value still does not fit — a single pathological
+ * scalar or deeply-nested blob — only then does it fall back to a marker
+ * object, which is itself valid JSON.
+ */
+function shrinkJsonValueToFit(
+  value: unknown,
+  maxChars: number,
+  originalChars: number,
+): { json: string; note: string } {
+  let working: unknown;
+  try {
+    working = JSON.parse(JSON.stringify(value)) as unknown;
+  } catch {
+    working = null;
+  }
+
+  const arraysOf = (v: unknown): unknown[][] => {
+    if (Array.isArray(v)) return [v];
+    if (v !== null && typeof v === 'object') {
+      return Object.values(v as Record<string, unknown>).filter((m): m is unknown[] =>
+        Array.isArray(m),
+      );
+    }
+    return [];
+  };
+
+  let dropped = 0;
+  let json = JSON.stringify(working, null, 2) ?? '';
+  while (json.length > maxChars) {
+    const candidates = arraysOf(working).filter((a) => a.length > 0);
+    if (candidates.length === 0) break;
+    let longest = candidates[0]!;
+    for (const candidate of candidates) {
+      if (candidate.length > longest.length) longest = candidate;
+    }
+    longest.pop();
+    dropped += 1;
+    json = JSON.stringify(working, null, 2) ?? '';
+  }
+
+  if (json.length > maxChars) {
+    return {
+      json: JSON.stringify(
+        {
+          _truncated: true,
+          _reason: 'section exceeded the prompt ceiling',
+          _original_chars: originalChars,
+        },
+        null,
+        2,
+      ),
+      note: `section body could not be bounded by entry removal and is NOT present (${originalChars} chars)`,
+    };
+  }
+  return {
+    json,
+    note: `${dropped} trailing entr${dropped === 1 ? 'y' : 'ies'} omitted to fit the ${maxChars}-char section ceiling`,
+  };
+}
+
+/**
  * Stringify a (already array-capped) section value, then apply the hard
  * byte-ceiling backstop. Any truncation (array-level or byte-level) is
  * disclosed via an appended `[TRUNCATED: ...]` marker — never silent.
@@ -353,30 +425,23 @@ function boundedJsonBlock(value: unknown, notes: readonly string[]): string {
   const allNotes = [...notes];
   if (json.length > DECISION_REVIEW_SECTION_MAX_CHARS) {
     // ⛔ THIS USED TO BE `json.slice(0, MAX)` AND THAT HANDED THE MODEL
-    // MALFORMED JSON. It never fired in production only because the section it
-    // most endangers — `<GRAPH>` — has been 21 characters (`{}`) on every live
-    // turn, so the ceiling was unreachable. Repairing the graph makes it
-    // reachable on the first real model: a mid-object slice ends the body at an
-    // arbitrary byte, and what the reviewing model receives is a truncated
-    // literal it cannot parse. A section it cannot parse is worse than a
-    // section it does not have, because the failure is silent on our side.
+    // MALFORMED JSON — a mid-object cut ending the body at an arbitrary byte.
+    // It fires today on `<ISL_RESULTS>` for a real 12-fragile-edge capture, so
+    // this is not a hypothetical path.
     //
-    // Replaced by a marker OBJECT that is itself valid JSON. The graph section
-    // does better still — it shrinks the value entity-by-entity and keeps real
-    // content (see `boundedGraphJsonBlock`). This is the backstop for every
-    // other section, and its job is only to stay parseable.
-    json = JSON.stringify(
-      {
-        _truncated: true,
-        _reason: `section exceeded the ${DECISION_REVIEW_SECTION_MAX_CHARS}-char ceiling`,
-        _original_chars: json.length,
-      },
-      null,
-      2,
-    );
-    allNotes.push(
-      `section body omitted at ${DECISION_REVIEW_SECTION_MAX_CHARS} chars (hard ceiling); the body is NOT present`,
-    );
+    // ⚠ AND THE OBVIOUS REPLACEMENT — a "body omitted" marker — IS WORSE, which
+    // was MEASURED, not reasoned: swapping the slice for a marker object turned
+    // a 12-edge ISL_RESULTS section into 212 characters of apology and took a
+    // sibling spec red. A malformed body at least still carries the leading
+    // entries the model needs; an empty one carries nothing.
+    //
+    // So the value is SHRUNK and re-serialised: valid JSON at every size, and
+    // the leading (most decision-relevant, since every caller has already
+    // rank-capped) entries survive. The graph section has its own
+    // relationship-aware variant — see `boundedGraphJsonBlock`.
+    const shrunk = shrinkJsonValueToFit(value, DECISION_REVIEW_SECTION_MAX_CHARS, json.length);
+    json = shrunk.json;
+    allNotes.push(shrunk.note);
   }
   return allNotes.length > 0 ? `${json}\n[TRUNCATED: ${allNotes.join('; ')}]` : json;
 }
