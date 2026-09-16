@@ -53,7 +53,11 @@ interface WarrantCase {
   readonly baseWarrant: boolean;
 }
 
-const CORPUS: readonly WarrantCase[] = [
+// Exported so the edit-verb-usage spec can be measured against the SAME rows
+// rather than against a copy of them. One definition, not a mirror: a corpus
+// duplicated into a second spec drifts, and the copy that drifts is the one
+// whose predicate is unproven.
+export const CORPUS: readonly WarrantCase[] = [
   // captured verbatim from the deployed product (calibration-consent-boundary.test.ts)
   { label: "NON_EDIT", message: "No - that is not what I meant. Please undo that change. By ‘pretty likely’ I mean the probability that churn stays below 3%. What numerical probability does ‘pretty likely’ map to? Do not change the graph until I confirm.", baseWarrant: true },
   // captured verbatim from the deployed product (calibration-consent-boundary.test.ts)

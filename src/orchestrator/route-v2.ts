@@ -255,6 +255,7 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
+import { hasOnlyNonInstructionalEditVerbs } from '../orchestrator-v5/routing/edit-verb-usage.js';
 import {
   hasExplicitNoModelChangeIntent,
   isBoundedNonMutationAnalyticalRequest,
@@ -5487,6 +5488,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const modelChangeRefused = hasExplicitNoModelChangeIntent(ingress.message);
     const analyticalQuestionDetected =
       isAnalyticalQuestion(ingress.message) || boundedNonMutationAnalytical;
+    // Named apart from `analyticalQuestionDetected` on purpose. That predicate
+    // answers "is the user asking a question?"; this one answers "is the edit
+    // verb that got us here even being used as a verb?" — a different question,
+    // and folding them into one name is how two authorities start disagreeing.
+    // Captured hiring session, turns 8 and 10: "our next product UPDATE in 6
+    // months" is a noun, and the turn carrying the user's launch-timing
+    // requirement went to the graph editor because of it. Turn 0: "their
+    // strength is not SET yet" is a state description, and the reply claimed a
+    // change had been drafted that never was.
+    const editVerbsAreNonInstructional = hasOnlyNonInstructionalEditVerbs(ingress.message);
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
     // Part-accounting conservation law (2026-07-20): the suppressor stands
@@ -5667,6 +5678,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const editVerbCandidate =
       !modelChangeRefused &&
       positiveEditRegexHit &&
+      !editVerbsAreNonInstructional &&
       !negativeEditRegexHit &&
       !valueUpdatePhrasingHit &&
       !analyticalQuestionDetected &&
