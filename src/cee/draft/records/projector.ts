@@ -3273,8 +3273,43 @@ function projectOnce(
       // keeps the field: removing it is a wire change for no gain, and an
       // unread optional property costs one slot, not a rejection.)
       if (typeof claim.value === "number") {
-        node.data = { value: claim.value };
-        node.observed_state = { value: claim.value };
+        // ⭐⭐ THE HONESTY HALF, SHIPPED IN THE SAME CHANGE AS THE ASK — exactly
+        // as v10 did when it stopped telling the model to withhold `sets_to`.
+        //
+        // ⚠⚠ MEASURED ON THE RAW RECORD SETS, before any projection or
+        // representation: across five banked live captures, 33 quantity claims
+        // and `value` set on ZERO of them, while `sets_to` was set on 28 causal
+        // links. The model puts a number on a LINK and never on a NODE — it
+        // says how much an option MOVES a factor and never what the factor IS.
+        // v10's docblock explains why, about its own mirror image of this:
+        // "THE MODEL WAS NOT FAILING TO COMPLY; IT WAS COMPLYING."
+        //
+        // ⛔ SO THE ASK CANNOT SHIP ALONE. Until now a claim `value` carried NO
+        // provenance at all, which leaves exactly two bad outcomes once the
+        // model starts supplying one: our estimate is displayed as the user's
+        // fact, or it is displayed as nobody's and does not count where a
+        // user-stated parameter is what unlocks a comparison.
+        //
+        // ⭐ EARNED THE SAME WAY `bindDirectStatedMagnitude` earns it for a
+        // `sets_to`: the stamp is `explicit` ONLY when the number the model
+        // asserted equals a figure it CITED — i.e. the user gave that number for
+        // that quantity. Anything else sets nothing and falls to the safe
+        // `ai_inferred`, which is what the header calls the projector's
+        // node-level provenance honesty.
+        //
+        // ⚠ AND NOTE WHAT DECIDES WHAT. The MODEL supplies the number; `basis`
+        // decides only ATTRIBUTION. Reading a magnitude OUT of `basis` is the
+        // fabrication refuted and pinned in
+        // `claim-carries-its-cited-figure.test.ts` — it put "Current Subscriber
+        // Count = £20,000" on a graph, because `basis` means built on, not equal
+        // to. This reads the same array for a different question.
+        const citedMatch = basisFigures.find((f) => f.value === claim.value);
+        node.data = {
+          value: claim.value,
+          ...(citedMatch?.unit !== undefined ? { unit: citedMatch.unit } : {}),
+          ...(citedMatch !== undefined ? { extractionType: "explicit" as const } : {}),
+        };
+        node.observed_state = { value: claim.value, raw_value: claim.value };
       }
     }
     nodes.push(node);
