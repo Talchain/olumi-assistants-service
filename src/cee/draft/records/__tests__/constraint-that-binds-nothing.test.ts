@@ -192,8 +192,30 @@ describe("D2 — the three controls that bound the change", () => {
     const base = NO_DIRECTION();
     const reasons = dropped(base).filter((x) => x.label.includes("monthly churn")).map((x) => x.reason);
     expect(reasons, "the direction gate owns it").toContain("constraint_direction_unstated");
-    expect(reasons, "and this new reason must not also fire — one finding, one name").not.toContain(
-      "constraint_target_unstated",
-    );
+    // ⚠ AND THE ASK, NOT ONLY THE DISCLOSURE — added because a mutant deleting
+    // the direction guard left this test GREEN. Checking reasons could not see
+    // that the user would have gained a question about the SUBJECT of a limit
+    // whose DIRECTION is still unknown, which is the wrong question: a floor
+    // shipped as a ceiling is the opposite constraint, and asking what it bounds
+    // before knowing which way it points invites the model to settle the
+    // subject while the operator stays a coin flip.
+    const ask = enumerateCompletionAsk(base, project(base));
+    expect(
+      ask.items.filter((i) => i.detail.includes("does not say what it bounds")).length,
+      "the subject is not asked about while the direction is unknown",
+    ).toBe(0);
+
+    // ⛔ A SEPARATE GAP, PINNED HERE SO IT CANNOT BE FORGOTTEN AND IS NOT
+    // SILENTLY CLOSED BY SOMETHING ELSE. `projector.ts` comments that
+    // `enumerateCompletionAsk` "turns this disclosure into a question". It does
+    // not: there is NO `constraint_direction_unstated` case in `completion.ts`
+    // at all (target 0, contrast `constraint_value_unstated` 5 in the same
+    // sweep). So today an unstated direction is disclosed and never asked about.
+    // This assertion records the CURRENT state; when that gap is closed this
+    // line must be updated deliberately, not by accident.
+    expect(
+      ask.items.filter((i) => i.detail.includes("keeping monthly churn under 4%")).length,
+      "TODAY: nothing asks which way this limit points — see the note above",
+    ).toBe(0);
   });
 });
