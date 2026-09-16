@@ -648,6 +648,43 @@ export interface DroppedRecordRef {
      */
     | "constraint_value_unstated"
     /**
+     * ⭐⭐ A MAGNITUDE AUTHORED IN AN EARLIER PASS, AGAINST A POPULATION THAT NO
+     * LONGER EXISTS.
+     *
+     * Witnessed live 16 Sep 2026. Factor "Hiring and Onboarding Cost", frame
+     * 200000 — the user's own budget:
+     *   hire a Tech lead                      raw 80000   -> 0.4
+     *   two developers                        raw 120000  -> 0.6
+     *   Hire One Tech Lead and One Developer  raw 0.85    -> 0.00000425
+     * The third option read as FREE on the cost axis, ~141,000x understated, on
+     * a product that ranks options.
+     *
+     * Established at the bytes: pass 1 emitted SEVEN option-effect magnitudes and
+     * every one was on the unit interval (0.9, 0.55, 0.8, 0.7, 0.6, 0.5, 0.85).
+     * `80000` and `120000` appear NOWHERE in the pass-1 record set. Pass 1 was
+     * internally consistent; the pounds arrive only from the completion pass, and
+     * pass 3d then frames both together.
+     *
+     * ⛔ THE DETECTOR IS NOT MAGNITUDE, and two attempts proved why. "Refuse a
+     * sub-unit magnitude beside an absolute one" is refuted by
+     * `projector-scale-projection`, which asserts the opposite deliberately:
+     * £0.50 penny pricing beside £50,000 enterprise pricing is a REAL strategy.
+     * The same rule with zero excluded also deleted a legitimate £0 status quo.
+     *
+     * ⭐ IT IS THE PASS BOUNDARY, WHICH THE PIPELINE ALREADY RECORDS.
+     * `enumerateCompletionAsk` returns `baseClaimIndex`; the completion prompt
+     * tells the model its first new claim carries that index. Claims below it are
+     * pass 1, at or above it completion-authored. Nothing is inferred — the fact
+     * was simply never handed to the projector.
+     *
+     * ⚠ A NUMBER IS REFUSED, NEVER A PROPOSAL. The option keeps its identity and
+     * its other interventions, and the existing `missing_value` blocker then asks
+     * what it sets. Completion ran later with the merged graph in view, which is
+     * the ordering argument for preferring its magnitudes — not a judgement about
+     * which number looks more plausible.
+     */
+    | "option_magnitude_scale_unreconciled"
+    /**
      * ⭐ A STATED `constraint` NAMED WHAT IT LIMITS, AND THE TARGET CANNOT
      * CARRY A THRESHOLD.
      *
@@ -2361,6 +2398,13 @@ function projectOnce(
   records: DraftRecordSet,
   demoted: ReadonlyMap<number, DemoteDecision>,
   brief: string | undefined,
+  /**
+   * The claim index at which the COMPLETION pass began — `baseClaimIndex` from
+   * `enumerateCompletionAsk`. Claims below it were authored in pass 1. OPTIONAL
+   * and behaviour-preserving when absent: with no boundary, nothing can be shown
+   * to span one and pass 3d behaves exactly as before.
+   */
+  completionBoundary?: number,
 ): OneProjection {
   const statedItems: readonly DraftStatedItem[] = records.stated_items ?? [];
   const claims: readonly DraftInferenceClaim[] = records.claims ?? [];
@@ -4089,6 +4133,79 @@ function projectOnce(
         typeof observed?.value === "number" && Number.isFinite(observed.value)
           ? observed.value
           : undefined;
+      // ⛔⛔ WITHHOLD A MAGNITUDE AUTHORED BEFORE THE COMPLETION PASS once
+      // completion has authored one on the SAME factor — see
+      // `option_magnitude_scale_unreconciled`. Runs BEFORE the frame is derived,
+      // so the withheld value never contributes to it.
+      if (completionBoundary !== undefined) {
+        // ⛔⛔ BIND BY THE WHOLE EDGE SET, NEVER BY THE FIRST MATCH. An
+        // option→factor pair can carry MORE THAN ONE edge — a merged refinement
+        // repoints its links onto the option it merged into, so a pass-1 edge and
+        // a completion-authored edge can name the same pair. `edges.find` picked
+        // whichever came first, so a value the completion had just supplied was
+        // judged by a pass-1 edge and withheld: `option-framing-adapter` went red
+        // on "accepted completion must recover the original question option ID".
+        //
+        // The magnitude in `interventions` is the LATEST writer's, so the honest
+        // question is "did the completion author ANY edge for this pair?" — if it
+        // did, the value is completion-authored and stays. Only a pair whose
+        // edges are ENTIRELY pass-1 can be withheld.
+        const originsOf = (optId: string): number[] =>
+          edges
+            .filter((e) => e.from === optId && e.to === factor.id)
+            .map((e) => claimOriginByEdgeId.get(e.id)?.index)
+            .filter((i): i is number => typeof i === "number");
+        const carried = optionNodes3d
+          .map((opt) => ({ opt, v: opt.data.interventions[factor.id], origins: originsOf(opt.id) }))
+          .filter(
+            (x): x is { opt: typeof optionNodes3d[number]; v: number; origins: number[] } =>
+              typeof x.v === "number" && Number.isFinite(x.v) && x.origins.length > 0,
+          );
+        const authoredByCompletion = (x: { origins: number[] }): boolean =>
+          x.origins.some((i) => i >= completionBoundary);
+        // ⛔⛔ SPANNING THE BOUNDARY IS NECESSARY AND NOT SUFFICIENT — measured,
+        // after shipping the boundary-only rule and watching it misfire.
+        // `option-framing-adapter` carries a factor whose three magnitudes are
+        // 0.4 (completion-authored) beside 0.8 and 0.6 (pass 1): the completion
+        // simply added one more option to an already-coherent unit-interval set.
+        // A boundary-only rule withheld two perfectly good magnitudes there.
+        //
+        // ⭐ SO THE TEST IS THE CONJUNCTION, and that is what makes it safe where
+        // each half alone was refuted. Magnitude ALONE was refuted by penny
+        // pricing (£0.50 beside £50,000 in ONE pass is a real strategy). The
+        // boundary ALONE was refuted by the case above. Together they name
+        // exactly the observed harm: a set that crosses the pass boundary AND
+        // diverges in scale across it — 0.85 beside £80,000 and £120,000, three
+        // orders of magnitude, which no single quantity plausibly spans within
+        // one draft. Penny pricing is single-pass, so it can never reach this
+        // test at all, whatever its ratio.
+        const completionSide = carried.filter(authoredByCompletion).map((x) => Math.abs(x.v));
+        const earlierSide = carried.filter((x) => !authoredByCompletion(x)).map((x) => Math.abs(x.v));
+        const biggestLater = completionSide.length > 0 ? Math.max(...completionSide) : 0;
+        const biggestEarlier = earlierSide.length > 0 ? Math.max(...earlierSide) : 0;
+        const spansBoundary =
+          completionSide.length > 0 &&
+          earlierSide.length > 0 &&
+          biggestEarlier > 0 &&
+          biggestLater / biggestEarlier >= 1000;
+        if (spansBoundary) {
+          for (const x of carried.filter((y) => !authoredByCompletion(y))) {
+            delete x.opt.data.interventions[factor.id];
+            const rawBag = (x.opt.data as { raw_interventions?: Record<string, unknown> })
+              .raw_interventions;
+            if (rawBag !== undefined) delete rawBag[factor.id];
+            dropped.push({
+              claim_index: Math.min(...x.origins),
+              claim_kind: "claim",
+              label: `${String(x.opt.label)} → ${String(factor.label)}`,
+              node_id: x.opt.id,
+              reason: "option_magnitude_scale_unreconciled",
+              value: x.v,
+            });
+          }
+        }
+      }
+
       const magnitudes: number[] = baseline !== undefined ? [baseline] : [];
       for (const opt of optionNodes3d) {
         const v = opt.data.interventions[factor.id];
@@ -4801,16 +4918,18 @@ export function projectRecordsToGraph(
    * brief gets honest under-claiming, never a badge it did not establish.
    */
   brief?: string,
+  /** See `projectOnce`. Absent = byte-identical to the previous behaviour. */
+  completionBoundary?: number,
 ): RecordProjection {
   const claimCount = (records.claims ?? []).length;
   const demoted = new Map<number, DemoteDecision>();
-  let projection = projectOnce(records, demoted, brief);
+  let projection = projectOnce(records, demoted, brief, completionBoundary);
   repairStatedOptionTargets(projection);
   for (let pass = 0; pass < claimCount; pass++) {
     const decisions = findUndevelopedDuplicates(projection);
     if (decisions.length === 0) break;
     for (const d of decisions) demoted.set(d.claimIndex, d);
-    projection = projectOnce(records, demoted, brief);
+    projection = projectOnce(records, demoted, brief, completionBoundary);
     repairStatedOptionTargets(projection);
   }
   // The internal binding is not part of the contract: consumers get the same

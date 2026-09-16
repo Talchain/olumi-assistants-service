@@ -138,6 +138,13 @@ export const NOTICE_KIND_BY_REASON: Record<
   // declined to assert rather than guessing a direction — the conservative
   // resolution of an ambiguity, which is what this kind names.
   constraint_direction_unstated: "conflict_resolved_conservatively",
+  // A magnitude authored in an earlier pass, against a population that no longer
+  // existed by the time the factor's scale was derived. `other`, not a
+  // nearest-looking kind: nothing was consolidated and no relationship was
+  // dropped — a NUMBER was declined while its option kept its place. A
+  // coarse-but-true bucket beats a specific-but-false one on a channel whose
+  // whole purpose is telling the truth about what was lost.
+  option_magnitude_scale_unreconciled: "other",
   // "A stated limit carries no threshold we can use, so it cannot be enforced."
   // Same family as the direction case above and for the same reason: the user's
   // limit is on the model in their own words and is NOT being applied, which is
