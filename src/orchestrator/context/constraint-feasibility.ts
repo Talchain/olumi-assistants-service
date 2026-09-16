@@ -237,6 +237,28 @@ export interface RatifiedConstraint {
    * `source_quote ?? null` and treats absence exactly like `null`.
    */
   readonly source_quote?: string | null;
+  /**
+   * ⭐ THE TARGET NODE'S IDENTITY — the next field in `source_quote`'s own
+   * argument, for the same reason and with the same shape.
+   *
+   * `GoalConstraintSchema` declares `node_id` as REQUIRED (`z.string().min(1)`)
+   * and every persisted row carries it, but this reader took `constraint_id`,
+   * `label` and `source_quote` only — so every disclosure built from a
+   * `RatifiedConstraint` could say WHICH LIMIT failed and never WHICH NODE it
+   * was about. The Canvas lane reports the consequence from the other side:
+   * `CONSTRAINT_TARGET_UNRELIABLE` reaches them carrying no identity, so they
+   * can render only the anonymous form of the withheld-recommendation copy.
+   *
+   * `null` when the row genuinely carries none — never fabricated.
+   */
+  readonly node_id?: string | null;
+  /**
+   * The unit the threshold is stated in, when the row carries one (e.g.
+   * `"GBP"`). Read for the SAME reason as the identity: an ask about a cell
+   * must state the unit the answer will be recorded in, and the only
+   * non-fabricating source for it is the persisted row the user ratified.
+   */
+  readonly unit?: string | null;
 }
 
 /**
@@ -493,6 +515,10 @@ export function readRatifiedConstraints(source: unknown): RatifiedConstraint[] {
       constraint_id: id,
       label: readString(obj.label),
       source_quote: readString(obj.source_quote),
+      // Same record, same hop as the label and the quote — so identity, name
+      // and the user's own words can never come from different rows.
+      node_id: readString(obj.node_id),
+      unit: readString(obj.unit),
     });
   }
   return out;
