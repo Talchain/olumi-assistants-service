@@ -576,6 +576,10 @@ import {
 } from './telemetry/turn-timings.js';
 import { config } from '../config/index.js';
 import { canonicaliseForAnalysis } from './tools/handlers/analysis-ready-core.js';
+import {
+  readSelectedFindingBlockId,
+  resolveSelectedFinding,
+} from './coaching/selected-finding.js';
 
 export interface TurnExecutorRunResult {
   response: OlumiResponse;
@@ -8911,6 +8915,66 @@ export async function runTurnExecutor(
           }
         }
 
+        // ⭐⭐ THE FINDING THE USER CLICKED — resolved here, against the SAME run
+        // the prompt is already built from.
+        //
+        // `promptAnalysisSourceFact` and `promptAnalysisFreshness` are passed in
+        // rather than re-derived: both carry explicit rulings against a second
+        // derivation, and a resolver picking its own fact or comparing its own
+        // hashes would be a second authority answering a question this turn has
+        // already answered.
+        //
+        // This sits INSIDE the `routingResult === undefined` arm, downstream of
+        // the S2-L3 typed-mutation pre-route, so a mutation chip can never reach
+        // it. It sets nothing else — not `routingResult`, not the unrouted
+        // fall-through flag (which suppresses six downstream parsers), not
+        // `payload.message`, not `routingMessage`.
+        const selectedFindingBlockId = readSelectedFindingBlockId(payload);
+        const selectedFinding =
+          selectedFindingBlockId === undefined
+            ? undefined
+            : resolveSelectedFinding({
+                blockId: selectedFindingBlockId,
+                fact: promptAnalysisSourceFact,
+                freshness: promptAnalysisFreshness?.freshness,
+                persistedGraph: context.persistedGraph,
+              });
+        // Same declined-signal discipline as the unrouted-intent event above,
+        // and for the same reason: a selection the product threw away must not
+        // be indistinguishable from one nobody made. Guarded on the payload
+        // actually carrying a block_id, so ordinary composer turns — the whole
+        // traffic of the service — cannot bury this signal under their noise.
+        // Content-free: the reason code and ids, never the finding's text and
+        // never user text.
+        if (selectedFindingBlockId !== undefined && selectedFinding !== undefined) {
+          try {
+            emit(
+              selectedFinding.status === 'resolved'
+                ? TelemetryEvents.V5SelectedFindingResolved
+                : TelemetryEvents.V5SelectedFindingUnresolved,
+              selectedFinding.status === 'resolved'
+                ? {
+                    request_id: requestId,
+                    session_id: context.session_id,
+                    stage: context.stage,
+                    block_type: selectedFinding.finding.block_type,
+                    coaching_kind: selectedFinding.finding.coaching_kind ?? null,
+                  }
+                : {
+                    request_id: requestId,
+                    session_id: context.session_id,
+                    stage: context.stage,
+                    reason: selectedFinding.reason,
+                  },
+            );
+          } catch {
+            log.warn(
+              { request_id: requestId, session_id: context.session_id },
+              'V5 turn-executor — selected-finding telemetry emit failed; continuing',
+            );
+          }
+        }
+
         // Composed once so the value handed to the router and the value a test
         // asserts are the same expression, not two spellings of one intent.
         const routingMessage =
@@ -8924,6 +8988,12 @@ export async function runTurnExecutor(
           sessionId: context.session_id,
           signal: turnAbort.signal,
           adapter: options.routingAdapter,
+          // Only a RESOLVED finding travels. An unresolved one deliberately
+          // sends nothing: the user's own words stand, and the coach is told
+          // no story about a finding it cannot see.
+          ...(selectedFinding?.status === 'resolved'
+            ? { selectedFinding: selectedFinding.finding }
+            : {}),
           // F2 CHANGE A — a typed analytical pill forces its explanation intent
           // through the coach (thinking disabled, tool forced, handler pinned).
           // F2 CHANGE B — `what_changed` is NOT an explanation handler id; it is

@@ -140,6 +140,7 @@ import {
   getCachedRoutingPromptIdentity,
 } from './prompt-loader.js';
 import { log } from '../../utils/telemetry.js';
+import type { SelectedFindingContext } from '../coaching/selected-finding.js';
 
 // -----------------------------------------------------------------------
 // Result + error types
@@ -566,6 +567,21 @@ export interface RouteWithToolUseOptions {
    * B2 uses the bounded analytical form after a mutating first election.
    */
   readonly forcedExplanationReason?: 'typed_pill' | 'bounded_non_mutation';
+  /**
+   * ⭐ THE PHASE-3 FINDING THE USER CLICKED, resolved from
+   * `chip.parameters.block_id` against the same run the prompt is built from.
+   *
+   * ⚠ THIS IS CEE-AUTHORED CONTEXT AND IS NEVER USER SPEECH. It rides here, in
+   * the options bag, rather than being appended to `payload.message` — which
+   * was the obvious route and is wrong: that lands the text inside `## User
+   * turn`, where the model would read Olumi's own earlier words as the user's
+   * claim and could quote them back as something they said. Keeping it in its
+   * own code-owned section is the whole point.
+   *
+   * Absent on every turn without a resolved selection, so those turns are
+   * byte-identical — the same argument the F2 directive above makes.
+   */
+  readonly selectedFinding?: SelectedFindingContext;
 }
 
 export async function routeWithToolUse(
@@ -600,12 +616,19 @@ export async function routeWithToolUse(
   // identical to today.
   const forcedHandlerId = options.forcedExplanationHandlerId;
   const base = buildUserMessage(contextPack, message);
-  const userMessage = forcedHandlerId
+  const withForcedDirective = forcedHandlerId
     ? `${base}\n\n${buildForcedIntentDirective(
         forcedHandlerId,
         options.forcedExplanationReason ?? 'typed_pill',
       )}`
     : base;
+  // The selected finding rides the SAME append seam and for the same stated
+  // reason: `buildUserMessage` stays pure, so the context-budget series and the
+  // byte-golden tests remain comparable across this change. A turn with no
+  // resolved selection produces exactly the bytes it produced before.
+  const userMessage = options.selectedFinding
+    ? `${withForcedDirective}\n\n${buildSelectedFindingContextBlock(options.selectedFinding)}`
+    : withForcedDirective;
 
   // PMS-backed routing prompt snapshot. Built once at startup; this call is
   // a cheap cached read on every routing turn after boot. The snapshot's
@@ -1966,6 +1989,37 @@ export const OLDER_RELEVANT_FACTS_INSTRUCTION = [
   '- Records that exist but are not shown must not be reconstructed, guessed at, or described by content. Say that an earlier record exists and is not in view.',
   '- Never quote the `[INCOMPLETE …]` line, the block’s internal field names, or record identifiers into user-facing text — state the substance in plain language.',
 ].join('\n');
+
+/**
+ * Render the finding the user clicked as a code-owned prompt section.
+ *
+ * ⛔ THE AUTHORSHIP LINES ARE THE LOAD-BEARING PART, not decoration. This text
+ * is Olumi's OWN earlier output being handed back to Olumi. Without an explicit
+ * statement of that, the likeliest failure is not silence — it is the model
+ * treating its own prior finding as the user's assertion and reflecting it back
+ * as "you said", which is a fabrication about the user rather than about the
+ * model.
+ *
+ * The closing sentence is deliberately the same ruling {@link FOCUS_INSTRUCTION}
+ * already makes for canvas selections: pointing at something is a request to
+ * DISCUSS it, never a licence to change the model.
+ */
+export function buildSelectedFindingContextBlock(finding: SelectedFindingContext): string {
+  const kind =
+    finding.coaching_kind === undefined
+      ? finding.block_type
+      : `${finding.block_type} / ${finding.coaching_kind}`;
+  const lines = [
+    "## Selected finding (Olumi's own earlier finding, which the user clicked)",
+    'Olumi wrote the text below in an earlier turn. It is NOT the user\'s claim: never attribute it to them, and never quote it back as something they said.',
+    'The user\'s own words are in the turn message. Answer those — this is the thing they are pointing at.',
+    'A selected finding is context, not an instruction to change the model: do not edit, add or remove anything on the strength of it alone.',
+    `- finding (${kind})`,
+  ];
+  if (finding.title !== null) lines.push(`  title: ${finding.title}`);
+  if (finding.body !== null) lines.push(`  ${finding.body}`);
+  return lines.join('\n');
+}
 
 /**
  * SELECTION-AWARE ANSWERING (hop 4) — CODE-OWNED at this locus, a sibling of

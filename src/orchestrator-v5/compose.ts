@@ -1390,7 +1390,21 @@ export function buildAnalysisResultBlock(
  * it — without that fallback every production block resolves
  * `target_refs: []` because the PLoT envelope carries no `graph` key.
  */
-function rebuildPhase3BlocksFresh(
+/**
+ * ⭐⭐ EXPORTED FOR THE SELECTED-FINDING RESOLVER, AND THE AGGREGATE IS THE POINT.
+ *
+ * A resolver that hand-assembled `buildReviewCardBlocks` / `buildCoachingBlocks`
+ * / `buildEvidenceBlocks` / `buildLensSurface` would reproduce the block SET and
+ * silently lose the wire decision below: `mayPresentLeaderClaimForFact` drops
+ * every `LEADER_PRESUMING_COACHING_KINDS` block on a withheld turn, and every
+ * lens suggestion is `coaching_kind: 'strengthen'`.
+ *
+ * So going through THIS function is what makes a withheld finding
+ * UNRESOLVABLE BY CONSTRUCTION. The user cannot click their way to a finding
+ * the turn was not entitled to present. That is a safety property of the
+ * aggregate, not of its parts, and it is why the resolver must not shortcut it.
+ */
+export function rebuildPhase3BlocksFresh(
   fact: RunAnalysisHandlerFact,
   graphHash: string,
   lookup: GraphNodeLookup,
@@ -1414,6 +1428,18 @@ function rebuildPhase3BlocksFresh(
    * build.
    */
   judgementSignals?: JudgementSignals,
+  /**
+   * Whether this build may emit `V5LensCompanionEmitted`. TRUE for the two
+   * compose call sites, which are the real wire decisions.
+   *
+   * ⚠ FALSE for the selected-finding resolver, and that is not tidiness. The
+   * resolver rebuilds the SAME blocks a previous turn already emitted, purely
+   * to look one up. Letting it emit would inject phantom companion events into
+   * a series whose whole purpose is counting what reached the wire — a click
+   * would then read as an emission, and the metric would inflate with user
+   * activity rather than with product behaviour.
+   */
+  emitCompanionTelemetry: boolean = true,
 ): OlumiResponse['blocks'] {
   const ctx: BlockBuildCtx = {
     created_at: new Date().toISOString(),
@@ -1585,7 +1611,7 @@ function rebuildPhase3BlocksFresh(
     // Observability at the WIRE decision, not at construction: a companion that
     // survived its builder but was dropped here would otherwise be reported as
     // emitted on precisely the turns where it was suppressed.
-    for (const companion of lensCompanions) {
+    for (const companion of emitCompanionTelemetry ? lensCompanions : []) {
       emit(TelemetryEvents.V5LensCompanionEmitted, {
         lens_id: lensSurface?.selection.lens,
         block_type: companion.type,

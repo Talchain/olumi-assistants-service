@@ -1,0 +1,95 @@
+{
+ "_record": "APPEND-ONLY RECORD of phase-3 blocks CEE actually emitted on a real user session. Captured from Paul's debug export, scenario request 1dd2133d, 16 Sep 2026. These are bytes the product really produced - not a fixture to keep current. Add to it; never edit it.",
+ "_why": "The selected-finding receiver resolves chip.parameters.block_id against rebuilt blocks. Its whole premise is that block_id is re-derivable as uuidv5('{prefix}:{key}:{graph_hash}'). This corpus is what makes that testable against production bytes rather than against ids this repo minted for itself.",
+ "graph_hash_at_run": "f45e54f21f8c3a66",
+ "namespace": "f0c87e25-9d0b-4f4c-89b2-d8b8f4d2b6c1",
+ "blocks": [
+  {
+   "block_id": "558e05de-46a6-5369-8c99-4bb6ae19b036",
+   "signal_id": "review:assumption:1:f45e54f21f8c3a66",
+   "type": "review_card",
+   "card_kind": "assumption",
+   "title": "A load-bearing assumption",
+   "body": "The link from Team Leadership Coverage to On-Time Launch Readiness assumes the launch timeline holds as currently scoped.",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "ASSUMPTION_CHECK"
+  },
+  {
+   "block_id": "3f6f9f5d-ed13-50b9-aa74-75b0a0ab7dac",
+   "signal_id": "review:assumption:2:f45e54f21f8c3a66",
+   "type": "review_card",
+   "card_kind": "assumption",
+   "title": "A load-bearing assumption",
+   "body": "The comparison assumes your \u00a3200,000 budget ceiling and the preference to spend less both remain fixed constraints.",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "ASSUMPTION_CHECK"
+  },
+  {
+   "block_id": "5f2d33d8-d09d-5a0b-8c0e-8bae296ec0da",
+   "signal_id": "coach:assumption:1:f45e54f21f8c3a66",
+   "type": "coaching",
+   "coaching_kind": "assumption_check",
+   "title": "An assumption to check",
+   "body": "The link from Team Leadership Coverage to On-Time Launch Readiness assumes the launch timeline holds as currently scoped.",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "ASSUMPTION_CHECK"
+  },
+  {
+   "block_id": "cc655d68-85d4-518f-bf4a-d67785231d2f",
+   "signal_id": "coach:assumption:2:f45e54f21f8c3a66",
+   "type": "coaching",
+   "coaching_kind": "assumption_check",
+   "title": "An assumption to check",
+   "body": "The comparison assumes your \u00a3200,000 budget ceiling and the preference to spend less both remain fixed constraints.",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "ASSUMPTION_CHECK"
+  },
+  {
+   "block_id": "f367b9e8-b9d1-5e85-885b-c0b9ae831821",
+   "signal_id": "coach:calibration:1:f45e54f21f8c3a66",
+   "type": "coaching",
+   "coaching_kind": "calibration_prompt",
+   "title": "Outside View (Kahneman) prompt",
+   "body": "What is the base rate for onboarding a Tech Lead successfully within a three-month launch window like yours?",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "CALIBRATION_PROMPT"
+  },
+  {
+   "block_id": "05569946-7c65-5663-9f4a-c0ac9196ae0a",
+   "signal_id": "evidence:17456e58:f45e54f21f8c3a66",
+   "type": "evidence",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "EVIDENCE_GAP"
+  },
+  {
+   "block_id": "60336c67-ee79-5e3c-9e02-4ccc98c35ed3",
+   "signal_id": "evidence:f91ee77c:f45e54f21f8c3a66",
+   "type": "evidence",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "EVIDENCE_GAP"
+  },
+  {
+   "block_id": "1977f5a9-3308-5c45-9ce7-68338dafa288",
+   "signal_id": "evidence:26f82e8c:f45e54f21f8c3a66",
+   "type": "evidence",
+   "graph_hash_at_generation": "f45e54f21f8c3a66",
+   "freshness": "fresh",
+   "source_handler": "decision_review_enricher",
+   "signal_code": "EVIDENCE_GAP"
+  }
+ ]
+}
