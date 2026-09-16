@@ -592,11 +592,22 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * already earns it for a `sets_to`. Without that, the first estimate the model
  * supplies is either shown as the user's fact or counts as nobody's.
  *
+ * ⛔⛔ AND IT CARRIES A v17 DEFECT I FOUND BY VERIFYING THAT v17 WAS SERVING.
+ * v17 replaced the restrictive `option_refinement` DEFINITION, but a SECOND
+ * sentence scoping the same route survived, 60 lines earlier and inside the same
+ * served template: "that is the route by which something becomes an option WHEN
+ * THE USER NAMED NONE." The independent review was explicit that appending a
+ * widening sentence beside a restriction leaves the conflict in place — and v17
+ * left one. Found only because the serving check grepped the LIVE bytes for the
+ * old phrase and got 1, not 0, on a build that was otherwise correctly ahead.
+ * The paragraph's subject (a brief that names no course of action) is unchanged;
+ * only the clause scoping the ROUTE is.
+ *
  * SHAPE HALF ONLY — the connect half is byte-identical to v17 (asserted below).
  */
 const PREREGISTERED_V18_INSTRUCTION_SHA256 =
-  "7bdd32c90ea8939ed13d995e645d680c2fb0e2b986bb92e826a7f06ade9ca272";
-const PREREGISTERED_V18_INSTRUCTION_BYTES = 16884;
+  "72bbdc69f3525df049ba07a7c8fa3bd4a27a748d25fb8b63bee7fa204f4a495f";
+const PREREGISTERED_V18_INSTRUCTION_BYTES = 16894;
 /**
  * SUPERSEDED — v17's bytes, the widening delta. Retained and asserted DISTINCT
  * so a widening measurement can never be re-attributed to v18's value ask.
@@ -883,9 +894,9 @@ describe("the draft records instruction is the measured artefact", () => {
     // non-numeric clause must reach the model too" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
       // v17 — the definition replacement plus the two widening paragraphs.
-      "3ab3d6ded48268a773b95c53622f3174fa4a5f8892ab1f823cdc9f23a71cc6d7",
+      "d3028f8af21f0bae9424251e0f8f63b8acf24cc99fb7f475345c53ccee19ba1c",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(11946);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(11956);
     // SUPERSEDED — v15's shape half, the bytes the qualitative-conjunct loss was
     // witnessed under (release reached the person's own option in 0 of 5 draws).
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(

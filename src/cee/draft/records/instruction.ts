@@ -232,7 +232,7 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   does, do not hunt the brief for an option that is not there, and do not promote
   one of the causes to fill the gap. An action YOU are putting forward is an
   \`option_refinement\` claim — that is the route by which something becomes an
-  option when the user named none. \`claims\` is already the half of the record
+  option, whether or not the user named any. \`claims\` is already the half of the record
   set that is yours rather than theirs, so putting it there is what lets the user
   tell your proposal from their own words and argue with it. Set its \`basis\` to
   whatever in the brief you built it on, and leave \`basis\` empty when you built
