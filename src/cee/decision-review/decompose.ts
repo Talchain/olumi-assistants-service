@@ -113,6 +113,21 @@ const SLICE_MAX_FLIP = 8;
 const SLICE_MAX_GAPS = 8;
 const SLICE_MAX_CRITIQUES = 6;
 const SLICE_MAX_BRIEF_CHARS = 1_600;
+/**
+ * Graph entities forwarded to the CALIBRATION slice. R4 is the fragment that
+ * emits `bias_findings[].affected_elements`, and the contract gate grounds
+ * those against the run's graph — so R4 was being asked to cite ids from a
+ * graph NO FRAGMENT HAS EVER RECEIVED (`buildSlices` forwarded none to any of
+ * the four). Under the monolith that was invisible; the moment the graph is
+ * real, an ungrounded citation drops the whole review.
+ *
+ * Bounded far tighter than the monolith's 40/80 because a slice is a haiku
+ * sub-call: what R4 needs is the ADDRESS SPACE (which ids exist, and what they
+ * mean), not the full causal model, which R2/R3 already carry as factor
+ * sensitivity and fragile edges.
+ */
+const SLICE_MAX_GRAPH_NODES = 30;
+const SLICE_MAX_GRAPH_EDGES = 30;
 
 // ============================================================================
 // Small defensive readers (local — decompose must not depend on the enricher)
@@ -173,6 +188,81 @@ function briefSlice(brief: string): string {
 function block(tag: string, body: unknown): string {
   const json = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
   return `<${tag}>\n${json}\n</${tag}>`;
+}
+
+/**
+ * Project the run's graph into the bounded entity index the CALIBRATION slice
+ * needs in order to cite real ids.
+ *
+ * ⚠ AN EDGE IS ADDRESSED BY ITS ENDPOINTS WHEN IT HAS NO `id`. The model-facing
+ * compact edge shape carries `from`/`to` and no id (graph-compact.ts:143), so
+ * `ref` is the edge's explicit id when it has one and the producer's canonical
+ * `from->to` spelling otherwise — the same address the contract gate accepts
+ * (`collectGraphEntityIds`). Keeping the two in step is the whole point: a
+ * fragment told to cite an address the gate then rejects is worse than a
+ * fragment told nothing.
+ *
+ * Nodes referenced by a retained edge take the cap's places first, so a
+ * retained relationship never points at an absent endpoint. Omissions are
+ * disclosed in-band.
+ */
+function graphEntityIndex(graph: Record<string, unknown>): Record<string, unknown> | null {
+  const rawNodes = Array.isArray(graph['nodes']) ? (graph['nodes'] as unknown[]) : [];
+  const rawEdges = Array.isArray(graph['edges']) ? (graph['edges'] as unknown[]) : [];
+  if (rawNodes.length === 0 && rawEdges.length === 0) return null;
+
+  const rec = (v: unknown): Record<string, unknown> | null =>
+    v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  const str = (v: unknown): string | null =>
+    typeof v === 'string' && v.length > 0 ? v : null;
+
+  const edges = rawEdges
+    .map(rec)
+    .filter((e): e is Record<string, unknown> => e !== null)
+    .map((e) => {
+      const from = str(e['from']);
+      const to = str(e['to']);
+      if (from === null || to === null) return null;
+      return { ref: str(e['id']) ?? `${from}->${to}`, from, to };
+    })
+    .filter((e): e is { ref: string; from: string; to: string } => e !== null)
+    .slice(0, SLICE_MAX_GRAPH_EDGES);
+
+  const needed = new Set<string>();
+  for (const e of edges) {
+    needed.add(e.from);
+    needed.add(e.to);
+  }
+  const projected = rawNodes
+    .map(rec)
+    .filter((n): n is Record<string, unknown> => n !== null)
+    .map((n) => {
+      const id = str(n['id']);
+      if (id === null) return null;
+      return {
+        id,
+        ...(str(n['label']) !== null ? { label: str(n['label']) } : {}),
+        ...(str(n['kind']) !== null ? { kind: str(n['kind']) } : {}),
+      };
+    })
+    .filter((n): n is { id: string } => n !== null);
+  const nodes = [
+    ...projected.filter((n) => needed.has(n.id)),
+    ...projected.filter((n) => !needed.has(n.id)),
+  ].slice(0, SLICE_MAX_GRAPH_NODES);
+
+  const present = new Set(nodes.map((n) => n.id));
+  const keptEdges = edges.filter((e) => present.has(e.from) && present.has(e.to));
+
+  const omittedNodes = projected.length - nodes.length;
+  const omittedEdges = rawEdges.length - keptEdges.length;
+  return {
+    nodes,
+    edges: keptEdges,
+    ...(omittedNodes > 0 || omittedEdges > 0
+      ? { _omitted: { nodes: omittedNodes, edges: omittedEdges } }
+      : {}),
+  };
 }
 
 /**
@@ -267,8 +357,13 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
   ].join('\n\n');
 
   // R4 CALIBRATION — bias findings + decision-quality prompts + framing check.
+  // ⭐ THE ONLY FRAGMENT THAT EMITS `affected_elements`, and until now the only
+  // one asked to cite graph ids it had never been shown. Omitted entirely when
+  // the run carries no graph, so a graph-less run is byte-identical to before.
+  const graphEntities = graphEntityIndex(input.graph);
   const r4 = [
     block('BRIEF', briefSlice(input.brief)),
+    ...(graphEntities !== null ? [block('GRAPH_ENTITIES', graphEntities)] : []),
     block('MODEL_CRITIQUES', modelCritiques),
     block('FACTOR_SENSITIVITY', factorSensitivity),
     block('CALIBRATION', {

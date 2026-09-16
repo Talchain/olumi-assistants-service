@@ -540,6 +540,20 @@ export interface HandlerOutcome {
    * status quo" chip in front of a user who has nothing to configure, next to
    * a disclosure that deliberately prescribes nothing.
    */
+  /**
+   * ⭐ THE GRAPH THIS RUN ACTUALLY ANALYSED — server-only, never the wire.
+   *
+   * The exact `snapshot.rawPersistedGraph` the handler submitted to PLoT and
+   * hashed into `graph_hash_at_run`. Consumed by the turn-executor's
+   * decision-review block so the reviewing model reasons about, and grounds its
+   * citations in, the same model the numbers came from.
+   *
+   * ⚠ NAMED APART FROM `context.persistedGraph` ON PURPOSE (trap 21). That one
+   * answers *"what is saved right now"*; this one answers *"what did this run
+   * analyse"*. On an edit-then-analyse turn they are different graphs, and
+   * reconciling them is the wrong move — the review needs THIS one.
+   */
+  readonly __run_graph_snapshot?: unknown;
   readonly __excluded_options?: ReadonlyArray<
     import('../coaching/scaffold-disclosure.js').OmittedOptionRecord
   >;
