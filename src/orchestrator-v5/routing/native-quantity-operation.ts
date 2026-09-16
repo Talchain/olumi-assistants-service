@@ -82,6 +82,13 @@ export function readExistingIntervention(
 export function buildNativeQuantityOperation(
   write: NativeQuantityWrite,
   existing: ExistingIntervention | null,
+  /**
+   * The target factor's declared scale. REQUIRED to write: without a
+   * calibration there is no supported mapping from the user's figure to the
+   * model, and inventing one is the fabrication this whole path exists to
+   * avoid.
+   */
+  factorScale: { readonly cap?: number; readonly unit?: string } | undefined,
 ): Record<string, unknown> | null {
   if (existing === null) return null;
   // The encoded magnitude must already be present: this records a native
@@ -89,14 +96,37 @@ export function buildNativeQuantityOperation(
   if (typeof existing.value !== 'number' || !Number.isFinite(existing.value)) return null;
   if (!Number.isFinite(write.nativeValue)) return null;
 
+  // ⚠⚠ NO CALIBRATION, NO WRITE. Executed (Codex CX-60 witness): with the
+  // stale encoded value carried through, the no-calibration and unit-mismatch
+  // cases BOTH landed a cell that kept `value: 0.7` and reported
+  // `unresolved: []` — a silent success over an unsupported conversion. The
+  // refusal has to happen here, before the operation exists.
+  if (typeof factorScale?.cap !== 'number' || !Number.isFinite(factorScale.cap)) return null;
+  // A declared factor unit that disagrees with the figure's unit is a mismatch,
+  // not a conversion opportunity.
+  if (typeof factorScale.unit === 'string' && factorScale.unit !== write.unit) return null;
+
+  // ⭐⭐ THE STALE ENCODED VALUE IS DROPPED, AND THAT IS THE POINT.
+  //
+  // My first cut spread the whole cell through, `value` included, on a
+  // "preserve everything" instinct. Measured, that instinct BLOCKS the
+  // calibration it was meant to protect: the encoder's `deriveValue` returns
+  // `rec.value` immediately when a numeric one is present, so the native was
+  // stored and never consumed — the cell stayed 0.7. Codex's control line is
+  // the proof: "same calibrated native without old encoded value" -> 0.6.
+  //
+  // So the native reaches the existing calibration authority and the encoded
+  // magnitude is RE-DERIVED from it. Every other field is still carried
+  // through verbatim; siblings and unrelated meaning are untouched.
+  const { value: _staleEncoded, display_value: _staleDisplay, ...carried } = existing;
+
   return {
     op: 'update_node',
     path: `/nodes/${write.optionId}/data/interventions/${write.factorId}`,
     value: {
-      // Spread FIRST so the cell keeps source, target_match, value_confidence,
-      // reasoning, encoding_map and display_value. The encoded `value` rides
-      // through here untouched — it is not this operation's business.
-      ...existing,
+      // Everything EXCEPT the stale encoded value and its display twin, which
+      // described the old magnitude and would otherwise caption the new one.
+      ...carried,
       raw_value: write.nativeValue,
       unit: write.unit,
     },
@@ -104,7 +134,7 @@ export function buildNativeQuantityOperation(
     impact: 'moderate',
     rationale:
       `Records the ${write.unit} figure the user gave for ${write.optionLabel} `
-      + `on ${write.factorLabel}, beside the existing model value.`,
+      + `on ${write.factorLabel}, for the model value to be derived from.`,
   };
 }
 

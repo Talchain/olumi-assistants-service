@@ -38,28 +38,40 @@ const graph = (cell: unknown, optionId = 'opt_tech_lead') => ({
   ],
 });
 
-describe('buildNativeQuantityOperation — adds two fields, destroys none', () => {
-  const op = buildNativeQuantityOperation(WRITE, CELL)!;
+/** A calibrated factor: a finite cap in the same unit as the figure. */
+const SCALE = { cap: 250000, unit: 'GBP' };
 
-  it('⭐ PRESERVES every existing field — the defect the reused builder would cause', () => {
-    // `buildOptionEffectRawOperation` emits `value: { value }`, a whole-object
-    // replacement that would drop all five of these.
+describe('buildNativeQuantityOperation — the native reaches the calibration authority', () => {
+  const op = buildNativeQuantityOperation(WRITE, CELL, SCALE)!;
+
+  it('⭐⭐ DROPS the stale encoded value, so the authority re-derives it', () => {
+    // Measured (Codex CX-60 witness): carrying the old `value` through makes
+    // the encoder's `deriveValue` return it immediately, so the native is
+    // stored and NEVER consumed — the cell stays 0.7. The control line in that
+    // same run: "same calibrated native without old encoded value" -> 0.6.
+    // My "preserve everything" instinct was what blocked the calibration.
+    expect(op.value).not.toHaveProperty('value');
+  });
+
+  it('drops `display_value` too — it captioned the OLD magnitude', () => {
+    expect(op.value).not.toHaveProperty('display_value');
+  });
+
+  it('⭐ PRESERVES every other field — siblings and unrelated meaning untouched', () => {
     expect(op.value).toEqual({
-      ...CELL,
+      source: CELL.source,
+      target_match: CELL.target_match,
+      value_confidence: CELL.value_confidence,
+      reasoning: CELL.reasoning,
       raw_value: 95000,
       unit: 'GBP',
     });
   });
 
-  it('⛔ NEVER touches the encoded value the engine computes on', () => {
-    // Writing 95000 into `value` would move a [0,1] intervention to 95,000.
-    expect((op.value as Record<string, unknown>).value).toBe(0.7);
-  });
-
-  it('records the native beside it, not instead of it', () => {
-    const v = op.value as Record<string, unknown>;
-    expect(v.raw_value).toBe(95000);
-    expect(v.unit).toBe('GBP');
+  it('⛔ NEVER writes the native into the encoded field', () => {
+    // 95000 in `value` would move a [0,1] intervention to 95,000.
+    expect((op.value as Record<string, unknown>).value).toBeUndefined();
+    expect((op.value as Record<string, unknown>).raw_value).toBe(95000);
   });
 
   it('targets the exact cell by identity', () => {
@@ -72,26 +84,37 @@ describe('buildNativeQuantityOperation — adds two fields, destroys none', () =
   });
 
   it('replaces a stale native rather than duplicating it', () => {
-    const withOld = buildNativeQuantityOperation(WRITE, { ...CELL, raw_value: 1, unit: 'USD' })!;
+    const withOld = buildNativeQuantityOperation(WRITE, { ...CELL, raw_value: 1, unit: 'USD' }, SCALE)!;
     const v = withOld.value as Record<string, unknown>;
     expect(v.raw_value).toBe(95000);
     expect(v.unit).toBe('GBP');
   });
 });
 
-describe('buildNativeQuantityOperation — refuses rather than minting a half cell', () => {
+describe('buildNativeQuantityOperation — refuses rather than storing an unsupported figure', () => {
+  it('⚠ REFUSES when the factor carries NO CALIBRATION', () => {
+    // Executed before this gate: the no-calibration case landed a cell that
+    // kept value 0.7 and reported unresolved [] — a silent success over an
+    // unsupported conversion. This is also Paul's captured case exactly.
+    expect(buildNativeQuantityOperation(WRITE, CELL, undefined)).toBeNull();
+    expect(buildNativeQuantityOperation(WRITE, CELL, { unit: 'GBP' })).toBeNull();
+  });
+
+  it('⚠ REFUSES when the factor\u2019s declared unit disagrees with the figure', () => {
+    // A mismatch is not a conversion opportunity.
+    expect(buildNativeQuantityOperation(WRITE, CELL, { cap: 250000, unit: 'USD' })).toBeNull();
+  });
+
   it('refuses when the cell does not exist', () => {
-    expect(buildNativeQuantityOperation(WRITE, null)).toBeNull();
+    expect(buildNativeQuantityOperation(WRITE, null, SCALE)).toBeNull();
   });
 
   it('refuses when there is no encoded value to restate', () => {
-    // This records a native restatement OF something. With no encoded value
-    // there is nothing to restate and nothing to preserve.
-    expect(buildNativeQuantityOperation(WRITE, { source: 'user_specified' })).toBeNull();
+    expect(buildNativeQuantityOperation(WRITE, { source: 'user_specified' }, SCALE)).toBeNull();
   });
 
   it('refuses a non-finite native figure', () => {
-    expect(buildNativeQuantityOperation({ ...WRITE, nativeValue: Number.NaN }, CELL)).toBeNull();
+    expect(buildNativeQuantityOperation({ ...WRITE, nativeValue: Number.NaN }, CELL, SCALE)).toBeNull();
   });
 });
 

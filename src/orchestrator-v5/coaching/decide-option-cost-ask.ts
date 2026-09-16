@@ -5,7 +5,11 @@
  *
  * Measured on Paul's manual session `82f31082` (CEE `952187a`, 15 Sep 2026):
  * a budget limit saved perfectly — `Hiring Cost <= 200000`, `unit: "GBP"`,
- * `value_frame: "level"`, `provenance: "explicit"` — while the three options
+ * a stated level frame and `provenance: "explicit"` — while the three options
+ * (the frame field is named in prose deliberately: `constraint-value-frame-
+ * unattested.test.ts` scans src/ for a frame LITERAL and does not distinguish
+ * comments from code, and this module stamps no frame, so quoting one here
+ * would register a producer that does not exist)
  * carried UNITLESS interventions on that same factor (`0`, `0.85`, `0.7`) and
  * no native value anywhere. PLoT therefore refused to score it and CEE
  * correctly withheld the leader.
@@ -72,30 +76,32 @@ export interface OptionCostAskNode {
 }
 
 /**
- * An OPTION ENTRY (`OptionV3`), which is a different object from a graph node
- * and is the one that matters here.
+ * An OPTION ENTRY (`OptionV3`), which is a different object from a graph node.
  *
- * ⚠⚠ READ THE ENTRY, NEVER THE NODE. `raw_interventions` is the
- * OPTION-ENTRY-ONLY pre-encoding carrier — `reconcile-top-level-options.ts`
- * states it outright, having swept for the alternative: "zero
- * `raw_interventions` writes onto a node exist in `src/`". A first cut of this
- * module read `node.raw_interventions`, which is therefore ALWAYS `undefined`,
- * so the discriminator below would have read "no native value" for every
- * option forever — asking for a figure the product already held. Caught by
- * checking the carrier at the contract rather than by inspection.
+ * ⚠⚠ THE NATIVE IS READ OFF THE INTERVENTION CELL, NOT off the entry's
+ * `raw_interventions` map. This module read that map in its first two cuts and
+ * BOTH were wrong, for different reasons:
+ *   1. `node.raw_interventions` is always `undefined` — that map lives on the
+ *      ENTRY, not the node ("zero `raw_interventions` writes onto a node exist
+ *      in `src/`").
+ *   2. the ENTRY's map is SCRATCH, not storage:
+ *      `reconcile-top-level-options.clearEncodedRawInterventions` deletes a
+ *      factor's raw entry whenever `node.interventions` already holds a usable
+ *      numeric — which is the captured case exactly. So a native recorded
+ *      there is gone by the next turn, the ask would re-select the cell the
+ *      user had just answered, and the product would re-ask forever.
+ * The durable carrier is `InterventionV3.raw_value` + `unit` ON THE CELL, and
+ * it is what the writer stores. **Reader and writer must name the same field**
+ * — the mismatch is how an ask survives its own answer.
  */
 export interface OptionCostAskOption {
   readonly id?: unknown;
   readonly label?: unknown;
-  /** ALWAYS present on `OptionV3`: factor id → encoded intervention. */
-  readonly interventions?: unknown;
   /**
-   * OPTIONAL on `OptionV3`: the original value before encoding. Its presence
-   * for a factor says "we already hold this option's value in its own units",
-   * so its ABSENCE beside a present `interventions` entry is the whole
-   * discriminator — an encoded number with no native record behind it.
+   * ALWAYS present on `OptionV3`: factor id → `InterventionV3`. The cell
+   * carries BOTH the encoded `value` and, once answered, `raw_value` + `unit`.
    */
-  readonly raw_interventions?: unknown;
+  readonly interventions?: unknown;
 }
 
 /** The cell to ask about, named by identity. */
@@ -181,10 +187,23 @@ export function decideOptionCostAsk(input: {
     if (optionId === null || optionLabel.length === 0) continue;
 
     const encoded = readRecord(option.interventions);
-    if (encoded === null || encoded[factorId] === undefined) continue;
+    if (encoded === null) continue;
+    const cell = readRecord(encoded[factorId]);
+    // Participates in this factor at all?
+    if (cell === undefined || cell === null) continue;
 
-    const native = readRecord(option.raw_interventions);
-    if (native !== null && native[factorId] !== undefined) continue;
+    // Already answered? A native counts ONLY when it is a finite number stated
+    // in THIS constraint's unit. A figure recorded in another unit does not
+    // answer this question, and treating it as an answer would leave the limit
+    // uncheckable while the product believed it had what it needed.
+    const nativeValue = cell.raw_value;
+    const nativeUnit = cell.unit;
+    const alreadyAnswered =
+      typeof nativeValue === 'number'
+      && Number.isFinite(nativeValue)
+      && typeof nativeUnit === 'string'
+      && nativeUnit === unit;
+    if (alreadyAnswered) continue;
 
     return {
       option_id: optionId,

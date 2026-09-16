@@ -51,6 +51,7 @@ import { evaluateConfigureOptionOutcome } from '../routing/configure-option-outc
 // guard. 2.427 above owns the TEXT on this turn; this owns the WRITE, so a
 // factor-baseline mutation cannot persist behind a reply that says the option's
 // effect value is still unset. See the module header for the wire witness.
+import { buildFactorScaleMap } from '../tools/plot-intervention-scale.js';
 import { decideNativeQuantityAnswer } from '../routing/native-quantity-answer.js';
 import {
   buildNativeQuantityOperation,
@@ -2742,6 +2743,12 @@ export async function dispatchEditGraph(
               // The cell as it stands, so every existing field survives and the
               // ENCODED value rides through untouched.
               readExistingIntervention(graphState, nativeAnswer.optionId, nativeAnswer.factorId),
+              // The target factor's declared scale, from the estate's own
+              // reader. Absent ⇒ no supported mapping ⇒ the write refuses
+              // rather than storing a figure nothing can consume.
+              buildFactorScaleMap(
+                (graphState as { nodes?: unknown } | null | undefined)?.nodes,
+              ).get(nativeAnswer.factorId),
             );
         const nativeQuantityOperation = nativeQuantityRaw === null
           ? null

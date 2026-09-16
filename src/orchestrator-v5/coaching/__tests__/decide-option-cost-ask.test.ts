@@ -27,24 +27,27 @@ const CAPTURED_NODES: readonly OptionCostAskNode[] = [
 ];
 
 /**
- * The captured OPTION ENTRIES — a different object from a graph node, and the
- * only carrier of `raw_interventions`. Values verbatim from the bundle.
+ * The captured OPTION ENTRIES. The native lives on the intervention CELL
+ * (`InterventionV3.raw_value` + `unit`) — the same carrier the writer stores
+ * to. Reader and writer naming different fields is how an ask survives its own
+ * answer, and this module got that wrong twice before.
+ * Values verbatim from the bundle.
  */
 const CAPTURED_OPTIONS: readonly OptionCostAskOption[] = [
   {
     id: 'opt_status_quo',
     label: 'Status Quo: Keep Current Team',
-    interventions: { '85dd1a1d': 0, '943110e8': 0 },
+    interventions: { '85dd1a1d': { value: 0 }, '943110e8': { value: 0 } },
   },
   {
     id: 'opt_two_devs',
     label: 'Two Developers',
-    interventions: { '85dd1a1d': 0.85, '943110e8': 0.8 },
+    interventions: { '85dd1a1d': { value: 0.85 }, '943110e8': { value: 0.8 } },
   },
   {
     id: 'opt_tech_lead',
     label: 'Hire a Tech Lead',
-    interventions: { '85dd1a1d': 0.7 },
+    interventions: { '85dd1a1d': { value: 0.7 } },
   },
 ];
 
@@ -80,9 +83,51 @@ describe('decideOptionCostAsk — the captured defect', () => {
 
   it('moves to the NEXT cell once the first records a native value', () => {
     const options = CAPTURED_OPTIONS.map((o) =>
-      o.id === 'opt_status_quo' ? { ...o, raw_interventions: { '85dd1a1d': 0 } } : o,
+      o.id === 'opt_status_quo'
+        ? { ...o, interventions: { '85dd1a1d': { value: 0, raw_value: 0, unit: 'GBP' }, '943110e8': { value: 0 } } }
+        : o,
     );
     expect(ask({ options })?.option_id).toBe('opt_two_devs');
+  });
+});
+
+describe('decideOptionCostAsk — the ask must not survive its own answer', () => {
+  it('⭐ ADVANCES through every option, then stops — the full sequence', () => {
+    // The defect this closes: the reader named `raw_interventions` (scratch)
+    // while the writer stored `InterventionV3.raw_value`. After a successful
+    // answer the ask re-selected the SAME cell, forever.
+    let options = [...CAPTURED_OPTIONS];
+    const asked: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const next = ask({ options });
+      if (next === null) break;
+      asked.push(next.option_id);
+      // Answer it the way the writer does — on the CELL.
+      options = options.map((o) =>
+        o.id === next.option_id
+          ? {
+              ...o,
+              interventions: {
+                ...(o.interventions as Record<string, unknown>),
+                [next.factor_id]: { value: 0.7, raw_value: 95000, unit: 'GBP' },
+              },
+            }
+          : o,
+      );
+    }
+    expect(asked).toEqual(['opt_status_quo', 'opt_two_devs', 'opt_tech_lead']);
+    expect(ask({ options })).toBeNull();
+  });
+
+  it('a native in a DIFFERENT unit does not count as answered', () => {
+    // A figure in USD does not answer a question asked in GBP. Treating it as
+    // an answer would leave the limit uncheckable while the product believed
+    // it had what it needed.
+    const options = CAPTURED_OPTIONS.map((o) => ({
+      ...o,
+      interventions: { ...(o.interventions as Record<string, unknown>), '85dd1a1d': { value: 0.7, raw_value: 95000, unit: 'USD' } },
+    }));
+    expect(ask({ options })?.option_id).toBe('opt_status_quo');
   });
 });
 
@@ -100,7 +145,7 @@ describe('decideOptionCostAsk — every refusal is a decision not to guess', () 
     // Asking options for a native outcome value would repeat it.
     const nodes: OptionCostAskNode[] = [{ id: '85dd1a1d', kind: 'outcome', label: 'Cost Efficiency' }];
     const options: OptionCostAskOption[] = [
-      { id: 'opt_a', label: 'A', interventions: { '85dd1a1d': 0.7 } },
+      { id: 'opt_a', label: 'A', interventions: { '85dd1a1d': { value: 0.7 } } },
     ];
     expect(ask({ nodes, options })).toBeNull();
   });
@@ -123,7 +168,10 @@ describe('decideOptionCostAsk — every refusal is a decision not to guess', () 
   });
 
   it('asks NOTHING when every participating option already records a native value', () => {
-    const options = CAPTURED_OPTIONS.map((o) => ({ ...o, raw_interventions: { '85dd1a1d': 1 } }));
+    const options = CAPTURED_OPTIONS.map((o) => ({
+      ...o,
+      interventions: { ...(o.interventions as Record<string, unknown>), '85dd1a1d': { value: 0.7, raw_value: 1, unit: 'GBP' } },
+    }));
     expect(ask({ options })).toBeNull();
   });
 
@@ -131,8 +179,8 @@ describe('decideOptionCostAsk — every refusal is a decision not to guess', () 
     // A non-participating option has nothing to restate — asking it for a cost
     // on a factor it does not touch would invent a relationship.
     const options: OptionCostAskOption[] = [
-      { id: 'opt_untouched', label: 'Untouched', interventions: { '943110e8': 1 } },
-      { id: 'opt_real', label: 'Real', interventions: { '85dd1a1d': 0.7 } },
+      { id: 'opt_untouched', label: 'Untouched', interventions: { '943110e8': { value: 1 } } },
+      { id: 'opt_real', label: 'Real', interventions: { '85dd1a1d': { value: 0.7 } } },
     ];
     expect(ask({ options })?.option_id).toBe('opt_real');
   });
