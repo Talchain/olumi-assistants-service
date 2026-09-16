@@ -143,13 +143,21 @@ describe('formatConstraintTargetAlternative', () => {
     expect(text).not.toMatch(/\bI have moved\b|\bmoved it\b/i);
   });
 
-  it('⛔ PROMISES "as well", never a MOVE the write path cannot perform', () => {
-    // The row key is (node_id, operator), so accepting APPENDS against the new
-    // node and the original survives — there is no removal path in the estate.
-    // A first draft promised "I will move the limit to it", which the write
-    // cannot keep.
-    expect(text).toMatch(/as well/i);
-    expect(text).not.toMatch(/move the limit|instead of|replace/i);
+  it('⛔ PROMISES ONLY WHAT HOLDS ON BOTH PATHS — not "as well", not a move', () => {
+    // ⚠ THIS ASSERTION HAS BEEN WRONG IN BOTH DIRECTIONS, WHICH IS THE LESSON.
+    // It first pinned "I will move the limit to it" when the writer could only
+    // APPEND — a test pinning a false promise. It then pinned "as well", which
+    // went false the moment the correction offer went live and a confirmation
+    // began MOVING the limit.
+    //
+    // So it now binds to the INVARIANT rather than to either wording: the
+    // confirmation may move (offer armed) or append (offer absent — no graph
+    // hash, or the emitter refusing the copy), and the sentence must be true on
+    // BOTH paths. The only such claim is that the limit ends up on that node.
+    // Which one happened is the RECEIPT's job, after the fact.
+    expect(text).toMatch(/put the limit on it/i);
+    expect(text).not.toMatch(/\bas well\b/i);           // would deny a move
+    expect(text).not.toMatch(/\bmove\b|instead of|\bno longer\b|replace/i); // would promise removal
   });
 
   it('⛔ offers a CANDIDATE and does not assert checkability', () => {

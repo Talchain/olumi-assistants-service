@@ -75,6 +75,7 @@ import {
   formatConstraintAdded,
   formatConstraintDurationNotEvaluated,
   formatConstraintLabelUpdated,
+  formatConstraintMoved,
   formatConstraintNotCheckable,
   formatConstraintUnchanged,
   formatConstraintUpdated,
@@ -1311,13 +1312,22 @@ export function createAddConstraintHandler(): HandlerFn {
               value: params.value,
               ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
             })
-        : narratesUnchanged
-          ? labelChanged
-            ? formatConstraintLabelUpdated(formatInput)
-            : formatConstraintUnchanged(formatInput)
-          : existing !== undefined
-            ? formatConstraintUpdated(formatInput)
-            : formatConstraintAdded(formatInput);
+        : isCorrection
+          // A correction destroyed a row on another node. "Added constraint"
+          // would be true of the destination and silent about the deletion.
+          ? formatConstraintMoved({
+              fromLabel:
+                graph.nodes.find((n) => n.id === correctsId)?.label ?? 'the previous target',
+              toLabel: targetNode.label,
+              label: constraintLabel,
+            })
+          : narratesUnchanged
+            ? labelChanged
+              ? formatConstraintLabelUpdated(formatInput)
+              : formatConstraintUnchanged(formatInput)
+            : existing !== undefined
+              ? formatConstraintUpdated(formatInput)
+              : formatConstraintAdded(formatInput);
 
       // ⭐⭐ THE RECEIPT MUST NOT CLAIM AN ENFORCEMENT THAT WILL NOT HAPPEN.
       //
@@ -1387,6 +1397,12 @@ export function createAddConstraintHandler(): HandlerFn {
       //     on the same cell is noise, and two asks in one receipt invite the
       //     user to answer neither.
       //   · otherwise, and only then, the disclosure speaks.
+      // ⭐ Hoisted so the OUTCOME can offer the move, not just describe it.
+      // The sentence alone was the honest-dead-end pattern: it names the node
+      // that could carry the limit and leaves the user to retype the whole
+      // thing, which is what put the limit on the wrong node in the first
+      // place. `null` ⇒ nothing was offered ⇒ no pending (fail closed).
+      let alternativeForCorrection: ReturnType<typeof findConstraintTargetAlternative> = null;
       const fragments: string[] = [constraintText];
       if (unevaluatedDurationSpan !== null) {
         fragments.push(
@@ -1419,18 +1435,18 @@ export function createAddConstraintHandler(): HandlerFn {
         // re-targeted: the user chose a node, and moving their limit under
         // them on a unit match would be the confident wrongness the
         // admissibility check exists to prevent.
-        const alternative = findConstraintTargetAlternative({
+        alternativeForCorrection = findConstraintTargetAlternative({
           chosenIsCheckable: false,
           chosenNodeId: targetId,
           constraintUnit: newConstraint.unit ?? null,
           nodes: graph.nodes as never,
         });
         fragments.push(
-          alternative === null
+          alternativeForCorrection === null
             ? formatConstraintNotCheckable({ targetLabel: targetNode.label })
             : formatConstraintTargetAlternative({
                 chosenLabel: targetNode.label,
-                alternative,
+                alternative: alternativeForCorrection,
               }),
         );
       }
@@ -1441,6 +1457,21 @@ export function createAddConstraintHandler(): HandlerFn {
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
         mutated_graph: result.mutatedGraph,
+        // The move the user may confirm. Fields are the builder's own, so the
+        // sentence and the offer cannot describe different nodes.
+        ...(alternativeForCorrection !== null && newConstraint.unit !== undefined
+          ? {
+              __constraint_target_correction: {
+                misplaced_node_id: targetId,
+                misplaced_node_label: targetNode.label,
+                operator,
+                value: params.value,
+                unit: newConstraint.unit,
+                alternative_node_id: alternativeForCorrection.nodeId,
+                alternative_label: alternativeForCorrection.label,
+              },
+            }
+          : {}),
         // The executor persists the pending question from this channel in the
         // SAME commit as the receipt that asked it (fields shared with the
         // pending-action type so the two cannot drift). `label` is the

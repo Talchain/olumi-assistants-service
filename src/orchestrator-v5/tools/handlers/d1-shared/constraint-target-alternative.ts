@@ -181,7 +181,20 @@ export function findConstraintTargetAlternative(input: {
  * their limit under them on a unit match would be exactly the confident
  * wrongness the admissibility check exists to prevent.
  *
- * ⚠⚠ AND IT PROMISES ONLY WHAT THE WRITE PATH CAN DO — "add", NOT "move"
+ * ⚠⚠ AND IT PROMISES ONLY WHAT THE WRITE PATH CAN GUARANTEE — which is now
+ * neither "as well" nor "move", and the reason is worth stating.
+ *
+ * With the correction offer armed, confirming MOVES the limit. But the offer
+ * is armed in the executor and can legitimately be absent (no graph hash, or
+ * the emitter refusing the copy), and on that path a confirmation APPENDS. So
+ * a sentence promising removal would be false exactly when the carrier is
+ * missing — the failure mode hardest to notice.
+ *
+ * The sentence therefore asserts only the part that holds either way: the
+ * limit will end up on that node. WHICH of the two happened is stated by the
+ * RECEIPT, after the fact, where it is known rather than predicted.
+ *
+ * Superseded reasoning kept for the record — "add", NOT "move"
  * (derived at `add-constraint.ts`, Codex CX-150's second half, which I had
  * claimed nothing about until I checked).
  *
@@ -212,7 +225,7 @@ export function formatConstraintTargetAlternative(input: {
     `I recorded this against ${input.chosenLabel}, which has no figure for the `
     + `analysis to test. ${input.alternative.label} may be the one you meant \u2014 `
     + `it is the only thing in your model recorded in ${input.alternative.unit}. `
-    + `Say so and I will put the limit there as well.`
+    + `Say so and I will put the limit on it.`
   );
 }
 

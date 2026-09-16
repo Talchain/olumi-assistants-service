@@ -100,6 +100,21 @@ describe('corrects_node_id — a MOVE through the existing atomic write', () => 
     expect(rows.some((r) => r.node_id === 'r-overrun')).toBe(false);
   });
 
+  it('⭐ the RECEIPT says it MOVED, and names the node it left', async () => {
+    // Before this the turn produced "Added constraint: …" with
+    // fact.result.before = null — a row destroyed while BOTH channels narrated
+    // a fresh add. Under-reporting a deletion is the same class as
+    // over-claiming a write: the user cannot see what their model now says.
+    // "Moved" with only one end named is as ambiguous as not saying it.
+    const outcome = await run({
+      targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-overrun',
+    });
+    const text = outcome.assistant_text ?? '';
+    expect(text).toMatch(/moved that limit off Budget Overrun Risk/i);
+    expect(text).toMatch(/onto Hiring and Onboarding Cost/i);
+    expect(text).not.toMatch(/^Added constraint/i);
+  });
+
   it('⭐ an UNRELATED limit survives the correction untouched', async () => {
     const rows = await rowsOf(await run({
       targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-overrun',

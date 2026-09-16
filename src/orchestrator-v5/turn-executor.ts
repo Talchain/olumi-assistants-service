@@ -307,6 +307,7 @@ import {
   sanitisePublicCopyOrFallback,
   emitProposedChange,
 } from './compose/proposed-change.js';
+import { buildConstraintTargetCorrection } from './compose/constraint-target-correction.js';
 import {
   buildWarrantDemotion,
   buildIncompleteOfferRefusalText,
@@ -13493,6 +13494,64 @@ export async function runTurnExecutor(
           emitted_at_iso: askedAtIso,
         };
       })();
+      // ⭐⭐ THE CORRECTION OFFER — armed in the SAME commit as the sentence
+      // that makes it. Mirrors `__option_cost_ask`: server-only, fail-closed on
+      // an unavailable hash, and the user-facing half is already in
+      // `assistant_text`.
+      //
+      // It rides `emitProposedChange`, so the confirmation is the EXISTING
+      // `apply_proposed_change` lifecycle (freshness + idempotency gating, then
+      // handler dispatch at the top of this file) rather than a new one. The
+      // patch carries `corrects_node_id`, which is what makes the confirmed
+      // turn MOVE the limit instead of appending a second one.
+      //
+      // ⚠ On an emit refusal nothing is offered and telemetry says which — a
+      // silent drop would leave the sentence promising a move with no carrier.
+      // Even then the failure is honest rather than silent: the handler refuses
+      // an unresolvable correction explicitly and says nothing changed.
+      const correctionChannel = handlerOutcome?.__constraint_target_correction;
+      const correctionPendingForCommit: PendingAction | undefined = (() => {
+        if (correctionChannel === undefined) return undefined;
+        if (llmGraphHash === null) {
+          log.warn(
+            { request_id: requestId, scenario_id: context.session_id },
+            'V5 constraint-target correction — graph hash unavailable; nothing offered (fail-closed)',
+          );
+          return undefined;
+        }
+        const proposal = buildConstraintTargetCorrection({
+          misplaced: {
+            nodeId: correctionChannel.misplaced_node_id,
+            nodeLabel: correctionChannel.misplaced_node_label,
+            operator: correctionChannel.operator,
+            value: correctionChannel.value,
+            unit: correctionChannel.unit,
+          },
+          alternative: {
+            nodeId: correctionChannel.alternative_node_id,
+            label: correctionChannel.alternative_label,
+          },
+        });
+        if (proposal === null) return undefined;
+        const emitted = emitProposedChange(proposal, {
+          scenario_id: context.session_id,
+          graph_hash: llmGraphHash,
+          emitted_at_iso: new Date().toISOString(),
+          registry: options.handlerRegistry ?? getDefaultRegistry(),
+        });
+        if (emitted.status !== 'success') {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              emit_status: emitted.status,
+            },
+            'V5 constraint-target correction — emit refused; nothing offered',
+          );
+          return undefined;
+        }
+        return emitted.pending;
+      })();
       const elicitChannel = handlerOutcome?.__elicit_baseline;
       const elicitPendingForCommit: PendingAction | undefined = (() => {
         if (elicitChannel === undefined) return undefined;
@@ -13584,10 +13643,15 @@ export async function runTurnExecutor(
       })();
       const pendingForCommit =
         flipProposalPending || elicitPendingForCommit || goalTargetAskPendingForCommit
-        || optionCostPendingForCommit
+        || optionCostPendingForCommit || correctionPendingForCommit
           ? [
               ...(elicitPendingForCommit ? [elicitPendingForCommit] : []),
               ...(goalTargetAskPendingForCommit ? [goalTargetAskPendingForCommit] : []),
+              // Ahead of the rerun/proposal chips for the same reason the
+              // option-cost ask is: a limit on a target that cannot carry it
+              // will keep producing the same withheld verdict, so the offer
+              // that can FIX it takes the scarcer slot.
+              ...(correctionPendingForCommit ? [correctionPendingForCommit] : []),
               // Ahead of the rerun/proposal chips: a rerun offered while the
               // limit is still uncheckable repeats the same withheld verdict,
               // so the question that could change it takes the scarcer slot.
