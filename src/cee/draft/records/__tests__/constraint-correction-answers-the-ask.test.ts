@@ -39,6 +39,17 @@ const BRIEF =
   "Given our goal of reaching £20k MRR within 12 months while keeping monthly churn under 4%, should we increase the Pro plan price to £59 with the next Pro feature release, or hold at £49 and ship the same feature release to drive volume?";
 
 const load = (p: string): DraftRecordSet => JSON.parse(readFileSync(p, "utf8")) as DraftRecordSet;
+
+/**
+ * ⭐ THE REPAIR SCOPE, STATED EXPLICITLY PER TEST. `applyConstraintCorrections`
+ * now requires it — a correction may only touch a limit this turn was asked
+ * about (P1a). These cases are about the OTHER refusals, so each declares the
+ * index under test as in-scope and isolates the property it names. Scope itself
+ * is covered by `correction-scope-and-conflict.test.ts`.
+ */
+const inScope = (...ix: number[]): ReadonlySet<number> => new Set(ix);
+const allIndices = (r: DraftRecordSet): ReadonlySet<number> =>
+  new Set(r.stated_items.map((_, i) => i));
 function project(r: DraftRecordSet, brief?: string) {
   const out = projectDraftRecords(r, brief);
   if (!out.ok) throw new Error(`projection failed: ${out.reason}`);
@@ -125,7 +136,7 @@ describe("B — a correction repairs the limit, and CANNOT rewrite the user", ()
       constraint_corrections: [
         { stated_index: 1, direction: "ceiling", value: 0.04, unit: "%", applies_to_claim: 0 },
       ],
-    });
+    }, allIndices(records));
     expect(merged.ok).toBe(true);
     if (!merged.ok) return;
     expect(merged.corrections_applied).toBe(1);
@@ -166,7 +177,7 @@ describe("B — a correction repairs the limit, and CANNOT rewrite the user", ()
       constraint_corrections: [
         { stated_index: ci, direction: "ceiling", value: 0.04, unit: "%", applies_to_claim: churnFactor },
       ],
-    });
+    }, allIndices(base));
     expect(merged.ok).toBe(true);
     if (!merged.ok) return;
     const projection = project(merged.records, BRIEF);
@@ -184,12 +195,12 @@ describe("B — a correction repairs the limit, and CANNOT rewrite the user", ()
       constraint_corrections: [
         { stated_index: idx(base), direction: "ceiling", value: 0.04, applies_to_claim: 0 },
       ],
-    });
+    }, allIndices(base));
     expect(merged.ok).toBe(true);
   });
 
   it("B3: an EMPTY completion is still `no_new_claims`", () => {
-    expect(mergeCompletionClaims(r(), { claims: [] })).toEqual({ ok: false, reason: "no_new_claims" });
+    expect(mergeCompletionClaims(r(), { claims: [] }, allIndices(r()))).toEqual({ ok: false, reason: "no_new_claims" });
   });
 
   it("B4: `source_quote` and `kind` survive a correction byte-for-byte", () => {
@@ -197,14 +208,14 @@ describe("B — a correction repairs the limit, and CANNOT rewrite the user", ()
     const i = idx(base);
     const out = applyConstraintCorrections(base, [
       { stated_index: i, direction: "floor", value: 1, applies_to_claim: 0 },
-    ]);
+    ], inScope(i));
     expect(out.applied).toBe(1);
     expect(out.stated_items[i]!.source_quote).toBe(base.stated_items[i]!.source_quote);
     expect((out.stated_items[i] as { kind?: string }).kind).toBe("constraint");
   });
 
   it("B5: wholesale `stated_items` is STILL refused", () => {
-    expect(mergeCompletionClaims(r(), { stated_items: [], claims: [] })).toEqual({
+    expect(mergeCompletionClaims(r(), { stated_items: [], claims: [] }, allIndices(r()))).toEqual({
       ok: false,
       reason: "stated_items_disturbed",
     });
@@ -215,7 +226,7 @@ describe("C — every way a correction could smuggle something is refused", () =
   const base = () => load(CAPTURE);
   const i = (x: DraftRecordSet) => x.stated_items.findIndex((s) => (s as { kind?: string }).kind === "constraint");
   const apply = (c: Partial<ConstraintCorrection>) =>
-    applyConstraintCorrections(base(), [{ stated_index: i(base()), direction: "ceiling", value: 1, ...c } as ConstraintCorrection]).applied;
+    applyConstraintCorrections(base(), [{ stated_index: i(base()), direction: "ceiling", value: 1, ...c } as ConstraintCorrection], allIndices(base())).applied;
 
   it("C1: BOTH subject namespaces at once is refused", () => {
     expect(apply({ applies_to_claim: 0, applies_to_stated: 0 })).toBe(0);
@@ -227,22 +238,28 @@ describe("C — every way a correction could smuggle something is refused", () =
     expect(
       applyConstraintCorrections(base(), [
         { stated_index: 0, direction: "ceiling", value: 1, applies_to_claim: 0 },
-      ]).applied,
+      ], allIndices(base())).applied,
     ).toBe(0);
   });
   it("C4: an out-of-range index is refused", () => {
     expect(apply({ stated_index: 9999 } as Partial<ConstraintCorrection>)).toBe(0);
   });
-  it("C5: a SECOND correction for one limit is refused, not last-wins", () => {
+  it("C5: a SECOND correction for one limit refuses BOTH — order-independent", () => {
+    // ⚠ THIS ASSERTED THE WRONG THING. It checked only that the second entry
+    // does not win, which FIRST-WINS satisfies — so it passed under the exact
+    // defect it was named for. Independent review reproduced the ordering
+    // dependence. The real property is in `correction-scope-and-conflict.test.ts`
+    // (B1-B3); this keeps a local guard on the same behaviour.
     const b = base();
     const k = i(b);
     const out = applyConstraintCorrections(b, [
       { stated_index: k, direction: "ceiling", value: 0.04, applies_to_claim: 0 },
       { stated_index: k, direction: "floor", value: 999, applies_to_claim: 1 },
-    ]);
-    expect(out.applied).toBe(1);
-    expect((out.stated_items[k] as { value?: number }).value).toBe(0.04);
+    ], inScope(k));
+    expect(out.applied).toBe(0);
+    expect(out.stated_items).toBe(b.stated_items);
   });
+
   it("C6: a non-finite value is refused", () => {
     expect(apply({ value: Number.NaN, applies_to_claim: 0 })).toBe(0);
   });
@@ -263,7 +280,7 @@ describe("D — with nothing to apply, the user's items come back BY REFERENCE",
 
   it("D1: no corrections at all ⇒ the very same array", () => {
     const b = base();
-    expect(applyConstraintCorrections(b, []).stated_items).toBe(b.stated_items);
+    expect(applyConstraintCorrections(b, [], allIndices(b)).stated_items).toBe(b.stated_items);
   });
 
   it("D2: every correction REFUSED ⇒ still the very same array", () => {
@@ -271,7 +288,7 @@ describe("D — with nothing to apply, the user's items come back BY REFERENCE",
     const out = applyConstraintCorrections(b, [
       { stated_index: 9999, direction: "ceiling", value: 1, applies_to_claim: 0 },
       { stated_index: 0, direction: "ceiling", value: 1, applies_to_claim: 0 },
-    ]);
+    ], allIndices(b));
     expect(out.applied).toBe(0);
     expect(out.stated_items).toBe(b.stated_items);
   });
@@ -281,7 +298,7 @@ describe("D — with nothing to apply, the user's items come back BY REFERENCE",
     const ci = b.stated_items.findIndex((x) => (x as { kind?: string }).kind === "constraint");
     const out = applyConstraintCorrections(b, [
       { stated_index: ci, direction: "ceiling", value: 0.04, applies_to_claim: 0 },
-    ]);
+    ], inScope(ci));
     expect(out.stated_items).not.toBe(b.stated_items);
     b.stated_items.forEach((item, i) => {
       if (i === ci) return;

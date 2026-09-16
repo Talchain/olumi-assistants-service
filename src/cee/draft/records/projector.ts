@@ -739,6 +739,16 @@ export interface DroppedRecordRef {
     | "claim_label_not_a_name";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
+  /**
+   * ⭐ THE `stated_items` POSITION THIS REFUSAL IS ABOUT, when it is about one.
+   *
+   * Typed rather than parsed back out of `from_ref`. A consumer that scraped
+   * `stated_items[N]` out of the rendered string would be a hand-maintained
+   * mirror of `renderRef`'s format (trap 12): change the rendering and the
+   * scraper silently stops matching, with nothing red. The completion's repair
+   * scope is derived from this field.
+   */
+  readonly stated_index?: number;
   readonly to_ref?: string;
   /** Resolved node kinds — present only on `ref_kind_illegal`, where they ARE the finding. */
   readonly from_kind?: string;
@@ -2671,6 +2681,8 @@ function projectOnce(
         label: quote,
         node_id: id,
         reason: "constraint_value_unstated",
+        from_ref: `stated_items[${index}]`,
+        stated_index: index,
       });
     }
     if (kind === "constraint" && typeof item.value === "number" && statedDirection === undefined) {
@@ -3356,6 +3368,7 @@ function projectOnce(
         node_id: binding.nodeId,
         reason,
         from_ref: `stated_items[${binding.statedIndex}]`,
+        stated_index: binding.statedIndex,
         ...(toRef !== undefined ? { to_ref: toRef } : {}),
       });
     };

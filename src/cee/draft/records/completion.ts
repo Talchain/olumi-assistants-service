@@ -1622,16 +1622,95 @@ export interface ConstraintCorrection {
  * naming a goal will be refused there exactly as the original was. This function
  * decides only that a correction is SHAPED like a repair, never that it is true.
  */
+/**
+ * ⭐⭐⭐ WHICH LIMITS THE COMPLETION WAS ACTUALLY ASKED TO REPAIR.
+ *
+ * P1 from independent review: without this, a completion asked to repair limit
+ * A could rewrite limit B — reproduced by flipping an already-bound churn
+ * ceiling `<= 0.04` into a floor `>= 0.9` while a LEGAL-only ask was the sole
+ * question on the turn. The row kept the user's unchanged "under 4%" quote and
+ * `provenance: "explicit"`, preservation violations were empty, and the keep
+ * gate said true.
+ *
+ * ⛔ THE LESSON, NAMED BECAUSE I HAD IT BACKWARDS: my own test asserted that
+ * `source_quote` survives byte-for-byte and I treated that as the safety
+ * property. QUOTE PRESERVATION IS NOT MEANING PRESERVATION. The words were
+ * intact and the limit said the opposite thing.
+ *
+ * Derived from the projection's own refusals, never from a list anyone
+ * maintains: a limit is repairable exactly when the projector refused to bind
+ * it and said so.
+ */
+export function repairableConstraintIndices(
+  projection: { readonly dropped: ReadonlyArray<{ readonly reason: string; readonly stated_index?: number }> },
+): ReadonlySet<number> {
+  const out = new Set<number>();
+  for (const d of projection.dropped) {
+    if (!REPAIRABLE_CONSTRAINT_REASONS.has(d.reason)) continue;
+    if (typeof d.stated_index === "number") out.add(d.stated_index);
+  }
+  return out;
+}
+
+/**
+ * The refusal reasons that a `constraint_corrections` entry can answer. Kept
+ * beside `enumerateCompletionAsk`'s own cases so the two cannot drift: a reason
+ * that raises the ask must appear here, or the model is asked a question whose
+ * answer will then be discarded.
+ */
+const REPAIRABLE_CONSTRAINT_REASONS: ReadonlySet<string> = new Set([
+  "constraint_target_not_measurable",
+  "constraint_target_unit_mismatch",
+  "constraint_value_unstated",
+  "unparseable_ref",
+  "ref_out_of_range",
+  "ref_target_not_a_node",
+  "missing_ref",
+  "ambiguous_ref",
+]);
+
 export function applyConstraintCorrections(
   base: DraftRecordSet,
   corrections: readonly ConstraintCorrection[],
+  /**
+   * The limits this turn was asked to repair — see
+   * {@link repairableConstraintIndices}. REQUIRED, not optional: an optional
+   * scope defaults to "anything", which is the P1 this parameter exists to
+   * close, and a caller that forgets it would silently restore the hole.
+   */
+  repairable: ReadonlySet<number>,
 ): { stated_items: DraftRecordSet["stated_items"]; applied: number } {
+  /**
+   * ⭐⭐ CONFLICTING CORRECTIONS ARE REFUSED, NOT RESOLVED BY POSITION.
+   *
+   * Second P1 from the same review: this was first-wins, so two opposite
+   * corrections for one limit produced `<= 0.04` or `>= 0.9` depending only on
+   * which arrived first, and BOTH passed the real keep gate. My own comment
+   * beside it read "an ordering-dependent result is not a result" — the
+   * principle was right and the code did the other thing.
+   *
+   * ⚠ AND MY TEST COULD NOT SEE IT. `C5` asserted only that the SECOND entry
+   * does not win, which first-wins satisfies. A guard that passes under the
+   * defect it names is the shape this estate's tests exist to hunt.
+   *
+   * The whole group is dropped. One unambiguous correction still applies.
+   */
+  const perIndex = new Map<number, number>();
+  for (const c of corrections) {
+    if (!Number.isInteger(c?.stated_index)) continue;
+    perIndex.set(c.stated_index, (perIndex.get(c.stated_index) ?? 0) + 1);
+  }
+  const contested = new Set([...perIndex].filter(([, n]) => n > 1).map(([i]) => i));
   const seen = new Set<number>();
   const items = base.stated_items.map((item) => item);
   let applied = 0;
   for (const c of corrections) {
     const i = c.stated_index;
     if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
+    // ⛔ ONLY A LIMIT THIS TURN WAS ASKED ABOUT. An already-bound limit the
+    // completion was not questioned on is not its to change.
+    if (!repairable.has(i)) continue;
+    if (contested.has(i)) continue;
     if (seen.has(i)) continue;
     const target = items[i]!;
     if ((target as { kind?: string }).kind !== "constraint") continue;
@@ -1685,12 +1764,15 @@ export function mergeCompletionClaims(
     claims?: DraftInferenceClaim[];
     constraint_corrections?: readonly ConstraintCorrection[];
   },
+  /** The limits this turn was asked to repair. Empty ⇒ no correction applies. */
+  repairable: ReadonlySet<number> = new Set<number>(),
 ): CompletionMergeResult {
   if (completion.stated_items !== undefined) return { ok: false, reason: "stated_items_disturbed" };
   const added = completion.claims ?? [];
   const { stated_items, applied } = applyConstraintCorrections(
     base,
     completion.constraint_corrections ?? [],
+    repairable,
   );
   // ⭐ A CORRECTION ON ITS OWN IS A REAL ANSWER. `no_new_claims` used to be the
   // only verdict when `claims` was empty, and it is still correct when nothing

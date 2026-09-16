@@ -100,6 +100,7 @@ export {
   shouldKeepCompletion,
   completionRegressesProtectedContent,
   applyConstraintCorrections,
+  repairableConstraintIndices,
   type ConstraintCorrection,
   askItemIdentity,
   buildRecordsCompletionSchema,
