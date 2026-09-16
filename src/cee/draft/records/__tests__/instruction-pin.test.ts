@@ -508,9 +508,66 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * records connect, so the connect half is byte-identical to v14 (asserted
  * below).
  */
-const PREREGISTERED_V16_INSTRUCTION_SHA256 =
+/**
+ * v17 — THE WIDENING DELTA. INDEPENDENTLY REVIEWED WORDING, TRANSCRIBED.
+ *
+ * PRE-REGISTERED: hashed and written here in the same commit that produced the
+ * bytes, BEFORE any draw was taken under them. Nothing has been measured under
+ * v17 yet, and this pin exists so that whatever IS measured is attributable to
+ * these exact bytes rather than to "the current instruction".
+ *
+ * ⭐ WHY IT IS A REPLACEMENT AND NOT AN APPENDED COMMAND, which was the
+ * reviewer's explicit instruction. Paul's report: "previously, the initial
+ * graphs generated at least one additional option … we seem to have lost that."
+ * Derived at the served bytes rather than guessed: the instruction ALLOWED a
+ * novel alternative and MANDATED one nowhere, and its `option_refinement`
+ * definition scoped proposing to the case where "the user named no course of
+ * action". Once a user names options, that sentence reads as a bar. Appending a
+ * widening paragraph beside it would have left the conflict in place — the
+ * reviewer said so, and that is why lines 291-294 are REPLACED.
+ *
+ * Four changes, all transcribed from the returned review:
+ *   · the `option_refinement` definition, replaced — proposing is no longer
+ *     conditional on the user having named nothing;
+ *   · "Look beyond the named options", with the guard that these are prompts to
+ *     think and not a checklist, and an explicit ban on near-duplicates;
+ *   · "Keep the user's stated requirements intact" — no relaxing a deadline or
+ *     budget, no claiming a proposal meets one when that is unknown, and no
+ *     inventing a figure merely to make an alternative different;
+ *   · "Emit only what the brief supports" clarified to mean the STATED/PROPOSED
+ *     distinction rather than a bar on proposing, with the empty-claims answer
+ *     preserved as valid.
+ *
+ * ⚠ THE CAP IS A CEILING, NEVER A QUOTA, and the wording now says so in the
+ * same bullet that states the limit — because a limit stated without that
+ * sentence is read as room to fill, which is the failure mode the reviewer
+ * named first.
+ *
+ * ⚠ AND WHAT THIS PIN CANNOT SHOW. Offline replay proves preservation and
+ * projection; it cannot prove improved GENERATION. The contrasts this change
+ * must not break — compound pricing keeping price-plus-release and its
+ * grandfathering, shared release staying shared with no invented price, and
+ * price-only not acquiring an unstated release — are held as controls in the
+ * banked-tape suites. A bounded captured generation witness comes after those
+ * pass, with complete request and output capture and no retry-until-green.
+ *
+ * BOTH HALVES TOUCHED — the shape half takes the definition and the two new
+ * paragraphs; the connect half takes the own-chain rule and the cap
+ * clarification. This is the first version to change the connect half since v13.
+ */
+const PREREGISTERED_V17_INSTRUCTION_SHA256 =
+  "52c1c94aff6000fc997dac9c46239216343856c5036f02e156dd1c51687c689b";
+const PREREGISTERED_V17_INSTRUCTION_BYTES = 16202;
+/**
+ * SUPERSEDED — v16's bytes, AND THE ARTEFACT EVERY 15-16 Sep MEASUREMENT WAS
+ * TAKEN UNDER. The five banked live captures, the 0-of-20-figures and
+ * 0-of-57-values measurements, and the two merge disclosures in the
+ * shared-release tape all belong to these bytes. Retained and asserted DISTINCT
+ * so none of those numbers can be silently re-attributed to v17.
+ */
+const SUPERSEDED_V16_INSTRUCTION_SHA256 =
   "76d71513e0f1b2a65369559a58fa3eef51df8880806719c89cfc2459f6d4b55b";
-const PREREGISTERED_V16_INSTRUCTION_BYTES = 14848;
+const SUPERSEDED_V16_INSTRUCTION_BYTES = 14848;
 /**
  * SUPERSEDED — v15's bytes, AND THE ARTEFACT THE QUALITATIVE-CONJUNCT LOSS WAS
  * WITNESSED UNDER. Five fresh draws on 15 Sep 2026 at served prompt v201 /
@@ -559,10 +616,17 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v16 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V16_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v17 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V17_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V16_INSTRUCTION_BYTES,
+      PREREGISTERED_V17_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v16 bytes, so every 15-16 Sep measurement stays its own", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V16_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V16_INSTRUCTION_BYTES,
     );
   });
 
@@ -765,9 +829,10 @@ describe("the draft records instruction is the measured artefact", () => {
     // to v15 (asserted in the next test). The edit is legible as "an option's
     // non-numeric clause must reach the model too" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      "90a29f43ad7f6bf6efecf6872022b900a511833c5f6f03641ce2be3468d1a099",
+      // v17 — the definition replacement plus the two widening paragraphs.
+      "6b3caf7558d05f65815d9a1daa3b89ec633e0f93e096a2ba8ddeacb88a03602a",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(10304);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(11264);
     // SUPERSEDED — v15's shape half, the bytes the qualitative-conjunct loss was
     // witnessed under (release reached the person's own option in 0 of 5 draws).
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -852,8 +917,11 @@ describe("the draft records instruction is the measured artefact", () => {
     // replaced was false at `f18d941b`.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-    ).toBe("b631a9538e5c1e9a5bcb1e0c884c2cb81f7920ab5c1b61f3a15ba12d106691f9");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4544);
+      // v17 — the own-chain rule and the ceiling-not-quota clarification. The
+      // FIRST change to the connect half since v13, so a diff here is legible as
+      // exactly that rather than as drift.
+    ).toBe("5ecd2394cd3540873cea629a9f990d06d7a6e7ad20bd688cf5df64528d4768e3");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4938);
     // HISTORIC — the v6/v7/v8/v9 connect half, asserted DISTINCT. Every draw in
     // the 1-of-23 measurement was served these bytes.
     expect(
@@ -958,7 +1026,15 @@ describe("the draft records instruction is the measured artefact", () => {
     expect([...DRAFT_RECORD_CLAIM_KINDS]).toContain("option_refinement");
     // named in the claim-kind list too, or the model meets the term cold
     expect(DRAFT_RECORDS_SHAPE_INSTRUCTION).toContain(
-      "when the user named no\n  course of action and the option is one you are proposing",
+      // ⚠ v17 REPLACED THE RESTRICTIVE SENTENCE THIS USED TO PIN. It asserted
+      // "when the user named no course of action and the option is one you are
+      // proposing" — which scoped proposing to the case where the user named
+      // nothing, and therefore read as a BAR once they had. Paul reported the
+      // consequence: "previously, the initial graphs generated at least one
+      // additional option … we seem to have lost that." The independently
+      // reviewed delta replaced the definition rather than appending a widening
+      // command beside it, because appending leaves the conflict in place.
+      "either sharpening a named option\n  or introducing a materially different alternative, whether or not the user\n  already named options",
     );
 
     // (3) THE TWO THINGS THE PRODUCT RULING FORBIDS TRADING AWAY TO GET AN
@@ -1227,7 +1303,12 @@ describe("the instruction says nothing it must not say", () => {
    */
   it("keeps empty basis as an explicitly legitimate answer", () => {
     expect(DRAFT_RECORDS_INSTRUCTION).toContain("leave `basis` empty — that\nis a legitimate and expected answer");
-    expect(DRAFT_RECORDS_INSTRUCTION).toContain("An empty `claims` list is a valid response.");
+    // v17 kept this answer explicitly legitimate while clarifying that "only what
+    // the brief supports" is the STATED/PROPOSED distinction rather than a bar on
+    // proposing. The guarantee is unchanged; the sentence carries its condition.
+    expect(DRAFT_RECORDS_INSTRUCTION).toContain(
+      "An empty `claims` list remains a valid response when\nnothing useful can be added.",
+    );
   });
 
   /**

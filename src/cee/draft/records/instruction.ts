@@ -288,11 +288,24 @@ Use \`claim_kind\`:
 - \`risk\` — something that could go wrong, or a downside the decision carries.
   Higher is worse.
 - \`causal_link\` — one thing affecting another
-- \`option_refinement\` — an action put on the graph as an option to compare.
-  Use it to sharpen an option the user named, and ALSO when the user named no
-  course of action and the option is one you are proposing. Either way it
-  becomes an option to compare, and it is yours rather than theirs.
+- \`option_refinement\` — an action you propose, either sharpening a named option
+  or introducing a materially different alternative, whether or not the user
+  already named options. Keep proposals in \`claims\`, not in the user's
+  \`stated_items\`.
 - \`prior\` — what you believe about a quantity, and how sure you are
+
+Look beyond the named options. Before settling the draft, consider a materially
+different way to pursue the user's purpose: for example, a reversible trial,
+temporary or external capacity, a hybrid, or a smaller-scope route. Use these as
+prompts to think, not a checklist to populate. Include a plausible alternative
+when it changes the mechanism, exposes an important trade-off, or offers a
+useful way to learn. Do not add a near-duplicate merely to increase the count.
+
+Keep the user's stated requirements intact. Do not relax a deadline, budget or
+other limit without their invitation, or claim a proposal meets it when that is
+unknown. Do not invent a price, rate or other figure merely to make an
+alternative different. Existing estimation rules still apply; estimates are not
+user-stated facts or proof of feasibility.
 
 \`label\` NAMES the thing, in a few words. Every claim except a \`causal_link\`
 becomes a node on the canvas, and \`label\` is the name the user reads on it:
@@ -325,7 +338,10 @@ choosing the field. A \`causal_link\` needs exactly one \`from_\` and one \`to_\
 Never set both \`from_stated\` and \`from_claim\` on one link, or both \`to_\`
 fields: they point into different lists and the pair contradicts itself.
 
-Emit only what the brief supports. An empty \`claims\` list is a valid response.
+Emit only what the brief supports — which means the distinction between what the
+user STATED and what is plausibly PROPOSED from their situation, not a bar on
+proposing anything. An empty \`claims\` list remains a valid response when
+nothing useful can be added.
 `.trim();
 
 /** The connectivity half: the causal spine the structural validator checks. */
@@ -357,9 +373,14 @@ and \`basis\` still records whatever the user said that you built them on.
   refinement's \`basis\` already records which option it belongs to. Give a
   refinement its OWN chain only when it is a genuinely different alternative the
   user did not name.
+- Give a genuinely new alternative its OWN causal chain. Keep \`basis\` honest; do
+  not alter it to force an alternative to survive projection. Respect an explicit
+  request to compare only specified options.
 - Count your alternatives: the user's stated options plus any \`option_refinement\`
   that introduces a NEW alternative should come to six or fewer. Prefer a few
-  well-connected options over many bare ones.
+  well-connected options over many bare ones. Within that limit favour useful,
+  materially different proposals over cosmetic variants; the limit is a ceiling,
+  never a quota, and having room left is not a reason to add an option.
 - Nothing points INTO an option. An option is where a chain starts. If something
   bears on whether an option is viable, connect it to a factor on that option's
   chain, or to the goal.
