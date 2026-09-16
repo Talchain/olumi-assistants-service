@@ -225,19 +225,34 @@ export interface CompletionAsk {
  */
 const ASK_KINDS_NEEDING_A_STATED_ITEM: ReadonlySet<CompletionAskItem["kind"]> = new Set([
   "no_goal",
-  // ⭐ SAME GATE, SAME REASON, DIFFERENT VERB. `no_goal` needs a `stated_items`
-  // entry ADDED; a refused limit needs a field on an EXISTING one CHANGED. Both
-  // are writes to the `stated_items` axis, and the completion grammar has no
-  // such axis — so both are withheld by the same derived verdict, and both
-  // become answerable automatically on the day it gains one.
+]);
+
+/**
+ * ⭐⭐ THE TWO VERBS, NAMED APART — this set used to hold both, and that was
+ * trap 21 in miniature (its own comment said "SAME GATE, SAME REASON, DIFFERENT
+ * VERB", which is the tell).
+ *
+ * `no_goal` needs a `stated_items` entry ADDED, and remains withheld: this
+ * grammar still cannot mint the user's words.
+ * A refused limit needs fields on an EXISTING entry CHANGED, which
+ * `constraint_corrections` now expresses without touching `source_quote` or
+ * `kind` — so it is answerable, and only it.
+ */
+const ASK_KINDS_NEEDING_A_CONSTRAINT_CORRECTION: ReadonlySet<CompletionAskItem["kind"]> = new Set([
   "constraint_target_unbindable",
 ]);
 
 export function isModelAnswerableAskItem(item: CompletionAskItem): boolean {
-  if (!ASK_KINDS_NEEDING_A_STATED_ITEM.has(item.kind)) return true;
   const properties = buildRecordsCompletionSchema().properties as Record<string, unknown> | undefined;
-  return properties !== undefined
-    && Object.prototype.hasOwnProperty.call(properties, "stated_items");
+  const has = (k: string): boolean =>
+    properties !== undefined && Object.prototype.hasOwnProperty.call(properties, k);
+  // ⚠ STILL DERIVED FROM THE GRAMMAR, NEVER HARDCODED — same reason as before:
+  // a literal `true` here would go stale in the fail-OPEN direction, putting an
+  // ask to the model that it has no field to answer with, which is an advertised
+  // action terminating in refusal.
+  if (ASK_KINDS_NEEDING_A_STATED_ITEM.has(item.kind)) return has("stated_items");
+  if (ASK_KINDS_NEEDING_A_CONSTRAINT_CORRECTION.has(item.kind)) return has("constraint_corrections");
+  return true;
 }
 
 /**
@@ -807,6 +822,13 @@ export function enumerateCompletionAsk(
           validatorCode: null,
         });
         break;
+      case "constraint_value_unstated":
+        push({
+          kind: "constraint_target_unbindable",
+          detail: `"${d.label}" — this limit has no threshold we can apply, so it is not being enforced; if it states one, give its value, its direction and what it bounds`,
+          validatorCode: null,
+        });
+        break;
       case "constraint_target_unit_mismatch":
         push({
           kind: "constraint_target_unbindable",
@@ -1100,11 +1122,58 @@ export function enumerateCompletionAsk(
  * even if it wanted to. Built from the draft grammar's own claim-item builder,
  * so a change to the claim shape moves both passes together.
  */
+/**
+ * ⭐⭐⭐ THE CORRECTION AXIS — SUBJECT, ROLE AND VALUE TRAVEL TOGETHER OR NOT AT ALL.
+ *
+ * WHY IT EXISTS. `constraint_target_unbindable` is raised today, is correct
+ * today, and was UNANSWERABLE today: repairing a refused limit is a change to
+ * `applies_to_*` on an existing `stated_items[]` entry, and this grammar carried
+ * only `claims`. So the pipeline asked the one question it could not accept an
+ * answer to. Measured: the brief's "keeping monthly churn under 4%" reached the
+ * graph in 0 of 20 pricing drafts while the goal from the same sentence bound.
+ *
+ * ⛔ IT IS NOT `stated_items`, AND THAT IS THE WHOLE POINT. Exposing
+ * `stated_items` would let the second turn restate the user's words. This axis
+ * cannot: it carries no `source_quote` and no `kind`, so a correction can only
+ * say WHAT AN EXISTING LIMIT APPLIES TO and WHAT IT BOUNDS — never what the user
+ * said. `mergeCompletionConstraintCorrections` enforces that at the bytes, and
+ * `stated_items_disturbed` still refuses a wholesale rewrite.
+ *
+ * ⭐ `direction` AND `value` ARE REQUIRED ALONGSIDE THE SUBJECT. A subject
+ * without a role is a limit with no operator — and this projector has already
+ * paid for that: an unstated direction defaulted to `<=` turns "must stay above"
+ * into its exact opposite. A subject without a value is a bound with nothing to
+ * bound. Requiring all three means the model cannot half-answer.
+ *
+ * ⭐ AND OMISSION IS A LEGAL ANSWER — the negative control this mechanism must
+ * keep passing. "legal has NOT confirmed this… which is 60% of revenue" is a
+ * QUALITATIVE limit whose span happens to contain a number that is not its
+ * threshold. A previous attempt (#1513) read that 60% deterministically and
+ * fabricated a floor. The model declines here by emitting no entry, and a
+ * qualitative constraint stays qualitative.
+ */
+function buildConstraintCorrectionSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      stated_index: { type: "integer" },
+      direction: { type: "string", enum: ["floor", "ceiling"] },
+      value: { type: "number" },
+      unit: { type: "string" },
+      applies_to_claim: { type: "integer" },
+      applies_to_stated: { type: "integer" },
+    },
+    required: ["stated_index", "direction", "value"],
+    additionalProperties: false,
+  };
+}
+
 export function buildRecordsCompletionSchema(): Record<string, unknown> {
   return {
     type: "object",
     properties: {
       claims: { type: "array", items: buildDraftClaimItemSchema() },
+      constraint_corrections: { type: "array", items: buildConstraintCorrectionSchema() },
     },
     required: ["claims"],
     additionalProperties: false,
@@ -1407,6 +1476,32 @@ export function buildRecordsCompletionPrompt(args: {
     `Emit ONLY new claims. Your first new claim will be claims[${ask.baseClaimIndex}], the next`,
     `claims[${ask.baseClaimIndex + 1}], and so on. Everything above keeps the index it already has.`,
     "",
+    // ⭐⭐ SHOWN ONLY WHEN A LIMIT WAS ACTUALLY REFUSED. Every draft would
+    // otherwise pay tokens for an instruction about a situation it is not in,
+    // and an instruction present on turns where it cannot apply is how a prompt
+    // teaches the model to use a field speculatively.
+    ...(ask.items.some((i) => i.kind === "constraint_target_unbindable")
+      ? [
+          "### A limit that could not be attached to anything",
+          "For each limit listed above as unattached, you may emit one `constraint_corrections`",
+          "entry saying what it bounds:",
+          "- `stated_index` — that limit's position in `stated_items`.",
+          "- `applies_to_claim` OR `applies_to_stated` — EXACTLY ONE — the position of the thing",
+          "  the limit bounds. Not the goal: a goal is what is being reached, not a measured",
+          "  quantity a limit can bound.",
+          "- `direction` — `ceiling` if the user must stay below it, `floor` if above.",
+          "- `value`, plus `unit` where the user gave one.",
+          "Subject, direction and value travel together. A subject with no value bounds nothing,",
+          "and a value with no direction is as likely to invert the user's meaning as honour it.",
+          "",
+          "LEAVE THE ENTRY OUT when the limit states no number. \"Legal has not confirmed this\" is",
+          "a real constraint with no threshold, and a number elsewhere in the same sentence — as in",
+          "\"...dead in enterprise, which is 60% of revenue\" — is usually describing something else,",
+          "not the limit. An omitted correction keeps the limit qualitative, which is correct and",
+          "costs nothing. A wrong one asserts a bound the user never set.",
+          "",
+        ]
+      : []),
     "### Which list a reference points into — the field says which, and it is not interchangeable",
     "- `from_stated` / `to_stated` — a position in `stated_items`, the list of things the USER said.",
     "- `from_claim` / `to_claim` — a position in `claims`, the list of things YOU said.",
@@ -1491,8 +1586,251 @@ export function buildRecordsCompletionPrompt(args: {
 }
 
 export type CompletionMergeResult =
-  | { ok: true; records: DraftRecordSet; added: number }
+  | { ok: true; records: DraftRecordSet; added: number; corrections_applied?: number }
   | { ok: false; reason: "stated_items_disturbed" | "no_new_claims" };
+
+/** One model-supplied repair of a limit the projector refused to bind. */
+export interface ConstraintCorrection {
+  readonly stated_index: number;
+  readonly direction: "floor" | "ceiling";
+  readonly value: number;
+  readonly unit?: string;
+  readonly applies_to_claim?: number;
+  readonly applies_to_stated?: number;
+}
+
+/**
+ * ⭐⭐⭐ APPLY A CORRECTION TO AN EXISTING LIMIT — AND TO NOTHING ELSE.
+ *
+ * Four refusals, each closing a way this could become a rewrite of the user:
+ *
+ *  1. THE TARGET MUST ALREADY BE A `constraint`. A correction cannot convert a
+ *     goal, an option or a figure into a limit, and cannot mint one.
+ *  2. `source_quote` AND `kind` ARE NEVER READ. They are not on the correction
+ *     schema, so the user's own words are structurally out of reach — not merely
+ *     unmodified by convention.
+ *  3. EXACTLY ONE SUBJECT NAMESPACE, or the correction is dropped. Both or
+ *     neither is the same contradiction the projector already refuses to resolve
+ *     by preference on a causal link; it is refused here for the same reason.
+ *  4. ONE CORRECTION PER CONSTRAINT. A second entry for the same index is
+ *     dropped rather than allowed to win by arriving later — an ordering-
+ *     dependent result is not a result.
+ *
+ * ⛔ IT VALIDATES NOTHING ABOUT WHETHER THE SUBJECT IS RIGHT, deliberately. The
+ * projector's existing safeties — `MINTABLE_TARGET_KINDS` and the unit-family
+ * check — are the authority on that and run unchanged afterwards. A correction
+ * naming a goal will be refused there exactly as the original was. This function
+ * decides only that a correction is SHAPED like a repair, never that it is true.
+ */
+/**
+ * ⭐⭐⭐ WHICH LIMITS THE COMPLETION WAS ACTUALLY ASKED TO REPAIR.
+ *
+ * P1 from independent review: without this, a completion asked to repair limit
+ * A could rewrite limit B — reproduced by flipping an already-bound churn
+ * ceiling `<= 0.04` into a floor `>= 0.9` while a LEGAL-only ask was the sole
+ * question on the turn. The row kept the user's unchanged "under 4%" quote and
+ * `provenance: "explicit"`, preservation violations were empty, and the keep
+ * gate said true.
+ *
+ * ⛔ THE LESSON, NAMED BECAUSE I HAD IT BACKWARDS: my own test asserted that
+ * `source_quote` survives byte-for-byte and I treated that as the safety
+ * property. QUOTE PRESERVATION IS NOT MEANING PRESERVATION. The words were
+ * intact and the limit said the opposite thing.
+ *
+ * Derived from the projection's own refusals, never from a list anyone
+ * maintains: a limit is repairable exactly when the projector refused to bind
+ * it and said so.
+ */
+export type ConstraintRepairField = "target" | "value" | "direction" | "unit";
+
+/**
+ * ⭐⭐⭐ WHICH FIELDS OF WHICH LIMIT THIS TURN MAY CHANGE.
+ *
+ * Second finding on the same review, and the row was the wrong granularity:
+ * scoping to the ROW still let a TARGET repair arrive carrying `direction:
+ * "floor", value: 0.9` and overwrite a standing `<= 0.04` whose own quote says
+ * "under 4%". Repairing the reference is not licence to restate the limit.
+ *
+ * A field is editable only when it is the faulty or missing datum:
+ *  · `target`    — a target refusal fired, or the item names no target at all
+ *  · `value`     — the item carries no usable threshold
+ *  · `direction` — the item states no direction
+ *  · `unit`      — the unit is absent, or was refused as the wrong quantity
+ *
+ * Everything else is PRESERVED from what the user already had. Derived from the
+ * projection's own refusals plus the record itself, so nothing here is a list
+ * anyone maintains.
+ */
+export function repairableConstraintFields(
+  base: DraftRecordSet,
+  projection: { readonly dropped: ReadonlyArray<{ readonly reason: string; readonly stated_index?: number }> },
+): ReadonlyMap<number, ReadonlySet<ConstraintRepairField>> {
+  const out = new Map<number, Set<ConstraintRepairField>>();
+  for (const d of projection.dropped) {
+    if (!REPAIRABLE_CONSTRAINT_REASONS.has(d.reason)) continue;
+    const i = d.stated_index;
+    if (typeof i !== "number") continue;
+    const item = base.stated_items[i] as
+      | { value?: unknown; unit?: unknown; direction?: unknown; applies_to_claim?: unknown; applies_to_stated?: unknown }
+      | undefined;
+    if (!item) continue;
+    const fields = out.get(i) ?? new Set<ConstraintRepairField>();
+    if (TARGET_REFUSAL_REASONS.has(d.reason)
+      || (item.applies_to_claim === undefined && item.applies_to_stated === undefined)) fields.add("target");
+    if (typeof item.value !== "number") fields.add("value");
+    if (item.direction === undefined) fields.add("direction");
+    // ⛔⛔ A KNOWN UNIT IS NEVER EDITABLE — not even on a unit MISMATCH.
+    //
+    // This line used to add "unit" whenever `constraint_target_unit_mismatch`
+    // fired, on the reasoning that a unit refusal is about the unit. It is not:
+    // the mismatch says the LIMIT and its TARGET measure different quantities,
+    // and the likely fault is the TARGET. Independent review reproduced the
+    // consequence — keep the wrong cost target, change the unit to £, and
+    // "keeping monthly churn under 4%" binds as `<= £4` with the user's own
+    // quote and `provenance: "explicit"`, kept, no preservation violations.
+    //
+    // So the unit the user stated is preserved, and only an ABSENT unit may be
+    // supplied. Repairing a stated unit needs its own evidence and its own
+    // path; it is not a side effect of fixing a reference.
+    if (item.unit === undefined) fields.add("unit");
+    out.set(i, fields);
+  }
+  return out;
+}
+
+/** Refusals that are ABOUT the target, so the target is the datum to repair. */
+const TARGET_REFUSAL_REASONS: ReadonlySet<string> = new Set([
+  "constraint_target_not_measurable",
+  "constraint_target_unit_mismatch",
+  "unparseable_ref",
+  "ref_out_of_range",
+  "ref_target_not_a_node",
+  "missing_ref",
+  "ambiguous_ref",
+]);
+
+/** Back-compat view for callers that only need "may this row be touched at all". */
+export function repairableConstraintIndices(
+  projection: { readonly dropped: ReadonlyArray<{ readonly reason: string; readonly stated_index?: number }> },
+): ReadonlySet<number> {
+  const out = new Set<number>();
+  for (const d of projection.dropped) {
+    if (!REPAIRABLE_CONSTRAINT_REASONS.has(d.reason)) continue;
+    if (typeof d.stated_index === "number") out.add(d.stated_index);
+  }
+  return out;
+}
+
+/**
+ * The refusal reasons that a `constraint_corrections` entry can answer. Kept
+ * beside `enumerateCompletionAsk`'s own cases so the two cannot drift: a reason
+ * that raises the ask must appear here, or the model is asked a question whose
+ * answer will then be discarded.
+ */
+const REPAIRABLE_CONSTRAINT_REASONS: ReadonlySet<string> = new Set([
+  "constraint_target_not_measurable",
+  "constraint_target_unit_mismatch",
+  "constraint_value_unstated",
+  "unparseable_ref",
+  "ref_out_of_range",
+  "ref_target_not_a_node",
+  "missing_ref",
+  "ambiguous_ref",
+]);
+
+export function applyConstraintCorrections(
+  base: DraftRecordSet,
+  corrections: readonly ConstraintCorrection[],
+  /**
+   * The limits this turn was asked to repair — see
+   * {@link repairableConstraintIndices}. REQUIRED, not optional: an optional
+   * scope defaults to "anything", which is the P1 this parameter exists to
+   * close, and a caller that forgets it would silently restore the hole.
+   */
+  repairable: ReadonlyMap<number, ReadonlySet<ConstraintRepairField>>,
+): { stated_items: DraftRecordSet["stated_items"]; applied: number } {
+  /**
+   * ⭐⭐ CONFLICTING CORRECTIONS ARE REFUSED, NOT RESOLVED BY POSITION.
+   *
+   * Second P1 from the same review: this was first-wins, so two opposite
+   * corrections for one limit produced `<= 0.04` or `>= 0.9` depending only on
+   * which arrived first, and BOTH passed the real keep gate. My own comment
+   * beside it read "an ordering-dependent result is not a result" — the
+   * principle was right and the code did the other thing.
+   *
+   * ⚠ AND MY TEST COULD NOT SEE IT. `C5` asserted only that the SECOND entry
+   * does not win, which first-wins satisfies. A guard that passes under the
+   * defect it names is the shape this estate's tests exist to hunt.
+   *
+   * The whole group is dropped. One unambiguous correction still applies.
+   */
+  const perIndex = new Map<number, number>();
+  for (const c of corrections) {
+    if (!Number.isInteger(c?.stated_index)) continue;
+    perIndex.set(c.stated_index, (perIndex.get(c.stated_index) ?? 0) + 1);
+  }
+  const contested = new Set([...perIndex].filter(([, n]) => n > 1).map(([i]) => i));
+  const seen = new Set<number>();
+  const items = base.stated_items.map((item) => item);
+  let applied = 0;
+  for (const c of corrections) {
+    const i = c.stated_index;
+    if (!Number.isInteger(i) || i < 0 || i >= items.length) continue;
+    // ⛔ ONLY A LIMIT THIS TURN WAS ASKED ABOUT. An already-bound limit the
+    // completion was not questioned on is not its to change.
+    const editable = repairable.get(i);
+    if (editable === undefined) continue;
+    if (contested.has(i)) continue;
+    if (seen.has(i)) continue;
+    const target = items[i]!;
+    if ((target as { kind?: string }).kind !== "constraint") continue;
+    if ((c.applies_to_claim === undefined) === (c.applies_to_stated === undefined)) continue;
+    if (typeof c.value !== "number" || !Number.isFinite(c.value)) continue;
+    if (c.direction !== "floor" && c.direction !== "ceiling") continue;
+    // ⛔⛔ ONLY THE FAULTY OR MISSING DATUM. A target repair arriving with a
+    // direction and a value does NOT get to restate the limit: the reviewer
+    // reproduced `floor 0.9` overwriting a standing `<= 0.04` whose own quote
+    // reads "under 4%". Repairing a reference is not licence to change what the
+    // user said the limit IS.
+    const mayUnit = editable.has("unit") && c.unit !== undefined;
+    const mayTarget = editable.has("target");
+    // A correction that could change nothing permitted is not an answer.
+    if (!editable.has("direction") && !editable.has("value") && !mayUnit && !mayTarget) continue;
+    seen.add(i);
+    // ⚠ BUILT BY CONDITIONAL SPREAD, NOT BY MUTATING A `Record<string, unknown>`.
+    // The mutable form needed `as unknown as` twice, which the forbidden-boundary
+    // ratchet counts and correctly refused: a cast through `unknown` discards the
+    // very typing that makes this write safe to reason about.
+    items[i] = {
+      ...target,
+      ...(editable.has("direction") ? { direction: c.direction } : {}),
+      ...(editable.has("value") ? { value: c.value } : {}),
+      ...(mayUnit ? { unit: c.unit } : {}),
+      ...(mayTarget
+        ? (c.applies_to_claim !== undefined
+            ? { applies_to_claim: c.applies_to_claim, applies_to_stated: undefined }
+            : { applies_to_stated: c.applies_to_stated, applies_to_claim: undefined })
+        : {}),
+    } as typeof target;
+    applied += 1;
+  }
+  // ⭐⭐ NOTHING CHANGED ⇒ THE ORIGINAL ARRAY, BY REFERENCE — one guard, not two.
+  //
+  // `namespace-merge-and-completion.test.ts` asserts this pass-through with
+  // `Object.is`, because "the user's items are untouched" is a claim about
+  // IDENTITY; a fresh array with equal contents is a weaker claim that would
+  // slip past deep equality. My first version rebuilt unconditionally and broke
+  // it on turns with NO corrections at all — CI caught that, my own suite did not.
+  //
+  // ⚠ A SECOND, EARLIER `corrections.length === 0` RETURN WAS REMOVED RATHER
+  // THAN KEPT. It read as belt-and-braces and was strictly redundant: a mutant
+  // deleting it killed nothing, because this guard already covers the empty
+  // case. An unreachable branch is one no test can ever kill, which is the shape
+  // this module's own tests exist to hunt.
+  return applied === 0
+    ? { stated_items: base.stated_items, applied: 0 }
+    : { stated_items: items, applied };
+}
 
 /**
  * APPEND-ONLY MERGE. Existing claims keep their indices; `stated_items` is
@@ -1506,14 +1844,31 @@ export type CompletionMergeResult =
  */
 export function mergeCompletionClaims(
   base: DraftRecordSet,
-  completion: { stated_items?: unknown; claims?: DraftInferenceClaim[] },
+  completion: {
+    stated_items?: unknown;
+    claims?: DraftInferenceClaim[];
+    constraint_corrections?: readonly ConstraintCorrection[];
+  },
+  /** Which fields of which limits this turn may change. Empty ⇒ nothing applies. */
+  repairable: ReadonlyMap<number, ReadonlySet<ConstraintRepairField>> = new Map(),
 ): CompletionMergeResult {
   if (completion.stated_items !== undefined) return { ok: false, reason: "stated_items_disturbed" };
   const added = completion.claims ?? [];
-  if (added.length === 0) return { ok: false, reason: "no_new_claims" };
+  const { stated_items, applied } = applyConstraintCorrections(
+    base,
+    completion.constraint_corrections ?? [],
+    repairable,
+  );
+  // ⭐ A CORRECTION ON ITS OWN IS A REAL ANSWER. `no_new_claims` used to be the
+  // only verdict when `claims` was empty, and it is still correct when nothing
+  // at all came back — but a turn that repaired a refused limit and proposed no
+  // new claim has done exactly what was asked of it, and discarding that as
+  // "empty" would make the ask unanswerable again by a different route.
+  if (added.length === 0 && applied === 0) return { ok: false, reason: "no_new_claims" };
   return {
     ok: true,
-    records: { stated_items: base.stated_items, claims: [...base.claims, ...added] },
+    records: { stated_items, claims: [...base.claims, ...added] },
     added: added.length,
+    ...(applied > 0 ? { corrections_applied: applied } : {}),
   };
 }
