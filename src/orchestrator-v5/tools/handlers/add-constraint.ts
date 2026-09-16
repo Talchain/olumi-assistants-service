@@ -84,6 +84,10 @@ import {
   classifyConstraintWriteAdmissibility,
   findUnevaluatedDurationSpan,
 } from './d1-shared/constraint-write-admissibility.js';
+import {
+  findConstraintTargetAlternative,
+  formatConstraintTargetAlternative,
+} from './d1-shared/constraint-target-alternative.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 /**
@@ -1110,7 +1114,35 @@ export function createAddConstraintHandler(): HandlerFn {
       } else if (elicitBaseline) {
         fragments.push(formatBaselineElicitation({ targetLabel: targetNode.label }));
       } else if (admissibility !== null && !admissibility.checkable) {
-        fragments.push(formatConstraintNotCheckable({ targetLabel: targetNode.label }));
+        // ⭐ NAME THE CAUSE, NOT ONLY THE SYMPTOM.
+        //
+        // `formatConstraintNotCheckable` says "X has no number recorded
+        // against it" — true, and where it stops the user is left holding a
+        // correct sentence and no move. Measured on Paul's 16 Sep session
+        // `1dd2133d`: his £200,000 landed on "Budget Overrun Risk" (kind risk,
+        // observed_state null) while "Hiring and Onboarding Cost" sat in the
+        // same graph, and he was told only that the risk had no number. The
+        // honest disclosure was already in place and he was still stuck.
+        //
+        // When exactly one factor in the graph already records the
+        // constraint's own unit, name it and offer the move. Nothing is
+        // re-targeted: the user chose a node, and moving their limit under
+        // them on a unit match would be the confident wrongness the
+        // admissibility check exists to prevent.
+        const alternative = findConstraintTargetAlternative({
+          chosenIsCheckable: false,
+          chosenNodeId: targetId,
+          constraintUnit: newConstraint.unit ?? null,
+          nodes: graph.nodes as never,
+        });
+        fragments.push(
+          alternative === null
+            ? formatConstraintNotCheckable({ targetLabel: targetNode.label })
+            : formatConstraintTargetAlternative({
+                chosenLabel: targetNode.label,
+                alternative,
+              }),
+        );
       }
       const assistantText = fragments.join(' ');
 
