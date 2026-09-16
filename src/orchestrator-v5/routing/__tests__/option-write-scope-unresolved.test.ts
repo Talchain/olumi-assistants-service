@@ -239,6 +239,56 @@ describe('an option-anchored turn with no resolved identity asks instead of writ
     expect(verdict.verdict).toBe('allow');
   });
 
+  // ── REVIEWER DELTA 2 (codex-reviewer, REVIEW1512 at 0eb5f18a) ─────────────
+  //
+  // ⛔ THE CONTRACTION ARM WAS DEAD ON ARRIVAL, AND ITS OWN SHAPE HID IT.
+  //
+  // `GLOBAL_SCOPE_NEGATION` carried `\bn['’]t\b` to catch "don't". It
+  // cannot: `\b` before `n` demands a word boundary, and in "don't" the
+  // preceding character is `o` — both word characters, so there is no
+  // boundary and the arm never fires. Executed against the shipped regex,
+  // THREE contracted prohibitions escaped while every uncontracted twin was
+  // caught, so ESCAPE 1 above passed and certified an arm that was half dead.
+  //
+  // ⭐ This is why each case below is a TWIN of a passing uncontracted case:
+  // a negation corpus written only in the form the author typed cannot see
+  // the form the author did not type (trap 22). The apostrophe is doubled —
+  // ASCII `'` and typographic `’` — because a phone keyboard emits the
+  // latter and a regex that handles only ASCII is the same defect one
+  // character over.
+
+  it.each([
+    ["ASCII apostrophe", "Don't change the model-wide baseline."],
+    ["typographic apostrophe", "Don’t change the model-wide baseline."],
+    ["third-person contraction", "That doesn't apply to the model-wide baseline."],
+  ])('ESCAPE 1 CONTRACTED (%s): a contracted prohibition withholds exactly as the uncontracted twin does', (_name, prohibition) => {
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Set Vendor Licensing Cost to £150,000 per year for the buy option. ' +
+        prohibition,
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('scope_unresolved');
+  });
+
+  it('ESCAPE 1 CONTRACTED TWIN: the affirmative global request still lands', () => {
+    // The same trade the uncontracted twin guards against. Widening the
+    // contraction arm must not start reading ordinary sentences as
+    // prohibitions — `instead of` is the one my own earlier test caught, so
+    // it stays in the message here on purpose.
+    const verdict = decideOptionInterventionWrite({
+      message:
+        'Across all options, change Vendor Licensing Cost so the model-wide baseline ' +
+        'is £150,000 per year instead of £120,000.',
+      before: CAPTURE,
+      after: afterBaselineMinted(),
+      appliedMutation: true,
+    });
+    expect(verdict.verdict).toBe('allow');
+  });
+
   it('ESCAPE 2: resolving a full label is NOT evidence another guard owns the write', () => {
     // ⛔ I stood down whenever an identity resolved, assuming the existing arms
     // would own it. They do not — the reviewer executed this and got allow. A
