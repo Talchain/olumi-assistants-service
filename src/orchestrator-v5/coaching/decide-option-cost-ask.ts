@@ -68,6 +68,8 @@
  * Pure: no I/O, no LLM, no telemetry, no clock.
  */
 
+import { sameUnit } from '../routing/native-quantity-operation.js';
+
 /** A graph NODE, at the shape this decision needs. Used only to resolve the target factor. */
 export interface OptionCostAskNode {
   readonly id?: unknown;
@@ -202,7 +204,10 @@ export function decideOptionCostAsk(input: {
       typeof nativeValue === 'number'
       && Number.isFinite(nativeValue)
       && typeof nativeUnit === 'string'
-      && nativeUnit === unit;
+      // Symbol/code normalised for the same reason the writer does it: a cell
+      // stored under one spelling must not read as unanswered under the other,
+      // or the product re-asks a question it already has the answer to.
+      && sameUnit(nativeUnit, unit);
     if (alreadyAnswered) continue;
 
     return {
