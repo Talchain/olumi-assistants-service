@@ -105,6 +105,21 @@ describe('S2 — the id is read from ONE key, with no fallback', () => {
     ).toBeUndefined();
   });
 
+  it('S2d2 ⭐ the fallback case that ACTUALLY discriminates: parameters PRESENT but block_id absent', () => {
+    // ⛔ S2d ALONE DOES NOT COVER ITS OWN NAMED HAZARD, and mutation proved it:
+    // adding a `?? chip.id` fallback left S2d green, because a chip with no
+    // `parameters` returns at the `parameters === null` guard BEFORE any
+    // fallback could fire. The dangerous shape is a chip that DOES carry a
+    // parameters bag — just not block_id — alongside an id. That is the real
+    // wrong-finding case, and only this test can see it.
+    expect(
+      readSelectedFindingBlockId(
+        chipPayload({ id: `strengthen:phase3:${real}`, parameters: { scenario_id: 'x' } }),
+      ),
+      'a present-but-block_id-less bag must not fall through to chip.id',
+    ).toBeUndefined();
+  });
+
   it('S2e NEGATIVE — no other parameter key is consulted', () => {
     for (const key of ['id', 'signal_id', 'entry_id', 'blockId', 'index']) {
       expect(
