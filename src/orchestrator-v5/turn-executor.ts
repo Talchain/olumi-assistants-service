@@ -11592,7 +11592,14 @@ export async function runTurnExecutor(
               // The reviewing model has never had the graph: the enrichment
               // envelope does not carry one (`readGraph`'s own docstring says
               // so). Threaded like `brief`, from the server-side read only.
-              canonicalGraph: context.persistedGraph,
+              //
+              // ⭐ AND IT IS THE RUN'S OWN SNAPSHOT. `__run_graph_snapshot` is
+              // stamped by run-analysis from the same `rawPersistedGraph` it
+              // submitted to PLoT, so the review is grounded in the model that
+              // was actually analysed. `context.persistedGraph` is the
+              // turn-start reread and remains only as the fallback for a
+              // handler that produced no snapshot.
+              runGraph: handlerOutcome.__run_graph_snapshot ?? context.persistedGraph,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
               // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
               // disclosure channel — the review must never narrate a

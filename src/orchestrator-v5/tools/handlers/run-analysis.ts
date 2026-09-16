@@ -2038,6 +2038,15 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // The configure chip's source (see chip-generator): the options a
       // configure step actually repairs.
       ...(gate.excluded.length > 0 ? { __excluded_options: gate.excluded } : {}),
+      // Internal channel — the exact graph THIS run analysed, for the
+      // decision-review enricher. Same object the submission and
+      // `graph_hash_at_run` were derived from, so a review grounded in it is
+      // grounded in the analysed model rather than in a turn-start reread.
+      // Omitted when the snapshot carried none, which the reader treats
+      // exactly as today (it falls back to `context.persistedGraph`).
+      ...(snapshot.rawPersistedGraph !== undefined && snapshot.rawPersistedGraph !== null
+        ? { __run_graph_snapshot: snapshot.rawPersistedGraph }
+        : {}),
       // GO(A) — the cell whose native value would make the withheld limit
       // checkable. Server-only: the turn-executor arms it as an
       // `elicit_option_effect` pending in the SAME commit as the disclosure

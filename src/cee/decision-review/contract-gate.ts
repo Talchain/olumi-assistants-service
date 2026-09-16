@@ -68,6 +68,7 @@
  */
 
 import { collectStrings } from './shape-check.js';
+import { EDGE_KEY_SEPARATOR } from './prose-fact-agreement.js';
 
 // ============================================================================
 // Contract count caps — the TIGHT prompt bound  (TELEMETRY-ONLY; see D-11 below)
@@ -204,6 +205,16 @@ export function findFabricatedContinuityHit(text: string): string | null {
 // Entity grounding corpus
 // ============================================================================
 
+/**
+ * Every spelling the producer uses for one edge's endpoint pair.
+ *
+ * `EDGE_KEY_SEPARATOR` is imported rather than re-spelled so this corpus can
+ * never drift from the canonical join key it exists to accept — a
+ * hand-maintained mirror of `'|'` here would read green for exactly as long as
+ * nobody moved the original.
+ */
+const EDGE_ENDPOINT_SEPARATORS = ['->', '::', EDGE_KEY_SEPARATOR] as const;
+
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -211,13 +222,44 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /**
- * Collect the set of valid entity ids from the run's graph: every
- * `graph.nodes[].id` and `graph.edges[].id` that is a non-empty string. This
- * is the corpus the R-ID / R-BIAS rule grounds `affected_elements` against.
+ * Collect the set of valid entity ids from the run's graph. This is the corpus
+ * the R-ID / R-BIAS rule grounds `affected_elements` against.
+ *
  * Defensive by construction (the enrichment graph is opaque on this path) — an
  * unrecognisable graph yields an empty set, which SKIPS the grounding rule (no
  * corpus ⇒ cannot check), mirroring the number-grounding doctrine in
  * `shape-check.ts` (`isGrounded`: empty corpus ⇒ skip).
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⭐⭐⭐ AN EDGE HAS NO `id` IN THE MODEL-FACING SHAPE, SO `.id` ALONE WAS
+ * NEVER A COMPLETE ADDRESS FOR ONE.
+ *
+ * This function used to read `.id` and nothing else. That was harmless only
+ * because the graph reaching it was `{}` on every live turn (measured 16 Sep
+ * 2026: `enrichment_has_graph: false` on 6 of 6 captured reviews), so the rule
+ * skipped. The moment the reviewing model is actually GIVEN the graph, `.id`
+ * alone makes the gate strictly harmful: `CompactEdge` is
+ * `{ from, to, strength, exists, … }` with NO `id` by construction
+ * (graph-compact.ts:143), so every edge citation the model makes is
+ * ungrounded, `ungrounded_entity_reference` fires, `mustDrop` is true, and the
+ * ENTIRE review is discarded. Giving the model the graph would have made the
+ * product worse, not better.
+ *
+ * ⚠ THE REMEDY IS AN ADDRESS, NOT A RELAXATION. The corpus now also admits the
+ * producer's own endpoint-pair spellings — but ONLY for edges that genuinely
+ * exist in this graph. Three spellings, because the producer really does use
+ * all three for the same edge in one payload: `fragile_edges[].edge_id` and
+ * the `scenario_contexts` key spell it `from->to`, `edge_e_values[].edge_id`
+ * spells it `from::to`, and `edgeFlipKey` (the estate's canonical internal
+ * join, prose-fact-agreement.ts:56-82) spells it `from|to`. A model handed a
+ * graph whose edges carry no id has no other way to name one.
+ *
+ * ⛔ WHAT THIS DELIBERATELY DOES NOT DO. It does not weaken validation to make
+ * a captured output pass. An invented node id still refuses. An endpoint pair
+ * naming an edge that is NOT in this graph still refuses — including a pair
+ * whose endpoints are both real nodes but which no edge connects, and a pair
+ * with the endpoints the wrong way round on a directed edge. Explicit `id`s,
+ * on nodes and on edges that carry one, are retained unchanged.
  */
 export function collectGraphEntityIds(graph: Record<string, unknown>): Set<string> {
   const ids = new Set<string>();
@@ -232,6 +274,23 @@ export function collectGraphEntityIds(graph: Record<string, unknown>): Set<strin
       if (entity) add(entity.id);
     }
   }
+
+  // Endpoint-pair aliases, minted from REAL edges only.
+  const edges = graph.edges;
+  if (Array.isArray(edges)) {
+    for (const raw of edges) {
+      const edge = readRecord(raw);
+      if (!edge) continue;
+      const from = edge.from;
+      const to = edge.to;
+      if (typeof from !== 'string' || from.length === 0) continue;
+      if (typeof to !== 'string' || to.length === 0) continue;
+      for (const separator of EDGE_ENDPOINT_SEPARATORS) {
+        ids.add(`${from}${separator}${to}`);
+      }
+    }
+  }
+
   return ids;
 }
 

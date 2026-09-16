@@ -352,10 +352,181 @@ function boundedJsonBlock(value: unknown, notes: readonly string[]): string {
   let json = JSON.stringify(value, null, 2);
   const allNotes = [...notes];
   if (json.length > DECISION_REVIEW_SECTION_MAX_CHARS) {
-    json = json.slice(0, DECISION_REVIEW_SECTION_MAX_CHARS);
-    allNotes.push(`section body truncated at ${DECISION_REVIEW_SECTION_MAX_CHARS} chars (hard ceiling)`);
+    // ⛔ THIS USED TO BE `json.slice(0, MAX)` AND THAT HANDED THE MODEL
+    // MALFORMED JSON. It never fired in production only because the section it
+    // most endangers — `<GRAPH>` — has been 21 characters (`{}`) on every live
+    // turn, so the ceiling was unreachable. Repairing the graph makes it
+    // reachable on the first real model: a mid-object slice ends the body at an
+    // arbitrary byte, and what the reviewing model receives is a truncated
+    // literal it cannot parse. A section it cannot parse is worse than a
+    // section it does not have, because the failure is silent on our side.
+    //
+    // Replaced by a marker OBJECT that is itself valid JSON. The graph section
+    // does better still — it shrinks the value entity-by-entity and keeps real
+    // content (see `boundedGraphJsonBlock`). This is the backstop for every
+    // other section, and its job is only to stay parseable.
+    json = JSON.stringify(
+      {
+        _truncated: true,
+        _reason: `section exceeded the ${DECISION_REVIEW_SECTION_MAX_CHARS}-char ceiling`,
+        _original_chars: json.length,
+      },
+      null,
+      2,
+    );
+    allNotes.push(
+      `section body omitted at ${DECISION_REVIEW_SECTION_MAX_CHARS} chars (hard ceiling); the body is NOT present`,
+    );
   }
   return allNotes.length > 0 ? `${json}\n[TRUNCATED: ${allNotes.join('; ')}]` : json;
+}
+
+/**
+ * ⭐⭐ THE GRAPH SECTION, BOUNDED WITHOUT EVER BECOMING UNPARSEABLE AND WITHOUT
+ * SILENTLY LOSING EVERY RELATIONSHIP.
+ *
+ * Two defects this replaces, both latent until the reviewing model was actually
+ * given a graph:
+ *
+ * ⛔ 1. RELATIONSHIPS WERE CAPPED INDEPENDENTLY OF THEIR ENDPOINTS. `nodes` cap
+ * at 40 and `edges` cap at 80 ran as two unrelated slices, so a retained edge
+ * could point at a node that had been dropped. The model then sees a causal
+ * link between two ids, one of which is not in the graph — and the contract
+ * gate, grounding against the same projection, would refuse the model's own
+ * citation of it. Endpoints of retained edges are now retained FIRST, and any
+ * edge whose endpoint did not survive is dropped WITH ITS DISCLOSURE rather
+ * than left dangling.
+ *
+ * ⛔ 2. THE BYTE CEILING SLICED THE JSON STRING. See `boundedJsonBlock`. Here
+ * the VALUE is shrunk and re-serialised instead, so the output is valid JSON at
+ * every size. Shrinking drops from the tail one entity at a time — a guaranteed
+ * decrement, so the loop terminates — and edges go before nodes, because a node
+ * list with no edges still tells the model what exists whereas edges pointing
+ * at absent nodes tell it something false.
+ *
+ * Every omission is disclosed twice: machine-readably inside the object as
+ * `_omitted`, and in the section's `[TRUNCATED: …]` marker.
+ */
+function boundedGraphJsonBlock(graph: Record<string, unknown>): string {
+  const rawNodes = Array.isArray(graph['nodes']) ? (graph['nodes'] as unknown[]) : null;
+  const rawEdges = Array.isArray(graph['edges']) ? (graph['edges'] as unknown[]) : null;
+  if (rawNodes === null && rawEdges === null) {
+    // Not a recognisable node/edge graph — fall back to the generic backstop.
+    return boundedJsonBlock(graph, []);
+  }
+
+  const originalNodeCount = rawNodes?.length ?? 0;
+  const originalEdgeCount = rawEdges?.length ?? 0;
+
+  const idOf = (entity: unknown): string | null => {
+    if (entity === null || typeof entity !== 'object' || Array.isArray(entity)) return null;
+    const id = (entity as Record<string, unknown>)['id'];
+    return typeof id === 'string' && id.length > 0 ? id : null;
+  };
+  const endpointsOf = (entity: unknown): readonly string[] => {
+    if (entity === null || typeof entity !== 'object' || Array.isArray(entity)) return [];
+    const e = entity as Record<string, unknown>;
+    return [e['from'], e['to']].filter((v): v is string => typeof v === 'string' && v.length > 0);
+  };
+
+  let edges = (rawEdges ?? []).slice(0, DECISION_REVIEW_MAX_GRAPH_EDGES);
+
+  // Endpoint-first node retention: nodes an EDGE depends on take the cap's
+  // places before unreferenced nodes do.
+  const needed = new Set<string>();
+  for (const edge of edges) for (const id of endpointsOf(edge)) needed.add(id);
+  const allNodes = rawNodes ?? [];
+  const referenced = allNodes.filter((n) => {
+    const id = idOf(n);
+    return id !== null && needed.has(id);
+  });
+  const unreferenced = allNodes.filter((n) => {
+    const id = idOf(n);
+    return id === null || !needed.has(id);
+  });
+  let nodes = [...referenced, ...unreferenced].slice(0, DECISION_REVIEW_MAX_GRAPH_NODES);
+
+  const dropDanglingEdges = () => {
+    if (rawNodes === null) return;
+    const present = new Set(nodes.map(idOf).filter((v): v is string => v !== null));
+    edges = edges.filter((edge) => {
+      const ends = endpointsOf(edge);
+      return ends.length === 0 || ends.every((id) => present.has(id));
+    });
+  };
+  dropDanglingEdges();
+
+  const render = (): string =>
+    JSON.stringify(
+      {
+        ...graph,
+        ...(rawNodes !== null ? { nodes } : {}),
+        ...(rawEdges !== null ? { edges } : {}),
+        ...(rawNodes !== null ? { _node_count: nodes.length } : {}),
+        ...(rawEdges !== null ? { _edge_count: edges.length } : {}),
+        ...(nodes.length !== originalNodeCount || edges.length !== originalEdgeCount
+          ? {
+              _omitted: {
+                nodes: originalNodeCount - nodes.length,
+                edges: originalEdgeCount - edges.length,
+                of_nodes: originalNodeCount,
+                of_edges: originalEdgeCount,
+                reason: 'prompt budget; entities dropped from the tail, edges before nodes',
+              },
+            }
+          : {}),
+      },
+      null,
+      2,
+    );
+
+  const referencedIds = (): Set<string> => {
+    const set = new Set<string>();
+    for (const edge of edges) for (const id of endpointsOf(edge)) set.add(id);
+    return set;
+  };
+
+  let json = render();
+  // ⛔ ORDER MATTERS, AND THE OBVIOUS ORDER IS WRONG. Dropping the tail entity
+  // — edges first — was written here and MEASURED: a 120-node/150-edge graph
+  // came out with all 150 edges gone and the node list still over budget, which
+  // is precisely the "silently drop every relationship" outcome this function
+  // exists to prevent. A list of nodes with no edges is not a model.
+  //
+  // So ISOLATES GO FIRST: a node no retained edge touches costs budget and
+  // carries no relationship. Only when every remaining node is load-bearing
+  // does an edge go — and then its orphaned endpoints go WITH it, so what
+  // survives is always a connected sub-model rather than a scatter of ids.
+  //
+  // Every branch removes at least one entity, so this terminates at the floor
+  // (`nodes: [], edges: []`), which is still valid JSON.
+  while (json.length > DECISION_REVIEW_SECTION_MAX_CHARS && (edges.length > 0 || nodes.length > 0)) {
+    const referenced = referencedIds();
+    const isolate = nodes.findLastIndex((node) => {
+      const id = idOf(node);
+      return id === null || !referenced.has(id);
+    });
+    if (isolate >= 0) {
+      nodes = nodes.filter((_, index) => index !== isolate);
+    } else if (edges.length > 0) {
+      edges = edges.slice(0, edges.length - 1);
+      const stillReferenced = referencedIds();
+      nodes = nodes.filter((node) => {
+        const id = idOf(node);
+        return id !== null && stillReferenced.has(id);
+      });
+    } else {
+      nodes = nodes.slice(0, nodes.length - 1);
+    }
+    json = render();
+  }
+
+  const notes: string[] = [];
+  const droppedNodes = originalNodeCount - nodes.length;
+  const droppedEdges = originalEdgeCount - edges.length;
+  if (droppedNodes > 0) notes.push(`${droppedNodes} of ${originalNodeCount} graph.nodes entries omitted`);
+  if (droppedEdges > 0) notes.push(`${droppedEdges} of ${originalEdgeCount} graph.edges entries omitted`);
+  return notes.length > 0 ? `${json}\n[TRUNCATED: ${notes.join('; ')}]` : json;
 }
 
 /**
@@ -402,21 +573,11 @@ export function buildDecisionReviewUserMessage(
 
   // GRAPH — cap nodes/edges by count (no decision-relevance signal exists
   // for individual nodes/edges at this layer; keep the first N).
-  const graphNodesRaw = input.graph['nodes'];
-  const graphEdgesRaw = input.graph['edges'];
-  const nodesCap = capArray<unknown>(graphNodesRaw, DECISION_REVIEW_MAX_GRAPH_NODES);
-  const edgesCap = capArray<unknown>(graphEdgesRaw, DECISION_REVIEW_MAX_GRAPH_EDGES);
-  const cappedGraph: Record<string, unknown> = {
-    ...input.graph,
-    ...(Array.isArray(graphNodesRaw) ? { nodes: nodesCap.kept } : {}),
-    ...(Array.isArray(graphEdgesRaw) ? { edges: edgesCap.kept } : {}),
-  };
-  const graphNotes: string[] = [];
-  if (nodesCap.droppedCount > 0) graphNotes.push(`${nodesCap.droppedCount} additional graph.nodes entries omitted`);
-  if (edgesCap.droppedCount > 0) graphNotes.push(`${edgesCap.droppedCount} additional graph.edges entries omitted`);
-
+  // Relationship-aware, always-parseable bounding — see `boundedGraphJsonBlock`.
+  // The independent nodes/edges caps this replaces could retain an edge whose
+  // endpoint node had been dropped, and the byte ceiling sliced the JSON string.
   sections.push('<GRAPH>');
-  sections.push(boundedJsonBlock(cappedGraph, graphNotes));
+  sections.push(boundedGraphJsonBlock(input.graph));
   sections.push('</GRAPH>');
 
   // ISL_RESULTS — cap factor_sensitivity / fragile_edges / option_comparison,
