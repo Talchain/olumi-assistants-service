@@ -233,7 +233,7 @@ describe("compactGraph", () => {
     ];
     const result = compactGraph(makeGraph(nodes, []));
     const optNode = result.nodes.find((n) => n.id === "opt_a")!;
-    expect(optNode.intervention_summary).toBe("sets AI Expertise=0.9, Cost=0.7, Velocity=0.8");
+    expect(optNode.intervention_summary).toBe("sets AI Expertise=model value 0.9 (display band Very high; real-world meaning not established), Cost=model value 0.7 (display band High; real-world meaning not established), Velocity=model value 0.8 (display band Very high; real-world meaning not established)");
   });
 
   it("option node without interventions has no intervention_summary", () => {
@@ -265,7 +265,7 @@ describe("compactGraph", () => {
     ];
     const result = compactGraph(makeGraph(nodes, []));
     const optNode = result.nodes.find((n) => n.id === "opt_d")!;
-    expect(optNode.intervention_summary).toBe("sets Revenue Growth=0.5");
+    expect(optNode.intervention_summary).toBe("sets Revenue Growth=model value 0.5 (display band Moderate; real-world meaning not established)");
     expect(optNode.intervention_summary).not.toContain("fac_x");
   });
 
@@ -462,7 +462,7 @@ describe("compactGraph", () => {
     ];
     const result = compactGraph(makeGraph(nodes, []));
     const optNode = result.nodes.find((n) => n.id === "opt_e")!;
-    expect(optNode.intervention_summary).toBe("sets Known Factor=0.5");
+    expect(optNode.intervention_summary).toBe("sets Known Factor=model value 0.5 (display band Moderate; real-world meaning not established)");
     expect(optNode.intervention_summary).not.toContain("unknown_id");
   });
 

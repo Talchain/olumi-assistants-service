@@ -12,6 +12,7 @@
  */
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
+import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 import {
@@ -352,7 +353,28 @@ export function projectUncertaintyDriversForContext(
 
 /**
  * Build a human-readable intervention summary for an option node.
- * Format: "sets Label1=0.9, Label2=0.7" (capped at 5 entries).
+ *
+ * Format, capped at 5 entries:
+ *   bare, in [0,1]   "sets Evening Footfall Uplift=model value 0.7
+ *                     (display band High; real-world meaning not established)"
+ *   bare, off scale  "sets Headcount Added=model value 42
+ *                     (real-world meaning not established)"
+ *   native quantity  "sets Monthly price=69 £/month (model value 0.69)"
+ *
+ * ⚠ SIZE COST, DISCLOSED RATHER THAN DISCOVERED LATER — AND RESTATED AFTER THE
+ * REVIEW CORRECTION, BECAUSE IT GREW. The qualified form runs roughly 80–100
+ * characters per entry against the bare numeral's handful, so a 5-entry option
+ * costs a few hundred characters it did not before. `budget.ts` drops this
+ * whole field in its second pass under context pressure, so on a graph already
+ * over budget the drop becomes more likely than it was.
+ *
+ * Accepted deliberately, and the trade is the honest one: a summary that
+ * SURVIVES while asserting a meaning the stored value does not establish is
+ * worse than one dropped cleanly. The bare numeral is what produced the
+ * "active" / "inactive baseline" answer in capture served-coaching-8077853a,
+ * and an unqualified band would have produced a confident wrong scale instead.
+ * If this field starts being dropped in practice, the fix is a shorter honest
+ * form, never a shorter dishonest one.
  *
  * @param interventions - entries selected by the existing intervention authority
  * @param labelMap - node id → label lookup built from graph nodes
@@ -376,10 +398,41 @@ function buildInterventionSummary(
   const remaining = resolved.length - shown.length;
 
   const parts = shown.map(([factorId, entry]) => {
-    // Legacy bare values retain their established representation. Canonical
-    // objects must not stringify as [object Object] or attach native units to
-    // a model-scale value. Carry the stored pair without doing any conversion.
-    if (typeof entry === 'number') return `${labelMap.get(factorId)!}=${entry}`;
+    // ⚠ A BARE MODEL VALUE CARRIES NO ESTABLISHED MEANING, AND SAYING SO IS
+    // THE POINT — corrected by review CX-20260916-90.
+    //
+    // Served capture `served-coaching-8077853a` (16 Sep 2026): the owned
+    // bookshop options carry bare `1` and `0`, so this line sent
+    // "Friday Extended Hours=1" and "=0" to the model. The answer came back
+    // saying each option "sets Friday extended hours ACTIVE" and that the
+    // baseline "sets Friday extended hours to its INACTIVE baseline".
+    //
+    // ⚠⚠ MY FIRST REPAIR MADE THE MODEL'S OWN MISTAKE. It sent
+    // "Very high (1)" and argued the value was ORDINAL because the UI renders
+    // it that way. The reviewer's correction is right and is the rule here: a
+    // bare 1/0 establishes NEITHER a binary NOR an ordinal reading, and a
+    // display band is a FORMATTER FALLBACK, not semantic evidence. Replacing
+    // the model's unwarranted "active" with our own unwarranted "Very high"
+    // would have moved the fabrication one layer upstream and made it look
+    // authoritative, which is worse — the model can hedge a number it was
+    // given raw, and cannot hedge a label we asserted.
+    //
+    // So the context now states all three things separately and lets the model
+    // see which is which: the MODEL VALUE (fact), the DISPLAY BAND (how the UI
+    // renders it, `qualitativeBand`, the shared rule reused rather than
+    // restated), and that the REAL-WORLD MEANING IS NOT ESTABLISHED (the
+    // actual epistemic state). An unknown scale is named as unknown.
+    //
+    // Outside [0,1] no band is claimed at all, because `qualitativeBand` is
+    // documented for normalised values and a label outside its domain would be
+    // exactly the unwarranted promotion this comment exists to prevent.
+    if (typeof entry === 'number') {
+      const label = labelMap.get(factorId)!;
+      if (!Number.isFinite(entry)) return `${label}=${entry}`;
+      return entry >= 0 && entry <= 1
+        ? `${label}=model value ${entry} (display band ${qualitativeBand(entry)}; real-world meaning not established)`
+        : `${label}=model value ${entry} (real-world meaning not established)`;
+    }
     const value = entry as Record<string, unknown>;
     const unit = typeof value.unit === 'string' ? value.unit.trim() : '';
     const native = value.raw_value;
