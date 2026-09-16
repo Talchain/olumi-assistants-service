@@ -63,10 +63,7 @@ import { applyWinnerNamingEgressGuard } from '../compose/winner-naming-egress-gu
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
 import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels.js';
-import {
-  projectRunGraphForDecisionReview,
-  type DecisionReviewGraphProjection,
-} from './decision-review-graph-projection.js';
+import { projectRunGraphForDecisionReview } from './decision-review-graph-projection.js';
 // ROADMAP 2.228 F1 — the SINGLE owner of the parse for PLoT's live top-level
 // `enrichment.flip_thresholds[]` shape, shared with the coach context path so
 // the two surfaces cannot drift into disagreeing about the same rows.

@@ -406,7 +406,11 @@ function shrinkJsonValueToFit(
         null,
         2,
       ),
-      note: `section body could not be bounded by entry removal and is NOT present (${originalChars} chars)`,
+      // `hard ceiling` is a PINNED phrase (invoke.prompt-cap.test.ts:231) — it
+      // is the disclosure an operator greps for. A single oversized scalar
+      // field is exactly the case that reaches here, and it is exactly the case
+      // that test was written for.
+      note: `section body omitted at the hard ceiling — a single oversized field cannot be bounded by entry removal (${originalChars} chars)`,
     };
   }
   return {
@@ -521,29 +525,33 @@ function boundedGraphJsonBlock(graph: Record<string, unknown>): string {
   };
   dropDanglingEdges();
 
-  const render = (): string =>
-    JSON.stringify(
+  // ⚠ BYTE-IDENTICAL WHEN NOTHING IS DROPPED. A graph that fits is emitted
+  // exactly as it arrived — no `_node_count`, no `_omitted`, no added noise —
+  // so this function changes the prompt ONLY on the graphs it actually has to
+  // bound. Every other turn's bytes are unchanged, which keeps the blast radius
+  // of this repair to the case it exists for.
+  const render = (): string => {
+    const intact = nodes.length === originalNodeCount && edges.length === originalEdgeCount;
+    if (intact) return JSON.stringify(graph, null, 2);
+    return JSON.stringify(
       {
         ...graph,
         ...(rawNodes !== null ? { nodes } : {}),
         ...(rawEdges !== null ? { edges } : {}),
         ...(rawNodes !== null ? { _node_count: nodes.length } : {}),
         ...(rawEdges !== null ? { _edge_count: edges.length } : {}),
-        ...(nodes.length !== originalNodeCount || edges.length !== originalEdgeCount
-          ? {
-              _omitted: {
-                nodes: originalNodeCount - nodes.length,
-                edges: originalEdgeCount - edges.length,
-                of_nodes: originalNodeCount,
-                of_edges: originalEdgeCount,
-                reason: 'prompt budget; entities dropped from the tail, edges before nodes',
-              },
-            }
-          : {}),
+        _omitted: {
+          nodes: originalNodeCount - nodes.length,
+          edges: originalEdgeCount - edges.length,
+          of_nodes: originalNodeCount,
+          of_edges: originalEdgeCount,
+          reason: 'prompt budget; isolated nodes dropped first, then edges with their endpoints',
+        },
       },
       null,
       2,
     );
+  };
 
   const referencedIds = (): Set<string> => {
     const set = new Set<string>();
@@ -567,10 +575,16 @@ function boundedGraphJsonBlock(graph: Record<string, unknown>): string {
   // (`nodes: [], edges: []`), which is still valid JSON.
   while (json.length > DECISION_REVIEW_SECTION_MAX_CHARS && (edges.length > 0 || nodes.length > 0)) {
     const referenced = referencedIds();
-    const isolate = nodes.findLastIndex((node) => {
-      const id = idOf(node);
-      return id === null || !referenced.has(id);
-    });
+    // Reverse scan rather than `findLastIndex` — this project's `lib` predates
+    // es2023, and the gate catches it (TS2550) while vitest does not.
+    let isolate = -1;
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const id = idOf(nodes[index]);
+      if (id === null || !referenced.has(id)) {
+        isolate = index;
+        break;
+      }
+    }
     if (isolate >= 0) {
       nodes = nodes.filter((_, index) => index !== isolate);
     } else if (edges.length > 0) {
