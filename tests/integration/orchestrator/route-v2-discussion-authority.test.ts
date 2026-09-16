@@ -239,3 +239,56 @@ describe('lean native discussion respects explicit no-change authority at both e
     expect(coachCall).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * REAL-ROUTE WITNESS for the advice-question guard (PR #1521).
+ *
+ * Requested by review CX-20260916-39: "your gate-chain cases identify
+ * candidates, not proof which actual router route handled them". Correct — the
+ * predicate suite proves what `isAnalyticalQuestion` returns, and
+ * `editIntentDetected` is a disjunction with detectors the message alone cannot
+ * decide. These four cases run the actual Fastify route and assert the EDIT
+ * DOOR itself, via the `dispatchEditGraph` mock already wired above.
+ *
+ * Added to this existing suite rather than a new harness, per the same review.
+ *
+ * BOTH DIRECTIONS, and the second half is the load-bearing one: the three
+ * mixed command-and-question messages are REGRESSIONS THIS GUARD SHIPPED,
+ * found by an independent route-level comparison and not by the author's own
+ * corpus. They are pinned here at the route, not just at the predicate,
+ * because that is the level at which the user loses the edit.
+ */
+describe('an advice question reaches discussion; a command mixed with one does not', () => {
+  let app: FastifyInstance;
+  beforeAll(async () => { app = Fastify(); await ceeOrchestratorRouteV2(app); await app.ready(); });
+  afterAll(async () => { await app.close(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    modelFixture.includeGeneralQuery = true;
+    append.mockResolvedValue({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' });
+    editDispatch.mockResolvedValue({ response: { response_version: 2, assistant_text: 'EDIT DISPATCH SENTINEL', blocks: [], suggested_actions: [], insights: [], stage_indicator: 'analyse' }, commitPerformed: true });
+  });
+
+  it('the captured advice question does not reach the edit door', async () => {
+    // Captured turn 9, hiring scenario 82f31082, CEE request 8a366af6. On the
+    // deployed build this entered edit_graph, which returned no operations and
+    // asked the user for a factor and a value instead of answering.
+    const res = await app.inject({
+      method: 'POST', url: '/orchestrate/v2/turn',
+      payload: nativeRequest('How do you recommend we add it to the decision?'),
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(editDispatch, 'the advice question reached the edit door').not.toHaveBeenCalled();
+    expect(res.json().assistant_text ?? '').not.toContain('EDIT DISPATCH SENTINEL');
+  });
+
+  it.each([
+    ['a quoted factor name containing "Should we"', 'Add a factor called "Should we hire contractors?"'],
+    ['a command followed by an advice question', 'Add a risk for churn. Should we hire a tech lead?'],
+    ['an advice question followed by a command', 'How do you recommend we manage morale? Add a factor for staff morale.'],
+  ])('%s still reaches the edit door', async (_name, message) => {
+    const res = await app.inject({ method: 'POST', url: '/orchestrate/v2/turn', payload: nativeRequest(message) });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(editDispatch, `an explicit command lost the edit door: ${message}`).toHaveBeenCalled();
+  });
+});

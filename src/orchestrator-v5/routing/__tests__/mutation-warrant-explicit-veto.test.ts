@@ -229,7 +229,6 @@ const KNOWN_UNFIXED_LIES: readonly string[] = [
   "What did the hiring cost update do?",
   "Update budget?",
   "Change pricing?",
-  "Should we change pricing?",
   "Could you change the pricing?",
   "What did the update to hiring cost do?",
   "What did your customer acquisition cost change do?",
@@ -250,6 +249,30 @@ const KNOWN_UNFIXED_LIES: readonly string[] = [
  * Asserted EXACTLY, so this REDs if it GROWS (more edits silently dropped) or
  * SHRINKS (someone fixed one — move it out of here and say so).
  */
+/**
+ * ⭐ FIXED AND MOVED OUT OF `KNOWN_UNFIXED_LIES`, 16 Sep 2026 — said so rather
+ * than silently shrinking the set, which is what that set's own docstring asks
+ * for.
+ *
+ * `analytical-question-guard.ts` gained a deliberative-modal pattern
+ * (`should I / should we`) for the captured hiring session, where "Should I
+ * hire a Tech lead or two developers to increase productivity?" — the user's
+ * central decision question — reached the edit path on the real-world verb
+ * `increase`. `hasMutationWarrantSignal` consults `isAnalyticalQuestion`, so
+ * this row moved with it.
+ *
+ * ⚠ THIS IS NOT THE RULE THE SET'S DOCSTRING FORBIDS. That warning names a
+ * measured attempt where "a veto granted a warrant IFF it did not end in a
+ * question mark". This pattern is not punctuation-based and does not read the
+ * question mark: it requires the deliberative modal to be followed by the
+ * ASKING PARTY. Its two neighbours in that set are the proof it did not
+ * generalise — "Change pricing?" and "Could you change the pricing?" are still
+ * lies, still pinned, and still unfixed. A rule that had merely learned "ends
+ * in ?" would have taken all three.
+ */
+const DELIBERATIVE_QUESTION_FIXED: readonly string[] = [
+  "Should we change pricing?",];
+
 const KNOWN_OPEN_GAPS: readonly string[] = [
   "Edit hiring cost to 0.9 and do not change the model.",
   "Reduce churn to 0.02 and do not change the model.",];
@@ -377,7 +400,9 @@ describe('mutation warrant consults the explicit veto', () => {
     // because it breaks them, which is why they are named here rather than
     // absorbed into a looser assertion. Anything else moving voids the claim
     // that this change touches only what it says it touches.
-    expect([...moved].sort()).toEqual([...EXPLICIT_VETOES, ...KNOWN_OPEN_GAPS].sort());
+    expect([...moved].sort()).toEqual(
+      [...EXPLICIT_VETOES, ...KNOWN_OPEN_GAPS, ...DELIBERATIVE_QUESTION_FIXED].sort(),
+    );
   });
 
   it('GAPS — the only edits without a warrant are the base gaps plus the recorded known-open set', () => {
@@ -428,12 +453,12 @@ describe('mutation warrant consults the explicit veto', () => {
     }
   });
 
-  it('LIES — 16 -> 14, and the remainder is EXACTLY the two recorded sets', () => {
+  it('LIES — 16 -> 13, and the remainder is EXACTLY the two recorded sets', () => {
     const lies = NON_EDITS.filter((c) => hasMutationWarrantSignal(c.message)).map((c) => c.message);
     const baseLies = NON_EDITS.filter((c) => c.baseWarrant).map((c) => c.message);
     expect(baseLies.length).toBe(16);
     expect([...lies].sort()).toEqual([...KNOWN_UNFIXED_LIES, ...KNOWN_OPEN_LIES].sort());
-    expect(lies.length).toBe(14);
+    expect(lies.length).toBe(13);
   });
 
   /**

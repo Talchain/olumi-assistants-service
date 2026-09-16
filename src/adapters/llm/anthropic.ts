@@ -87,6 +87,8 @@ import {
   buildRecordsCompletionPrompt,
   buildRecordsCompletionSchema,
   mergeCompletionClaims,
+  repairableConstraintFields,
+  type ConstraintCorrection,
   RECORDS_COMPLETION_MAX_TOKENS,
   RECORDS_COMPLETION_WALL_MS,
   censusOptionFactorMagnitudes,
@@ -2091,7 +2093,20 @@ export async function draftGraphWithAnthropic(
         }
         const merged =
           completionParsed !== undefined
-            ? mergeCompletionClaims(seam.records, completionParsed as { claims?: DraftInferenceClaim[] })
+            ? mergeCompletionClaims(
+                seam.records,
+                // ⭐ `constraint_corrections` travels with the claims. Omitting it
+                // here would leave the new grammar field parsed and then dropped —
+                // the ask answerable in principle and unanswered in fact.
+                completionParsed as {
+                  claims?: DraftInferenceClaim[];
+                  constraint_corrections?: readonly ConstraintCorrection[];
+                },
+                // ⭐ THE REPAIR SCOPE — derived from the SAME projection that
+                // raised the ask, so the model can only change a limit this turn
+                // actually questioned.
+                repairableConstraintFields(seam.records, seam.projection),
+              )
             : ({ ok: false, reason: "no_new_claims" } as const);
         completionMeta.parsed = completionParsed !== undefined;
         if (merged.ok) {

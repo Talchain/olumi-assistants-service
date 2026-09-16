@@ -324,7 +324,12 @@ describe("⭐ the completion pass asks about gaps, and only about gaps", () => {
       properties: Record<string, unknown>;
       required: string[];
     };
-    expect(Object.keys(schema.properties)).toEqual(["claims"]);
+    // ⚠ `constraint_corrections` was added 15 Sep so a REFUSED LIMIT could be
+    // repaired. It changes this key list and NOT this test's claim: a correction
+    // carries `stated_index`, subject, `direction` and `value` — no
+    // `source_quote`, no `kind`, no way to mint a stated item. The two
+    // assertions below are the load-bearing ones and are untouched.
+    expect(Object.keys(schema.properties).sort()).toEqual(["claims", "constraint_corrections"]);
     expect(schema.required).toEqual(["claims"]);
     // A fabricated `source_quote` would wear a `stated` provenance badge. There
     // is no field through which the second turn could produce one.

@@ -154,6 +154,23 @@ function pendingOfKind(kind: PendingActionKind): PendingAction {
           label: 'Churn rate',
         },
       };
+    case 'elicit_option_native_quantity':
+      // GO(A) — the same cell as `elicit_option_effect` below, asking the
+      // OPPOSITE question: that one supplies a MISSING model-unit value, this
+      // restates an EXISTING one in the user's own units. `unit` is required
+      // and comes from the ratified constraint's own row — an answer is
+      // recorded in that unit or not at all.
+      return {
+        ...base,
+        action: {
+          kind,
+          option_id: 'opt_two_devs',
+          option_label: 'Two Developers',
+          factor_id: 'fac_hiring_cost',
+          factor_label: 'Hiring Cost',
+          unit: 'GBP',
+        },
+      };
     case 'elicit_option_effect':
       // ROADMAP 2.1352 — the configure-option clarify intercept's asked cell
       // (server-only; carries the (option, factor) identity the question

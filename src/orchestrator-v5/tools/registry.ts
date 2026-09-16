@@ -556,6 +556,29 @@ export interface HandlerOutcome {
    * the next turn has no elliptical binding (fail closed).
    */
   readonly __elicit_baseline?: import('../session/pending-action.js').ElicitTargetBaselineFields;
+  /**
+   * ⭐ GO(A) — set ONLY by `run_analysis`, and ONLY when the producer's own
+   * constraint verdict is `unevaluated` (its "I did not reach decision grade"
+   * state). Names the ONE option-factor cell whose value in the limit's own
+   * unit would make the withheld limit checkable.
+   *
+   * Internal channel on the `__elicit_baseline` pattern — never crosses to the
+   * wire envelope; the user-facing half is the disclosure already appended to
+   * `assistant_text`. The executor arms the matching
+   * `elicit_option_native_quantity` pending in the SAME commit, so the question
+   * and the record that can answer it are never persisted apart. Absent ⇒ no
+   * question was asked ⇒ no pending persists (fail closed).
+   *
+   * ⚠ Fields are the pending's own, so the two cannot drift.
+   */
+  readonly __option_cost_ask?: {
+    readonly option_id: string;
+    readonly option_label: string;
+    readonly factor_id: string;
+    readonly factor_label: string;
+    readonly unit: string;
+    readonly constraint_label: string | null;
+  };
   // ⚠ ROADMAP 2.804 — `__leading_option_claim_withheld` WAS DECLARED HERE AND
   // IS DELETED. DO NOT REINSTATE IT.
   //
