@@ -506,7 +506,34 @@ export function transformNodeToV3(
     // the same place from the same source. ⚠ CARRIES, NEVER INFERS: absent
     // upstream, it stays absent here — a fabricated authorship is far worse
     // than a withheld one.
-    if (rawOk && capOk) {
+    // ⛔⛔ A DECLARED PRIOR OUTRANKS THE PAIR — DO NOT RESTORE A REJECTED
+    // DEFAULT (Codex CX-175, an independent review that BLOCKED this change
+    // with an executed reproduction, confirmed here by running it).
+    //
+    // `handleUnreachableFactors` DELIBERATELY removes a fabricated point value
+    // and substitutes `buildUnquantifiedPrior()` — "Do not disguise ignorance
+    // as a 0–1 distribution", "MARK, NEVER SUPPRESS" — but it leaves the
+    // promoted `raw_value`/`cap` ON THE NODE. So this fallback saw the pair,
+    // recreated `observed_state.value = raw_value / cap`, reinstated exactly
+    // the default the repair had REJECTED, and PLoT sampled that point instead
+    // of the declared distribution. Genuine prior-backed externals too.
+    //
+    // ⭐ THE TELL, AND IT WAS IN MY OWN COMMENT: "CARRIES, NEVER DERIVES" sat
+    // directly above a DIVISION. Dividing two numbers is a derivation; it is
+    // defensible as carrying only into a VACUUM. A prior is not a vacuum — it
+    // is the pipeline's considered statement about this factor's level, and it
+    // wins.
+    //
+    // ⚠ RESIDUAL RECORDED, NOT CHASED: a prior-backed factor still reaches the
+    // wire with no unit. That is a real display/comparison gap and it needs a
+    // carrier that is NOT `observed_state` (`scale_frame` is the typed one the
+    // estate already designed). Synthesising one here would trade a display gap
+    // for a corrupted computation, which is the worse of the two by far.
+    const declaredPrior = (node as { prior?: unknown }).prior;
+    const hasDeclaredPrior =
+      declaredPrior !== null && typeof declaredPrior === 'object' && !Array.isArray(declaredPrior);
+
+    if (rawOk && capOk && !hasDeclaredPrior) {
       const derived = promotedRaw / promotedCap;
       if (Number.isFinite(derived)) {
         const promotedExtraction = (node as { extractionType?: unknown }).extractionType;

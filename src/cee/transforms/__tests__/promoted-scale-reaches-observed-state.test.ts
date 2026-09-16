@@ -150,3 +150,41 @@ describe('the promoted scale moves the gate the user actually feels', () => {
     expect(structureProvenance(parsedOf(promotedNode()))).toBe('unattributed');
   });
 });
+
+/**
+ * ⛔⛔ A DECLARED PRIOR IS THE PIPELINE'S STATEMENT ABOUT THIS FACTOR'S LEVEL,
+ * AND SYNTHESISING A POINT VALUE BESIDE IT OVERRIDES IT (Codex CX-175, an
+ * independent review that BLOCKED this change with an executed reproduction).
+ *
+ * `handleUnreachableFactors` DELIBERATELY removes a fabricated point value and
+ * substitutes `buildUnquantifiedPrior()` — its own header says "Do not disguise
+ * ignorance as a 0–1 distribution" and "MARK, NEVER SUPPRESS". But it leaves
+ * the promoted `raw_value`/`cap` on the node. So this fallback saw the pair,
+ * recreated `observed_state.value = raw_value / cap` — reinstating the very
+ * default the repair had REJECTED — and PLoT then sampled from that point
+ * instead of the declared distribution. Genuine prior-backed externals were
+ * affected too.
+ *
+ * ⭐ THE TELL I MISSED: my own comment said "CARRIES, NEVER DERIVES", and then
+ * the code DIVIDED two numbers. Division is a derivation. It is defensible as
+ * carrying only when nothing else already speaks for that factor's level — and
+ * a prior speaks for it.
+ *
+ * So the pair is carried ONLY into a vacuum. Where a prior exists it is the
+ * authority and this emits nothing. ⚠ The residual is recorded, not chased: a
+ * prior-backed factor still reaches the wire without its unit, which is a real
+ * gap and needs a carrier that is NOT `observed_state` — synthesising one here
+ * trades a display gap for a corrupted computation.
+ */
+describe('a declared prior outranks the promoted pair', () => {
+  it.each([
+    ['unquantified prior', { distribution: 'uniform', range_min: 0, range_max: 1, prior_is_unquantified: true }],
+    ['synthesised prior around a real baseline', { distribution: 'uniform', range_min: 0.4, range_max: 0.6 }],
+  ])('⛔ emits NO observed_state beside a %s', (_n, prior) => {
+    expect(observedOf(promotedNode({ prior }))).toBeUndefined();
+  });
+
+  it('⭐ still carries the pair when NOTHING else speaks for the level', () => {
+    expect(observedOf(promotedNode())).toEqual({ value: 0.55, raw_value: 55000, cap: 100000, unit: '$' });
+  });
+});
