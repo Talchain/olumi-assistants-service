@@ -54,7 +54,7 @@
  *    cover.
  */
 
-import { classifyAnalyticalIntent } from './analytical-intent.js';
+import { classifyAnalyticalIntent, hasMutationSignal } from './analytical-intent.js';
 
 /**
  * Canonical analytical-outcome nouns. Narrow alternation: a phrase
@@ -127,6 +127,50 @@ const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
   /\bwhat\s+should\s+(?:i|we)\s+(?:change|update|edit|adjust|modify|fix|tweak|improve|simplify|do|set|increase|decrease|raise|lower|reduce|bump)\b/i,
 ];
 
+
+/**
+ * ⚠⚠ THESE TWO ARE VETOED BY `hasMutationSignal`, AND THE VETO IS THE WHOLE
+ * DIFFERENCE BETWEEN THEM AND THE ARRAY ABOVE.
+ *
+ * Both patterns are UNANCHORED: they match wherever the phrase appears in the
+ * message. Shipped without a veto that was a blanket mutation stop, and an
+ * independent route-level comparison (CX-20260916-42, executed through the real
+ * Fastify route) found three explicit commands newly losing the edit lane:
+ *
+ *   Add a factor called "Should we hire contractors?"     — inside a QUOTED NAME
+ *   Add a risk for churn. Should we hire a tech lead?     — command THEN question
+ *   How do you recommend we manage morale? Add a factor…  — question THEN command
+ *
+ * In all three the user issued a real instruction and would have watched it do
+ * nothing. My own suite asserted "both directions" and still missed them,
+ * because its opposite-direction half held pure edits and polite requests but
+ * no message that MIXED a command with a question — the obvious adversarial
+ * class, and the one a corpus written beside the fix does not think of.
+ *
+ * The fix is not more verb exceptions. `hasMutationSignal` is the existing
+ * authority for "this message carries a concrete edit clause", and its own
+ * docstring already says downstream analytical guards must not short-circuit
+ * when it holds. A message that asks for advice AND issues a command is an
+ * instruction; only a message that just asks is a question.
+ */
+const ADVICE_SEEKING_QUESTION_PATTERNS: readonly RegExp[] = [
+  // "How do you recommend we add it to the decision?" — captured turn 9 of the
+  // hiring session (CEE request 8a366af6, 15 Sep 2026 22:20 UTC), the
+  // ASSESSMENT's top-ranked failure, and confirmed through the real route as
+  // the one intended edit→coaching improvement of this change. The edit verb is
+  // the OBJECT of the recommendation being sought, not an instruction to
+  // perform it. Anchored on the ADVICE VERB, so "Can you add a risk for churn?"
+  // never matches.
+  /\bhow\s+(?:do|does|would|should|can|could)\s+(?:you|we|i)\s+(?:recommend|suggest|advise|propose)\b/i,
+  // "Should I hire a Tech lead or two developers to increase productivity?" —
+  // captured turns 12/13, the user's central decision question, trips the gate
+  // on the real-world verb `increase`. Generalises the `what should I/we VERB`
+  // entry above, whose closed verb list is what let this phrasing through.
+  // "we should add the risk" is a commitment and does NOT match; only
+  // "should we" / "should I" does.
+  /\bshould\s+(?:i|we)\b/i,
+];
+
 /**
  * Returns `true` when the message is an analytical / hypothetical
  * question about the model's outcome (and therefore must NOT be
@@ -148,6 +192,13 @@ export function isAnalyticalQuestion(message: string): boolean {
   if (classifyAnalyticalIntent(trimmed) !== null) return true;
   for (const re of ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS) {
     if (re.test(trimmed)) return true;
+  }
+  // Checked LAST and behind the veto. A message carrying a concrete edit clause
+  // is an instruction even when it also asks something — see the block above.
+  if (!hasMutationSignal(trimmed)) {
+    for (const re of ADVICE_SEEKING_QUESTION_PATTERNS) {
+      if (re.test(trimmed)) return true;
+    }
   }
   return false;
 }
