@@ -86,6 +86,31 @@ describe('the opposite direction: captured edit intent still dispatches', () => 
     expect(dispatchesEditGraph(message)).toBe(true);
   });
 
+  it('an explicit command MIXED with a question is an instruction, not a question', () => {
+    // ⚠ THESE THREE ARE REGRESSIONS THIS CHANGE SHIPPED AND AN INDEPENDENT
+    // ROUTE-LEVEL COMPARISON CAUGHT — not cases imagined here.
+    //
+    // CX-20260916-42 ran them through the real Fastify route against a control
+    // built from the previous routing files, and all three newly LOST the edit
+    // lane: a user issued a real instruction and would have watched it do
+    // nothing. The first hides "Should we" inside a QUOTED FACTOR NAME; the
+    // other two put a command and a question in one message, in both orders.
+    //
+    // My own suite claimed "both directions asserted" and still missed them,
+    // because its opposite-direction half held pure edits and polite requests
+    // and no message that MIXED the two — the obvious adversarial class, and
+    // exactly the one a corpus written beside the fix does not think of. Pinned
+    // by name so a future widening of the advice patterns REDs here.
+    for (const message of [
+      'Add a factor called "Should we hire contractors?"',
+      'Add a risk for churn. Should we hire a tech lead?',
+      'How do you recommend we manage morale? Add a factor for staff morale.',
+    ]) {
+      expect(isAnalyticalQuestion(message), `newly suppressed: ${message}`).toBe(false);
+      expect(dispatchesEditGraph(message), `lost the edit lane: ${message}`).toBe(true);
+    }
+  });
+
   it('a polite request that the assistant perform the edit still dispatches', () => {
     // The dangerous over-reach for this change. "Can you add X?" is an
     // interrogative AND an instruction; suppressing it would convert a working
