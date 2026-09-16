@@ -113,6 +113,20 @@ const TERMINOLOGY_RULES: readonly TerminologyRule[] = [
   // compose — vocabulary here, permission there — instead of one masking the
   // other.
   //
+  // ⚠⚠ BOTH ARMS CANONICALISE ONTO "leading option", NOT ONTO THE NOUN THEY
+  // CAME FROM — and that is a correction, not a preference. Review CX198
+  // demonstrated the escape and it reproduces exactly:
+  //     "… is the strongest choice" -> "… is the leading choice"
+  //        textAssertsLeadingOption -> FALSE   (escapes the permission guard)
+  //     "… is the strongest option" -> "… is the leading option"
+  //        textAssertsLeadingOption -> TRUE    (caught, as intended)
+  // The wire guard's vocabulary knows "leading option" and does NOT know
+  // "leading choice", so preserving the source noun would have produced a
+  // rewrite that slips a leader claim past the permission guard on a WITHHELD
+  // turn — the precise opposite of this rule's purpose. Emitting the one
+  // recognised result term makes the two guards compose in BOTH arms, and
+  // "leading option" is the term the terminology ruling sanctions anyway.
+  //
   // ⚠ NARROWED TO `choice|option` ON PURPOSE. The fatal pattern also covers
   // `bet|path|route`, and those are NOT rewritten: "your best bet" and "the way
   // to go" are idiomatic PRESCRIPTION, not a result term, and the terminology
@@ -126,7 +140,7 @@ const TERMINOLOGY_RULES: readonly TerminologyRule[] = [
   {
     pattern:
       /\b(is|are|was|were|remains?|looks?\s+like|seems?|appears?\s+to\s+be)(\s+)(?!not\b|never\b|no\b|rarely\b|seldom\b)((?:\w+\s+){0,2})(?:best|better|optimal|right|obvious|clear|clearest|smartest|safest|sensible|superior|preferable|strongest|most\s+promising)(\s+)(choice|option)\b/gi,
-    replacement: '$1$2$3leading$4$5',
+    replacement: '$1$2$3leading$4option',
   },
 ];
 
