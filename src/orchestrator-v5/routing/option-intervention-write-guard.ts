@@ -688,9 +688,19 @@ function isAffirmativeGlobalRequest(message: string): boolean {
  * INSTEAD OF £120,000" is a VALUE COMPARISON, not a scope prohibition, and
  * including them made the supported affirmative global request refuse. A
  * negation cue here must negate the SCOPE, never the quantity.
+ *
+ * ⚠ THE CONTRACTION ARM SHIPPED DEAD, AND ESCAPE 1 CERTIFIED IT ANYWAY
+ * (codex-reviewer, REVIEW1512 at `0eb5f18a`; reproduced here by execution).
+ * It read `\bn['’]t\b`, which cannot match "don't": `\b` demands a word
+ * boundary before `n`, and the preceding character is `o` — both word
+ * characters, so no boundary exists and the arm never fired. Three contracted
+ * prohibitions escaped while every uncontracted twin was caught, so the
+ * uncontracted test passed over a half-dead predicate. `\w*n['’]t\b`
+ * anchors at the word START instead, which is the position that actually has
+ * a boundary.
  */
 const GLOBAL_SCOPE_NEGATION =
-  /\b(?:do\s+not|does\s+not|never|without|avoid)\b|\bn['’]t\b/i;
+  /\b(?:do\s+not|does\s+not|never|without|avoid)\b|\w*n['’]t\b/i;
 
 /**
  * A universal quantifier over the option word: "all options", "every option",
