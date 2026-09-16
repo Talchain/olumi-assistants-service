@@ -261,9 +261,22 @@ function readSameTurnOptions(rawGraph: unknown): ReadonlyArray<{ interventions?:
   const canonical = ready?.options;
   if (!Array.isArray(canonical) || canonical.length === 0) return [];
 
-  // Complete each option's interventions from its NODE with the same merger the
-  // loader uses, so an option whose canonical row carries none is not read as
-  // pinning nothing when the node says otherwise.
+  // Interventions come from the option NODE ONLY — byte-for-byte the projection
+  // the loader submits (`mergeOptionInterventionObjects`, build-turn-context.ts:
+  // "returns the ORIGINAL merged intervention OBJECTS per option", sourced from
+  // `optionNodesById.get(option.option_id)` and nothing else).
+  //
+  // ⛔ THE CANONICAL ROW'S OWN `interventions` ARE DELIBERATELY NOT MERGED IN.
+  // Codex CX-20260916 counterexample: node A pins the measured cost, node B pins
+  // an upstream factor, and a COMPLETE top-level mirror (an exact unique-id
+  // bijection, so it owns the population) pins the cost for BOTH. Unioning the
+  // row over the node certifies an all-option cost pin the loader never submits,
+  // and the offer then names a target PLoT will refuse to anchor.
+  //
+  // Canonical readiness answers MEMBERSHIP (which options exist, completing a
+  // partial mirror from the nodes). The NODE answers WHAT EACH ONE PINS. Two
+  // questions, two authorities, named apart — merging them was one authority
+  // answering a question it does not own (trap 21).
   const optionNodesById = new Map<string, Record<string, unknown>>();
   const nodes = (rawGraph as { nodes?: unknown } | null)?.nodes;
   if (Array.isArray(nodes)) {
@@ -275,19 +288,20 @@ function readSameTurnOptions(rawGraph: unknown): ReadonlyArray<{ interventions?:
   // double cast here would be a 59th `as unknown as` against a baseline of 58
   // and the boundary ratchet would refuse it — correctly, since nothing about
   // this read needs to escape the type system.
+  // Only the IDENTITY fields are declared: the row is read for membership and
+  // nothing else, and a declared-but-unread `interventions` would invite the
+  // merge back.
   const rows: ReadonlyArray<{
     readonly option_id?: unknown;
     readonly id?: unknown;
-    readonly interventions?: unknown;
   }> = canonical;
   return rows.map((row) => {
     const id = typeof row.option_id === 'string' ? row.option_id
       : typeof row.id === 'string' ? row.id : undefined;
     const node = id !== undefined ? optionNodesById.get(id) : undefined;
-    const fromNode = node !== undefined ? mergeInterventionSourceObjects(node) : {};
-    const fromRow = (row.interventions && typeof row.interventions === 'object')
-      ? (row.interventions as Record<string, unknown>) : {};
-    return { interventions: { ...fromNode, ...fromRow } };
+    // `mergeInterventionSourceObjects` is the loader's own merger, so safely
+    // encoded raw-only node interventions are preserved exactly as submitted.
+    return { interventions: node !== undefined ? mergeInterventionSourceObjects(node) : {} };
   });
 }
 

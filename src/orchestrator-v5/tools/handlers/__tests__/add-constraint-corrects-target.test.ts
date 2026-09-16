@@ -634,6 +634,28 @@ describe('anchor routes reach the REAL handler', () => {
     expect(await textFor(g)).not.toMatch(/Hiring and Onboarding Cost/);
   });
 
+  it('⛔⛔ DIVERGENT CARRIER: a COMPLETE mirror may not out-vote the option NODES', async () => {
+    // Codex CX-20260916's counterexample, and the inverse of the partial-mirror
+    // case above. Here the top-level mirror IS an exact unique-id bijection, so
+    // canonical readiness lets it own the population — and it pins the cost for
+    // BOTH options. The NODES disagree: only opt_a pins cost; opt_b pins upstream.
+    //
+    // The loader submits NODE-DERIVED pins only
+    // (build-turn-context `mergeOptionInterventionObjects`), so on the real wire
+    // this is NOT pinned by every option. Reading the row over the node certifies
+    // an all-option pin that never reaches PLoT, and the offer names a target the
+    // engine will refuse to anchor — over-anchoring, the worse direction.
+    const g = nonRootGraph([
+      opt('opt_a', { 'f-hiring-cost': 0.4 }),
+      opt('opt_b', { 'f-upstream': 0.8 }),
+    ]);
+    (g as { options?: unknown }).options = [
+      { id: 'opt_a', option_id: 'opt_a', label: 'opt_a', interventions: { 'f-hiring-cost': 0.4 } },
+      { id: 'opt_b', option_id: 'opt_b', label: 'opt_b', interventions: { 'f-hiring-cost': 0.9 } },
+    ];
+    expect(await textFor(g)).not.toMatch(/Hiring and Onboarding Cost/);
+  });
+
   it('⛔ SOME options pin it — not every — so it is NOT offered', async () => {
     const text = await textFor(nonRootGraph([
       opt('opt_a', { 'f-hiring-cost': 0.4 }),
