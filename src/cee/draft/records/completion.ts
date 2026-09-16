@@ -1792,24 +1792,26 @@ export function applyConstraintCorrections(
     // reproduced `floor 0.9` overwriting a standing `<= 0.04` whose own quote
     // reads "under 4%". Repairing a reference is not licence to change what the
     // user said the limit IS.
-    const t = target as unknown as Record<string, unknown>;
-    const next: Record<string, unknown> = { ...t };
-    let changed = false;
-    if (editable.has("direction")) { next.direction = c.direction; changed = true; }
-    if (editable.has("value")) { next.value = c.value; changed = true; }
-    if (editable.has("unit") && c.unit !== undefined) { next.unit = c.unit; changed = true; }
-    if (editable.has("target")) {
-      if (c.applies_to_claim !== undefined) {
-        next.applies_to_claim = c.applies_to_claim; next.applies_to_stated = undefined;
-      } else {
-        next.applies_to_stated = c.applies_to_stated; next.applies_to_claim = undefined;
-      }
-      changed = true;
-    }
+    const mayUnit = editable.has("unit") && c.unit !== undefined;
+    const mayTarget = editable.has("target");
     // A correction that could change nothing permitted is not an answer.
-    if (!changed) continue;
+    if (!editable.has("direction") && !editable.has("value") && !mayUnit && !mayTarget) continue;
     seen.add(i);
-    items[i] = next as unknown as typeof target;
+    // ⚠ BUILT BY CONDITIONAL SPREAD, NOT BY MUTATING A `Record<string, unknown>`.
+    // The mutable form needed `as unknown as` twice, which the forbidden-boundary
+    // ratchet counts and correctly refused: a cast through `unknown` discards the
+    // very typing that makes this write safe to reason about.
+    items[i] = {
+      ...target,
+      ...(editable.has("direction") ? { direction: c.direction } : {}),
+      ...(editable.has("value") ? { value: c.value } : {}),
+      ...(mayUnit ? { unit: c.unit } : {}),
+      ...(mayTarget
+        ? (c.applies_to_claim !== undefined
+            ? { applies_to_claim: c.applies_to_claim, applies_to_stated: undefined }
+            : { applies_to_stated: c.applies_to_stated, applies_to_claim: undefined })
+        : {}),
+    } as typeof target;
     applied += 1;
   }
   // ⭐⭐ NOTHING CHANGED ⇒ THE ORIGINAL ARRAY, BY REFERENCE — one guard, not two.
