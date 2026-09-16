@@ -204,14 +204,14 @@ export const TelemetryEvents = {
   // is every ordinary turn in the service, and the signal would drown.
   // See src/orchestrator-v5/turn-executor.ts (the typed coaching-intent arm).
   /** A clicked phase-3 finding resolved and reached the coaching prompt. */
-  V5SelectedFindingResolved: "v5.selected_finding_resolved",
+  V5SelectedFindingResolved: "v5.selected_finding.resolved",
   /**
    * A clicked phase-3 finding could NOT be resolved. Emitted only when the
    * payload actually carried a block_id, so a zero here means "nobody's
    * selection was dropped" rather than "nobody clicked" — without the resolved
    * twin above, those two are indistinguishable.
    */
-  V5SelectedFindingUnresolved: "v5.selected_finding_unresolved",
+  V5SelectedFindingUnresolved: "v5.selected_finding.unresolved",
   V5TypedCoachingIntentUnrouted: "v5.typed_coaching_intent_unrouted",
 
   // S3 §5 / Lane C3 — add-option compound transaction. Fires once per typed
