@@ -11589,6 +11589,10 @@ export async function runTurnExecutor(
               scenarioId: context.session_id,
               signal: turnAbort.signal,
               brief: resolvedBrief,
+              // The reviewing model has never had the graph: the enrichment
+              // envelope does not carry one (`readGraph`'s own docstring says
+              // so). Threaded like `brief`, from the server-side read only.
+              canonicalGraph: context.persistedGraph,
               ...(timingsEnabled ? { callTelemetrySink } : {}),
               // D-ask-1 (2.11 P0-1) — P1-2: scaffolded-placeholder
               // disclosure channel — the review must never narrate a

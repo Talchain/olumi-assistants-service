@@ -117,6 +117,39 @@ export interface EnrichDecisionReviewInput {
    */
   readonly brief: string | null;
   /**
+   * ⭐⭐ THE CANONICAL GRAPH, THREADED THE SAME WAY `brief` IS AND FOR THE SAME
+   * REASON — because the enrichment envelope does not carry it.
+   *
+   * ⚠⚠ MEASURED ON A REAL USER SESSION, 16 Sep 2026. `v5.context_budget` for
+   * `call_site: "decision_review"` reported
+   * `section_chars: { graph_json: 21, isl_results: 8096, ... }` against
+   * `budget_chars: 43100` with `total_chars: 10647`. Twenty-one characters is
+   * `<GRAPH>\n\n{}\n\n</GRAPH>` — arithmetic checked: `{}` renders 21,
+   * `{nodes:[],edges:[]}` renders 51, a one-node graph 103. So the graph was
+   * **absent entirely**, not present-and-empty, while `factor_sensitivity` (6
+   * rows) and `option_comparison` (5 rows) in the same enrichment were full.
+   * `v5.decision_review.completed` agreed: `enrichment_has_graph: false`,
+   * node and edge counts 0.
+   *
+   * ⛔ AND IT IS NOT AN OUTAGE — IT IS THE DOCUMENTED STEADY STATE. CEE's own
+   * conformance manifest lists `enrichment.graph` among the keys PLoT does not
+   * emit at top level, and `readGraph`'s docstring says so in as many words:
+   * "On staging the run-analysis envelope often has NO top-level `graph` —
+   * callers must tolerate an empty result and fall back to inline labels."
+   * The reviewing model has therefore never had the graph.
+   *
+   * ⭐ COMPOSE ALREADY SOLVED THIS ONE LAYER DOWN. `buildGraphNodeLookup(fact,
+   * fallbackGraph)` reads `enrichment.graph` first and falls back to a
+   * hash-gated `persistedGraph`. The enricher runs EARLIER and feeds the LLM,
+   * and never received the same fallback — the remedy was scoped to the
+   * instance and nothing swept its sibling.
+   *
+   * Callers pass `context.persistedGraph`, the server-side scenarios read —
+   * never request-supplied `graph_state`. Optional: absent behaves exactly as
+   * before.
+   */
+  readonly canonicalGraph?: unknown;
+  /**
    * Optional write-back sink for the decision_review LLM call's attribution
    * (model / provider / token usage). Populated as a side effect ONLY on the
    * path where the underlying `invokeDecisionReview` /
@@ -240,6 +273,11 @@ export async function enrichRunAnalysisWithDecisionReview(
     // receives `enrichment` alone, and since schemas 0.25.0 the verdict is a
     // SIBLING of that record, not a member of it.
     readMayNameLeadingOptionFromResult(fact.result),
+    // The canonical graph the caller threaded. `enrichment.graph` is absent on
+    // this path as a documented steady state, so without this the reviewing
+    // model receives `<GRAPH>{}</GRAPH>` — 21 characters against a 43,100
+    // budget, measured live.
+    input.canonicalGraph,
   );
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner', {
@@ -785,8 +823,17 @@ export function buildInvokeInputForTests(
    * production caller always passes the fact's real verdict.
    */
   mayNameLeadingOption = true,
+  /** See `buildInvokeInput`. Absent behaves exactly as before. */
+  canonicalGraph?: unknown,
 ): DecisionReviewInvokeInput | null {
-  return buildInvokeInput(brief, enrichment, leadingOptionId, scaffoldDisclosure, mayNameLeadingOption);
+  return buildInvokeInput(
+    brief,
+    enrichment,
+    leadingOptionId,
+    scaffoldDisclosure,
+    mayNameLeadingOption,
+    canonicalGraph,
+  );
 }
 
 function buildInvokeInput(
@@ -812,6 +859,12 @@ function buildInvokeInput(
    * calls the dominant risk at a boundary.
    */
   mayNameLeadingOption: boolean,
+  /**
+   * The canonical graph, threaded like `brief` because the enrichment envelope
+   * does not carry one. See `canonicalGraph` on `EnrichDecisionReviewInput` for
+   * the measurement. Optional: absent behaves exactly as before.
+   */
+  canonicalGraph?: unknown,
 ): DecisionReviewInvokeInput | null {
   // Phase 3A fix (2026-05-17): walk every available results source until
   // one can match `leading_option_id`. The previous "first non-empty
@@ -932,7 +985,15 @@ function buildInvokeInput(
   // opaque (Record<string, unknown>) on this path, so reads are defensive.
   // Same maps are reused by readFlipThresholdData and readIslResults so
   // labels stay consistent across the prompt.
-  const graph = readGraph(enrichment);
+  // Prefer the enrichment's own graph; fall back to the canonical one the caller
+  // threaded when the envelope carries none (the documented steady state — see
+  // `canonicalGraph` on the input type). Falling back only when the enrichment
+  // yields NOTHING keeps the producer authoritative wherever it does speak.
+  const enrichmentGraph = readGraph(enrichment);
+  const graph =
+    Object.keys(enrichmentGraph).length > 0
+      ? enrichmentGraph
+      : readGraph({ graph: canonicalGraph });
   const labelMap = buildNodeLabelMap(graph);
   const unitMap = buildNodeUnitMap(graph);
 

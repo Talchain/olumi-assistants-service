@@ -1601,6 +1601,8 @@ export async function dispatchChipClickRunAnalysis(
         scenarioId: context.session_id,
         signal: turnAbort.signal,
         brief: context.scenarioBriefText,
+        // Same threading as the turn-executor decision-review block.
+        canonicalGraph: context.persistedGraph,
         ...(timingsEnabled ? { callTelemetrySink } : {}),
         // D-ask-1 (2.11 P0-1) — P1-2: same scaffolded-placeholder
         // disclosure threading as the turn-executor decision-review block —
