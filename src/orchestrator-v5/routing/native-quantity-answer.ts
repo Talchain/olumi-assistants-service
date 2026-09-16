@@ -48,6 +48,7 @@
  */
 import { findStatedAmounts } from '../../cee/provenance/stated-amounts.js';
 import { filterLivePendingActions, type PendingAction } from '../session/pending-action.js';
+import { sameUnit } from './native-quantity-operation.js';
 
 export type NativeQuantityAnswer =
   | {
@@ -119,7 +120,10 @@ export function decideNativeQuantityAnswer(params: {
   const amount = amounts[0]!;
   // A stated currency must MATCH. Converting invents a rate; recording under
   // the asked unit anyway would attach a number to a unit it was not given in.
-  if (amount.currencyCode !== undefined && amount.currencyCode !== asked.unit) {
+  // ⚠ SYMBOL vs CODE, normalised — `findStatedAmounts` returns an ISO code
+  // while a ratified constraint may carry `£`. Comparing raw would refuse the
+  // user's own currency. Not a conversion: USD vs GBP still refuses.
+  if (amount.currencyCode !== undefined && !sameUnit(amount.currencyCode, asked.unit)) {
     return { kind: 'ask', reason: 'unit_mismatch' };
   }
   if (!Number.isFinite(amount.magnitude)) return { kind: 'ask', reason: 'no_amount' };

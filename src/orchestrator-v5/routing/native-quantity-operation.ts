@@ -28,6 +28,36 @@
  * gate and the commit are all the same code every other edit goes through.
  */
 
+import { CURRENCY_SYMBOL_TO_CODE } from '../../utils/currency-alphabet.js';
+
+/**
+ * ⚠⚠ A FACTOR DECLARES ITS UNIT AS A SYMBOL AND A CONSTRAINT AS A CODE, AND
+ * COMPARING THEM RAW MAKES THIS FEATURE NEVER FIRE.
+ *
+ * Measured across real captured graphs: drafts declare monetary factors as
+ * `('Hiring and Salary Cost', '£', 200000)`, `('Total Hiring Cost', '£',
+ * 120000)`, `('Pro Plan Monthly Price', '£', 59)`. Paul's own ratified
+ * constraint declares `unit: "GBP"`. So the legitimate case is `£` vs `GBP`,
+ * and a raw equality check REFUSES it — the guard correct and pointed at the
+ * wrong bytes (trap 22), which would have made the whole path silently
+ * unreachable in production while every test passed.
+ *
+ * Normalised through `CURRENCY_SYMBOL_TO_CODE`, which the estate already calls
+ * "the one currency vocabulary". A non-currency unit (`months`, `FTE`,
+ * `developers`) is not in that map and compares on its own trimmed text, so
+ * nothing outside currency is widened.
+ *
+ * ⛔ THIS IS NOT A CONVERSION. `£`→`GBP` is the SAME unit spelled two ways.
+ * USD vs GBP still refuses, and no rate is ever applied.
+ */
+export function sameUnit(a: string, b: string): boolean {
+  const norm = (u: string) => {
+    const t = u.trim();
+    return (CURRENCY_SYMBOL_TO_CODE[t] ?? t).toUpperCase();
+  };
+  return norm(a) === norm(b);
+}
+
 /** The intervention cell as it stands, read from the graph by the caller. */
 export interface ExistingIntervention {
   readonly [field: string]: unknown;
@@ -104,7 +134,7 @@ export function buildNativeQuantityOperation(
   if (typeof factorScale?.cap !== 'number' || !Number.isFinite(factorScale.cap)) return null;
   // A declared factor unit that disagrees with the figure's unit is a mismatch,
   // not a conversion opportunity.
-  if (typeof factorScale.unit === 'string' && factorScale.unit !== write.unit) return null;
+  if (typeof factorScale.unit === 'string' && !sameUnit(factorScale.unit, write.unit)) return null;
 
   // ⭐⭐ THE STALE ENCODED VALUE IS DROPPED, AND THAT IS THE POINT.
   //
