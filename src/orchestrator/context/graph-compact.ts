@@ -12,6 +12,7 @@
  */
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
+import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
 import {
@@ -376,10 +377,37 @@ function buildInterventionSummary(
   const remaining = resolved.length - shown.length;
 
   const parts = shown.map(([factorId, entry]) => {
-    // Legacy bare values retain their established representation. Canonical
-    // objects must not stringify as [object Object] or attach native units to
-    // a model-scale value. Carry the stored pair without doing any conversion.
-    if (typeof entry === 'number') return `${labelMap.get(factorId)!}=${entry}`;
+    // ⚠ A BARE MODEL VALUE WITHOUT ITS BAND IS READ AS ON/OFF.
+    //
+    // Served capture `served-coaching-8077853a` (16 Sep 2026): the owned
+    // bookshop options carry bare `1` and `0`, so this line sent
+    // "Friday Extended Hours=1" and "=0" to the model. The answer came back
+    // saying each option "sets Friday extended hours ACTIVE" and that the
+    // baseline "sets Friday extended hours to its INACTIVE baseline".
+    //
+    // The model was not fabricating — it was reading a bare 1/0 the only way a
+    // bare 1/0 can be read. The product's own `intervention_details` renders
+    // exactly these two values as "Very high (1)" and "Low (0)": a position on
+    // an ORDINAL scale, not a switch. So the user's screen and the model's
+    // context disagreed about what the user's own option means, and the model
+    // took the reading its context supported.
+    //
+    // `qualitativeBand` is the shared banding rule, exported for precisely this
+    // ("so orchestrator surfaces can render a qualitative label for unitless
+    // 0–1 factors without reimplementing the banding rule"). Reused, not
+    // restated. The numeral is KEPT alongside the band — the band alone would
+    // lose the precision the model needs to compare two options that differ
+    // within one band.
+    //
+    // Range-gated: a value outside [0,1] is not on the banded scale, so it
+    // keeps its established bare representation rather than being given a label
+    // the rule does not warrant. No conversion, no new field, no prompt change.
+    if (typeof entry === 'number') {
+      const label = labelMap.get(factorId)!;
+      return Number.isFinite(entry) && entry >= 0 && entry <= 1
+        ? `${label}=${qualitativeBand(entry)} (${entry})`
+        : `${label}=${entry}`;
+    }
     const value = entry as Record<string, unknown>;
     const unit = typeof value.unit === 'string' ? value.unit.trim() : '';
     const native = value.raw_value;
