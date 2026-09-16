@@ -1440,6 +1440,8 @@ export function createAddConstraintHandler(): HandlerFn {
           chosenNodeId: targetId,
           constraintUnit: newConstraint.unit ?? null,
           nodes: graph.nodes as never,
+          edges: graph.edges as never,
+          options: (graph as { options?: unknown }).options as never,
         });
         fragments.push(
           alternativeForCorrection === null

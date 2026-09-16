@@ -55,6 +55,115 @@ export interface TargetAlternativeNode {
   readonly kind?: unknown;
   readonly label?: unknown;
   readonly observed_state?: unknown;
+  readonly goal_threshold_frame?: unknown;
+}
+
+export interface TargetAlternativeEdge {
+  readonly from?: unknown;
+  readonly to?: unknown;
+  readonly edge_type?: unknown;
+}
+
+export interface TargetAlternativeOption {
+  readonly interventions?: unknown;
+}
+
+/**
+ * ⭐⭐ WOULD A LIMIT ON THIS NODE ACTUALLY BE SCORED? — a deliberately
+ * SUFFICIENT mirror of the consumer's own anchor test.
+ *
+ * ── WHY THIS EXISTS ───────────────────────────────────────────────────────
+ * A unit match and a recorded figure make a node look like a good target and
+ * do not make it a SCORABLE one. PLoT refuses to score a constraint whose
+ * sample frame it cannot anchor, and the refusal is silent to this module:
+ * `constraints_status: 'unavailable'`, no exception. Offering such a node is
+ * proposing a dead end with a confident sentence attached — the exact thing
+ * this whole module exists to stop, reproduced one level up.
+ *
+ * ── DERIVED, AND I GOT IT WRONG ONCE BY NOT DOING THAT ────────────────────
+ * Read at `plot-lite-service` staging `d68d4ffb` (16 Sep 2026),
+ * `src/lib/constraint-reliability.ts` `resolveConstraintSampleFrameAnchor`
+ * :216-245 and `collectDirectedEdgeTargets` :409-419. ⚠ I previously reported
+ * that PLoT rejects every non-root target. That was FALSE — I relayed a lane's
+ * sentence instead of reading the function, and Codex refuted it. Non-root is
+ * the THIRD test, and two routes return before it. A blanket non-root refusal
+ * would have suppressed legitimate offers.
+ *
+ * The real order, mirrored below exactly:
+ *   1. the node's own `goal_threshold_frame === 'delta'`  -> attested
+ *   2. EVERY option intervenes on it                      -> pinned
+ *   3. it has a directed (non-bidirected) incoming edge    -> UNANCHORED
+ *   4. it is a root carrying a finite observed value       -> anchored
+ *
+ * ⚠ ROOT IS DERIVED FROM THE CALCULATION GRAPH, NOT FROM UI LINKS. PLoT
+ * strips `option` / `decision` / `constraint` nodes before the engine
+ * (`option-filter.ts`, mirrored by this estate's own `strippedByPlot`), so an
+ * option→factor intervention link never reaches that edge set and cannot
+ * un-root a factor. Counting it would make almost every factor look unanchored
+ * and silence the offer entirely.
+ *
+ * ⛔ SUFFICIENT, NEVER COMPLETE — and that asymmetry is the safety argument.
+ * Anchoring is necessary for a score, not sufficient: the unit gate, the range
+ * gate and the temporal drop can each still suppress the constraint
+ * afterwards. So a node this accepts MAY still not be scored, and nothing here
+ * may be read as "the analysis will check it". What it does buy is the other
+ * direction: a node this REFUSES would certainly not have been scored, so the
+ * offer stops naming it.
+ *
+ * ⚠ IT IS A MIRROR OF ANOTHER SERVICE'S PREDICATE, which is this estate's
+ * chronic defect class, and it is here deliberately rather than by accident:
+ * there is no shared carrier for the anchor verdict today. It is dated and
+ * SHA-pinned above so a reader can re-derive it, and it fails CLOSED — an
+ * unreadable graph offers nothing.
+ */
+function sampleFrameIsAnchored(
+  nodeId: string,
+  node: TargetAlternativeNode,
+  input: {
+    readonly nodes: readonly TargetAlternativeNode[];
+    readonly edges?: readonly TargetAlternativeEdge[];
+    readonly options?: readonly TargetAlternativeOption[];
+  },
+): boolean {
+  // 1. The node itself attests a delta frame.
+  if (node.goal_threshold_frame === 'delta') return true;
+
+  // 2. Every option pins it. `length > 0` is load-bearing: `[].every()` is
+  //    true, so an empty option list would anchor everything.
+  const options = input.options;
+  if (
+    Array.isArray(options) &&
+    options.length > 0 &&
+    options.every((o) => {
+      const interventions = o?.interventions;
+      return (
+        interventions !== null &&
+        typeof interventions === 'object' &&
+        Object.prototype.hasOwnProperty.call(interventions, nodeId)
+      );
+    })
+  ) {
+    return true;
+  }
+
+  // 3. A directed (non-bidirected) incoming edge un-roots it. Edges from a
+  //    node PLoT strips never reach the engine, so they cannot un-root.
+  const strippedKinds = new Set(['option', 'decision', 'constraint']);
+  const kindById = new Map<string, string>();
+  for (const n of input.nodes) {
+    if (typeof n.id === 'string' && typeof n.kind === 'string') kindById.set(n.id, n.kind);
+  }
+  for (const edge of input.edges ?? []) {
+    if (edge.edge_type === 'bidirected') continue;
+    if (edge.to !== nodeId) continue;
+    const fromKind = typeof edge.from === 'string' ? kindById.get(edge.from) : undefined;
+    if (fromKind !== undefined && strippedKinds.has(fromKind)) continue;
+    return false;
+  }
+
+  // 4. A root carrying a finite observed value anchors on its own level. The
+  //    candidate gate already proved the figure, so reaching here means yes.
+  return true;
 }
 
 export interface TargetAlternative {
@@ -122,6 +231,10 @@ export function findConstraintTargetAlternative(input: {
   /** The constraint's own unit, from the persisted row. Never inferred. */
   readonly constraintUnit: string | null | undefined;
   readonly nodes: readonly TargetAlternativeNode[];
+  /** The calculation graph's edges. Absent ⇒ every candidate reads as a root. */
+  readonly edges?: readonly TargetAlternativeEdge[];
+  /** Options, for the all-option-pin anchor route. */
+  readonly options?: readonly TargetAlternativeOption[];
 }): TargetAlternative | null {
   // A checkable target needs no alternative, whatever else is in the graph.
   if (input.chosenIsCheckable) return null;
@@ -155,6 +268,11 @@ export function findConstraintTargetAlternative(input: {
     // See {@link recordsATestableFigure} for why this is NOT the chosen
     // target's own admissibility classifier.
     if (!recordsATestableFigure(node)) continue;
+
+    // ⛔ AND IT MUST BE SCORABLE, NOT MERELY MEASURED (Codex CX-255). A node
+    // whose sample frame PLoT cannot anchor is silently not scored, so naming
+    // it would be an actionable-looking dead end.
+    if (!sampleFrameIsAnchored(id, node, input)) continue;
 
     candidates.push({ nodeId: id, label, unit: candidateUnit });
   }

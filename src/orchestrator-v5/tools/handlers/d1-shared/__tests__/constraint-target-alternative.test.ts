@@ -167,3 +167,93 @@ describe('formatConstraintTargetAlternative', () => {
     expect(text).not.toMatch(/\bdoes,? in\b/i);
   });
 });
+
+/**
+ * ⭐⭐ IS THE CANDIDATE ACTUALLY SCORABLE? (Codex CX-255)
+ *
+ * A unit match and a recorded figure make a node look like a good target and
+ * do not make it a scorable one. PLoT refuses to score a constraint whose
+ * sample frame it cannot anchor, silently — `constraints_status:
+ * 'unavailable'`, no exception. Offering such a node is an actionable-looking
+ * dead end, which is the exact failure this module exists to stop.
+ *
+ * ⚠ I FIRST REPORTED THAT PLoT REJECTS EVERY NON-ROOT TARGET. That was FALSE:
+ * I relayed a lane's sentence rather than reading the function. Non-root is the
+ * THIRD test and two routes return before it, so a blanket refusal would have
+ * suppressed legitimate offers. These arms pin the real order, derived at
+ * `plot-lite-service` staging `d68d4ffb`.
+ *
+ * ⛔ SUFFICIENT, NEVER COMPLETE. The unit gate, the range gate and the
+ * temporal drop can each still suppress afterwards, so nothing here asserts
+ * "the analysis will check it" — only that a node it REFUSES would certainly
+ * not have been scored.
+ */
+describe('the candidate must be SCORABLE, not merely measured', () => {
+  const MEASURED = { value: 0.6, raw_value: 150000, cap: 250000, unit: '£' };
+  const nodes = (over: Partial<TargetAlternativeNode> = {}) => [
+    { id: 'dac3fdc3', kind: 'risk', label: 'Budget Overrun Risk', observed_state: null },
+    { id: '7809def4', kind: 'factor', label: 'Hiring and Onboarding Cost', observed_state: MEASURED, ...over },
+  ];
+  const findWith = (over: Record<string, unknown>) =>
+    findConstraintTargetAlternative({
+      chosenIsCheckable: false, chosenNodeId: 'dac3fdc3', constraintUnit: 'GBP',
+      nodes: nodes(), ...over,
+    } as never);
+
+  it('⭐ MEASURED ROOT: no incoming edges — offered', () => {
+    expect(findWith({ edges: [] })?.nodeId).toBe('7809def4');
+  });
+
+  it('⛔ UNANCHORED NON-ROOT: a directed incoming edge — NOT offered', () => {
+    expect(findWith({ edges: [{ from: 'f-other', to: '7809def4', edge_type: 'directed' }] })).toBeNull();
+  });
+
+  it('⭐ a BIDIRECTED edge does not un-root it — those are stripped from the forward model', () => {
+    expect(findWith({ edges: [{ from: 'f-other', to: '7809def4', edge_type: 'bidirected' }] })?.nodeId)
+      .toBe('7809def4');
+  });
+
+  it('⭐⭐ an OPTION link does not un-root it — PLoT strips option nodes before the engine', () => {
+    // Counting UI intervention links as causal parents would make almost every
+    // factor read as unanchored and silence the offer entirely.
+    const withOption = [...nodes(), { id: 'opt1', kind: 'option', label: 'Hire' }];
+    expect(findWith({
+      nodes: withOption,
+      edges: [{ from: 'opt1', to: '7809def4', edge_type: 'directed' }],
+    })?.nodeId).toBe('7809def4');
+  });
+
+  it('⭐ ATTESTED DELTA anchors a non-root — route 1 returns before the root test', () => {
+    expect(findWith({
+      nodes: nodes({ goal_threshold_frame: 'delta' }),
+      edges: [{ from: 'f-other', to: '7809def4', edge_type: 'directed' }],
+    })?.nodeId).toBe('7809def4');
+  });
+
+  it('⭐ PINNED BY EVERY OPTION anchors a non-root — route 2 returns before the root test', () => {
+    expect(findWith({
+      edges: [{ from: 'f-other', to: '7809def4', edge_type: 'directed' }],
+      options: [
+        { interventions: { '7809def4': { value: 0.4 } } },
+        { interventions: { '7809def4': { value: 0.7 } } },
+      ],
+    })?.nodeId).toBe('7809def4');
+  });
+
+  it('⛔ pinned by SOME options is not pinned by every option', () => {
+    expect(findWith({
+      edges: [{ from: 'f-other', to: '7809def4', edge_type: 'directed' }],
+      options: [
+        { interventions: { '7809def4': { value: 0.4 } } },
+        { interventions: { 'somewhere-else': { value: 0.7 } } },
+      ],
+    })).toBeNull();
+  });
+
+  it('⛔ an EMPTY option list pins nothing — [].every() is true and would anchor everything', () => {
+    expect(findWith({
+      edges: [{ from: 'f-other', to: '7809def4', edge_type: 'directed' }],
+      options: [],
+    })).toBeNull();
+  });
+});
