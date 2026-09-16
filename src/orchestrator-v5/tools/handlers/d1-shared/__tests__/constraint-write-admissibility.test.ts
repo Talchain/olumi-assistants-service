@@ -277,9 +277,32 @@ describe('the write-time copy is the run_analysis copy, not a second vocabulary'
 
   it('quotes the dropped span back and claims only that THIS limit ignores it', () => {
     expect(formatConstraintDurationNotEvaluated({ span: '3 months' })).toBe(
-      'This limit is checked as a single threshold, so the “3 months” in it is ' +
-        'recorded as wording and is not part of that check.',
+      'The “3 months” in it is recorded as wording only: the limit is stored as ' +
+        'a single threshold, with no time condition attached.',
     );
+  });
+
+  /**
+   * ⭐⭐ IT MUST NOT ASSERT THAT CHECKING HAPPENS — it co-emits with the
+   * sentence saying it does not.
+   *
+   * The duration fragment is pushed by a BARE `if` in `add-constraint.ts`,
+   * OUTSIDE the mintedBaseline / elicitBaseline / else chain beneath it, so it
+   * ships whatever the target records. The previous wording opened "This limit
+   * is checked as a single threshold" and joined, in one reply, to "...has no
+   * number recorded against it, so it will not be part of the analysis."
+   *
+   * This binds to the CO-EMISSION, not to the sentence in isolation — the
+   * defect was invisible to a test that only read one fragment.
+   */
+  it('⛔ does not claim the limit IS CHECKED — it co-emits with the sentence saying it is not', () => {
+    const duration = formatConstraintDurationNotEvaluated({ span: '3 months' });
+    const notCheckable = formatConstraintNotCheckable({ targetLabel: 'Subscriber Churn Rate' });
+    const joined = `${duration} ${notCheckable}`;
+    expect(duration).not.toMatch(/\bis checked\b|\bare checked\b/i);
+    // The pair must not simultaneously assert checking and deny it.
+    expect(joined).not.toMatch(/limit is checked/i);
+    expect(notCheckable).toMatch(/not be part of the analysis|no number recorded/i);
   });
 });
 
@@ -399,9 +422,15 @@ describe('add_constraint: the receipt tells the truth at the write', () => {
       'Your model records no value to test this limit: Subscriber Churn Rate has no ' +
         'number recorded against it, so it will not be part of the analysis.',
     );
+    // ⭐ AND THE WHOLE REPLY MUST NOT CONTRADICT ITSELF. The duration fragment
+    // and the not-checkable disclosure co-emit on this exact shape; the old
+    // wording asserted the limit "is checked" three words before the product
+    // said it would not be part of the analysis.
+    expect(outcome.assistant_text).not.toMatch(/limit is checked/i);
     // The time condition is disclosed rather than silently dropped.
     expect(outcome.assistant_text).toContain(
-      'the “3 months” in it is recorded as wording and is not part of that check',
+      'The “3 months” in it is recorded as wording only: the limit is stored as '
+        + 'a single threshold, with no time condition attached',
     );
   });
 

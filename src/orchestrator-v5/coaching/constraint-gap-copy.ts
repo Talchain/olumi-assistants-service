@@ -90,13 +90,38 @@ export const UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE = ', so it will not be part 
  *
  * A `goal_constraints[]` row is `{operator, value, unit}` and has no temporal
  * field of any kind, so a span named in the user's sentence survives only inside
- * the label string. The claim is therefore unconditionally true of the row it is
- * attached to, and it is scoped to that row on purpose: it says this LIMIT is
- * checked at a single threshold, never that the timing is unmodelled everywhere
- * (a deadline can reach the model by other routes, e.g. `extractDeadline`).
+ * the label string. It is scoped to that row on purpose: it never claims the
+ * timing is unmodelled everywhere (a deadline can reach the model by other
+ * routes, e.g. `extractDeadline`).
+ *
+ * ⚠⚠ IT ASSERTS STORAGE, NOT CHECKING, AND THAT CHANGED AFTER AN INDEPENDENT
+ * COPY AUDIT. The sentence used to open "This limit is checked as a single
+ * threshold" — which asserts that CHECKING HAPPENS. It is pushed by a BARE `if`
+ * in `add-constraint.ts`, outside the mintedBaseline / elicitBaseline / else
+ * chain beneath it, so it fires whatever the target records. On the witnessed
+ * 14 Sep shape (`44e349fa`: churn over 7% for more than 3 months, `kind: risk`,
+ * `observed_state` null) the fragments joined into ONE reply reading:
+ *
+ *     "... must be at most 7%. This limit IS CHECKED as a single threshold, so
+ *      the "3 months" ... Your model records no value to test this limit:
+ *      Subscriber Churn Rate has no number recorded against it, SO IT WILL NOT
+ *      BE PART OF THE ANALYSIS."
+ *
+ * A direct self-contradiction, in one reply, on a shape a demo reaches with any
+ * "for 3 months" / "within 2 years" phrasing.
+ *
+ * ⭐ The old docstring's defence — "unconditionally true of the row it is
+ * attached to" — answers whether the TIMING is modelled, which was never the
+ * disputed clause. The disputed clause is whether the limit is checked at all,
+ * and this module has no authority over that: it is decided by the target's
+ * recorded quantity, two `if`s below.
+ *
+ * So the sentence now claims only what this module can know: the row stores a
+ * single threshold and no time condition. That is true whether or not the
+ * target carries a value, so it composes safely with EITHER sibling arm.
  */
 export function durationNotEvaluatedSentence(span: string): string {
-  return `This limit is checked as a single threshold, so the “${span}” in it is recorded as wording and is not part of that check.`;
+  return `The “${span}” in it is recorded as wording only: the limit is stored as a single threshold, with no time condition attached.`;
 }
 
 /**
