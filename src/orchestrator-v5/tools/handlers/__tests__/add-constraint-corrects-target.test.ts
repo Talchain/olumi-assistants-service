@@ -191,4 +191,37 @@ describe('the correction arm sits ABOVE the unchanged-value skip', () => {
     expect(rows.map((r) => r.node_id)).toEqual(['g-right']);
     expect(rows.some((r) => r.node_id === 'g-wrong')).toBe(false);
   });
+
+  /**
+   * ⭐⭐ A DESTRUCTIVE TURN MAY NOT BE NARRATED AS A NO-OP.
+   *
+   * ⚠ FOUND BY REVIEW, NOT BY ME, AND MY OWN SUITE WAS GREEN OVER IT. On this
+   * exact shape `nodeChannelUnchanged` makes `valueUnchanged` true, so
+   * `turnIsNoop` was true WHILE the correction arm deleted a row: the receipt
+   * would have said "no need to change it" and `fact.result.before` would have
+   * said null, over a mutation that destroyed a constraint.
+   *
+   * It is the same class the `mintedBaseline` conjunct beside `turnIsNoop`
+   * already guards, arriving through a new door — which is why the fix is a
+   * conjunct there and not a special case somewhere else.
+   */
+  it('⛔ a correction is NEVER a no-op, even when the value is identical', async () => {
+    const g = buildD1Fixture();
+    g.nodes.push(
+      { id: 'g-wrong', kind: 'goal', label: 'Wrong goal' } as GraphV3T['nodes'][number],
+      {
+        id: 'g-right', kind: 'goal', label: 'Right goal',
+        goal_threshold_raw: 800, goal_threshold_unit: 'customers',
+      } as unknown as GraphV3T['nodes'][number],
+    );
+    (g as { goal_constraints?: unknown }).goal_constraints = [
+      { constraint_id: 'gc-misplaced', node_id: 'g-wrong', operator: '>=', value: 800, unit: 'customers', provenance: 'explicit' },
+    ];
+    const outcome = await run({
+      targetId: 'g-right', value: 800, unit: 'customers',
+      constraintType: 'at_least', corrects: 'g-wrong', graph: g,
+    });
+    expect(outcome.handler_facts[0]?.noop).toBe(false);
+    expect(outcome.assistant_text ?? '').not.toMatch(/no need to change/i);
+  });
 });

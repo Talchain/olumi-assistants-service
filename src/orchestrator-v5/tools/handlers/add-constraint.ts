@@ -866,6 +866,32 @@ export function createAddConstraintHandler(): HandlerFn {
       // same commit. The constraint commit itself is NEVER touched.
       const elicitBaseline = mintEligible && !mintedBaseline;
 
+      // ⭐⭐ IS THIS TURN A CORRECTION? Derived ONCE, above the mutation,
+      // because TWO questions need the answer and a second derivation would be
+      // a twin free to drift (this estate's chronic defect).
+      //   · the WRITE needs it to replace the named row rather than append;
+      //   · the RECEIPT needs it because a correction DESTROYS a row, and a
+      //     destructive turn must never be narrated as a no-op.
+      //
+      // ⚠ THE SECOND READER IS WHY THIS IS HOISTED, AND IT WAS FOUND BY REVIEW,
+      // NOT BY ME. On a goal target with `>=` whose threshold the draft path
+      // already stamped, `nodeChannelUnchanged` makes `valueUnchanged` true, so
+      // `turnIsNoop` was true while the correction arm deleted a row — the
+      // receipt would have read "no need to change it" over a destructive
+      // mutation, and `fact.result.before` would have said null. That is the
+      // same class the `mintedBaseline` conjunct beside `turnIsNoop` already
+      // exists to prevent, arriving through a new door.
+      const correctsId = params.corrects_node_id;
+      const correctableRows =
+        existing === undefined && correctsId !== undefined && correctsId !== targetId
+          ? (graph.goal_constraints ?? []).filter(
+              (c) => c.node_id === correctsId && c.operator === operator,
+            )
+          : [];
+      // Exactly one, or the (node, operator) key is not unique here and
+      // choosing between them would be a guess — refuse and behave as today.
+      const isCorrection = correctableRows.length === 1;
+
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         // F8 backfill residual (self-review hardening): when there is no
@@ -895,16 +921,11 @@ export function createAddConstraintHandler(): HandlerFn {
         // gone; 2+ means the (node, operator) key is not unique here and
         // choosing between them would be a guess. Both fall through to today's
         // behaviour untouched — the user's limit is never lost to this path.
-        const correctsId = params.corrects_node_id;
-        const correctable =
-          correctsId !== undefined && correctsId !== targetId
-            ? list.filter((c) => c.node_id === correctsId && c.operator === operator)
-            : [];
         const next = existing
           ? list.map((c) =>
               c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
             )
-          : correctable.length === 1
+          : isCorrection
             ? list.map((c) =>
                 c.node_id === correctsId && c.operator === operator ? constraintParse.data : c,
               )
@@ -1023,7 +1044,10 @@ export function createAddConstraintHandler(): HandlerFn {
       // the natural REPAIR after an honest ISL refusal, and swallowing it under
       // `noop` would both lie in the fact channel and move the
       // analysis-affecting hash out from under a "nothing changed" receipt.
-      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline;
+      // ⚠ `!isCorrection` is the same discipline as `!mintedBaseline` beside it:
+      // a correction REMOVES a constraint row, which is analysis-affecting, so
+      // the turn changed the model however unchanged the value looks.
+      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline && !isCorrection;
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
@@ -1062,8 +1086,20 @@ export function createAddConstraintHandler(): HandlerFn {
       // label-only change (value unchanged, label differs) gets its own
       // distinct receipt — never the fresh-update claim, never the
       // total-noop claim either.
+      // ⚠⚠ THE TEXT CHANNEL MUST USE THE SAME PREDICATE AS THE FACT CHANNEL,
+      // and this is the line that keeps them together. The comment above says
+      // "the fact channel already marks this noop; the text channel now
+      // agrees" — so when a conjunct is added to one, it belongs on both. I
+      // added `!isCorrection` to `turnIsNoop` alone and a test caught the text
+      // still saying "no need to change it" over a mutation that DELETED a
+      // constraint row. Fixing one channel of a two-channel agreement is how
+      // the agreement silently ends.
+      //
+      // A correction is never "unchanged": it removes a row, which is
+      // analysis-affecting, whatever the value looks like.
+      const narratesUnchanged = valueUnchanged && !isCorrection;
       const constraintText = isSuccessTargetTurn
-        ? valueUnchanged
+        ? narratesUnchanged
           ? formatGoalTargetUnchanged({
               goalLabel: targetNode.label,
               value: params.value,
@@ -1074,7 +1110,7 @@ export function createAddConstraintHandler(): HandlerFn {
               value: params.value,
               ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
             })
-        : valueUnchanged
+        : narratesUnchanged
           ? labelChanged
             ? formatConstraintLabelUpdated(formatInput)
             : formatConstraintUnchanged(formatInput)
