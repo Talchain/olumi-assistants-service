@@ -83,6 +83,65 @@ const TERMINOLOGY_RULES: readonly TerminologyRule[] = [
     pattern: /\bwinning\s+(option|side|choice|outcome)(s)?\b/gi,
     replacement: 'leading $1$2',
   },
+  // ⭐ THE SUPERLATIVE CROWNING — the broadest prescriptive pattern in the
+  // fatal list, and until now the ONLY one with no rewrite, so it fell
+  // straight through to whole-answer deletion.
+  //
+  // MEASURED on a fresh-session journey against staging `a81f741`, 16 Sep:
+  // the user asked "So what would you actually recommend I do?" on a turn where
+  // naming the leader was PERMITTED (`may_name_leading_option: true`, options
+  // separated at 92%). The model produced 648 output tokens in 24.5s; the user
+  // received 71 characters — `EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT` — because
+  // `applyTerminologyRewrite` returned `applied: []` and the guard fell to
+  // `fallback_replacement`. Telemetry: `v5.egress.forbidden_phrase_detected`,
+  // `phrase: "is the strongest option"`, `dispatch_path: turn_executor_finalise`.
+  //
+  // The ban itself is correct and stays: the served prompt bans this vocabulary
+  // too, and the estate's terminology ruling replaces prescriptive crowning with
+  // "leading option". What was wrong is the REMEDY. This module's own docstring
+  // states the design — rewrite the prescriptive-lexicon class, re-scan, and
+  // reserve deletion for residual fatal-class phrases — and pattern 1 of
+  // DOCTRINE_FATAL_PATTERNS was not covered by it.
+  //
+  // ⚠⚠ THIS ALSO CLOSES A DETECTION HOLE, which is the stronger reason to do it
+  // here rather than by exempting permitted turns. Measured: the original
+  // wording is INVISIBLE to `textAssertsLeadingOption` (false), while the
+  // rewritten wording is VISIBLE (true). So on a WITHHELD turn the crowning
+  // previously reached the permission guard unrecognised and could only be
+  // stopped by deleting the whole answer; after the rewrite the permission guard
+  // sees a leader claim and removes it as a leader claim. The two guards now
+  // compose — vocabulary here, permission there — instead of one masking the
+  // other.
+  //
+  // ⚠⚠ BOTH ARMS CANONICALISE ONTO "leading option", NOT ONTO THE NOUN THEY
+  // CAME FROM — and that is a correction, not a preference. Review CX198
+  // demonstrated the escape and it reproduces exactly:
+  //     "… is the strongest choice" -> "… is the leading choice"
+  //        textAssertsLeadingOption -> FALSE   (escapes the permission guard)
+  //     "… is the strongest option" -> "… is the leading option"
+  //        textAssertsLeadingOption -> TRUE    (caught, as intended)
+  // The wire guard's vocabulary knows "leading option" and does NOT know
+  // "leading choice", so preserving the source noun would have produced a
+  // rewrite that slips a leader claim past the permission guard on a WITHHELD
+  // turn — the precise opposite of this rule's purpose. Emitting the one
+  // recognised result term makes the two guards compose in BOTH arms, and
+  // "leading option" is the term the terminology ruling sanctions anyway.
+  //
+  // ⚠ NARROWED TO `choice|option` ON PURPOSE. The fatal pattern also covers
+  // `bet|path|route`, and those are NOT rewritten: "your best bet" and "the way
+  // to go" are idiomatic PRESCRIPTION, not a result term, and the terminology
+  // ruling maps neither onto "leading option". Rewriting them would produce
+  // "your leading bet", which is both ungrammatical and a weaker ban. They keep
+  // the fatal remedy. Pinned in-test in both directions.
+  //
+  // The negation lookahead of the fatal pattern is mirrored here so a
+  // DE-recommendation is untouched: "the status quo is not always the safest
+  // choice" must survive, and does.
+  {
+    pattern:
+      /\b(is|are|was|were|remains?|looks?\s+like|seems?|appears?\s+to\s+be)(\s+)(?!not\b|never\b|no\b|rarely\b|seldom\b)((?:\w+\s+){0,2})(?:best|better|optimal|right|obvious|clear|clearest|smartest|safest|sensible|superior|preferable|strongest|most\s+promising)(\s+)(choice|option)\b/gi,
+    replacement: '$1$2$3leading$4option',
+  },
 ];
 
 /** Restore the leading capital of the matched text onto the replacement. */

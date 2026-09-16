@@ -43,6 +43,8 @@ import {
   findDoctrineHit,
   scanPayloadForDoctrineHits,
 } from "../route-egress-doctrine-scan.js";
+import { textAssertsLeadingOption } from "../../../orchestrator-v5/compose/leading-option-egress-guard.js";
+import { projectExplanationAnswerForWithheldClaim } from "../../../orchestrator-v5/compose/withheld-explanation-answer.js";
 
 /** The exact sentence `blockBuilders.ts` shipped, with the exact label shape. */
 const MEASURED_EVASION = '"Hire Locally" appears to be the strongest option.';
@@ -61,13 +63,64 @@ describe("A — the `strongest` evasion is closed in DOCTRINE_FATAL", () => {
     ).toBe(true);
   });
 
-  it("the whole turn-path guard now fires on it, with the FATAL remedy", () => {
+  it("the whole turn-path guard still FIRES on it — detection is unchanged", () => {
+    // Detection is the property this file was written to close and it is
+    // untouched. Asserted first and separately, so a weakened DETECTOR fails
+    // here loudly rather than hiding behind the remedy assertion below.
     expect(findForbiddenPhraseHit(MEASURED_EVASION)).not.toBeNull();
+    expect(applyEgressForbiddenPhraseGuard(MEASURED_EVASION).rewritten).toBe(true);
+  });
+
+  it("the remedy is now a TERMINOLOGY REWRITE, and the old rationale did not cover it", () => {
+    // ⚠ THIS EXPECTATION CHANGED ON 16 Sep 2026, BY RULING (Codex CX220/CX222),
+    // and the superseded reasoning is recorded rather than deleted. It read:
+    //
+    //   "Fatal, not rewritable: there is no TERMINOLOGY_RULES entry for a choice
+    //    crowning, so substituting a NOUN would leave the product still crowning."
+    //
+    // That was correct about NOUN substitution and it is not what the rule does.
+    // `strongest` -> `leading` substitutes the SUPERLATIVE, and canonicalises the
+    // noun onto the one result term the wire guard recognises. The ruling:
+    // "leading option is permitted when actual admission/claim authority allows
+    // it; withheld/provisional claims remain guarded."
+    //
+    // WHY THE HARM WAS WORTH A RULING. Measured on a fresh session against
+    // staging, 16 Sep: on a turn ENTITLED to answer (may_name_leading_option
+    // true, options separated at 92%) the user asked "So what would you actually
+    // recommend I do?", the model produced 648 output tokens, and the user
+    // received 71 characters — because this class had no rewrite. An hour later
+    // the identical question returned 1,639 useful characters, because the model
+    // happened to pick the permitted register. Same question, destroyed or
+    // excellent by word choice.
     const guarded = applyEgressForbiddenPhraseGuard(MEASURED_EVASION);
-    expect(guarded.rewritten).toBe(true);
-    // Fatal, not rewritable: there is no TERMINOLOGY_RULES entry for a choice
-    // crowning, so substituting a noun would leave the product still crowning.
-    expect(guarded.remedy).toBe("fallback_replacement");
+    expect(guarded.remedy).toBe("terminology_rewrite");
+    expect(guarded.text).toBe('"Hire Locally" appears to be the leading option.');
+    // The corrected text must itself be clean, or this is laundering.
+    expect(findForbiddenPhraseHit(guarded.text)).toBeNull();
+  });
+
+  it("BOTH PERMISSION CONTRASTS — the rewrite is only safe because the claim stays guarded", () => {
+    // The ruling permits "leading option" WHEN AUTHORITY ALLOWS. This asserts the
+    // other half: on a turn whose claim is withheld, the rewritten sentence is
+    // still caught and removed. A rewrite the permission guard cannot see would
+    // be strictly worse than the deletion it replaced — that is exactly the
+    // escape CX198 found on the `choice` arm, and it is closed here by both arms
+    // canonicalising onto the recognised term.
+    const rewritten = applyEgressForbiddenPhraseGuard(MEASURED_EVASION).text;
+
+    // PERMITTED: the guard is entitled to say it, and does.
+    expect(textAssertsLeadingOption(rewritten)).toBe(true);
+
+    // WITHHELD: the permission guard removes it AS a leader claim.
+    const withheld = projectExplanationAnswerForWithheldClaim(
+      rewritten,
+      "unevaluated",
+      [],
+      true,
+      true,
+    );
+    expect(withheld.reason).toBe("leader_claim_replaced");
+    expect(withheld.text).not.toContain("leading option");
   });
 
   it("CONTROL — the additions do not widen the pattern beyond its copula anchor", () => {

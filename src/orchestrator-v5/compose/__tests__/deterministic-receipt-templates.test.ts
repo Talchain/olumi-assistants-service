@@ -328,7 +328,11 @@ describe('REVERTED APPROACH — B2: a label FRAGMENT must NOT disable a frame', 
   ];
   for (const text of CEE_AUTHORED_DIRECTIVES) {
     it(`still fatal regardless of any label content: ${text}`, () => {
-      expect(applyEgressForbiddenPhraseGuard(text).remedy).toBe('fallback_replacement');
+      // The frame is still DETECTED regardless of label content — that is what this block guards and it is
+      // unchanged. What moved is the REMEDY: a crowning is now rewritten into sanctioned vocabulary rather
+      // than deleting the whole response. `findForbiddenPhraseHit` is asserted directly so this block keeps
+      // testing detection rather than a downstream policy that may change again.
+      expect(findForbiddenPhraseHit(text)).not.toBeNull();
     });
   }
 });
@@ -483,7 +487,11 @@ describe('⚠ KNOWN FALSE POSITIVES — RIDER F1: compliant sentences the guard 
         `PINNING AN ACCEPTED COST, NOT APPROVING IT. This sentence is compliant: ${why} ` +
           'RED here means the guard learned to allow it — delete the pin.',
       ).not.toBeNull();
-      expect(applyEgressForbiddenPhraseGuard(text).remedy).toBe('fallback_replacement');
+      // The frame is still DETECTED regardless of label content — that is what this block guards and it is
+      // unchanged. What moved is the REMEDY: a crowning is now rewritten into sanctioned vocabulary rather
+      // than deleting the whole response. `findForbiddenPhraseHit` is asserted directly so this block keeps
+      // testing detection rather than a downstream policy that may change again.
+      expect(findForbiddenPhraseHit(text)).not.toBeNull();
     });
   }
 
