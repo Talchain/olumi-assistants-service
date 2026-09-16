@@ -459,16 +459,34 @@ export function transformNodeToV3(
     const promotedRaw = (node as { raw_value?: unknown }).raw_value;
     const promotedCap = (node as { cap?: unknown }).cap;
     const promotedUnit = (node as { unit?: unknown }).unit;
-    const promoted: Record<string, unknown> = {
-      ...(typeof promotedRaw === 'number' && Number.isFinite(promotedRaw)
-        ? { raw_value: promotedRaw } : {}),
-      ...(typeof promotedCap === 'number' && Number.isFinite(promotedCap)
-        ? { cap: promotedCap } : {}),
-      ...(typeof promotedUnit === 'string' && promotedUnit.trim() !== ''
-        ? { unit: promotedUnit } : {}),
-    };
-    if (Object.keys(promoted).length > 0) {
-      (v3Node as { observed_state?: unknown }).observed_state = promoted;
+    const rawOk = typeof promotedRaw === 'number' && Number.isFinite(promotedRaw);
+    const capOk = typeof promotedCap === 'number' && Number.isFinite(promotedCap) && promotedCap !== 0;
+
+    // ⚠⚠ `observed_state.value` IS REQUIRED BY `NodeV3`, so a partial object is
+    // not a weaker record — it is an INVALID one. A first cut emitted
+    // {raw_value, cap, unit} with no value; six specs passed because they
+    // asserted on this function's OUTPUT and never parsed it through the schema
+    // the wire actually uses. `NodeV3.safeParse` rejects it with
+    // "observed_state.value Required" (Codex CX-147, reproduced here).
+    //
+    // So the pair is the unit of carry: `value = raw_value / cap` is the
+    // contract's OWN stated relationship — `unreachable-factors.ts` says it
+    // verbatim, "value = raw_value / cap ... When `cap` is absent, value =
+    // raw_value" — so computing it from two carried numbers is carrying, not
+    // deriving a new fact. With only a unit, or only one of the pair, there is
+    // no valid record to make and this correctly does nothing rather than
+    // emitting something the strict re-parse will delete or refuse.
+    if (rawOk && capOk) {
+      const derived = promotedRaw / promotedCap;
+      if (Number.isFinite(derived)) {
+        (v3Node as { observed_state?: unknown }).observed_state = {
+          value: derived,
+          raw_value: promotedRaw,
+          cap: promotedCap,
+          ...(typeof promotedUnit === 'string' && promotedUnit.trim() !== ''
+            ? { unit: promotedUnit } : {}),
+        };
+      }
     }
   }
 

@@ -64,6 +64,44 @@ export interface TargetAlternative {
   readonly unit: string;
 }
 
+/**
+ * ⚠⚠ THE CANDIDATE TEST IS *NARROWER* THAN WRITE-TIME ADMISSIBILITY, AND THAT
+ * INVERSION IS THE WHOLE POINT (Codex CX-150, then derived by execution).
+ *
+ * The obvious move — and the one I first shipped — was to run the chosen
+ * target's own `classifyConstraintWriteAdmissibility` on each candidate. **It
+ * does not discriminate here, proven by running it:** that classifier speaks
+ * from `constraintTargetCarriesNoQuantity`, which asks *"does this node record
+ * any number, on any of the fields a quantity can arrive on"* by reading the
+ * TOP-LEVEL keys. A node carrying `observed_state: {unit: 'GBP'}` and no figure
+ * has a non-null `observed_state`, so it answers YES and classifies as
+ * checkable — while PLoT's `classifyConstraintPu` reads `observed_state.value`
+ * specifically and emits `missing_observed_state`.
+ *
+ * ⭐ That gap is DELIBERATE AND CORRECT WHERE IT LIVES, which is why widening
+ * the shared predicate would be the wrong repair. For a REFUSAL the safe error
+ * is a false silence — telling a user their good limit will be ignored is worse
+ * than the defect. **Here the direction is inverted: a false positive NAMES A
+ * NODE TO THE USER.** Two questions under one predicate (CLAUDE.md trap 21), so
+ * they get two predicates, not one relaxed one.
+ *
+ * Derived at the consumer's bytes (`plot-lite-service`
+ * `src/integrations/isl/translator-v3.ts` → `buildParameterUncertaintiesV3`,
+ * pass 1): `kind === 'factor' && Number.isFinite(observed_state.value)`.
+ *
+ * ⚠ GAP RECORDED, NOT CHASED: PLoT's pass 2 also admits a factor carrying a
+ * non-degenerate uniform `prior` and no `observed_state.value`. This stays
+ * SILENT about that class rather than proposing it, because the entailment then
+ * runs the safe way — everything proposed here is evaluable; not everything
+ * evaluable is proposed.
+ */
+function recordsATestableFigure(node: TargetAlternativeNode): boolean {
+  const os = node.observed_state;
+  if (os === null || typeof os !== 'object' || Array.isArray(os)) return false;
+  const value = (os as { value?: unknown }).value;
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 function recordedUnit(node: TargetAlternativeNode): string | null {
   const os = node.observed_state;
   if (os === null || typeof os !== 'object' || Array.isArray(os)) return null;
@@ -108,6 +146,16 @@ export function findConstraintTargetAlternative(input: {
 
     const candidateUnit = recordedUnit(node);
     if (candidateUnit === null || !sameUnit(candidateUnit, unit)) continue;
+
+    // ⚠⚠ A MATCHING UNIT IS NOT A USABLE TARGET (Codex CX-150). It establishes
+    // NOTIONAL COMPATIBILITY and nothing else — not amount, not scale, not
+    // period, not quantity identity. A factor recording `{unit: 'GBP'}` and no
+    // figure passes a unit match and is still the same dead end with a
+    // different label — which is the very state this path exists to report.
+    // See {@link recordsATestableFigure} for why this is NOT the chosen
+    // target's own admissibility classifier.
+    if (!recordsATestableFigure(node)) continue;
+
     candidates.push({ nodeId: id, label, unit: candidateUnit });
   }
 
@@ -117,13 +165,44 @@ export function findConstraintTargetAlternative(input: {
 }
 
 /**
- * The question. Names the limit, the node that cannot carry it, and the one
- * that can — so the user can correct it in one reply instead of discovering
- * two turns later that nothing was checked.
+ * The question. Names the node that cannot carry the limit and the one that
+ * MIGHT be meant — so the user can correct it in one reply instead of
+ * discovering two turns later that nothing was checked.
+ *
+ * ⚠⚠ IT OFFERS A CANDIDATE, NOT AN ASSURED TARGET (Codex CX-150). An earlier
+ * draft said the alternative "does" have a figure the analysis can test. A
+ * shared currency establishes notional compatibility only: a £revenue factor
+ * is not a hiring-cost subject, and claiming otherwise is the same overreach
+ * as the partial record this lane already shipped once. The copy states the
+ * one thing that IS established — it is the only node recorded in that unit —
+ * and asks.
  *
  * ⚠ It ASKS. It does not re-target anything: the user chose a node, and moving
  * their limit under them on a unit match would be exactly the confident
  * wrongness the admissibility check exists to prevent.
+ *
+ * ⚠⚠ AND IT PROMISES ONLY WHAT THE WRITE PATH CAN DO — "add", NOT "move"
+ * (derived at `add-constraint.ts`, Codex CX-150's second half, which I had
+ * claimed nothing about until I checked).
+ *
+ * The idempotency key for a constraint row is **`(node_id, operator)`**
+ * (`add-constraint.ts:448`). Accepting this suggestion writes a DIFFERENT
+ * `node_id`, so `existing` is `undefined` and the row **APPENDS**. `add_constraint`
+ * is the only constraint handler in the estate, `apply-graph-mutation.ts:195`
+ * states it "does NOT prune", and no removal path exists — so the original row
+ * against the un-testable node SURVIVES, and keeps producing "One limit on your
+ * model could not be checked" on every later rerun.
+ *
+ * ⭐ A first draft of this sentence said *"I will move the limit to it."* That
+ * would have been a promise the write path cannot keep, invited by the very
+ * disclosure meant to fix a dead end — the same shape as the honest-failure
+ * pattern this module exists to break, pointed the other way. The copy says
+ * "as well" because that is what actually happens.
+ *
+ * The exact move needs a supersession carrier (`{from_node_id, to_node_id,
+ * operator}`) AND a consumer on the accept path. Named as the follow-up, NOT
+ * built here: a producer without a round-trip is a mechanism this lane has
+ * already shipped once and had to withdraw.
  */
 export function formatConstraintTargetAlternative(input: {
   readonly chosenLabel: string;
@@ -131,7 +210,9 @@ export function formatConstraintTargetAlternative(input: {
 }): string {
   return (
     `I recorded this against ${input.chosenLabel}, which has no figure for the `
-    + `analysis to test. ${input.alternative.label} does, in ${input.alternative.unit}. `
-    + `Say the word and I will move the limit there.`
+    + `analysis to test. ${input.alternative.label} may be the one you meant \u2014 `
+    + `it is the only thing in your model recorded in ${input.alternative.unit}. `
+    + `Say so and I will put the limit there as well.`
   );
 }
+

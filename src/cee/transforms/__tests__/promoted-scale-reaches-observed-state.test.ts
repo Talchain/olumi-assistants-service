@@ -25,6 +25,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { NodeV3 } from '../../../schemas/cee-v3.js';
 import { transformNodeToV3 } from '../schema-v3.js';
 
 /** The shape the repair stage leaves: promoted to the node, `data` gone. */
@@ -39,12 +40,31 @@ const promotedNode = (over: Record<string, unknown> = {}) =>
     ...over,
   }) as never;
 
-const observedOf = (node: unknown) =>
-  (transformNodeToV3(node as never) as { observed_state?: Record<string, unknown> }).observed_state;
+/**
+ * ⚠⚠ EVERY ASSERTION GOES THROUGH `NodeV3.safeParse`, AND THAT IS THE WHOLE
+ * POINT. A first cut of this suite read `transformNodeToV3`'s output directly:
+ * six specs, all green, over an object the wire's own schema REJECTS
+ * ("observed_state.value Required", Codex CX-147). A partial `observed_state`
+ * is not a weaker record, it is an INVALID one. Reading the function's return
+ * value tested the function; it did not test what reaches the wire.
+ */
+const parsedOf = (node: unknown) => {
+  const out = transformNodeToV3(node as never);
+  const parsed = NodeV3.safeParse(out);
+  if (!parsed.success) {
+    throw new Error(`NodeV3 rejected the transform output: ${JSON.stringify(parsed.error.issues)}`);
+  }
+  return parsed.data as { observed_state?: Record<string, unknown> };
+};
+
+const observedOf = (node: unknown) => parsedOf(node).observed_state;
 
 describe('the promoted scale reaches observed_state', () => {
-  it('⭐ carries raw_value, cap and unit from the NODE when data is gone', () => {
+  it('⭐ carries the pair and a SCHEMA-VALID value when data is gone', () => {
+    // `value = raw_value / cap` is the contract's own stated relationship, so
+    // the pair is the unit of carry — and the record parses.
     expect(observedOf(promotedNode())).toEqual({
+      value: 0.55,
       raw_value: 55000,
       cap: 100000,
       unit: '$',
@@ -77,10 +97,15 @@ describe('the promoted scale reaches observed_state', () => {
     expect(observedOf({ id: 'f2', kind: 'factor', label: 'No scale anywhere' })).toBeUndefined();
   });
 
-  it('carries a PARTIAL promotion rather than requiring all three', () => {
-    // A unit with no cap is still worth more than nothing: it tells a
-    // downstream reader what the number is denominated in.
-    expect(observedOf(promotedNode({ cap: undefined, raw_value: undefined }))).toEqual({ unit: '$' });
+  it.each([
+    ['unit only', { cap: undefined, raw_value: undefined }],
+    ['raw only', { cap: undefined, unit: undefined }],
+    ['cap only', { raw_value: undefined, unit: undefined }],
+    ['cap of zero', { cap: 0 }],
+  ])('⛔ emits NOTHING for a %s promotion — a partial record is INVALID, not weaker', (_n, over) => {
+    // CX-147: `observed_state.value` is Required, so half a record is refused
+    // by the wire's schema. Emitting one would be worse than emitting none.
+    expect(observedOf(promotedNode(over))).toBeUndefined();
   });
 
   it('ignores non-finite or blank promotions rather than carrying junk', () => {

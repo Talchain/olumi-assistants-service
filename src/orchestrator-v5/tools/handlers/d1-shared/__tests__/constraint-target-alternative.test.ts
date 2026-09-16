@@ -15,13 +15,21 @@ import {
   type TargetAlternativeNode,
 } from '../constraint-target-alternative.js';
 
-/** Paul's graph. The cost factor carries a unit once the scale is recorded. */
+/**
+ * Paul's graph, with the cost factor in the shape the wire ACTUALLY carries
+ * once the companion transform fix lands: `observed_state` holds the
+ * `{value, raw_value, cap, unit}` quartet, `value = raw_value / cap`.
+ *
+ * ⚠ IT CARRIES A `value`, AND THAT IS LOAD-BEARING, NOT DECORATION. An earlier
+ * fixture recorded `{unit, cap}` alone — a shape the schema now refuses — and
+ * a candidate test written against it could only ever have checked the unit.
+ */
 const NODES: readonly TargetAlternativeNode[] = [
   { id: 'dac3fdc3', kind: 'risk', label: 'Budget Overrun Risk', observed_state: null },
-  { id: '7809def4', kind: 'factor', label: 'Hiring and Onboarding Cost', observed_state: { unit: '£', cap: 250000 } },
+  { id: '7809def4', kind: 'factor', label: 'Hiring and Onboarding Cost', observed_state: { value: 0.6, raw_value: 150000, cap: 250000, unit: '£' } },
   { id: '17456e58', kind: 'factor', label: 'Team Leadership Coverage', observed_state: null },
   { id: '2416c872', kind: 'factor', label: 'Leadership Gap Risk', observed_state: null },
-  { id: 'c3636f2d', kind: 'factor', label: 'Increase Productivity', observed_state: { unit: 'scale', cap: 1 } },
+  { id: 'c3636f2d', kind: 'factor', label: 'Increase Productivity', observed_state: { value: 0.8, raw_value: 0.8, cap: 1, unit: 'scale' } },
 ];
 
 const find = (over: Partial<Parameters<typeof findConstraintTargetAlternative>[0]> = {}) =>
@@ -41,6 +49,18 @@ describe('findConstraintTargetAlternative — the captured case', () => {
   it('⭐ matches £ against GBP — symbol and code are one unit', () => {
     // The constraint row carries the code; the factor carries the symbol.
     expect(find({ constraintUnit: '£' })?.nodeId).toBe('7809def4');
+  });
+
+  it('⛔ REFUSES a candidate that matches the unit but records NO FIGURE', () => {
+    // Codex CX-150: a unit match establishes notional compatibility only — not
+    // amount, scale, period or quantity identity. A factor recording
+    // {unit:'GBP'} and nothing else passes the unit test and is still the same
+    // dead end with a different label, so it goes through the SAME
+    // admissibility classifier the chosen target did.
+    const nodes = NODES.map((n) =>
+      n.id === '7809def4' ? { ...n, observed_state: { unit: 'GBP' } } : n,
+    );
+    expect(find({ nodes })).toBeNull();
   });
 
   it('⛔ matches on RECORDED UNIT, never on the label', () => {
@@ -65,13 +85,13 @@ describe('findConstraintTargetAlternative — refusals', () => {
   });
 
   it('⛔ REFUSES on two candidates — the question is open, so it must be asked', () => {
-    const nodes = [...NODES, { id: 'other', kind: 'factor', label: 'Contractor Spend', observed_state: { unit: 'GBP' } }];
+    const nodes = [...NODES, { id: 'other', kind: 'factor', label: 'Contractor Spend', observed_state: { value: 0.3, cap: 50000, unit: 'GBP' } }];
     expect(find({ nodes })).toBeNull();
   });
 
   it('never proposes the node the user already chose', () => {
     const nodes = NODES.map((n) =>
-      n.id === 'dac3fdc3' ? { ...n, kind: 'factor', observed_state: { unit: '£' } } : n,
+      n.id === 'dac3fdc3' ? { ...n, kind: 'factor', observed_state: { value: 0.5, cap: 400000, unit: '£' } } : n,
     );
     // Both now carry £; the chosen one is excluded, leaving exactly one.
     expect(find({ nodes })?.nodeId).toBe('7809def4');
@@ -119,9 +139,23 @@ describe('formatConstraintTargetAlternative', () => {
   });
 
   it('⛔ ASKS rather than moving the limit', () => {
-    // Re-targeting a user's limit on a unit match would be the confident
-    // wrongness the admissibility check exists to prevent.
-    expect(text).toMatch(/say the word/i);
+    expect(text).toMatch(/say so and I will/i);
     expect(text).not.toMatch(/\bI have moved\b|\bmoved it\b/i);
+  });
+
+  it('⛔ PROMISES "as well", never a MOVE the write path cannot perform', () => {
+    // The row key is (node_id, operator), so accepting APPENDS against the new
+    // node and the original survives — there is no removal path in the estate.
+    // A first draft promised "I will move the limit to it", which the write
+    // cannot keep.
+    expect(text).toMatch(/as well/i);
+    expect(text).not.toMatch(/move the limit|instead of|replace/i);
+  });
+
+  it('⛔ offers a CANDIDATE and does not assert checkability', () => {
+    // CX-150: an earlier draft said the alternative "does" have a figure the
+    // analysis can test. A shared currency does not establish that.
+    expect(text).toMatch(/may be the one you meant/i);
+    expect(text).not.toMatch(/\bdoes,? in\b/i);
   });
 });
