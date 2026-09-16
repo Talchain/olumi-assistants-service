@@ -16,3 +16,10 @@ If the owning lane wants these in its corpus, promote them one level and re-deri
 those four numbers deliberately. The substantive claims were checked and hold:
 these carry ZERO `cause` spans, so `misfiled-explanation` C1's assertion is
 unaffected by their content.
+
+## Added 15 Sep — `live-stated-limit-no-value-2026-09-15.json`
+
+Same provenance and the same append-only rule. It carries the defect the
+constraint-correction work exists for: a `constraint`
+("keeping monthly churn under 4%") with a `direction` and NO numeric `value`,
+which is why the limit reached the graph in 0 of 20 pricing drafts.

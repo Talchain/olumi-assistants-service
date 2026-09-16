@@ -623,6 +623,31 @@ export interface DroppedRecordRef {
      */
     | "constraint_direction_unstated"
     /**
+     * ⭐⭐ A STATED LIMIT CARRIES NO THRESHOLD WE CAN USE — so it cannot be
+     * enforced, and until now nobody said so.
+     *
+     * MEASURED 15 Sep 2026: 13 of 13 captured constraints arrived with a
+     * `direction` and NO numeric `value` — the figure sat in the span, or in a
+     * separate `figure` item. Both binding branches gate on
+     * `typeof item.value === "number"`, so the limit never reached the binding
+     * path and its only disclosure was the generic `unconnected_to_goal`. The
+     * limit reached the graph in 0 of 20 pricing drafts.
+     *
+     * ⛔ THIS READS NOTHING OUT OF THE SPAN, and that is deliberate. An earlier
+     * attempt (#1513) recovered the sole quantity from the quote and FABRICATED
+     * a 60% floor out of "…dead in enterprise, which is 60% of revenue" — a
+     * descriptive aside in a qualitative constraint. Which quantity a sentence
+     * BOUNDS is a semantic judgement, and the only routes to it are comparative-
+     * word parsing or name matching, both of which this estate has already paid
+     * for. So this disclosure states the ABSENCE and asks; it never guesses.
+     *
+     * ⚠ IT FIRES ON A GENUINELY QUALITATIVE LIMIT TOO, and that is correct
+     * rather than noise: "legal has NOT confirmed this" IS a constraint we
+     * cannot enforce, and saying so is honest. The completion turn is told
+     * explicitly to leave such a limit alone.
+     */
+    | "constraint_value_unstated"
+    /**
      * ⭐ A STATED `constraint` NAMED WHAT IT LIMITS, AND THE TARGET CANNOT
      * CARRY A THRESHOLD.
      *
@@ -714,6 +739,16 @@ export interface DroppedRecordRef {
     | "claim_label_not_a_name";
   /** The reference as emitted, rendered for a reader. */
   readonly from_ref?: string;
+  /**
+   * ⭐ THE `stated_items` POSITION THIS REFUSAL IS ABOUT, when it is about one.
+   *
+   * Typed rather than parsed back out of `from_ref`. A consumer that scraped
+   * `stated_items[N]` out of the rendered string would be a hand-maintained
+   * mirror of `renderRef`'s format (trap 12): change the rendering and the
+   * scraper silently stops matching, with nothing red. The completion's repair
+   * scope is derived from this field.
+   */
+  readonly stated_index?: number;
   readonly to_ref?: string;
   /** Resolved node kinds — present only on `ref_kind_illegal`, where they ARE the finding. */
   readonly from_kind?: string;
@@ -2637,6 +2672,19 @@ function projectOnce(
     };
 
     const statedDirection = item.direction;
+    // ⭐ THE ABSENCE, DISCLOSED. Derived from the record alone: a limit was
+    // stated, a direction was given, and no usable threshold came with it.
+    if (kind === "constraint" && typeof item.value !== "number" && statedDirection !== undefined) {
+      dropped.push({
+        claim_index: -1,
+        claim_kind: STATED_ITEM_DROP_KIND,
+        label: quote,
+        node_id: id,
+        reason: "constraint_value_unstated",
+        from_ref: `stated_items[${index}]`,
+        stated_index: index,
+      });
+    }
     if (kind === "constraint" && typeof item.value === "number" && statedDirection === undefined) {
       // ⭐⭐ ROOT 2(a) — DO NOT GUESS A DIRECTION. ASK.
       //
@@ -3320,6 +3368,7 @@ function projectOnce(
         node_id: binding.nodeId,
         reason,
         from_ref: `stated_items[${binding.statedIndex}]`,
+        stated_index: binding.statedIndex,
         ...(toRef !== undefined ? { to_ref: toRef } : {}),
       });
     };
