@@ -66,6 +66,10 @@ import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
 import { sameUnit } from '../../../utils/currency-alphabet.js';
+import {
+  buildCanonicalAnalysisReadyFromGraph,
+  mergeInterventionSourceObjects,
+} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
@@ -220,28 +224,63 @@ interface ResolvedParams {
 // module's doc comment for the full doctrine.
 
 /**
- * The turn's options, read from the RAW snapshot.
+ * The turn's options, read from the RAW snapshot through the CANONICAL
+ * readiness membership — not a third population algorithm.
  *
- * ⚠ It cannot come from the parsed graph: `GraphV3` declares nodes, edges and
- * goal_constraints only, so options are stripped at the ingress parse. This
- * mirrors the sibling raw read already in this file rather than re-parsing.
+ * ⚠⚠ TWO DEFECTS LIVED HERE, IN OPPOSITE DIRECTIONS, AND BOTH WERE FOUND ON
+ * THE REAL CALLER RATHER THAN BY MY TESTS.
  *
- * Two carriers, preferred in order, because a V3 graph may hold either: the
- * canonical top-level `options` array, else the option NODES — which is what
- * `run_analysis` projects into the wire `options` it hands PLoT, so the pin
- * question is asked against the same population PLoT will see.
+ * FIRST, it read the PARSED graph. `GraphV3` declares nodes, edges and
+ * goal_constraints and nothing else, so the ingress parse strips top-level
+ * options: `graph.options` was always undefined and the every-option-pin
+ * anchor route was dead in production while helper tests passed.
+ *
+ * THEN, reading the raw snapshot, it preferred any top-level `options` array
+ * WHOLESALE. That over-anchors, which is the worse direction. Codex's
+ * counterexample: option node A pins hiring cost, node B pins another factor,
+ * and the top-level mirror contains only A. A wholesale read sees one option,
+ * finds it pins, and concludes EVERY option pins — while the real analysis
+ * retains A+B and concludes the opposite. The result is an offer PLoT will
+ * refuse to anchor: exactly the actionable-looking dead end this module exists
+ * to prevent.
+ *
+ * ⭐ So the membership question is answered by the code that already answers it
+ * for the run. `buildCanonicalAnalysisReadyFromGraph` COMPLETES a partial
+ * top-level mirror from the option nodes (analysis-ready-helper.ts:897-942 —
+ * a top-level array owns the population only when it is an exact unique-id
+ * bijection with the option nodes), and it is what `build-turn-context` uses
+ * to load the real run. Asking a different question here would be a third
+ * population that is free to drift from both.
+ *
+ * ⚠ FAILS CLOSED. When canonical readiness cannot build a payload the answer
+ * is NO OPTIONS, so the pin route simply does not fire and the offer is
+ * withheld. Under-offering is the safe error; over-anchoring names a dead end.
  */
 function readSameTurnOptions(rawGraph: unknown): ReadonlyArray<{ interventions?: unknown }> {
-  const raw = rawGraph as { options?: unknown; nodes?: unknown } | null;
-  if (Array.isArray(raw?.options)) {
-    return raw.options as ReadonlyArray<{ interventions?: unknown }>;
+  const ready = buildCanonicalAnalysisReadyFromGraph(rawGraph);
+  const canonical = ready?.options;
+  if (!Array.isArray(canonical) || canonical.length === 0) return [];
+
+  // Complete each option's interventions from its NODE with the same merger the
+  // loader uses, so an option whose canonical row carries none is not read as
+  // pinning nothing when the node says otherwise.
+  const optionNodesById = new Map<string, Record<string, unknown>>();
+  const nodes = (rawGraph as { nodes?: unknown } | null)?.nodes;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes as Array<Record<string, unknown>>) {
+      if (n?.kind === 'option' && typeof n.id === 'string') optionNodesById.set(n.id, n);
+    }
   }
-  if (Array.isArray(raw?.nodes)) {
-    return (raw.nodes as Array<{ kind?: unknown; interventions?: unknown }>).filter(
-      (n) => n?.kind === 'option',
-    );
-  }
-  return [];
+  return canonical.map((option) => {
+    const row = option as unknown as Record<string, unknown>;
+    const id = typeof row.option_id === 'string' ? row.option_id
+      : typeof row.id === 'string' ? row.id : undefined;
+    const node = id !== undefined ? optionNodesById.get(id) : undefined;
+    const fromNode = node !== undefined ? mergeInterventionSourceObjects(node) : {};
+    const fromRow = (row.interventions && typeof row.interventions === 'object')
+      ? (row.interventions as Record<string, unknown>) : {};
+    return { interventions: { ...fromNode, ...fromRow } };
+  });
 }
 
 function resolveParams(invocation: HandlerInvocation): ResolvedParams {

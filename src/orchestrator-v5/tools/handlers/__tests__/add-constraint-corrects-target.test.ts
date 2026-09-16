@@ -612,6 +612,28 @@ describe('anchor routes reach the REAL handler', () => {
     expect(text).toMatch(/Hiring and Onboarding Cost/);
   });
 
+  it('⛔⛔ PARTIAL TOP-LEVEL MIRROR: completed from the option NODES, not trusted wholesale', async () => {
+    // Codex CX-303's counterexample. Option node A pins hiring cost; node B
+    // pins something else; the top-level mirror lists ONLY A. Reading that
+    // mirror wholesale sees one option, finds it pins, and concludes EVERY
+    // option pins — while the real analysis retains A+B and concludes the
+    // opposite. That OVER-ANCHORS, which is the worse direction: it names a
+    // target PLoT will refuse to anchor.
+    //
+    // Canonical readiness completes a partial mirror from the option nodes
+    // (a top-level array owns the population only when it is an exact
+    // unique-id bijection with them), so B is retained and the offer is
+    // correctly withheld.
+    const g = nonRootGraph([
+      opt('opt_a', { 'f-hiring-cost': 0.4 }),
+      opt('opt_b', { 'f-upstream': 0.8 }),
+    ]);
+    (g as { options?: unknown }).options = [
+      { id: 'opt_a', option_id: 'opt_a', label: 'opt_a', interventions: { 'f-hiring-cost': 0.4 } },
+    ];
+    expect(await textFor(g)).not.toMatch(/Hiring and Onboarding Cost/);
+  });
+
   it('⛔ SOME options pin it — not every — so it is NOT offered', async () => {
     const text = await textFor(nonRootGraph([
       opt('opt_a', { 'f-hiring-cost': 0.4 }),
