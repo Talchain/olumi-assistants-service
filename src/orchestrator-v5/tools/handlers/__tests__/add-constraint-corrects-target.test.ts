@@ -361,11 +361,14 @@ describe('CX-195 — a move must not quietly become something else', () => {
     const outcome = await run({
       targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-overrun',
     });
-    const before = outcome.handler_facts[0]?.result?.before as Record<string, unknown> | null;
-    expect(before).not.toBeNull();
-    expect(before).toMatchObject({ constraint_id: 'gc-wrong', node_id: 'r-overrun' });
-    const after = outcome.handler_facts[0]?.result?.after as Record<string, unknown>;
-    expect(after).toMatchObject({ node_id: 'f-hiring-cost' });
+    // `handler_facts[0]` is a union across every fact type, so `result` has no
+    // common before/after. Narrow to the add_constraint shape explicitly.
+    const result = (outcome.handler_facts[0] as {
+      result?: { before?: unknown; after?: unknown };
+    })?.result;
+    expect(result?.before).not.toBeNull();
+    expect(result?.before).toMatchObject({ constraint_id: 'gc-wrong', node_id: 'r-overrun' });
+    expect(result?.after).toMatchObject({ node_id: 'f-hiring-cost' });
   });
 });
 
@@ -473,6 +476,35 @@ describe('attested properties travel with the moved row', () => {
     // exactly; the explicit unit on the turn still wins for the written row.
     const rows = await move(movable({ unit: '\u00a3' }));
     expect(rows[0]).toMatchObject({ value_frame: 'level', unit: 'GBP' });
+  });
+
+  it('⛔⛔ a move that CHANGES THE AMOUNT may not inherit the unit — the 700% case', async () => {
+    // CEE stores a sub-1 percentage as {value: 0.07, unit: 'fraction'}, which
+    // MEANS 7%. `normaliseConstraintUnits` only ever fires on unit === '%', so
+    // a fraction-labelled row is never re-examined. Moving it while restating
+    // the amount as 7 and silently inheriting 'fraction' writes SEVEN HUNDRED
+    // PER CENT, and nothing downstream objects.
+    const g = movable({ value: 0.07, unit: 'fraction' });
+    const before = JSON.stringify((g as { goal_constraints?: unknown }).goal_constraints);
+    await expect(run({
+      targetId: 'f-hiring-cost', value: 7, corrects: 'r-overrun', graph: g,
+    } as never)).rejects.toThrow();
+    expect(JSON.stringify((g as { goal_constraints?: unknown }).goal_constraints)).toBe(before);
+  });
+
+  it('⭐ stating the units WITH the new amount is accepted — it is the silence that is refused', async () => {
+    const rows = await move(movable({ value: 0.07, unit: 'fraction' }), { value: 7, unit: '%' });
+    expect(rows[0]).toMatchObject({ value: 7, unit: '%' });
+  });
+
+  it('⭐ the frame key is spelled EXACTLY `value_frame` — a misspelling is silent', async () => {
+    // ISL parses with extra:"ignore", so `value_frmae` is dropped at parse and
+    // behaves identically to absence — with no error anywhere (captured arm D,
+    // ISL c695feb7). And an ABSENT frame is worse than a wrong one: ISL fail-
+    // closes by omitting the ENTIRE constraint_analysis block, deleting every
+    // SIBLING constraint's verdict in that run.
+    const rows = await move(movable());
+    expect(Object.keys(rows[0]!)).toContain('value_frame');
   });
 
   it('⛔ NEVER INVENTS a frame the source did not attest', async () => {

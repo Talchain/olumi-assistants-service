@@ -601,10 +601,56 @@ export function createAddConstraintHandler(): HandlerFn {
       // intents wearing one call — a move, and a re-denomination. Answering
       // one of them silently would change what the user's limit MEANS while
       // reporting a move. `sameUnit` so £ and GBP are one unit spelled twice.
+      // ⛔⛔ A MOVE THAT ALSO CHANGES THE NUMBER MAY NOT INHERIT THE UNIT.
+      // This is a 700% defect, and it was found by reading PLoT/ISL rather
+      // than this file.
+      //
+      // CEE relabels a sub-1 percentage: `{value: 0.07, unit: '%'}` is stored
+      // as `{value: 0.07, unit: 'fraction'}` and MEANS 7%
+      // (`compound-goal/extractor.ts` `normaliseConstraintUnits`). That rule
+      // fires ONLY on `unit === '%'`, so a row already labelled `fraction` is
+      // never re-examined. If a correction moves that limit and states a new
+      // value of 7 while silently inheriting `fraction`, the model now carries
+      // SEVEN HUNDRED PER CENT and nothing downstream objects.
+      //
+      // Inheriting a unit is only safe for the quantity it was attested for.
+      // A move is a MOVE; a move that also restates the amount is two intents
+      // in one call, exactly like the conflicting-unit case below. So the unit
+      // must be stated explicitly when the number changes — the turn that
+      // changes the quantity is the turn that must say what it is in.
+      if (
+        isCorrection &&
+        params.unit === undefined &&
+        sourceRow?.unit !== undefined &&
+        !valuesMatch(sourceRow.value, params.value)
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          `I did not move the limit because you have changed the amount and I cannot assume it is still in ${sourceRow.unit}. Tell me the amount and its units together. Nothing on your model changed.`,
+          {
+            details: {
+              source_value: sourceRow.value,
+              requested_value: params.value,
+              source_unit: sourceRow.unit,
+            },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
+        );
+      }
+
+      // ⚠ AND THIS ONE FIRES ONLY WHEN THE NUMBER IS UNCHANGED, which is the
+      // whole of its case. Re-denominating the SAME number is genuinely
+      // ambiguous — "move it, and it is USD not GBP" asks two questions at
+      // once. But a turn that states BOTH a new amount AND its unit has
+      // assumed nothing and left nothing to inherit: the limit is fully
+      // specified, so there is no ambiguity to refuse. Refusing it anyway
+      // would block the natural repair for the 700% case above ("make it 7%"),
+      // which is the one phrasing a user is most likely to reach for.
       if (
         isCorrection &&
         params.unit !== undefined &&
         sourceRow?.unit !== undefined &&
+        valuesMatch(sourceRow.value, params.value) &&
         !sameUnit(params.unit, sourceRow.unit)
       ) {
         throw new D1HandlerError(
@@ -1184,7 +1230,7 @@ export function createAddConstraintHandler(): HandlerFn {
           // move — so the fact channel recorded a destroyed limit as a fresh
           // add, and nothing downstream could see what was removed.
           before: isCorrection
-            ? (sourceRow as unknown as Record<string, unknown>)
+            ? (sourceRow as Record<string, unknown>)
             : existing
               ? (existing as Record<string, unknown>)
               : null,
