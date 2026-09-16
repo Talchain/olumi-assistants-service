@@ -63,8 +63,10 @@ import { GraphV3 } from '../../schemas/cee-v3.js';
 import {
   boundNodeDescriptionForContext,
   compactGraph,
+  projectUncertaintyDriversForContext,
   type GraphV3Compact,
 } from '../../orchestrator/context/graph-compact.js';
+import { valueSourceAuthorship } from '../../cee/transforms/provenance-display.js';
 
 /** How the projection was obtained. Reported in telemetry; never user-facing. */
 export type DecisionReviewGraphSource =
@@ -125,7 +127,8 @@ function endpointAddress(from: string, to: string): string {
 }
 
 /**
- * Give every projected edge an `id` the model can cite.
+ * Give every projected edge an `id` the model can cite, and carry back the
+ * source qualifiers the compactor does not model.
  *
  * ⭐⭐ THIS IS THE ROOT-CAUSE HALF OF THE FIX, AND IT IS WHY THE REPAIR DOES NOT
  * MAKE THE PRODUCT WORSE.
@@ -138,37 +141,116 @@ function endpointAddress(from: string, to: string): string {
  * the gate to tolerate invented references would be a relaxation; this is not.
  * It closes the gap at the other end, by making the address REAL.
  *
- * Two sources, in order:
- *   · the source edge's own `id`, carried back by index and confirmed by both
- *     endpoints (`compactGraph` maps `graph.edges` 1:1, so the index is the
- *     natural join; if it ever filters, the endpoints disagree and the carry
- *     fails weak, which is safe because the address below still applies);
- *   · otherwise `from->to`, which is DERIVED ENTIRELY FROM FIELDS THE EDGE
- *     ALREADY CARRIES. It asserts nothing the producer did not say — contrast
- *     `toStructuralGraphV3`, which invents a strength, a probability and a
- *     direction.
+ * ⛔⛔ THIS JOINED BY INDEX AND THAT WAS WRONG. `compactGraph` SORTS — nodes by
+ * id at graph-compact.ts:896, edges by `(from, to)` at :952. The positional join
+ * silently assumed it did not. Measured on one two-edge graph: with the source
+ * already in sorted order both explicit ids were retained, and with the SAME two
+ * edges in the other order NEITHER was — so two genuine producer ids vanished,
+ * and a model citing them would have had the whole review dropped. An endpoint
+ * guard made it fail weak rather than mis-attribute, which is why nothing threw;
+ * it just quietly lost identity depending on input order.
  *
- * `edge_ids_retained` counts only the FIRST kind, so telemetry never reports a
- * synthesised address as producer-supplied identity.
+ * Now joined by DIRECTED ENDPOINT PAIR, which is what the compactor sorts on and
+ * therefore cannot be permuted by it. Parallel edges (same pair, more than one
+ * edge) are consumed from a per-pair queue in source order — `Array.prototype
+ * .sort` is stable, so same-pair edges keep their relative order through the
+ * compactor and the queue matches them exactly.
+ *
+ * Address, in order: the source edge's own `id`; otherwise `from->to`, DERIVED
+ * ENTIRELY FROM FIELDS THE EDGE ALREADY CARRIES. It asserts nothing the producer
+ * did not say — contrast `toStructuralGraphV3`, which invents a strength, a
+ * probability and a direction.
+ *
+ * `edge_ids_retained` counts only explicit producer ids, so telemetry never
+ * reports a synthesised address as producer-supplied identity.
  */
 function carryEdgeIds(
   compact: GraphV3Compact,
   sourceEdges: readonly unknown[],
 ): { edges: Array<Record<string, unknown>>; retained: number } {
+  // Per-pair queues, in source order. Keyed on the directed endpoints the
+  // compactor sorts by, so sorting cannot permute a key away from its edge.
+  const byPair = new Map<string, Array<Record<string, unknown>>>();
+  for (const raw of sourceEdges) {
+    const source = readRecord(raw);
+    if (source === null) continue;
+    const from = nonEmptyString(source.from);
+    const to = nonEmptyString(source.to);
+    if (from === null || to === null) continue;
+    const key = endpointAddress(from, to);
+    const queue = byPair.get(key);
+    if (queue === undefined) byPair.set(key, [source]);
+    else queue.push(source);
+  }
+
   let retained = 0;
-  const edges = compact.edges.map((edge, index) => {
-    const source = readRecord(sourceEdges[index]);
-    const explicit =
-      source !== null && source.from === edge.from && source.to === edge.to
-        ? nonEmptyString(source.id)
-        : null;
+  const edges = compact.edges.map((edge) => {
+    const queue = byPair.get(endpointAddress(edge.from, edge.to));
+    const source = queue !== undefined && queue.length > 0 ? queue.shift() ?? null : null;
+    const explicit = source === null ? null : nonEmptyString(source.id);
     if (explicit !== null) retained += 1;
     return {
       id: explicit ?? endpointAddress(edge.from, edge.to),
       ...edge,
+      // ⚠ `provenance.reasoning` is the producer's WHY for this relationship and
+      // the compactor models only `provenance.source`. Dropping it left the model
+      // a coefficient with no account of where it came from.
+      ...(source !== null ? readEdgeReasoning(source) : {}),
     } as Record<string, unknown>;
   });
   return { edges, retained };
+}
+
+/** The producer's stated reason for an edge, when it gave one. Never inferred. */
+function readEdgeReasoning(edge: Record<string, unknown>): Record<string, unknown> {
+  const provenance = readRecord(edge.provenance);
+  const reasoning = nonEmptyString(provenance?.reasoning);
+  return reasoning === null ? {} : { reasoning };
+}
+
+/**
+ * Goal-threshold fields GraphV3 declares on a node but `CompactNode` does not
+ * model. On the £200,000-budget shape these ARE the decision meaning: a goal
+ * node stripped of its threshold and unit is a name with no target.
+ */
+const GOAL_THRESHOLD_FIELDS = [
+  'goal_threshold',
+  'goal_threshold_raw',
+  'goal_threshold_unit',
+  'goal_threshold_cap',
+] as const;
+
+function readGoalThreshold(node: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of GOAL_THRESHOLD_FIELDS) {
+    const value = node[field];
+    if (value !== undefined && value !== null) out[field] = value;
+  }
+  return out;
+}
+
+/**
+ * Carry the goal-threshold fields onto the compacted nodes, joined by `id`.
+ * Node ids are unique within a graph, so this join cannot be permuted by the
+ * compactor's sort — unlike the positional one it replaces.
+ */
+function carryNodeQualifiers(
+  compact: GraphV3Compact,
+  sourceNodes: readonly unknown[],
+): Array<Record<string, unknown>> {
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const raw of sourceNodes) {
+    const source = readRecord(raw);
+    const id = nonEmptyString(source?.id);
+    if (source !== null && id !== null && !byId.has(id)) byId.set(id, source);
+  }
+  return compact.nodes.map((node) => {
+    const source = byId.get(node.id);
+    return {
+      ...node,
+      ...(source === undefined ? {} : readGoalThreshold(source)),
+    } as Record<string, unknown>;
+  });
 }
 
 /**
@@ -177,8 +259,32 @@ function carryEdgeIds(
  * every downstream reader. A field absent on the source is absent here.
  */
 const PRESERVED_NODE_FIELDS = ['id', 'kind', 'label', 'type', 'category', 'description'] as const;
-/** `observed_state` fields lifted to the top level, mirroring `compactGraph`. */
-const PRESERVED_OBSERVED_FIELDS = ['value', 'raw_value', 'unit', 'cap'] as const;
+/**
+ * `observed_state` fields lifted to the top level, mirroring `compactGraph`.
+ *
+ * ⛔⛔ `stated_role` AND `source` WERE MISSING AND THAT IS THE WORST OMISSION IN
+ * THIS FILE'S HISTORY, because it is the ONE-SIDED kind: it kept the NUMBER and
+ * dropped the QUALIFIER THAT SAYS WHAT THE NUMBER IS.
+ *
+ * `stated_role: 'constraint'` means the user gave that magnitude as a LIMIT and
+ * `value` is standing in for a level they never stated — the £200,000 shape
+ * exactly. Without it the reviewing model sees a plain observation and may
+ * reason about a budget CEILING as though it were a measured level. `source:
+ * 'user_edited'` is the difference between the user's own figure and an AI
+ * guess. Retaining `value` while discarding both is worse than retaining
+ * neither, because it converts an uncertainty into a false certainty.
+ *
+ * The strict arm never had this gap — `CompactNode` models both — so this was
+ * the two arms disagreeing about meaning while agreeing about numbers.
+ */
+const PRESERVED_OBSERVED_FIELDS = [
+  'value',
+  'raw_value',
+  'unit',
+  'cap',
+  'stated_role',
+  'source',
+] as const;
 
 function projectNodePreserving(raw: unknown): Record<string, unknown> | null {
   const node = readRecord(raw);
@@ -198,10 +304,32 @@ function projectNodePreserving(raw: unknown): Record<string, unknown> | null {
   const observed = readRecord(node.observed_state);
   if (observed !== null) {
     for (const field of PRESERVED_OBSERVED_FIELDS) {
+      if (field === 'source') continue;
       if (observed[field] !== undefined && observed[field] !== null) out[field] = observed[field];
     }
+    // ⚠ MAPPED, NOT COPIED — through the SAME shared authority the rich
+    // compactor uses (`valueSourceAuthorship`, cee/transforms/provenance-
+    // display.ts:396). Passing the raw string through had the two arms saying
+    // DIFFERENT WORDS FOR ONE FACT: strict emitted `source: 'user'` and the
+    // fallback `source: 'user_edited'` off the same node. Differently-named
+    // twins is this estate's chronic defect, and it would have reached the
+    // reviewing model as two provenance vocabularies in one prompt. An
+    // unrecognised value maps to undefined and is omitted rather than guessed.
+    // Returns the PAIR (`source` + `provenance`), which is what the compactor
+    // emits too — so spreading it keeps both arms' shape identical, not just
+    // their vocabulary.
+    const authorship = valueSourceAuthorship(observed.source);
+    if (authorship !== undefined) Object.assign(out, authorship);
   }
   if (node.is_baseline === true) out.is_baseline = true;
+  // A goal node without its threshold is a name with no target.
+  Object.assign(out, readGoalThreshold(node));
+  // Producer-stated epistemic uncertainty, through the SHARED bounds authority
+  // (`projectUncertaintyDriversForContext`) rather than a second copy of its
+  // rules — it resolves the two permitted source locations, withholds on
+  // conflict, and discloses its own truncation. Reusing it is what keeps this
+  // arm's disclosure identical to the strict arm's.
+  Object.assign(out, projectUncertaintyDriversForContext(node));
   return out;
 }
 
@@ -231,7 +359,36 @@ function projectEdgePreserving(raw: unknown): Record<string, unknown> | null {
     out.exists = edge.exists;
   }
   if (typeof edge.effect_direction === 'string') out.effect_direction = edge.effect_direction;
+  // ⚠ A BIDIRECTED EDGE IS NOT AN ORDINARY LINK. It records an unmeasured common
+  // cause, not a directed path. Dropping `edge_type` while keeping `strength`
+  // presented one to the model as the other — the same one-sided loss as
+  // `stated_role`, at the relationship level. The strict arm has always carried
+  // it (graph-compact.ts CompactEdge.edge_type).
+  if (edge.edge_type === 'bidirected') out.edge_type = 'bidirected';
+  const provenance = readRecord(edge.provenance);
+  const provenanceSource = nonEmptyString(provenance?.source);
+  if (provenanceSource !== null) out.provenance = provenanceSource;
+  Object.assign(out, readEdgeReasoning(edge));
   return out;
+}
+
+/**
+ * The scenario's saved `goal_constraints` — a TOP-LEVEL GraphV3 field
+ * (cee-v3.ts:654), and the carrier for a limit like "keep spend under
+ * £200,000".
+ *
+ * ⛔ Both arms dropped it, because both rebuilt the graph as `{nodes, edges}`
+ * and nothing else. On the shape this whole component exists to serve — Paul's
+ * session, where a £200,000 budget was the entire point of the turn — the
+ * reviewing model was handed a graph with the constraint deleted. Passed
+ * through verbatim: it is producer data, and reshaping it would be inventing a
+ * second context schema.
+ */
+function readGoalConstraints(graph: Record<string, unknown>): Record<string, unknown> {
+  const constraints = graph.goal_constraints;
+  return Array.isArray(constraints) && constraints.length > 0
+    ? { goal_constraints: constraints }
+    : {};
 }
 
 function projectPreserving(graph: Record<string, unknown>): DecisionReviewGraphProjection {
@@ -245,7 +402,13 @@ function projectPreserving(graph: Record<string, unknown>): DecisionReviewGraphP
     .filter((e): e is Record<string, unknown> => e !== null);
   if (nodes.length === 0 && edges.length === 0) return EMPTY;
   return {
-    graph: { nodes, edges, _node_count: nodes.length, _edge_count: edges.length },
+    graph: {
+      nodes,
+      edges,
+      ...readGoalConstraints(graph),
+      _node_count: nodes.length,
+      _edge_count: edges.length,
+    },
     via: 'run_snapshot_preserving',
     node_count: nodes.length,
     edge_count: edges.length,
@@ -294,11 +457,13 @@ export function projectRunGraphForDecisionReview(
   if (parsed.success) {
     const compact = compactGraph(parsed.data);
     const sourceEdges = Array.isArray(candidate.edges) ? candidate.edges : [];
+    const sourceNodes = Array.isArray(candidate.nodes) ? candidate.nodes : [];
     const { edges, retained } = carryEdgeIds(compact, sourceEdges);
     return {
       graph: {
-        nodes: compact.nodes,
+        nodes: carryNodeQualifiers(compact, sourceNodes),
         edges,
+        ...readGoalConstraints(candidate),
         _node_count: compact._node_count,
         _edge_count: compact._edge_count,
       },

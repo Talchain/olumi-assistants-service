@@ -433,6 +433,284 @@ describe('C4 — a strict-parse failure preserves source facts, never synthesise
   });
 });
 
+/**
+ * ⛔⛔ C6 — EXPLICIT EDGE IDENTITY SURVIVES THE COMPACTOR'S SORT.
+ *
+ * `compactGraph` sorts nodes by id (graph-compact.ts:896) and edges by
+ * `(from, to)` (:952). The first cut joined the source edges POSITIONALLY and
+ * assumed it did not. The failure is invisible on an already-sorted fixture and
+ * total on an unsorted one — which is exactly why the original spec missed it:
+ * `RUN_GRAPH` happened to be in sorted order.
+ *
+ * The contrasting-order pair is the whole control. One order alone proves
+ * nothing, because the broken join passes on the sorted arm.
+ */
+describe('C6 — explicit edge ids survive the compactor sort, in either input order', () => {
+  const mk = (edges: unknown[]) => ({
+    nodes: [
+      { id: 'fac_a', kind: 'factor', label: 'Alpha' },
+      { id: 'fac_z', kind: 'factor', label: 'Zulu' },
+      { id: 'out_o', kind: 'outcome', label: 'Outcome' },
+    ],
+    edges,
+  });
+  const EDGE_A = {
+    id: 'e_a',
+    from: 'fac_a',
+    to: 'out_o',
+    strength: { mean: 0.5, std: 0.1 },
+    exists_probability: 0.9,
+    effect_direction: 'positive',
+  };
+  const EDGE_Z = {
+    id: 'e_z',
+    from: 'fac_z',
+    to: 'out_o',
+    strength: { mean: -0.3, std: 0.1 },
+    exists_probability: 0.9,
+    effect_direction: 'negative',
+  };
+  const SORTED = mk([EDGE_A, EDGE_Z]);
+  const UNSORTED = mk([EDGE_Z, EDGE_A]);
+
+  it('C6a PRECONDITION: the two orders really are different inputs', () => {
+    expect((SORTED.edges[0] as { id: string }).id).toBe('e_a');
+    expect((UNSORTED.edges[0] as { id: string }).id).toBe('e_z');
+  });
+
+  it('C6b PRECONDITION: both take the strict arm, so the sort is actually applied', () => {
+    expect(projectRunGraphForDecisionReview({}, SORTED).via).toBe('run_snapshot_strict');
+    expect(projectRunGraphForDecisionReview({}, UNSORTED).via).toBe('run_snapshot_strict');
+  });
+
+  it.each([
+    ['sorted', SORTED],
+    ['unsorted', UNSORTED],
+  ])('C6c %s input retains BOTH explicit producer ids', (_label, graph) => {
+    const projection = projectRunGraphForDecisionReview({}, graph);
+    expect(projection.edge_ids_retained, 'both ids are the producer\'s own').toBe(2);
+    const ids = (projection.graph.edges as Array<Record<string, unknown>>).map((e) => e.id);
+    expect(new Set(ids)).toEqual(new Set(['e_a', 'e_z']));
+  });
+
+  it.each([
+    ['sorted', SORTED],
+    ['unsorted', UNSORTED],
+  ])('C6d %s input — both genuine ids GROUND, and an invented one still refuses', (_l, graph) => {
+    const projected = projectRunGraphForDecisionReview({}, graph).graph;
+    for (const ref of ['e_a', 'e_z']) {
+      expect(
+        checkDecisionReviewContract(reviewCiting(ref), { graph: projected }).mustDrop,
+        `${ref} is a real producer id`,
+      ).toBe(false);
+    }
+    expect(
+      checkDecisionReviewContract(reviewCiting('e_invented'), { graph: projected }).mustDrop,
+      'the fix must not have widened the gate',
+    ).toBe(true);
+  });
+
+  it('C6e ids are attached to the RIGHT edge, not merely present somewhere', () => {
+    // A set-equality check passes if the two ids are swapped. This binds each id
+    // to its own endpoints — the mis-attribution the endpoint guard prevented,
+    // now asserted rather than assumed.
+    for (const graph of [SORTED, UNSORTED]) {
+      const edges = projectRunGraphForDecisionReview({}, graph).graph.edges as Array<
+        Record<string, unknown>
+      >;
+      expect(edges.find((e) => e.from === 'fac_a')?.id).toBe('e_a');
+      expect(edges.find((e) => e.from === 'fac_z')?.id).toBe('e_z');
+    }
+  });
+});
+
+/**
+ * ⛔⛔ C7 — THE TWO ARMS MUST AGREE ABOUT MEANING, NOT ONLY ABOUT NUMBERS.
+ *
+ * The fallback arm kept `value` and `strength` while dropping
+ * `stated_role: 'constraint'`, `source: 'user_edited'`, `uncertainty_drivers`
+ * and a bidirected `edge_type`. That is the ONE-SIDED loss: a qualified limit
+ * becomes an unqualified number, and an unmeasured common cause becomes an
+ * ordinary causal link. Retaining the number while discarding the qualifier is
+ * worse than retaining neither, because it converts an uncertainty into a false
+ * certainty.
+ *
+ * The fixtures differ ONLY by node id casing — `fac_Budget` breaks NodeV3's
+ * canonical-id regex — so any difference in the output is the ARM, not the data.
+ */
+describe('C7 — semantic qualifiers survive on BOTH projection arms', () => {
+  const semanticGraph = (budgetId: string) => ({
+    nodes: [
+      {
+        id: budgetId,
+        kind: 'factor',
+        label: 'Budget',
+        observed_state: {
+          value: 0.2,
+          raw_value: 200000,
+          unit: 'GBP',
+          stated_role: 'constraint',
+          source: 'user_edited',
+        },
+        uncertainty_drivers: ['supplier quotes vary by a third'],
+      },
+      {
+        id: 'goal_margin',
+        kind: 'goal',
+        label: 'Gross Margin',
+        goal_threshold: 0.8,
+        goal_threshold_raw: 80,
+        goal_threshold_unit: '%',
+        goal_threshold_cap: 100,
+      },
+    ],
+    edges: [
+      {
+        id: 'e_budget_margin',
+        from: budgetId,
+        to: 'goal_margin',
+        strength: { mean: 0.4, std: 0.1 },
+        exists_probability: 0.9,
+        effect_direction: 'positive',
+        edge_type: 'bidirected',
+        provenance: { source: 'user_specified', reasoning: 'Both move with headcount.' },
+      },
+    ],
+    // ⚠ THE REAL `GoalConstraintSchema` SHAPE (assist.ts:401). My first version
+    // of this fixture invented `{id, kind, target_id}` out of my own head, the
+    // whole graph failed strict parse on it, and the "strict arm" assertion was
+    // silently measuring the FALLBACK arm — a self-authored fixture encoding my
+    // model of the producer instead of the producer. Derived at the schema.
+    goal_constraints: [
+      {
+        constraint_id: 'gc_budget',
+        node_id: 'goal_margin',
+        operator: '<=' as const,
+        value: 200000,
+        unit: 'GBP',
+        label: 'Keep total spend under GBP200,000',
+      },
+    ],
+  });
+
+  const STRICT = projectRunGraphForDecisionReview({}, semanticGraph('fac_budget'));
+  const FALLBACK = projectRunGraphForDecisionReview({}, semanticGraph('fac_Budget'));
+
+  it('C7a PRECONDITION: one fixture takes each arm, and they differ only by id casing', () => {
+    expect(STRICT.via).toBe('run_snapshot_strict');
+    expect(FALLBACK.via).toBe('run_snapshot_preserving');
+  });
+
+  it.each([
+    ['strict', () => STRICT],
+    ['fallback', () => FALLBACK],
+  ])('C7b %s — the limit keeps the qualifier that says it IS a limit', (_l, get) => {
+    const budget = (get().graph.nodes as Array<Record<string, unknown>>).find(
+      (n) => String(n.id).toLowerCase() === 'fac_budget',
+    );
+    expect(budget?.raw_value, 'the number').toBe(200000);
+    expect(budget?.stated_role, 'and what the number IS').toBe('constraint');
+    expect(budget?.unit).toBe('GBP');
+  });
+
+  it.each([
+    ['strict', () => STRICT],
+    ['fallback', () => FALLBACK],
+  ])('C7c %s — authorship and stated uncertainty survive', (_l, get) => {
+    const budget = (get().graph.nodes as Array<Record<string, unknown>>).find(
+      (n) => String(n.id).toLowerCase() === 'fac_budget',
+    );
+    // One vocabulary across both arms: the shared `valueSourceAuthorship`
+    // mapper turns the wire's `user_edited` into the display term `user`. The
+    // fallback used to pass the raw string through, so the two arms said
+    // different words for the same fact.
+    expect(budget?.source, "the user's own figure, not an AI guess").toBe('user');
+    expect(
+      JSON.stringify(budget),
+      'the producer-stated uncertainty reaches the model',
+    ).toContain('supplier quotes vary by a third');
+  });
+
+  it.each([
+    ['strict', () => STRICT],
+    ['fallback', () => FALLBACK],
+  ])('C7d %s — the goal keeps its threshold, so it is a target not a name', (_l, get) => {
+    const goal = (get().graph.nodes as Array<Record<string, unknown>>).find(
+      (n) => n.id === 'goal_margin',
+    );
+    expect(goal?.goal_threshold).toBe(0.8);
+    expect(goal?.goal_threshold_raw).toBe(80);
+    expect(goal?.goal_threshold_unit).toBe('%');
+  });
+
+  it.each([
+    ['strict', () => STRICT],
+    ['fallback', () => FALLBACK],
+  ])('C7e %s — an unmeasured common cause is not presented as a causal link', (_l, get) => {
+    const edge = (get().graph.edges as Array<Record<string, unknown>>)[0];
+    expect(edge?.edge_type, 'bidirected must not read as an ordinary edge').toBe('bidirected');
+  });
+
+  it.each([
+    ['strict', () => STRICT],
+    ['fallback', () => FALLBACK],
+  ])("C7f %s — the producer's reason for the edge reaches the model", (_l, get) => {
+    const edge = (get().graph.edges as Array<Record<string, unknown>>)[0];
+    expect(edge?.reasoning).toBe('Both move with headcount.');
+  });
+
+  it.each([
+    ['strict', () => STRICT],
+    ['fallback', () => FALLBACK],
+  ])('C7g %s — the GBP200,000 goal constraint is NOT deleted', (_l, get) => {
+    const constraints = get().graph.goal_constraints as Array<Record<string, unknown>> | undefined;
+    expect(constraints, 'the entire point of the turn this component serves').toHaveLength(1);
+    expect(constraints?.[0]?.value).toBe(200000);
+  });
+
+  it('C7h nothing this projection controls is INVENTED', () => {
+    const bare = projectRunGraphForDecisionReview({}, {
+      nodes: [{ id: 'fac_bare', kind: 'factor', label: 'Bare' }],
+      edges: [],
+    });
+    const node = (bare.graph.nodes as Array<Record<string, unknown>>)[0];
+    expect(node?.stated_role, 'a limit is never inferred').toBeUndefined();
+    expect(node?.goal_threshold, 'a target is never inferred').toBeUndefined();
+    expect(bare.graph.goal_constraints, 'a constraint is never inferred').toBeUndefined();
+  });
+
+  /**
+   * ⚠ ONE DIVERGENCE BETWEEN THE ARMS, PINNED RATHER THAN QUIETLY TOLERATED.
+   *
+   * On a node with no `observed_state`, the RICH compactor stamps
+   * `source: 'system'` / `provenance: 'ai_inferred'` — its own long-shipped
+   * mapping ("unknown upstream values map to ai_inferred"), not something this
+   * projection adds. The fallback arm leaves both ABSENT, because inferring
+   * them here is exactly what CX274 forbids and what `toStructuralGraphV3` does
+   * wrong.
+   *
+   * So the arms genuinely differ, in the safe direction: the strict arm inherits
+   * an upstream default, the fallback arm asserts nothing. Neither invents a
+   * QUALIFIER — no `stated_role`, no threshold, no constraint. Recording it as a
+   * test means it fails loudly if either side moves, instead of being
+   * rediscovered as a surprise.
+   */
+  it('C7i the arms diverge ONLY on the compactor\'s own provenance default', () => {
+    const bare = { nodes: [{ id: 'fac_bare', kind: 'factor', label: 'Bare' }], edges: [] };
+    const strict = projectRunGraphForDecisionReview({}, bare);
+    const fallback = projectRunGraphForDecisionReview({}, {
+      ...bare,
+      nodes: [{ id: 'fac_Bare', kind: 'factor', label: 'Bare' }],
+    });
+    expect(strict.via).toBe('run_snapshot_strict');
+    expect(fallback.via).toBe('run_snapshot_preserving');
+    const s0 = (strict.graph.nodes as Array<Record<string, unknown>>)[0];
+    const f0 = (fallback.graph.nodes as Array<Record<string, unknown>>)[0];
+    expect(s0?.source, "compactGraph's shipped default, inherited not added").toBe('system');
+    expect(f0?.source, 'the fallback asserts nothing it was not told').toBeUndefined();
+  });
+});
+
 // ── C5 ──────────────────────────────────────────────────────────────────────
 
 describe('C5 — the fragments see the same snapshot as the monolith', () => {
