@@ -882,15 +882,58 @@ export function createAddConstraintHandler(): HandlerFn {
       // same class the `mintedBaseline` conjunct beside `turnIsNoop` already
       // exists to prevent, arriving through a new door.
       const correctsId = params.corrects_node_id;
-      const correctableRows =
-        existing === undefined && correctsId !== undefined && correctsId !== targetId
-          ? (graph.goal_constraints ?? []).filter(
-              (c) => c.node_id === correctsId && c.operator === operator,
-            )
-          : [];
-      // Exactly one, or the (node, operator) key is not unique here and
-      // choosing between them would be a guess — refuse and behave as today.
-      const isCorrection = correctableRows.length === 1;
+      // Pointing at the node already targeted asks for nothing to be moved —
+      // that is an ordinary update, not a correction.
+      const correctionRequested = correctsId !== undefined && correctsId !== targetId;
+      const correctableRows = correctionRequested
+        ? (graph.goal_constraints ?? []).filter(
+            (c) => c.node_id === correctsId && c.operator === operator,
+          )
+        : [];
+      const isCorrection =
+        correctionRequested && existing === undefined && correctableRows.length === 1;
+
+      // ⛔⛔ AN UNRESOLVABLE CORRECTION FAILS CLOSED — IT DOES NOT FALL THROUGH
+      // TO APPEND (Codex CX-183, correcting my first cut, and they are right).
+      //
+      // My first version treated 0 or 2+ matches as "refuse the correction and
+      // behave exactly as today", i.e. append. That reads like the safe
+      // default and is the opposite: the user asked for a limit to be MOVED,
+      // and appending silently substitutes an ADDITIONAL limit for the move —
+      // leaving the original, un-evaluable row in place and recreating the
+      // exact poisoned-old-row loop this parameter exists to break. A silent
+      // substitution of one intent for a different one is worse than a visible
+      // refusal.
+      //
+      // Destination collision is refused for the same reason rather than
+      // merged: with a row already on the destination there are two plausible
+      // readings (update the destination and drop the source, or leave the
+      // source alone) and picking one is inference. Ambiguous identity is
+      // asked about, never resolved by guessing.
+      //
+      // ⚠ Only callers that supply NO correction parameter keep the ordinary
+      // append — so nothing existing changes behaviour.
+      if (correctionRequested && !isCorrection) {
+        const reason =
+          existing !== undefined
+            ? 'there is already a limit on that target'
+            : correctableRows.length === 0
+              ? 'I could not find the limit you meant'
+              : 'more than one limit matches the one you meant';
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          `I did not move the limit because ${reason}. Nothing on your model changed.`,
+          {
+            details: {
+              corrects_node_id: correctsId,
+              target_node_id: targetId,
+              matching_source_rows: correctableRows.length,
+              destination_row_exists: existing !== undefined,
+            },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
+        );
+      }
 
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];

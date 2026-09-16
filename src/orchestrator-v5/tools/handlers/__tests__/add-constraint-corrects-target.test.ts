@@ -118,24 +118,70 @@ describe('corrects_node_id — a MOVE through the existing atomic write', () => 
     expect(rows.map((r) => r.node_id).sort()).toEqual(['f-hiring-cost', 'f-marketing', 'r-overrun']);
   });
 
-  it('⛔ REFUSES on a row that is not there — appends, loses nothing', async () => {
-    const rows = await rowsOf(await run({
-      targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-does-not-exist',
-    }));
-    expect(rows.some((r) => r.node_id === 'r-overrun')).toBe(true);
-    expect(rows.some((r) => r.node_id === 'f-hiring-cost')).toBe(true);
+  /**
+   * ⛔⛔ AN UNRESOLVABLE CORRECTION FAILS CLOSED — IT DOES NOT APPEND.
+   *
+   * ⚠ MY FIRST CUT GOT THIS BACKWARDS AND CODEX (CX-183) CORRECTED IT. I had
+   * 0 or 2+ matches "refuse the correction and behave exactly as today", i.e.
+   * append — which reads like the conservative default and is the opposite of
+   * one. The user asked for a limit to be MOVED; appending silently
+   * substitutes an ADDITIONAL limit for the move, leaves the original
+   * un-evaluable row in place, and recreates the exact poisoned-old-row loop
+   * this parameter exists to break.
+   *
+   * A silent substitution of one intent for a different one is worse than a
+   * visible refusal. These bind to BOTH halves: the call rejects, AND the
+   * caller's graph is untouched.
+   */
+  const unchangedRows = (g: GraphV3T) =>
+    JSON.stringify((g as { goal_constraints?: unknown }).goal_constraints);
+
+  it('⛔ MISSING SOURCE: refuses and changes nothing — never appends a second limit', async () => {
+    const graph = graphWithMisplacedLimit();
+    const before = unchangedRows(graph);
+    await expect(run({
+      targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-does-not-exist', graph,
+    })).rejects.toThrow();
+    expect(unchangedRows(graph)).toBe(before);
   });
 
-  it('⛔ REFUSES on AMBIGUOUS identity — two rows on that key, so neither is removed', async () => {
+  it('⛔ AMBIGUOUS SOURCE: two rows on that key — refuses, removes neither, adds none', async () => {
     const graph = graphWithMisplacedLimit([
       { constraint_id: 'gc-a', node_id: 'r-overrun', operator: '<=', value: 200000, unit: 'GBP', provenance: 'explicit' },
       { constraint_id: 'gc-b', node_id: 'r-overrun', operator: '<=', value: 300000, unit: 'GBP', provenance: 'explicit' },
     ]);
-    const rows = await rowsOf(await run({
+    const before = unchangedRows(graph);
+    await expect(run({
       targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-overrun', graph,
-    }));
-    expect(rows.filter((r) => r.node_id === 'r-overrun')).toHaveLength(2);
-    expect(rows.some((r) => r.node_id === 'f-hiring-cost')).toBe(true);
+    })).rejects.toThrow();
+    expect(unchangedRows(graph)).toBe(before);
+  });
+
+  it('⛔ DESTINATION COLLISION: a limit already on the target — refuses rather than merging by inference', async () => {
+    // Two plausible readings (update the destination and drop the source, or
+    // leave the source alone). Picking one is inference, so it asks instead.
+    const graph = graphWithMisplacedLimit([
+      { constraint_id: 'gc-wrong', node_id: 'r-overrun', operator: '<=', value: 200000, unit: 'GBP', provenance: 'explicit' },
+      { constraint_id: 'gc-dest', node_id: 'f-hiring-cost', operator: '<=', value: 90000, unit: 'GBP', provenance: 'explicit' },
+    ]);
+    const before = unchangedRows(graph);
+    await expect(run({
+      targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-overrun', graph,
+    })).rejects.toThrow();
+    expect(unchangedRows(graph)).toBe(before);
+  });
+
+  it('⛔ a STALE confirmation — the source was already corrected — refuses, not silently re-adds', async () => {
+    // The move already happened on an earlier turn, so the source row is gone.
+    // Re-confirming must not quietly append the limit a second time.
+    const graph = graphWithMisplacedLimit([
+      { constraint_id: 'gc-already-moved', node_id: 'f-hiring-cost', operator: '<=', value: 200000, unit: 'GBP', provenance: 'explicit' },
+    ]);
+    const before = unchangedRows(graph);
+    await expect(run({
+      targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', corrects: 'r-overrun', graph,
+    })).rejects.toThrow();
+    expect(unchangedRows(graph)).toBe(before);
   });
 
   it('⛔ pointing at ITSELF is an ordinary update, not a correction', async () => {
