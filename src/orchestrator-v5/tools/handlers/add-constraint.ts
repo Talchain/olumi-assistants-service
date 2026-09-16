@@ -65,6 +65,7 @@ import { findSoleLiveElicitBaselinePending } from '../../session/pending-action.
 import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
+import { sameUnit } from '../../../utils/currency-alphabet.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
@@ -283,14 +284,33 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
     unit = unitParse.data;
   }
 
-  // Optional, additive, and absent from every existing caller — a malformed
-  // value is ignored rather than thrown, because a correction that cannot be
-  // identified must degrade to today's behaviour (append), never to a refusal
-  // of the user's limit.
+  // ⛔⛔ PRESENT BUT INVALID MUST REJECT — IT MUST NOT DEGRADE TO APPEND
+  // (Codex CX-195, found by executing `corrects_node_id: 42`).
+  //
+  // The first version parsed leniently and fell back to `undefined`, which
+  // reads as "no correction was asked for" and APPENDS. So a malformed id
+  // silently turned a requested MOVE into a second limit — the exact
+  // substitution of one intent for another that CX-183 had just corrected
+  // elsewhere, surviving in the PARSER because I only fixed it in the writer.
+  //
+  // Absence still means "no correction requested" and keeps today's behaviour.
+  // It is PRESENCE that now carries an obligation.
   const correctsParam = get('corrects_node_id');
-  const correctsRaw = correctsParam?.value;
-  const correctsNodeId =
-    typeof correctsRaw === 'string' && correctsRaw.trim() !== '' ? correctsRaw.trim() : undefined;
+  let correctsNodeId: string | undefined;
+  if (correctsParam !== undefined) {
+    const correctsRaw = correctsParam.value;
+    if (typeof correctsRaw !== 'string' || correctsRaw.trim() === '') {
+      throw new D1HandlerError(
+        'PARAMETER_INVALID',
+        'I did not move the limit because I could not tell which one you meant. Nothing on your model changed.',
+        {
+          details: { corrects_node_id: correctsRaw, received_type: typeof correctsRaw },
+          userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+        },
+      );
+    }
+    correctsNodeId = correctsRaw.trim();
+  }
 
   return {
     constraint_type: typeParse.data,
@@ -477,6 +497,27 @@ export function createAddConstraintHandler(): HandlerFn {
         (c) => c.node_id === targetId && c.operator === operator,
       );
 
+      // ⭐⭐ IS THIS TURN A CORRECTION? Derived ONCE, and derived HERE —
+      // ABOVE the unit chain — because THREE readers need it and the unit
+      // chain is one of them (Codex CX-195).
+      //   · the UNIT chain, to inherit the moved limit's own currency;
+      //   · the WRITE, to replace the named row rather than append;
+      //   · the RECEIPT and the FACT, because a correction DESTROYS a row.
+      // A second derivation would be a twin free to drift.
+      const correctsId = params.corrects_node_id;
+      // Pointing at the node already targeted asks for nothing to be moved —
+      // that is an ordinary update, not a correction.
+      const correctionRequested = correctsId !== undefined && correctsId !== targetId;
+      const correctableRows = correctionRequested
+        ? (graph.goal_constraints ?? []).filter(
+            (c) => c.node_id === correctsId && c.operator === operator,
+          )
+        : [];
+      const isCorrection =
+        correctionRequested && existing === undefined && correctableRows.length === 1;
+      /** The row being moved. Its own recorded unit travels with it. */
+      const sourceRow = isCorrection ? correctableRows[0] : undefined;
+
       // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
       // UNCHANGED). On an update, a turn that does not mention a unit
       // keeps the persisted row's unit — `existing?.unit` sits between
@@ -491,14 +532,50 @@ export function createAddConstraintHandler(): HandlerFn {
       //
       // Lifted out of the object literal because the FRAME resolution below
       // has to read the resolved unit, not the raw parameter.
+      // ⛔⛔ A MOVE MUST NOT ERASE THE LIMIT'S OWN CURRENCY (Codex CX-195,
+      // found by executing a GBP 200,000 move onto a UNITLESS factor).
+      //
+      // On a correction `existing` is undefined by construction — the row is on
+      // a DIFFERENT node — so the old chain fell straight through to the
+      // DESTINATION's observed unit. Moving £200,000 onto a factor that records
+      // no unit therefore produced a limit with NO CURRENCY AT ALL: the same
+      // number, silently denominated in nothing. The one thing a move must
+      // preserve is what the number means.
+      //
+      // `sourceRow.unit` sits exactly where `existing.unit` sits for an
+      // ordinary update — it IS the prior state of the thing being changed —
+      // and therefore AHEAD of any destination metadata.
       const resolvedUnit =
         params.unit !== undefined
           ? params.unit
           : existing?.unit !== undefined
             ? existing.unit
-            : targetNode.observed_state?.unit !== undefined
-              ? targetNode.observed_state.unit
-              : undefined;
+            : sourceRow?.unit !== undefined
+              ? sourceRow.unit
+              : targetNode.observed_state?.unit !== undefined
+                ? targetNode.observed_state.unit
+                : undefined;
+
+      // ⛔ AND TWO UNITS THAT DISAGREE ARE REFUSED, NOT SILENTLY PICKED. An
+      // explicit unit that contradicts the moved row's own is two different
+      // intents wearing one call — a move, and a re-denomination. Answering
+      // one of them silently would change what the user's limit MEANS while
+      // reporting a move. `sameUnit` so £ and GBP are one unit spelled twice.
+      if (
+        isCorrection &&
+        params.unit !== undefined &&
+        sourceRow?.unit !== undefined &&
+        !sameUnit(params.unit, sourceRow.unit)
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          `I did not move the limit because it is recorded in ${sourceRow.unit} and you have asked for ${params.unit}. Nothing on your model changed.`,
+          {
+            details: { source_unit: sourceRow.unit, requested_unit: params.unit },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
+        );
+      }
 
       // ROADMAP 2.877 (link 1) — THE SAME SILENT-NULLIFICATION CLASS AS THE
       // UNIT DROP ABOVE, which this PR would otherwise have opened on a new
@@ -866,32 +943,6 @@ export function createAddConstraintHandler(): HandlerFn {
       // same commit. The constraint commit itself is NEVER touched.
       const elicitBaseline = mintEligible && !mintedBaseline;
 
-      // ⭐⭐ IS THIS TURN A CORRECTION? Derived ONCE, above the mutation,
-      // because TWO questions need the answer and a second derivation would be
-      // a twin free to drift (this estate's chronic defect).
-      //   · the WRITE needs it to replace the named row rather than append;
-      //   · the RECEIPT needs it because a correction DESTROYS a row, and a
-      //     destructive turn must never be narrated as a no-op.
-      //
-      // ⚠ THE SECOND READER IS WHY THIS IS HOISTED, AND IT WAS FOUND BY REVIEW,
-      // NOT BY ME. On a goal target with `>=` whose threshold the draft path
-      // already stamped, `nodeChannelUnchanged` makes `valueUnchanged` true, so
-      // `turnIsNoop` was true while the correction arm deleted a row — the
-      // receipt would have read "no need to change it" over a destructive
-      // mutation, and `fact.result.before` would have said null. That is the
-      // same class the `mintedBaseline` conjunct beside `turnIsNoop` already
-      // exists to prevent, arriving through a new door.
-      const correctsId = params.corrects_node_id;
-      // Pointing at the node already targeted asks for nothing to be moved —
-      // that is an ordinary update, not a correction.
-      const correctionRequested = correctsId !== undefined && correctsId !== targetId;
-      const correctableRows = correctionRequested
-        ? (graph.goal_constraints ?? []).filter(
-            (c) => c.node_id === correctsId && c.operator === operator,
-          )
-        : [];
-      const isCorrection =
-        correctionRequested && existing === undefined && correctableRows.length === 1;
 
       // ⛔⛔ AN UNRESOLVABLE CORRECTION FAILS CLOSED — IT DOES NOT FALL THROUGH
       // TO APPEND (Codex CX-183, correcting my first cut, and they are right).
@@ -1075,7 +1126,15 @@ export function createAddConstraintHandler(): HandlerFn {
           }
         }
         return {
-          before: existing ? (existing as Record<string, unknown>) : null,
+          // ⛔ ON A CORRECTION `before` IS THE SOURCE ROW (Codex CX-195). It
+          // was `null` because `existing` is undefined by construction on a
+          // move — so the fact channel recorded a destroyed limit as a fresh
+          // add, and nothing downstream could see what was removed.
+          before: isCorrection
+            ? (sourceRow as unknown as Record<string, unknown>)
+            : existing
+              ? (existing as Record<string, unknown>)
+              : null,
           after: constraintParse.data as unknown as Record<string, unknown>,
         };
       });
