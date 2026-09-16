@@ -421,6 +421,57 @@ export function transformNodeToV3(
     }
   }
 
+  // ⭐⭐ THE PROMOTED SCALE — READ FROM THE NODE WHEN `data` IS GONE.
+  //
+  // ⚠⚠ WITHOUT THIS, A SCALE THE PIPELINE CHOSE AND APPLIED IS DISCARDED, and
+  // that is measured rather than argued. `unreachable-factors.ts` promotes
+  // `raw_value` / `cap` / `declared_scale` to NODE level and then deletes
+  // `node.data`, precisely because a field-by-field rebuild drops anything left
+  // on a deleted `data`. Every branch above reads `node.data.*` ONLY, so the
+  // promotion landed at a level this rebuild also never read — the same defect
+  // one storey up. That lane located the hop and handed it here verbatim:
+  // "correcting it means teaching the V3 transform to read node-level values".
+  //
+  // Measured, two ways:
+  //   · that lane, across four deployed captures: ZERO of 29 factors carried
+  //     node-level `raw_value`, `cap` or `unit` on the wire;
+  //   · executed on this function before the change — a node carrying promoted
+  //     `{raw_value: 55000, cap: 100000, unit: '$'}` with no `data` produced NO
+  //     `observed_state` AT ALL, while the same values under `data` produced a
+  //     complete one.
+  //
+  // THE USER-VISIBLE COST, from Paul's 16 Sep capture: `Annual Assistant Cost`
+  // reached the wire carrying only id/label/type/kind/category, while its four
+  // option cells were encoded at a consistent 1:100,000 ratio. The scale was
+  // chosen, applied to every cell, and recorded nowhere — so a money limit on
+  // that factor can never be checked, and nothing downstream can reproduce the
+  // encoding.
+  //
+  // ⚠ CARRIES, NEVER DERIVES. Every value here was already extracted by the
+  // pipeline and promoted by the repair stage; this copies it to the level the
+  // contract reads. Nothing is read from the brief and nothing is computed — a
+  // number taken out of prose and attributed to the user is the ROADMAP 2.714
+  // defect class, reverted 8 Aug 2026.
+  //
+  // ⚠ FALLBACK ONLY. If a branch above already built `observed_state`, it wins
+  // untouched: `data` is the richer source and this must not shadow it.
+  if (v3Node.observed_state === undefined) {
+    const promotedRaw = (node as { raw_value?: unknown }).raw_value;
+    const promotedCap = (node as { cap?: unknown }).cap;
+    const promotedUnit = (node as { unit?: unknown }).unit;
+    const promoted: Record<string, unknown> = {
+      ...(typeof promotedRaw === 'number' && Number.isFinite(promotedRaw)
+        ? { raw_value: promotedRaw } : {}),
+      ...(typeof promotedCap === 'number' && Number.isFinite(promotedCap)
+        ? { cap: promotedCap } : {}),
+      ...(typeof promotedUnit === 'string' && promotedUnit.trim() !== ''
+        ? { unit: promotedUnit } : {}),
+    };
+    if (Object.keys(promoted).length > 0) {
+      (v3Node as { observed_state?: unknown }).observed_state = promoted;
+    }
+  }
+
   // Preserve prior distribution data for external factors.
   // prior is set by the LLM (via Anthropic schema) or synthesised by unreachable-factors
   // repair. ISL needs prior ranges to run Monte Carlo sampling on external factors.
