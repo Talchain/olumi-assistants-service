@@ -770,6 +770,19 @@ describe('FORBIDDEN_USER_FACING_PHRASES — 2.213 does NOT false-positive', () =
 });
 
 describe('2.213 remedy class — a choice directive has no safe rewrite', () => {
+  it('the superlative crowning HAS a rewrite, and the idioms next to it do NOT', () => {
+    // The positive control for the branch below: without this, a future change that removed every rewrite
+    // would make the `else` arm vacuously true for all exemplars and the split would stop discriminating.
+    const crowning = 'Hiring an assistant and equipping them with an AI tool is the strongest option.';
+    expect(applyTerminologyRewrite(crowning).applied.length).toBeGreaterThan(0);
+    expect(findForbiddenPhraseHit(applyTerminologyRewrite(crowning).text)).toBeNull();
+    // Contrast: idiomatic prescription keeps the fatal remedy. "your leading bet" is not English and
+    // "the way to go" has no result-term equivalent, so neither is in the map.
+    for (const idiom of ['Hire a tech lead is your best bet.', 'Hiring a tech lead is the way to go.']) {
+      expect(applyTerminologyRewrite(idiom).applied).toEqual([]);
+    }
+  });
+
   // The RC4 rewrite-first machinery converts a rewritable LEXICON offence
   // ("recommendation" → "leading option") in place. A choice directive is not
   // a vocabulary problem: swapping a noun leaves the product still telling the
@@ -822,17 +835,43 @@ describe('2.213 remedy class — a choice directive has no safe rewrite', () => 
       });
 
       for (const text of covering) {
-        it(`is DETECTED and has no safe rewrite: ${text}`, () => {
-          // 1. It hits.
+        it(`is DETECTED, with the remedy its class earns: ${text}`, () => {
+          // 1. It hits. Detection is unchanged by the 16 Sep remedy split and is
+          //    asserted first, because a weakened DETECTOR would be the serious
+          //    regression and must fail here before anything else is read.
           expect(findForbiddenPhraseHit(text)).not.toBeNull();
-          // 2. No terminology rewrite applies — this is the ABSENCE the fatal
-          //    class rests on, asserted directly rather than inferred.
-          expect(applyTerminologyRewrite(text).applied).toEqual([]);
-          // 3. The remedy is therefore the whole-response fallback.
+
           const guarded = applyEgressForbiddenPhraseGuard(text);
           expect(guarded.rewritten).toBe(true);
-          expect(guarded.remedy).toBe('fallback_replacement');
-          expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+
+          // ⭐ THE REMEDY SPLIT, ASSERTED ON THE TEXT RATHER THAN THE PATTERN.
+          // An exemplar can match several doctrine patterns at once ("… is your
+          // best bet" matches both the crowning and the bare-idiom pattern), so
+          // classifying by pattern would mis-file it. The honest invariant is:
+          // a rewrite is used IF AND ONLY IF one exists and leaves clean text.
+          const rewrite = applyTerminologyRewrite(text);
+          const rewriteIsAvailable =
+            rewrite.applied.length > 0 && findForbiddenPhraseHit(rewrite.text) === null;
+
+          if (rewriteIsAvailable) {
+            // Vocabulary offence with a sanctioned replacement — the terminology
+            // ruling maps prescriptive crowning onto "leading option". Correct the
+            // words; do not destroy the answer around them.
+            //
+            // Measured 16 Sep 2026, fresh journey against staging a81f741: the user
+            // asked "So what would you actually recommend I do?" on a turn ENTITLED
+            // to answer (may_name_leading_option true, options separated at 92%).
+            // The model produced 648 output tokens; the user received 71 characters,
+            // because this class had no rewrite.
+            expect(guarded.remedy).toBe('terminology_rewrite');
+            expect(guarded.text).not.toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+            expect(findForbiddenPhraseHit(guarded.text)).toBeNull();
+          } else {
+            // Genuine prescription — a directive, an idiom, a denial — for which no
+            // safe substitution exists. Destroying the response is the right remedy.
+            expect(guarded.remedy).toBe('fallback_replacement');
+            expect(guarded.text).toBe(EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT);
+          }
         });
       }
     });
