@@ -315,18 +315,30 @@ describe('C3 — a large graph stays parseable, keeps relationships, marks omiss
  * SHRUNK, never deleted.
  */
 describe('C3g — an over-budget section keeps its leading content, not a marker', () => {
+  // ⚠ THE FIXTURE HAS TO OVERFLOW *AFTER* THE ARRAY CAPS, NOT BEFORE.
+  // The first version used 200 rows. `buildDecisionReviewUserMessage` rank-caps
+  // factor_sensitivity and fragile_edges to 15 EACH before the byte ceiling is
+  // consulted, so 200 rows became 15 tiny ones, the ceiling never fired, and
+  // this whole block passed without exercising a single line of the code it
+  // names — while its own precondition (sizing the RAW fixture) read green.
+  // A precondition has to measure the object the branch actually receives.
+  //
+  // So: few rows, each large, so the CAPPED section is still over budget.
+  const BULK = 'x'.repeat(500);
   const HEAVY_ISL = {
-    factor_sensitivity: Array.from({ length: 200 }, (_, i) => ({
+    factor_sensitivity: Array.from({ length: 12 }, (_, i) => ({
       factor_id: `fac_${i}`,
-      factor_label: `Factor ${i} with a label long enough to make this section overflow the ceiling`,
-      elasticity: 0.9 - i / 1000,
+      factor_label: `Factor ${i}`,
+      elasticity: 0.9 - i / 100,
       confidence: 0.5,
+      notes: `${BULK}-factor-${i}`,
     })),
-    fragile_edges: Array.from({ length: 200 }, (_, i) => ({
+    fragile_edges: Array.from({ length: 12 }, (_, i) => ({
       edge_id: `fac_${i}->out_ship`,
       from_label: `Factor ${i}`,
       to_label: 'Ship On Time',
       switch_probability: 0.4,
+      notes: `${BULK}-edge-${i}`,
     })),
   };
 
@@ -339,13 +351,19 @@ describe('C3g — an over-budget section keeps its leading content, not a marker
   const at = body.lastIndexOf('\n[TRUNCATED: ');
   const json = at === -1 ? body : body.slice(0, at);
 
-  it('C3g-a PRECONDITION: this section really does exceed the ceiling', () => {
-    expect(JSON.stringify(HEAVY_ISL, null, 2).length).toBeGreaterThan(8_000);
-  });
-
-  it('C3g-b PRECONDITION: the section was actually located in the message', () => {
+  it('C3g-a PRECONDITION: the section was actually located in the message', () => {
     expect(open, 'an ISL_RESULTS section exists to measure').toBeGreaterThanOrEqual(0);
     expect(json.length, 'and its body is non-empty').toBeGreaterThan(0);
+  });
+
+  it('C3g-b PRECONDITION: the BYTE CEILING branch genuinely fired', () => {
+    // Not "the raw fixture is big" — the raw fixture is rank-capped first. The
+    // only honest evidence the ceiling was consulted is its own disclosure.
+    expect(at, 'a truncation marker is present at all').toBeGreaterThan(-1);
+    expect(
+      body.slice(at),
+      'and it is the SECTION-CEILING marker, not an array-cap one',
+    ).toContain('section ceiling');
   });
 
   it('C3g-c it is valid JSON', () => {
