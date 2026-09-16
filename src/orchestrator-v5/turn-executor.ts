@@ -13510,7 +13510,7 @@ export async function runTurnExecutor(
       // Even then the failure is honest rather than silent: the handler refuses
       // an unresolvable correction explicitly and says nothing changed.
       const correctionChannel = handlerOutcome?.__constraint_target_correction;
-      const correctionPendingForCommit: PendingAction | undefined = (() => {
+      const correctionOffer: { pending: PendingAction; chip: unknown } | undefined = (() => {
         if (correctionChannel === undefined) return undefined;
         if (llmGraphHash === null) {
           log.warn(
@@ -13550,8 +13550,19 @@ export async function runTurnExecutor(
           );
           return undefined;
         }
-        return emitted.pending;
+        // ⛔⛔ BOTH HALVES OR NEITHER (Codex CX-210). The first version kept
+        // `emitted.pending` and threw `emitted.chip` away, so the offer was
+        // ARMED WITH NOTHING FOR THE USER TO CLICK — and `commit.ts` does not
+        // reconstruct a public chip from a pending, so nothing downstream put
+        // it back.
+        //
+        // ⚠ I inherited that from `__option_cost_ask`, whose user-facing half
+        // IS the assistant_text. This proposal's user-facing half is the CHIP.
+        // The precedent did not transfer and I did not check that it did —
+        // copying a pattern is not the same as copying its preconditions.
+        return { pending: emitted.pending, chip: emitted.chip };
       })();
+      const correctionPendingForCommit: PendingAction | undefined = correctionOffer?.pending;
       const elicitChannel = handlerOutcome?.__elicit_baseline;
       const elicitPendingForCommit: PendingAction | undefined = (() => {
         if (elicitChannel === undefined) return undefined;
@@ -13641,6 +13652,20 @@ export async function runTurnExecutor(
           emitted_at_iso: askedAtIso,
         };
       })();
+      // ⭐ THE VISIBLE HALF. Appended AFTER `buildPendingActionsWithProposalCapture`
+      // has already read `suggested_actions` above, deliberately: that helper
+      // mints pendings from LLM-proposed chips, and this chip is SERVER-minted
+      // with its pending already armed — capturing it again would double-mint.
+      if (composedOk !== null && correctionOffer !== undefined) {
+        composedOk = {
+          ...composedOk,
+          suggested_actions: [
+            ...(composedOk.suggested_actions ?? []),
+            correctionOffer.chip,
+          ] as typeof composedOk.suggested_actions,
+        };
+      }
+
       const pendingForCommit =
         flipProposalPending || elicitPendingForCommit || goalTargetAskPendingForCommit
         || optionCostPendingForCommit || correctionPendingForCommit
