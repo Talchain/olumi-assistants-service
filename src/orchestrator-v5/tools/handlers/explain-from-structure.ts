@@ -123,6 +123,12 @@ export function createExplainFromStructureHandler(): HandlerFn {
             ? explanation!.answer_text
             : composeExplainFromStructureFallback(invocation.structureProjection, {
                 canRunAnalysis,
+                // The routing veto already recognised this class; without it
+                // the composer answers "what does your model look like" to a
+                // question about how to MODEL something, in the same bytes
+                // every time. Read last, so an authored answer that survived
+                // validation and every typed evidence carrier still outrank it.
+                adviseOnModelling: invocation.adviseOnModelling === true,
               });
 
     const fact: ExplainFromStructureHandlerFact = {

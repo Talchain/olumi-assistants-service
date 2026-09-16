@@ -80,7 +80,43 @@ const ANALYTICAL_OUTCOME_NOUNS = String.raw`(?:result|results|outcome|outcomes|l
  * would block legitimate edits, so when in doubt the pattern should
  * NOT match.
  */
-const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
+/**
+ * ⭐ THE ADVISE-ON-MODELLING SHAPES, NAMED ONCE AND SHARED BY REFERENCE.
+ *
+ * These two regexes are the ONLY members of the veto that ask "how should we
+ * MODEL this?". They are declared here and SPREAD into the two arrays below,
+ * so `isAnalyticalQuestion` (the veto) and `isAdviseOnModellingQuestion` (the
+ * classification the veto carries forward) consult the SAME RegExp OBJECTS.
+ * There is no second copy to drift — the estate's dominant defect is a
+ * hand-maintained mirror, and a second spelling of these patterns would be one.
+ *
+ * ⚠ THE SET IS DELIBERATELY NARROWER THAN THE VETO, and that is the whole
+ * design. The veto also holds `\bshould\s+(?:i|we)\b`, which claims
+ * "Should we hire a tech lead or two developers?" — a SUBSTANTIVE DECISION
+ * question, not a question about how to represent something in the model. Two
+ * questions under one name is this estate's trap 21; answering them from one
+ * destination would reproduce it. Keeping the decision question OUT means it
+ * keeps whatever answer it gets today, unchanged.
+ */
+const ADVISE_ON_MODELLING_RECOMMENDATION_PATTERN =
+  /\bhow\s+(?:do|does|would|should|can|could)\s+(?:you|we|i)\s+(?:recommend|suggest|advise|propose)\b/i;
+const ADVISE_ON_MODELLING_WHAT_SHOULD_PATTERN =
+  /\bwhat\s+should\s+(?:i|we)\s+(?:change|update|edit|adjust|modify|fix|tweak|improve|simplify|do|set|increase|decrease|raise|lower|reduce|bump)\b/i;
+
+/**
+ * The carried classification's pattern set. This array and the two veto arrays
+ * below are all exported so a spec can assert the sharing BY OBJECT IDENTITY
+ * (`toContain(pattern)`, which compares references) rather than by source text.
+ * Re-spelling one of these as an equal-looking literal in either veto array
+ * then REDs — which is the only way a second copy could be introduced, and the
+ * estate's dominant defect if it were.
+ */
+export const ADVISE_ON_MODELLING_PATTERNS: readonly RegExp[] = [
+  ADVISE_ON_MODELLING_RECOMMENDATION_PATTERN,
+  ADVISE_ON_MODELLING_WHAT_SHOULD_PATTERN,
+];
+
+export const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
   // "What could change the outcome / result / ranking / ..."
   // (Defence-in-depth; covered by classifier's what_would_flip class
   // since round-2.)
@@ -124,7 +160,7 @@ const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
   // `analytical_question_suppressed` emit condition
   // (`!valueUpdate`) ensures this analytical pattern doesn't double-
   // count those cases in telemetry.
-  /\bwhat\s+should\s+(?:i|we)\s+(?:change|update|edit|adjust|modify|fix|tweak|improve|simplify|do|set|increase|decrease|raise|lower|reduce|bump)\b/i,
+  ADVISE_ON_MODELLING_WHAT_SHOULD_PATTERN,
 ];
 
 
@@ -153,7 +189,7 @@ const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
  * when it holds. A message that asks for advice AND issues a command is an
  * instruction; only a message that just asks is a question.
  */
-const ADVICE_SEEKING_QUESTION_PATTERNS: readonly RegExp[] = [
+export const ADVICE_SEEKING_QUESTION_PATTERNS: readonly RegExp[] = [
   // "How do you recommend we add it to the decision?" — captured turn 9 of the
   // hiring session (CEE request 8a366af6, 15 Sep 2026 22:20 UTC), the
   // ASSESSMENT's top-ranked failure, and confirmed through the real route as
@@ -161,7 +197,7 @@ const ADVICE_SEEKING_QUESTION_PATTERNS: readonly RegExp[] = [
   // the OBJECT of the recommendation being sought, not an instruction to
   // perform it. Anchored on the ADVICE VERB, so "Can you add a risk for churn?"
   // never matches.
-  /\bhow\s+(?:do|does|would|should|can|could)\s+(?:you|we|i)\s+(?:recommend|suggest|advise|propose)\b/i,
+  ADVISE_ON_MODELLING_RECOMMENDATION_PATTERN,
   // "Should I hire a Tech lead or two developers to increase productivity?" —
   // captured turns 12/13, the user's central decision question, trips the gate
   // on the real-world verb `increase`. Generalises the `what should I/we VERB`
@@ -201,4 +237,47 @@ export function isAnalyticalQuestion(message: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * ⭐ THE VETO'S OWN CLASSIFICATION, CARRIED FORWARD.
+ *
+ * `isAnalyticalQuestion` above already RECOGNISES an advise-on-modelling turn
+ * — that recognition is what keeps "How do you recommend we add the author
+ * event's effort level to the decision?" out of the edit lane. But it is
+ * consumed ONLY AS A VETO (route-v2.ts, mutation-warrant.ts), so the
+ * classification dies at the routing boundary: the turn lands in
+ * `explain_from_structure`, whose deterministic fallback never reads the
+ * message, and the user is served a whole-model structural recap that is
+ * byte-identical for every message that resolves no named factor.
+ *
+ * MEASURED (staging `1b50150`, request c55a2800-cae3-420f-b071-79cfed67aadd,
+ * 16 Sep 2026 11:14 UTC): the model authored a 974-character answer citing
+ * three pieces of evidence; the side-band validator rejected it
+ * (`mutation_language_detected`) and the user was served 643 characters of
+ * recap about a question they had not asked.
+ *
+ * This function is the same recognition, returned as a FACT the handler can
+ * act on instead of a veto that only ever says "no".
+ *
+ * RELATIONSHIP TO THE VETO — a strict subset, by construction:
+ *  · it tests the SAME RegExp objects (see ADVISE_ON_MODELLING_PATTERNS);
+ *  · it applies the SAME `hasMutationSignal` stand-down, to BOTH patterns
+ *    rather than to one array, so a message that also issues a concrete
+ *    command ("How do you recommend we manage morale? Add a factor for team
+ *    mood.") is an INSTRUCTION here exactly as it is there;
+ *  · it deliberately omits `should I/we`, which the veto holds but which asks
+ *    a substantive decision question rather than a modelling one.
+ * Therefore `isAdviseOnModellingQuestion(m) ⇒ isAnalyticalQuestion(m)`, and a
+ * spec asserts that containment over a corpus rather than trusting this note.
+ */
+export function isAdviseOnModellingQuestion(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return false;
+  // A message carrying a concrete edit clause is an instruction even when it
+  // also asks something — the same authority, and the same reasoning, as the
+  // veto's ADVICE_SEEKING_QUESTION_PATTERNS stand-down above.
+  if (hasMutationSignal(trimmed)) return false;
+  return ADVISE_ON_MODELLING_PATTERNS.some((re) => re.test(trimmed));
 }

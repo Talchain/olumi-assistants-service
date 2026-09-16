@@ -249,6 +249,7 @@ import {
   tryPostAnalysisAdviceGate,
   hasRenderableTopDriverLabel,
 } from './routing/post-analysis-advice-gate.js';
+import { isAdviseOnModellingQuestion } from './routing/analytical-question-guard.js';
 import { stripPlanningPreamble } from './routing/strip-planning-preamble.js';
 import { tryStaleRerunGuard } from './routing/stale-rerun-guard.js';
 import { tryRunComparisonGate } from './routing/run-comparison-gate.js';
@@ -10857,6 +10858,18 @@ export async function runTurnExecutor(
             }) ?? undefined
           : undefined;
 
+      // ⭐ THE ROUTING VETO'S OWN CLASSIFICATION, CARRIED TO THE HANDLER.
+      //
+      // `isAnalyticalQuestion` already recognises an advise-on-modelling turn
+      // — that recognition is what keeps it out of the edit lane — but it is
+      // consumed only as a veto, so `explain_from_structure` cannot tell one
+      // from a structure question and its deterministic fallback answers both
+      // with the whole-model recap. Derived from the SAME message the
+      // projections above read, so there is no second source to drift.
+      const adviseOnModelling =
+        proposedHandlerId === 'explain_from_structure' &&
+        isAdviseOnModellingQuestion(payload.message);
+
       // P0b-2: the routed `what_would_flip` deterministic fallback must not name
       // an option-pinned lever as "the clearest one to test". The chip-click path
       // already filters its flip evidence (chip-click-dispatch.ts →
@@ -10934,6 +10947,7 @@ export async function runTurnExecutor(
           analysisReady: analysisReadyForTurn,
           explanation: explanationInvocationPayload,
           analysisProjection,
+          adviseOnModelling,
           structureProjection,
           structuralPairEvidence,
           selectedDependenciesEvidence,

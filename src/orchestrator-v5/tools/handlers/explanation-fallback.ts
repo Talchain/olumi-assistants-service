@@ -823,6 +823,19 @@ export function composeWhatWouldFlipFallback(
  */
 export interface ExplainFromStructureFallbackOptions {
   readonly canRunAnalysis?: boolean;
+  /**
+   * True when the routing veto's own classification says this turn is an
+   * ADVISE-ON-MODELLING question ("how do you recommend we add X to the
+   * decision?"). Set from `isAdviseOnModellingQuestion` — never re-derived
+   * here, so the composer and the router cannot disagree about the class.
+   *
+   * The structural path below answers "what does my saved model look like".
+   * That is the wrong question for this class, and because the composer never
+   * reads the message, it answers it with the SAME BYTES for every message
+   * that resolves no named factor. This flag selects a destination that
+   * answers what was asked, to the limit of what the saved structure licenses.
+   */
+  readonly adviseOnModelling?: boolean;
 }
 
 function composeDirectRelationship(
@@ -1153,6 +1166,69 @@ export function composeExplainFromStructureFallback(
       'I cannot establish one unique Living Model factor from that wording, so I will not choose a connector by label or model order. ' +
       'Name the intended factor more precisely and I can explain its saved structure.'
     );
+  }
+
+  // ────────────────────────────────────────────────────────────────────
+  // ⭐ THE ADVISE-ON-MODELLING DESTINATION.
+  //
+  // Placed AFTER the ambiguity refusal (an unresolvable reference is still
+  // unresolvable, and telling the user so stays the right answer) and BEFORE
+  // every structural branch, because those branches answer a different
+  // question. Reached only when the caller passes the routing veto's own
+  // classification, so a genuine structure question cannot enter here and the
+  // structural path below is preserved exactly as it is.
+  //
+  // WHAT THIS ANSWER MAY ASSERT, and nothing more: that placing something in
+  // the model is the user's judgement; what the saved model already holds
+  // (labels and counts — facts the projection already licenses on this turn);
+  // and the one next step that moves the conversation on. It states no
+  // sign, magnitude, confidence or ranking, proposes no operation, and claims
+  // no change — so it passes back through the STEP 6.5 monitor and the STEP
+  // 6.6 enforcing honesty gate unchanged (pinned by spec).
+  // ────────────────────────────────────────────────────────────────────
+  if (options?.adviseOnModelling === true) {
+    const adviceSentences = [
+      'Where that belongs in your model is a judgement about your decision, and the saved structure cannot settle it on its own.',
+    ];
+    // ⚠ A COUNT IS NOT LICENSED ON A WITHHELD OR TRIMMED TURN. Under
+    // `relationship_detail_status: 'unavailable'` the projection is built from
+    // a snapshot that may have had elements removed ("trimming removes, it
+    // never invents"), so "your model holds 3 factors" could be an
+    // UNDERSTATEMENT presented as a fact. Labels survive that; quantities do
+    // not. This is the same split the licensed-structure branch below already
+    // makes for sign, magnitude and confidence.
+    const countsLicensed = projection.relationship_detail_status !== 'unavailable';
+    const named = projection.named_factor_label;
+    if (named !== undefined && countsLicensed) {
+      const connectionCount = projection.named_factor_pathways.length;
+      adviceSentences.push(
+        connectionCount === 0
+          ? `Your model already holds ${named}, with no recorded connections yet.`
+          : `Your model already holds ${named}, with ${connectionCount} recorded connection${
+              connectionCount === 1 ? '' : 's'
+            }.`,
+      );
+    } else if (named !== undefined) {
+      adviceSentences.push(`Your model already holds ${named}.`);
+    } else if (
+      countsLicensed &&
+      (projection.factor_count > 0 || projection.option_count > 0)
+    ) {
+      const around = projection.goal_label ? ` around ${projection.goal_label}` : '';
+      adviceSentences.push(
+        `Your model currently holds ${projection.factor_count} ${
+          projection.factor_count === 1 ? 'factor' : 'factors'
+        } and ${projection.option_count} ${
+          projection.option_count === 1 ? 'option' : 'options'
+        }${around}.`,
+      );
+    } else if (projection.goal_label) {
+      adviceSentences.push(`Your model is built around ${projection.goal_label}.`);
+    }
+    adviceSentences.push(
+      'Tell me what you expect it to affect, and I can help you work out where it fits.',
+    );
+    return adviceSentences.join(' ');
   }
 
   if (projection.relationship_detail_status === 'unavailable') {

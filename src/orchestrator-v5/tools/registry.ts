@@ -316,6 +316,18 @@ export interface HandlerInvocation {
    */
   readonly structureProjection?: StructureProjectionSummary;
   /**
+   * The routing veto's own classification, carried forward: true when this
+   * turn is an ADVISE-ON-MODELLING question ("how do you recommend we add X
+   * to the decision?"). Set by the turn-executor from
+   * `isAdviseOnModellingQuestion`; never re-derived by a handler, so the
+   * router and the handler cannot disagree about the class.
+   *
+   * `explain_from_structure` reads it to pick a destination that answers the
+   * question asked, instead of the whole-model structural recap its
+   * deterministic fallback otherwise emits for every unresolved message.
+   */
+  readonly adviseOnModelling?: boolean;
+  /**
    * Canonical, identity-resolved evidence for an explicit two-element
    * structural question. When present, `explain_from_structure` renders this
    * deterministic evidence instead of trusting free-form topology prose.
