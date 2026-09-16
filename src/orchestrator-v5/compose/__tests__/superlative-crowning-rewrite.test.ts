@@ -40,6 +40,7 @@ import {
 } from '../forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from '../terminology-rewrite.js';
 import { textAssertsLeadingOption } from '../leading-option-egress-guard.js';
+import { projectExplanationAnswerForWithheldClaim } from '../withheld-explanation-answer.js';
 
 /** The witnessed sentence class, in the user's own scenario vocabulary. */
 const CROWNING =
@@ -66,6 +67,38 @@ describe('the crowning is corrected, not deleted', () => {
     // The detection hole, asserted in both directions. Without this the rewrite would merely be cosmetic.
     expect(textAssertsLeadingOption(CROWNING)).toBe(false);
     expect(textAssertsLeadingOption(applyTerminologyRewrite(CROWNING).text)).toBe(true);
+  });
+});
+
+describe('BOTH arms canonicalise, and BOTH permission states are checked at the wire', () => {
+  // ⚠ REVIEW CX198 DEMONSTRATED THE ESCAPE THAT THIS BLOCK NOW PINS, and it reproduced exactly:
+  //   "… is the strongest choice" -> "… is the leading choice"  ->  textAssertsLeadingOption FALSE
+  // The wire guard's vocabulary knows "leading option" and does NOT know "leading choice", so preserving the
+  // source noun produced a rewrite that slipped a leader claim past the permission guard on a WITHHELD turn —
+  // the exact opposite of this rule's purpose. Both arms now emit the one recognised result term.
+  it.each([
+    ['choice arm', 'Hire a tech lead is the strongest choice.'],
+    ['option arm', 'Hire a tech lead is the strongest option.'],
+    ['modifier arm', 'Hire a tech lead is the clear best choice.'],
+  ])('%s rewrites to the recognised result term', (_name, text) => {
+    const guarded = applyEgressForbiddenPhraseGuard(text);
+    expect(guarded.remedy).toBe('terminology_rewrite');
+    expect(guarded.text).toContain('leading option');
+    expect(guarded.text).not.toContain('leading choice');
+  });
+
+  it.each([
+    ['choice arm', 'Hire a tech lead is the strongest choice.'],
+    ['option arm', 'Hire a tech lead is the strongest option.'],
+    ['modifier arm', 'Hire a tech lead is the clear best choice.'],
+  ])('%s: on a WITHHELD turn the permission guard still removes the claim', (_name, text) => {
+    // The composition property, asserted at the seam that actually ships. A rewrite that the permission
+    // guard cannot see is worse than no rewrite: it launders a claim into a shippable form.
+    const rewritten = applyEgressForbiddenPhraseGuard(text).text;
+    expect(textAssertsLeadingOption(rewritten)).toBe(true);
+    const projected = projectExplanationAnswerForWithheldClaim(rewritten, 'unevaluated', [], true, true);
+    expect(projected.reason).toBe('leader_claim_replaced');
+    expect(projected.text).not.toContain('leading option');
   });
 });
 
