@@ -192,7 +192,7 @@ describe('WS-A 2(a) — the unevaluated disclosure quotes the user back to thems
     );
     expect(suffix).toBe(
       ' One limit on your model could not be checked: “A limit”.' +
-        ' We could not line it up with anything this analysis measures, so no option can be put forward yet.' +
+        ' We could not line it up with anything this analysis measures, so it was not part of the comparison.' +
         ' Tell me the limit you meant in your own words and I will record it; this one stays on the model.' +
         ' Then run the analysis again.',
     );

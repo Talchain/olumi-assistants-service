@@ -384,9 +384,25 @@ describe('route-level: the rerun no-op explanation answer on a WITHHELD turn', (
       // (b) which condition
       expect(turn.assistantText).toContain('Three-Year Total Cost of Ownership');
       expect(turn.assistantText).toContain('could not be checked');
-      // the consequence, in the estate's own wording ("put forward", never
-      // "recommended" — the forbidden-vocabulary ban is blunt by design)
-      expect(turn.assistantText).toContain('no option can be put forward yet');
+      // ⚠ THE CONSEQUENCE CLAUSE CHANGED, AND THIS ASSERTION WAS STALE AGAINST
+      // THE NEW CONTRACT. It pinned "no option can be put forward yet", which
+      // told the user their RANKING was void. Measured live 16 Sep 2026: that
+      // sentence reached a user four times in one session while
+      // `analysis_ready` logged 5 ready options and 0 blockers.
+      //
+      // ⭐ WHAT THIS TEST PROTECTS IS UNCHANGED AND STILL ASSERTED EITHER SIDE
+      // of this line: (b) the condition is NAMED, and (c) a repair step the user
+      // can act on is present. Neither depended on the false clause. Whether a
+      // LEADING OPTION may be named is a different gate
+      // (`MAY_NAME_LEADING_OPTION` / `leading-option-egress-guard`), and the
+      // withheld-permission checks in the sibling case above still cover it —
+      // so nothing here restores a blanket ban on useful comparison in order to
+      // satisfy the old phrase.
+      expect(turn.assistantText).toContain('not part of the comparison');
+      expect(
+        turn.assistantText,
+        'the false blanket claim must not come back through any producer',
+      ).not.toContain('no option can be put forward yet');
       // (c) a repair step the user can act on
       expect(turn.assistantText).toContain(
         'Tell me the limit you meant in your own words and I will record it',
