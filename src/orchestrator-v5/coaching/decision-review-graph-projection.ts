@@ -59,7 +59,7 @@
  * corpus grows by the aliases of REAL edges only.
  */
 
-import { GraphV3 } from '../../schemas/cee-v3.js';
+import { GraphV3, NodeV3 } from '../../schemas/cee-v3.js';
 import {
   boundNodeDescriptionForContext,
   compactGraph,
@@ -213,12 +213,28 @@ function readEdgeReasoning(edge: Record<string, unknown>): Record<string, unknow
  * model. On the £200,000-budget shape these ARE the decision meaning: a goal
  * node stripped of its threshold and unit is a name with no target.
  */
-const GOAL_THRESHOLD_FIELDS = [
-  'goal_threshold',
-  'goal_threshold_raw',
-  'goal_threshold_unit',
-  'goal_threshold_cap',
-] as const;
+/**
+ * ⛔⛔ THIS WAS A HAND-WRITTEN LIST AND IT WAS SHORT — it named four fields and
+ * omitted `goal_threshold_frame` (cee-v3.ts:224), so BOTH arms kept `0.8` and
+ * dropped the frame it is stated in. `frame` is what says whether `0.8` is a
+ * LEVEL or something else; the schema's own comment calls that declaration
+ * "LOAD-BEARING, NOT DOCUMENTATION". A threshold without its frame is the same
+ * one-sided loss as a value without its `stated_role`.
+ *
+ * ⭐ AND MY TEST COULD NOT SEE IT, WHICH IS THE REAL LESSON. The C7 fixture was
+ * written from the same head as the list, so it omitted `frame` too — a corpus
+ * sharing the code's blind spot cannot observe the code's defect (CLAUDE.md
+ * trap 12d). Adding the fifth string would have fixed this instance and left
+ * the next sibling to be found the same way.
+ *
+ * So it is DERIVED FROM THE CONTRACT. `NodeV3.shape` is the single source of
+ * truth; any `goal_threshold*` field the schema gains is carried the day it is
+ * declared, and an UNdeclared one is excluded by construction — which is right,
+ * since `NodeV3` strips those anyway.
+ */
+const GOAL_THRESHOLD_FIELDS: readonly string[] = Object.keys(NodeV3.shape).filter((key) =>
+  key.startsWith('goal_threshold'),
+);
 
 function readGoalThreshold(node: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

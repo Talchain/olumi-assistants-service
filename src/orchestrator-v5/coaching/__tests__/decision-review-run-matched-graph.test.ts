@@ -34,6 +34,7 @@ import {
 } from '../../../cee/decision-review/contract-gate.js';
 import { buildDecisionReviewUserMessage } from '../../../cee/decision-review/invoke.js';
 import { buildSlices } from '../../../cee/decision-review/decompose.js';
+import { NodeV3 } from '../../../schemas/cee-v3.js';
 import { projectRunGraphForDecisionReview } from '../decision-review-graph-projection.js';
 import { buildInvokeInputForTests } from '../decision-review-enricher.js';
 
@@ -562,6 +563,10 @@ describe('C7 — semantic qualifiers survive on BOTH projection arms', () => {
         goal_threshold_raw: 80,
         goal_threshold_unit: '%',
         goal_threshold_cap: 100,
+        // ⛔ THE FIELD MY FIRST FIXTURE OMITTED, exactly as the code did. A
+        // corpus written from the same head as the list cannot see the list is
+        // short (trap 12d).
+        goal_threshold_frame: 'level',
       },
     ],
     edges: [
@@ -641,6 +646,41 @@ describe('C7 — semantic qualifiers survive on BOTH projection arms', () => {
     expect(goal?.goal_threshold).toBe(0.8);
     expect(goal?.goal_threshold_raw).toBe(80);
     expect(goal?.goal_threshold_unit).toBe('%');
+    expect(goal?.goal_threshold_cap).toBe(100);
+    expect(
+      goal?.goal_threshold_frame,
+      'the frame the threshold is STATED IN — 0.8 of what?',
+    ).toBe('level');
+  });
+
+  it('C7j the derived field list covers every declared goal_threshold* sibling', () => {
+    // The union assertion trap 12d asks for: derivation proves the consumers
+    // agree, and only a check against the CONTRACT proves the list is complete.
+    // Fails the day NodeV3 gains a sibling this projection does not carry.
+    const declared = Object.keys(NodeV3.shape).filter((k) => k.startsWith('goal_threshold'));
+    const carried = Object.keys(
+      (STRICT.graph.nodes as Array<Record<string, unknown>>).find((n) => n.id === 'goal_margin') ??
+        {},
+    );
+    for (const field of declared) {
+      expect(carried, `${field} is declared by NodeV3 and must reach the model`).toContain(field);
+    }
+    expect(declared.length, 'and the contract really does declare all five').toBe(5);
+  });
+
+  it.each([
+    ['strict', 'fac_budget'],
+    ['fallback', 'fac_Budget'],
+  ])('C7k %s — an ABSENT frame stays absent, never defaulted', (_l, budgetId) => {
+    const src = semanticGraph(budgetId) as { nodes: Array<Record<string, unknown>> };
+    const goal = src.nodes.find((n) => n.id === 'goal_margin')!;
+    delete goal.goal_threshold_frame;
+    const projected = projectRunGraphForDecisionReview({}, src);
+    const out = (projected.graph.nodes as Array<Record<string, unknown>>).find(
+      (n) => n.id === 'goal_margin',
+    );
+    expect(out?.goal_threshold, 'the threshold still carries').toBe(0.8);
+    expect(out?.goal_threshold_frame, 'but an unstated frame is NOT invented').toBeUndefined();
   });
 
   it.each([
