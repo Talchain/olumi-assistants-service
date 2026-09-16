@@ -392,6 +392,24 @@ describe("ROADMAP 2.330 — a new magnitude list in src/ forces a review", () =>
    * magnitude word for a reason that is not a magnitude lookup.
    */
   const REVIEWED: Readonly<Record<string, string>> = {
+    // 16 Sep 2026 — INCIDENTAL, and the mention is one word of English prose.
+    // `orchestrator/context/graph-compact.ts` qualifies an option's model value
+    // for the AI-facing context ("model value 1 (display band Very high;
+    // real-world meaning not established)"). Its band comes from
+    // `qualitativeBand` in `cee/factor-extraction/display-value.ts` — the
+    // canonical shared rule, imported, never re-typed — and the bands are
+    // Low/Moderate/High/Very high, which are not magnitude words at all.
+    // The single trigger is the word `hundred` in a docstring sentence pricing
+    // the size cost of that qualification ("a few hundred characters it did not
+    // before"). It declares no alphabet, holds no magnitude->value map, and
+    // maps no magnitude word to a number.
+    // ⚠ Recorded rather than reworded. Rewording the comment to dodge the
+    // guard would quiet a working alarm and leave the next reader no record
+    // that this file was looked at; this entry IS the review the guard asked
+    // for. If this file ever maps a magnitude word to a NUMBER, it becomes a
+    // genuine sibling lookup and must move to SIBLING_VALUE_LOOKUPS.
+    'orchestrator/context/graph-compact.ts':
+      'incidental — the word `hundred` appears once in a docstring pricing the context size cost; bands come from the shared qualitativeBand, and no magnitude word is mapped to a number',
     // ROADMAP 2.1131 — INCIDENTAL, and deliberately so. `utils/amount-range.ts`
     // is the RANGE grammar: how a magnitude written once after a coordinate
     // pair ("£80-120k") scopes both bounds. It declares no alphabet, holds no
