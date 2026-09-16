@@ -125,6 +125,31 @@ const ADDITIONAL_ANALYTICAL_QUESTION_PATTERNS: readonly RegExp[] = [
   // (`!valueUpdate`) ensures this analytical pattern doesn't double-
   // count those cases in telemetry.
   /\bwhat\s+should\s+(?:i|we)\s+(?:change|update|edit|adjust|modify|fix|tweak|improve|simplify|do|set|increase|decrease|raise|lower|reduce|bump)\b/i,
+  // "How do you recommend we add it to the decision?" — captured turn 9 of the
+  // hiring session (CEE request 8a366af6, 15 Sep 2026 22:20 UTC), and the
+  // ASSESSMENT's top-ranked failure. The edit verb here is the OBJECT of the
+  // recommendation the user is asking for, not an instruction to perform it,
+  // but `add` matches EDIT_GRAPH_POSITIVE_REGEX, `EDIT_GRAPH_NEGATIVE_REGEX`
+  // carries no "recommend" phrase, and the turn dispatched to the V4 edit LLM —
+  // which returned no operations and asked for a factor and a value instead of
+  // answering the question.
+  //
+  // Anchored on the ADVICE VERB, not on the edit verb, so a message only
+  // matches when the user is explicitly soliciting a recommendation. "Can you
+  // add a risk for churn?" carries no advice verb and stays on the edit path.
+  /\bhow\s+(?:do|does|would|should|can|could)\s+(?:you|we|i)\s+(?:recommend|suggest|advise|propose)\b/i,
+  // "Should I hire a Tech lead or two developers to increase productivity?" —
+  // captured turns 12/13, the user's central decision question, trips on the
+  // real-world verb `increase`. Those two turns opened the session so the draft
+  // path owned them; the defect is latent rather than witnessed at this gate,
+  // and re-asking the same question once the scenario exists reaches it.
+  //
+  // This generalises the `what should I/we VERB` entry directly above it: the
+  // deliberative modal is the signal, and pinning it to a closed verb list is
+  // what let this phrasing through. `should` must be followed by the asking
+  // party — "we should add the risk" is a commitment and is NOT matched, only
+  // "should we / should I" is.
+  /\bshould\s+(?:i|we)\b/i,
 ];
 
 /**
