@@ -728,6 +728,65 @@ export function shouldKeepCompletion(
  *                 name, which is a product-authorship decision outside this
  *                 lane's remit. Rowed, not silently skipped.
  */
+/**
+ * ⭐⭐ A COMPLETE LIMIT THAT NAMES NOTHING TO LIMIT — DERIVED FROM THE RECORD,
+ * NOT FROM A DISCLOSURE, AND THAT CHOICE IS THE WHOLE DESIGN.
+ *
+ * Measured by replaying the 15 Sep live captures through this projector in
+ * three arms:
+ *   A  as captured (no `value`)     rows=0  askFields=["target","value","unit"]
+ *   B  + value, reference kept      rows=0  askFields=["target"]
+ *   D  + value, NO reference        rows=0  askFields=[]        <- nothing asked
+ *
+ * ⛔ THE OBVIOUS PROMPT FIX WAS REFUTED BEFORE IT SHIPPED. In 4 of 4 captures the
+ * model emits the limit with a direction and no `value`, so "teach it to carry
+ * the number" looks right. It is not: it moves every capture from A to B or D,
+ * and D IS SILENT. `constraint_value_unstated` is today the most informative
+ * state a lost limit can reach, and that change would have made the product
+ * quieter while losing the limit just the same.
+ *
+ * ⛔⛔ AND IT IS DELIBERATELY NOT A NEW `dropped` ROW. The first attempt emitted
+ * one from the projector and it cost EIGHT tests across five files, one of them
+ * a genuine regression: this node is ALSO disclosed by the connectivity prune,
+ * the consumer keys by `node_id`, and a second, magnitude-less row displaced the
+ * prune's row — `stated-magnitude-survives-withdrawal` went red with "magnitude
+ * lost at the wire ... expected undefined to be 1200000". The projector's own
+ * pass-2c comment already says a second entry for one event is a duplicate. It
+ * is right, and this derivation obeys it.
+ *
+ * A constraint carrying a direction AND a threshold AND no `applies_to_*` is
+ * unbindable BY CONSTRUCTION — the projector collects a binding only when a
+ * reference is present — so no projection evidence is needed to know it.
+ *
+ * ⚠ THIS ASKS FOR A SUBJECT, NOT A CAUSAL LINK, and that is why it is safe where
+ * `unconnected_to_goal` is not. The user already stated the bound, so naming
+ * what it bounds is retrieval; inventing an edge to the goal would be
+ * fabrication and nothing here asks for one. Every target the model names still
+ * faces SAFETY 1 and SAFETY 2, and an unconnected constraint is still pruned
+ * exactly as before.
+ */
+function statedLimitsThatNameNoSubject(
+  records: { readonly stated_items: readonly unknown[] },
+): ReadonlyArray<{ index: number; quote: string }> {
+  const out: Array<{ index: number; quote: string }> = [];
+  records.stated_items.forEach((raw, index) => {
+    const item = raw as {
+      kind?: string;
+      source_quote?: unknown;
+      direction?: unknown;
+      value?: unknown;
+      applies_to_stated?: unknown;
+      applies_to_claim?: unknown;
+    };
+    if (item.kind !== "constraint") return;
+    if (item.direction === undefined) return;
+    if (typeof item.value !== "number") return;
+    if (item.applies_to_stated !== undefined || item.applies_to_claim !== undefined) return;
+    out.push({ index, quote: typeof item.source_quote === "string" ? item.source_quote : "" });
+  });
+  return out;
+}
+
 export function enumerateCompletionAsk(
   records: DraftRecordSet,
   projection: RecordProjection,
@@ -740,6 +799,14 @@ export function enumerateCompletionAsk(
     seen.add(key);
     items.push(item);
   };
+
+  for (const limit of statedLimitsThatNameNoSubject(records)) {
+    push({
+      kind: "constraint_target_unbindable",
+      detail: `"${limit.quote}" \u2014 this limit does not say what it bounds, so nothing is holding it; name the factor or outcome it applies to`,
+      validatorCode: null,
+    });
+  }
 
   for (const d of projection.dropped) {
     switch (d.reason) {
@@ -1702,6 +1769,16 @@ export function repairableConstraintFields(
     if (item.unit === undefined) fields.add("unit");
     out.set(i, fields);
   }
+
+  // Same derivation, same scope, same justification as the ask above. ONLY
+  // `target` opens: the direction, value and unit are exactly what the user
+  // stated, and nothing here has any basis for changing them.
+  for (const limit of statedLimitsThatNameNoSubject(base)) {
+    const fields = out.get(limit.index) ?? new Set<ConstraintRepairField>();
+    fields.add("target");
+    out.set(limit.index, fields);
+  }
+
   return out;
 }
 

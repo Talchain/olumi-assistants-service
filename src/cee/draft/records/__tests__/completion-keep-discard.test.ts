@@ -210,8 +210,25 @@ describe("⭐⭐ the two completion passes round 7 threw away, replayed from the
     const r = replay(banked("round7-completion-pass07.json"));
     expect(r.askAfter.items.length).toBeGreaterThanOrEqual(r.askBefore.items.length);
     expect(r.blockingAfter).toBeLessThan(r.blockingBefore);
-    expect(r.blockingBefore).toBe(r.askBefore.items.length); // before: every item blocking
+    // ⚠ RE-MEASURED AGAIN. This line used to read
+    // `expect(r.blockingBefore).toBe(r.askBefore.items.length)` — "before, every
+    // item is blocking". That was an incidental TRUTH OF THIS CAPTURE being used
+    // as a proxy for the blocking count, and it decayed the moment the ask
+    // gained a non-blocking source. The blocking count is now asserted directly,
+    // which is what the claim was always about and cannot decay the same way.
+    expect(r.blockingBefore).toBe(7);
     expect(r.blockingAfter).toBe(0);                          // after: none of them
+
+    // ⭐ WHAT THE DECAY EXPOSED, AND IT IS WORTH ITS OWN ASSERTION. The three
+    // extra items are stated limits that carry a direction and a threshold and
+    // name NO SUBJECT — unbindable by construction, and before they were derived
+    // this capture asked about none of them. THREE in one real captured pass is
+    // the measurement that justifies deriving them at all.
+    const nameNoSubject = r.askBefore.items.filter((i) =>
+      i.detail.includes("does not say what it bounds"),
+    );
+    expect(nameNoSubject.length, "three limits in this capture bound nothing, silently").toBe(3);
+    for (const item of nameNoSubject) expect(item.validatorCode).toBeNull();
 
     const grown = r.askAfter.items.filter((i) => !isBlockingAskItem(i));
     expect(grown.length).toBeGreaterThan(0);
