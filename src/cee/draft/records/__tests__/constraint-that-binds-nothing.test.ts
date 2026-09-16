@@ -128,6 +128,47 @@ describe("D1 — a complete limit that names no target is disclosed and repairab
   });
 });
 
+/**
+ * ⚠ THESE TWO EXIST BECAUSE MUTANTS SURVIVED, NOT BECAUSE I THOUGHT OF THEM.
+ * Deleting the `kind !== "constraint"` guard and deleting the
+ * `typeof value !== "number"` guard both left the suite fully GREEN — so the
+ * suite could not see either guard doing its job. A surviving mutant is a claim
+ * about coverage either way, and the only settlement is a discriminating case.
+ */
+describe("D3 — the two guards no earlier test could see", () => {
+  it("D3a a non-constraint item is never treated as a limit, however it is shaped", () => {
+    const base = {
+      stated_items: [
+        { kind: "goal", source_quote: "reaching £20k MRR within 12 months", role: "target" },
+        // A figure wearing a constraint's clothes. The grammar does not put
+        // `direction` on a figure; the guard must not rely on that.
+        { kind: "figure", source_quote: "4%", value: 4, unit: "%", direction: "ceiling" },
+      ],
+      claims: CLAIMS,
+    } as unknown as DraftRecordSet;
+    const ask = enumerateCompletionAsk(base, project(base));
+    expect(
+      ask.items.filter((i) => i.detail.includes("does not say what it bounds")).length,
+      "a figure is not a limit",
+    ).toBe(0);
+    expect(repairableConstraintFields(base, project(base)).get(1)).toBeUndefined();
+  });
+
+  it("D3b a limit with NO threshold raises ONE ask, not two", () => {
+    // Without the value guard this limit matches BOTH derivations and the user
+    // is asked about the same sentence twice, in two different vocabularies.
+    const base = NO_VALUE();
+    const ask = enumerateCompletionAsk(base, project(base));
+    const aboutThisLimit = ask.items.filter(
+      (i) => i.kind === "constraint_target_unbindable" && i.detail.includes("keeping monthly churn under 4%"),
+    );
+    expect(aboutThisLimit.length, "one finding, one question").toBe(1);
+    expect(aboutThisLimit[0]?.detail, "and it is the one that asks for the threshold").toContain(
+      "no threshold we can apply",
+    );
+  });
+});
+
 describe("D2 — the three controls that bound the change", () => {
   it("D2a a MISSING VALUE keeps its richer ask — this must not be downgraded", () => {
     const base = NO_VALUE();
