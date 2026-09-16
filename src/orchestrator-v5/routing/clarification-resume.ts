@@ -276,6 +276,12 @@ export const PENDING_ACTION_KIND_SAFETY_CLASSIFICATION: Record<
   // load-bearing half: an unclassified-but-wired kind would slip through the
   // non-mutating branch and skip the divergence guard entirely.
   elicit_option_effect: 'mutating',
+  // Answering it WRITES a native quantity onto an option->factor cell, so it
+  // carries exactly 2.1352's reasoning: fail-closed MUTATING, because an
+  // unclassified-but-wired kind would slip through the non-mutating branch and
+  // skip the divergence guard, and because the cell's identity can be
+  // invalidated by a rename or removal between the ask and the answer.
+  elicit_option_native_quantity: 'mutating',
   // ROADMAP 2.1353 — the two value-ask exits' offered cells. Not resumed by
   // this module today, and classified MUTATING for exactly 2.1352's reasoning:
   // answering "which of these does your 0.12 belong to?" WRITES an

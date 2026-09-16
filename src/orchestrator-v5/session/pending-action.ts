@@ -296,6 +296,44 @@ export type PendingActionAction =
       /** The unit already established, when one was. Never guessed. */
       readonly unit?: string;
     }
+  | {
+      /**
+       * ⭐ AN OPTION'S COST IN THE USER'S OWN UNITS — asked when a money limit
+       * could not be checked because nothing in the model is denominated in
+       * that unit.
+       *
+       * ⚠⚠ NAMED APART FROM `elicit_option_effect` DELIBERATELY, AND THE TWO
+       * MUST NEVER BE FOLDED (trap 21 — this estate's signature defect).
+       * They name the same cell and ask OPPOSITE questions:
+       *   · `elicit_option_effect` — "this cell has NO value; give me a number
+       *     from 0 to 1". Its reader enforces that: `isModelUnitEffectValueText`,
+       *     whose own comment reads "it never turns bare 20 into 20%", and it
+       *     resolves only for pairs readiness still lists as MISSING.
+       *   · this kind — "this cell HAS a value (0.7) and I need the same
+       *     quantity in GBP". The cell is not missing; it is unreadable against
+       *     a native limit.
+       * Measured: on session `82f31082` a saved `Hiring Cost <= 200000 GBP`
+       * sat beside unitless interventions `0` / `0.85` / `0.7`, readiness read
+       * `{"status":"ready","blockers":[]}`, and the product asked a question
+       * whose answer had nowhere to land.
+       *
+       * ⚠ THE UNIT IS CARRIED, NEVER INFERRED. It comes from the ratified
+       * constraint's own persisted row — the only non-fabricating source. An
+       * answer is recorded in THIS unit or not at all; no conversion is
+       * derived from the cap, and none from the encoded `0.7`.
+       */
+      readonly kind: 'elicit_option_native_quantity';
+      readonly option_id: string;
+      readonly option_label: string;
+      readonly factor_id: string;
+      readonly factor_label: string;
+      /** The constraint's own unit, e.g. `"GBP"`. Carried, never guessed. */
+      readonly unit: string;
+      /** The user-ratified limit this repairs, for copy that names it. */
+      readonly constraint_label?: string;
+      /** How many times this cell has been asked; read off the superseded row. */
+      readonly attempt?: number;
+    }
   | { readonly kind: 'run_analysis' }
   | { readonly kind: 'what_would_flip' }
   | {
@@ -595,6 +633,9 @@ export const RESUMABLE_ACTION_TYPES: ReadonlySet<PendingActionKind> = new Set([
   // Deliberately ABSENT from the short-confirm resumer's local
   // RESUMABLE_KINDS: a bare "yes" answers no "give me a number" question.
   'elicit_option_effect',
+  // Answering it WRITES a native quantity onto the named cell, so it resumes
+  // for the same reason its model-unit sibling does.
+  'elicit_option_native_quantity',
   // ROADMAP 2.1353 — the value-ask and edit-clarify exits' offered referents.
   // MANDATORY here for the SAME structural reason 2.1352 records above, and it
   // is worth restating because it is not obvious from the set's name:
@@ -863,6 +904,9 @@ export const PENDING_KIND_IS_RECORDED_ASK: Record<PendingActionKind, boolean> = 
   // every bind path re-checks the live graph before it binds.
   elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
   elicit_option_effect: true, // "give me a number from 0 to 1"
+  // "What does <option> cost, in <unit>?" — a recorded question awaiting the
+  // user's own figure, which is the defining case for the longer ask window.
+  elicit_option_native_quantity: true,
   elicit_effect_target: true, // "which of these does your number belong to?"
   elicit_edit_target: true, // "which factor, edge, option or value?"
   elicit_goal_target: true, // "what value counts as success for <goal>?"
@@ -1207,6 +1251,13 @@ export type ElicitTargetBaselinePending = PendingAction & {
  */
 export const PENDING_KIND_CLAIMS_BARE_NUMBER: Record<PendingActionKind, boolean> = {
   // The asks whose natural answer IS a bare number, or a bare menu index.
+  // "What does this option cost?" -> "95000" / "£95,000". TRUE so a lone
+  // numeric reply is CLAIMED rather than falling through to the edit lane.
+  // ⚠ Claiming it is not the same as binding it: the model-unit reader in
+  // `repair-value-binding.ts` checks `kind !== 'elicit_option_effect'` and
+  // returns `other_question`, so a native amount can never be written into a
+  // [0,1] slot by that path. Fail-safe by construction.
+  elicit_option_native_quantity: true,
   elicit_target_baseline: true, // "Roughly what percentage is X at right now?"
   elicit_option_effect: true, // "give me a number from 0 to 1"
   elicit_effect_target: true, // "which of these does your number belong to?"
