@@ -486,10 +486,6 @@ export function createAddConstraintHandler(): HandlerFn {
         params.value,
       );
 
-      // Default the constraint label from the target node's label so the
-      // confirmation text and the persisted shape are coherent.
-      const constraintLabel = params.label ?? targetNode.label;
-
       // Idempotency: match an existing constraint by (node_id, operator).
       // If found, update value/label/unit in place. If not, append a
       // fresh GoalConstraint with a generated id.
@@ -517,6 +513,50 @@ export function createAddConstraintHandler(): HandlerFn {
         correctionRequested && existing === undefined && correctableRows.length === 1;
       /** The row being moved. Its own recorded unit travels with it. */
       const sourceRow = isCorrection ? correctableRows[0] : undefined;
+
+      // ⭐⭐⭐ A CORRECTION RELOCATES ONE ROW — SO ITS ATTESTED PROPERTIES
+      // TRAVEL WITH IT. This is the CLASS, named once, because I have now been
+      // handed FOUR separate findings that are all the same fact.
+      //
+      // `existing` is undefined BY CONSTRUCTION on a move (the row is on a
+      // different node), so EVERY chain that reads it falls through to
+      // DESTINATION metadata. Each reader loses something the user attested:
+      //   · unit        → the limit's currency          (fixed, CX195)
+      //   · before      → the row that was destroyed    (fixed, CX195)
+      //   · receipt     → "added" instead of "moved"    (fixed)
+      //   · value_frame → its quantitative meaning      (CX213 — here)
+      //   · label       → the user's own description    (found by sweeping)
+      //
+      // I fixed the first three ONE AT A TIME and was handed the fourth,
+      // which is the "remedy scoped to the instance, nothing sweeps its
+      // siblings" failure this estate keeps paying for. So the remaining two
+      // are fixed together, under one rule: on a correction the SOURCE row is
+      // the prior state of the thing being changed — exactly the role
+      // `existing` plays for an ordinary update — and therefore outranks any
+      // destination metadata.
+      //
+      // ⚠ CARRIES, NEVER INVENTS. Absent upstream it stays absent, and an
+      // explicit parameter on this turn always wins: the user restating
+      // something is not the same as us preserving it.
+      //
+      // ⛔ `constraint_id` IS DELIBERATELY NOT IN THIS LIST. It is the same
+      // shape but it is a SEMANTICS decision (is a moved limit the same
+      // limit?), not a loss of attested meaning, and no returned finding asks
+      // for it. I checked the one consequence I could think of — identity
+      // churn feeding `constraint_identity_unresolved`, which withholds the
+      // leader — and it does not bite: that state is reconciled WITHIN a run
+      // (run-analysis.ts:1694 reads `constraintVerdict.state`), so a fresh id
+      // is self-consistent on the next run. Recorded rather than changed.
+
+      // Default the constraint label from the target node's label so the
+      // confirmation text and the persisted shape are coherent — EXCEPT on a
+      // correction, where the moved row's own label is the user's attested
+      // description and relocating the limit must not silently retitle it
+      // with whatever the destination node happens to be called.
+      const constraintLabel =
+        params.label
+        ?? (isCorrection ? sourceRow?.label : undefined)
+        ?? targetNode.label;
 
       // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
       // UNCHANGED). On an update, a turn that does not mention a unit
@@ -593,11 +633,24 @@ export function createAddConstraintHandler(): HandlerFn {
       // different number and carrying it over would be a manufactured
       // attestation — so it is dropped and the row fails closed, exactly as an
       // unattested row should.
+      // The SAME attestation test, applied to whichever row is the prior state
+      // of the thing being changed: `existing` for an update, `sourceRow` for a
+      // move. `sameUnit` on the correction arm because the move may legitimately
+      // spell the currency differently (GBP vs the pound sign) and that is not a
+      // change of quantity — an exact string compare would drop the frame on a
+      // move that preserved its meaning exactly.
+      const frameCarrier = existing ?? (isCorrection ? sourceRow : undefined);
+      const frameUnitMatches =
+        frameCarrier === existing
+          ? existing?.unit === resolvedUnit
+          : frameCarrier?.unit !== undefined &&
+            resolvedUnit !== undefined &&
+            sameUnit(frameCarrier.unit, resolvedUnit);
       const inheritedValueFrame =
-        existing?.value_frame !== undefined &&
-        valuesMatch(existing.value, params.value) &&
-        existing.unit === resolvedUnit
-          ? existing.value_frame
+        frameCarrier?.value_frame !== undefined &&
+        valuesMatch(frameCarrier.value, params.value) &&
+        frameUnitMatches
+          ? frameCarrier.value_frame
           : undefined;
 
       const newConstraintBase: Omit<GoalConstraintT, 'constraint_id'> = {

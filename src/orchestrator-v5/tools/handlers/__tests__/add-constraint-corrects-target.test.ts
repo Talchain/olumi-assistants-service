@@ -49,6 +49,7 @@ function run(opts: {
   unit?: string;
   corrects?: string;
   correctsRaw?: unknown;
+  label?: string;
   graph?: GraphV3T;
   constraintType?: 'at_least' | 'at_most';
 }) {
@@ -57,6 +58,7 @@ function run(opts: {
     { name: 'value', value: opts.value, source: 'user_explicit' },
   ];
   if (opts.unit) parameters.push({ name: 'unit', value: opts.unit, source: 'user_explicit' });
+  if (opts.label) parameters.push({ name: 'label', value: opts.label, source: 'user_explicit' });
   if (opts.corrects) parameters.push({ name: 'corrects_node_id', value: opts.corrects, source: 'user_explicit' });
   if (opts.correctsRaw !== undefined) {
     parameters.push({ name: 'corrects_node_id', value: opts.correctsRaw, source: 'user_explicit' } as never);
@@ -415,5 +417,85 @@ describe('after the correction, the product stops saying the limit cannot be che
     (g as { goal_constraints?: unknown }).goal_constraints = [];
     const outcome = await run({ targetId: 'r-overrun', value: 200000, unit: 'GBP', graph: g });
     expect(outcome.assistant_text ?? '').toMatch(/no number recorded against it/i);
+  });
+});
+
+/**
+ * ⭐⭐⭐ A CORRECTION RELOCATES ONE ROW — ITS ATTESTED PROPERTIES TRAVEL.
+ *
+ * ⚠ THIS SUITE EXISTS BECAUSE I FIXED THIS DEFECT FOUR TIMES ONE AT A TIME.
+ * `existing` is undefined by construction on a move, so every chain reading it
+ * falls through to DESTINATION metadata: the currency went, the before-state
+ * went, the receipt said "added", then value_frame went. Each was returned as a
+ * separate finding. These bind the RULE rather than the instances, so the next
+ * reader of `existing` that forgets a move fails here instead of in review.
+ */
+describe('attested properties travel with the moved row', () => {
+  const movable = (over: Record<string, unknown> = {}) => {
+    const g = buildD1Fixture();
+    g.nodes.push(
+      { id: 'r-overrun', kind: 'risk', label: 'Budget Overrun Risk' } as GraphV3T['nodes'][number],
+      { id: 'f-hiring-cost', kind: 'factor', label: 'Hiring and Onboarding Cost' } as GraphV3T['nodes'][number],
+    );
+    (g as { goal_constraints?: unknown }).goal_constraints = [
+      {
+        constraint_id: 'gc-wrong', node_id: 'r-overrun', operator: '<=',
+        value: 200000, unit: 'GBP', provenance: 'explicit',
+        value_frame: 'level', label: 'Total hiring spend this year',
+        ...over,
+      },
+    ];
+    return g;
+  };
+  const move = async (graph: GraphV3T, over: Record<string, unknown> = {}) =>
+    rowsOf(await run({
+      targetId: 'f-hiring-cost', value: 200000, unit: 'GBP',
+      corrects: 'r-overrun', graph, ...over,
+    } as never));
+
+  it('⭐ value_frame survives the move — its quantitative meaning', async () => {
+    // Dropping it can reproduce the very unevaluated-limit outcome the
+    // capability exists to repair.
+    const rows = await move(movable());
+    expect(rows[0]).toMatchObject({ node_id: 'f-hiring-cost', value_frame: 'level' });
+  });
+
+  it('⭐ the label survives the move — the user\u2019s own description', async () => {
+    // Otherwise the limit is silently retitled with whatever the destination
+    // node happens to be called, discarding what the user actually said.
+    const rows = await move(movable());
+    expect(rows[0]).toMatchObject({ label: 'Total hiring spend this year' });
+  });
+
+  it('⭐ \u00a3 and GBP still carry the frame — a spelling is not a change of quantity', async () => {
+    // The source records the symbol, this turn restates the code. An EXACT
+    // string compare would drop the frame on a move that preserved its meaning
+    // exactly; the explicit unit on the turn still wins for the written row.
+    const rows = await move(movable({ unit: '\u00a3' }));
+    expect(rows[0]).toMatchObject({ value_frame: 'level', unit: 'GBP' });
+  });
+
+  it('⛔ NEVER INVENTS a frame the source did not attest', async () => {
+    const rows = await move(movable({ value_frame: undefined }));
+    expect(rows[0]?.value_frame).toBeUndefined();
+  });
+
+  it('⛔ an EXPLICIT label on this turn wins — restating is not preserving', async () => {
+    expect((await move(movable()))[0]?.label).toBe('Total hiring spend this year');
+    expect((await move(movable(), { label: 'Hiring budget' }))[0]?.label).toBe('Hiring budget');
+  });
+
+  it('⛔ an ordinary UPDATE is untouched — the destination row still governs', async () => {
+    const g = buildD1Fixture();
+    g.nodes.push({ id: 'f-hiring-cost', kind: 'factor', label: 'Hiring and Onboarding Cost' } as GraphV3T['nodes'][number]);
+    (g as { goal_constraints?: unknown }).goal_constraints = [
+      { constraint_id: 'gc-dest', node_id: 'f-hiring-cost', operator: '<=', value: 200000, unit: 'GBP', value_frame: 'level', label: 'Destination label' },
+    ];
+    const rows = await rowsOf(await run({ targetId: 'f-hiring-cost', value: 200000, unit: 'GBP', graph: g }));
+    // The destination row governs its own frame, exactly as before. The LABEL
+    // default (node label when the turn states none) is pre-existing behaviour
+    // on the update path and this change does not touch it — asserting it here
+    // would pin something I did not change and did not verify.
+    expect(rows[0]).toMatchObject({ constraint_id: 'gc-dest', value_frame: 'level' });
   });
 });
