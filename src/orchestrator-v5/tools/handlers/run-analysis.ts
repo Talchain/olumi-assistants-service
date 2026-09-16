@@ -53,6 +53,7 @@ import {
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
+import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // ROADMAP 2.579 — the intake axis: did the graph keep every option the brief
 // spelled out? Derived here, at the point of the claim, from the two pieces of
 // canonical persisted state this handler already holds (`snapshot.briefText`
@@ -286,6 +287,54 @@ export interface RunAnalysisHandlerDeps {
  * Returned handler is a pure function modulo its deps — same invocation +
  * same deps → same outcome (modulo PLoT non-determinism, bounded by seed).
  */
+/**
+ * Graph NODES for the cost-ask decision — read defensively off whichever graph
+ * shape the snapshot holds, exactly as the sibling readers on this path do.
+ * Only used to resolve the constraint's target factor by id.
+ */
+function readGraphNodesForCostAsk(
+  source: unknown,
+): ReadonlyArray<{ id?: unknown; kind?: unknown; label?: unknown }> {
+  if (source === null || typeof source !== 'object') return [];
+  const nodes = (source as Record<string, unknown>).nodes;
+  return Array.isArray(nodes)
+    ? (nodes as ReadonlyArray<{ id?: unknown; kind?: unknown; label?: unknown }>)
+    : [];
+}
+
+/**
+ * OPTION ENTRIES for the cost-ask decision.
+ *
+ * ⚠ ENTRIES, NOT NODES. `raw_interventions` is the option-entry-only
+ * pre-encoding carrier (`reconcile-top-level-options.ts`: "zero
+ * `raw_interventions` writes onto a node exist in `src/`"), so reading options
+ * out of `graph.nodes` would make the native-value check read ABSENT forever
+ * and ask for a figure the product already holds.
+ */
+function readOptionEntriesForCostAsk(
+  snapshot: { readonly options?: unknown; readonly rawPersistedGraph?: unknown },
+): ReadonlyArray<{
+  id?: unknown;
+  label?: unknown;
+  interventions?: unknown;
+  raw_interventions?: unknown;
+}> {
+  type Entry = {
+    id?: unknown;
+    label?: unknown;
+    interventions?: unknown;
+    raw_interventions?: unknown;
+  };
+  const direct = snapshot.options;
+  if (Array.isArray(direct)) return direct as ReadonlyArray<Entry>;
+  const raw = snapshot.rawPersistedGraph;
+  if (raw !== null && typeof raw === 'object') {
+    const nested = (raw as Record<string, unknown>).options;
+    if (Array.isArray(nested)) return nested as ReadonlyArray<Entry>;
+  }
+  return [];
+}
+
 export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerFn {
   return async function runAnalysisHandler(
     invocation: HandlerInvocation,
@@ -1765,6 +1814,31 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       constraintVerdict,
       snapshot.briefText,
     );
+    // GO(A) — the ask that makes the disclosure above ACTIONABLE.
+    //
+    // `buildConstraintDisclosure` already tells the user which limit was not
+    // checked and invites them to repair it. Measured on session `82f31082`,
+    // the repair it invites cannot land: the limit was ALREADY correct
+    // (`Hiring Cost <= 200000 GBP`, provenance explicit), so restating it
+    // changes nothing, and every pending action minted on that turn was
+    // `run_analysis` or `what_would_flip` — the answer had nothing to bind to.
+    //
+    // The genuinely missing datum is the OPTION'S OWN COST in the limit's unit.
+    // This selects ONE such cell; the turn-executor arms it as an
+    // `elicit_option_effect` pending, whose reader
+    // (`routing/repair-value-binding.ts`) already binds a bare value to the
+    // exact `(option_id, factor_id)` the pending names.
+    //
+    // ⚠ THE TRIGGER IS THE PRODUCER'S OWN VERDICT. `unevaluated` is the one
+    // state where "your condition was not checked" is assertable. We do NOT
+    // derive scoreability here — that predicate is the reverted #1225 release
+    // blocker (see the ⚠⚠ block above `deriveConstraintVerdict`).
+    const optionCostAsk = decideOptionCostAsk({
+      notDecisionGrade: constraintVerdict.state === 'unevaluated',
+      ratified: ratifiedConstraints,
+      nodes: readGraphNodesForCostAsk(snapshot.rawPersistedGraph ?? snapshot.graph),
+      options: readOptionEntriesForCostAsk(snapshot),
+    });
     // ROADMAP 2.579 disclosure, LAST of the three. It names the option(s) the
     // brief listed and the graph does not carry, and gives BOTH repair paths
     // (add it, or confirm the omission was deliberate). Appended after the
@@ -1964,6 +2038,12 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
       // The configure chip's source (see chip-generator): the options a
       // configure step actually repairs.
       ...(gate.excluded.length > 0 ? { __excluded_options: gate.excluded } : {}),
+      // GO(A) — the cell whose native value would make the withheld limit
+      // checkable. Server-only: the turn-executor arms it as an
+      // `elicit_option_effect` pending in the SAME commit as the disclosure
+      // copy, so the question and the thing that can answer it are never
+      // persisted apart. `null`/absent when there is nothing coherent to ask.
+      ...(optionCostAsk !== null ? { __option_cost_ask: optionCostAsk } : {}),
       ...(gate.held.length > 0
         ? { __scaffolded_options: heldPresence.stamped }
         : {}),
