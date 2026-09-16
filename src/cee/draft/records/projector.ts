@@ -3273,8 +3273,63 @@ function projectOnce(
       // keeps the field: removing it is a wire change for no gain, and an
       // unread optional property costs one slot, not a rejection.)
       if (typeof claim.value === "number") {
+        // ⭐⭐ THE HONESTY HALF, SHIPPED IN THE SAME CHANGE AS THE ASK — exactly
+        // as v10 did when it stopped telling the model to withhold `sets_to`.
+        //
+        // ⚠⚠ MEASURED ON THE RAW RECORD SETS, before any projection or
+        // representation: across five banked live captures, 33 quantity claims
+        // and `value` set on ZERO of them, while `sets_to` was set on 28 causal
+        // links. The model puts a number on a LINK and never on a NODE — it
+        // says how much an option MOVES a factor and never what the factor IS.
+        // v10's docblock explains why, about its own mirror image of this:
+        // "THE MODEL WAS NOT FAILING TO COMPLY; IT WAS COMPLYING."
+        //
+        // ⛔ SO THE ASK CANNOT SHIP ALONE. Until now a claim `value` carried NO
+        // provenance at all, which leaves exactly two bad outcomes once the
+        // model starts supplying one: our estimate is displayed as the user's
+        // fact, or it is displayed as nobody's and does not count where a
+        // user-stated parameter is what unlocks a comparison.
+        //
+        // ⭐ EARNED THE SAME WAY `bindDirectStatedMagnitude` earns it for a
+        // `sets_to`: the stamp is `explicit` ONLY when the number the model
+        // asserted equals a figure it CITED — i.e. the user gave that number for
+        // that quantity. Anything else sets nothing and falls to the safe
+        // `ai_inferred`, which is what the header calls the projector's
+        // node-level provenance honesty.
+        //
+        // ⚠ AND NOTE WHAT DECIDES WHAT. The MODEL supplies the number; `basis`
+        // decides only ATTRIBUTION. Reading a magnitude OUT of `basis` is the
+        // fabrication refuted and pinned in
+        // `claim-carries-its-cited-figure.test.ts` — it put "Current Subscriber
+        // Count = £20,000" on a graph, because `basis` means built on, not equal
+        // to. This reads the same array for a different question.
+        // ⛔⛔ NO ATTRIBUTION IS EARNED HERE, AND THE ATTEMPT WAS REFUTED BY
+        // INDEPENDENT REVIEW BEFORE IT SHIPPED.
+        //
+        // The first version of this block stamped `extractionType: "explicit"`
+        // and borrowed the cited figure's unit whenever `claim.value` EQUALLED a
+        // figure in `basis`. The reviewer's exact reproductions:
+        //   · "Current Subscriber Count" stamped explicit at 49 £/month from a
+        //     citation of a £49 PRICE — same number, DIFFERENT SUBJECT;
+        //   · a CURRENT level of 59 stamped explicit from a quote proposing 59 —
+        //     same number, DIFFERENT ROLE.
+        //
+        // Numeric equality plus a citation proves neither. Earning
+        // `brief_extraction` needs subject, quantity, unit AND the
+        // current/proposed/target/limit role all to match, and `basis` carries
+        // none of that — it means "built on", exactly as the sibling refutation
+        // in `claim-carries-its-cited-figure.test.ts` established when the same
+        // field was misread as a magnitude. I closed that hole and opened its
+        // twin one level up, in ATTRIBUTION rather than in value.
+        //
+        // ⭐ SO THE VALUE IS RECORDED AND STAYS OURS. No `extractionType` means
+        // the safe `ai_inferred`, and no unit is borrowed from a figure whose
+        // subject was never established. That is honest, and it deliberately
+        // does NOT lift a user-authorship permission via an inferred value.
+        // Earning the attribution needs an attested subject relationship this
+        // record set does not carry; it is not a stamp to guess at.
         node.data = { value: claim.value };
-        node.observed_state = { value: claim.value };
+        node.observed_state = { value: claim.value, raw_value: claim.value };
       }
     }
     nodes.push(node);

@@ -555,9 +555,78 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * paragraphs; the connect half takes the own-chain rule and the cap
  * clarification. This is the first version to change the connect half since v13.
  */
-const PREREGISTERED_V17_INSTRUCTION_SHA256 =
+/**
+ * v18 — RECORD WHAT A QUANTITY IS NOW, AND EARN THE ATTRIBUTION FOR IT.
+ *
+ * PRE-REGISTERED: hashed and written here in the same commit that produced the
+ * bytes, BEFORE any draw was taken under them.
+ *
+ * ⚠⚠ MEASURED ON THE RAW RECORD SETS — before any projection, conversion or
+ * debug representation, which is the boundary the earlier `full_graph` framing
+ * was retracted for. Five banked live captures: 20 stated figures, 33 quantity
+ * claims, `value` set on ZERO of them, and `sets_to` set on 28 causal links.
+ * The model puts a number on a LINK 28 times and on a NODE not once.
+ *
+ * ⭐ AND v10 ALREADY DIAGNOSED THE MIRROR IMAGE OF THIS, in its own words: v9
+ * told the model to withhold `sets_to` where the brief gave no number, options
+ * reached readiness with no interventions, and 20 of 23 journeys raised
+ * `MISSING_OPTION_VALUE` — "THE MODEL WAS NOT FAILING TO COMPLY; IT WAS
+ * COMPLYING." The three legitimate states are user fact / OUR estimate with its
+ * provenance / genuinely unknown, and `value` on a claim had never been given
+ * the middle one. v18 gives it, in the same three-state shape.
+ *
+ * ⛔ SCOPED TO WHAT THE CARRIER ACTUALLY HOLDS. Only `factor` (and `prior`, which
+ * projects to a factor) carries a claim value through `projector.ts`; `outcome`
+ * and `risk` do not. Asking for a number the projector would drop is how an
+ * instruction change ships dark, so the ask names `factor`.
+ *
+ * ⛔ AND IT REFUSES THE THREE WRONG SOURCES BY NAME — a target, a limit, and a
+ * figure merely reasoned from. "Reach £20k MRR" is a goal and "keep churn under
+ * 4%" is a limit; neither says what the quantity is today. The last of the three
+ * is the fabrication this suite refuted by execution earlier the same day: read
+ * from `basis`, it put "Current Subscriber Count = £20,000" on a graph.
+ *
+ * ⛔⛔ THE ATTRIBUTION HALF WAS REFUTED BY INDEPENDENT REVIEW AND REMOVED BEFORE
+ * SHIPPING. It stamped `extractionType: "explicit"` when `claim.value` equalled a
+ * figure in `basis`. The reviewer's reproductions: "Current Subscriber Count"
+ * explicit at 49 from a £49 PRICE citation (same number, different SUBJECT), and
+ * a CURRENT 59 explicit from a quote PROPOSING 59 (same number, different ROLE).
+ * Earning `brief_extraction` needs subject, quantity, unit AND role to match;
+ * `basis` carries none of that. So no stamp is made, the value stays
+ * `ai_inferred`, and no user-authorship permission is lifted by an inferred
+ * value. The wording carries the same separation: current / proposed / limit are
+ * three different things, an estimate needs a scale the brief supports, and a
+ * genuinely qualitative or unknown quantity stays that way.
+ *
+ * ⚠ THE ORIGINAL HONESTY NOTE, kept for the record —
+ * `projector.ts` now stamps a claim value `extractionType: "explicit"` ONLY when
+ * it equals a figure the model CITED, the way `bindDirectStatedMagnitude`
+ * already earns it for a `sets_to`. Without that, the first estimate the model
+ * supplies is either shown as the user's fact or counts as nobody's.
+ *
+ * ⛔⛔ AND IT CARRIES A v17 DEFECT I FOUND BY VERIFYING THAT v17 WAS SERVING.
+ * v17 replaced the restrictive `option_refinement` DEFINITION, but a SECOND
+ * sentence scoping the same route survived, 60 lines earlier and inside the same
+ * served template: "that is the route by which something becomes an option WHEN
+ * THE USER NAMED NONE." The independent review was explicit that appending a
+ * widening sentence beside a restriction leaves the conflict in place — and v17
+ * left one. Found only because the serving check grepped the LIVE bytes for the
+ * old phrase and got 1, not 0, on a build that was otherwise correctly ahead.
+ * The paragraph's subject (a brief that names no course of action) is unchanged;
+ * only the clause scoping the ROUTE is.
+ *
+ * SHAPE HALF ONLY — the connect half is byte-identical to v17 (asserted below).
+ */
+const PREREGISTERED_V18_INSTRUCTION_SHA256 =
+  "af2cfe3a477b6e3d5ce0df7dac6ac183235a1ec2ab03a61eb00f13ab8bbf15c9";
+const PREREGISTERED_V18_INSTRUCTION_BYTES = 17196;
+/**
+ * SUPERSEDED — v17's bytes, the widening delta. Retained and asserted DISTINCT
+ * so a widening measurement can never be re-attributed to v18's value ask.
+ */
+const SUPERSEDED_V17_INSTRUCTION_SHA256 =
   "52c1c94aff6000fc997dac9c46239216343856c5036f02e156dd1c51687c689b";
-const PREREGISTERED_V17_INSTRUCTION_BYTES = 16202;
+const SUPERSEDED_V17_INSTRUCTION_BYTES = 16202;
 /**
  * SUPERSEDED — v16's bytes, AND THE ARTEFACT EVERY 15-16 Sep MEASUREMENT WAS
  * TAKEN UNDER. The five banked live captures, the 0-of-20-figures and
@@ -616,10 +685,17 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v17 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V17_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v18 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V18_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V17_INSTRUCTION_BYTES,
+      PREREGISTERED_V18_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v17 bytes, so the widening measurement stays its own", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V17_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V17_INSTRUCTION_BYTES,
     );
   });
 
@@ -830,9 +906,9 @@ describe("the draft records instruction is the measured artefact", () => {
     // non-numeric clause must reach the model too" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
       // v17 — the definition replacement plus the two widening paragraphs.
-      "6b3caf7558d05f65815d9a1daa3b89ec633e0f93e096a2ba8ddeacb88a03602a",
+      "29ca91a152b251191e5f4f740a574324dc7f9eb4e3e9929ebb65c827a3396ae6",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(11264);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(12258);
     // SUPERSEDED — v15's shape half, the bytes the qualitative-conjunct loss was
     // witnessed under (release reached the person's own option in 0 of 5 draws).
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(

@@ -232,7 +232,7 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   does, do not hunt the brief for an option that is not there, and do not promote
   one of the causes to fill the gap. An action YOU are putting forward is an
   \`option_refinement\` claim — that is the route by which something becomes an
-  option when the user named none. \`claims\` is already the half of the record
+  option, whether or not the user named any. \`claims\` is already the half of the record
   set that is yours rather than theirs, so putting it there is what lets the user
   tell your proposal from their own words and argue with it. Set its \`basis\` to
   whatever in the brief you built it on, and leave \`basis\` empty when you built
@@ -300,6 +300,21 @@ temporary or external capacity, a hybrid, or a smaller-scope route. Use these as
 prompts to think, not a checklist to populate. Include a plausible alternative
 when it changes the mechanism, exposes an important trade-off, or offers a
 useful way to learn. Do not add a near-duplicate merely to increase the count.
+
+Record what a quantity IS now. On a \`factor\` claim, set \`value\` to the level
+that quantity sits at today, when you can say what that level is on a scale the
+brief supports. Use the user's own number when they gave one FOR THAT QUANTITY;
+otherwise give your own estimate. A number you estimate is recorded as yours,
+not as something they said.
+\`current\`, \`proposed\` and \`limit\` are three different things and a number
+belonging to one is not the level of another. "Reach £20k MRR" is a target,
+"keep churn under 4%" is a limit, and "we are proposing £59" is a proposal —
+none of them says what the quantity is TODAY. A subscriber count worked out from
+a revenue figure is not that figure, and the same number appearing nearby does
+not make it the same quantity.
+Leave \`value\` out where you cannot place the quantity on a scale the brief
+supports. A quantity that is genuinely qualitative, or genuinely unknown, stays
+that way: there is nothing to fill in and no count to satisfy.
 
 Keep the user's stated requirements intact. Do not relax a deadline, budget or
 other limit without their invitation, or claim a proposal meets it when that is
