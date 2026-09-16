@@ -1675,7 +1675,14 @@ export function repairableConstraintFields(
       | undefined;
     if (!item) continue;
     const fields = out.get(i) ?? new Set<ConstraintRepairField>();
+    // ⛔⛔ "CHECKED AND WRONG" AND "NEVER CHECKED" ARE TWO DIFFERENT ANSWERS AND
+    // MUST NOT SHARE A RULE (trap 21). `TARGET_REFUSAL_REASONS` means the
+    // binding pass resolved this reference and rejected the node it reached.
+    // `REASONS_WITH_AN_UNCHECKED_TARGET` means the binding pass NEVER RAN, so
+    // nothing has ever looked at the reference — and treating that as
+    // checked-and-fine is what locked the captured case into a dead end.
     if (TARGET_REFUSAL_REASONS.has(d.reason)
+      || REASONS_WITH_AN_UNCHECKED_TARGET.has(d.reason)
       || (item.applies_to_claim === undefined && item.applies_to_stated === undefined)) fields.add("target");
     if (typeof item.value !== "number") fields.add("value");
     if (item.direction === undefined) fields.add("direction");
@@ -1699,6 +1706,33 @@ export function repairableConstraintFields(
 }
 
 /** Refusals that are ABOUT the target, so the target is the datum to repair. */
+/**
+ * ⭐⭐ THE REFUSALS THAT FIRE BEFORE THE BINDING PASS RUNS.
+ *
+ * Measured on the live capture of 15 Sep 2026, five pass-1 record sets: in FOUR
+ * OF FOUR that carried the user's limit the model emitted the constraint with a
+ * `direction` and NO `value`, putting the number in a separate `figure`. The
+ * projector collects a binding only inside `typeof item.value === "number"`, so
+ * with no threshold it never reaches SAFETY 1 and the reference is never
+ * resolved against a node. `constraint_value_unstated` therefore says nothing
+ * whatsoever about whether the target is right.
+ *
+ * ⛔ AND IN 2 OF THOSE 4 THE TARGET WAS THE GOAL (`applies_to_stated: 0`), which
+ * can never carry a threshold (`MINTABLE_TARGET_KINDS` is `outcome`/`factor`).
+ * Without this set those turns were handed `value` and `unit` and forbidden the
+ * one field that was actually wrong, so the very next projection refused the
+ * bind again and the connectivity prune removed the user's limit outright.
+ *
+ * ⚠ THIS IS NOT A BLANKET "ALWAYS LET THE MODEL RE-POINT". A reference the
+ * binding pass DID check and accept produces no disclosure at all, so it never
+ * reaches this map — pinned by the negative control in
+ * `unchecked-constraint-target.test.ts`, which must stay green in both
+ * directions.
+ */
+const REASONS_WITH_AN_UNCHECKED_TARGET: ReadonlySet<string> = new Set([
+  "constraint_value_unstated",
+]);
+
 const TARGET_REFUSAL_REASONS: ReadonlySet<string> = new Set([
   "constraint_target_not_measurable",
   "constraint_target_unit_mismatch",
