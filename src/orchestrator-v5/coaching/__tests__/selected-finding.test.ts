@@ -17,10 +17,12 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { V5_PHASE3_BLOCK_ID_NAMESPACE, deterministicBlockId } from '../../compose/block-id.js';
-import {
-  buildSelectedFindingContextBlock,
-  type SelectedFindingContext,
-} from '../../routing/route-with-tool-use.js';
+import { buildSelectedFindingContextBlock } from '../../routing/route-with-tool-use.js';
+// ⚠ The TYPE comes from its OWN module. `route-with-tool-use` imports it as a
+// type and does not re-export it, so importing it from there typechecks under
+// the build config (which excludes tests) and fails the separate Typecheck
+// Drift check — the gate that is blind to specs is exactly where this hid.
+import type { SelectedFindingContext } from '../selected-finding.js';
 import { readSelectedFindingBlockId, resolveSelectedFinding } from '../selected-finding.js';
 
 const CORPUS = JSON.parse(
