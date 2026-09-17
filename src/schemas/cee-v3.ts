@@ -923,14 +923,18 @@ export function isValidInterventionTarget(node: NodeV3T): boolean {
  * CAUSAL CLAIM. `EffectDirection` documents "positive" as "increasing source
  * increases target" (`schemas/graph.ts:459-462`) — false of a zero coefficient.
  *
- * Two user-facing surfaces already refuse to name a direction here, written
- * independently of each other and of this function:
- * `orchestrator/context/graph-compact.ts:529-532` returns `undefined` at
- * `mean === 0`, and `edgeSign()`
- * (`orchestrator-v5/coaching/post-draft-narrative.ts:1344`) returns `null`,
- * its comment noting that `-0 >= 0` would otherwise call every zero positive.
- * They are the evidence that `>= 0` was the wrong DEFINITION rather than merely
- * an inconsistency between copies.
+ * `edgeSign()` (`orchestrator-v5/coaching/post-draft-narrative.ts:1340-1352`)
+ * had already reached this conclusion and states it in its own words: "a mean
+ * of exactly 0 yields `null` rather than a guess — at zero the sign cannot
+ * recover direction, and `-0 >= 0` is `true`, so an unguarded test calls every
+ * zero positive." That is the evidence `>= 0` was the wrong DEFINITION rather
+ * than merely an inconsistency between copies — a guard derived from the old
+ * rule could only ever have proved the copies agreed with it.
+ *
+ * (`orchestrator/context/graph-compact.ts` also never names a direction at
+ * zero, but incidentally: an earlier `absMean < 0.1` sub-threshold skip makes
+ * its `mean > 0 ? 'positive' : 'negative'` ternary unreachable there. It
+ * corroborates; it is not a second independent witness.)
  *
  * ⚠ `-0` MUST classify as carrying no sign information. `-0 >= 0` and
  * `-0 > 0 === false` and `-0 < 0 === false`, so the ordering comparisons below

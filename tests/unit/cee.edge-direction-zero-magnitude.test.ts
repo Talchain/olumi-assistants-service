@@ -31,16 +31,25 @@
  * `transformEdgeToV3` as `effect_direction: "positive"`. An authored negative
  * becomes a positive on the wire, with no warning anywhere.
  *
- * ⚠ ZERO IS NOT A DIRECTION, AND THE ESTATE ALREADY KNOWS THIS IN TWO PLACES.
- * `orchestrator/context/graph-compact.ts:529-532` returns `undefined` at
- * `mean === 0` rather than name a direction, and `edgeSign()`
- * (`orchestrator-v5/coaching/post-draft-narrative.ts:1344`) returns `null`
- * there, its comment noting that `-0 >= 0` would otherwise call every zero
- * positive. Both are user-facing surfaces, written independently. They are the
- * evidence — from outside this lane's head — that `>= 0` is the wrong
- * DEFINITION and not merely an inconsistency: the enum's own documentation
- * (`schemas/graph.ts:459-462`) defines "positive" as "increasing source
- * INCREASES target", which is false of a zero coefficient.
+ * ⚠ ZERO IS NOT A DIRECTION, AND THE ESTATE ALREADY SAID SO — IN ONE PLACE,
+ * EXPLICITLY. `edgeSign()`
+ * (`orchestrator-v5/coaching/post-draft-narrative.ts:1340-1352`) returns `null`
+ * at a zero mean, and its own comment gives the reason: "at zero the sign
+ * cannot recover direction, and `-0 >= 0` is `true`, so an unguarded test calls
+ * every zero positive." That is the evidence — from outside this lane's head —
+ * that `>= 0` is the wrong DEFINITION and not merely an inconsistency between
+ * copies: the enum's own documentation (`schemas/graph.ts:459-462`) defines
+ * "positive" as "increasing source INCREASES target", which is false of a zero
+ * coefficient.
+ *
+ * ⚠ AND THE LIMIT OF THAT EVIDENCE, STATED SO IT CANNOT BE INHERITED WRONG:
+ * this lane first wrote "TWO places", citing
+ * `orchestrator/context/graph-compact.ts:529-532` as the second. WITHDRAWN.
+ * That file never names a direction at zero either, but only because an earlier
+ * `absMean < 0.1` sub-threshold skip makes its `mean > 0 ? 'positive' :
+ * 'negative'` ternary unreachable there — incidental, not a second independent
+ * judgement. One witness is enough; two would have been better, and saying two
+ * when there is one is how a premise becomes load-bearing without being true.
  *
  * WHAT THIS FILE PINS — written against the SPEC ("a magnitude with no sign
  * states no direction"), never against the failure mode in hand, and every case
