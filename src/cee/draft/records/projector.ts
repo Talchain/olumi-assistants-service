@@ -2407,6 +2407,35 @@ interface StatedConstraintBinding {
   readonly appliesToClaim: number | undefined;
 }
 
+/**
+ * ⭐ WHICH OPTION NODES THE OPTION BUDGET WILL SURRENDER — ONE DERIVATION, READ TWICE.
+ *
+ * Pass 3b(i) must know this BEFORE it mints; Pass 3b (OPTION BUDGET) acts on it
+ * after. Two readings of one rule is the hand-maintained mirror this estate keeps
+ * paying for (trap 12), so the rule lives here and both callers READ it rather
+ * than restating it.
+ *
+ * ⚠ SAFE TO READ EARLY, AND THE REASON IS LOAD-BEARING: the option node set does
+ * not move between the two call sites. The connectivity prune that runs between
+ * them withdraws `factor` and `constraint` nodes ONLY — options are named in its
+ * exemption list, precisely so a decision tool never silently narrows the user's
+ * own choice set. Same input, same answer.
+ *
+ * Returns the surrendered nodes IN SURRENDER ORDER (refinements first, reverse
+ * emission order), because the disclosure entries the budget pushes are ordered
+ * and a Set would have discarded that.
+ */
+function optionsSurrenderedByBudget(
+  nodes: readonly ProjectedNode[],
+  provenance: Readonly<Record<string, RecordProvenance>>,
+): readonly ProjectedNode[] {
+  const optionNodes = nodes.filter((n) => n.kind === "option");
+  if (optionNodes.length <= MAX_PROJECTED_OPTIONS) return [];
+  const isRefinement = (id: string) => provenance[id]?.provenance_class === "ai_inferred";
+  const surrenderable = optionNodes.filter((n) => isRefinement(n.id)).reverse();
+  return surrenderable.slice(0, optionNodes.length - MAX_PROJECTED_OPTIONS);
+}
+
 function projectOnce(
   records: DraftRecordSet,
   demoted: ReadonlyMap<number, DemoteDecision>,
@@ -3867,6 +3896,14 @@ function projectOnce(
     // `provenance_source: "structural"` and the scaffold badge, so no surface
     // can present it as a link the model or the user drew.
     //
+    // ⚠⚠ AND THAT SENTENCE IS TRUE OF THE PROJECTOR AND WAS FALSE OF THE SYSTEM,
+    // WHICH IS WHY THE MINT NOW CARRIES `strength_mean: 0`. A bare bridge is
+    // split downstream into a fully-numeric POSITIVE causal path from hardcoded
+    // defaults — one edge in, one synthetic outcome node and two invented causal
+    // claims out. The badge story survived that; the NUMERICS story did not. See
+    // the derivation at the mint site below, which was measured post-sweep on
+    // both arms rather than reasoned about.
+    //
     // ── THE PREDICATE IS DELIBERATELY NOT "IS THIS MONEY?" ──────────────────
     // Cost is the instance that was witnessed; the property that matters is
     // that TWO OR MORE OPTIONS put a NUMBER on the same factor, which is what
@@ -3874,16 +3911,45 @@ function projectOnce(
     // currency would be a natural-language predicate over an open class (trap
     // 22) to buy a narrower rule that is no safer.
     //
-    // Both bounds are load-bearing and both are pinned by discriminating
-    // controls in `__tests__/option-set-factor-is-a-modelled-quantity.test.ts`:
+    // EVERY bound is load-bearing and each is pinned by a discriminating control
+    // in `__tests__/option-set-factor-is-a-modelled-quantity.test.ts`. A rule
+    // that kept any of these classes would reopen what Pass 3b closed:
     //   · NO `sets_to` on the link → still dropped. Nothing quantified is lost,
     //     and rescuing it would only manufacture `MISSING_OPTION_VALUE` asks.
     //   · Only ONE option quantifies it → still dropped. See the note on the
     //     bound below; this is the case the existing orphan test already pins.
-    // A rule that kept either class would reopen what Pass 3b closed.
+    //   · Two options, but the SAME level on both → still dropped. Identical
+    //     alternatives are not a comparison, and the comparison is the whole
+    //     justification.
+    //   · A USER-STATED FIGURE → still dropped, whatever the options set it to.
+    //     This is the class Pass 3b was measured on and it stays disclosed.
+    //   · The model's own links do not carry any OPTION to the goal → nothing is
+    //     bridged at all; the completion turn owns that failure.
+    //   · An option the budget is about to surrender does not count toward the
+    //     two.
     const bridgedToGoal: string[] = [];
     {
-      const optionIds = new Set(nodes.filter((n) => n.kind === "option").map((n) => n.id));
+      // ⚠⚠ BOUND 0 — AN OPTION THE BUDGET IS ABOUT TO SURRENDER MAY NOT COUNT
+      // TOWARDS THE COMPARISON, AND THIS BLOCK RUNS FIRST.
+      //
+      // The option budget (Pass 3b, below) surrenders refinement options AFTER
+      // this mint, and the bridge's endpoints are a FACTOR and the GOAL — so the
+      // bridge SURVIVES the removal of an option that was one of its two
+      // quantifiers. Measured on the review's fixture: 5 stated options + 2
+      // refinements against `MAX_OPTIONS = 6`, where the two quantifiers of a
+      // dangling factor are one stated option and the surrendered refinement —
+      // the factor reached the graph wired to the goal with exactly ONE
+      // surviving option putting a number on it. That is precisely the class
+      // bound 1 excludes, arrived at after the fact.
+      //
+      // Read from the budget's OWN derivation rather than restated here, so the
+      // two can never drift (trap 12).
+      const surrenderedIds = new Set(
+        optionsSurrenderedByBudget(nodes, provenance).map((n) => n.id),
+      );
+      const optionIds = new Set(
+        nodes.filter((n) => n.kind === "option" && !surrenderedIds.has(n.id)).map((n) => n.id),
+      );
       const factorIds = new Set(nodes.filter((n) => n.kind === "factor").map((n) => n.id));
       // A factor is a COMPARISON DIMENSION iff TWO OR MORE DISTINCT OPTIONS set
       // it to a finite level. Magnitudes are read from `setsToByEdgeId`, the
@@ -3903,23 +3969,32 @@ function projectOnce(
       // decided to keep. Two options putting numbers on the same factor is the
       // model asserting the alternatives DIFFER on that dimension, which is the
       // thing the witnessed defect destroyed.
-      const optionsQuantifyingFactor = new Map<string, Set<string>>();
+      //
+      // ⚠ AND TWO OR MORE OF THOSE LEVELS MUST DIFFER. `options.size >= 2` alone
+      // counts DISTINCT OPTIONS, not DISTINCT VALUES, so two options setting the
+      // same cost to 110000 bought the full mint for ZERO comparative value —
+      // measured at the reviewed head: node kept, `distinctValues: 1`. A
+      // dimension on which the alternatives are identical is not a comparison,
+      // which is the justification this rule stands on; the bound is now what
+      // the prose already claimed.
+      const levelsByFactor = new Map<string, Map<string, number>>();
       for (const edge of edges) {
         if (!optionIds.has(edge.from) || !factorIds.has(edge.to)) continue;
         const setsTo = setsToByEdgeId.get(edge.id);
         if (typeof setsTo !== "number" || !Number.isFinite(setsTo)) continue;
-        const byOption = optionsQuantifyingFactor.get(edge.to);
-        if (byOption) byOption.add(edge.from);
-        else optionsQuantifyingFactor.set(edge.to, new Set([edge.from]));
+        const byOption = levelsByFactor.get(edge.to);
+        if (byOption) byOption.set(edge.from, setsTo);
+        else levelsByFactor.set(edge.to, new Map([[edge.from, setsTo]]));
       }
       const quantifiedByAnOption = new Set(
-        [...optionsQuantifyingFactor].filter(([, options]) => options.size >= 2).map(([factorId]) => factorId),
+        [...levelsByFactor]
+          .filter(([, levels]) => levels.size >= 2 && new Set(levels.values()).size >= 2)
+          .map(([factorId]) => factorId),
       );
       // One goal, chosen by node order, so the mint is a pure function of the
       // record set. Iterated over `nodes` rather than the Set for the same
       // reason: Set iteration order would follow edge order instead.
       const goalId = goalNodes[0]!.id;
-      const goalIdSet = new Set(goalNodes.map((n) => n.id));
       // ⭐⭐ THE THIRD BOUND, AND IT IS THE ONE THAT KEEPS THE COMPLETION TURN'S
       // JOB INTACT: only rescue a dangling dimension when the model's own links
       // ALREADY reach the goal somewhere.
@@ -3940,11 +4015,46 @@ function projectOnce(
       // magnitudes over it is the disproportionate answer. Pinned from the other
       // side by `completion-gate3-closes.test.ts`, whose fixtures are exactly the
       // no-spine case and must keep raising both asks.
-      const modelsOwnLinksReachGoal = edges.some(
-        (e) => goalIdSet.has(e.to) && !goalIdSet.has(e.from),
+      // ⚠⚠ AND THE PREDICATE IS "THE OPTIONS REACH THE GOAL", NOT "ANYTHING
+      // TOUCHES THE GOAL". The first version of this bound read
+      // `edges.some((e) => goalIdSet.has(e.to) && !goalIdSet.has(e.from))` —
+      // satisfied by a LONE STATED `constraint → goal` while NO OPTION reaches
+      // the goal at all, which is the exact state the paragraph above says it
+      // refuses. Measured on `completion-gate3-closes.test.ts`'s own fixture:
+      // both `option_without_chain` asks fell silent and four blocking
+      // connectivity errors (`NO_EFFECT_PATH` ×2, `NO_PATH_TO_GOAL` ×2)
+      // collapsed to one, with a 100%-machine outcome layer standing in place of
+      // the model's own. That is verbatim the trap-23 harm this bound exists to
+      // refuse, so the bound now tests what the prose claims: the model has
+      // substantially succeeded ⇔ the user's OPTIONS already arrive at the goal.
+      //
+      // Read off `reachesGoalBeforeBridging`, the same reverse-reachability
+      // kernel the prune itself uses, so "reaches the goal" cannot mean one
+      // thing here and another twenty lines down.
+      const optionSpineReachesGoal = nodes.some(
+        (n) =>
+          n.kind === "option" &&
+          !surrenderedIds.has(n.id) &&
+          reachesGoalBeforeBridging.has(n.id),
       );
-      for (const node of modelsOwnLinksReachGoal ? nodes : []) {
+      for (const node of optionSpineReachesGoal ? nodes : []) {
         if (node.kind !== "factor") continue;
+        // ⚠⚠ A USER-STATED FIGURE IS THE UNTOUCHED CLASS, AND IT WAS NOT
+        // UNTOUCHED. `STATED_KIND_TO_NODE_KIND` maps `figure → "factor"`, so a
+        // stated quantity lands in `factorIds` like any derived factor — and
+        // two options putting levels on "NRR is 112%" rescued the canonical
+        // member of the very class the comment above promises this block does
+        // not touch (measured at the reviewed head: present, `provenance_class:
+        // "stated"`, bridged `structural`, `dropped: []`).
+        //
+        // `sets_to` says WHAT LEVEL the factor takes under each option. It says
+        // nothing about WHETHER THE FACTOR BEARS ON THE GOAL — and the omitted
+        // onward hop is precisely that assertion, which is the same declination
+        // in both classes. So the signal this rule keys on is orthogonal to the
+        // one the two questions differ on (trap 21), and the discriminator that
+        // does separate them is the one the projector already holds: who
+        // authored the record. A stated figure stays disclosed.
+        if (node.provenance?.provenance_class === "stated") continue;
         if (!quantifiedByAnOption.has(node.id)) continue;
         if (reachesGoalBeforeBridging.has(node.id)) continue;
         const prov = scaffoldingProvenance(EDGE_ATTRIBUTION.option_set_factor_bridge.quote);
@@ -3956,6 +4066,42 @@ function projectOnce(
           to: goalId,
           origin: "default",
           provenance_source: "structural",
+          // ⭐⭐ `strength_mean: 0` IS THE MINT REFUSING TO ASSERT A MAGNITUDE,
+          // AND IT IS LOAD-BEARING — WITHOUT IT THIS EDGE ACQUIRES A CAUSAL
+          // CLAIM NOBODY AUTHORED.
+          //
+          // `fixFactorGoalEdges` runs unconditionally downstream and SPLITS every
+          // `factor → goal` edge into `factor → outcome → goal`, filling the gaps
+          // from hardcoded defaults: `?? 0.5`, `?? 0.15`, `?? 0.9` and
+          // `effect_direction: edge.effect_direction ?? "positive"`
+          // (`deterministic-sweep.ts:1501-1513`). Minting the bridge bare
+          // therefore emitted a fully-numeric POSITIVE causal path — measured
+          // post-sweep on the arm C fixture: `dir=positive mean=0.5 std=0.15
+          // ex=0.9`. On a COST dimension that is the model's own sign inverted,
+          // and the option that costs MORE pushes the goal HARDER — a confident
+          // lie, which is the harm this whole lane exists to refuse. It is trap
+          // 23: a bound that compels SHAPE does not compel SUFFICIENCY.
+          //
+          // `0` is a legitimate strength (`strengthBand(0)` → 'negligible' —
+          // `edge-format.ts` says so explicitly, and it is NOT interchangeable
+          // with absent), and `??` does not fire on it, so the split carries it
+          // through verbatim. MEASURED, both arms, through the repo's own
+          // splitter: absent → `mean=0.5`; `0` → `mean=0`, with an IDENTICAL
+          // validator error set. A zero-magnitude first hop cannot transmit the
+          // comparison to the goal in EITHER direction, so the sign the splitter
+          // defaults is inert and no ranking can be inverted by this mint.
+          //
+          // ⚠ WHY NOT `effect_direction: "unknown"`, which would say this
+          // directly: CEE's LOCAL contract cannot carry it. `src/schemas/graph.ts:420`
+          // declares `EffectDirection = z.enum(["positive", "negative"])` — no
+          // neutral member — and `Edge.safeParse({ effect_direction: "unknown" })`
+          // FAILS here with `invalid_enum_value` (measured), even though
+          // `@talchain/schemas` 0.50.0 admits it and this service's own sweep
+          // documents it as "the explicit absence of a directional claim"
+          // (`deterministic-sweep.ts:1277`). That skew is a real seam and closing
+          // it is a contract change, not this lane's; the magnitude is the part
+          // that is representable today, and it is the part that carries the harm.
+          strength_mean: 0,
           provenance: prov,
         });
         bridgedToGoal.push(node.id);
@@ -4033,12 +4179,11 @@ function projectOnce(
   // are surrendered first and in reverse emission order, so the result is deterministic
   // and a stated option is never the thing that goes.
   {
-    const optionNodesForBudget = nodes.filter((n) => n.kind === "option");
-    if (optionNodesForBudget.length > MAX_PROJECTED_OPTIONS) {
-      const isRefinement = (id: string) => provenance[id]?.provenance_class === "ai_inferred";
-      const surrenderable = optionNodesForBudget.filter((n) => isRefinement(n.id)).reverse();
-      const overBy = optionNodesForBudget.length - MAX_PROJECTED_OPTIONS;
-      const surrendered = surrenderable.slice(0, overBy);
+    // The rule itself lives in `optionsSurrenderedByBudget`, which Pass 3b(i)
+    // also reads so the bridge cannot count an option this block is about to
+    // remove (trap 12 — one rule, two readers, never two copies).
+    {
+      const surrendered = optionsSurrenderedByBudget(nodes, provenance);
       if (surrendered.length > 0) {
         const goneIds = new Set(surrendered.map((n) => n.id));
         for (const node of surrendered) {
