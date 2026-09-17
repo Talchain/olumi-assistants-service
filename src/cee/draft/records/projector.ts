@@ -3379,6 +3379,28 @@ function projectOnce(
         // only what the model said, and still earns no `extractionType`.
         node.data = { value: claim.value, ...(claim.unit ? { unit: claim.unit } : {}) };
         node.observed_state = { value: claim.value, raw_value: claim.value };
+      } else if (claim.unit !== undefined) {
+        // ⛔⛔ A UNIT WITHOUT A LEVEL, AND THIS IS THE COMMON CASE — the branch
+        // whose absence made grammar v9 nearly a no-op twenty minutes after it
+        // shipped.
+        //
+        // v9 added `unit` to the claim, and the write above carried it — but ONLY
+        // inside `typeof claim.value === "number"`. Measured on the banked
+        // records: **21 of 22 factor claims carry no value at all.** So in 21 of
+        // 22 cases the model could declare a unit and the projector would drop
+        // it, leaving `data` undefined and `nodeDeclaredUnit` returning
+        // undefined — exactly the state v9 existed to end.
+        //
+        // ⚠ MY OWN ADVERSARIAL REVIEW MISSED IT because every case I wrote set a
+        // value alongside the unit. That is the same one-door corpus that has
+        // cost this estate repeatedly: I tested unit-WITH-value and never
+        // unit-WITHOUT-value, which is the overwhelmingly common shape.
+        //
+        // Knowing what a quantity is MEASURED IN is useful even when nobody
+        // knows what it currently SITS AT: it is what lets a stated £ limit be
+        // refused against a %-measured factor, and refusing that weld does not
+        // require a level.
+        node.data = { unit: claim.unit };
       }
     }
     nodes.push(node);

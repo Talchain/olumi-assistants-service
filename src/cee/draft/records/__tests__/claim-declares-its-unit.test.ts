@@ -114,3 +114,52 @@ describe("a claim can declare its unit", () => {
     for (const u of [undefined]) expect(factorOf(u)?.data?.unit).toBeUndefined();
   });
 });
+
+/**
+ * ⛔⛔ THE CASE MY OWN ADVERSARIAL REVIEW MISSED, found 20 minutes after v9
+ * shipped and fixed immediately.
+ *
+ * v9's carriage sat inside `typeof claim.value === "number"`. Measured on the
+ * banked records: **21 of 22 factor claims carry no value at all** — so in 21 of
+ * 22 cases the model could declare a unit and the projector would drop it,
+ * leaving `nodeDeclaredUnit` undefined and v9 a near no-op.
+ *
+ * ⚠ Every case in the block above sets a value alongside the unit. **I tested
+ * unit-WITH-value and never unit-WITHOUT-value**, which is the common shape —
+ * the one-door corpus again, in my own adversarial pass, on the same morning I
+ * wrote that a second seat catches what the author cannot.
+ */
+describe("a unit declared WITHOUT a level — the common case", () => {
+  const noLevel = (unit?: string): DraftRecordSet =>
+    ({
+      stated_items: [
+        { kind: "goal", source_quote: "grow the business", role: "target" },
+        { kind: "option", source_quote: "raise the price" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Churn Rate", ...(unit ? { unit } : {}) },
+        { claim_kind: "outcome", label: "Revenue", basis: [] },
+        { claim_kind: "causal_link", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 6 },
+        { claim_kind: "causal_link", from_claim: 0, to_claim: 1, effect: "negative" },
+        { claim_kind: "causal_link", from_claim: 1, to_stated: 0, effect: "positive" },
+      ],
+    }) as unknown as DraftRecordSet;
+  const f = (unit?: string) =>
+    nodes(projectRecordsToGraph(noLevel(unit), undefined)).find(
+      (n) => n.kind === "factor" && n.label === "Churn Rate",
+    );
+
+  it("PRECONDITION: the factor has no level, which is the point", () => {
+    expect(f("%"), "node exists").toBeDefined();
+    expect(f("%")?.observed_state?.value, "and genuinely carries no level").toBeUndefined();
+  });
+
+  it("⭐ the declared unit still reaches data.unit", () => {
+    expect(f("%")?.data?.unit).toBe("%");
+    expect(f("£")?.data?.unit).toBe("£");
+  });
+
+  it("⛔ and with nothing declared it stays absent — no invention", () => {
+    expect(f(undefined)?.data?.unit).toBeUndefined();
+  });
+});
