@@ -87,6 +87,7 @@ import {
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
 import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+import { stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -2973,6 +2974,38 @@ export async function handleEditGraph(
 
     // Sanitise: remove legacy fields
     let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
+
+    // ⭐ STRIP PIPELINE-OWNED KEYS FROM `add_node` VALUES, RATHER THAN LET THE
+    // REFEREE REFUSE THE WHOLE BATCH. Witnessed on a real user session: an
+    // add_node carrying `observed_state.source` / `provenance` / `raw_value`
+    // was rejected PIPELINE_OWNED_FIELD, and the three structural edges that
+    // referenced the node it would have created then cascaded to
+    // ENTITY_NOT_FOUND — so a change the user had spent three turns agreeing
+    // was reported back as "the model is unchanged". Our own served prompt
+    // asks the model to mirror comparable nodes, which is where those keys
+    // come from. Full rationale + scope on `stripPipelineOwnedFromAddOperations`.
+    //
+    // PLACED HERE, at the ONE choke point, deliberately: `operations` is what
+    // every downstream consumer sees — the referee gate (via
+    // `editResult.operations`), the canonicaliser, the applier and the
+    // receipts. Stripping only the referee's screened copy would leave the
+    // APPLIER writing the forged stamp, re-opening the hole ROADMAP 2.478
+    // closed. Same shape and same seam as the legacy-field strip above.
+    const pipelineOwnedStrip = stripPipelineOwnedFromAddOperations(operations);
+    if (pipelineOwnedStrip.strippedKeyShapes.length > 0) {
+      // DISCLOSED, never silent — and redaction-safe: the shapes name only the
+      // closed CEE-owned vocabulary, every other segment is masked to `*`.
+      log.info(
+        {
+          request_id: requestId,
+          event: 'edit_graph.pipeline_owned_field_stripped',
+          key_shapes: pipelineOwnedStrip.strippedKeyShapes,
+          key_shape_count: pipelineOwnedStrip.strippedKeyShapes.length,
+        },
+        'edit_graph: stripped pipeline-owned keys from add_node values (the add proceeds; the referee would have refused the whole batch)',
+      );
+    }
+    operations = pipelineOwnedStrip.operations;
 
     // Populate old_value for undo data capture (before PLoT submission)
     operations = populateOldValues(
