@@ -615,11 +615,37 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * The paragraph's subject (a brief that names no course of action) is unchanged;
  * only the clause scoping the ROUTE is.
  *
- * SHAPE HALF ONLY — the connect half is byte-identical to v17 (asserted below).
+ * ⛔⛔ AND IT CORRECTS A v17 REGRESSION I INTRODUCED, found on a fresh user test.
+ * v17 added "Give a genuinely new alternative its OWN causal chain" as a
+ * STANDALONE bullet, sitting immediately after the rule it is an exception to:
+ * "Chain the option the USER named … Give a refinement its OWN chain only when
+ * it is a genuinely different alternative." So the instruction stated the RULE
+ * once and its EXCEPTION twice, with the exception last and therefore most
+ * salient.
+ *
+ * ⚠ WITNESSED: on a 16 Sep 23:12Z draft the model produced "Hire Tech Lead
+ * (Status Quo Headcount)" — plainly a restatement of the user's own "hire a Tech
+ * lead" — gave it its OWN chain carrying every magnitude, and left the user's
+ * option `Hire a Tech Lead` with `interventions: {}`. `analysis_ready` came back
+ * `needs_user_mapping` for exactly one reason: "No interventions extracted" on
+ * the USER'S OWN OPTION, while four model proposals were `ready`.
+ *
+ * ⚠ THE FIX IS A DELETION, NOT MORE PROSE. The duplicated exception is removed
+ * and its genuinely new content (basis honesty, compare-only requests) kept, so
+ * the exception is stated ONCE, inside the rule that governs it. A deletion
+ * cannot introduce behaviour, which is why it is the right shape of change for a
+ * hypothesis that prose adjacency caused this.
+ *
+ * ⚠ EVIDENTIAL STATUS, STATED HONESTLY: that the instruction stated the
+ * exception twice is a STRUCTURAL FACT. That this caused the model to orphan the
+ * user's option is a strong HYPOTHESIS from one observed draft, not a proven
+ * cause, and one draw is not a rate.
+ *
+ * SHAPE AND CONNECT HALVES BOTH TOUCHED — the connect half loses the duplicate.
  */
 const PREREGISTERED_V18_INSTRUCTION_SHA256 =
-  "af2cfe3a477b6e3d5ce0df7dac6ac183235a1ec2ab03a61eb00f13ab8bbf15c9";
-const PREREGISTERED_V18_INSTRUCTION_BYTES = 17196;
+  "6bb20a5fffb4b8db518f3788e5386d0cd086244e579ce000343b3b049a6c95fc";
+const PREREGISTERED_V18_INSTRUCTION_BYTES = 17139;
 /**
  * SUPERSEDED — v17's bytes, the widening delta. Retained and asserted DISTINCT
  * so a widening measurement can never be re-attributed to v18's value ask.
@@ -996,8 +1022,8 @@ describe("the draft records instruction is the measured artefact", () => {
       // v17 — the own-chain rule and the ceiling-not-quota clarification. The
       // FIRST change to the connect half since v13, so a diff here is legible as
       // exactly that rather than as drift.
-    ).toBe("5ecd2394cd3540873cea629a9f990d06d7a6e7ad20bd688cf5df64528d4768e3");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4938);
+    ).toBe("8418e5e048d3f9ea0c8d0ee61914c5c5b8c2a54a2e601a2958284f73749b1c64");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4881);
     // HISTORIC — the v6/v7/v8/v9 connect half, asserted DISTINCT. Every draw in
     // the 1-of-23 measurement was served these bytes.
     expect(

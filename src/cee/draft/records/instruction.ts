@@ -388,9 +388,8 @@ and \`basis\` still records whatever the user said that you built them on.
   refinement's \`basis\` already records which option it belongs to. Give a
   refinement its OWN chain only when it is a genuinely different alternative the
   user did not name.
-- Give a genuinely new alternative its OWN causal chain. Keep \`basis\` honest; do
-  not alter it to force an alternative to survive projection. Respect an explicit
-  request to compare only specified options.
+- Keep \`basis\` honest; do not alter it to force an alternative to survive
+  projection. Respect an explicit request to compare only specified options.
 - Count your alternatives: the user's stated options plus any \`option_refinement\`
   that introduces a NEW alternative should come to six or fewer. Prefer a few
   well-connected options over many bare ones. Within that limit favour useful,
