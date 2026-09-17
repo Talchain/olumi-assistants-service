@@ -207,6 +207,11 @@ import {
 // ⚠ It was the per-fact withheld LEAF until the unrequested-run confinement;
 // the leaf answers only "does the constraint verdict permit a leader?", and
 // compose now also asks "did anybody request this analysis?".
+import {
+  canonicaliseEdgeReference,
+  canonicalEdgeAddress,
+  composeEdgeIdentity,
+} from './edge-address.js';
 import { selectFragileEdge } from '../coaching/select-fragile-edge.js';
 // Lane C — the grounded counter-case. NOTE it answers a DIFFERENT question
 // from `selectFragileEdge` above ("what should the team argue against?" vs
@@ -522,41 +527,136 @@ function populateGraphNodeLookup(
   // Without this pass, every scenario_context card would drop (the
   // round-3 fail-closed gate is correct; the lookup just needed to be
   // wider).
+  //
+  // ⛔⛔ AND IT WAS STILL NOT WIDE ENOUGH — IT KEYED ON A FIELD THE CONTRACT
+  // DOES NOT DEFINE, AND THAT COST A REAL USER TWELVE CARDS.
+  //
+  // Measured on Render `srv-d4slpaili9vc73eiq4og`, 17 Sep 2026 17:39–18:20Z, one
+  // session, twelve occurrences of `v5.phase3.block_dropped` with
+  // `drop_reason: 'lookup_miss'` — `scenario_context` on `edge_id`, `pre_mortem`
+  // on `grounded_in`. Every pre-mortem and scenario card that referenced a
+  // relationship was deleted before egress.
+  //
+  // This pass read `e.id` and `continue`d when it was absent. `EdgeV3Schema`
+  // DECLARES NO `id` (contrast control: `NodeV3Schema` declares one, with
+  // `NODE_ID_PATTERN`), and `GraphV3Schema.edges` is `z.array(EdgeV3Schema)` —
+  // so for a canonical graph NO EDGE WAS EVER REGISTERED and every edge
+  // reference missed BY CONSTRUCTION. The drop gates downstream are correct
+  // fail-closed guards; the map underneath them was empty.
+  //
+  // ⭐ THE MODEL WAS CITING THE RIGHT THING THE WHOLE TIME. Both committed live
+  // captures (`__tests__/fixtures/dsk-walk/*.enrichment.json`) key
+  // `scenario_contexts` and `pre_mortem.grounded_in` on `from->to` endpoint
+  // addresses, which is exactly what `decision-review-graph-projection.ts`
+  // hands the model as an edge's `id` and what `fragile_edges[].edge_id`
+  // carries. The producer honoured the prompt; the consumer looked for a field
+  // that does not exist. So the repair is NOT to relax a gate — it is to make
+  // the ADDRESS resolvable, by the identity the contract actually defines.
   const edges = graph.edges;
   if (Array.isArray(edges)) {
+    // ⚠ THE PAIR DOES NOT UNIQUELY RESOLVE EVERY CASE, so the address is read
+    // in two passes rather than written straight into the map. PARALLEL EDGES
+    // (two edges over the same ordered pair) share ONE address between them,
+    // and `Map.set` would silently hand the card to whichever came last.
+    // Attaching a card to an arbitrary one of several relationships asserts an
+    // identity nothing gave us — the exact fabrication class the `lookup_miss`
+    // gates exist to prevent. An address claimed more than once therefore
+    // resolves to NEITHER edge and the card drops exactly as it does today,
+    // with its existing telemetry. This is `deriveLabelIndex`'s own
+    // `AMBIGUOUS_LABEL` doctrine one level down, not a new opinion.
+    const pending: Array<{
+      readonly explicitId: string | null;
+      readonly address: string | null;
+      readonly ref: GraphNodeRef;
+    }> = [];
+    const addressClaims = new Map<string, number>();
     for (const raw of edges) {
       const e = readRecord(raw);
       if (e === null) continue;
-      const id = typeof e.id === 'string' ? e.id : null;
-      if (id === null) continue;
+      const explicitId = typeof e.id === 'string' && e.id.length > 0 ? e.id : null;
       const explicitLabel = typeof e.label === 'string' && e.label.length > 0
         ? e.label
         : null;
-      if (explicitLabel !== null) {
-        lookup.set(id, { id, label: explicitLabel, kind: 'edge' });
-        continue;
-      }
-      // Derive `from → to` from canonical endpoint node labels. Skip if
-      // either endpoint isn't in the node lookup (graph drift). Endpoint
-      // ids: `from_node_id`/`to_node_id` (enrichment shape) or `from`/`to`
-      // (persisted GraphStateIngress shape).
+      // Endpoint ids: `from_node_id`/`to_node_id` (enrichment shape) or
+      // `from`/`to` (the canonical `EdgeV3` / persisted shape).
       const fromId = typeof e.from_node_id === 'string' ? e.from_node_id
         : typeof e.from === 'string' ? e.from
         : null;
       const toId = typeof e.to_node_id === 'string' ? e.to_node_id
         : typeof e.to === 'string' ? e.to
         : null;
-      if (fromId === null || toId === null) continue;
-      const fromRef = lookup.get(fromId);
-      const toRef = lookup.get(toId);
-      if (fromRef === undefined || toRef === undefined) continue;
-      lookup.set(id, {
-        id,
-        label: `${fromRef.label} → ${toRef.label}`,
-        kind: 'edge',
-      });
+      // Both endpoints must resolve to canonical nodes before the pair is an
+      // address: an endpoint that is not in the graph is drift, and an address
+      // built over it would point at nothing (the pre-existing skip).
+      const fromRef = fromId === null ? undefined : lookup.get(fromId);
+      const toRef = toId === null ? undefined : lookup.get(toId);
+      const addressed = fromId !== null && toId !== null
+        && fromRef !== undefined && toRef !== undefined;
+      const address = addressed ? canonicalEdgeAddress(fromId, toId) : null;
+      // Derive `from → to` from canonical endpoint node labels when the
+      // producer named none. An explicit label still wins, unchanged.
+      const label = explicitLabel ?? (
+        fromRef !== undefined && toRef !== undefined
+          ? `${fromRef.label} → ${toRef.label}`
+          : null
+      );
+      // Nothing honest to register: no label to show and/or no key to file it
+      // under. Both were already `continue`s; neither is new.
+      if (label === null) continue;
+      if (explicitId === null && address === null) continue;
+      // The ref's OWN id is the ACTIONABLE composite, matching the fragile-edge
+      // card above (`composeEdgeIdentity`) — the string
+      // `adjust-edge-strength.ts::parseEdgeId` round-trips, so the thing the
+      // card points at and the thing the handler resolves are one string. A
+      // producer-supplied id still wins, so nothing that resolved before moves.
+      const id = explicitId ?? (
+        addressed && fromId !== null && toId !== null
+          ? composeEdgeIdentity(fromId, toId)
+          : ''
+      );
+      if (id.length === 0) continue;
+      pending.push({ explicitId, address, ref: { id, label, kind: 'edge' } });
+      if (address !== null) {
+        addressClaims.set(address, (addressClaims.get(address) ?? 0) + 1);
+      }
+    }
+    for (const entry of pending) {
+      // A producer-minted id is unambiguous by construction and keeps its own
+      // key — so a producer that DOES distinguish its parallel edges stays
+      // fully addressable even where the shared endpoint pair cannot.
+      if (entry.explicitId !== null) lookup.set(entry.explicitId, entry.ref);
+      if (entry.address !== null && addressClaims.get(entry.address) === 1) {
+        lookup.set(entry.address, entry.ref);
+      }
     }
   }
+}
+
+/**
+ * Resolve an LLM-supplied graph reference to its canonical ref.
+ *
+ * ⭐ THIS IS THE CONSUMER HALF OF THE EDGE-IDENTITY REPAIR. A direct hit covers
+ * every node id and every producer-minted edge id, exactly as before. The
+ * fallback normalises an EDGE ADDRESS onto the one key the lookup is registered
+ * under, so the `->` spelling the decision_review producer emits and the `→`
+ * spelling the graph-edit path round-trips both resolve to the same edge
+ * instead of one of them missing by spelling alone.
+ *
+ * ⚠ IT WIDENS NO GATE. A reference that names an edge the graph does not
+ * contain, an address whose endpoints are not nodes, an ambiguous parallel-edge
+ * address, or a string with no separator at all still returns `undefined` and
+ * still drops its card with the same telemetry. The only references that newly
+ * resolve are ones naming an edge that GENUINELY EXISTS.
+ */
+export function resolveGraphEntityRef(
+  lookup: GraphNodeLookup,
+  raw: string,
+): GraphNodeRef | undefined {
+  const direct = lookup.get(raw);
+  if (direct !== undefined) return direct;
+  const address = canonicaliseEdgeReference(raw);
+  if (address === null || address === raw) return undefined;
+  return lookup.get(address);
 }
 
 
@@ -2535,7 +2635,7 @@ function buildPreMortemCard(
   const groundedStrings = grounded.filter((g): g is string => typeof g === 'string' && g.length > 0);
   const targetRefs: TargetRef[] = [];
   for (const raw of groundedStrings) {
-    const ref = lookup.get(raw);
+    const ref = resolveGraphEntityRef(lookup, raw);
     if (ref !== undefined) targetRefs.push(ref);
   }
   if (groundedStrings.length > 0 && targetRefs.length === 0) {
@@ -2858,7 +2958,13 @@ function buildBiasCards(
     const targetRefs: TargetRef[] = [];
     for (const elt of affected) {
       if (typeof elt !== 'string') continue;
-      const ref = lookup.get(elt);
+      // Same LLM-supplied edge-reference class as the two drop sites above:
+      // the served prompt tells the model `affected_elements` may carry
+      // "valid node/edge ids from graph". This one never DROPPED the card — a
+      // missed edge just silently lost its link — so it cost a link rather
+      // than a card, but it is the same unresolvable address and the same
+      // one-line resolution.
+      const ref = resolveGraphEntityRef(lookup, elt);
       if (ref !== undefined) targetRefs.push(ref);
     }
     const candidate = {
@@ -3072,7 +3178,7 @@ function buildScenarioContextCards(
     // the canonical graph lookup. The Record key IS the edge claim;
     // emitting with `target_refs: []` would publish a "scenario about
     // an unknown thing" — fail-closed instead.
-    const ref = lookup.get(edgeId);
+    const ref = resolveGraphEntityRef(lookup, edgeId);
     if (ref === undefined || ref.kind !== 'edge') {
       emitDrop({
         block_type: 'review_card',
