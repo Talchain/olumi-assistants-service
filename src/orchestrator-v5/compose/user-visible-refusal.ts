@@ -70,6 +70,13 @@ import type { OlumiResponse } from '@talchain/schemas/boundary';
  */
 const REFUSAL_BLOCK_TYPE = 'error';
 
+/**
+ * The block a held mutation ships. Named as a constant beside
+ * {@link REFUSAL_BLOCK_TYPE} so the two wire vocabularies this function
+ * discriminates between are declared in one place rather than inlined.
+ */
+const HELD_PROPOSAL_BLOCK_TYPE = 'held_proposal';
+
 export interface UserVisibleRefusal {
   /** Boundary `BoundaryErrorCode` — existing closed enum, not re-spelled here. */
   readonly error_code: string;
@@ -113,6 +120,45 @@ export function classifyUserVisibleRefusal(
 
   const blocks = envelope.blocks;
   if (!Array.isArray(blocks)) return null;
+
+  /**
+   * ⭐⭐ A LIVE HOLD IS NEVER A REFUSAL, WHATEVER SHIPS BESIDE IT.
+   *
+   * This function's own docstring above has always promised to return null for
+   * "every held proposal". It did not. `edit-graph-dispatch.ts:3875-3885` ships
+   * the redacted public reason as a LEADING `error` block and THEN appends the
+   * held proposal, so an ordinary add-node/add-edge hold reaches the wire as
+   * `[error, held_proposal]` — and the loop below returns on the FIRST error
+   * block it meets. So every routine confirmation hold was counted as a
+   * user-visible refusal.
+   *
+   * WITNESSED, not inferred. Paul's staging session, 17 Sep 2026:
+   *   18:06:51.698  v5.edit_graph.turn  outcome:"proposal" failure_code:null
+   *                                     branch:"graph_management_held"
+   *   18:06:53.141  cee.turn.refused    error_code:"INTERNAL_ERROR" severity:"warn"
+   * The turn SUCCEEDED — the user confirmed 28 seconds later and the change
+   * applied. Three held mutations on that one turn, so this is the NORMAL path
+   * for structural edits, not an edge case.
+   *
+   * ⚠ WHY THE FIX IS HERE AND NOT AT THE PRODUCER. Removing the error block
+   * from the held arm would be the tidier root fix, and it is NOT safe as a
+   * small change: `turn-executor.ts:1011` short-circuits the zero-resolved
+   * selection honesty projection on `blocks.some(b => b.type === 'error')`, so a
+   * held turn is currently exempt from that projection ONLY because it carries
+   * this block. Strip it and a hold with `resolved_count === 0` would newly have
+   * its `assistant_text` REPLACED — a user-visible copy change arriving as a
+   * side effect of a telemetry fix. Correcting the CLASSIFIER leaves the wire
+   * byte-identical, so that guard, the UI's `case 'error': return null`, and the
+   * held-proposal card are all untouched.
+   *
+   * The presence test is deliberately independent of ORDER. Keying on "error
+   * before held_proposal" would encode the producer's current block order as a
+   * contract, and the producer is free to reorder.
+   */
+  const carriesLiveHold = blocks.some(
+    (raw) => asRecord(raw)?.type === HELD_PROPOSAL_BLOCK_TYPE,
+  );
+  if (carriesLiveHold) return null;
 
   for (const raw of blocks) {
     const block = asRecord(raw);
