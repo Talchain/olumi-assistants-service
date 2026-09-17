@@ -7,6 +7,9 @@
    "label": "Status Quo: Keep Current Team",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": true,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": true,
    "observed_state_value": null,
    "display_value": null
   },
@@ -16,6 +19,9 @@
    "label": "Increase Productivity",
    "provenance": "from_brief",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -25,6 +31,9 @@
    "label": "Team Coordination Overhead",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -34,6 +43,9 @@
    "label": "Budget Strain",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -43,6 +55,9 @@
    "label": "Code Quality and Architecture",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -52,6 +67,9 @@
    "label": "Question",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -61,6 +79,9 @@
    "label": "Tech Lead Capacity",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -70,6 +91,9 @@
    "label": "Engineering Output",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -79,6 +103,9 @@
    "label": "Hiring Cost",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -88,6 +115,9 @@
    "label": "Onboarding and Ramp-Up Delay",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -97,6 +127,9 @@
    "label": "Developer Headcount Added",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -106,6 +139,9 @@
    "label": "Two Developers",
    "provenance": "from_brief",
    "unit": null,
+   "is_baseline": false,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -115,6 +151,9 @@
    "label": "Hire a Tech Lead",
    "provenance": "from_brief",
    "unit": null,
+   "is_baseline": false,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   }
@@ -209,17 +248,17 @@
    "to": "85dd1a1d"
   }
  ],
- "option_interventions": {
-  "Status Quo: Keep Current Team": {
+ "option_interventions_by_id": {
+  "0462a5b8": {
    "7b8fe1ef": 0,
    "85dd1a1d": 0,
    "943110e8": 0
   },
-  "Two Developers": {
+  "be215545": {
    "85dd1a1d": 0.85,
    "943110e8": 0.8
   },
-  "Hire a Tech Lead": {
+  "e70301eb": {
    "7b8fe1ef": 0.85,
    "85dd1a1d": 0.7
   }

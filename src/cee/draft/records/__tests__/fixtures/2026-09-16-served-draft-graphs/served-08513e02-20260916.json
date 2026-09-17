@@ -7,6 +7,9 @@
    "label": "Launch Delay Risk",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -16,6 +19,9 @@
    "label": "Hire Tech Lead (Status Quo Headcount)",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": true,
    "observed_state_value": null,
    "display_value": null
   },
@@ -25,6 +31,9 @@
    "label": "Question",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -34,6 +43,9 @@
    "label": "Team Productivity",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -43,6 +55,9 @@
    "label": "we're lacking leadership",
    "provenance": "from_brief",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -52,6 +67,9 @@
    "label": "Tech Lead Hiring Cost",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": 0.8,
    "display_value": "80,000"
   },
@@ -61,6 +79,9 @@
    "label": "Hire One Developer and One Tech Lead",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -70,6 +91,9 @@
    "label": "Engineering Headcount",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": 0.6,
    "display_value": "6"
   },
@@ -79,6 +103,9 @@
    "label": "Budget Overrun",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -88,6 +115,9 @@
    "label": "Developer Hiring Cost",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -97,6 +127,9 @@
    "label": "Two Developers",
    "provenance": "from_brief",
    "unit": null,
+   "is_baseline": false,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -106,6 +139,9 @@
    "label": "Increase Productivity, While Maintaining Code Quality",
    "provenance": "from_brief",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -115,6 +151,9 @@
    "label": "Engage Fractional/Contract Tech Lead",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -124,6 +163,9 @@
    "label": "Hire a Tech Lead",
    "provenance": "from_brief",
    "unit": null,
+   "is_baseline": false,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   },
@@ -133,6 +175,9 @@
    "label": "Code Quality",
    "provenance": "ai_inferred",
    "unit": null,
+   "is_baseline": null,
+   "data_is_status_quo": null,
+   "analysis_ready_is_baseline": null,
    "observed_state_value": null,
    "display_value": null
   }
@@ -243,22 +288,22 @@
    "to": "c3636f2d"
   }
  ],
- "option_interventions": {
-  "Hire Tech Lead (Status Quo Headcount)": {
+ "option_interventions_by_id": {
+  "06c4431f": {
    "49a8f419": 0.85
   },
-  "Hire One Developer and One Tech Lead": {
+  "6cc6212a": {
    "49a8f419": 0.6,
    "9672f007": 0.7
   },
-  "Two Developers": {
+  "be215545": {
    "9672f007": 0.8
   },
-  "Engage Fractional/Contract Tech Lead": {
+  "d095fa5c": {
    "49a8f419": 0.65,
    "553faba1": 0.35
   },
-  "Hire a Tech Lead": {}
+  "e70301eb": {}
  },
  "goal_constraints": [
   {
