@@ -23,17 +23,25 @@
  * ⚠ `OBSERVED_DEFECTIVE_TURN_10` is a RECORD OF WHAT THE PRODUCT ONCE SAID.
  * Append to this file; never edit that string to match new behaviour.
  *
- * SCOPE, measured not asserted (700 real replies: the 688-reply 2026-08-17
- * live corpus plus this journey's 12 turns): 148 replies change, every one of them stranded today;
- * 290 stranded headings across those replies go to 0; zero replies gain or
- * lose a shape. The negative case below is the guard on the other direction —
- * an ordinary lead-sentence-then-list must STILL hoist its bullets.
+ * SCOPE, measured not asserted, and the two scopes kept APART (700 real
+ * replies: the 688-reply 2026-08-17 live corpus plus this journey's 12 turns).
+ * FUNCTION-LEVEL: 148 replies change, and every one of them is a reply this
+ * function strands WHEN IT IS FED THE TEXT; 290 stranded headings across those
+ * replies go to 0; zero replies gain or lose a shape. PRODUCTION-LEVEL, which
+ * is a different and much smaller claim: 13 of the 688 corpus replies actually
+ * SHIPPED stranded, all of them the advice gate's `What to check next`. The
+ * 146 `Options compared` replies shipped fine and the deployed product never
+ * routes them through here — `corpus reachability` below derives both numbers
+ * rather than restating them. The negative case is the guard on the other
+ * direction — an ordinary lead-sentence-then-list must STILL hoist its
+ * bullets; `the consumer's default view` is the guard on what the trade costs.
  */
 import { describe, expect, it } from 'vitest';
 import {
   synthesiseAnswerShapeFromText,
   deriveAnswerTextFromShape,
 } from '../answer-shape.js';
+import LIVE_REPLIES from '../../compose/__tests__/fixtures/live-assistant-text-corpus-2026-08-17/digit-bearing-replies.json';
 
 /**
  * `composeAdvice`'s own output for that turn as it stood BEFORE this PR: the
@@ -169,7 +177,7 @@ describe('answer shape — a heading keeps its bullets', () => {
     expect(plain?.bullets).toEqual(['Cost of delay.', 'Team capacity.']);
   });
 
-  it('keeps `Options compared` with its options (146 of 146 corpus replies stranded it)', () => {
+  it('keeps `Options compared` with its options — a shape production never feeds this function', () => {
     const out = derive(
       "I've built a first decision model from your brief.\n\nOptions compared\n"
       + '• Hire a Dedicated Sales Team\n• Continue With Founder-Led Sales\n\n'
@@ -214,6 +222,72 @@ describe('answer shape — a heading keeps its bullets', () => {
     );
     expect(shape).not.toBeNull();
     expect(shape?.bullets).toEqual(['Cost of delay.', 'Team capacity.']);
+  });
+
+  it('corpus reachability — the deployed product stranded the advice gate, not `Options compared`', () => {
+    // WHY THIS CASE EXISTS. The docstrings on this fix once said the 146
+    // `Options compared` replies were "stranded TODAY" and that fixing at the
+    // emitter "would have left every one of them broken". Both are false as
+    // claims about the PRODUCT: that heading is emitted only by
+    // `post-draft-narrative.ts:1128`, and a draft turn is excluded from
+    // shaping twice over by `route-v2.ts:1518-1524` (it is marked
+    // `answerKind: 'functional'` AND carries a `draft_graph` block). The
+    // numbers below are DERIVED from the committed corpus, so the corrected
+    // sentences cannot drift back into a production claim.
+    //
+    // `strandedHeadings` is applied to the CAPTURED text — what the user was
+    // actually shown — never to this function's output.
+    const replies = LIVE_REPLIES.filter((r): r is string => typeof r === 'string');
+    expect(replies).toHaveLength(688);
+
+    // TARGET: the class the old sentences counted. It shipped intact, every one.
+    const optionsCompared = replies.filter((r) => /^[ \t]*Options compared[ \t]*$/m.test(r));
+    expect(optionsCompared).toHaveLength(146);
+    expect(
+      optionsCompared.filter((r) => strandedHeadings(r).includes('Options compared')),
+    ).toHaveLength(0);
+    // The mechanism, not just the count: all 146 are draft narratives.
+    expect(
+      optionsCompared.filter((r) => r.trimStart().startsWith("I've built a first decision model")),
+    ).toHaveLength(146);
+
+    // CONTRAST CONTROL, same sweep, same detector: a target of 0 proves nothing
+    // unless a sibling class reads non-zero in the same run. The advice gate's
+    // heading IS production-reachable, and it shipped stranded every time.
+    const whatToCheck = replies.filter((r) => /^[ \t]*What to check next[ \t]*$/m.test(r));
+    expect(whatToCheck).toHaveLength(13);
+    expect(
+      whatToCheck.filter((r) => strandedHeadings(r).includes('What to check next')),
+    ).toHaveLength(13);
+  });
+
+  it("the consumer's default view — the next step moves behind `Show more`, and that is the ruling", () => {
+    // WHAT THIS FIX COSTS, PINNED AT THE SHAPE THE CONSUMER READS instead of
+    // left as a conditional in a PR body. Read at DecisionGuideAI staging
+    // `d135ff7e`: `MessageBubble.tsx:323,404` hand the body to `AnswerBody`
+    // whenever a shape parses (so `assistant_text` is not rendered on that
+    // path at all), `AnswerBody.tsx:96` renders `bullets`, and `:114` opens
+    // `detail` COLLAPSED (`useState(false)`, pinned by that repo's
+    // `AnswerBody.spec.tsx:21-27`); `answerShape.ts` accepts `bullets: []` as
+    // a legitimate shape. So `bullets` IS the default view and `detail` is one
+    // click away — see the ruling on `SECTION_HEADING_MAX_LENGTH`.
+    const shape = synthesiseAnswerShapeFromText(ADVICE_GATE_OUTPUT);
+    expect(shape).not.toBeNull();
+
+    // The default view is the headline ALONE. This is the regression the
+    // ruling accepts; it must not change silently.
+    expect(shape?.bullets).toEqual([]);
+    expect(shape?.headline).toContain('the analysis currently favours');
+
+    // Behind the toggle: the next step WITH its heading, adjacent. That is the
+    // other half of the trade — what moves is coherent, what it replaced was not.
+    expect(shape?.detail).toContain('What to check next\n• The biggest thing to examine next');
+    expect(strandedHeadings(shape?.detail ?? '')).toEqual([]);
+
+    // PRECONDITION, so this cannot pass on a shape that never carried the
+    // section at all: the heading is absent from the visible region entirely.
+    expect(shape?.headline).not.toContain('What to check next');
+    expect((shape?.bullets ?? []).join('\n')).not.toContain('What to check next');
   });
 
   it('leaves the turn-8 passage unaltered in content and order', () => {

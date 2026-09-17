@@ -253,24 +253,45 @@ const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
  * A bullet belongs to the SECTION HEADING immediately above it, and hoisting
  * it away from that heading strands the heading with nothing under it.
  *
- * Measured on the 2026-08-17 live reply corpus + the 2026-09-05 founder
- * journey (700 replies: 688 in the committed corpus + 12 journey turns):
- * **146 of 146** replies carrying an `Options compared`
- * heading derived to an output where that heading was followed by nothing, and
- * the deployed founder journey shows the same defect on the advice gate's
- * `What to check next` (turns 3 and 10, reproduced byte-exact). The heading is
- * emitted correctly — `post-analysis-advice-gate.ts` puts the bullet directly
- * beneath it — so the strand is introduced HERE, by lifting the bullet into
- * `bullets` while the heading stays behind in `detail`, after which
+ * ⚠ SCOPE DISCIPLINE — THIS COMMENT ONCE STATED A FUNCTION-LEVEL MEASUREMENT
+ * IN THE PRESENT TENSE OF THE PRODUCT, and that reading is false for most of
+ * the corpus it counted. Re-measured on the committed corpus 2026-09-17, with
+ * a contrast control that fires. Two claims live here; each names its scope.
+ *
+ * WHAT THE DEPLOYED PRODUCT STRANDS — the production-reachable class, and the
+ * reason this ships. The advice gate's `What to check next`
+ * (`post-analysis-advice-gate.ts`) DOES reach this function: it is a
+ * substantive answer carrying no `draft_graph` block, so `route-v2.ts`'s
+ * egress synthesiser shapes it. In the committed 2026-08-17 corpus **13 of
+ * 688** replies shipped to users with that heading stranded and its bullet
+ * hoisted above it (entries 8 and 105 among them) — the same shape the
+ * 2026-09-05 founder journey shows again at turns 3 and 10, reproduced
+ * byte-exact. The heading is emitted CORRECTLY: the gate puts the bullet
+ * directly beneath it, so the strand is introduced HERE, by lifting the bullet
+ * into `bullets` while the heading stays behind in `detail`, after which
  * `deriveAnswerTextFromShape` re-renders `[headline, bullets, detail]` and the
  * bullet lands ABOVE its own heading.
  *
+ * WHAT IT DOES NOT — the 146 `Options compared` replies in that corpus are NOT
+ * evidence about the deployed product and must not be cited as such. Every one
+ * of them is a draft-narrative reply (`post-draft-narrative.ts:1128` is the
+ * only emitter of that heading), and a draft turn is excluded from shaping
+ * TWICE over: it is marked `answerKind: 'functional'` AND it carries a
+ * `draft_graph` block, either of which fails `route-v2.ts`'s gate
+ * (`:1518-1524`, `responseCarriesDraftGraphBlock` at `:1836`). Measured:
+ * **146 of 146** shipped with the heading followed by its bullets — stranded
+ * **0**. The only true claim about them is narrow — FED this text, this
+ * function strands it — which makes them a good test INPUT, never a production
+ * count.
+ *
  * A line introduces the bullets beneath it when EITHER:
  *
- *   - it ends with a colon — it explicitly promises what follows
- *     (`…three sensible ways to define it against your £150,000 budget:`, and
- *     `post-analysis-advice-gate.ts`'s evidence-priority line, both of which
- *     strand their colon today); or
+ *   - it ends with a colon — it explicitly promises what follows. The same
+ *     advice-gate file's `composeFactorEvppiValidationGuidance` returns
+ *     ``…is 'X':\n• …`` and rides the same shaped egress, so it sits in the
+ *     same reachable class. That is a REACHABILITY argument, not a measured
+ *     production count: no colon-led heading appears stranded anywhere in the
+ *     committed corpus. Or
  *   - it is short and carries NO sentence-terminating punctuation — a label
  *     rather than a sentence (`What to check next`, `Options compared`).
  *
@@ -283,10 +304,46 @@ const SYNTH_BULLET_LINE = /^\s*[•\-*]\s+(\S.*)$/;
  *
  * Scope of the behaviour change, MEASURED rather than asserted: across the
  * 700-reply corpus exactly 148 replies change, and every one of them is a
- * reply whose heading or colon is stranded TODAY. No reply outside the
+ * reply THIS FUNCTION strands when it is fed the text. That is a statement
+ * about the function, NOT about what shipped — 13 of the 148 are replies the
+ * product actually shipped stranded (the advice-gate class above); the rest
+ * are inputs production never routes through here. No reply outside the
  * stranded class changes shape, and no reply gains or loses a shape (zero
  * null-flips). `answer-shape-heading-bullet-adjacency.test.ts` pins both
- * directions, including the negative case.
+ * directions including the negative case, and DERIVES the 13 / 146 / 0 counts
+ * from the committed corpus so this paragraph cannot drift back into a
+ * production claim.
+ *
+ * ⚠ WHAT THIS COSTS AT THE SURFACE THAT RENDERS IT — DECIDED, NOT DISCOVERED.
+ * For those 148 replies the whole `bullets` array empties into `detail`, and
+ * `detail` is not visible by default in the consumer. Read at DecisionGuideAI
+ * staging `d135ff7e` (this seat's own read, not inherited):
+ * `useConversation.ts:5241` attaches the `_answer_shape` sidecar
+ * UNCONDITIONALLY (its own comment: "no UI flag"); `MessageBubble.tsx:323,404`
+ * hand the body to `AnswerBody` whenever a shape parses, so `assistant_text`
+ * is not rendered at all on that path; `AnswerBody.tsx:96` renders `bullets`
+ * and `:114` opens `detail` COLLAPSED (`useState(false)`, pinned by that
+ * repo's `AnswerBody.spec.tsx:21-27`); and `answerShape.ts` accepts
+ * `bullets: []` as a legitimate shape. SO: for a turn-10-class advice reply
+ * the default view becomes the headline ALONE, and the next step moves behind
+ * `Show more`.
+ *
+ * That trade is taken deliberately, because `AnswerShape`
+ * ({ headline, bullets, detail }) cannot express a LABELLED SECTION at all —
+ * its visible region is a flat headline plus unlabelled bullets, so "keep the
+ * heading with its bullets" and "keep those bullets visible" cannot both hold
+ * under this contract. The alternative is what shipped: a visible bullet
+ * severed from the heading that says what it is a list OF, while
+ * `assistant_text` — what every non-`AnswerBody` consumer reads, and what this
+ * same bubble falls back to whenever the sidecar is absent or malformed —
+ * carries the bullet ABOVE its own heading. One coherent answer one click away
+ * beats an incoherent one on screen.
+ *
+ * Making the next step visible AND labelled needs the CONSUMER, not this
+ * function: either `AnswerBody` renders a heading-led section expanded, or the
+ * contract gains a section concept. Neither belongs here — recorded for a row.
+ * The consumer-surface case in the adjacency spec fails loud if the visible
+ * region is changed without a decision.
  */
 const SECTION_HEADING_MAX_LENGTH = 60;
 
