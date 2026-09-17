@@ -324,6 +324,62 @@ const NEGATED_FLOOR_PATTERNS = [
 ];
 
 /**
+ * NEGATED CEILINGS — "must not go above £1.5m" means X <= 1_500_000.
+ *
+ * ⚠ THE EXACT MIRROR OF `NEGATED_FLOOR_PATTERNS`, AND DELIBERATELY NOT A SECOND
+ * MECHANISM. Measured on staging tip `f31b84c8` (2026-09-17): FIVE of seven
+ * ceiling phrasings reached the wire with the operator REVERSED —
+ *
+ *   "Marketing must not go above £1.5m."             -> `>= 1500000`
+ *   "Marketing cannot go above £1.5m."               -> `>= 1500000`
+ *   "Spend must not rise above £1.5m."               -> `>= 1500000`
+ *   "Do not let marketing go above £1.5m."           -> `>= 1500000`
+ *   "Headcount should not climb above 50 engineers." -> `>= 50`
+ *
+ * — each stamped `provenance: "explicit"` at `confidence: 0.85`. Only `exceed`
+ * and `under` worked, because those two have their own upper-bound patterns.
+ *
+ * This is the SAME defect class as the negated floors above, on the LOWER-bound
+ * path instead of the upper one, and it was disclosed as a tripwire in
+ * `negated-bound-polarity.test.ts` describe D rather than fixed, because fixing
+ * it was a second symmetric change on a different code path. This is that
+ * change. The tripwire is deleted with it, which is the protocol its own
+ * docblock prescribed.
+ *
+ * An inverted ceiling is worse than a missing one in exactly the way an
+ * inverted floor is: the operator and value survive all 19 hops to ISL, so
+ * every option that HONOURS the user's limit is scored as violating it and
+ * every option that BREACHES it passes.
+ *
+ * As with the floors, the inner phrase ("marketing go above £1.5m") still
+ * matches the simple `X above Y` lower-bound pattern, so CLAIMING THE SPAN is
+ * the only way to stop the floor being re-derived from the ceiling's own words.
+ */
+export const RISE_VERB = String.raw`(?:go(?:ing|es)?|ris(?:e|es|ing)|climb(?:ing|s)?|grow(?:ing|s)?|increas(?:e|es|ing)|exceed(?:ing|s)?|creep(?:ing|s)?)`;
+const NEGATED_CEILING_PATTERNS = [
+  // "without letting marketing go above £1.5m"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+(?:let(?:ting)?\s+)?${RISE_VERB}\s+(\w+(?:\s+\w+){0,3})\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+  // "must not let marketing go above £1.5m"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+let(?:ting)?\s+(\w+(?:\s+\w+){0,3})\s+${RISE_VERB}\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+  // "marketing must not go above £1.5m" — the founder case, and the commonest.
+  new RegExp(
+    String.raw`(\w+(?:\s+\w+){0,3})\s+${NEGATION_LEAD}\s+${RISE_VERB}\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+  // subject-less: "without going above £1.5m"
+  new RegExp(
+    String.raw`${NEGATION_LEAD}\s+${RISE_VERB}\s+(?:above|over|beyond)\s+(${AMT})`,
+    "gi",
+  ),
+];
+
+/**
  * Lower bound constraint patterns (operator: >=).
  *
  * ⚠ `barePreposition` IS DECLARED AT THE PATTERN, NOT IN A SIDE LIST. It marks
@@ -1045,6 +1101,61 @@ function extractNegatedFloorConstraints(brief: string): {
   return { constraints, claimed };
 }
 
+/**
+ * Extract negated CEILINGS, and report the spans they claim.
+ *
+ * The exact mirror of {@link extractNegatedFloorConstraints}, down to the
+ * confidence rule and the quote policy. The claim is the load-bearing half for
+ * the same reason: "must not go above £1.5m" contains "go above £1.5m", which
+ * the simple lower-bound pattern reads as a FLOOR. Without the claim the fix
+ * would emit the correct ceiling and the inverted floor side by side, and the
+ * model would carry both.
+ */
+function extractNegatedCeilingConstraints(brief: string): {
+  constraints: ExtractedGoalConstraint[];
+  claimed: Span[];
+} {
+  const constraints: ExtractedGoalConstraint[] = [];
+  const claimed: Span[] = [];
+
+  for (const pattern of NEGATED_CEILING_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(brief)) !== null) {
+      const index = match.index ?? 0;
+      // A later, looser pattern must not re-emit a span an earlier one owns.
+      if (overlapsClaimed(index, match[0].length, claimed)) continue;
+
+      // Subject-less form: single capture group (the amount).
+      const hasSubject = match[2] !== undefined;
+      const targetName = hasSubject ? match[1] : "unspecified";
+      const valueStr = hasSubject ? match[2] : match[1];
+      if (!valueStr) continue;
+
+      const { value, unit } = parseValue(valueStr);
+      constraints.push({
+        targetName: targetName.trim(),
+        targetNodeId: generateNodeId(targetName.trim()),
+        operator: "<=",
+        value,
+        unit,
+        label: buildBoundDisplayName(targetName, "<=", valueStr),
+        // ⚠ THE QUOTE KEEPS THE NEGATION, for the reason the floor version
+        // gives: it is shown back to the user as the evidence for this
+        // constraint, and a quote with the word that reverses its meaning
+        // removed cannot support the row it is attached to.
+        sourceQuote: match[0].slice(0, 200),
+        confidence: hasSubject ? 0.85 : 0.6,
+        provenance: "explicit",
+        valueFrame: "level",
+      });
+      claimed.push([index, index + match[0].length]);
+    }
+  }
+
+  return { constraints, claimed };
+}
+
 function extractUpperBoundConstraints(
   brief: string,
   claimed: readonly Span[] = [],
@@ -1147,6 +1258,30 @@ function extractLowerBoundConstraints(
       // duratively, and only for `over`; see DURATIVE_OVER_RE for why the
       // honest output here is NOTHING rather than a re-united row.
       if (spec.barePreposition && isDurativeOver(brief, match.index ?? 0, match[0])) {
+        continue;
+      }
+
+      // ── SUPPRESS RATHER THAN INVERT (the mirror of the ceiling path) ────
+      // An `above|over` reading whose clause is negated is a CEILING wearing a
+      // floor's words. `NEGATED_CEILING_PATTERNS` mints the correct row for the
+      // phrasings it recognises; for every phrasing it does not, the honest
+      // output is NOTHING.
+      //
+      // Identical reasoning to the `below|under` screen in
+      // `extractUpperBoundConstraints`, and deliberately the SAME two
+      // predicates (`NEGATION_OR_PREVENTION_LEAD` over `suppressionWindow`), so
+      // the two directions cannot drift apart. A missing constraint is a gap;
+      // an inverted one is scored by ISL and penalises precisely the options
+      // that honour the limit.
+      //
+      // ⚠ WE DO NOT ATTEMPT TO INVERT-CORRECTLY HERE. Guessing the operator
+      // from arbitrary English is the 2.714 failure mode, and CLAUDE.md trap
+      // 22f records this predicate family oscillating for four rounds when the
+      // fix in one direction was a new rule rather than a suppression.
+      if (
+        /\b(?:above|over)\b/i.test(match[0]) &&
+        NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0, claimed) + " " + match[0])
+      ) {
         continue;
       }
       let targetName: string;
@@ -2003,7 +2138,17 @@ export function extractCompoundGoals(
   // pass had nothing left to drop. It was deleted rather than shipped as
   // unreachable code with a test that passed vacuously. The property is guarded
   // by the mutant that removes the claim itself (M7), which REDs.
-  const { constraints: negatedFloors, claimed } = extractNegatedFloorConstraints(brief);
+  const { constraints: negatedFloors, claimed: floorClaimed } =
+    extractNegatedFloorConstraints(brief);
+  // ⚠ NEGATED CEILINGS RUN HERE, BEFORE THE LOWER BOUNDS, FOR THE MIRROR-IMAGE
+  // REASON: "must not go above £1.5m" contains "go above £1.5m", which the
+  // simple `X above Y` pattern reads as a FLOOR. Claiming the span first is
+  // what stops the inverted floor being re-derived from the ceiling's own
+  // words. The two claim sets are UNIONED and every later path receives the
+  // union, so a span owned by either direction is owned by both.
+  const { constraints: negatedCeilings, claimed: ceilingClaimed } =
+    extractNegatedCeilingConstraints(brief);
+  const claimed: Span[] = [...floorClaimed, ...ceilingClaimed];
   const upperBound = extractUpperBoundConstraints(brief, claimed);
   const lowerBound = extractLowerBoundConstraints(brief, claimed);
   // NOUN forms ("a £50,000 cap"). Runs AFTER the bound patterns and claims
@@ -2017,6 +2162,7 @@ export function extractCompoundGoals(
   // Combine and deduplicate
   let constraints = deduplicateConstraints([
     ...negatedFloors,
+    ...negatedCeilings,
     ...upperBound,
     ...lowerBound,
     ...nounForm,
