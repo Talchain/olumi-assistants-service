@@ -219,10 +219,45 @@ export async function extractFactorsLLM(
 
     const durationMs = Date.now() - startTime;
 
+    // ⭐⭐ THE PRE-FILTER COUNT, AND WHY A POST-FILTER COUNT ALONE CANNOT BE ACTED ON.
+    //
+    // MEASURED on staging, 17 Sep 2026, 16:00-19:00Z: this extractor is the
+    // PRIMARY path (`cee.factor_extraction.mode` reads `llm-first`), it ran 13
+    // times with ZERO failures, and **10 of those 13 returned
+    // `factorCount: 0`** — median 1284ms, max 3516ms, 21,812ms of latency in
+    // total. The three non-zero returns (4, 4, 5 factors) were also the three
+    // SLOWEST, which is consistent with them being the runs that actually
+    // produced output.
+    //
+    // ⛔ AND NOTHING IN THAT LOG COULD SAY WHY. `factorCount` is the count AFTER
+    // the confidence filter above, and `llmFactors.length` was never recorded,
+    // so "the model returned nothing" and "the model returned factors and every
+    // one fell below `minConfidence`" produce an IDENTICAL line. Those are
+    // different defects with different owners — a prompt problem versus a
+    // threshold decision — and the number that separates them was being
+    // discarded at the decision point.
+    //
+    // ⚠ NO BEHAVIOUR CHANGE. Three additional fields on an existing log line:
+    // the pre-filter count, the threshold in force, and the confidence values
+    // that were rejected. `rawFactorCount === 0` means the model said nothing;
+    // `rawFactorCount > 0 && factorCount === 0` means we filtered its answer
+    // away, and `rejectedConfidences` then says by how much.
+    //
+    // ⚠ CONFIDENCES ONLY, NEVER LABELS OR VALUES. This extractor reads the
+    // user's brief, so its factors carry the user's own quantities and wording.
+    // Every field added here is a COUNT or a bare number from a 0-1 scale; a
+    // confidence cannot leak a brief. Same rule the records seam's histogram
+    // holds itself to.
+    const rejectedConfidences = llmFactors
+      .filter((f) => f.confidence < minConfidence)
+      .map((f) => f.confidence);
     log.info(
       {
         event: "cee.llm_factor_extraction.complete",
         factorCount: factors.length,
+        rawFactorCount: llmFactors.length,
+        minConfidence,
+        rejectedConfidences,
         durationMs,
       },
       "LLM factor extraction complete"
