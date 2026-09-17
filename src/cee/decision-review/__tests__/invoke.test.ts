@@ -69,6 +69,7 @@ vi.mock('../science-claims.js', () => ({
 
 import * as routerMod from '../../../adapters/llm/router.js';
 import type { ModelResolution } from '../../../adapters/llm/router.js';
+import { setTestSink } from '../../../utils/telemetry.js';
 import {
   invokeDecisionReview,
   type DecisionReviewInvokeInput,
@@ -267,5 +268,94 @@ describe('invokeDecisionReview — UU-16 regression guards', () => {
     const [, callOpts] = adapter.chat.mock.calls[0]!;
     expect(callOpts.requestId).toBe('req-xyz');
     expect(callOpts.timeoutMs).toBe(7_500);
+  });
+});
+
+describe('invokeDecisionReview — v5.context_budget must say whether the model got a graph', () => {
+  /**
+   * ⚠⚠ THE MEASURED HARM (enricher docs, `decision-review-enricher.ts:121-134`).
+   * A real user session reported `section_chars: { graph_json: 21, ... }`, and
+   * it took a human comparing three hypothetical renderings — `{}` is 21,
+   * `{nodes:[],edges:[]}` is 51, a one-node graph 103 — to establish that the
+   * REVIEWING MODEL HAD BEEN SENT NO GRAPH AT ALL. The manifest says it
+   * outright. A producer mutant (`graph_json: {}`) survived every suite in this
+   * repo before this test existed.
+   */
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    setTestSink(null);
+    vi.restoreAllMocks();
+  });
+
+  async function budgetPayloadFor(
+    graph: DecisionReviewInvokeInput['graph'],
+  ): Promise<Record<string, unknown>> {
+    const captured: { event: string; payload: Record<string, unknown> }[] = [];
+    setTestSink((event, payload) => {
+      captured.push({ event, payload: payload as Record<string, unknown> });
+    });
+    const adapter = makeAdapterStub('{"narrative_summary":"ok"}');
+    // Cast scoped to THIS block. `makeAdapterStub` omits five LLMAdapter
+    // methods this path never calls, which is a pre-existing type error on six
+    // other lines of this file (measured: 6 at pristine). Those are not this
+    // lane's to fix, but adding a SEVENTH would move the `Typecheck Drift`
+    // ratchet — so the new call site is typed rather than absorbed.
+    vi.mocked(routerMod.getAdapterWithResolution).mockReturnValue({
+      adapter,
+      resolution: MOCK_RESOLUTION,
+    } as unknown as ReturnType<typeof routerMod.getAdapterWithResolution>);
+    await invokeDecisionReview(
+      { ...baseInput(), graph },
+      { requestId: 'req-manifest', timeoutMs: 15_000 },
+    );
+    const events = captured.filter(
+      (c) =>
+        c.event === 'v5.context_budget' &&
+        (c.payload as { call_site?: string }).call_site === 'decision_review',
+    );
+    expect(events, 'precondition: exactly one decision_review budget event was emitted').toHaveLength(1);
+    return events[0].payload;
+  }
+
+  it('DISCRIMINATES an empty graph from a real one, through the real assembly path', async () => {
+    const emptyPayload = await budgetPayloadFor({ nodes: [], edges: [] });
+    const realPayload = await budgetPayloadFor({
+      nodes: [
+        { id: 'opt-1', label: 'Option A' },
+        { id: 'opt-2', label: 'Option B' },
+      ],
+      edges: [{ from: 'opt-1', to: 'opt-2' }],
+    } as DecisionReviewInvokeInput['graph']);
+
+    const emptyShape = emptyPayload.section_shape as Record<string, Record<string, number>>;
+    const realShape = realPayload.section_shape as Record<string, Record<string, number>>;
+
+    // Bind by IDENTITY to the counts the builder actually put in the <GRAPH>
+    // block — read back off the assembled user message, not off the input.
+    expect(emptyShape.graph_json.nodes).toBe(0);
+    expect(emptyShape.graph_json.edges).toBe(0);
+    expect(realShape.graph_json.nodes).toBe(2);
+    expect(realShape.graph_json.edges).toBe(1);
+    expect(emptyShape.graph_json).not.toEqual(realShape.graph_json);
+  });
+
+  it('the CALL SITE emits every section as a finite number (NOT a claim about redaction — see below)', async () => {
+    // ⚠ SCOPE, stated so this cannot be misread as covering the sha8 defect:
+    // `emit()` calls the test sink BEFORE `log.info`, so this payload has not
+    // been through pino redaction. It proves the PRODUCER passes counts; the
+    // claim that those counts survive the logger is a different claim, proven
+    // against the real `createLoggerConfig` boundary in
+    // `orchestrator-v5/context/__tests__/context-budget-sections-are-measurements.test.ts`.
+    const payload = await budgetPayloadFor({ nodes: [], edges: [] });
+    const sectionChars = payload.section_chars as Record<string, unknown>;
+    for (const [section, value] of Object.entries(sectionChars)) {
+      expect(
+        typeof value === 'number' && Number.isFinite(value),
+        `section_chars.${section} must be a finite number, got ${JSON.stringify(value)}`,
+      ).toBe(true);
+    }
+    expect(sectionChars.brief as number).toBeGreaterThan(0);
   });
 });
