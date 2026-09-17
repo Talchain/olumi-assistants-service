@@ -307,11 +307,33 @@ function resolveUnitLabel(node: UnappliedEditNode): string | undefined {
  * reads. Importing it means this module widens automatically if the handler
  * ever accepts another kind, instead of becoming a fourth list to keep in step
  * (CLAUDE.md trap 12). A hardcoded `kind === 'option'` would ALSO be the wrong
- * shape: measured over every `*.json` under `src/` (44 files, 44 parsed, 0
- * unparseable, 662 nodes, bucketed BY KIND) `risk` and `outcome` nodes ALREADY
- * carry unit-interval values — 1/95 and 3/81, against a `factor` contrast of
- * 120/228 — so an option-only guard closes the instance the reviewer named and
- * leaves its siblings open.
+ * shape — but NOT for the reason first written here, and the correction is
+ * recorded rather than quietly swapped, because a corrected sentence reads as
+ * already-audited and nobody re-checks it.
+ *
+ * ⚠ WITHDRAWN: "`risk` and `outcome` nodes ALREADY carry unit-interval
+ * values — 1/95 and 3/81". What was MEASURED is a different column: those
+ * nodes carry a `value` IN [0,1]. `resolveFactorScale` tests `unit` /
+ * `raw_value` / `cap` BEFORE the [0,1] test, and every non-factor node in that
+ * corpus carrying an `observed_state` carries one of them — an outcome at
+ * `cap:5, unit:"Trustpilot score"`, one at `cap:4000000, unit:"£"`, one at
+ * `cap:100, unit:"%"`, the single risk at `cap:100, unit:"%"`, the options at
+ * `unit:"%"`. All resolve `measured`. ZERO non-factor nodes in the shipped
+ * corpus reach `unit_interval`, which is the escape the NUMERIC CHIP needs.
+ * The factor row conflates the same two columns: a substantial minority of
+ * factors holding a value in [0,1] also carry a unit or a cap and resolve
+ * `measured`, not `unit_interval`.
+ *
+ * ⭐ THE CLASS ARGUMENT SURVIVES; THE MECHANISM STATED FOR IT DID NOT.
+ * `risk` and `outcome` are exposed TODAY through the COPY-PROMISE branches
+ * rather than the numeric chip: `findNamedNode` binds by label alone, so a
+ * valued risk reaches `level_on_measured_factor` ("Give me the amount and
+ * I'll write it") or `named_target_no_value` ("Give me the value and I'll
+ * write it") — a promise to write a value on a node `set_factor_value`
+ * refuses outright (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS = ['factor']`,
+ * read at that file's bytes). Same advertises-an-action-that-refuses defect,
+ * without the click. That is why the guard sits ABOVE all five branches, and
+ * why an option-only guard still leaves the siblings open.
  *
  * FAIL-SAFE DIRECTION: a node whose `kind` is missing or not a string is
  * treated as NOT value-editable. Withholding an offer from a node we cannot
@@ -452,6 +474,18 @@ export type UnappliedEditUnderstanding =
       readonly kind: 'value_edit_unsupported_kind';
       readonly node: UnappliedEditNode;
       readonly nodeKind: string | null;
+      /**
+       * ⚠ CARRIED SO THE DELIBERATION BRANCH DOES NOT SILENTLY DROP THE
+       * USER'S OWN WORD. `levelSuffix` reads `'level' in understanding`, so a
+       * variant without this field turns "Change X to low." into "Change X."
+       * on the proceed chip — a behaviour change nothing in the suite pinned,
+       * because `EDIT_GRAPH_POSITIVE_REGEX` matches either string. The user
+       * said "low"; we repeat it back rather than quietly discarding it.
+       *
+       * `null` when the message bounded no level. `typeof null !== 'string'`,
+       * so the suffix stays empty and the existing fail-safe is unchanged.
+       */
+      readonly level: string | null;
     }
   | {
       /** The object was named; no value we could read. */
@@ -568,6 +602,10 @@ export function resolveUnappliedEditUnderstanding(
       nodeKind: typeof node.kind === 'string' && node.kind.trim().length > 0
         ? node.kind.trim()
         : null,
+      // The level the user's own words bounded, or `null`. Read above, before
+      // this guard, so it is in scope here; carried because the deliberation
+      // branch repeats it back and dropping it loses what the user said.
+      level: band,
     };
   }
 
@@ -616,6 +654,36 @@ export function resolveUnappliedEditUnderstanding(
 export interface UnappliedEditReplyParts {
   readonly text: string;
   readonly chips: readonly SuggestedAction[];
+  /**
+   * ⭐⭐ A FACT ABOUT `text`, NOT AN INSTRUCTION TO THE CALLER — and the two
+   * are named apart deliberately (CLAUDE.md trap 21). This module states what
+   * its own copy CLAIMS; the caller decides what that obliges it to do.
+   *
+   * `true` when `text` tells the user that setting a value is something we can
+   * only do on a FACTOR. A caller that substitutes its own chips for an empty
+   * `chips` list must then restrict them to nodes `isValueEditableTarget`
+   * accepts — `edit-graph.ts` fills its generic label chips FACTORS FIRST AND
+   * THEN OPTIONS, up to three (`edit-clarify-response.ts`
+   * `selectEditClarifyTargets`), so on a graph carrying FEWER THAN THREE
+   * factors a chip reading "For <option>, what value should we use?" would sit
+   * directly beneath a sentence saying we cannot do that.
+   *
+   * ⚠ NEWLY REACHABLE WITH THE `value_edit_unsupported_kind` BRANCH. Before
+   * it, this path's chips were never empty on that input, so the substitution
+   * never ran and the contradiction could not occur. It is MILDER than the
+   * defect this PR fixes — that chip carries no number and routes to the
+   * conversational lane, not to `set_factor_value` — but it makes the reply
+   * name a capability the sentence above it has just withheld.
+   *
+   * ⚠ A FIXTURE AT OR ABOVE THE 3-CAP CANNOT SEE IT. With three or more
+   * factors an option chip is never selected, so a three-factor graph reports
+   * the same green whether the restriction exists or not. The wiring spec
+   * therefore pins it on a graph with FEWER THAN THREE factors.
+   *
+   * Required rather than optional on purpose: a future branch writing the same
+   * capability claim must DECIDE this, not inherit a default.
+   */
+  readonly text_limits_value_edits_to_factors: boolean;
 }
 
 /**
@@ -717,6 +785,10 @@ export function composeUnappliedEditReply(input: {
             `Change ${named}${levelSuffix}.`,
           ),
         ],
+        // This copy makes no kind-capability claim — it says what we
+        // understood and offers to proceed. Both chips are always present, so
+        // no substitution runs on this branch in any case.
+        text_limits_value_edits_to_factors: false,
       };
     }
 
@@ -734,6 +806,7 @@ export function composeUnappliedEditReply(input: {
           'Add that to the model.',
         ),
       ],
+      text_limits_value_edits_to_factors: false,
     };
   }
 
@@ -755,6 +828,9 @@ export function composeUnappliedEditReply(input: {
           `number I can change on a factor is its value. If you meant the ` +
           `value, tell me which and I'll write it.`,
         chips: buildValueOfferChips(label, understanding.offers),
+        // Q-KIND already passed to reach this branch, so the named node IS a
+        // factor and this copy limits nothing by kind.
+        text_limits_value_edits_to_factors: false,
       };
     }
 
@@ -776,6 +852,7 @@ export function composeUnappliedEditReply(input: {
           `${examples}, so picking one for you would be putting a number in ` +
           `your model that you never gave me. Tell me which and I'll write it.`,
         chips: offerChips,
+        text_limits_value_edits_to_factors: false,
       };
     }
 
@@ -791,6 +868,7 @@ export function composeUnappliedEditReply(input: {
           `"${label}" yet, so I can't tell what that word maps to without ` +
           `guessing. Give me the value and I'll write it.`,
         chips: [],
+        text_limits_value_edits_to_factors: false,
       };
 
     case 'level_on_measured_factor': {
@@ -803,6 +881,7 @@ export function composeUnappliedEditReply(input: {
           `${measuredIn}, so I'd have to invent an amount to act on that word. ` +
           `Give me the amount and I'll write it.`,
         chips: [],
+        text_limits_value_edits_to_factors: false,
       };
     }
 
@@ -833,6 +912,12 @@ export function composeUnappliedEditReply(input: {
           `factor. If you meant a factor it affects, name that factor and the ` +
           `value, and I'll write that.`,
         chips: [],
+        // ⭐ THE SENTENCE ABOVE IS THE CLAIM. "setting a value is something I
+        // can only do on a factor" stops being true the moment a substituted
+        // chip offers a value on an option, so the caller is told HERE, beside
+        // the words that make the claim, rather than in a rule it must
+        // remember (CLAUDE.md trap 12 — a rule kept in step by hand drifts).
+        text_limits_value_edits_to_factors: true,
       };
     }
 
@@ -846,6 +931,7 @@ export function composeUnappliedEditReply(input: {
           `${NOTHING_WRITTEN} I understood which one you meant — "${label}" — ` +
           `but not what to set it to. Give me the value and I'll write it.`,
         chips: [],
+        text_limits_value_edits_to_factors: false,
       };
   }
 }

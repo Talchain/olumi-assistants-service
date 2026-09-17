@@ -148,21 +148,39 @@ const UNKNOWN_SCALE_FACTOR: UnappliedEditNode = {
  *
  * `NodeV3Schema` puts `observed_state` on the NODE, not on a factor-shaped
  * subtype, so this fixture is schema-valid. Measured over every `*.json` under
- * `src/` (44 files, 44 parsed, 0 unparseable, 662 nodes), bucketed BY KIND:
+ * `src/`, bucketed BY KIND. ⚠ THE COLUMN IS `value in [0,1]`, WHICH IS NOT
+ * `resolveFactorScale === 'unit_interval'` — the two were conflated when this
+ * table was first written here, and the annotation "<- REACHABLE TODAY" on the
+ * risk and outcome rows is WITHDRAWN:
  *
  *   kind      total   observed_state   value   value in [0,1]
  *   factor      228             120      120             120   <- CONTRAST
  *   option      175               4        4               0
- *   risk         95               1        1               1   <- REACHABLE TODAY
- *   outcome      81               3        3               3   <- REACHABLE TODAY
+ *   risk         95               1        1               1
+ *   outcome      81               3        3               3
  *   goal         42               0        0               0
  *   decision     41               0        0               0
  *
- * So the escape is NOT option-shaped. `risk` and `outcome` nodes carrying a
- * unit-interval value exist in the shipped corpus right now, and a fix written
- * against `kind === 'option'` would leave both open — closing the instance the
- * reviewer named while its siblings stay open (CLAUDE.md: close against the
- * enumeration, not the instances found).
+ * `resolveFactorScale` tests `unit` / `raw_value` / `cap` BEFORE the [0,1]
+ * test, and every non-factor node in that corpus carrying an `observed_state`
+ * carries one of them (`cap:5, unit:"Trustpilot score"` · `cap:4000000,
+ * unit:"£"` · `cap:100, unit:"%"` · the risk at `cap:100, unit:"%"` · the
+ * options at `unit:"%"`). They all resolve `measured`. ZERO non-factor nodes
+ * in the shipped corpus reach `unit_interval` — the escape the NUMERIC chip
+ * needs. The factor row conflates the same two columns: some of those 120 also
+ * carry a unit or a cap and resolve `measured`.
+ *
+ * ⭐ THE CONCLUSION STANDS ON A DIFFERENT MECHANISM. The escape is still NOT
+ * option-shaped, because `findNamedNode` binds by LABEL ALONE and the
+ * COPY-PROMISE branches — `level_on_measured_factor` and
+ * `named_target_no_value`, both "I'll write it" — reach a valued risk or
+ * outcome TODAY and promise a write `set_factor_value` refuses
+ * (`SET_FACTOR_VALUE_ALLOWED_TARGET_KINDS = ['factor']`). So a fix written
+ * against `kind === 'option'` still leaves the siblings open, and the fixtures
+ * below exercise the class rather than the instance (CLAUDE.md: close against
+ * the enumeration, not the instances found). The `unit_interval` fixtures here
+ * are CONSTRUCTED to reach the numeric-chip branch: legal under `NodeV3Schema`
+ * and not drawn from the corpus, which is stated rather than implied.
  */
 const VALUED_OPTION: UnappliedEditNode = {
   id: 'opt_ai',
@@ -1043,8 +1061,13 @@ describe('NON-FACTOR TARGETS — a value chip must never name a node the value l
   });
 
   it('RED-first signature 3: the ENUMERATION, not the instance — risk and outcome carry the same escape', () => {
-    // Both kinds hold a unit-interval value in the shipped `src/**/*.json`
-    // corpus TODAY (risk 1/95, outcome 3/81). A fix written against
+    // ⚠ CORRECTED: these two fixtures are CONSTRUCTED, not drawn from the
+    // corpus. The corpus's risk and outcome nodes hold a value in [0,1] but
+    // also a `unit`/`cap`, so they resolve `measured`, and ZERO non-factor
+    // nodes there reach `unit_interval`. What IS reachable today on those
+    // kinds is the copy promise, not the numeric chip — and the guard closes
+    // both, which is the point of asking Q-KIND above every branch. A fix
+    // written against
     // `kind === 'option'` leaves both open.
     for (const [msg, label] of [
       ['Change Key talent attrition to low.', 'Key talent attrition'],
@@ -1212,6 +1235,93 @@ describe('NON-FACTOR TARGETS — a value chip must never name a node the value l
     // `set_factor_value`, which would refuse it.
     expect(shouldSuppressEditDispatchForValueUpdate(proceed.message)).toBe(false);
     expect(EDIT_GRAPH_POSITIVE_REGEX.test(proceed.message)).toBe(true);
+  });
+
+  // ── THE CLAIM THIS COPY MAKES, AND WHAT IT OBLIGES THE CALLER TO DO ────
+  // Review finding 2 (CEE #1351): the branch returns EMPTY chips, and
+  // `edit-graph.ts` substitutes generic label chips that are filled
+  // factors-first-then-OPTIONS. On a graph with fewer than three factors the
+  // substituted chip offers a value on an option — directly beneath a
+  // sentence saying we can only do that on a factor. The composer states the
+  // claim; the caller restricts its substitution. Pinned on both sides: here
+  // for the fact, and in the wiring spec for the substitution it governs.
+
+  it('the kind-refusal branch DECLARES that its copy limits value edits to factors', () => {
+    const reply = composeUnappliedEditReply({
+      message: 'Change Deploy the AI chatbot to low.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    // PRECONDITION PINNED IN-TEST: the flag only matters where the chip list
+    // is empty, because that is the only case the caller substitutes into. If
+    // this branch ever started emitting chips, the assertion below would be
+    // true about a path nothing reads — a guard agreeing with itself.
+    expect(reply.chips).toEqual([]);
+    expect(reply.text).toMatch(/only do on a factor/);
+    expect(reply.text_limits_value_edits_to_factors).toBe(true);
+  });
+
+  it('OPPOSITE DIRECTION — no other branch declares it, so the flag is not a blanket true', () => {
+    // A flag that read `true` everywhere would restrict the caller's chips on
+    // paths whose copy invites "factor, edge, option, or value", and the
+    // restriction would be invisible: the wiring would still be green. The
+    // pair is what proves the binding — one arm alone proves nothing.
+    const others: ReadonlyArray<readonly [string, string]> = [
+      [W2, 'level_on_unitless_factor'],
+      [W1, 'unsupported_aspect'],
+      ['Change Shipping cost to low', 'level_on_measured_factor'],
+      ['Change Team morale to low', 'level_on_unknown_scale'],
+      ['Change Team coordination overhead', 'named_target_no_value'],
+      ['Do you agree? Change Deploy the AI chatbot to low.', 'deliberation'],
+    ];
+    for (const [message, expectedBranch] of others) {
+      const reply = composeUnappliedEditReply({
+        message,
+        nodes: NODES_WITH_VALUED_NON_FACTORS,
+      })!;
+      // Pin WHICH branch each row exercises, so a resolver change that
+      // silently reroutes one of them cannot leave this passing by accident.
+      if (expectedBranch !== 'deliberation') {
+        expect(
+          resolveUnappliedEditUnderstanding(message, NODES_WITH_VALUED_NON_FACTORS)!.kind,
+          `row no longer reaches ${expectedBranch}: ${message}`,
+        ).toBe(expectedBranch);
+      }
+      expect(
+        reply.text_limits_value_edits_to_factors,
+        `branch ${expectedBranch} wrongly claims a factor-only limit: ${message}`,
+      ).toBe(false);
+    }
+  });
+
+  it("the DELIBERATION proceed chip keeps the user's OWN word — the level is not silently dropped", () => {
+    // Review finding 3 (CEE #1351): `levelSuffix` reads `'level' in
+    // understanding`. The kind-refusal variant carried no `level`, so a
+    // deliberation naming a non-factor yielded "Change Deploy the AI chatbot."
+    // where every other branch yields "… to low." Nothing pinned it, because
+    // `EDIT_GRAPH_POSITIVE_REGEX` matches either string — so the assertion
+    // here is on the SUFFIX, not on the routing.
+    const reply = composeUnappliedEditReply({
+      message: 'Do you agree? Change Deploy the AI chatbot to low.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
+    expect(proceed.message).toBe('Change Deploy the AI chatbot to low.');
+    expect(reply.text).toContain('"Deploy the AI chatbot" to low');
+    // The routing is unchanged — still the edit lane, never the value lane.
+    expect(shouldSuppressEditDispatchForValueUpdate(proceed.message)).toBe(false);
+    expect(EDIT_GRAPH_POSITIVE_REGEX.test(proceed.message)).toBe(true);
+  });
+
+  it('OPPOSITE DIRECTION — a deliberation that bounded NO level gains no invented one', () => {
+    // The fail-safe half. `level` is `null` when the message bounded nothing,
+    // and `typeof null !== \'string\'`, so the suffix stays empty. Without this
+    // twin the fix above could have been "always append a level".
+    const reply = composeUnappliedEditReply({
+      message: 'Do you agree? Change Deploy the AI chatbot.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
+    expect(proceed.message).toBe('Change Deploy the AI chatbot.');
   });
 
   it('KNOWN-DROPPED does not grow — every new case is grounded, not silently dropped', () => {
