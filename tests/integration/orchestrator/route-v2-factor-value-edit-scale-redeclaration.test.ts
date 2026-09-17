@@ -188,7 +188,7 @@ describe('POST /orchestrate/v2/turn — scale redeclaration (ROADMAP 2.159)', ()
 
     expect(body.assistant_text).toMatch(/haven't changed anything/i);
     expect(body.blocks).toEqual([]);
-    expect(body.assistant_text).toContain('recorded without a unit');
+    expect(body.assistant_text).toContain('no unit recorded');
     // Prediction-free AND free of computed arithmetic (an earlier draft
     // rendered "the value given was 1.2999999999999998").
     expect(body.assistant_text).not.toMatch(/\d{6}/);
@@ -214,6 +214,35 @@ describe('POST /orchestrate/v2/turn — scale redeclaration (ROADMAP 2.159)', ()
     // ⚠ THIS TEST EXISTS FOR ANOTHER REPO. The UI's #524 reject-revert keys off
     // a CEE refusal. Pin the payload here so a CEE-side change shows up as a
     // RED in CEE rather than as a silent regression in the UI.
+      //
+      // ⭐⭐ THE SENTENCE WAS REWORDED ON 17 SEP 2026 AND THIS TEST CAUGHT IT,
+      // WHICH IS EXACTLY ITS JOB. Before re-pinning, the UI dependency was
+      // MEASURED rather than assumed: it is STRUCTURAL, so a reword is safe.
+      // Recording the EVIDENCE and not just the conclusion, so the next lane to
+      // touch this copy does not have to re-derive it:
+      //
+      //   · `optimisticFactorEditRevert.spec.ts` (312 lines) — the reject-revert
+      //     path itself — contains ZERO occurrences of the refusal text. Every
+      //     assertion is structural: `observedNow().raw_value`, `.source`,
+      //     `.value`, `dispatched.length`, and an outcome enum. Contrast controls
+      //     in the same sweep: `revert` 11, `blocks` 5, `import` 12.
+      //   · Four principal response-handling modules, each fetched WHOLE and
+      //     grepped, text=0 with a non-zero contrast in the same file:
+      //     `selectors.ts` 0/9, `useGraphReadiness.ts` 0/8,
+      //     `responseRouter.ts` 0/17, `composeBlockedReason.ts` 0/24.
+      //
+      // ⛔ AND THE INSTRUMENT WARNING, because it nearly produced the OPPOSITE
+      // answer. GitHub code search reported FOUR hits for "recorded without a
+      // unit" in UI production files. Fetching those files whole and grepping
+      // them found ZERO literal occurrences — fuzzy token matches, not the
+      // phrase. The same instrument returns 0 for a symbol with 7 live read
+      // sites in that repo. It is unreliable in BOTH directions and must not be
+      // used for a presence OR an absence claim here. Fetch the file and grep it.
+      //
+      // ⚠ SCOPE: the reject-revert path and every module handling a CEE refusal
+      // response were checked. All 6,164 files in that repo were NOT swept. A
+      // text dependency in an unfetched module is not excluded — but #524's own
+      // path demonstrably does not read the sentence.
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
@@ -226,7 +255,7 @@ describe('POST /orchestrate/v2/turn — scale redeclaration (ROADMAP 2.159)', ()
     expect(JSON.parse(res.body)).toEqual({
       response_version: 2,
       assistant_text:
-        'This factor is recorded without a unit, so applying a value in % would change ' +
+        'This factor has no unit recorded, so a value in % would change ' +
         "what it measures. I haven't changed anything. Tell me what you'd like instead and I'll apply it.",
       blocks: [],
       suggested_actions: [
