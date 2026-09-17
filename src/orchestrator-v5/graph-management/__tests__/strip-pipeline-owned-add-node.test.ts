@@ -39,6 +39,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   PIPELINE_OWNED_ROOTS,
+  STRIP_EXEMPT_ROOTS_FOR_TEST,
+  STRIPPABLE_OWNED_ROOTS_FOR_TEST,
   checkFieldSafety,
   stripPipelineOwnedFromAddOperations,
 } from '../field-safety.js';
@@ -80,9 +82,11 @@ function moraleBatch(): OpLike[] {
         label: 'Team morale',
         observed_state: {
           value: 0.3,
-          // ⭐ THE THREE FIELDS THE SERVED PROMPT INVITES AND THE REFEREE FORBIDS.
+          // ⭐ A PROVENANCE STAMP THE SERVED PROMPT INVITES AND THE REFEREE
+          // FORBIDS. `raw_value` is deliberately NOT here: it is the native
+          // magnitude, it is never stripped, and an add carrying it still
+          // refuses — pinned in its own block below.
           source: 'user_stated',
-          raw_value: 30,
         },
         provenance: { source: 'edit_graph_llm', rationale: 'discussed over three turns' },
         extractionType: 'stated',
@@ -198,8 +202,8 @@ describe('THE FIX — strip the pipeline-owned keys, keep the edit', () => {
 });
 
 describe('THE STRIP IS DERIVED, NEVER RE-LISTED', () => {
-  it('every member of PIPELINE_OWNED_ROOTS is removed from an add_node value', () => {
-    const owned = [...PIPELINE_OWNED_ROOTS];
+  it('every STRIPPABLE member of the owned set is removed from an add_node value', () => {
+    const owned = [...STRIPPABLE_OWNED_ROOTS_FOR_TEST];
     // The set must be non-empty, or this whole block would pass vacuously.
     expect(owned.length).toBeGreaterThan(5);
 
@@ -260,7 +264,7 @@ describe('DISCLOSURE — what was dropped is reported, in a redaction-safe shape
           label: 'Disclose',
           provenance: 'x',
           observed_state: { value: 1, source: 'user_stated' },
-          model_authored_container: { raw_value: 7 },
+          model_authored_container: { extractionType: 'stated' },
         },
       },
     ]);
@@ -270,7 +274,7 @@ describe('DISCLOSURE — what was dropped is reported, in a redaction-safe shape
     expect(strippedKeyShapes).toContain('provenance');
     expect(strippedKeyShapes).toContain('observed_state/source');
     // The model-authored container name is MASKED.
-    expect(strippedKeyShapes).toContain('*/raw_value');
+    expect(strippedKeyShapes).toContain('*/extractiontype');
     expect(strippedKeyShapes.join(' ')).not.toContain('model_authored_container');
   });
 
@@ -356,6 +360,62 @@ describe('⭐ THE OPPOSITE DIRECTION — the strip must not become a blanket acc
 
     expect(operations[0]).toBe(op);
     expect(strippedKeyShapes).toEqual([]);
+  });
+});
+
+describe('⛔ `raw_value` IS DATA, NOT A STAMP — it is never stripped, and it still refuses', () => {
+  it('the exempt set is EXACTLY {raw_value} — a widening of the owned set must force this decision again', () => {
+    expect([...STRIP_EXEMPT_ROOTS_FOR_TEST]).toEqual(['raw_value']);
+    // Derivation pin: strippable + exempt reconstitutes the owned set exactly,
+    // so the exemption is a set DIFFERENCE and never a second hand-kept list.
+    expect(
+      [...STRIPPABLE_OWNED_ROOTS_FOR_TEST, ...STRIP_EXEMPT_ROOTS_FOR_TEST].sort(),
+    ).toEqual([...PIPELINE_OWNED_ROOTS].sort());
+    // `raw_value` really is in the owned set — without this the block is vacuous.
+    expect(PIPELINE_OWNED_ROOTS.has('raw_value')).toBe(true);
+    expect(STRIPPABLE_OWNED_ROOTS_FOR_TEST).not.toContain('raw_value');
+  });
+
+  it('⛔ a user-stated magnitude SURVIVES the strip — it is never silently deleted', () => {
+    const op: OpLike = {
+      op: 'add_node',
+      path: 'f-hiring',
+      value: {
+        kind: 'factor',
+        label: 'Hiring cost',
+        // "add a factor for hiring cost, it's £80,000"
+        observed_state: { value: 0.8, raw_value: 80000, unit: 'GBP', source: 'user_stated' },
+      },
+    };
+    const { operations, strippedKeyShapes } = stripPipelineOwnedFromAddOperations([op]);
+    const observed = (operations[0]!.value as Record<string, unknown>)
+      .observed_state as Record<string, unknown>;
+
+    // The stamp goes ...
+    expect(strippedKeyShapes).toContain('observed_state/source');
+    expect(observed).not.toHaveProperty('source');
+    // ... and the USER'S NUMBER STAYS.
+    expect(observed.raw_value).toBe(80000);
+    expect(observed.unit).toBe('GBP');
+    expect(observed.value).toBe(0.8);
+  });
+
+  it('⛔ and the add carrying it still REFUSES — visibly, rather than landing without the number', () => {
+    const { operations } = stripPipelineOwnedFromAddOperations([
+      {
+        op: 'add_node',
+        path: 'f-hiring',
+        value: {
+          kind: 'factor',
+          label: 'Hiring cost',
+          observed_state: { value: 0.8, raw_value: 80000 },
+        },
+      },
+    ]);
+    const verdicts = refereeOver(operations);
+
+    expect(verdicts[0]!.verdict).toBe('rejected');
+    expect(verdicts[0]!.blocker?.code).toBe(PIPELINE_OWNED_FIELD);
   });
 });
 

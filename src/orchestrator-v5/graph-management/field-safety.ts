@@ -485,6 +485,70 @@ function screenPayload(value: unknown, ctx: PayloadContext): FieldSafetyResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * ⛔⛔ `raw_value` IS THE ONE MEMBER OF THE OWNED SET THAT IS DATA, NOT A STAMP —
+ * AND STRIPPING IT WOULD BE A WORSE DISHONESTY THAN THE REFUSAL THIS FIXES.
+ *
+ * It sits in `CEE_ANALYSIS_OWNED_ROOTS` under a comment that reads:
+ *
+ *     "Extraction-provenance stamps: these mark HOW a value entered the model
+ *      ... relabelling an AI-invented value as user-extracted is a provenance
+ *      integrity breach."
+ *
+ * That rationale is exactly right for its neighbours `source` and
+ * `extractiontype`, which are CLAIMS ABOUT a value. It does not hold for
+ * `raw_value`, which IS the value — the NATIVE MAGNITUDE, the thing that lets
+ * a factor read "£80,000" instead of "0.8". Three concepts were grouped under
+ * one comment and one list; this is trap 21 at list granularity.
+ *
+ * DERIVED AT THE BYTES, and each of these is why the exemption exists:
+ *  1. `ObservedStateV3` DECLARES it — `raw_value: z.number().optional()`
+ *     (`schemas/cee-v3.ts:130`). It is first-class data that SURVIVES the
+ *     GraphV3 re-parse, not an unknown key the schema would drop anyway.
+ *  2. NOTHING RE-DERIVES IT ON AN ADD. Every `raw_value`-writing path in
+ *     `canonicalise-value-ops.ts` is gated `op.op !== 'update_node'` (all four
+ *     of them). On an `add_node` there is no prior value to recompute from, so
+ *     a stripped magnitude is gone with NO recovery path.
+ *  3. IT IS READ EVERYWHERE — 745 non-test references in `src/`, against a
+ *     same-family contrast control (`observed_state`) of 684 and a negative
+ *     control of 0, so the sweep discriminates. The canonical formatter reads
+ *     `raw_value` FIRST.
+ *  4. THE ESTATE HAS ALREADY RULED ON THIS COLLISION ONCE: ROADMAP 2.11
+ *     exempted `raw_value` inside the interventions subtree for precisely this
+ *     reason — there it is contract DATA, and screening it context-free killed
+ *     the one chat path that writes option interventions.
+ *
+ * So: a user who says "add a factor for hiring cost, it's £80,000" must not
+ * have that £80,000 deleted on the way in. TODAY such an add is REFUSED, which
+ * is visible and honest. Stripping would make it land silently WITHOUT the
+ * magnitude — trading a visible refusal for an invisible data loss, which is
+ * the exact failure class this change exists to end.
+ *
+ * ⚠ THIS NARROWS THE FIX AND THAT IS DELIBERATE. An `add_node` carrying
+ * `observed_state.raw_value` STILL refuses, and the served prompt's
+ * DERIVED-FIELD RULE ("Include value, raw_value, unit, and cap") means that
+ * will keep happening. Whether `raw_value` should be GRANTED on adds is a
+ * change to what the referee permits — a provenance-contract decision with its
+ * own owner — and is reported as a finding rather than taken here.
+ */
+const STRIP_EXEMPT_ROOTS: ReadonlySet<string> = new Set<string>(['raw_value']);
+
+/**
+ * What the strip may remove: the owned set MINUS the value-bearing exemption,
+ * DERIVED by set difference so it tracks `PIPELINE_OWNED_ROOTS` as that set
+ * widens (it may never narrow). A NEW member is strippable by default, which
+ * is why `strip-pipeline-owned-add-node.test.ts` also PINS the exempt set —
+ * derivation proves the copies agree, only a pinned corpus notices the list
+ * changed and forces the stamp-or-data question to be asked again (trap 12d).
+ */
+const STRIPPABLE_OWNED_ROOTS: ReadonlySet<string> = new Set<string>(
+  [...PIPELINE_OWNED_ROOTS].filter((root) => !STRIP_EXEMPT_ROOTS.has(root)),
+);
+
+/** Exposed so the pin above is assertable rather than assumed. */
+export const STRIP_EXEMPT_ROOTS_FOR_TEST: readonly string[] = [...STRIP_EXEMPT_ROOTS];
+export const STRIPPABLE_OWNED_ROOTS_FOR_TEST: readonly string[] = [...STRIPPABLE_OWNED_ROOTS];
+
+/**
  * Segments that carry NO model-authored content, so they may be named in a
  * disclosure. DERIVED from the sets this module already owns — never a second
  * hand-kept vocabulary. Anything outside it is masked to `*`, the same
@@ -539,7 +603,11 @@ function stripOutside(value: unknown, path: readonly string[], out: string[]): u
   let changed = false;
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     const lower = k.toLowerCase();
-    if (PIPELINE_OWNED_ROOTS.has(lower)) {
+    // ⛔ `STRIPPABLE_OWNED_ROOTS`, not `PIPELINE_OWNED_ROOTS`: `raw_value` is
+    // the native magnitude and is NEVER stripped — see STRIP_EXEMPT_ROOTS. An
+    // add carrying it keeps refusing, visibly, rather than landing without the
+    // user's number.
+    if (STRIPPABLE_OWNED_ROOTS.has(lower)) {
       out.push(describeStrippedKeyShape([...path, lower]));
       changed = true;
       continue;
