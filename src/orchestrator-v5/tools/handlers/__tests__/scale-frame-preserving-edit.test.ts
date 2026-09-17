@@ -203,7 +203,46 @@ describe("edit_graph value ops are frame-preserving on framed capless factors", 
     expect(observed.raw_value).toBe(74000);
   });
 
-  it("a CAPPED factor keeps today's behaviour exactly (cap authority unchanged)", () => {
+  /**
+   * ⚠⚠ THIS ASSERTION WAS DELIBERATELY CHANGED BY THE BARE-UNIT/VALUE LANE
+   * (2026-09-15), AND THE CHANGE IS DISCLOSED RATHER THAN QUIET. Its previous
+   * form, kept here in full because a superseded expectation is evidence:
+   *
+   *     it("a CAPPED factor keeps today's behaviour exactly (cap authority unchanged)")
+   *     // value untouched by reconcile on the capped path (its authority is
+   *     // the handler/canonicaliser, unchanged by this PR).
+   *     expect(observed.value).toBe(74000);
+   *
+   * ⭐ IT WAS A SCOPE PIN, NOT A CORRECTNESS CLAIM. Its own comment says the
+   * authority for `value` on this path "is the handler/canonicaliser" — and
+   * THAT AUTHORITY DISAGREES WITH THE NUMBER THE PIN RECORDED. Derived at the
+   * producer's bytes rather than inferred:
+   *
+   *   1. `normalise-factor-value.ts:311` — `const value = rawInput / cap;`,
+   *      and its header: "When `cap` is defined, value = raw_value / cap".
+   *      For this fixture the named authority writes 0.74, not 74000.
+   *   2. `evaluate-factor-value-proposal.ts:397` is the consumer gate —
+   *      `value < 0 || value > 1`. A stored `value` of 74000 is outside it.
+   *   3. The inverse in that same file resolves `raw = value * cap`, so
+   *      reading `{value: 74000, cap: 100000}` back yields 7.4e9, not 74000.
+   *      The round-trip does not close on the pinned pair; it closes on this
+   *      one.
+   *
+   * ⭐ AND THE CASE DIRECTLY ABOVE ALREADY ANSWERED THIS INPUT THE OTHER WAY:
+   * "a raw-looking new value (74000) is rescaled onto the factor's own frame"
+   * → `{value: 0.74, raw_value: 74000}`. ONE INPUT, TWO WRITERS, TWO ANSWERS,
+   * separated only by whether the divisor was spelled `cap` or recovered as a
+   * frame — the twins defect this module's header exists to warn about. This
+   * change makes the capped arm agree with the framed arm.
+   *
+   * ⚠ ITS SIBLING PIN IS DELIBERATELY UNTOUCHED, and is the contrast control:
+   * "an UNFRAMED capless factor keeps today's behaviour exactly" still expects
+   * `value` 74000, because with NO divisor `value === raw_value` is the
+   * coherent pair. A cap IS a divisor; that is the whole difference, and if
+   * this change had been a blanket "stop leaving value alone" the sibling
+   * would have moved too.
+   */
+  it("a CAPPED factor normalises onto its cap, agreeing with the framed arm", () => {
     const before = { value: 0.5, raw_value: 50000, cap: 100000 };
     const [out] = reconcileObservedValuePair(
       [mergedOp(before, 74000) as never],
@@ -212,9 +251,36 @@ describe("edit_graph value ops are frame-preserving on framed capless factors", 
     const observed = (out as { value: { observed_state: Record<string, unknown> } }).value.observed_state;
     // Capped semantics are resolveExistingRawValue's: 74000 > 1 → already-raw.
     expect(observed.raw_value).toBe(74000);
-    // value untouched by reconcile on the capped path (its authority is the
-    // handler/canonicaliser, unchanged by this PR).
-    expect(observed.value).toBe(74000);
+    // …and the other half of the pair, which nothing was writing: the capped
+    // writer's own arithmetic, `value = raw / cap` (normalise-factor-value.ts:311).
+    expect(observed.value).toBe(0.74);
+    // The pair is coherent under the cap it carries — the property the old
+    // expectation could not hold, stated as the invariant rather than as the
+    // number (trap 13d: invariants come from the spec, not the failure in hand).
+    expect((observed.value as number) * (observed.cap as number)).toBeCloseTo(
+      observed.raw_value as number,
+      9,
+    );
+    // …and inside the consumer's own gate (evaluate-factor-value-proposal.ts:397).
+    expect(observed.value as number).toBeGreaterThanOrEqual(0);
+    expect(observed.value as number).toBeLessThanOrEqual(1);
+  });
+
+  it("a capped factor's LEVEL edit is still untouched — the opposite-direction twin", () => {
+    // ⚠ THE BREADTH CONTROL for the change above. A value INSIDE [0,1] on a
+    // capped factor is a LEVEL, which is exactly what the capped convention
+    // stores, and it must NOT be divided by the cap a second time. Without
+    // this case the change above would pass just as happily if it rescaled
+    // everything (trap 22b: a corpus that tests one direction is a guard
+    // watching one door).
+    const before = { value: 0.5, raw_value: 50000, cap: 100000 };
+    const [out] = reconcileObservedValuePair(
+      [mergedOp(before, 0.74) as never],
+      graphWith(before),
+    );
+    const observed = (out as { value: { observed_state: Record<string, unknown> } }).value.observed_state;
+    expect(observed.value).toBe(0.74);
+    expect(observed.raw_value).toBe(74000);
   });
 });
 

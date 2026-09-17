@@ -720,8 +720,18 @@ describe('route-level: the constraint disclosure in the serialised HTTP envelope
     // It does NOT say the condition went unchecked (#703's false statement).
     expect(turn.assistantText).not.toContain('could not be checked');
     // It does NOT certify safety — no leader is named (#707's false statement).
+    // ⚠ THAT CHECK IS THE LINE BELOW. The line under it used to assert
+    // "no option can be put forward yet" as a PROXY for the same thing, and the
+    // proxy was not equivalent: withholding the LEADER is a claim-safety
+    // entitlement (`MAY_NAME_LEADING_OPTION`, enforced by
+    // `compose/leading-option-egress-guard.ts`), while "no option can be put
+    // forward" asserts the RANKING is void. Measured live on 16 Sep 2026, those
+    // came apart: a user was told no option could be put forward while
+    // `analysis_ready` logged 5 ready options and 0 blockers. The entitlement
+    // check stays; the proxy is replaced by the voice's true consequence.
     expect(turn.assistantText).not.toContain('Hire Marketing Manager');
-    expect(turn.assistantText).toContain('no option can be put forward yet');
+    expect(turn.assistantText).toContain('cannot be counted as part of the comparison');
+    expect(turn.assistantText).not.toContain('no option can be put forward yet');
     // And it offers ITS repair step, not the units one.
     expect(turn.assistantText).toContain(
       'State the condition in your own words and run the analysis again',

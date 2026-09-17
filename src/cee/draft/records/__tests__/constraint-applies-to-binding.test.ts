@@ -893,7 +893,25 @@ describe("a stated FLOOR binds with the floor operator, through the reference", 
  * in `ask.items`, so telemetry and `shouldKeepCompletion` still see it. What is
  * withheld is the instruction to a model that cannot follow it.
  */
-describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD from the model", () => {
+describe("⭐ a stated-limit refusal is now PUT TO THE MODEL — and the user's words still are not", () => {
+  /**
+   * ⚠⚠ THIS BLOCK ASSERTED THE OPPOSITE UNTIL 15 Sep 2026, AND THE INVERSION IS
+   * DELIBERATE. It was right then: repairing a refused limit is a change on the
+   * `stated_items[]` axis, the completion grammar carried only `claims`, so
+   * putting the ask to the model would have been an advertised action
+   * terminating in refusal.
+   *
+   * What changed is the GRAMMAR, not the judgement. `constraint_corrections`
+   * carries `stated_index` + subject + `direction` + `value` together, so the
+   * repair is expressible and the ask is honest. Measured cause: the brief's
+   * "keeping monthly churn under 4%" reached the graph in 0 of 20 pricing
+   * drafts while the goal from the same sentence bound.
+   *
+   * ⭐ THE PROPERTY THIS BLOCK DEFENDS IS UNCHANGED — the model is asked only
+   * what it has a field to answer. Hence `no_goal` is still withheld at the
+   * foot of this block, and `stated_items` is still absent: a correction says
+   * what an existing limit BOUNDS, never what the user SAID.
+   */
   const askFor = (records: unknown) => {
     const r = projectDraftRecords(records, BRIEF);
     if (!r.ok) throw new Error(`seam refused: ${r.reason}: ${r.detail}`);
@@ -908,13 +926,16 @@ describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD f
    * must be RE-DERIVED rather than quietly keep passing on a stale premise
    * (trap 12b — a control pinned to something that moves).
    */
-  it("PRECONDITION — the completion grammar exposes `claims` only, and is closed", () => {
+  it("PRECONDITION — the grammar gained a correction axis and is still closed", () => {
     const schema = buildRecordsCompletionSchema();
-    expect(Object.keys(schema.properties as Record<string, unknown>)).toEqual(["claims"]);
+    expect(Object.keys(schema.properties as Record<string, unknown>).sort()).toEqual([
+      "claims",
+      "constraint_corrections",
+    ]);
     expect(schema.additionalProperties).toBe(false);
   });
 
-  it("a target that cannot carry a threshold is asked ABOUT but not asked OF the model", () => {
+  it("a target that cannot carry a threshold is asked ABOUT and asked OF the model", () => {
     const { ask, projection } = askFor(churnRecords({ applies_to_stated: 0 }, { linkToGoal: true }));
     // The trap is genuinely set: the projector really refused, for this reason.
     expect(projection.dropped.map((d) => d.reason)).toContain("constraint_target_not_measurable");
@@ -924,10 +945,10 @@ describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD f
       (i) => i.kind === "constraint_target_unbindable" && i.detail.includes(LIMIT_QUOTE),
     );
     expect(item, "the refusal must still be enumerated — the record stays honest").toBeDefined();
-    expect(modelAnswerableAskItems(ask)).not.toContain(item);
+    expect(modelAnswerableAskItems(ask)).toContain(item);
   });
 
-  it("a cross-quantity refusal is likewise enumerated and withheld", () => {
+  it("a cross-quantity refusal is likewise enumerated AND answerable", () => {
     const { ask, projection } = askFor({
       stated_items: [
         { kind: "goal", source_quote: "grow net revenue", role: "target" },
@@ -951,7 +972,7 @@ describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD f
       (i) => i.kind === "constraint_target_unbindable" && i.detail.includes(LIMIT_QUOTE),
     );
     expect(item).toBeDefined();
-    expect(modelAnswerableAskItems(ask)).not.toContain(item);
+    expect(modelAnswerableAskItems(ask)).toContain(item);
   });
 
   /**
@@ -960,7 +981,7 @@ describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD f
    * the same reason a bad `to_claim` raises, where the repair IS expressible.
    * This is the case a two-reason fix would leave open.
    */
-  it("an out-of-range reference on a LIMIT is withheld too, though its reason is shared", () => {
+  it("an out-of-range reference on a LIMIT is answerable too, its reason still shared", () => {
     const { ask, projection } = askFor(churnRecords({ applies_to_claim: 99 }, { linkToGoal: true }));
     expect(projection.dropped.map((d) => d.reason)).toContain("ref_out_of_range");
 
@@ -968,7 +989,7 @@ describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD f
       (i) => i.kind === "constraint_target_unbindable" && i.detail.includes(LIMIT_QUOTE),
     );
     expect(item, "a bad limit reference is still a stated-limit refusal").toBeDefined();
-    expect(modelAnswerableAskItems(ask)).not.toContain(item);
+    expect(modelAnswerableAskItems(ask)).toContain(item);
   });
 
   /**
@@ -1003,7 +1024,7 @@ describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD f
    * refuses, and for whatever reason, no item built from a `stated_item` row
    * reaches the model while the grammar cannot express the repair.
    */
-  it("NO STATED-LIMIT REFUSAL REACHES THE MODEL — over every reason the binder raises", () => {
+  it("EVERY stated-limit refusal the binder raises now REACHES the model", () => {
     const corpus: ReadonlyArray<readonly [string, unknown]> = [
       ["goal target", churnRecords({ applies_to_stated: 0 }, { linkToGoal: true })],
       ["both namespaces", churnRecords({ applies_to_claim: 0, applies_to_stated: 0 }, { linkToGoal: true })],
@@ -1026,13 +1047,21 @@ describe("⛔ a stated-limit refusal is enumerated for the record and WITHHELD f
       // is "does any refusal ABOUT THIS STATED LIMIT reach the model", so it is
       // asked over the REFUSED ROW'S OWN LABEL, whatever kind carries it.
       const answerable = modelAnswerableAskItems(ask);
+      // ⭐ The verdict flips; the reasoning that made it kind-agnostic does not.
+      // It still asks "does a refusal ABOUT THIS STATED LIMIT reach the model",
+      // over the refused row's own label, whatever kind carries it.
       for (const row of statedRows) {
         expect(
-          answerable.filter((i) => i.detail.includes(row.label)).map((i) => `${i.kind}: ${i.detail}`),
-          `${name}: no refusal about "${row.label}" may be put to the model`,
-        ).toEqual([]);
+          answerable.some((i) => i.detail.includes(row.label)),
+          `${name}: the refusal about "${row.label}" must be put to the model`,
+        ).toBe(true);
       }
     }
     expect(statedRefusalsSeen).toBeGreaterThanOrEqual(corpus.length);
+  });
+
+  it("and `no_goal` is STILL withheld — this grammar cannot mint a stated item", () => {
+    const props = buildRecordsCompletionSchema().properties as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(props, "stated_items")).toBe(false);
   });
 });

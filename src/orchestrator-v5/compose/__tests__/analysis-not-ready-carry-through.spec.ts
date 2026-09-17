@@ -81,10 +81,10 @@ function build(
  * never happened (CLAUDE.md trap 14b). If the wording moves, ADD a new list —
  * which is exactly what {@link QUESTIONS_NOW} is.
  *
- * ⚠ THREE OF THESE SIX ARE NO LONGER WHAT THE PRODUCT SAYS. See
- * {@link QUESTIONS_NOW} for the current wording and the reasoning. This list is
- * retained deliberately, and the divergence is asserted below rather than
- * quietly erased.
+ * ⚠ ALL SIX ARE NOW NO LONGER WHAT THE PRODUCT SAYS — three moved on 26 Aug and
+ * the remaining three on 15 Sep. See {@link QUESTIONS_NOW} for the current
+ * wording and the reasoning for each wave. This list is retained deliberately,
+ * and the divergence is asserted below rather than quietly erased.
  *
  * Still load-bearing as a TEST INPUT: the carry-through tests feed this list to
  * the composer to prove it names every question it is handed. That property is
@@ -101,14 +101,37 @@ const QUESTIONS_AS_EMITTED_2026_08_20: readonly string[] = [
 ];
 
 /**
- * ⭐⭐ WHAT THE PRODUCT SAYS NOW (2026-08-26) — and the confession of what moved.
+ * ⭐⭐ WHAT THE PRODUCT SAYS NOW — and the confession of what moved, in TWO
+ * SEPARATELY-DATED WAVES that are kept apart on purpose.
  *
- * THREE OF THE SIX CHANGED, and they are exactly the three `MISSING_OPTION_VALUE`
- * questions. The three `OPTION_NEEDS_MAPPING` questions are BYTE-IDENTICAL to
- * the 20 Aug record, which is the discriminating half of the change: a blanket
- * rewrite would have moved all six.
+ * WAVE 1 (2026-08-26) — the three `MISSING_OPTION_VALUE` questions, indices 0-2.
+ * WAVE 2 (2026-09-15) — the three `OPTION_NEEDS_MAPPING` questions, indices 3-5.
  *
- * WHY THEY MOVED. `blockerIssue` was DISCARDING the producer's own sentence and
+ * ⚠ THE OLD DISCRIMINATOR IS GONE AND HAS BEEN REPLACED, NOT DROPPED. Until
+ * wave 2 the mapping questions were BYTE-IDENTICAL to the 20 Aug record, and
+ * that identity was this list's discriminating half — proof that wave 1 was not
+ * a blanket rewrite. Wave 2 moves them deliberately, so identity can no longer
+ * carry that proof. It is replaced below by a STRICTLY STRONGER assertion: each
+ * mapping question must still BEGIN with its 20 Aug sentence verbatim and differ
+ * only by an appended disclosure. A blanket rewrite of the ask would break the
+ * prefix and RED, exactly as the identity check used to.
+ *
+ * WHY WAVE 2 MOVED. The deterministic connectivity repair had already wired each
+ * of these three options to three factors (verified on this very capture: nine
+ * `origin: "repair"` option→factor edges, three per option), and the product
+ * then asked which factor the option changes as though it had never touched it.
+ * `connectedFactorCount` excluding repair-authored edges is correct and is NOT
+ * changed — the product must not count its own wiring as a mapping the user
+ * made — so the ask is still put, verbatim, and the disclosure is appended to
+ * it. See `tests/integration/repair-wiring-does-not-re-ask.test.ts`.
+ *
+ * ⚠ AND THE SAME CAPTURE CARRIES THE OTHER HALF OF THAT DEFECT, UNEDITED: all
+ * nine repair edges are stamped `"Status-quo option wired to factor"` on options
+ * named "Electrify one-third of fleet", "Subcontract inner-city runs" and "Pay
+ * daily clean-air charges" — none of which is a status-quo option. The fixture
+ * is a dated record and is deliberately left as it is (trap 14b).
+ *
+ * WHY WAVE 1 MOVED. `blockerIssue` was DISCARDING the producer's own sentence and
  * synthesising a substitute, which the shared contract explicitly forbids
  * ("rendered VERBATIM … a consumer must not … SYNTHESISE A SUBSTITUTE WHEN IT
  * DISLIKES THE WORDING"). For the pair-scoped `missing_value` class the
@@ -131,9 +154,9 @@ const QUESTIONS_NOW: readonly string[] = [
   'Factor "Subcontractor cost as share of affected-route revenue" is currently Moderate (0.5). What should option "subcontracting inner-city deliveries to a green courier" set it to?',
   'Factor "Annual clean-air charge burden" is currently Moderate (0.5). What should option "paying the daily charges and passing costs to customers" set it to?',
   'Factor "Net EV capex after grants and resale of displaced diesels" is currently Moderate (0.5). What should option "replacing a third of the diesel fleet with electric vans now" set it to?',
-  'Choose which factor "Electrify one-third of fleet (EV capex route)" changes and by how much.',
-  'Choose which factor "Subcontract inner-city runs to green courier" changes and by how much.',
-  'Choose which factor "Pay daily clean-air charges and pass through to customers" changes and by how much.',
+  "Choose which factor \"Electrify one-third of fleet (EV capex route)\" changes and by how much. Olumi has already linked it to 3 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
+  "Choose which factor \"Subcontract inner-city runs to green courier\" changes and by how much. Olumi has already linked it to 3 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
+  "Choose which factor \"Pay daily clean-air charges and pass through to customers\" changes and by how much. Olumi has already linked it to 3 factors to keep the model connected, but that link is Olumi's own inference rather than a mapping you stated, and it carries no effect value.",
 ];
 
 const WITNESSED_NEXT_STEP = 'Review all 6 readiness issues together before analysis.';
@@ -323,26 +346,42 @@ describe('the questions are the producer\'s, derived not authored', () => {
    * about THEN, the other an expectation about NOW. Keeping both and pinning the
    * difference is what stops a future reader mistaking a wording change for a
    * wording that never changed — and it REDs if the delta ever grows or shrinks,
-   * so a later blanket rewrite of the other three classes cannot slip through.
+   * so a later blanket rewrite of any class cannot slip through.
+   *
+   * ⛔ ALL SIX HAVE NOW MOVED, IN TWO WAVES, AND THE TWO WAVES ARE ASSERTED
+   * SEPARATELY BY THEIR MECHANISM — never by a bare "they differ". Each wave has
+   * its own signature, so this test still fails if a question moves for the
+   * WRONG reason, which a count of changed indices could not detect.
    */
-  it('⭐ EXACTLY THREE of the six moved — the MISSING_OPTION_VALUE ones, and no others', () => {
+  it('⭐ ALL SIX moved, in two waves, each with its own signature', () => {
     const changed = QUESTIONS_AS_EMITTED_2026_08_20
       .map((was, i) => ({ was, now: QUESTIONS_NOW[i], i }))
       .filter((row) => row.was !== row.now);
 
-    expect(changed.map((row) => row.i)).toEqual([0, 1, 2]);
+    expect(changed.map((row) => row.i)).toEqual([0, 1, 2, 3, 4, 5]);
 
-    // The three that moved are the pair-scoped value questions: they gained the
-    // factor's current value and the direct question.
-    for (const row of changed) {
+    // WAVE 1 — the pair-scoped value questions gained the factor's current value
+    // and the direct question, and they REPLACED the old sentence outright.
+    for (const row of changed.slice(0, 3)) {
       expect(row.was).toContain('Choose the missing effect value for');
       expect(row.now).toContain('is currently');
       expect(row.now).toContain('set it to?');
+      expect(row.now.startsWith(row.was)).toBe(false);
     }
 
-    // ⛔ AND THE MAPPING QUESTIONS ARE UNTOUCHED — byte-identical to the record.
-    // This is the discriminating half: a blanket change would move these too.
-    expect(QUESTIONS_NOW.slice(3)).toEqual(QUESTIONS_AS_EMITTED_2026_08_20.slice(3));
+    // ⛔ WAVE 2 — THE DISCRIMINATING HALF, replacing the byte-identity that used
+    // to carry it. The mapping questions did NOT get rewritten: each still BEGINS
+    // with its 20 Aug sentence verbatim and differs only by an appended
+    // disclosure. A blanket rewrite of the ask breaks the prefix and REDs here,
+    // and a fix that silenced the ask entirely would break it too.
+    for (const row of changed.slice(3)) {
+      expect(row.was).toContain('Choose which factor');
+      expect(row.now.startsWith(row.was)).toBe(true);
+      const appended = row.now.slice(row.was.length);
+      expect(appended).toContain('already linked it to');
+      expect(appended).toContain("Olumi's own inference rather than a mapping you stated");
+      expect(appended).toContain('carries no effect value');
+    }
   });
 
   it('OPPOSITE DIRECTION — a verdict with no enumerable inputs yields no questions', () => {

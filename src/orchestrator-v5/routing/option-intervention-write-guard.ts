@@ -3,37 +3,65 @@
  * WRITE BOUND TO THE WRONG ENTITY IS WITHHELD, NOT APPLIED.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * ⚠⚠ THE SCOPE OF THAT CLAIM, STATED BEFORE ANYTHING ELSE — IT IS NARROWER
- * THAN "THE WRONG-ENTITY WRITE IS WITHHELD", AND THE UNQUALIFIED VERSION IS
- * FALSE FOR A REACHABLE CLASS.
+ * ⚠⚠ SCOPE, STATED BEFORE ANYTHING ELSE — AND IT HAS MOVED TWICE. READ BOTH
+ * HALVES; THE SUPERSEDED HALF IS KEPT BECAUSE IT NAMES THE MECHANISM.
  *
- * This module covers an option that carries **no effect values at all**. A
- * **PARTIALLY-CONFIGURED** option — one already holding a value on some other
- * factor — is outside it entirely, and the wrong-entity write still persists
- * for that class, false-success reply and all.
+ * ── SUPERSEDED (accurate until the deliberate-edit lane, 15 Sep 2026) ──────
+ * ~~This module covers an option that carries **no effect values at all**. A
+ * **PARTIALLY-CONFIGURED** option is outside it entirely, and the wrong-entity
+ * write still persists for that class, false-success reply and all.~~
  *
- * Measured at this tip, not reasoned about. `hasNumericInterventions` in
- * `analysis-ready-helper.ts` marks an option `ready` on ANY one numeric
- * intervention, and `resolveConfigureOptionFacts` searches only the
- * `needs_encoding` list, so a named-but-partially-configured option falls
- * through before this guard is ever consulted. Driving the identical
- * wrong-entity write against the two shapes:
+ * The mechanism that caused it, which is still worth knowing:
+ * `hasNumericInterventions` in `analysis-ready-helper.ts` marks an option
+ * `ready` on ANY one numeric intervention, and `resolveConfigureOptionFacts`
+ * searched only the OUTSTANDING-SLOT projection — so a named-but-configured
+ * option fell through before this guard was ever consulted. **A drafted graph
+ * arrives already populated, so every later edit is a REVISION, and a revision
+ * has no outstanding slot: the guard protected the FIRST configuration of a
+ * model and never a correction to one.** Measured live on deployed CEE staging,
+ * 14 Sep 2026: `evaluateConfigureOptionOutcome` returned `not_applicable` on
+ * **46 of 46** real captured turns while the shipped detector matched 46/46.
  *
- *   option with NO effect values   → outcome `not_honoured` → **withhold**
- *   option with ONE effect value   → outcome `not_applicable` → **allow**
+ * ── CURRENT ───────────────────────────────────────────────────────────────
+ * `configure-option-outcome.ts` now splits TARGET RESOLUTION from COPY
+ * REPLACEMENT and emits `not_honoured_no_copy` for a resolvable option with no
+ * honest sentence. This guard accepts BOTH verdicts, so a REVISION is protected
+ * on the same terms as a first configuration. Driving the identical
+ * wrong-entity write against the two shapes now:
  *
- * ⚠ The skip REASON on that second row is fixture-dependent, and both my first
- * report and the first review named one of them as "the" measured reason —
- * the same scope generalisation this file keeps warning about. It is
- * `option_not_identified` when the named option is the only unconfigured one,
- * and `option_not_named` when another unconfigured option exists and the
- * resolver's sole-unconfigured fallback retargets. Behaviourally identical
- * (both allow); quote both, or neither.
+ *   option with NO effect values   → `not_honoured`          → **withhold**
+ *   option with ONE effect value   → `not_honoured_no_copy`  → **withhold**
  *
- * `configure-option-outcome.ts` names this case as reachable in its own P1
- * note. Widening it is a separate, rowed piece of work — it changes which
- * options the 2.427 TEXT guard speaks about, not just this write guard, and
- * that is a bigger blast radius than this lane owns.
+ * ⚠⚠ WHAT IS STILL OUT OF SCOPE — FOUR CLASSES, NOT A FOOTNOTE, AND AN EARLIER
+ * VERSION OF THIS PARAGRAPH LISTED ONLY THE FIRST. A scope statement that is
+ * short is read as a scope statement that is complete.
+ *
+ *   1. A message naming NO option, or TWO, reaches no verdict ⇒ **allowed**.
+ *      Deliberate — see W1; withholding on an unnamed subject discards
+ *      correct, explicitly-requested edits wholesale, the direction that
+ *      destroys user work.
+ *   2. A wrong-**FACTOR** write on the named option is `honoured` ⇒ **commits**.
+ *      `interventionsWriteLandedFor` binds to the OPTION and asks only whether
+ *      any key moved. Closing it needs a referring-expression predicate over
+ *      FACTOR labels — class (4).
+ *   3. A wrong-**OPTION** write reaches a correct verdict and still
+ *      **commits**, because `anyInterventionWriteLanded` is true. That
+ *      conjunct is load-bearing (see below); removing it withholds legitimate
+ *      multi-option edits.
+ *   4. **The protected domain is "the message contains the option's full
+ *      label, verbatim."** Measured: 6 of 8 natural referring expressions —
+ *      pronouns, partial labels, positional references, paraphrases — leave
+ *      the identical witnessed corruption in place.
+ *
+ * Classes 2 and 3 are pinned at the STORED OBJECT in
+ * `configure-option-revision-acceptance.test.ts` (`RESIDUAL F2/a`, `F2/b`).
+ * ⚠ Those pins catch the class SHRINKING, not GROWING — a new way to leak past
+ * the guard leaves them green; the surrounding suite is what catches growth.
+ *
+ * ⛔ THE EXIT FOR ALL FOUR IS TO **ASK**, NOT TO WIDEN. Widening the
+ * referring-expression class is the natural-language predicate CLAUDE.md trap
+ * 22f rules unwinnable by better rules — four rounds oscillated on one such
+ * predicate, each fixing one direction and opening the other.
  *
  * **A narrowed true claim is worth more than a broad one that is false**, and
  * the overclaim enters at the moment of recording (trap 20), which is why the
@@ -97,8 +125,15 @@
  * 21), and its `named_in_message` requirement is what keeps this identity-bound
  * rather than a guess (trap 19). The one further question asked here is:
  *
- *   *Did this turn move the baseline of a factor THIS OPTION IS WIRED TO, while
- *    writing no effect value for ANY option?*
+ *   *Did this turn move the baseline of a factor THIS OPTION IS WIRED TO — or
+ *    one of THIS OPTION'S OWN OUTGOING EDGES — while writing no effect value
+ *    for ANY option?*
+ *
+ * ⭐ The edge disjunct was added by the deliberate-edit lane and is documented
+ * at `optionEdgeWritesLanded`. It is a STRICTER guard, not a wider one: its
+ * identity binding (`edge.from === optionId`) is tighter than the node arm's,
+ * and it is orthogonal to the W1 false positive below, which moves a node and
+ * no edge at all.
  *
  * All three conjuncts are load-bearing and all three are narrow ON PURPOSE:
  *
@@ -106,7 +141,11 @@
  *     somewhere, the turn accomplished a real option edit and discarding it
  *     would be a new harm. Checked across all options, not just the named one,
  *     because the outcome verdict already says the named one missed out.
- *   - **"a node baseline moved"** — this is the wrong-entity signature.
+ *   - **"a node baseline moved, or one of the option's own edges moved"** —
+ *     this is the wrong-entity signature. Both captures that motivated the two
+ *     rows are in it: a factor `observed_state` (2.1266) and an option→factor
+ *     edge `strength.mean` / `exists_probability` (2.427, and the live capture
+ *     in `wrong-entity-write-capture.fixture.ts`).
  *   - **"a factor THIS OPTION IS WIRED TO"** — the identity binding, added
  *     after an adversarial review executed a false positive against the
  *     version that lacked it. See `optionLinkedNodeIds`.
@@ -156,6 +195,10 @@
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
 import { evaluateConfigureOptionOutcome } from './configure-option-outcome.js';
+import {
+  messageAnchorsOnOption,
+  projectOptionLabels,
+} from './configure-option-intent.js';
 
 /** Why the write was allowed to proceed. Every value is today's behaviour. */
 export type OptionInterventionWriteAllowReason =
@@ -163,11 +206,17 @@ export type OptionInterventionWriteAllowReason =
   | 'no_write'
   /** Pre- or post-edit graph does not strict-parse; the harm is unestablished. */
   | 'graph_unparseable'
-  /** The configure-option outcome guard reached no `not_honoured` verdict. */
+  /**
+   * The configure-option outcome guard reached no write-protecting verdict —
+   * neither `not_honoured` nor `not_honoured_no_copy`.
+   */
   | 'outcome_not_unhonoured'
   /** An effect value DID land for some option — a real option edit. */
   | 'interventions_write_landed'
-  /** No node's own value moved; the write was not the wrong-entity kind. */
+  /**
+   * Neither a node's own value NOR one of the option's outgoing edges moved;
+   * the write was not the wrong-entity kind.
+   */
   | 'no_baseline_write'
   /**
    * A baseline DID move, but on a node the named option is not wired to — so
@@ -186,6 +235,65 @@ export type OptionInterventionWriteVerdict =
       readonly optionLabel: string;
       /** Node ids whose own value this turn moved — what is being discarded. */
       readonly baselineNodeIds: readonly string[];
+      /**
+       * `<from>-><to>` for each of the NAMED OPTION'S OWN outgoing edges whose
+       * `strength.mean` or `exists_probability` this turn moved.
+       *
+       * Deliberately NOT folded into `baselineNodeIds`: a moved edge and a
+       * moved node value are two different facts about what was discarded, and
+       * `formatWithheldWriteNotice` may only name a NODE it can truthfully call
+       * unchanged. On an edge-only withhold the node really is unchanged — it
+       * is the LINK that moved — so the notice correctly falls back to its
+       * unqualified sentence rather than naming the factor.
+       */
+      readonly optionEdgeKeys: readonly string[];
+    }
+  | {
+      /**
+       * ⭐⭐ THE SCOPE COULD NOT BE RESOLVED, SO THE WRITE MUST NOT LAND.
+       *
+       * MEASURED on deployed `a3b0548d`, wire-level, FRESH. The user typed
+       * "Change the buy option so the vendor cost is £150,000 per year instead
+       * of £120,000." The turn MINTED a model-wide baseline on factor
+       * `8f788330` — `observed_state` moved from null to a raw value of 150000
+       * stamped as a user override — left the named option's own intervention at
+       * 60000, replied "Updated Vendor Licensing Cost", and COMMITTED
+       * (`graph_hash` a0b39d86 → 84013c95). Contrast control, same battery: the
+       * pricing shape moved ZERO baselines.
+       *
+       * WHY THE EXISTING ARMS MISSED IT, executed against the real message and
+       * the real captured graph:
+       *   evaluateConfigureOptionOutcome -> {status:"not_applicable",
+       *                                     reason:"not_configure_intent"}
+       *   decideOptionInterventionWrite  -> {verdict:"allow",
+       *                                     reason:"outcome_not_unhonoured"}
+       * The OPTION ANCHOR matches — the sentence contains the word "option" —
+       * and `classifyConfigureOptionTrigger` returns null, so the whole
+       * detection reads "not about configuring an option" and the write arm,
+       * gating on `matched`, permits it. This module's header already records
+       * fixing one inheritance of exactly this shape ("the WRITE protection
+       * inherit[ed] the COPY predicate's domain"); the INTENT-DETECTOR
+       * inheritance was never removed.
+       *
+       * ⚠ AN ANCHOR IS NOT AN IDENTITY. This verdict deliberately carries no
+       * `optionId`, because none resolved: the resolver matches an option by its
+       * FULL LABEL phrase and "the buy option" is not "Buy Off-the-Shelf
+       * Reporting Tool". Guessing which option was meant is the fabricated-write
+       * this module exists to prevent, and a sole-candidate tie-break is
+       * forbidden by `resolveConfigureOptionTarget`'s own header. So the turn
+       * ASKS instead — unresolved identity asks, it does not write.
+       *
+       * ⚠ AND IT IS NOT "EVERY BASELINE EDIT IS FORBIDDEN". An explicit
+       * model-wide edit ("set Vendor Licensing Cost to £150,000") carries no
+       * option anchor at all, so it never reaches this arm and still lands. The
+       * anchor is what separates the two, and it is computed from the message
+       * the user actually sent, not from the write.
+       */
+      readonly verdict: 'scope_unresolved';
+      /** Node ids whose model-wide value this turn moved — what is withheld. */
+      readonly baselineNodeIds: readonly string[];
+      /** Option labels the user could pick between, for the ask. */
+      readonly optionLabels: readonly string[];
     };
 
 /** Every effect value the graph holds, keyed `<optionId>::<factorId>`. */
@@ -300,6 +408,96 @@ export function baselineWritesLanded(before: GraphV3T, after: GraphV3T): string[
   return moved;
 }
 
+/**
+ * ⭐⭐⭐ THE EDGE ARM — the originally-witnessed wrong-entity write, which
+ * `baselineWritesLanded` above is STRUCTURALLY BLIND TO.
+ *
+ * ── THE DEFECT, measured at the stored object ─────────────────────────────
+ * `baselineWritesLanded` reads only node `observed_state.value`. An EDGE-only
+ * write therefore yields `movedNodeIds.length === 0`, the guard returns
+ * `allow` / `no_baseline_write`, and the wrong mutation PERSISTS — with
+ * `evaluateConfigureOptionOutcome` having already replaced the prose. **Honest
+ * text over a persisted wrong mutation** is the precise state this module's own
+ * header says it exists to prevent, surviving in the case it was built from:
+ *
+ *   factor `observed_state`   → withhold   (the node arm — already covered)
+ *   edge `strength.mean`      → allow      ⛔ PERSISTED
+ *   edge `exists_probability` → allow      ⛔ PERSISTED
+ *
+ * ⭐ AND IT IS THE ORIGINAL DEFECT, NOT A NEW CLASS.
+ * `configure-option-outcome.ts`'s header witnesses an EDGE-STRENGTH write as
+ * the 2.427 capture (`opt_cloud_native → fac_adoption_complexity`,
+ * `strength.mean = 0.7`, `interventions` absent), and this module's own live
+ * capture fixture is an `exists_probability` write (1 → 0.79). **2.427 fixed
+ * the TEXT; 2.1266 withheld the WRITE for node baselines only.** The
+ * originally-witnessed edge write persisted the whole time, under both guards.
+ *
+ * ── WHY THIS IS A STRICTER GUARD, NOT A WIDER ONE ─────────────────────────
+ * Its identity binding is TIGHTER than the node arm's. The node arm must ask
+ * whether the moved node is one the option happens to be wired to — a shared
+ * baseline every option reads, which is why the W1 false positive lives there.
+ * An edge whose `from` IS the named option is unambiguously ABOUT that option:
+ * there is no other entity it could belong to. So this arm cannot convert an
+ * honest refusal into a corruption, and it is orthogonal to W1, whose measured
+ * shape (*"change Fuel price to 1.40"*) moves a node and no edge at all.
+ *
+ * ── SCOPE, STATED AS A BOUND (trap 20) ────────────────────────────────────
+ * Reads `strength.mean` and `exists_probability` ONLY — the two numeric claims
+ * the captures actually moved. `effect_direction`, `provenance` and
+ * `validation` are excluded on the same reasoning that excludes
+ * `display_value` from the node arm: a guard that fired on them would withhold
+ * on descriptive edits, the direction that destroys user work.
+ *
+ * Read from the BEFORE graph's edge set, so the edit under suspicion cannot
+ * invent an edge that justifies withholding it.
+ */
+export function optionEdgeWritesLanded(
+  before: GraphV3T,
+  after: GraphV3T,
+  optionId: string,
+): string[] {
+  const numeric = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  const claims = (edge: GraphV3T['edges'][number]): string => {
+    const strength = (edge as { strength?: { mean?: unknown } }).strength;
+    return JSON.stringify([
+      numeric(strength?.mean) ?? null,
+      numeric((edge as { exists_probability?: unknown }).exists_probability) ?? null,
+    ]);
+  };
+
+  const pre = new Map<string, string>();
+  for (const edge of before.edges) {
+    if (edge.from !== optionId) continue;
+    pre.set(`${edge.from}->${edge.to}`, claims(edge));
+  }
+
+  const moved: string[] = [];
+  const seen = new Set<string>();
+  for (const edge of after.edges) {
+    if (edge.from !== optionId) continue;
+    const key = `${edge.from}->${edge.to}`;
+    seen.add(key);
+    // A NEW edge is a structural add, not a rewrite of an existing claim —
+    // same posture as the node arm's treatment of a new node.
+    if (!pre.has(key)) continue;
+    if (pre.get(key) !== claims(edge)) moved.push(key);
+  }
+
+  // ⭐ A DELETED EDGE IS A WRITE TOO, and omitting it was a hole in this arm.
+  //
+  // The first cut of this function only walked `after.edges`, so an edge
+  // present in `before` and ABSENT afterwards was never looked at: severing
+  // the option's link to the factor the user named — the most destructive
+  // wrong-entity outcome available — read as "no edge write" and was ALLOWED.
+  // `anyInterventionWriteLanded` already treats a REMOVED effect value as a
+  // write for exactly this reason; this arm now matches that posture.
+  for (const key of pre.keys()) {
+    if (!seen.has(key)) moved.push(key);
+  }
+  return moved;
+}
+
 /** At most this many factor names are spelled out before the notice summarises. */
 const MAX_NAMED_IN_NOTICE = 3;
 
@@ -354,6 +552,169 @@ export function resolveNodeLabels(graph: GraphV3T, nodeIds: readonly string[]): 
 }
 
 /**
+ * The scope check that runs when the outcome arm does not apply.
+ *
+ * Returns a verdict only in the narrow state where ALL of these hold:
+ *   1. the message ANCHORS on an option (it contains "option(s)", or a full
+ *      option label) — so the turn is recognisably about one;
+ *   2. no option IDENTITY resolves from it — so which one is unknown;
+ *   3. a model-wide baseline write landed;
+ *   4. no intervention write landed — so the user did not get an option-scoped
+ *      change either.
+ *
+ * Any one of those failing returns null and the caller proceeds unchanged. In
+ * particular (1) is what keeps explicit model-wide edits working: a message
+ * that never mentions an option is not in scope here at all.
+ *
+ * ⚠ CONDITION 4 IS LOAD-BEARING, not defensive. A turn that moved a baseline
+ * AND landed an intervention is a compound edit that partly did what was asked,
+ * and discarding it would destroy the user's work — the measured false positive
+ * this module's identity-binding note already warns about.
+ */
+function decideUnresolvedOptionScope(
+  message: string,
+  before: GraphV3T,
+  after: GraphV3T,
+): OptionInterventionWriteVerdict | null {
+  const optionLabels = projectOptionLabels(before.nodes);
+
+  // ⭐ REVIEWER FINDING 1 (REVIEW1512), and it is the load-bearing correction.
+  //
+  // This arm previously returned early on `detection.matched`, so the SAME wrong
+  // baseline mutation was allowed for "Set Vendor Licensing Cost to £150,000 per
+  // year for the buy option." — matched vocabulary, unresolved identity, write
+  // permitted. The gate is about SCOPE, and scope does not depend on whether the
+  // mutation vocabulary happened to classify. So the classifier is not consulted
+  // here at all: the ANCHOR is asked directly, from its one owner.
+  if (!messageAnchorsOnOption(message, optionLabels)) return null;
+
+  // ⭐ REVIEWER FINDING 2. An EXPLICITLY model-wide request is not an unknown
+  // target — it is a known one. "Across all options, change Vendor Licensing Cost
+  // so the model-wide baseline is £150,000" was newly REFUSED by the first cut,
+  // because the only global control was a sentence that never said "options".
+  //
+  // ⚠ This is a CLOSED set of universal quantifiers over the option word, not a
+  // mutation vocabulary: it cannot grow with phrasings the way an intent
+  // classifier does, which is the class this estate has paid four oscillation
+  // rounds for (trap 22f). It says "the user quantified over ALL options", and
+  // nothing about what they want done.
+  if (isAffirmativeGlobalRequest(message)) return null;
+
+  // ⭐ PLURAL IS NOT UNRESOLVED — and conflating them made this arm pre-empt a
+  // guard that already owns the turn.
+  //
+  // MEASURED: "Revise Coverage Pilot to staff 30% of support hours, down from
+  // 70%. Keep Current Coverage at 40%…" names TWO options DELIBERATELY. The
+  // first cut resolved identity as `maximal.length === 1 ? label : null`, so two
+  // named targets read as "we do not know which option" and this arm refused a
+  // turn whose premise another module is built on — `option-observed-state-
+  // substitution.test.ts` pins that the write guard ALLOWS it, and its comment
+  // says outright that a change there means "the premise of this whole module
+  // has changed". It had.
+  //
+  // Zero resolved options is the unresolved case this arm exists for. TWO is a
+  // multi-target request, and `detectOptionOwnValueSubstitution` owns it.
+  // ⛔ ESCAPE 2 (reviewer, executed): standing down because an identity RESOLVED
+  // was wrong. "Change Buy Off-the-Shelf Reporting Tool so the vendor cost is
+  // £150,000…" resolved its label and returned allow — because the existing arms
+  // do NOT protect that write either. Merely resolving a label is not evidence
+  // that a downstream guard owns the mutation, and I had assumed it was.
+  //
+  // The PLURAL case that forced the previous change is handled by the FACTOR
+  // restriction below instead: it moved the OPTIONS' OWN `observed_state`, not a
+  // factor's, and an option's own value belongs to
+  // `detectOptionOwnValueSubstitution`. So the arm is now scoped by WHAT MOVED
+  // rather than by how many labels the sentence happened to contain.
+
+  // ⭐ IDENTITY, RESOLVED INDEPENDENTLY OF THE VOCABULARY GATE.
+  //
+  // The first cut called `resolveConfigureOptionTarget`, which returns at
+  // `configure-option-clarify.ts:378` whenever `!detection.matched` — so on this
+  // arm it could only ever answer "not_configure_intent", and EVERY turn reaching
+  // here was declared unresolved by construction, a full option label included.
+  // A guard agreeing with itself. The maximal-label rule is applied directly
+  // instead, on the same normalisation, so identity is a real question here.
+  if (anyInterventionWriteLanded(before, after)) return null;
+
+  // ⭐ FACTORS ONLY. `baselineWritesLanded` reads `observed_state` on ANY node,
+  // so an OPTION's own baseline counts — and that is a different harm with a
+  // different owner. This arm exists for the MODEL-WIDE value every option
+  // reads: the factor baseline.
+  const factorIds = new Set(
+    before.nodes.filter((n) => n.kind === 'factor').map((n) => n.id),
+  );
+  const baselineNodeIds = baselineWritesLanded(before, after).filter((id) => factorIds.has(id));
+  if (baselineNodeIds.length === 0) return null;
+
+  return { verdict: 'scope_unresolved', baselineNodeIds, optionLabels };
+}
+
+/**
+ * Is this an AFFIRMATIVE request for a model-wide change?
+ *
+ * ⛔ THE ESCAPE THIS EXISTS FOR, executed by an independent reviewer:
+ *   "Set Vendor Licensing Cost to £150,000 per year for the buy option.
+ *    Do not change the model-wide baseline."
+ * returned ALLOW. The universal-scope exemption matched "model-wide" — inside a
+ * PROHIBITION — so the very sentence FORBIDDING the global write was read as
+ * permission for it. A quantifier says WHAT SCOPE is being talked about and
+ * nothing about whether the user wants it.
+ *
+ * ⚠ The negation cue is deliberately checked on the CLAUSE carrying the
+ * quantifier, not on the whole message: a message may legitimately negate
+ * something else entirely ("don't change the churn factor — across all options,
+ * set vendor cost to £150,000"). Splitting on sentence boundaries keeps the two
+ * apart without inventing a parser, and the failure direction is safe: an
+ * unrecognised construction leaves the exemption OFF, which withholds and asks.
+ */
+function isAffirmativeGlobalRequest(message: string): boolean {
+  if (typeof message !== 'string') return false;
+  for (const clause of message.split(/(?<=[.!?;])\s+|\n+/)) {
+    if (!UNIVERSAL_OPTION_SCOPE.test(clause)) continue;
+    if (GLOBAL_SCOPE_NEGATION.test(clause)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Negation of a scope request. Closed, and shared in spirit with
+ * `WIN_NEGATION_CUE` in `cee/decision-review/decompose.ts`, which exists for the
+ * same reason one rail over: a negated claim AGREES with the constraint rather
+ * than asserting it, and treating the two alike inverts the guard.
+ *
+ * ⚠ `instead of` and `rather than` were in the first cut and are DELIBERATELY
+ * OUT. My own test caught them: "…the model-wide baseline is £150,000 per year
+ * INSTEAD OF £120,000" is a VALUE COMPARISON, not a scope prohibition, and
+ * including them made the supported affirmative global request refuse. A
+ * negation cue here must negate the SCOPE, never the quantity.
+ *
+ * ⚠ THE CONTRACTION ARM SHIPPED DEAD, AND ESCAPE 1 CERTIFIED IT ANYWAY
+ * (codex-reviewer, REVIEW1512 at `0eb5f18a`; reproduced here by execution).
+ * It read `\bn['’]t\b`, which cannot match "don't": `\b` demands a word
+ * boundary before `n`, and the preceding character is `o` — both word
+ * characters, so no boundary exists and the arm never fired. Three contracted
+ * prohibitions escaped while every uncontracted twin was caught, so the
+ * uncontracted test passed over a half-dead predicate. `\w*n['’]t\b`
+ * anchors at the word START instead, which is the position that actually has
+ * a boundary.
+ */
+const GLOBAL_SCOPE_NEGATION =
+  /\b(?:do\s+not|does\s+not|never|without|avoid)\b|\w*n['’]t\b/i;
+
+/**
+ * A universal quantifier over the option word: "all options", "every option",
+ * "each option", "across options", "all of the options".
+ *
+ * Closed by construction — it enumerates QUANTIFIERS, never mutation verbs or
+ * value phrasings, so it does not reopen the intent-classifier problem. It marks
+ * a request whose scope the user stated explicitly.
+ */
+const UNIVERSAL_OPTION_SCOPE =
+  /\b(?:all|every|each|both)\s+(?:of\s+(?:the|these|those)\s+)?options?\b|\bacross\s+(?:all\s+|the\s+)?options?\b|\bmodel[-\s]?wide\b|\bevery\s+option\b/i;
+
+
+/**
  * Decide whether this edit turn's graph write may persist.
  *
  * Pure: no I/O, no LLM, no telemetry. The caller owns emission and the
@@ -385,7 +746,25 @@ export function decideOptionInterventionWrite(params: {
     before: params.before,
     after: params.after,
   });
-  if (outcome.status !== 'not_honoured') {
+  // ⭐⭐ BOTH WRITE-PROTECTING VERDICTS, and the difference between them is
+  // about COPY, not about the write. `not_honoured_no_copy` says exactly what
+  // `not_honoured` says — configure-option intent, option resolved BY NAME, no
+  // interventions write for it — and adds only that no true sentence is
+  // available to replace the response with (the option already carries a value,
+  // so *"this option has no effect values yet"* would be a lie).
+  //
+  // Accepting only `not_honoured` here made the WRITE protection inherit the
+  // COPY predicate's domain, which is why a REVISION was unguarded: a drafted
+  // graph arrives populated, so every later edit is a revision. Measured live,
+  // 46 of 46 real captured turns reached no verdict at all.
+  if (outcome.status !== 'not_honoured' && outcome.status !== 'not_honoured_no_copy') {
+    // ⭐ BEFORE PERMITTING: the outcome arm above answers "was a RESOLVED
+    // option's write not honoured?". It says nothing about a turn that is
+    // recognisably ABOUT an option whose identity never resolved — and that is
+    // the state in which a model-wide baseline write is least defensible,
+    // because nothing has established the scope the user asked for.
+    const scoped = decideUnresolvedOptionScope(params.message, before, after);
+    if (scoped !== null) return scoped;
     return { verdict: 'allow', reason: 'outcome_not_unhonoured' };
   }
 
@@ -393,20 +772,29 @@ export function decideOptionInterventionWrite(params: {
     return { verdict: 'allow', reason: 'interventions_write_landed' };
   }
 
-  const movedNodeIds = baselineWritesLanded(before, after);
-  if (movedNodeIds.length === 0) {
-    return { verdict: 'allow', reason: 'no_baseline_write' };
-  }
-
   // ⭐⭐ BIND BY IDENTITY, NEVER BY A VALUE PREDICATE (trap 19). A moved
   // baseline is only a substitute for THIS option's missing effect value if the
   // option is actually wired to that factor. Everything else is a different
   // edit — very often the one the user asked for — and discarding it destroys
   // their work. See `optionLinkedNodeIds` for the measured false positive.
+  const movedNodeIds = baselineWritesLanded(before, after);
   const linked = optionLinkedNodeIds(before, outcome.optionId);
   const baselineNodeIds = movedNodeIds.filter((id) => linked.has(id));
-  if (baselineNodeIds.length === 0) {
-    return { verdict: 'allow', reason: 'baseline_write_unrelated_to_option' };
+
+  // The edge arm. Identity binding is `edge.from === optionId` — tighter than
+  // the node arm's, because an edge out of the named option cannot be about any
+  // other entity. See `optionEdgeWritesLanded`.
+  const optionEdgeKeys = optionEdgeWritesLanded(before, after, outcome.optionId);
+
+  if (baselineNodeIds.length === 0 && optionEdgeKeys.length === 0) {
+    // The two allow reasons stay NAMED APART (they are two different facts, and
+    // collapsing them is what let the W1 false positive through unseen): a turn
+    // that moved nothing of either kind, vs one that moved a node the option is
+    // not wired to.
+    return {
+      verdict: 'allow',
+      reason: movedNodeIds.length === 0 ? 'no_baseline_write' : 'baseline_write_unrelated_to_option',
+    };
   }
 
   return {
@@ -414,5 +802,6 @@ export function decideOptionInterventionWrite(params: {
     optionId: outcome.optionId,
     optionLabel: outcome.optionLabel,
     baselineNodeIds,
+    optionEdgeKeys,
   };
 }

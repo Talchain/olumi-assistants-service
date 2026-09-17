@@ -230,3 +230,61 @@ describe('mergeMutatedGraphForPersistence — fallback (NOT a degraded read; tha
     }
   });
 });
+
+/**
+ * ⭐⭐ A CORRECTION REMOVES A ROW, AND THE REMOVAL MUST SURVIVE PERSISTENCE.
+ *
+ * This is the load-bearing claim of the whole limit-correction capability. If
+ * `goal_constraints` were merged BY KEY rather than replaced wholesale, the
+ * row the correction deleted would come back from the persisted base on the
+ * very next read — the user would be told their limit moved, and it would not
+ * have. The docblock says "OVERLAYS", but a comment describing behaviour is
+ * exactly the hand-maintained mirror this estate keeps paying for, so this
+ * asserts the BEHAVIOUR.
+ *
+ * ⚠ It also pins the twin distinction the docblock warns about: swapping in
+ * `mergeAppliedGraphForPersistence` reproduces a real defect one field over.
+ */
+describe('a removed constraint stays removed', () => {
+  it('⭐ REPLACES goal_constraints wholesale — a deleted row does not return from the base', () => {
+    const persisted = {
+      nodes: [], edges: [],
+      goal_constraints: [
+        { constraint_id: 'gc-wrong', node_id: 'r-overrun', operator: '<=', value: 200000, unit: 'GBP' },
+        { constraint_id: 'gc-other', node_id: 'f-marketing', operator: '<=', value: 50000, unit: 'GBP' },
+      ],
+    };
+    // What the correction produced: the wrong row GONE, replaced on a new node.
+    const mutated = {
+      nodes: [], edges: [],
+      goal_constraints: [
+        { constraint_id: 'gc-moved', node_id: 'f-hiring-cost', operator: '<=', value: 200000, unit: 'GBP' },
+        { constraint_id: 'gc-other', node_id: 'f-marketing', operator: '<=', value: 50000, unit: 'GBP' },
+      ],
+    };
+    const merged = mergeMutatedGraphForPersistence({
+      mutatedGraph: mutated,
+      persistedBase: persisted,
+      ...REQ,
+    });
+    const rows = merged.goal_constraints as Array<Record<string, unknown>>;
+    expect(rows.map((r) => r.node_id).sort()).toEqual(['f-hiring-cost', 'f-marketing']);
+    expect(rows.some((r) => r.node_id === 'r-overrun')).toBe(false);
+    // And the unrelated limit is byte-identical, not merely present.
+    expect(JSON.stringify(rows.find((r) => r.node_id === 'f-marketing')))
+      .toBe(JSON.stringify(persisted.goal_constraints[1]));
+  });
+
+  it('⛔ leaves the persisted constraints alone when the mutation wrote none', () => {
+    const persisted = {
+      nodes: [], edges: [],
+      goal_constraints: [{ constraint_id: 'gc-keep', node_id: 'n1', operator: '<=', value: 5 }],
+    };
+    const merged = mergeMutatedGraphForPersistence({
+      mutatedGraph: { nodes: [], edges: [] },
+      persistedBase: persisted,
+      ...REQ,
+    });
+    expect(JSON.stringify(merged.goal_constraints)).toBe(JSON.stringify(persisted.goal_constraints));
+  });
+});

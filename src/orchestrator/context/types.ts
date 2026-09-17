@@ -62,9 +62,18 @@ export interface EditCompactNode {
   kind: string;
   category?: string;
   description?: string;
+  /**
+   * ⚠ A CLOSED PICK, SO A NEW `observed_state` FIELD SHIPS DARK TO THE EDITING
+   * MODEL UNLESS IT IS NAMED HERE. `stated_role` was added to the wire and to
+   * the REASONING pack (`compactGraph`) and reached the editing model not at
+   * all — and the editing path is where the measured wrong-entity and
+   * non-baseline edit defects live. Listing it is what makes the role legible
+   * where a model is about to WRITE to the node.
+   */
   observed_state?: Pick<ObservedStateV3T,
     'value' | 'raw_value' | 'baseline' | 'unit' | 'cap' | 'source' |
-    'extractionType' | 'factor_type' | 'uncertainty_drivers' | 'std' | 'confidence'>;
+    'extractionType' | 'factor_type' | 'uncertainty_drivers' | 'std' | 'confidence' |
+    'stated_role'>;
   /** Existing explicit frame, never inferred from one observed pair. */
   scale_frame?: number;
   encoding_map?: Record<string, string>;

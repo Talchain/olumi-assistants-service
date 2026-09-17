@@ -42,6 +42,34 @@ describe('commitDirectAnswer (slice B — RPC-backed persistence)', () => {
     ).rejects.toThrow(/invariant/i);
   });
 
+  it('stores and returns the same projected public answer in a single append', async () => {
+    const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'unpublished candidate', stage: 'frame',
+    });
+    const store = createNoopSessionStore();
+    const append = vi.spyOn(store, 'append');
+    const projector = vi.fn((candidate: typeof composed) => ({
+      ...candidate, assistant_text: 'public answer',
+    }));
+    const result = await commitDirectAnswer(composed, META, store, projector);
+    expect(projector).toHaveBeenCalledTimes(1);
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(append.mock.calls[0]![0].assistantMessage).toBe(result.response.assistant_text);
+    expect(result.response.assistant_text).toBe('public answer');
+    expect(composed.assistant_text).toBe('unpublished candidate');
+  });
+
+  it('does not append when public-answer projection throws', async () => {
+    const composed = composeDirectAnswerResponse({
+      answerKind: 'functional', assistant_text: 'candidate', stage: 'frame',
+    });
+    const store = createNoopSessionStore();
+    const append = vi.spyOn(store, 'append');
+    const boom = new Error('projection failed');
+    await expect(commitDirectAnswer(composed, META, store, () => { throw boom; })).rejects.toBe(boom);
+    expect(append).not.toHaveBeenCalled();
+  });
+
   it('propagates SessionStore.append errors so TurnExecutor catch can map them', async () => {
     const composed = composeDirectAnswerResponse({
       answerKind: 'functional',
@@ -586,6 +614,25 @@ describe('F-HELD — held-consent lifecycle at the commit seam', () => {
   };
 
   describe('fix 2b — honest lapse notice on turn-TTL drop', () => {
+    it('projects after lapse composition and stores the projected notice only once', async () => {
+      const composed = composeDirectAnswerResponse({
+        answerKind: 'functional', assistant_text: 'Candidate answer.', stage: 'frame',
+      });
+      const { store, appendCalls } = makeSpyStore();
+      const projector = vi.fn((candidate: typeof composed) => {
+        expect(candidate.assistant_text).toContain('has lapsed');
+        return { ...candidate, assistant_text: candidate.assistant_text.replace('Candidate answer.', 'Public answer.') };
+      });
+      const result = await commitDirectAnswer(composed,
+        { ...META, priorPendingActions: [holdPending({ turnCount: 1 })] }, store, projector);
+      expect(projector).toHaveBeenCalledTimes(1);
+      expect(appendCalls).toHaveLength(1);
+      expect(appendCalls[0]!.assistantMessage).toBe(result.response.assistant_text);
+      expect(result.response.assistant_text.match(/has lapsed/g)).toHaveLength(1);
+      expect(result.response.assistant_text).toContain('Public answer.');
+      expect(appendCalls[0]!.pending_actions ?? []).toHaveLength(0);
+    });
+
     it('appends the deterministic lapse sentence (wire + durable copy) when a hold turn-TTL-drops at commit', async () => {
       const composed = composeDirectAnswerResponse({
         answerKind: 'functional',

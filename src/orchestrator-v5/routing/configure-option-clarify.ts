@@ -85,7 +85,15 @@ export type ConfigureOptionClarifyDeclineReason =
    * non-test reads of `.reason` from either predicate, contrast control: 7 in
    * the companion spec — so this is honesty in the record, not behaviour.
    */
-  | 'option_already_partially_configured';
+  | 'option_already_partially_configured'
+  /**
+   * ⭐ THE MESSAGE NAMED MORE THAN ONE OPTION, and no one of them is a nested
+   * reading of another. Distinct from `option_not_identified`, which says no
+   * option was named at all: these are two different facts about the message
+   * and they want two different remedies (ask which, vs ask for one). Picking
+   * one of several is the confident-wrong-answer this module exists to remove.
+   */
+  | 'option_label_ambiguous';
 
 export type ConfigureOptionClarifyResult =
   | { readonly matched: false; readonly reason: ConfigureOptionClarifyDeclineReason }
@@ -297,6 +305,125 @@ function outstandingSlotsByOption(
 }
 
 /**
+ * ⭐⭐⭐ QUESTION: *WHICH OPTION DID THE USER NAME?* — and nothing else.
+ *
+ * ── WHY THIS EXISTS, MEASURED ──────────────────────────────────────────────
+ * `resolveConfigureOptionFacts` above answers a DIFFERENT question and always
+ * did: *"which option can I offer a concrete next step for?"* Its candidate set
+ * is `outstandingSlotsByOption`, so it declines `no_unconfigured_option` the
+ * moment nothing is outstanding. **A drafted graph arrives already populated,
+ * so every later edit is a REVISION, and a revision has no outstanding slot.**
+ * Driven live against deployed CEE staging on 14 Sep 2026,
+ * `evaluateConfigureOptionOutcome` returned `not_applicable` on **46 of 46**
+ * real captured turns while the shipped intent detector matched 46/46.
+ *
+ * ⚠ THE PRECISE FRAMING, because the loose one sends the next lane at the wrong
+ * code: the guard does not reach a WRONG verdict on an already-configured
+ * option. **It reaches no verdict in any direction** — a successful revision is
+ * exactly as invisible to it as a wrong-entity one. So this is not a guard that
+ * needs tightening; it is a guard that is never asked.
+ *
+ * ── THIS IS A SPLIT, NOT A WIDENING (trap 21) ─────────────────────────────
+ * The two bounds that sat in series here guard two different questions, and
+ * widening one predicate to cover both would make the product STATE A
+ * FALSEHOOD:
+ *
+ *   TARGET RESOLUTION — *which option did the user name?*
+ *     → decides whether the WRITE is guarded.
+ *     → an already-configured option is a perfectly good answer. **This
+ *       function. No outstanding-slot bound, no sole-unconfigured fallback.**
+ *
+ *   COPY REPLACEMENT  — *what copy replaces the response?*
+ *     → decides what the product SAYS.
+ *     → an already-configured option has NO true sentence available, because
+ *       the recovery copy asserts *"this option has no effect values yet"*.
+ *       **`buildConfigureOptionRecoveryCopy` below. The domain bound STAYS.**
+ *
+ * ⚠ NO SOLE-UNCONFIGURED FALLBACK, ON PURPOSE. `configure-option-outcome.ts`
+ * rejected that fallback outright (its P1 note: *a guess is not an identity*),
+ * so carrying it here would only reintroduce a retargeting hazard for a caller
+ * that discards it anyway. Every match this function returns was NAMED.
+ *
+ * Pure. `graph` is the persisted graph; anything that does not strict-parse
+ * declines. Safe-biased in the same direction as its siblings: every
+ * uncertainty declines, and a decline leaves the pre-existing route untouched.
+ */
+export type ConfigureOptionTargetDeclineReason =
+  | 'not_configure_intent'
+  | 'graph_unparseable'
+  | 'no_readiness'
+  | 'option_not_identified'
+  | 'option_label_ambiguous';
+
+export type ConfigureOptionTargetResult =
+  | { readonly matched: false; readonly reason: ConfigureOptionTargetDeclineReason }
+  | {
+      readonly matched: true;
+      readonly optionId: string;
+      readonly optionLabel: string;
+      /** Carried so callers need not recompute it — same payload, one read. */
+      readonly readiness: AnalysisReadyPayload;
+    };
+
+/** The message/label normalisation `resolveConfigureOptionFacts` uses, verbatim. */
+function normaliseLabel(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+export function resolveConfigureOptionTarget(params: {
+  readonly message: string;
+  readonly detection: ConfigureOptionIntentDetection;
+  readonly graph: unknown;
+}): ConfigureOptionTargetResult {
+  if (!params.detection.matched) return { matched: false, reason: 'not_configure_intent' };
+
+  const parsed = GraphV3.safeParse(params.graph);
+  if (!parsed.success) return { matched: false, reason: 'graph_unparseable' };
+
+  // DERIVED (trap 12): the SAME canonical readiness payload the badge and the
+  // blocker copy are composed from — so this resolver cannot disagree with the
+  // user's screen about which options exist or what they are called. The only
+  // difference from its sibling is that it reads `options` WHOLE instead of the
+  // outstanding-slot projection of them.
+  const readiness = buildCanonicalAnalysisReadyFromGraph(params.graph);
+  if (readiness === undefined) return { matched: false, reason: 'no_readiness' };
+
+  const normalisedMessage = ` ${normaliseLabel(params.message)} `;
+
+  const matches: Array<{ optionId: string; optionLabel: string; normalised: string }> = [];
+  for (const option of readiness.options) {
+    const label = option.label;
+    if (typeof label !== 'string') continue;
+    const normalised = normaliseLabel(label);
+    if (normalised.length < 3) continue;
+    if (!containsPhrase(normalisedMessage, normalised)) continue;
+    if (matches.some((m) => m.optionId === option.option_id)) continue;
+    matches.push({ optionId: option.option_id, optionLabel: label, normalised });
+  }
+
+  if (matches.length === 0) return { matched: false, reason: 'option_not_identified' };
+
+  // ⭐ A NESTED READING IS ONE READING, NOT TWO CANDIDATES. "Cloud CRM" sitting
+  // inside "Cloud CRM Premium" both match a message containing the longer
+  // phrase; the user named the longer one and the shorter is an artefact of
+  // substring matching. Keep only MAXIMAL labels — those contained in no other
+  // match. Two options sharing one normalised label are maximal in each other
+  // and therefore correctly fall through to `option_label_ambiguous`.
+  const maximal = matches.filter(
+    (m) => !matches.some((other) => other !== m && other.normalised.includes(m.normalised)),
+  );
+  if (maximal.length !== 1) return { matched: false, reason: 'option_label_ambiguous' };
+
+  const target = maximal[0]!;
+  return {
+    matched: true,
+    optionId: target.optionId,
+    optionLabel: target.optionLabel,
+    readiness,
+  };
+}
+
+/**
  * QUESTION: *should the deterministic remedy answer this turn INSTEAD of
  * sending it to the edit LLM?*
  *
@@ -352,8 +479,27 @@ export function buildConfigureOptionRecoveryCopy(params: {
   readonly detection: ConfigureOptionIntentDetection;
   readonly graph: unknown;
 }): ConfigureOptionClarifyResult {
-  const facts = resolveConfigureOptionFacts(params);
-  if (!facts.matched) return facts;
+  // ⭐⭐ BOUND A — IDENTITY, and this is the ONE thing that moved. It used to
+  // come from `resolveConfigureOptionFacts`, whose candidate set is the
+  // OUTSTANDING-SLOT projection — so on a revision (nothing outstanding) this
+  // predicate declined `no_unconfigured_option` before the domain bound below
+  // was ever reached, and the caller flattened that to `option_not_identified`:
+  // a name for a resolution failure that was never attempted.
+  //
+  // Worse than the misleading name, and the reason this could not simply be
+  // left alone: with the outstanding-slot candidate set, a message NAMING a
+  // configured option found no match among the candidates and fell through to
+  // the `sole_unconfigured` tie-break, silently resolving to a DIFFERENT
+  // option. The copy predicate could answer about an entity the user had not
+  // named — the wrong-entity class this module exists to remove, occurring
+  // inside the module.
+  //
+  // `resolveConfigureOptionFacts` itself is UNTOUCHED: `shouldInterceptBefore
+  // EditLane` shares it and answers a question for which the outstanding-slot
+  // candidate set is exactly right.
+  const target = resolveConfigureOptionTarget(params);
+  if (!target.matched) return decline(target.reason);
+  const readiness = target.readiness;
 
   // ⭐⭐ THE DOMAIN BOUND, UNCHANGED — and now stated at the question that owns
   // it rather than smuggled in through the shared candidate set.
@@ -375,7 +521,28 @@ export function buildConfigureOptionRecoveryCopy(params: {
   // trade a false success for a false NOTICE: the same harm, opposite sign.
   // The residual (a wrong-entity write against a partially configured option
   // raises no notice) is unchanged by this lane, and still rowed.
-  const option = facts.readiness.options.find((o) => o.option_id === facts.optionId);
+  const option = readiness.options.find((o) => o.option_id === target.optionId);
   if (option?.status !== 'needs_encoding') return decline('option_already_partially_configured');
-  return facts;
+
+  // ⭐ BOUND C — MATERIAL. The copy names REAL, still-unset, linked factors or
+  // it is not offered: "never invented" is this module's whole posture. Read
+  // from the outstanding-slot projection, which is the estate's owner of
+  // "which option×factor slots are unset" (trap 12 — derive, do not re-spell).
+  // `optionLabel` comes from the same entry as the factors, so the copy cannot
+  // name one option and list another's factors.
+  const slots = outstandingSlotsByOption(readiness).find((s) => s.optionId === target.optionId);
+  if (slots === undefined || slots.factorLabels.length === 0) {
+    return decline('no_candidate_factor');
+  }
+
+  return {
+    matched: true,
+    optionId: target.optionId,
+    optionLabel: slots.optionLabel,
+    factorLabels: slots.factorLabels,
+    readiness,
+    // Every match is NAMED now — the sole-unconfigured tie-break belongs to the
+    // intercept question, and the only caller of this one discarded it anyway.
+    optionSource: 'named_in_message',
+  };
 }

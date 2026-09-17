@@ -48,6 +48,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
+import { isValueUpdatePhrasing } from '../../../src/orchestrator/routing/value-update-gate.js';
 import type { FastifyInstance } from 'fastify';
 
 const dispatchEditGraphMock = vi.fn();
@@ -515,10 +516,28 @@ describe('the two edit-clarify intercepts must PERSIST the question they asked',
   // ─── THE TWIN (mandatory) ────────────────────────────────────────────────
   it('TWIN: an ordinary, specific edit is NOT intercepted and arms no clarify pending', async () => {
     dispatchEditGraphMock.mockResolvedValueOnce(makeEditGraphMockResult());
+    // ⚠ MESSAGE CHANGED 2026-09-14 (`Change Hiring and Salary Cost to 0.4`).
+    // This twin's subject is the two CLARIFY INTERCEPTS — it needs a message
+    // that reaches `dispatchEditGraph`, and the old one no longer does now
+    // that `change` is a clause-A verb in value-update-gate.ts.
+    //
+    // The 500 that surfaced this is a HARNESS gap, not a product regression:
+    // this file mocks `edit-graph-dispatch` but nothing on the value path, so
+    // ANY message the value gate claims 500s here. PROVEN by control — the
+    // same message with `Set` (already a clause-A verb BEFORE that change)
+    // 500s identically at the pristine tip.
+    //
+    // `Increase X to Y` is the stable choice: clause B requires ` by `, so an
+    // `increase … to …` stays on the edit_graph route (it is already pinned as
+    // a NON_SUPPRESS regression row in value-update-gate.test.ts).
+    const TWIN_MESSAGE = 'Increase Hiring and Salary Cost to 0.4';
+    // PRECONDITION PIN — without this the test would silently stop covering
+    // what it claims the day the gate widens again, exactly as it just did.
+    expect(isValueUpdatePhrasing(TWIN_MESSAGE)).toBe(false);
     const res = await app.inject({
       method: 'POST',
       url: '/orchestrate/v2/turn',
-      payload: payload({ message: 'Change Hiring and Salary Cost to 0.4' }),
+      payload: payload({ message: TWIN_MESSAGE }),
     });
     expect(res.statusCode).toBe(200);
     // The pre-existing route ran untouched — neither intercept claimed it.

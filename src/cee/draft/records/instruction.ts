@@ -232,7 +232,7 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   does, do not hunt the brief for an option that is not there, and do not promote
   one of the causes to fill the gap. An action YOU are putting forward is an
   \`option_refinement\` claim — that is the route by which something becomes an
-  option when the user named none. \`claims\` is already the half of the record
+  option, whether or not the user named any. \`claims\` is already the half of the record
   set that is yours rather than theirs, so putting it there is what lets the user
   tell your proposal from their own words and argue with it. Set its \`basis\` to
   whatever in the brief you built it on, and leave \`basis\` empty when you built
@@ -240,6 +240,18 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
   resting on a basis that does not hold.
   Who said it makes no difference. "Sales says cut the price, product says hold
   and ship the integrations" names two real acts, and both are options.
+  An option often names more than one thing: "raise the price to £59 with the
+  next feature release" names a price move AND the release it is tied to. Keep
+  the whole sentence as the option's \`source_quote\`, and emit a \`factor\` for the
+  other part too when it is something that varies or bears on what happens.
+  Without it the release exists nowhere in the model, and the user is shown their
+  proposal reduced to its price while the option's name still says otherwise.
+  When the SAME condition runs through more than one alternative — "ship the same
+  release either way" — it is a shared condition, not what separates them. Emit
+  it once. Do not give each option a different effect on it to make it look like
+  a difference, and do not stretch to make every part of a sentence into
+  something an option acts on: an option need not move every clause of its own
+  name.
 - \`constraint\` — a limit the user set. Set \`direction\` to \`floor\` when the
   value is a minimum the user must stay above, \`ceiling\` when it is a maximum
   they must stay below.
@@ -276,11 +288,39 @@ Use \`claim_kind\`:
 - \`risk\` — something that could go wrong, or a downside the decision carries.
   Higher is worse.
 - \`causal_link\` — one thing affecting another
-- \`option_refinement\` — an action put on the graph as an option to compare.
-  Use it to sharpen an option the user named, and ALSO when the user named no
-  course of action and the option is one you are proposing. Either way it
-  becomes an option to compare, and it is yours rather than theirs.
+- \`option_refinement\` — an action you propose, either sharpening a named option
+  or introducing a materially different alternative, whether or not the user
+  already named options. Keep proposals in \`claims\`, not in the user's
+  \`stated_items\`.
 - \`prior\` — what you believe about a quantity, and how sure you are
+
+Look beyond the named options. Before settling the draft, consider a materially
+different way to pursue the user's purpose: for example, a reversible trial,
+temporary or external capacity, a hybrid, or a smaller-scope route. Use these as
+prompts to think, not a checklist to populate. Include a plausible alternative
+when it changes the mechanism, exposes an important trade-off, or offers a
+useful way to learn. Do not add a near-duplicate merely to increase the count.
+
+Record what a quantity IS now. On a \`factor\` claim, set \`value\` to the level
+that quantity sits at today, when you can say what that level is on a scale the
+brief supports. Use the user's own number when they gave one FOR THAT QUANTITY;
+otherwise give your own estimate. A number you estimate is recorded as yours,
+not as something they said.
+\`current\`, \`proposed\` and \`limit\` are three different things and a number
+belonging to one is not the level of another. "Reach £20k MRR" is a target,
+"keep churn under 4%" is a limit, and "we are proposing £59" is a proposal —
+none of them says what the quantity is TODAY. A subscriber count worked out from
+a revenue figure is not that figure, and the same number appearing nearby does
+not make it the same quantity.
+Leave \`value\` out where you cannot place the quantity on a scale the brief
+supports. A quantity that is genuinely qualitative, or genuinely unknown, stays
+that way: there is nothing to fill in and no count to satisfy.
+
+Keep the user's stated requirements intact. Do not relax a deadline, budget or
+other limit without their invitation, or claim a proposal meets it when that is
+unknown. Do not invent a price, rate or other figure merely to make an
+alternative different. Existing estimation rules still apply; estimates are not
+user-stated facts or proof of feasibility.
 
 \`label\` NAMES the thing, in a few words. Every claim except a \`causal_link\`
 becomes a node on the canvas, and \`label\` is the name the user reads on it:
@@ -313,7 +353,10 @@ choosing the field. A \`causal_link\` needs exactly one \`from_\` and one \`to_\
 Never set both \`from_stated\` and \`from_claim\` on one link, or both \`to_\`
 fields: they point into different lists and the pair contradicts itself.
 
-Emit only what the brief supports. An empty \`claims\` list is a valid response.
+Emit only what the brief supports — which means the distinction between what the
+user STATED and what is plausibly PROPOSED from their situation, not a bar on
+proposing anything. An empty \`claims\` list remains a valid response when
+nothing useful can be added.
 `.trim();
 
 /** The connectivity half: the causal spine the structural validator checks. */
@@ -345,9 +388,13 @@ and \`basis\` still records whatever the user said that you built them on.
   refinement's \`basis\` already records which option it belongs to. Give a
   refinement its OWN chain only when it is a genuinely different alternative the
   user did not name.
+- Keep \`basis\` honest; do not alter it to force an alternative to survive
+  projection. Respect an explicit request to compare only specified options.
 - Count your alternatives: the user's stated options plus any \`option_refinement\`
   that introduces a NEW alternative should come to six or fewer. Prefer a few
-  well-connected options over many bare ones.
+  well-connected options over many bare ones. Within that limit favour useful,
+  materially different proposals over cosmetic variants; the limit is a ceiling,
+  never a quota, and having room left is not a reason to add an option.
 - Nothing points INTO an option. An option is where a chain starts. If something
   bears on whether an option is viable, connect it to a factor on that option's
   chain, or to the goal.

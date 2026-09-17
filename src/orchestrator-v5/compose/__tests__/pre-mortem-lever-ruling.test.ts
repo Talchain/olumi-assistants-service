@@ -220,20 +220,18 @@ describe('pre_mortem — the two SILENT exits now emit drop telemetry', () => {
 // other surface must turn these RED.
 // ============================================================================
 describe('the lever ban is UNCHANGED on every other surface', () => {
-  it('narrative naming the lever is still dropped', () => {
-    const fact = makeFact({
-      decisionReview: {
-        narrative_summary: 'The outcome hinges on Sales Team Capacity, which stays deeply uncertain.',
-      },
-      graphNodes: WALK_GRAPH_NODES,
-    });
-    expect(
-      buildReviewCardBlocks(fact, buildGraphNodeLookup(fact), CTX, LEVERS).find(
-        (b) => b.card_kind === 'narrative',
-      ),
-    ).toBeUndefined();
-    expect(dropReasonsFor('narrative')).toContain('lever_named');
-  });
+  // ⚠ SUPERSEDED 16 Sep 2026, DELIBERATELY AND BY ITS OWN RULING — not widened
+  // from this one. This case used to assert that a narrative naming the lever is
+  // still dropped, as a scope pin for the pre-mortem ruling. The narrative card
+  // was then scoped out on its own measured grounds: the drop was witnessed
+  // costing a real user the only card that describes the analysis, three times
+  // in one session, and the card carries severity `info`, `target_refs: []` and
+  // no `action_intent`, so it cannot present a lever as an uncertainty to
+  // resolve. Its evidence and controls live in `narrative-lever-ruling.test.ts`.
+  //
+  // The scope pin BELOW is unchanged and remains the guard against a mutant
+  // widening either ruling into "ship anything": `scenario_context` DOES carry
+  // an uncertainty-resolution affordance and DOES still drop.
 
   it('scenario_context naming the lever is still skipped', () => {
     const fact = makeFact({

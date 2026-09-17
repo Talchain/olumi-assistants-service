@@ -122,9 +122,40 @@ describe("quantity identity at the real enrichment write", () => {
     if (price.raw_value === undefined || price.cap === undefined) throw new Error("Price lost its raw scale");
     expect(price.value).toBe(price.raw_value / price.cap);
     expect(node(result.graph, GOAL_ID).goal_baseline).toBeUndefined();
-    // No claim that the existing goal grammar has acquired the trailing MRR
-    // target or that execution now establishes goal/churn success.
+    // ⭐ SUPERSEDED BY #1328, AND THE DIRECTION MATTERS: THIS LINE ASSERTED THE
+    // DEFECT. The goal label states £20k and the brief attests "reaching £20k MRR
+    // within 12 months", so the user's own target was shipping as prose with every
+    // typed field null — the exact harm #1328 closes. When this case was written
+    // the mint was unreachable for a brief like this one, so "no threshold" read
+    // as the status quo rather than as a loss.
+    //
+    // Replaced by its POSITIVE TWIN rather than deleted: the quad is pinned by
+    // IDENTITY (this goal node) and by EXACT VALUE, so a regression to the old
+    // null quad REDs here instead of passing quietly.
+    //
+    // The case itself is unchanged — it is about ROLE BINDING, that the MRR amount
+    // must not stamp the perception factor, and it still does not (asserted above).
+    //
+    // ⚠ ROUND 6 (CEE #1328, 14 Sep 2026) — CHANGED AGAIN, DELIBERATELY AND
+    // DISCLOSED. The #1328 mint asserted here was correct for THIS brief, but no
+    // string rule could keep it from also minting "We rejected the proposal to
+    // reach £64k MRR" (Codex, PR38 5657776136). The label route therefore no
+    // longer writes: it yields a CANDIDATE the orchestration seam asks the user
+    // about, and only the user's answer writes through the canonical path. So
+    // the quad is honestly EMPTY here, and the candidate — pinned by IDENTITY
+    // and EXACT VALUE — is what a regression to either the old mint or to
+    // silence would RED against.
+    expect(node(result.graph, GOAL_ID).goal_threshold_raw).toBeUndefined();
     expect(node(result.graph, GOAL_ID).goal_threshold).toBeUndefined();
+    expect(result.goal_target_candidate).toEqual({
+      goal_node_id: GOAL_ID,
+      value_user_units: 20000,
+      unit: "£",
+      label_span: "£20k",
+      brief_span: "£20k",
+      binding: "governed",
+      reason: "governed",
+    });
   });
 
   it("positive non-pricing counterpart: an identified hiring budget retains its own currency scale", async () => {

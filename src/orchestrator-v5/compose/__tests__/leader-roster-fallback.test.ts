@@ -406,7 +406,30 @@ describe('withheld-leader enforcement — the roster must survive a graph-less e
       //  · it DOES ship chips, unlike the two exits above — but they are
       //    candidate answers about the GOAL ("The goal is to increase
       //    revenue."), never options, so they carry no leader claim either.
-      expect(calls.length).toBe(27);
+      //
+      // 2026-09-15, 27 -> 28: the draft-failure recovery turn
+      // (`'draft_graph_recovery'`, route-v2 — #1505), the floor underneath the
+      // goalfence ask: a draft that failed for any other reason now speaks
+      // instead of returning a bare 500. LOOKED AT, not assumed:
+      //  · it funnels through `sendFinalised200`, so it inherits the single
+      //    `enforceLeadingOptionClaimsAtWire` call pinned above, with both
+      //    roster sources threaded;
+      //  · it ships `graph: null` and `claimSafety.forExit()`, exactly like the
+      //    goalfence ask above it, so it adds no new claim authority — and as
+      //    there, `graph: null` is STRUCTURAL rather than conventional: the
+      //    draft failed and was discarded, so no model exists at all, let alone
+      //    one carrying options to rank. The PR is explicit that nothing is
+      //    repaired or synthesised on this path;
+      //  · its copy is a FAILURE REPORT — the producer's own `readable`
+      //    sentence plus a fault stamp and a copyable reference. No analysis
+      //    result, no value, no candidate list and no option ordering is in
+      //    scope, so there is no per-option datum to rank or crown.
+      //    `answerKind: 'functional'` keeps it out of the prose lane;
+      //  · it DOES ship a chip, like the goalfence ask — but it is the single
+      //    retry offer `draft_failure_retry` ("Try again" / "Yes, try building
+      //    the model again from what I have shared."), an instruction to redo
+      //    the DRAFT. It names no option and carries no leader claim.
+      expect(calls.length).toBe(28);
       // #1246's additional exit is a functional recorded-answer refusal, not
       // a new claim authority. It still funnels through the shared finalizer,
       // forwards claim safety, and uses only the canonical repair graph roster.

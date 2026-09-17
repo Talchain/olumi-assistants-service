@@ -65,6 +65,11 @@ import { findSoleLiveElicitBaselinePending } from '../../session/pending-action.
 import { deriveStatedConstraintFrame } from '../../../cee/compound-goal/index.js';
 import type { HandlerFn, HandlerInvocation, HandlerOutcome } from '../registry.js';
 import { HandlerInvocationFailedError, HandlerResultInvalidError } from '../handler-errors.js';
+import { sameUnit } from '../../../utils/currency-alphabet.js';
+import {
+  buildCanonicalAnalysisReadyFromGraph,
+  mergeInterventionSourceObjects,
+} from '../../../orchestrator/tools/analysis-ready-helper.js';
 import { applyAndValidateMutation } from './d1-shared/apply-graph-mutation.js';
 import { runD1Handler } from './d1-shared/error-boundary.js';
 import { D1HandlerError } from './d1-shared/errors.js';
@@ -72,12 +77,23 @@ import {
   formatBaselineElicitation,
   formatBaselineNoted,
   formatConstraintAdded,
+  formatConstraintDurationNotEvaluated,
   formatConstraintLabelUpdated,
+  formatConstraintMoved,
+  formatConstraintNotCheckable,
   formatConstraintUnchanged,
   formatConstraintUpdated,
   formatGoalTargetSet,
   formatGoalTargetUnchanged,
 } from './d1-shared/format-confirmation.js';
+import {
+  classifyConstraintWriteAdmissibility,
+  findUnevaluatedDurationSpan,
+} from './d1-shared/constraint-write-admissibility.js';
+import {
+  findConstraintTargetAlternative,
+  formatConstraintTargetAlternative,
+} from './d1-shared/constraint-target-alternative.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 /**
@@ -179,6 +195,24 @@ interface ResolvedParams {
   readonly value: number;
   readonly label?: string;
   readonly unit?: string;
+  /**
+   * ⭐⭐ THE ROW THIS WRITE CORRECTS — the one thing the writer could not be told.
+   *
+   * The idempotency key is `(node_id, operator)`. A correction MOVES a limit to
+   * a different node, so `existing` is undefined and the write APPENDS — leaving
+   * the original, wrong, un-evaluable constraint in place, still blocking the
+   * same journey it was blocking before (Codex CX-171). `add_constraint` is the
+   * only constraint handler in the estate and `apply-graph-mutation.ts:195`
+   * states it does NOT prune, so nothing else can remove it either.
+   *
+   * ⚠ NAMED, NEVER INFERRED. The obvious alternative — treat a write that
+   * matches an existing row's operator+value+unit on a different node as a
+   * correction of it — was considered and REJECTED: two genuinely different
+   * limits can share all three ("£200k on hiring", "£200k on marketing"), and
+   * replacing one would be silent data loss. Losing a limit the user set is
+   * strictly worse than the duplicate this exists to prevent.
+   */
+  readonly corrects_node_id?: string;
 }
 
 // `resolveGoalThresholdCap` (Lane CEE-W5 Mission B — goal-threshold join,
@@ -188,6 +222,88 @@ interface ResolvedParams {
 // (cee/factor-extraction/enricher.ts) delegates to the SAME function so a
 // goal target scores identically regardless of registration path. See that
 // module's doc comment for the full doctrine.
+
+/**
+ * The turn's options, read from the RAW snapshot through the CANONICAL
+ * readiness membership — not a third population algorithm.
+ *
+ * ⚠⚠ TWO DEFECTS LIVED HERE, IN OPPOSITE DIRECTIONS, AND BOTH WERE FOUND ON
+ * THE REAL CALLER RATHER THAN BY MY TESTS.
+ *
+ * FIRST, it read the PARSED graph. `GraphV3` declares nodes, edges and
+ * goal_constraints and nothing else, so the ingress parse strips top-level
+ * options: `graph.options` was always undefined and the every-option-pin
+ * anchor route was dead in production while helper tests passed.
+ *
+ * THEN, reading the raw snapshot, it preferred any top-level `options` array
+ * WHOLESALE. That over-anchors, which is the worse direction. Codex's
+ * counterexample: option node A pins hiring cost, node B pins another factor,
+ * and the top-level mirror contains only A. A wholesale read sees one option,
+ * finds it pins, and concludes EVERY option pins — while the real analysis
+ * retains A+B and concludes the opposite. The result is an offer PLoT will
+ * refuse to anchor: exactly the actionable-looking dead end this module exists
+ * to prevent.
+ *
+ * ⭐ So the membership question is answered by the code that already answers it
+ * for the run. `buildCanonicalAnalysisReadyFromGraph` COMPLETES a partial
+ * top-level mirror from the option nodes (analysis-ready-helper.ts:897-942 —
+ * a top-level array owns the population only when it is an exact unique-id
+ * bijection with the option nodes), and it is what `build-turn-context` uses
+ * to load the real run. Asking a different question here would be a third
+ * population that is free to drift from both.
+ *
+ * ⚠ FAILS CLOSED. When canonical readiness cannot build a payload the answer
+ * is NO OPTIONS, so the pin route simply does not fire and the offer is
+ * withheld. Under-offering is the safe error; over-anchoring names a dead end.
+ */
+function readSameTurnOptions(rawGraph: unknown): ReadonlyArray<{ interventions?: unknown }> {
+  const ready = buildCanonicalAnalysisReadyFromGraph(rawGraph);
+  const canonical = ready?.options;
+  if (!Array.isArray(canonical) || canonical.length === 0) return [];
+
+  // Interventions come from the option NODE ONLY — byte-for-byte the projection
+  // the loader submits (`mergeOptionInterventionObjects`, build-turn-context.ts:
+  // "returns the ORIGINAL merged intervention OBJECTS per option", sourced from
+  // `optionNodesById.get(option.option_id)` and nothing else).
+  //
+  // ⛔ THE CANONICAL ROW'S OWN `interventions` ARE DELIBERATELY NOT MERGED IN.
+  // Codex CX-20260916 counterexample: node A pins the measured cost, node B pins
+  // an upstream factor, and a COMPLETE top-level mirror (an exact unique-id
+  // bijection, so it owns the population) pins the cost for BOTH. Unioning the
+  // row over the node certifies an all-option cost pin the loader never submits,
+  // and the offer then names a target PLoT will refuse to anchor.
+  //
+  // Canonical readiness answers MEMBERSHIP (which options exist, completing a
+  // partial mirror from the nodes). The NODE answers WHAT EACH ONE PINS. Two
+  // questions, two authorities, named apart — merging them was one authority
+  // answering a question it does not own (trap 21).
+  const optionNodesById = new Map<string, Record<string, unknown>>();
+  const nodes = (rawGraph as { nodes?: unknown } | null)?.nodes;
+  if (Array.isArray(nodes)) {
+    for (const n of nodes as Array<Record<string, unknown>>) {
+      if (n?.kind === 'option' && typeof n.id === 'string') optionNodesById.set(n.id, n);
+    }
+  }
+  // ⚠ The callback parameter is typed structurally rather than cast. A
+  // double cast here would be a 59th `as unknown as` against a baseline of 58
+  // and the boundary ratchet would refuse it — correctly, since nothing about
+  // this read needs to escape the type system.
+  // Only the IDENTITY fields are declared: the row is read for membership and
+  // nothing else, and a declared-but-unread `interventions` would invite the
+  // merge back.
+  const rows: ReadonlyArray<{
+    readonly option_id?: unknown;
+    readonly id?: unknown;
+  }> = canonical;
+  return rows.map((row) => {
+    const id = typeof row.option_id === 'string' ? row.option_id
+      : typeof row.id === 'string' ? row.id : undefined;
+    const node = id !== undefined ? optionNodesById.get(id) : undefined;
+    // `mergeInterventionSourceObjects` is the loader's own merger, so safely
+    // encoded raw-only node interventions are preserved exactly as submitted.
+    return { interventions: node !== undefined ? mergeInterventionSourceObjects(node) : {} };
+  });
+}
 
 function resolveParams(invocation: HandlerInvocation): ResolvedParams {
   const params = invocation.proposal?.parameters ?? [];
@@ -255,11 +371,40 @@ function resolveParams(invocation: HandlerInvocation): ResolvedParams {
     unit = unitParse.data;
   }
 
+  // ⛔⛔ PRESENT BUT INVALID MUST REJECT — IT MUST NOT DEGRADE TO APPEND
+  // (Codex CX-195, found by executing `corrects_node_id: 42`).
+  //
+  // The first version parsed leniently and fell back to `undefined`, which
+  // reads as "no correction was asked for" and APPENDS. So a malformed id
+  // silently turned a requested MOVE into a second limit — the exact
+  // substitution of one intent for another that CX-183 had just corrected
+  // elsewhere, surviving in the PARSER because I only fixed it in the writer.
+  //
+  // Absence still means "no correction requested" and keeps today's behaviour.
+  // It is PRESENCE that now carries an obligation.
+  const correctsParam = get('corrects_node_id');
+  let correctsNodeId: string | undefined;
+  if (correctsParam !== undefined) {
+    const correctsRaw = correctsParam.value;
+    if (typeof correctsRaw !== 'string' || correctsRaw.trim() === '') {
+      throw new D1HandlerError(
+        'PARAMETER_INVALID',
+        'I did not move the limit because I could not tell which one you meant. Nothing on your model changed.',
+        {
+          details: { corrects_node_id: correctsRaw, received_type: typeof correctsRaw },
+          userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+        },
+      );
+    }
+    correctsNodeId = correctsRaw.trim();
+  }
+
   return {
     constraint_type: typeParse.data,
     value: valueParse.data,
     ...(label !== undefined ? { label } : {}),
     ...(unit !== undefined ? { unit } : {}),
+    ...(correctsNodeId !== undefined ? { corrects_node_id: correctsNodeId } : {}),
   };
 }
 
@@ -428,16 +573,77 @@ export function createAddConstraintHandler(): HandlerFn {
         params.value,
       );
 
-      // Default the constraint label from the target node's label so the
-      // confirmation text and the persisted shape are coherent.
-      const constraintLabel = params.label ?? targetNode.label;
-
       // Idempotency: match an existing constraint by (node_id, operator).
       // If found, update value/label/unit in place. If not, append a
       // fresh GoalConstraint with a generated id.
       const existing = graph.goal_constraints?.find(
         (c) => c.node_id === targetId && c.operator === operator,
       );
+
+      // ⭐⭐ IS THIS TURN A CORRECTION? Derived ONCE, and derived HERE —
+      // ABOVE the unit chain — because THREE readers need it and the unit
+      // chain is one of them (Codex CX-195).
+      //   · the UNIT chain, to inherit the moved limit's own currency;
+      //   · the WRITE, to replace the named row rather than append;
+      //   · the RECEIPT and the FACT, because a correction DESTROYS a row.
+      // A second derivation would be a twin free to drift.
+      const correctsId = params.corrects_node_id;
+      // Pointing at the node already targeted asks for nothing to be moved —
+      // that is an ordinary update, not a correction.
+      const correctionRequested = correctsId !== undefined && correctsId !== targetId;
+      const correctableRows = correctionRequested
+        ? (graph.goal_constraints ?? []).filter(
+            (c) => c.node_id === correctsId && c.operator === operator,
+          )
+        : [];
+      const isCorrection =
+        correctionRequested && existing === undefined && correctableRows.length === 1;
+      /** The row being moved. Its own recorded unit travels with it. */
+      const sourceRow = isCorrection ? correctableRows[0] : undefined;
+
+      // ⭐⭐⭐ A CORRECTION RELOCATES ONE ROW — SO ITS ATTESTED PROPERTIES
+      // TRAVEL WITH IT. This is the CLASS, named once, because I have now been
+      // handed FOUR separate findings that are all the same fact.
+      //
+      // `existing` is undefined BY CONSTRUCTION on a move (the row is on a
+      // different node), so EVERY chain that reads it falls through to
+      // DESTINATION metadata. Each reader loses something the user attested:
+      //   · unit        → the limit's currency          (fixed, CX195)
+      //   · before      → the row that was destroyed    (fixed, CX195)
+      //   · receipt     → "added" instead of "moved"    (fixed)
+      //   · value_frame → its quantitative meaning      (CX213 — here)
+      //   · label       → the user's own description    (found by sweeping)
+      //
+      // I fixed the first three ONE AT A TIME and was handed the fourth,
+      // which is the "remedy scoped to the instance, nothing sweeps its
+      // siblings" failure this estate keeps paying for. So the remaining two
+      // are fixed together, under one rule: on a correction the SOURCE row is
+      // the prior state of the thing being changed — exactly the role
+      // `existing` plays for an ordinary update — and therefore outranks any
+      // destination metadata.
+      //
+      // ⚠ CARRIES, NEVER INVENTS. Absent upstream it stays absent, and an
+      // explicit parameter on this turn always wins: the user restating
+      // something is not the same as us preserving it.
+      //
+      // ⛔ `constraint_id` IS DELIBERATELY NOT IN THIS LIST. It is the same
+      // shape but it is a SEMANTICS decision (is a moved limit the same
+      // limit?), not a loss of attested meaning, and no returned finding asks
+      // for it. I checked the one consequence I could think of — identity
+      // churn feeding `constraint_identity_unresolved`, which withholds the
+      // leader — and it does not bite: that state is reconciled WITHIN a run
+      // (run-analysis.ts:1694 reads `constraintVerdict.state`), so a fresh id
+      // is self-consistent on the next run. Recorded rather than changed.
+
+      // Default the constraint label from the target node's label so the
+      // confirmation text and the persisted shape are coherent — EXCEPT on a
+      // correction, where the moved row's own label is the user's attested
+      // description and relocating the limit must not silently retitle it
+      // with whatever the destination node happens to be called.
+      const constraintLabel =
+        params.label
+        ?? (isCorrection ? sourceRow?.label : undefined)
+        ?? targetNode.label;
 
       // Gate-1 unit-drop fix (Paul-ruled doctrine: omission means
       // UNCHANGED). On an update, a turn that does not mention a unit
@@ -453,14 +659,96 @@ export function createAddConstraintHandler(): HandlerFn {
       //
       // Lifted out of the object literal because the FRAME resolution below
       // has to read the resolved unit, not the raw parameter.
+      // ⛔⛔ A MOVE MUST NOT ERASE THE LIMIT'S OWN CURRENCY (Codex CX-195,
+      // found by executing a GBP 200,000 move onto a UNITLESS factor).
+      //
+      // On a correction `existing` is undefined by construction — the row is on
+      // a DIFFERENT node — so the old chain fell straight through to the
+      // DESTINATION's observed unit. Moving £200,000 onto a factor that records
+      // no unit therefore produced a limit with NO CURRENCY AT ALL: the same
+      // number, silently denominated in nothing. The one thing a move must
+      // preserve is what the number means.
+      //
+      // `sourceRow.unit` sits exactly where `existing.unit` sits for an
+      // ordinary update — it IS the prior state of the thing being changed —
+      // and therefore AHEAD of any destination metadata.
       const resolvedUnit =
         params.unit !== undefined
           ? params.unit
           : existing?.unit !== undefined
             ? existing.unit
-            : targetNode.observed_state?.unit !== undefined
-              ? targetNode.observed_state.unit
-              : undefined;
+            : sourceRow?.unit !== undefined
+              ? sourceRow.unit
+              : targetNode.observed_state?.unit !== undefined
+                ? targetNode.observed_state.unit
+                : undefined;
+
+      // ⛔ AND TWO UNITS THAT DISAGREE ARE REFUSED, NOT SILENTLY PICKED. An
+      // explicit unit that contradicts the moved row's own is two different
+      // intents wearing one call — a move, and a re-denomination. Answering
+      // one of them silently would change what the user's limit MEANS while
+      // reporting a move. `sameUnit` so £ and GBP are one unit spelled twice.
+      // ⛔⛔ A MOVE THAT ALSO CHANGES THE NUMBER MAY NOT INHERIT THE UNIT.
+      // This is a 700% defect, and it was found by reading PLoT/ISL rather
+      // than this file.
+      //
+      // CEE relabels a sub-1 percentage: `{value: 0.07, unit: '%'}` is stored
+      // as `{value: 0.07, unit: 'fraction'}` and MEANS 7%
+      // (`compound-goal/extractor.ts` `normaliseConstraintUnits`). That rule
+      // fires ONLY on `unit === '%'`, so a row already labelled `fraction` is
+      // never re-examined. If a correction moves that limit and states a new
+      // value of 7 while silently inheriting `fraction`, the model now carries
+      // SEVEN HUNDRED PER CENT and nothing downstream objects.
+      //
+      // Inheriting a unit is only safe for the quantity it was attested for.
+      // A move is a MOVE; a move that also restates the amount is two intents
+      // in one call, exactly like the conflicting-unit case below. So the unit
+      // must be stated explicitly when the number changes — the turn that
+      // changes the quantity is the turn that must say what it is in.
+      if (
+        isCorrection &&
+        params.unit === undefined &&
+        sourceRow?.unit !== undefined &&
+        !valuesMatch(sourceRow.value, params.value)
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          `I did not move the limit because you have changed the amount and I cannot assume it is still in ${sourceRow.unit}. Tell me the amount and its units together. Nothing on your model changed.`,
+          {
+            details: {
+              source_value: sourceRow.value,
+              requested_value: params.value,
+              source_unit: sourceRow.unit,
+            },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
+        );
+      }
+
+      // ⚠ AND THIS ONE FIRES ONLY WHEN THE NUMBER IS UNCHANGED, which is the
+      // whole of its case. Re-denominating the SAME number is genuinely
+      // ambiguous — "move it, and it is USD not GBP" asks two questions at
+      // once. But a turn that states BOTH a new amount AND its unit has
+      // assumed nothing and left nothing to inherit: the limit is fully
+      // specified, so there is no ambiguity to refuse. Refusing it anyway
+      // would block the natural repair for the 700% case above ("make it 7%"),
+      // which is the one phrasing a user is most likely to reach for.
+      if (
+        isCorrection &&
+        params.unit !== undefined &&
+        sourceRow?.unit !== undefined &&
+        valuesMatch(sourceRow.value, params.value) &&
+        !sameUnit(params.unit, sourceRow.unit)
+      ) {
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          `I did not move the limit because it is recorded in ${sourceRow.unit} and you have asked for ${params.unit}. Nothing on your model changed.`,
+          {
+            details: { source_unit: sourceRow.unit, requested_unit: params.unit },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
+        );
+      }
 
       // ROADMAP 2.877 (link 1) — THE SAME SILENT-NULLIFICATION CLASS AS THE
       // UNIT DROP ABOVE, which this PR would otherwise have opened on a new
@@ -478,11 +766,24 @@ export function createAddConstraintHandler(): HandlerFn {
       // different number and carrying it over would be a manufactured
       // attestation — so it is dropped and the row fails closed, exactly as an
       // unattested row should.
+      // The SAME attestation test, applied to whichever row is the prior state
+      // of the thing being changed: `existing` for an update, `sourceRow` for a
+      // move. `sameUnit` on the correction arm because the move may legitimately
+      // spell the currency differently (GBP vs the pound sign) and that is not a
+      // change of quantity — an exact string compare would drop the frame on a
+      // move that preserved its meaning exactly.
+      const frameCarrier = existing ?? (isCorrection ? sourceRow : undefined);
+      const frameUnitMatches =
+        frameCarrier === existing
+          ? existing?.unit === resolvedUnit
+          : frameCarrier?.unit !== undefined &&
+            resolvedUnit !== undefined &&
+            sameUnit(frameCarrier.unit, resolvedUnit);
       const inheritedValueFrame =
-        existing?.value_frame !== undefined &&
-        valuesMatch(existing.value, params.value) &&
-        existing.unit === resolvedUnit
-          ? existing.value_frame
+        frameCarrier?.value_frame !== undefined &&
+        valuesMatch(frameCarrier.value, params.value) &&
+        frameUnitMatches
+          ? frameCarrier.value_frame
           : undefined;
 
       const newConstraintBase: Omit<GoalConstraintT, 'constraint_id'> = {
@@ -828,6 +1129,49 @@ export function createAddConstraintHandler(): HandlerFn {
       // same commit. The constraint commit itself is NEVER touched.
       const elicitBaseline = mintEligible && !mintedBaseline;
 
+
+      // ⛔⛔ AN UNRESOLVABLE CORRECTION FAILS CLOSED — IT DOES NOT FALL THROUGH
+      // TO APPEND (Codex CX-183, correcting my first cut, and they are right).
+      //
+      // My first version treated 0 or 2+ matches as "refuse the correction and
+      // behave exactly as today", i.e. append. That reads like the safe
+      // default and is the opposite: the user asked for a limit to be MOVED,
+      // and appending silently substitutes an ADDITIONAL limit for the move —
+      // leaving the original, un-evaluable row in place and recreating the
+      // exact poisoned-old-row loop this parameter exists to break. A silent
+      // substitution of one intent for a different one is worse than a visible
+      // refusal.
+      //
+      // Destination collision is refused for the same reason rather than
+      // merged: with a row already on the destination there are two plausible
+      // readings (update the destination and drop the source, or leave the
+      // source alone) and picking one is inference. Ambiguous identity is
+      // asked about, never resolved by guessing.
+      //
+      // ⚠ Only callers that supply NO correction parameter keep the ordinary
+      // append — so nothing existing changes behaviour.
+      if (correctionRequested && !isCorrection) {
+        const reason =
+          existing !== undefined
+            ? 'there is already a limit on that target'
+            : correctableRows.length === 0
+              ? 'I could not find the limit you meant'
+              : 'more than one limit matches the one you meant';
+        throw new D1HandlerError(
+          'PARAMETER_INVALID',
+          `I did not move the limit because ${reason}. Nothing on your model changed.`,
+          {
+            details: {
+              corrects_node_id: correctsId,
+              target_node_id: targetId,
+              matching_source_rows: correctableRows.length,
+              destination_row_exists: existing !== undefined,
+            },
+            userGuidance: ADD_CONSTRAINT_USER_GUIDANCE,
+          },
+        );
+      }
+
       const result = applyAndValidateMutation(rawGraph, (clone) => {
         const list = clone.goal_constraints ?? [];
         // F8 backfill residual (self-review hardening): when there is no
@@ -841,13 +1185,33 @@ export function createAddConstraintHandler(): HandlerFn {
         // the append in exactly that case; a genuinely NEW constraint
         // (existing undefined, valueUnchanged false) still appends as
         // before.
+        // ⭐⭐ THE CORRECTION ARM (Codex CX-171). Replaces the NAMED row in the
+        // SAME atomic mutation, so there is no window in which the graph holds
+        // both limits and no second write to fail halfway.
+        //
+        // ⚠ It sits BELOW `existing` and ABOVE `valueUnchanged`, and both
+        // placements are load-bearing:
+        //   · below `existing` — a write to the SAME (node, operator) is an
+        //     ordinary update and must stay exactly as it was;
+        //   · above `valueUnchanged` — a correction that moves £200,000 from a
+        //     risk to a factor changes NO value, so the unchanged-skip would
+        //     silently discard the entire correction.
+        //
+        // ⛔ REFUSES ON AMBIGUOUS IDENTITY. 0 matches means the row is already
+        // gone; 2+ means the (node, operator) key is not unique here and
+        // choosing between them would be a guess. Both fall through to today's
+        // behaviour untouched — the user's limit is never lost to this path.
         const next = existing
           ? list.map((c) =>
               c.node_id === targetId && c.operator === operator ? constraintParse.data : c,
             )
-          : valueUnchanged
-            ? list
-            : [...list, constraintParse.data];
+          : isCorrection
+            ? list.map((c) =>
+                c.node_id === correctsId && c.operator === operator ? constraintParse.data : c,
+              )
+            : valueUnchanged
+              ? list
+              : [...list, constraintParse.data];
         clone.goal_constraints = next;
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
@@ -948,7 +1312,15 @@ export function createAddConstraintHandler(): HandlerFn {
           }
         }
         return {
-          before: existing ? (existing as Record<string, unknown>) : null,
+          // ⛔ ON A CORRECTION `before` IS THE SOURCE ROW (Codex CX-195). It
+          // was `null` because `existing` is undefined by construction on a
+          // move — so the fact channel recorded a destroyed limit as a fresh
+          // add, and nothing downstream could see what was removed.
+          before: isCorrection
+            ? (sourceRow as Record<string, unknown>)
+            : existing
+              ? (existing as Record<string, unknown>)
+              : null,
           after: constraintParse.data as unknown as Record<string, unknown>,
         };
       });
@@ -960,7 +1332,10 @@ export function createAddConstraintHandler(): HandlerFn {
       // the natural REPAIR after an honest ISL refusal, and swallowing it under
       // `noop` would both lie in the fact channel and move the
       // analysis-affecting hash out from under a "nothing changed" receipt.
-      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline;
+      // ⚠ `!isCorrection` is the same discipline as `!mintedBaseline` beside it:
+      // a correction REMOVES a constraint row, which is analysis-affecting, so
+      // the turn changed the model however unchanged the value looks.
+      const turnIsNoop = valueUnchanged && !labelChanged && !mintedBaseline && !isCorrection;
       const fact: AddConstraintHandlerFact = {
         fact_type: 'add_constraint',
         fact_version: 1,
@@ -999,8 +1374,20 @@ export function createAddConstraintHandler(): HandlerFn {
       // label-only change (value unchanged, label differs) gets its own
       // distinct receipt — never the fresh-update claim, never the
       // total-noop claim either.
+      // ⚠⚠ THE TEXT CHANNEL MUST USE THE SAME PREDICATE AS THE FACT CHANNEL,
+      // and this is the line that keeps them together. The comment above says
+      // "the fact channel already marks this noop; the text channel now
+      // agrees" — so when a conjunct is added to one, it belongs on both. I
+      // added `!isCorrection` to `turnIsNoop` alone and a test caught the text
+      // still saying "no need to change it" over a mutation that DELETED a
+      // constraint row. Fixing one channel of a two-channel agreement is how
+      // the agreement silently ends.
+      //
+      // A correction is never "unchanged": it removes a row, which is
+      // analysis-affecting, whatever the value looks like.
+      const narratesUnchanged = valueUnchanged && !isCorrection;
       const constraintText = isSuccessTargetTurn
-        ? valueUnchanged
+        ? narratesUnchanged
           ? formatGoalTargetUnchanged({
               goalLabel: targetNode.label,
               value: params.value,
@@ -1011,13 +1398,70 @@ export function createAddConstraintHandler(): HandlerFn {
               value: params.value,
               ...(newConstraint.unit !== undefined ? { unit: newConstraint.unit } : {}),
             })
-        : valueUnchanged
-          ? labelChanged
-            ? formatConstraintLabelUpdated(formatInput)
-            : formatConstraintUnchanged(formatInput)
-          : existing !== undefined
-            ? formatConstraintUpdated(formatInput)
-            : formatConstraintAdded(formatInput);
+        : isCorrection
+          // A correction destroyed a row on another node. "Added constraint"
+          // would be true of the destination and silent about the deletion.
+          ? formatConstraintMoved({
+              fromLabel:
+                graph.nodes.find((n) => n.id === correctsId)?.label ?? 'the previous target',
+              toLabel: targetNode.label,
+              label: constraintLabel,
+            })
+          : narratesUnchanged
+            ? labelChanged
+              ? formatConstraintLabelUpdated(formatInput)
+              : formatConstraintUnchanged(formatInput)
+            : existing !== undefined
+              ? formatConstraintUpdated(formatInput)
+              : formatConstraintAdded(formatInput);
+
+      // ⭐⭐ THE RECEIPT MUST NOT CLAIM AN ENFORCEMENT THAT WILL NOT HAPPEN.
+      //
+      // Measured on staging 14 Sep 2026 (debug export `44e349fa`): this handler
+      // said "Added constraint: …" for a `<= 7%` bound on a `risk` node that
+      // records no value anywhere. PLoT logged
+      // `plot.constraint_no_observed_value` and `constraint_analysis_absent` for
+      // all four options; the user learned this TWO TURNS LATER, on the rerun.
+      // The disclosure was correct and correctly worded — it was simply two
+      // turns too late, so the same words are now available at the write.
+      //
+      // ⚠ READ THE **RAW** NODE, NOT THE PARSED ONE, AND IT IS NOT A DETAIL.
+      // `NodeV3` is a plain `z.object`, so it STRIPS undeclared keys — and the
+      // V1 quantity carrier `data` is undeclared (measured at
+      // `schemas/cee-v3.ts` 14 Sep 2026: 8 of the 9 fields in
+      // `NODE_QUANTITY_FIELDS` are declared, `data` is not). Classifying the
+      // parsed node would therefore read a `data`-only node as carrying nothing
+      // and tell a user their perfectly good limit will be ignored — the one
+      // error this disclosure must never make. The raw node is also the exact
+      // input class the run_analysis-time collector consumes
+      // (`snapshot.rawPersistedGraph`), so the two moments classify the same
+      // bytes.
+      //
+      // ⚠ AND IF THE RAW NODE CANNOT BE FOUND, SAY NOTHING. A sweep that could
+      // not look returns the same clean answer as one that looked and found
+      // nothing (CLAUDE.md standing brief). Silence is today's behaviour;
+      // speaking on an unread node would be a claim we have not established.
+      const rawTargetNode = ((): Record<string, unknown> | null => {
+        const nodes = (rawGraph as { nodes?: unknown } | null)?.nodes;
+        if (!Array.isArray(nodes)) return null;
+        for (const n of nodes) {
+          if (n !== null && typeof n === 'object' && (n as Record<string, unknown>).id === targetId) {
+            return n as Record<string, unknown>;
+          }
+        }
+        return null;
+      })();
+      const admissibility =
+        rawTargetNode === null ? null : classifyConstraintWriteAdmissibility(rawTargetNode);
+
+      // The time span the row has no field for. Read off the label that will be
+      // PERSISTED, because that is the only place it survives.
+      const unevaluatedDurationSpan = findUnevaluatedDurationSpan({
+        label: newConstraint.label,
+        value: params.value,
+        unit: newConstraint.unit,
+      });
+
       // ROADMAP 2.877 (link 2) — the mint is user-visible in the same receipt:
       // the user stated two facts (a bound and a level) and is owed
       // confirmation of both; and on an otherwise-unchanged restatement the
@@ -1025,25 +1469,112 @@ export function createAddConstraintHandler(): HandlerFn {
       // no-op (see `turnIsNoop` above).
       // ROADMAP 2.918 — the elicitation is the mint receipt's interrogative
       // dual, on the same cell and the same channel: mint fired → note the
-      // level; mint impossible for want of a statement → ask for one. The
-      // question is ADDITIVE (the constraint receipt precedes it and the row
-      // is already in the committed write); ignoring it costs nothing beyond
-      // the honest ISL refusal that already existed.
-      const assistantText = mintedBaseline
-        ? `${constraintText} ${formatBaselineNoted({
+      // level; mint impossible for want of a statement → ask for one.
+      //
+      // ⚠ THE NOT-CHECKABLE DISCLOSURE IS THE LAST ARM OF THE SAME CHAIN, AND
+      // THAT ORDERING IS DELIBERATE, NOT INCIDENTAL:
+      //   · `mintedBaseline` — this very turn stamps `observed_state` on the
+      //     target, so the limit IS checkable from here on. Disclosing
+      //     otherwise would be false the moment it was written.
+      //   · `elicitBaseline` — the elicitation already names the missing thing
+      //     and asks for it ("the analysis also needs to know where X stands
+      //     today"). It is ADDITIVE (the constraint receipt precedes it and the
+      //     row is already in the committed write). Stacking a second repair ask
+      //     on the same cell is noise, and two asks in one receipt invite the
+      //     user to answer neither.
+      //   · otherwise, and only then, the disclosure speaks.
+      // ⭐ Hoisted so the OUTCOME can offer the move, not just describe it.
+      // The sentence alone was the honest-dead-end pattern: it names the node
+      // that could carry the limit and leaves the user to retype the whole
+      // thing, which is what put the limit on the wrong node in the first
+      // place. `null` ⇒ nothing was offered ⇒ no pending (fail closed).
+      let alternativeForCorrection: ReturnType<typeof findConstraintTargetAlternative> = null;
+      const fragments: string[] = [constraintText];
+      if (unevaluatedDurationSpan !== null) {
+        fragments.push(
+          formatConstraintDurationNotEvaluated({ span: unevaluatedDurationSpan }),
+        );
+      }
+      if (mintedBaseline) {
+        fragments.push(
+          formatBaselineNoted({
             targetLabel: targetNode.label,
             value: statedBaselinePercent!,
             unit: '%',
-          })}`
-        : elicitBaseline
-          ? `${constraintText} ${formatBaselineElicitation({ targetLabel: targetNode.label })}`
-          : constraintText;
+          }),
+        );
+      } else if (elicitBaseline) {
+        fragments.push(formatBaselineElicitation({ targetLabel: targetNode.label }));
+      } else if (admissibility !== null && !admissibility.checkable) {
+        // ⭐ NAME THE CAUSE, NOT ONLY THE SYMPTOM.
+        //
+        // `formatConstraintNotCheckable` says "X has no number recorded
+        // against it" — true, and where it stops the user is left holding a
+        // correct sentence and no move. Measured on Paul's 16 Sep session
+        // `1dd2133d`: his £200,000 landed on "Budget Overrun Risk" (kind risk,
+        // observed_state null) while "Hiring and Onboarding Cost" sat in the
+        // same graph, and he was told only that the risk had no number. The
+        // honest disclosure was already in place and he was still stuck.
+        //
+        // When exactly one factor in the graph already records the
+        // constraint's own unit, name it and offer the move. Nothing is
+        // re-targeted: the user chose a node, and moving their limit under
+        // them on a unit match would be the confident wrongness the
+        // admissibility check exists to prevent.
+        alternativeForCorrection = findConstraintTargetAlternative({
+          chosenIsCheckable: false,
+          chosenNodeId: targetId,
+          constraintUnit: newConstraint.unit ?? null,
+          nodes: graph.nodes as never,
+          edges: graph.edges as never,
+          // ⛔⛔ OPTIONS COME FROM THE RAW SNAPSHOT, NOT THE PARSED GRAPH.
+          // `GraphV3` is a plain `z.object` declaring nodes/edges/
+          // goal_constraints and nothing else (schemas/cee-v3.ts:642-655), so
+          // the parse at :353 STRIPS top-level options. Reading `graph.options`
+          // after it always yielded undefined, which silently disabled the
+          // every-option-pin anchor route: a measured non-root factor pinned by
+          // every real option was withheld even though PLoT's own predicate
+          // accepts it. My helper tests injected options directly and so could
+          // not see the boundary — a fixture proving nothing about the producer.
+          // Found by Codex on the real caller, not by my suite.
+          //
+          // Same-turn raw snapshot, no second graph read. Prefer the canonical
+          // top-level carrier; fall back to option NODES, which is how a V3
+          // graph carries them and what run_analysis projects into the wire
+          // `options` it sends PLoT.
+          options: readSameTurnOptions(rawGraph) as never,
+        });
+        fragments.push(
+          alternativeForCorrection === null
+            ? formatConstraintNotCheckable({ targetLabel: targetNode.label })
+            : formatConstraintTargetAlternative({
+                chosenLabel: targetNode.label,
+                alternative: alternativeForCorrection,
+              }),
+        );
+      }
+      const assistantText = fragments.join(' ');
 
       return {
         assistant_text: assistantText,
         handler_facts: [factCheck.data],
         llm_calls_used: 0,
         mutated_graph: result.mutatedGraph,
+        // The move the user may confirm. Fields are the builder's own, so the
+        // sentence and the offer cannot describe different nodes.
+        ...(alternativeForCorrection !== null && newConstraint.unit !== undefined
+          ? {
+              __constraint_target_correction: {
+                misplaced_node_id: targetId,
+                misplaced_node_label: targetNode.label,
+                operator,
+                value: params.value,
+                unit: newConstraint.unit,
+                alternative_node_id: alternativeForCorrection.nodeId,
+                alternative_label: alternativeForCorrection.label,
+              },
+            }
+          : {}),
         // The executor persists the pending question from this channel in the
         // SAME commit as the receipt that asked it (fields shared with the
         // pending-action type so the two cannot drift). `label` is the

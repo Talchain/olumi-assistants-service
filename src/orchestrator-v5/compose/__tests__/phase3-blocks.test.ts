@@ -2426,7 +2426,19 @@ describe('Finding 5 — free-text lever matcher normalisation', () => {
 describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
   const LEVERS = new Set(['fac_delivery_risk']); // label "Delivery risk"
 
-  it('narrative naming the lever is dropped; a non-lever narrative ships', () => {
+  // ⚠ INVERTED BY RULING (2026-09-16), exactly as the pre_mortem case below was
+  // on 2026-07-31. This test used to assert the narrative card was DROPPED when
+  // its prose named a lever. Measured harm: on a real user session three
+  // `review_card` blocks were dropped in one run, this one as
+  // `{ kind: 'narrative', reason: 'lever_named', field: 'narrative_summary' }`,
+  // and the user asked three different questions and got the same canned
+  // paragraph each time because the card that describes the analysis never
+  // arrived. The card carries severity `info`, `target_refs: []` and no
+  // `action_intent`, so it cannot present a lever as an uncertainty to resolve —
+  // a lever named there is REPORTED, not proposed. Evidence and controls:
+  // `narrative-lever-ruling.test.ts`. The non-lever half below is unchanged and
+  // still proves the card ships on ordinary prose.
+  it('narrative naming the lever SHIPS; a non-lever narrative ships too', () => {
     const named = makeFact({
       decisionReview: {
         narrative_summary: 'The outcome hinges on Delivery risk, which stays deeply uncertain.',
@@ -2436,7 +2448,7 @@ describe('Finding 1 — lever-naming guard on all free-text surfaces', () => {
     expect(
       buildReviewCardBlocks(named, buildGraphNodeLookup(named), CTX, LEVERS)
         .find((b) => b.card_kind === 'narrative'),
-    ).toBeUndefined();
+    ).toBeDefined();
 
     const clean = makeFact({
       decisionReview: {

@@ -5,6 +5,7 @@
  * StageContext is the single mutable context object passed through all stages.
  */
 
+import type { GoalTargetCandidate } from "../factor-extraction/goal-label-target.js";
 import type { FastifyRequest } from "fastify";
 import type { GraphV1 } from "../../contracts/plot/engine.js";
 import type { DraftGraphInputT } from "../../schemas/assist.js";
@@ -172,6 +173,15 @@ export interface UnifiedPipelineResult {
   statusCode: number;
   body: unknown;
   headers?: Record<string, string>;
+  /**
+   * ROUND 6 (CEE #1328) — the goal-label CANDIDATE, as an IN-PROCESS sibling of
+   * `body`, never a field on it: the body is also the legacy HTTP response,
+   * where nothing reads this. `StageContext` does not escape the pipeline
+   * (this function returns `{ statusCode, body }`), so the candidate must
+   * cross here to reach `DraftGraphResult` and the V5 orchestration seam that
+   * asks the user. Absent ⇒ nothing to ask about.
+   */
+  goal_target_candidate?: GoalTargetCandidate;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +263,13 @@ export interface StageContext {
    * Absent/empty ⇒ Stage 4b behaves exactly as it did before.
    */
   enricherMintedGoalIds?: Set<string>;
+  /**
+   * ROUND 6 (CEE #1328) — the figure the goal LABEL names when the brief
+   * contains it and nothing minted a target: a CANDIDATE the orchestration
+   * seam may turn into an `elicit_goal_target` question. Never written to the
+   * graph by any stage. Absent ⇒ nothing to ask about.
+   */
+  goal_target_candidate?: GoalTargetCandidate;
   enrichmentTrace?: {
     called_count: number;
     extraction_mode: string;

@@ -32,6 +32,7 @@ import {
 } from '../../cee/decision-review/decompose.js';
 import {
   checkDecisionReviewContract,
+  collectGraphEntityIds,
   summariseContractViolations,
 } from '../../cee/decision-review/contract-gate.js';
 import {
@@ -55,10 +56,14 @@ import {
   logRunnerUpGapRedaction,
   redactRunnerUpGapStatistic,
 } from '../compose/runner-up-gap-statistic.js';
+// The narrative must name the winner the run actually stored. Installed at the
+// same single egress seam, immediately before the review is attached.
+import { applyWinnerNamingEgressGuard } from '../compose/winner-naming-egress-guard.js';
 // Graph-label readers relocated to a lean, dependency-free context module so
 // the projection layer (`analysis-fallback`) can reuse them without importing
 // this heavy enricher. Re-exported below to keep existing consumers stable.
 import { readGraph, buildNodeLabelMap } from '../context/enrichment-graph-labels.js';
+import { projectRunGraphForDecisionReview } from './decision-review-graph-projection.js';
 // ROADMAP 2.228 F1 — the SINGLE owner of the parse for PLoT's live top-level
 // `enrichment.flip_thresholds[]` shape, shared with the coach context path so
 // the two surfaces cannot drift into disagreeing about the same rows.
@@ -113,6 +118,57 @@ export interface EnrichDecisionReviewInput {
    * minimise churn — only the upstream source has changed.
    */
   readonly brief: string | null;
+  /**
+   * ⭐⭐ THE CANONICAL GRAPH, THREADED THE SAME WAY `brief` IS AND FOR THE SAME
+   * REASON — because the enrichment envelope does not carry it.
+   *
+   * ⚠⚠ MEASURED ON A REAL USER SESSION, 16 Sep 2026. `v5.context_budget` for
+   * `call_site: "decision_review"` reported
+   * `section_chars: { graph_json: 21, isl_results: 8096, ... }` against
+   * `budget_chars: 43100` with `total_chars: 10647`. Twenty-one characters is
+   * `<GRAPH>\n\n{}\n\n</GRAPH>` — arithmetic checked: `{}` renders 21,
+   * `{nodes:[],edges:[]}` renders 51, a one-node graph 103. So the graph was
+   * **absent entirely**, not present-and-empty, while `factor_sensitivity` (6
+   * rows) and `option_comparison` (5 rows) in the same enrichment were full.
+   * `v5.decision_review.completed` agreed: `enrichment_has_graph: false`,
+   * node and edge counts 0.
+   *
+   * ⛔ AND IT IS NOT AN OUTAGE — IT IS THE DOCUMENTED STEADY STATE. CEE's own
+   * conformance manifest lists `enrichment.graph` among the keys PLoT does not
+   * emit at top level, and `readGraph`'s docstring says so in as many words:
+   * "On staging the run-analysis envelope often has NO top-level `graph` —
+   * callers must tolerate an empty result and fall back to inline labels."
+   * The reviewing model has therefore never had the graph.
+   *
+   * ⭐ COMPOSE ALREADY SOLVED THIS ONE LAYER DOWN. `buildGraphNodeLookup(fact,
+   * fallbackGraph)` reads `enrichment.graph` first and falls back to a
+   * hash-gated `persistedGraph`. The enricher runs EARLIER and feeds the LLM,
+   * and never received the same fallback — the remedy was scoped to the
+   * instance and nothing swept its sibling.
+   *
+   * ⛔⛔ AND IT MUST BE THE GRAPH THIS RUN ANALYSED, NOT A TURN-START REREAD.
+   *
+   * The first cut of this field took `context.persistedGraph`. That is the
+   * canonical graph as it stood when the TURN began, and it answers a different
+   * question from the one a review asks (trap 21). On a turn that edits and then
+   * analyses, the handler submits graph N+1 while `context.persistedGraph` still
+   * holds N — so the reviewing model would be handed one model, judged against a
+   * second, and would ground its citations in a third. Callers therefore pass
+   * the RUN HANDLER's own snapshot:
+   *
+   *   · chip path   — `cachedSnapshot.rawPersistedGraph`, the idiom already used
+   *                   twice in the same dispatcher (chip-click-dispatch.ts:1662,
+   *                   :1765);
+   *   · routed path — `handlerOutcome.__run_graph_snapshot`, stamped by
+   *                   run-analysis from the same `snapshot.rawPersistedGraph` it
+   *                   submitted and hashed.
+   *
+   * Both fall back to `context.persistedGraph` when the handler produced no
+   * snapshot, which is the pre-existing behaviour and never worse than absent.
+   * Always a server-side read — never request-supplied `graph_state`.
+   * Optional: absent behaves exactly as before.
+   */
+  readonly runGraph?: unknown;
   /**
    * Optional write-back sink for the decision_review LLM call's attribution
    * (model / provider / token usage). Populated as a side effect ONLY on the
@@ -237,6 +293,10 @@ export async function enrichRunAnalysisWithDecisionReview(
     // receives `enrichment` alone, and since schemas 0.25.0 the verdict is a
     // SIBLING of that record, not a member of it.
     readMayNameLeadingOptionFromResult(fact.result),
+    // The graph THIS RUN analysed. `enrichment.graph` is absent on this path as
+    // a documented steady state, so without this the reviewing model receives
+    // `<GRAPH>{}</GRAPH>` — 21 characters against a 43,100 budget, measured live.
+    input.runGraph,
   );
   if (!invokeInput) {
     skipTelemetry(input, 'no_winner', {
@@ -474,8 +534,28 @@ export async function enrichRunAnalysisWithDecisionReview(
     // includes sanitise + attach time (the full invoked → emit window).
     // Computing it now would understate latency dashboards by the
     // sanitise/attach budget.
+    //
+    // ⭐ PROMPT-GRAPH FIELDS. The existing `enrichment_graph_*` fields describe
+    // what the ENVELOPE carried, which is nothing on this path — they read 0/0
+    // on 6 of 6 captured reviews and said nothing about what the model saw.
+    // These describe what the MODEL and the CONTRACT GATE actually received,
+    // which is the only number that can witness this repair on staging. They
+    // are bounded integers and a closed enum — R-004-clean.
+    const promptGraphNodes = Array.isArray(
+      (invokeInput.graph as Record<string, unknown>)['nodes'],
+    )
+      ? ((invokeInput.graph as Record<string, unknown>)['nodes'] as unknown[]).length
+      : 0;
+    const promptGraphEdges = Array.isArray(
+      (invokeInput.graph as Record<string, unknown>)['edges'],
+    )
+      ? ((invokeInput.graph as Record<string, unknown>)['edges'] as unknown[]).length
+      : 0;
     const completedDensityPayload = {
       request_id: input.requestId,
+      prompt_graph_node_count: promptGraphNodes,
+      prompt_graph_edge_count: promptGraphEdges,
+      prompt_graph_entity_id_count: collectGraphEntityIds(invokeInput.graph).size,
       scenario_id: input.scenarioId,
       ...computeDecisionReviewInputDensity(enrichment as Record<string, unknown>),
       ...computeDecisionReviewOutputDensity(result.output),
@@ -600,7 +680,49 @@ export async function enrichRunAnalysisWithDecisionReview(
         ...summariseProseFactViolations(proseFact.violations),
       });
     }
-    const reviewOutput = proseFact.output as DecisionReviewOutput;
+    // WINNER-NAMING GUARD — the last mutation before the review is attached, so
+    // it binds the text that actually SHIPS rather than an intermediate. Placed
+    // at the SAME single egress seam as the DSK grounding policy and the
+    // runner-up gap redaction above, so both invoke paths (decomposed and
+    // monolithic, INCLUDING the decomposed path's fallback INTO the monolith)
+    // are covered by one rule rather than two drifting copies.
+    //
+    // The narrative is the primary review_card body — the first sentence a user
+    // reads after an analysis — and until now nothing on the live path compared
+    // it against the winner stored on the run. Measured: three captured runs
+    // whose headline stated a price that exists on no option in the model.
+    //
+    // A substitution here is an OLUMI FAULT and says so, with a copyable
+    // reference, in the replacement sentence itself AND in a machine-readable
+    // `narrative_summary_substitution` record. Never a silent drop: dropping
+    // would take out the whole review (bias findings, evidence enhancements,
+    // flip thresholds) and tell the user nothing. See
+    // `compose/winner-naming-egress-guard.ts` for the full reasoning.
+    const winnerNaming = applyWinnerNamingEgressGuard(
+      proseFact.output as Record<string, unknown>,
+      invokeInput.winner,
+      input.requestId,
+    );
+    if (winnerNaming.substituted && winnerNaming.details !== null) {
+      // Not routine. This is a review that named something the analysed model
+      // does not contain — the condition the live path could not previously see.
+      log.warn(
+        {
+          request_id: input.requestId,
+          scenario_id: input.scenarioId,
+          reason: winnerNaming.details.reason,
+          fault: winnerNaming.details.fault,
+          // The STORED label, never the model's prose (no free text in telemetry).
+          winner_label: winnerNaming.details.winner_label,
+        },
+        'v5.decision_review.narrative_did_not_name_winner',
+      );
+    }
+    const reviewOutput = (
+      winnerNaming.substituted
+        ? { ...winnerNaming.value, narrative_summary_substitution: winnerNaming.details }
+        : winnerNaming.value
+    ) as DecisionReviewOutput;
 
     // Phase 1 / Commit 5 — analysis-enrichment-critique-prose-safety:
     // Run the parent-level enrichment through the sanitiser BEFORE
@@ -740,8 +862,17 @@ export function buildInvokeInputForTests(
    * production caller always passes the fact's real verdict.
    */
   mayNameLeadingOption = true,
+  /** See `buildInvokeInput`. Absent behaves exactly as before. */
+  runGraph?: unknown,
 ): DecisionReviewInvokeInput | null {
-  return buildInvokeInput(brief, enrichment, leadingOptionId, scaffoldDisclosure, mayNameLeadingOption);
+  return buildInvokeInput(
+    brief,
+    enrichment,
+    leadingOptionId,
+    scaffoldDisclosure,
+    mayNameLeadingOption,
+    runGraph,
+  );
 }
 
 function buildInvokeInput(
@@ -767,6 +898,13 @@ function buildInvokeInput(
    * calls the dominant risk at a boundary.
    */
   mayNameLeadingOption: boolean,
+  /**
+   * The graph this run analysed, threaded like `brief` because the enrichment
+   * envelope does not carry one. See `runGraph` on `EnrichDecisionReviewInput`
+   * for the measurement and for why a turn-start reread is the wrong graph.
+   * Optional: absent behaves exactly as before.
+   */
+  runGraph?: unknown,
 ): DecisionReviewInvokeInput | null {
   // Phase 3A fix (2026-05-17): walk every available results source until
   // one can match `leading_option_id`. The previous "first non-empty
@@ -887,7 +1025,18 @@ function buildInvokeInput(
   // opaque (Record<string, unknown>) on this path, so reads are defensive.
   // Same maps are reused by readFlipThresholdData and readIslResults so
   // labels stay consistent across the prompt.
-  const graph = readGraph(enrichment);
+  // Prefer the enrichment's own graph; fall back to the canonical one the caller
+  // threaded when the envelope carries none (the documented steady state — see
+  // `canonicalGraph` on the input type). Falling back only when the enrichment
+  // yields NOTHING keeps the producer authoritative wherever it does speak.
+  // ⭐ ONE RUN-MATCHED REPRESENTATION, CONSUMED BY BOTH THE PROMPT AND THE
+  // CONTRACT GATE. `projectRunGraphForDecisionReview` keeps the enrichment's own
+  // graph authoritative wherever it speaks, and otherwise projects the run
+  // snapshot through the RICH compactor's strict-parse arm — never through
+  // `toStructuralGraphV3`, which would overwrite real edge strengths with
+  // `mean: 0 / exists: 1 / positive` and feed the reviewing model fabrications.
+  const graphProjection = projectRunGraphForDecisionReview(readGraph(enrichment), runGraph);
+  const graph = graphProjection.graph;
   const labelMap = buildNodeLabelMap(graph);
   const unitMap = buildNodeUnitMap(graph);
 

@@ -83,9 +83,12 @@ import {
   countBlockingAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
+  optionEffectReferencesUnreliable,
   buildRecordsCompletionPrompt,
   buildRecordsCompletionSchema,
   mergeCompletionClaims,
+  repairableConstraintFields,
+  type ConstraintCorrection,
   RECORDS_COMPLETION_MAX_TOKENS,
   RECORDS_COMPLETION_WALL_MS,
   censusOptionFactorMagnitudes,
@@ -2090,11 +2093,39 @@ export async function draftGraphWithAnthropic(
         }
         const merged =
           completionParsed !== undefined
-            ? mergeCompletionClaims(seam.records, completionParsed as { claims?: DraftInferenceClaim[] })
+            ? mergeCompletionClaims(
+                seam.records,
+                // ⭐ `constraint_corrections` travels with the claims. Omitting it
+                // here would leave the new grammar field parsed and then dropped —
+                // the ask answerable in principle and unanswered in fact.
+                completionParsed as {
+                  claims?: DraftInferenceClaim[];
+                  constraint_corrections?: readonly ConstraintCorrection[];
+                },
+                // ⭐ THE REPAIR SCOPE — derived from the SAME projection that
+                // raised the ask, so the model can only change a limit this turn
+                // actually questioned.
+                repairableConstraintFields(seam.records, seam.projection),
+              )
             : ({ ok: false, reason: "no_new_claims" } as const);
         completionMeta.parsed = completionParsed !== undefined;
         if (merged.ok) {
-          const reprojected = projectRecordsToGraph(merged.records, args.brief);
+          // ⭐⭐ THE PASS BOUNDARY, THREADED — without this the guard it feeds is
+          // DEAD CODE, which is how a change ships dark in this estate.
+          //
+          // `completionAsk.baseClaimIndex` is the claim index at which THIS
+          // completion pass began; it is already logged four lines above. Pass 3d
+          // needs it because it derives ONE scale frame per factor from whatever
+          // magnitudes are present by then, and a magnitude authored in pass 1
+          // was framed against a population that no longer exists once completion
+          // has added its own. Measured live: an option read as £0.85 against
+          // £80,000 and £120,000, ~141,000x understated — see
+          // `option_magnitude_scale_unreconciled`.
+          const reprojected = projectRecordsToGraph(
+            merged.records,
+            args.brief,
+            completionAsk.baseClaimIndex,
+          );
           // ⭐⭐ THE NON-INFERIORITY CHECK — THE BLOCKING CLASSES ONLY.
           //
           // ⚠ THIS IS THE THIRD SHAPE OF THIS LINE, AND THE FIRST DERIVED ONE.
@@ -2129,14 +2160,25 @@ export async function draftGraphWithAnthropic(
           // ⭐ THE PROJECTIONS ARE PASSED BECAUSE THE PRESERVATION QUESTION NEEDS
           // THEM. `activeProjection` is pass 1 — the content the completion is
           // forbidden to overwrite, disconnect, reclassify or delete.
+          // ⭐ PASS-1 OPTION EFFECTS ARE DEFENDED ONLY WHEN THEY ARE CREDIBLE.
+          // Derived from the PASS-1 records (`seam.records`), never from pass 2:
+          // the question is whether the values this guard is about to protect
+          // were reliably referenced in the first place.
+          const optionEffectsUnreliable = optionEffectReferencesUnreliable(seam.records);
           const preservationViolations = completionRegressesProtectedContent(
             activeProjection,
             reprojected,
+            { optionEffectsUnreliable },
           );
-          const notWorse = shouldKeepCompletion(completionAsk, askAfter, {
-            before: activeProjection,
-            after: reprojected,
-          });
+          completionMeta.option_effect_refs_unreliable = optionEffectsUnreliable;
+          // ⭐ THE SAME VIOLATIONS OBJECT THE TELEMETRY REPORTS — never a second
+          // derivation. See the note on `shouldKeepCompletion`'s `opts`.
+          const notWorse = shouldKeepCompletion(
+            completionAsk,
+            askAfter,
+            { before: activeProjection, after: reprojected },
+            { optionEffectsUnreliable, preservationViolations },
+          );
           completionMeta.ask_items_after = askAfter.items.length;
           completionMeta.blocking_before = blockingBefore;
           completionMeta.blocking_after = blockingAfter;

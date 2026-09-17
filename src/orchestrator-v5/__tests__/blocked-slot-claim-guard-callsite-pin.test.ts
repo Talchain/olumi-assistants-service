@@ -34,8 +34,9 @@ describe('blocked-slot claim guard — wired at the finaliser chokepoint', () =>
   it('1 · the guard IS CALLED from the finaliser guard block', () => {
     // The definition alone is not the wiring; assert the CALL exists.
     expect(source).toContain(
-      "enforceBlockedSlotClaimGuard('turn_executor_finalise');",
+      'enforceBlockedSlotClaimGuard(dispatchPath);',
     );
+    expect(source).toContain("enforcePublicAnswerGuards('turn_executor_finalise');");
     expect(source).toContain(
       "import { applyBlockedSlotClaimGuard } from './compose/blocked-slot-claim-guard.js';",
     );
@@ -45,15 +46,15 @@ describe('blocked-slot claim guard — wired at the finaliser chokepoint', () =>
     // Ordering is load-bearing: a layer that judges text a later guard discards
     // is judging a string no user will read. The sibling guards' own ordering
     // note makes the same argument.
-    const call = source.indexOf("enforceBlockedSlotClaimGuard('turn_executor_finalise');");
+    const call = source.indexOf('enforceBlockedSlotClaimGuard(dispatchPath);');
     const defaulted = source.indexOf(
-      "enforceDefaultedValueDisclosureGuard('turn_executor_finalise');",
+      'enforceDefaultedValueDisclosureGuard(dispatchPath);',
     );
     const forbidden = source.indexOf(
-      "enforceEgressForbiddenPhraseGuard('turn_executor_finalise');",
+      'enforceEgressForbiddenPhraseGuard(dispatchPath);',
     );
     const structural = source.indexOf(
-      "enforceStructuralSuccessClaimGuard('turn_executor_finalise');",
+      'enforceStructuralSuccessClaimGuard(dispatchPath);',
     );
     for (const earlier of [defaulted, forbidden, structural]) {
       expect(earlier).toBeGreaterThan(-1);

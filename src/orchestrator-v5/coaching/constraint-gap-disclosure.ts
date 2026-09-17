@@ -62,6 +62,10 @@
  */
 
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
+import {
+  UNMEASURED_TARGET_LEAD_IN,
+  unmeasuredTargetRepairStep,
+} from './constraint-gap-copy.js';
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
 import { locateEvidence } from '../../cee/compound-goal/direction-gate.js';
 import type {
@@ -316,36 +320,15 @@ const UNRESOLVED_LEAD_IN =
  */
 const OUT_OF_SCOPE_LEAD_IN = 'This analysis does not test ';
 
-/**
- * Constant lead-in for the UNMEASURED_TARGET voice; escaped into the grammar
- * below. It states the OBSERVABLE and nothing more: the node the limit points
- * at records no value. It does not say the engine failed (it was never asked a
- * question it could answer), and it does not say the limit is wrong (it is not
- * — the user's sentence was clear; our model has no number to test it against).
+/*
+ * `UNMEASURED_TARGET_LEAD_IN` and `unmeasuredTargetRepairStep` now live in
+ * `constraint-gap-copy.ts` (imported above) — UNCHANGED, byte for byte. They
+ * moved because the same fact is now also stated at CONSTRAINT-WRITE time, and
+ * one set of words said in two places must have one definition (CLAUDE.md
+ * trap 12). The grammar below still derives from them, so nothing here needs to
+ * know where they are declared.
  */
-const UNMEASURED_TARGET_LEAD_IN = 'Your model records no value to test ';
 
-/**
- * The repair step for the UNMEASURED_TARGET voice.
- *
- * It asks for the REFERENT, which is the one thing missing and the one thing
- * only the user knows. "I will record it there" is the same live capability
- * {@link UNEVALUATED_REPAIR_STEP} already claims (`add_constraint`, a
- * registered V5 handler pinned against the registry by this module's tests) —
- * the same verb deliberately, so the two repair steps cannot drift into
- * promising different things.
- *
- * ⚠ IT DISCLOSES THE SAME RESIDUAL its sibling does. There is no conversational
- * remove/replace constraint operation (ROADMAP 2.659), so a correction APPENDS
- * beside the existing row rather than replacing it. Saying so is the INV-2
- * discipline: a repair that cannot touch the defective row must disclose that
- * the row remains.
- */
-function unmeasuredTargetRepairStep(total: number): string {
-  return total === 1
-    ? ' Tell me which part of your model it applies to and I will record it there; this one stays on the model. Then run the analysis again.'
-    : ' Tell me which parts of your model they apply to and I will record them there; these stay on the model. Then run the analysis again.';
-}
 
 /**
  * The sentence that states WHAT the disclosure is about, optionally naming the
@@ -452,7 +435,26 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
     // was rewritten to remove. It also says less than it seems: the observable
     // is that the limit was not scored, not that any particular component was
     // unable to evaluate it.
-    return ` We could not line ${total === 1 ? 'it' : 'them'} up with anything this analysis measures, so no option can be put forward yet.`;
+    // ⛔⛔ THE CONSEQUENCE CLAUSE WAS FALSE, AND THIS MODULE ALREADY KNEW IT.
+    // Witnessed live 16 Sep 2026: this sentence reached a user FOUR times in one
+    // conversation while `cee.analysis_ready.built` logged
+    // `{ status: "ready", readyOptionsCount: 5, blockerCount: 0 }` and the
+    // enrichment carried a five-row `option_comparison`. Five options were
+    // ranked and the user was told none could be put forward.
+    //
+    // Both sibling voices below already refuse this exact clause, each with a
+    // comment saying it is FALSE there for the same reason it is false here: the
+    // comparison ran on every dimension the model does carry. `unevaluated` and
+    // the identity fallback simply never got that treatment.
+    //
+    // ⚠ WHETHER A LEADING OPTION MAY BE NAMED IS A DIFFERENT QUESTION AND IS NOT
+    // CHANGED. `MAY_NAME_LEADING_OPTION` (constraint-feasibility.ts) gates that,
+    // consumed through `ctx.mayNameLeadingOption` by
+    // `compose/leading-option-egress-guard.ts`. That withholding is legitimate
+    // and stays. "We are not naming a winner" and "there is no ranking" are
+    // different propositions and this sentence may only make the second one when
+    // it is true (trap 21).
+    return ` We could not line ${total === 1 ? 'it' : 'them'} up with anything this analysis measures, so ${total === 1 ? 'it was' : 'they were'} not part of the comparison.`;
   }
   if (voice === 'unmeasured_target') {
     // NOT "so no option can be put forward" — that consequence is FALSE here,
@@ -473,9 +475,14 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
       ? ' It was not part of the comparison.'
       : ' They were not part of the comparison.';
   }
+  // Same correction as the `unevaluated` voice above, and for the same reason —
+  // but this voice's PRECISION is preserved exactly: it still says neither that
+  // the limit went unchecked nor that it held. "Cannot be counted as part of the
+  // comparison" is the strongest true statement available when we do not know
+  // whether it was checked; "was not part of" would assert more than we know.
   return total === 1
-    ? ' So it cannot be confirmed whether it was checked, and no option can be put forward yet.'
-    : ' So it cannot be confirmed whether they were checked, and no option can be put forward yet.';
+    ? ' So it cannot be confirmed whether it was checked, and it cannot be counted as part of the comparison.'
+    : ' So it cannot be confirmed whether they were checked, and they cannot be counted as part of the comparison.';
 }
 
 function repairStep(voice: DisclosureVoice, total: number): string {

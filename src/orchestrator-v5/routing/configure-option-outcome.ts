@@ -57,26 +57,61 @@
 
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
 import { mergeInterventionSources } from '../../orchestrator/tools/analysis-ready-helper.js';
-import { buildConfigureOptionRecoveryCopy } from './configure-option-clarify.js';
+import {
+  buildConfigureOptionRecoveryCopy,
+  resolveConfigureOptionTarget,
+  type ConfigureOptionClarifyDeclineReason,
+  type ConfigureOptionTargetDeclineReason,
+} from './configure-option-clarify.js';
 import {
   detectConfigureOptionIntent,
   projectOptionLabels,
 } from './configure-option-intent.js';
 
-/** Why no verdict was reached. Every value leaves the response untouched. */
+/**
+ * Why no verdict was reached. Every value leaves the response untouched.
+ *
+ * ⭐ THESE ARE THE TARGET RESOLVER'S OWN REASONS, NOT A CATCH-ALL. This union
+ * used to flatten every resolver decline into `option_not_identified` — so
+ * `no_unconfigured_option`, `no_readiness`, `graph_unparseable` and
+ * `no_candidate_factor` all surfaced under a name that says *the option could
+ * not be resolved* when in fact resolution had never been attempted. That
+ * misdirection is what `configure-option-outcome-configured-domain.test.ts`
+ * pinned, and aiming a lane at a resolver that did not decide anything is
+ * exactly what it cost.
+ *
+ * ⚠ `option_not_named` IS RETIRED, not renamed. It existed because the shared
+ * resolver could fall back to "the sole unconfigured option" and this guard had
+ * to reject the guess afterwards. `resolveConfigureOptionTarget` has no
+ * fallback, so the state is now unreachable by construction rather than
+ * rejected after the fact — the stronger of the two.
+ */
 export type ConfigureOptionOutcomeSkipReason =
   | 'not_configure_intent'
   | 'pre_graph_unparseable'
+  | 'no_readiness'
   | 'option_not_identified'
-  /**
-   * The resolver fell back to "the sole unconfigured option" because the
-   * message named none. Sound for the intercept, never for a verdict — see the
-   * P1 note at the check itself.
-   */
-  | 'option_not_named'
-  | 'recovery_copy_unavailable'
-  /** Pre- and post-edit resolution disagreed about which option this is. */
+  /** The message named two or more options; a guess is not an identity. */
+  | 'option_label_ambiguous';
+
+/**
+ * Why the protecting verdict carries NO copy. Either the copy predicate
+ * declined on its own domain, or the two resolutions disagreed.
+ */
+export type ConfigureOptionNoCopyReason =
+  | ConfigureOptionClarifyDeclineReason
   | 'recovery_target_diverged';
+
+/**
+ * The target resolver's declines, in this module's vocabulary. Only
+ * `graph_unparseable` needs a name change: this module has already parsed the
+ * pre-edit graph, so its own reason is the more precise one.
+ */
+function skipReasonFor(
+  reason: ConfigureOptionTargetDeclineReason,
+): ConfigureOptionOutcomeSkipReason {
+  return reason === 'graph_unparseable' ? 'pre_graph_unparseable' : reason;
+}
 
 export type ConfigureOptionOutcomeVerdict =
   | { readonly status: 'not_applicable'; readonly reason: ConfigureOptionOutcomeSkipReason }
@@ -94,6 +129,33 @@ export type ConfigureOptionOutcomeVerdict =
       readonly optionId: string;
       readonly optionLabel: string;
       readonly factorLabels: readonly string[];
+    }
+  /**
+   * ⭐⭐ PROTECTION WITHOUT COPY — the verdict a REVISION gets.
+   *
+   * Everything `not_honoured` says about the WRITE is true here: this was a
+   * configure-option turn, the option is resolved BY NAME, and the applied
+   * graph carries no interventions write for it. What is NOT available is an
+   * honest sentence. The recovery copy asserts *"this option has no effect
+   * values yet, so the analysis cannot compare it"* — false of an option
+   * already carrying a value, which is every option on a drafted graph.
+   *
+   * So the two consumers are deliberately split at the status:
+   *
+   *   `option-intervention-write-guard.ts`  accepts BOTH → the write is
+   *                                         withheld on a revision.
+   *   `edit-graph-dispatch.ts`              matches `=== 'not_honoured'` only
+   *                                         → no new sentence is composed.
+   *
+   * It carries NO `factorLabels`, so a consumer cannot compose the untrue
+   * sentence even by accident. Widening the copy instead would have traded a
+   * false success for a false NOTICE: the same harm, opposite sign.
+   */
+  | {
+      readonly status: 'not_honoured_no_copy';
+      readonly optionId: string;
+      readonly optionLabel: string;
+      readonly copyDeclineReason: ConfigureOptionNoCopyReason;
     };
 
 /**
@@ -193,16 +255,33 @@ export function evaluateConfigureOptionOutcome(params: {
   // state in which the user's target was still `needs_encoding` and therefore
   // identifiable. Resolving against `after` would lose a target that the edit
   // had (correctly) just completed.
-  const target = buildConfigureOptionRecoveryCopy({
+  //
+  // ⭐⭐ RESOLVED BY THE TARGET RESOLVER, NOT THE COPY PREDICATE — this is the
+  // split. `buildConfigureOptionRecoveryCopy` answers *what copy replaces the
+  // response?*, and asking it *which option did the user name?* imported its
+  // COPY domain into the IDENTITY question: a revision has no outstanding slot,
+  // so the copy predicate declined and the guard abstained on 46 of 46 real
+  // captured turns — never reaching a verdict in EITHER direction, so a
+  // successful revision was as invisible to it as a wrong-entity one.
+  const target = resolveConfigureOptionTarget({
     message: params.message,
     detection,
     graph: before,
   });
   if (!target.matched) {
-    return { status: 'not_applicable', reason: 'option_not_identified' };
+    return { status: 'not_applicable', reason: skipReasonFor(target.reason) };
   }
 
   // ⭐⭐ P1 (adversarial review of `572f7ea9`) — A GUESS IS NOT AN IDENTITY.
+  //
+  // ⚠ THE CHECK THIS NOTE GUARDED IS GONE, AND THE NOTE STAYS BECAUSE THE
+  // REASONING IS WHAT MATTERS. It used to read
+  // `if (target.optionSource !== 'named_in_message') return option_not_named`,
+  // rejecting the shared resolver's sole-unconfigured fallback AFTER the fact.
+  // `resolveConfigureOptionTarget` carries no fallback at all, so the state is
+  // now unreachable BY CONSTRUCTION. Anything that reintroduces a
+  // "pick the only candidate" tie-break into that resolver reopens exactly the
+  // defect described below, with no check left here to catch it.
   //
   // `resolveConfigureOptionFacts` will fall back to "the sole unconfigured
   // option" when the message names none. That is a good heuristic for the
@@ -231,10 +310,6 @@ export function evaluateConfigureOptionOutcome(params: {
   // So: this guard may only speak about an option the USER NAMED. Its whole
   // doctrine is identity binding (trap 19), and a sole-unconfigured guess is
   // not an identity.
-  if (target.optionSource !== 'named_in_message') {
-    return { status: 'not_applicable', reason: 'option_not_named' };
-  }
-
   if (interventionsWriteLandedFor(target.optionId, before, after)) {
     return { status: 'honoured', optionId: target.optionId };
   }
@@ -247,10 +322,18 @@ export function evaluateConfigureOptionOutcome(params: {
     graph: after,
   });
   if (!recovery.matched) {
-    // The option is no longer resolvable in the applied graph (e.g. it left
-    // `needs_encoding` by some route other than an interventions write). No
-    // honest copy is available, so say nothing rather than guess.
-    return { status: 'not_applicable', reason: 'recovery_copy_unavailable' };
+    // ⭐ NO HONEST COPY — AND THAT IS NOT A REASON TO ABSTAIN. This used to
+    // return `not_applicable`, which switched the WRITE guard off along with
+    // the sentence. The two are separable: the option is resolved by name and
+    // no write landed for it, so the protection is owed whether or not a true
+    // sentence exists. The copy's own decline reason travels with the verdict
+    // instead of being flattened away.
+    return {
+      status: 'not_honoured_no_copy',
+      optionId: target.optionId,
+      optionLabel: target.optionLabel,
+      copyDeclineReason: recovery.reason,
+    };
   }
 
   // The post-edit re-resolution is a SECOND resolution, against a DIFFERENT
@@ -261,7 +344,16 @@ export function evaluateConfigureOptionOutcome(params: {
   // wrong-entity harm this module exists to remove, reintroduced two lines from
   // the end of it.
   if (recovery.optionId !== target.optionId) {
-    return { status: 'not_applicable', reason: 'recovery_target_diverged' };
+    // Same reasoning as the decline above: the copy is unusable, the
+    // protection is not. The verdict keeps the TARGET's identity — the option
+    // the message named, resolved against the pre-edit graph — and drops the
+    // copy that would have carried the other option's name and factors.
+    return {
+      status: 'not_honoured_no_copy',
+      optionId: target.optionId,
+      optionLabel: target.optionLabel,
+      copyDeclineReason: 'recovery_target_diverged',
+    };
   }
 
   return {

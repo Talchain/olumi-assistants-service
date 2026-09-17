@@ -27,7 +27,10 @@ import {
 } from '../../adapters/llm/router.js';
 import type { CallOpts } from '../../adapters/llm/types.js';
 import { extractJsonFromResponse } from '../../utils/json-extractor.js';
-import { emitContextBudget } from '../../orchestrator-v5/context/context-budget-telemetry.js';
+import {
+  emitContextBudget,
+  jsonStructureManifest,
+} from '../../orchestrator-v5/context/context-budget-telemetry.js';
 import {
   buildScienceClaimsSection,
   injectScienceClaimsSection,
@@ -344,6 +347,82 @@ function capArray<T>(
 }
 
 /**
+ * Shrink a JSON value until it fits `maxChars`, WITHOUT ever producing invalid
+ * JSON and without discarding the whole body.
+ *
+ * Arrays lose trailing elements; an object loses one element at a time from
+ * whichever of its array members is currently longest, so a section made of
+ * several lists degrades evenly instead of one list vanishing. Every caller
+ * here has already rank-capped its arrays by decision relevance (highest
+ * |elasticity|, highest switch_probability, closest-to-flip), so "trailing" is
+ * "least relevant" by construction.
+ *
+ * Each round removes exactly one element, so this terminates. If nothing is
+ * left to remove and the value still does not fit — a single pathological
+ * scalar or deeply-nested blob — only then does it fall back to a marker
+ * object, which is itself valid JSON.
+ */
+function shrinkJsonValueToFit(
+  value: unknown,
+  maxChars: number,
+  originalChars: number,
+): { json: string; note: string } {
+  let working: unknown;
+  try {
+    working = JSON.parse(JSON.stringify(value)) as unknown;
+  } catch {
+    working = null;
+  }
+
+  const arraysOf = (v: unknown): unknown[][] => {
+    if (Array.isArray(v)) return [v];
+    if (v !== null && typeof v === 'object') {
+      return Object.values(v as Record<string, unknown>).filter((m): m is unknown[] =>
+        Array.isArray(m),
+      );
+    }
+    return [];
+  };
+
+  let dropped = 0;
+  let json = JSON.stringify(working, null, 2) ?? '';
+  while (json.length > maxChars) {
+    const candidates = arraysOf(working).filter((a) => a.length > 0);
+    if (candidates.length === 0) break;
+    let longest = candidates[0]!;
+    for (const candidate of candidates) {
+      if (candidate.length > longest.length) longest = candidate;
+    }
+    longest.pop();
+    dropped += 1;
+    json = JSON.stringify(working, null, 2) ?? '';
+  }
+
+  if (json.length > maxChars) {
+    return {
+      json: JSON.stringify(
+        {
+          _truncated: true,
+          _reason: 'section exceeded the prompt ceiling',
+          _original_chars: originalChars,
+        },
+        null,
+        2,
+      ),
+      // `hard ceiling` is a PINNED phrase (invoke.prompt-cap.test.ts:231) — it
+      // is the disclosure an operator greps for. A single oversized scalar
+      // field is exactly the case that reaches here, and it is exactly the case
+      // that test was written for.
+      note: `section body omitted at the hard ceiling — a single oversized field cannot be bounded by entry removal (${originalChars} chars)`,
+    };
+  }
+  return {
+    json,
+    note: `${dropped} trailing entr${dropped === 1 ? 'y' : 'ies'} omitted to fit the ${maxChars}-char section ceiling`,
+  };
+}
+
+/**
  * Stringify a (already array-capped) section value, then apply the hard
  * byte-ceiling backstop. Any truncation (array-level or byte-level) is
  * disclosed via an appended `[TRUNCATED: ...]` marker — never silent.
@@ -352,10 +431,193 @@ function boundedJsonBlock(value: unknown, notes: readonly string[]): string {
   let json = JSON.stringify(value, null, 2);
   const allNotes = [...notes];
   if (json.length > DECISION_REVIEW_SECTION_MAX_CHARS) {
-    json = json.slice(0, DECISION_REVIEW_SECTION_MAX_CHARS);
-    allNotes.push(`section body truncated at ${DECISION_REVIEW_SECTION_MAX_CHARS} chars (hard ceiling)`);
+    // ⛔ THIS USED TO BE `json.slice(0, MAX)` AND THAT HANDED THE MODEL
+    // MALFORMED JSON — a mid-object cut ending the body at an arbitrary byte.
+    // It fires today on `<ISL_RESULTS>` for a real 12-fragile-edge capture, so
+    // this is not a hypothetical path.
+    //
+    // ⚠ AND THE OBVIOUS REPLACEMENT — a "body omitted" marker — IS WORSE, which
+    // was MEASURED, not reasoned: swapping the slice for a marker object turned
+    // a 12-edge ISL_RESULTS section into 212 characters of apology and took a
+    // sibling spec red. A malformed body at least still carries the leading
+    // entries the model needs; an empty one carries nothing.
+    //
+    // So the value is SHRUNK and re-serialised: valid JSON at every size, and
+    // the leading (most decision-relevant, since every caller has already
+    // rank-capped) entries survive. The graph section has its own
+    // relationship-aware variant — see `boundedGraphJsonBlock`.
+    const shrunk = shrinkJsonValueToFit(value, DECISION_REVIEW_SECTION_MAX_CHARS, json.length);
+    json = shrunk.json;
+    allNotes.push(shrunk.note);
   }
   return allNotes.length > 0 ? `${json}\n[TRUNCATED: ${allNotes.join('; ')}]` : json;
+}
+
+/**
+ * ⭐⭐ THE GRAPH SECTION, BOUNDED WITHOUT EVER BECOMING UNPARSEABLE AND WITHOUT
+ * SILENTLY LOSING EVERY RELATIONSHIP.
+ *
+ * Two defects this replaces, both latent until the reviewing model was actually
+ * given a graph:
+ *
+ * ⛔ 1. RELATIONSHIPS WERE CAPPED INDEPENDENTLY OF THEIR ENDPOINTS. `nodes` cap
+ * at 40 and `edges` cap at 80 ran as two unrelated slices, so a retained edge
+ * could point at a node that had been dropped. The model then sees a causal
+ * link between two ids, one of which is not in the graph — and the contract
+ * gate, grounding against the same projection, would refuse the model's own
+ * citation of it. Endpoints of retained edges are now retained FIRST, and any
+ * edge whose endpoint did not survive is dropped WITH ITS DISCLOSURE rather
+ * than left dangling.
+ *
+ * ⛔ 2. THE BYTE CEILING SLICED THE JSON STRING. See `boundedJsonBlock`. Here
+ * the VALUE is shrunk and re-serialised instead, so the output is valid JSON at
+ * every size. Shrinking drops from the tail one entity at a time — a guaranteed
+ * decrement, so the loop terminates — and edges go before nodes, because a node
+ * list with no edges still tells the model what exists whereas edges pointing
+ * at absent nodes tell it something false.
+ *
+ * Every omission is disclosed twice: machine-readably inside the object as
+ * `_omitted`, and in the section's `[TRUNCATED: …]` marker.
+ */
+function boundedGraphJsonBlock(graph: Record<string, unknown>): string {
+  const rawNodes = Array.isArray(graph['nodes']) ? (graph['nodes'] as unknown[]) : null;
+  const rawEdges = Array.isArray(graph['edges']) ? (graph['edges'] as unknown[]) : null;
+  if (rawNodes === null && rawEdges === null) {
+    // Not a recognisable node/edge graph — fall back to the generic backstop.
+    return boundedJsonBlock(graph, []);
+  }
+
+  const originalNodeCount = rawNodes?.length ?? 0;
+  const originalEdgeCount = rawEdges?.length ?? 0;
+
+  const idOf = (entity: unknown): string | null => {
+    if (entity === null || typeof entity !== 'object' || Array.isArray(entity)) return null;
+    const id = (entity as Record<string, unknown>)['id'];
+    return typeof id === 'string' && id.length > 0 ? id : null;
+  };
+  const endpointsOf = (entity: unknown): readonly string[] => {
+    if (entity === null || typeof entity !== 'object' || Array.isArray(entity)) return [];
+    const e = entity as Record<string, unknown>;
+    return [e['from'], e['to']].filter((v): v is string => typeof v === 'string' && v.length > 0);
+  };
+
+  let edges = (rawEdges ?? []).slice(0, DECISION_REVIEW_MAX_GRAPH_EDGES);
+
+  // Endpoint-first node retention: nodes an EDGE depends on take the cap's
+  // places before unreferenced nodes do.
+  const needed = new Set<string>();
+  for (const edge of edges) for (const id of endpointsOf(edge)) needed.add(id);
+  const allNodes = rawNodes ?? [];
+  const referenced = allNodes.filter((n) => {
+    const id = idOf(n);
+    return id !== null && needed.has(id);
+  });
+  const unreferenced = allNodes.filter((n) => {
+    const id = idOf(n);
+    return id === null || !needed.has(id);
+  });
+  let nodes = [...referenced, ...unreferenced].slice(0, DECISION_REVIEW_MAX_GRAPH_NODES);
+
+  const dropDanglingEdges = () => {
+    if (rawNodes === null) return;
+    const present = new Set(nodes.map(idOf).filter((v): v is string => v !== null));
+    edges = edges.filter((edge) => {
+      const ends = endpointsOf(edge);
+      return ends.length === 0 || ends.every((id) => present.has(id));
+    });
+  };
+  dropDanglingEdges();
+
+  // ⚠ BYTE-IDENTICAL WHEN NOTHING IS DROPPED. A graph that fits is emitted
+  // exactly as it arrived — no `_node_count`, no `_omitted`, no added noise —
+  // so this function changes the prompt ONLY on the graphs it actually has to
+  // bound. Every other turn's bytes are unchanged, which keeps the blast radius
+  // of this repair to the case it exists for.
+  const render = (): string => {
+    const intact = nodes.length === originalNodeCount && edges.length === originalEdgeCount;
+    if (intact) return JSON.stringify(graph, null, 2);
+    return JSON.stringify(
+      {
+        ...graph,
+        ...(rawNodes !== null ? { nodes } : {}),
+        ...(rawEdges !== null ? { edges } : {}),
+        ...(rawNodes !== null ? { _node_count: nodes.length } : {}),
+        ...(rawEdges !== null ? { _edge_count: edges.length } : {}),
+        _omitted: {
+          nodes: originalNodeCount - nodes.length,
+          edges: originalEdgeCount - edges.length,
+          of_nodes: originalNodeCount,
+          of_edges: originalEdgeCount,
+          reason: 'prompt budget; isolated nodes dropped first, then edges with their endpoints',
+        },
+      },
+      null,
+      2,
+    );
+  };
+
+  const referencedIds = (): Set<string> => {
+    const set = new Set<string>();
+    for (const edge of edges) for (const id of endpointsOf(edge)) set.add(id);
+    return set;
+  };
+
+  let json = render();
+  // ⛔ ORDER MATTERS, AND THE OBVIOUS ORDER IS WRONG. Dropping the tail entity
+  // — edges first — was written here and MEASURED: a 120-node/150-edge graph
+  // came out with all 150 edges gone and the node list still over budget, which
+  // is precisely the "silently drop every relationship" outcome this function
+  // exists to prevent. A list of nodes with no edges is not a model.
+  //
+  // So ISOLATES GO FIRST: a node no retained edge touches costs budget and
+  // carries no relationship. Only when every remaining node is load-bearing
+  // does an edge go — and then its orphaned endpoints go WITH it, so what
+  // survives is always a connected sub-model rather than a scatter of ids.
+  //
+  // Every branch removes at least one entity, so this terminates at the floor
+  // (`nodes: [], edges: []`), which is still valid JSON.
+  while (json.length > DECISION_REVIEW_SECTION_MAX_CHARS && (edges.length > 0 || nodes.length > 0)) {
+    const referenced = referencedIds();
+    // Reverse scan rather than `findLastIndex` — this project's `lib` predates
+    // es2023, and the gate catches it (TS2550) while vitest does not.
+    let isolate = -1;
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const id = idOf(nodes[index]);
+      if (id === null || !referenced.has(id)) {
+        isolate = index;
+        break;
+      }
+    }
+    if (isolate >= 0) {
+      nodes = nodes.filter((_, index) => index !== isolate);
+    } else if (edges.length > 0) {
+      edges = edges.slice(0, edges.length - 1);
+      const stillReferenced = referencedIds();
+      nodes = nodes.filter((node) => {
+        const id = idOf(node);
+        return id !== null && stillReferenced.has(id);
+      });
+    } else {
+      nodes = nodes.slice(0, nodes.length - 1);
+    }
+    json = render();
+  }
+
+  // ⚠ `additional graph.nodes entries omitted` IS A PINNED PHRASE, and it is
+  // pinned in `tools/`, OUTSIDE `src/` — a scoped run of the touched source
+  // directories collects none of it and reads green. The denominator is added
+  // AROUND the existing wording rather than replacing it, so the disclosure
+  // gains information without breaking the contract its readers grep for.
+  const notes: string[] = [];
+  const droppedNodes = originalNodeCount - nodes.length;
+  const droppedEdges = originalEdgeCount - edges.length;
+  if (droppedNodes > 0) {
+    notes.push(`${droppedNodes} additional graph.nodes entries omitted (of ${originalNodeCount})`);
+  }
+  if (droppedEdges > 0) {
+    notes.push(`${droppedEdges} additional graph.edges entries omitted (of ${originalEdgeCount})`);
+  }
+  return notes.length > 0 ? `${json}\n[TRUNCATED: ${notes.join('; ')}]` : json;
 }
 
 /**
@@ -402,21 +664,11 @@ export function buildDecisionReviewUserMessage(
 
   // GRAPH — cap nodes/edges by count (no decision-relevance signal exists
   // for individual nodes/edges at this layer; keep the first N).
-  const graphNodesRaw = input.graph['nodes'];
-  const graphEdgesRaw = input.graph['edges'];
-  const nodesCap = capArray<unknown>(graphNodesRaw, DECISION_REVIEW_MAX_GRAPH_NODES);
-  const edgesCap = capArray<unknown>(graphEdgesRaw, DECISION_REVIEW_MAX_GRAPH_EDGES);
-  const cappedGraph: Record<string, unknown> = {
-    ...input.graph,
-    ...(Array.isArray(graphNodesRaw) ? { nodes: nodesCap.kept } : {}),
-    ...(Array.isArray(graphEdgesRaw) ? { edges: edgesCap.kept } : {}),
-  };
-  const graphNotes: string[] = [];
-  if (nodesCap.droppedCount > 0) graphNotes.push(`${nodesCap.droppedCount} additional graph.nodes entries omitted`);
-  if (edgesCap.droppedCount > 0) graphNotes.push(`${edgesCap.droppedCount} additional graph.edges entries omitted`);
-
+  // Relationship-aware, always-parseable bounding — see `boundedGraphJsonBlock`.
+  // The independent nodes/edges caps this replaces could retain an edge whose
+  // endpoint node had been dropped, and the byte ceiling sliced the JSON string.
   sections.push('<GRAPH>');
-  sections.push(boundedJsonBlock(cappedGraph, graphNotes));
+  sections.push(boundedGraphJsonBlock(input.graph));
   sections.push('</GRAPH>');
 
   // ISL_RESULTS — cap factor_sensitivity / fragile_edges / option_comparison,
@@ -530,6 +782,22 @@ function taggedBlockChars(message: string, tag: string): number {
   return end + close.length - start;
 }
 
+/**
+ * Context v2 S0: the BODY of one `<TAG>…</TAG>` block — the bytes between the
+ * tags, trimmed. `null` when the tag is absent (distinct from an empty body,
+ * which returns `''`). Pure; the source of truth is the assembled user message
+ * itself, so a manifest derived from it describes what was SENT.
+ */
+function taggedBlockBody(message: string, tag: string): string | null {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const start = message.indexOf(open);
+  if (start === -1) return null;
+  const end = message.indexOf(close, start);
+  if (end === -1) return null;
+  return message.slice(start + open.length, end).trim();
+}
+
 // ============================================================================
 // Single-shot invocation
 // ============================================================================
@@ -615,6 +883,13 @@ export async function invokeDecisionReview(
       deterministic_coaching: taggedBlockChars(userMessage, 'DETERMINISTIC_COACHING'),
       decision_context: taggedBlockChars(userMessage, 'DECISION_CONTEXT'),
       flip_threshold_data: taggedBlockChars(userMessage, 'FLIP_THRESHOLD_DATA'),
+    },
+    // CONTENT MANIFEST. `graph_json: 21` was a real staging reading meaning
+    // "no graph reached the reviewing model", and it took arithmetic over three
+    // hypothetical renderings to establish that (enricher docs, :121-134). Read
+    // straight off the assembled message, so it describes the SENT bytes.
+    section_shape: {
+      graph_json: jsonStructureManifest(taggedBlockBody(userMessage, 'GRAPH')),
     },
     total_chars: userMessage.length,
     truncations: [],

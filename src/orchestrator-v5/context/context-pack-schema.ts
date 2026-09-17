@@ -376,6 +376,19 @@ export const RecentMutationSchema = z
     summary: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
     target_label: z.string().max(RECENT_CHANGES_SUMMARY_MAX_CHARS),
     transition: z.literal('node_label_changed').optional(),
+    /**
+     * The write-time evaluability verdict, carried onto every later turn. See
+     * `RecentMutation.constraint_not_checkable` in `./recent-changes.ts` for
+     * why absence is UNKNOWN rather than "this limit is fine", and why the
+     * verdict rides its own key instead of being appended to `summary`.
+     *
+     * The literal is the same token `ConstraintWriteAdmissibility.reason`
+     * carries, so the write receipt and the pack cannot drift into two
+     * vocabularies for one fact. This object is `.strict()`, so registering it
+     * here is what lets the projection's output through the assembler's
+     * non-prod runtime gate at all.
+     */
+    constraint_not_checkable: z.literal('target_records_no_value').optional(),
   })
   .strict();
 

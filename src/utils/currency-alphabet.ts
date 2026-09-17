@@ -47,3 +47,44 @@ const CURRENCY_MAP: Record<string, string> = {
 
 /** The one currency vocabulary. See the note on {@link CURRENCY_MAP}. */
 export const CURRENCY_SYMBOL_TO_CODE: Readonly<Record<string, string>> = CURRENCY_MAP;
+
+/** The recognised currency CODES, derived from the map rather than restated. */
+const CURRENCY_CODES: ReadonlySet<string> = new Set(Object.values(CURRENCY_MAP));
+
+/**
+ * ⭐ ONE UNIT, TWO SPELLINGS — `£` and `GBP` compare equal.
+ *
+ * Lives HERE, in the leaf that owns the currency vocabulary, because both the
+ * constraint-write path and the native-quantity path need it and importing one
+ * from the other created a cycle (`add-constraint` -> `constraint-target-
+ * alternative` -> `routing/native-quantity-operation`), which surfaced as a
+ * TEST TIMEOUT rather than an error — a pristine control passed 3/3 while the
+ * same test hung with the import in place.
+ *
+ * ⚠ RECOGNISED CURRENCIES ONLY. Everything else stays CASE-SENSITIVE: `mW` is
+ * not `MW`. And own-property lookup, because this is a plain object and
+ * `map['constructor']` returns an inherited function.
+ *
+ * ⛔ NOT A CONVERSION. A genuine currency difference still compares unequal and
+ * no rate is ever applied.
+ */
+export function sameUnit(a: string, b: string): boolean {
+  return normaliseUnitForComparison(a) === normaliseUnitForComparison(b);
+}
+
+/** True when the string names a currency this estate recognises. */
+export function isCurrencyUnit(unit: string): boolean {
+  const t = unit.trim();
+  if (Object.prototype.hasOwnProperty.call(CURRENCY_MAP, t)) return true;
+  return CURRENCY_CODES.has(t.toUpperCase());
+}
+
+function normaliseUnitForComparison(unit: string): string {
+  const trimmed = unit.trim();
+  if (Object.prototype.hasOwnProperty.call(CURRENCY_MAP, trimmed)) {
+    return CURRENCY_MAP[trimmed]!;
+  }
+  const upper = trimmed.toUpperCase();
+  if (CURRENCY_CODES.has(upper)) return upper;
+  return trimmed;
+}

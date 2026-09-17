@@ -95,7 +95,7 @@ const READY_GRAPH = {
   nodes: [
     { id: 'goal_growth', kind: 'goal', label: 'Customer growth', goal_threshold: 0.8 },
     { id: 'dec_growth', kind: 'decision', label: 'Growth approach' },
-    { id: 'fac_capacity', kind: 'factor', label: 'Capacity' },
+    { id: 'fac_capacity', kind: 'factor', label: 'Capacity', provenance: 'ai_inferred' },
     { id: 'fac_market', kind: 'factor', label: 'Market demand' },
     { id: 'opt_hire', kind: 'option', label: LEADER_LABEL, interventions: { fac_capacity: 1 } },
     {
@@ -247,6 +247,14 @@ const ANALYSIS_TURN = {
 };
 
 let factsByTurnRowId: Record<string, Array<Record<string, unknown>>> = {};
+let committedAssistantMessages: Array<string | undefined> = [];
+let appendFailure: Error | undefined;
+
+async function captureAppend(write: { assistantMessage?: string }) {
+  if (appendFailure) throw appendFailure;
+  committedAssistantMessages.push(write.assistantMessage);
+  return { id: `row-${randomUUID()}` };
+}
 
 /**
  * DEGRADED-READ MODE — drives `provenance: 'fail_closed_truncated'`.
@@ -266,7 +274,7 @@ let degradedAnalysisRead = false;
 function makeStore(): Record<string, unknown> {
   if (degradedAnalysisRead) {
     return {
-      append: async () => ({ id: `row-${randomUUID()}` }),
+      append: captureAppend,
       readRecent: async () => [ANALYSIS_TURN],
       // Provably truncated: the scenario has far more turns than the window.
       countTurns: async () => 25,
@@ -284,7 +292,7 @@ function makeStore(): Record<string, unknown> {
     };
   }
   return {
-    append: async () => ({ id: `row-${randomUUID()}` }),
+    append: captureAppend,
     readRecent: async (_id: string, limit: number = 20) => [ANALYSIS_TURN].slice(0, limit),
     countTurns: async () => 1,
     readFactsFor: async (turnRowIds: readonly string[]) =>
@@ -450,7 +458,7 @@ function eventsNamed(name: string) {
   return events.filter((e) => e.name === name);
 }
 
-/** The CHOKEPOINT guard's only observable. */
+/** The CHOKEPOINT guard's telemetry event. */
 const CHOKEPOINT_EVENT = TelemetryEvents.V5WithheldLeaderClaimNeutralisedAtFinalise;
 /** The IN-FLOW gate's only observable — the branch discriminator. */
 const IN_FLOW_GATE_EVENT = TelemetryEvents.V5WithheldExplanationAnswerProjected;
@@ -477,6 +485,8 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
 
   beforeEach(() => {
     events = [];
+    committedAssistantMessages = [];
+    appendFailure = undefined;
     setTestSink((name, data) => {
       events.push({ name, data: data as Record<string, any> });
     });
@@ -487,6 +497,30 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
   afterEach(() => {
     setTestSink(null);
     vi.clearAllMocks();
+  });
+
+  describe('mixed origin and advice reaches reasoning and survives final output', () => {
+    it('returns the substantive advice, not just a provenance stamp', async () => {
+      const answer = 'Capacity is an assumption to check. Use measured available staff hours for this input; without that evidence, keep its value uncertain rather than treating a guess as observed.';
+      routeWithToolUseMock.mockResolvedValue(converseTextOnly(answer));
+      const { status, body } = await postTurn(app, 'Why is Capacity in the model? Please suggest a sensible value.');
+      expect(status).toBe(200);
+      expect(routeWithToolUseMock).toHaveBeenCalledTimes(1);
+      // The ordinary answer formatter may insert paragraph breaks; it must
+      // preserve every word of the substantive advice.
+      expect(body.assistant_text.replace(/\s+/g, ' ')).toBe(answer);
+      expect(permissionOnTheWire(body)).toBe(false);
+      expect(eventsNamed(TelemetryEvents.V5StateQueryGuard).some((event) => event.data.matched === false)).toBe(true);
+    });
+
+    it('still answers a pure origin question directly from the saved provenance', async () => {
+      routeWithToolUseMock.mockResolvedValue(converseTextOnly('This should not be used.'));
+      const { status, body } = await postTurn(app, 'Why is Capacity in the model?');
+      expect(status).toBe(200);
+      expect(routeWithToolUseMock).not.toHaveBeenCalled();
+      expect(body.assistant_text).toContain('my suggestion');
+      expect(body.assistant_text).toContain('Capacity');
+    });
   });
 
   // ══ INSTRUMENT CHECKS — every assertion below is vacuous without these ════
@@ -587,14 +621,22 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
           finalText,
           'and it must be REPLACED with the withheld copy, not merely blanked',
         ).toContain(WITHHELD_EXPLANATION_OPENING);
+        expect(committedAssistantMessages, 'one durable conversation answer must be recorded').toHaveLength(1);
+        expect(
+          committedAssistantMessages[0],
+          'future conversation context must remember the answer actually emitted, not the blocked candidate',
+        ).toBe(finalText);
       });
 
       it('the chokepoint reports itself, tagged as an exit the in-flow gate could not cover', async () => {
         routeWithToolUseMock.mockResolvedValue(exit.routingResult(LEAK_TEXT));
-        await postTurn(app, NEUTRAL_MESSAGE);
+        const { body } = await postTurn(app, NEUTRAL_MESSAGE);
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBe(
+          'leader_claim_replaced',
+        );
         const fired = eventsNamed(CHOKEPOINT_EVENT);
         expect(fired, 'the guard must be observable, or a live walk is the only instrument again').toHaveLength(1);
-        expect(fired[0]?.data.dispatch_path).toBe('turn_executor_finalise');
+        expect(fired[0]?.data.dispatch_path).toBe('turn_executor_commit');
         // No `in_flow_gate_eligible` / `handler_id` assertion: both were removed
         // from the payload as structural constants under this guard's scope. A
         // field that cannot vary is not evidence, and asserting one is how a
@@ -603,6 +645,15 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         expect(Object.keys(fired[0]?.data ?? {})).not.toContain('in_flow_gate_eligible');
         // Privacy contract (R-004): lengths and bounded enums only.
         expect(Object.values(fired[0]?.data ?? {}).join(' ')).not.toContain(LEADER_LABEL);
+      });
+
+      it('does not report a committed answer or retain its projection reason when append fails', async () => {
+        appendFailure = new Error('simulated conversation append failure');
+        routeWithToolUseMock.mockResolvedValue(exit.routingResult(LEAK_TEXT));
+        const { body } = await postTurn(app, NEUTRAL_MESSAGE);
+        expect(committedAssistantMessages).toHaveLength(0);
+        expect(String(body.assistant_text ?? '')).not.toContain(WITHHELD_EXPLANATION_OPENING);
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).not.toBe('leader_claim_replaced');
       });
 
       it('PERMIT-WINS CONTROL: the SAME prose on a PERMITTED scenario is byte-identical', async () => {
@@ -618,6 +669,8 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
           'a blanket suppression would be a WORSE defect than the leak — this arm is what catches it',
         ).toContain('leads with a win probability');
         expect(eventsNamed(CHOKEPOINT_EVENT)).toHaveLength(0);
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBeNull();
+        expect(committedAssistantMessages).toEqual([body.assistant_text]);
       });
 
       it('CLEAN-TEXT CONTROL: a withheld turn with no leader claim is untouched', async () => {
@@ -626,6 +679,8 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
         expect(String(body.assistant_text ?? '')).toContain('genuine trade-off');
         expect(String(body.assistant_text ?? '')).not.toContain(WITHHELD_EXPLANATION_OPENING);
         expect(eventsNamed(CHOKEPOINT_EVENT)).toHaveLength(0);
+        expect(body._diagnostic_trace?.claim_safety?.withheld_projection_reason).toBeNull();
+        expect(committedAssistantMessages).toEqual([body.assistant_text]);
       });
 
       it('FALSE-POSITIVE CONTROL: "leads to" / "team leads" survive a withheld turn intact', async () => {

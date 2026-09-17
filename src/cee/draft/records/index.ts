@@ -99,6 +99,11 @@ export {
   modelAnswerableAskItems,
   shouldKeepCompletion,
   completionRegressesProtectedContent,
+  applyConstraintCorrections,
+  repairableConstraintIndices,
+  repairableConstraintFields,
+  type ConstraintRepairField,
+  type ConstraintCorrection,
   askItemIdentity,
   buildRecordsCompletionSchema,
   buildRecordsCompletionPrompt,
@@ -120,3 +125,7 @@ export type {
   OptionFactorMagnitudeCensus,
   OptionMagnitudeCensusPoint,
 } from "./option-magnitude-census.js";
+export {
+  countInvalidOptionEffectSources,
+  optionEffectReferencesUnreliable,
+} from "./option-effect-reference-trust.js";

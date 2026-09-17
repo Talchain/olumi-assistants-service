@@ -113,6 +113,21 @@ const SLICE_MAX_FLIP = 8;
 const SLICE_MAX_GAPS = 8;
 const SLICE_MAX_CRITIQUES = 6;
 const SLICE_MAX_BRIEF_CHARS = 1_600;
+/**
+ * Graph entities forwarded to the CALIBRATION slice. R4 is the fragment that
+ * emits `bias_findings[].affected_elements`, and the contract gate grounds
+ * those against the run's graph — so R4 was being asked to cite ids from a
+ * graph NO FRAGMENT HAS EVER RECEIVED (`buildSlices` forwarded none to any of
+ * the four). Under the monolith that was invisible; the moment the graph is
+ * real, an ungrounded citation drops the whole review.
+ *
+ * Bounded far tighter than the monolith's 40/80 because a slice is a haiku
+ * sub-call: what R4 needs is the ADDRESS SPACE (which ids exist, and what they
+ * mean), not the full causal model, which R2/R3 already carry as factor
+ * sensitivity and fragile edges.
+ */
+const SLICE_MAX_GRAPH_NODES = 30;
+const SLICE_MAX_GRAPH_EDGES = 30;
 
 // ============================================================================
 // Small defensive readers (local — decompose must not depend on the enricher)
@@ -173,6 +188,81 @@ function briefSlice(brief: string): string {
 function block(tag: string, body: unknown): string {
   const json = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
   return `<${tag}>\n${json}\n</${tag}>`;
+}
+
+/**
+ * Project the run's graph into the bounded entity index the CALIBRATION slice
+ * needs in order to cite real ids.
+ *
+ * ⚠ AN EDGE IS ADDRESSED BY ITS ENDPOINTS WHEN IT HAS NO `id`. The model-facing
+ * compact edge shape carries `from`/`to` and no id (graph-compact.ts:143), so
+ * `ref` is the edge's explicit id when it has one and the producer's canonical
+ * `from->to` spelling otherwise — the same address the contract gate accepts
+ * (`collectGraphEntityIds`). Keeping the two in step is the whole point: a
+ * fragment told to cite an address the gate then rejects is worse than a
+ * fragment told nothing.
+ *
+ * Nodes referenced by a retained edge take the cap's places first, so a
+ * retained relationship never points at an absent endpoint. Omissions are
+ * disclosed in-band.
+ */
+function graphEntityIndex(graph: Record<string, unknown>): Record<string, unknown> | null {
+  const rawNodes = Array.isArray(graph['nodes']) ? (graph['nodes'] as unknown[]) : [];
+  const rawEdges = Array.isArray(graph['edges']) ? (graph['edges'] as unknown[]) : [];
+  if (rawNodes.length === 0 && rawEdges.length === 0) return null;
+
+  const rec = (v: unknown): Record<string, unknown> | null =>
+    v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  const str = (v: unknown): string | null =>
+    typeof v === 'string' && v.length > 0 ? v : null;
+
+  const edges = rawEdges
+    .map(rec)
+    .filter((e): e is Record<string, unknown> => e !== null)
+    .map((e) => {
+      const from = str(e['from']);
+      const to = str(e['to']);
+      if (from === null || to === null) return null;
+      return { ref: str(e['id']) ?? `${from}->${to}`, from, to };
+    })
+    .filter((e): e is { ref: string; from: string; to: string } => e !== null)
+    .slice(0, SLICE_MAX_GRAPH_EDGES);
+
+  const needed = new Set<string>();
+  for (const e of edges) {
+    needed.add(e.from);
+    needed.add(e.to);
+  }
+  const projected = rawNodes
+    .map(rec)
+    .filter((n): n is Record<string, unknown> => n !== null)
+    .map((n) => {
+      const id = str(n['id']);
+      if (id === null) return null;
+      return {
+        id,
+        ...(str(n['label']) !== null ? { label: str(n['label']) } : {}),
+        ...(str(n['kind']) !== null ? { kind: str(n['kind']) } : {}),
+      };
+    })
+    .filter((n): n is { id: string } => n !== null);
+  const nodes = [
+    ...projected.filter((n) => needed.has(n.id)),
+    ...projected.filter((n) => !needed.has(n.id)),
+  ].slice(0, SLICE_MAX_GRAPH_NODES);
+
+  const present = new Set(nodes.map((n) => n.id));
+  const keptEdges = edges.filter((e) => present.has(e.from) && present.has(e.to));
+
+  const omittedNodes = projected.length - nodes.length;
+  const omittedEdges = rawEdges.length - keptEdges.length;
+  return {
+    nodes,
+    edges: keptEdges,
+    ...(omittedNodes > 0 || omittedEdges > 0
+      ? { _omitted: { nodes: omittedNodes, edges: omittedEdges } }
+      : {}),
+  };
 }
 
 /**
@@ -267,8 +357,13 @@ export function buildSlices(input: DecisionReviewInvokeInput): { slices: Slices;
   ].join('\n\n');
 
   // R4 CALIBRATION — bias findings + decision-quality prompts + framing check.
+  // ⭐ THE ONLY FRAGMENT THAT EMITS `affected_elements`, and until now the only
+  // one asked to cite graph ids it had never been shown. Omitted entirely when
+  // the run carries no graph, so a graph-less run is byte-identical to before.
+  const graphEntities = graphEntityIndex(input.graph);
   const r4 = [
     block('BRIEF', briefSlice(input.brief)),
+    ...(graphEntities !== null ? [block('GRAPH_ENTITIES', graphEntities)] : []),
     block('MODEL_CRITIQUES', modelCritiques),
     block('FACTOR_SENSITIVITY', factorSensitivity),
     block('CALIBRATION', {
@@ -615,6 +710,83 @@ function tokensNameOption(narrToks: readonly string[], labelToks: readonly strin
 
 export function narrativeNamesOption(narrative: string, label: string): boolean {
   return tokensNameOption(normaliseTokens(narrative), normaliseTokens(label));
+}
+
+/**
+ * Does `narrative` RESTATE `label` but with a DIFFERENT NUMERAL?
+ *
+ * ## Why this exists, and why it is not a cue-word rule (measured 2026-09-15)
+ *
+ * The three captured defects all share one shape: the review prose repeats the
+ * winner's own label verbatim except for the figure — stored "Raise the Pro plan
+ * price to £49", shipped "…to £44". `narrativeNamesOption` correctly returns
+ * false (numerals match EXACTLY), but false is also what it returns for a
+ * perfectly honest narrative that crowns nobody, so absence alone cannot tell a
+ * lie from a legitimate silence.
+ *
+ * ⛔ Gating on a win-cue does NOT separate them. MEASURED: `WIN_CUE` does not
+ * match "produced the best outcome in N% of runs of this model" — the exact
+ * template all three defects use — so a crowning-sentence gate stands the guard
+ * down on 3 of 3 real defects. Widening that cue list is the banned move
+ * (CLAUDE.md trap 22f): it is a natural-language predicate with no stable
+ * boundary, and this estate has already paid for four oscillation rounds on one.
+ *
+ * ⭐ So the binding is by IDENTITY against the winner's OWN label (trap 19), not
+ * by any predicate another object could satisfy: every non-numeric token must
+ * match (inflection-tolerant, {@link labelTokenMatches}) and at least one
+ * numeric token must differ. That is decidable, needs no roster, and cannot be
+ * satisfied by prose that simply does not discuss the winner.
+ *
+ * ## What it deliberately does NOT catch
+ *
+ * A crowning of a wholly different phrase ("Discounting aggressively produced
+ * the best outcome") is NOT detected here — it is the `claimedNonWinnerLeaders`
+ * case, which needs the option roster. Stated so the gap is pinned rather than
+ * silently assumed closed.
+ */
+export function narrativeRestatesLabelWithDifferentNumeral(
+  narrative: string,
+  label: string,
+): boolean {
+  const labelToks = normaliseTokens(label);
+  // No numeral in the label ⇒ no numeral can differ. Cheap, and it keeps the
+  // rule inapplicable (rather than accidentally true) for labels like
+  // "Switch to HubSpot".
+  if (!labelToks.some((t) => /[0-9]/.test(t))) return false;
+  const narrToks = normaliseTokens(narrative);
+  if (narrToks.length < labelToks.length) return false;
+
+  for (let i = 0; i <= narrToks.length - labelToks.length; i += 1) {
+    let all = true;
+    let numeralDiffers = false;
+    for (let j = 0; j < labelToks.length; j += 1) {
+      const labelTok = labelToks[j]!;
+      const narrTok = narrToks[i + j]!;
+      if (/[0-9]/.test(labelTok)) {
+        if (narrTok === labelTok) continue;
+        // A numeral replaced by ANOTHER numeral is the restatement we hunt. A
+        // numeral replaced by a WORD is a different sentence altogether.
+        if (/[0-9]/.test(narrTok)) {
+          numeralDiffers = true;
+          continue;
+        }
+        all = false;
+        break;
+      }
+      if (!labelTokenMatches(narrTok, labelTok)) {
+        all = false;
+        break;
+      }
+    }
+    if (all && numeralDiffers) return true;
+  }
+  return false;
+}
+
+/** Split prose into sentences. Exported so an egress guard can operate
+ *  PER-SENTENCE rather than replacing a whole field. */
+export function splitNarrativeSentences(text: string): string[] {
+  return sentenceList(text);
 }
 
 function sentenceList(text: string): string[] {

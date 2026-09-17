@@ -24,6 +24,8 @@
  * never silently rewritten into the operations array.
  */
 
+import { buildNonLandingDisclosure } from './edit-failure-disclosure.js';
+import type { EditFailureDisclosure } from './edit-failure-disclosure.js';
 import { createHash } from "node:crypto";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
 import { ORCHESTRATOR_TIMEOUT_MS } from "../../config/timeouts.js";
@@ -84,7 +86,8 @@ import {
   type PatchValidationResult,
 } from "../patch-validation.js";
 import { applyPatchOperations, PatchApplyError } from "../patch-applier.js";
-import { canonicaliseValueOps, batchFullyLanded, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+import { canonicaliseValueOps, firstOperationThatDidNotLand, stampUserEditProvenance, reconcileObservedValuePair, findAmbiguousScaleValueOps } from "../canonicalise-value-ops.js";
+import { stripPipelineOwnedFromAddOperations } from "../../orchestrator-v5/graph-management/field-safety.js";
 import { validateGraphStructure, VIOLATION_MESSAGES, type StructuralViolationCode } from "../graph-structure-validator.js";
 import { buildPatchRejectionEnvelope, type PatchRejectionContext } from "../patch-rejection-helper.js";
 import {
@@ -2972,6 +2975,38 @@ export async function handleEditGraph(
     // Sanitise: remove legacy fields
     let operations = sanitiseOperations(validationResult.operations as PatchOperation[]);
 
+    // ⭐ STRIP PIPELINE-OWNED KEYS FROM `add_node` VALUES, RATHER THAN LET THE
+    // REFEREE REFUSE THE WHOLE BATCH. Witnessed on a real user session: an
+    // add_node carrying `observed_state.source` / `provenance` / `raw_value`
+    // was rejected PIPELINE_OWNED_FIELD, and the three structural edges that
+    // referenced the node it would have created then cascaded to
+    // ENTITY_NOT_FOUND — so a change the user had spent three turns agreeing
+    // was reported back as "the model is unchanged". Our own served prompt
+    // asks the model to mirror comparable nodes, which is where those keys
+    // come from. Full rationale + scope on `stripPipelineOwnedFromAddOperations`.
+    //
+    // PLACED HERE, at the ONE choke point, deliberately: `operations` is what
+    // every downstream consumer sees — the referee gate (via
+    // `editResult.operations`), the canonicaliser, the applier and the
+    // receipts. Stripping only the referee's screened copy would leave the
+    // APPLIER writing the forged stamp, re-opening the hole ROADMAP 2.478
+    // closed. Same shape and same seam as the legacy-field strip above.
+    const pipelineOwnedStrip = stripPipelineOwnedFromAddOperations(operations);
+    if (pipelineOwnedStrip.strippedKeyShapes.length > 0) {
+      // DISCLOSED, never silent — and redaction-safe: the shapes name only the
+      // closed CEE-owned vocabulary, every other segment is masked to `*`.
+      log.info(
+        {
+          request_id: requestId,
+          event: 'edit_graph.pipeline_owned_field_stripped',
+          key_shapes: pipelineOwnedStrip.strippedKeyShapes,
+          key_shape_count: pipelineOwnedStrip.strippedKeyShapes.length,
+        },
+        'edit_graph: stripped pipeline-owned keys from add_node values (the add proceeds; the referee would have refused the whole batch)',
+      );
+    }
+    operations = pipelineOwnedStrip.operations;
+
     // Populate old_value for undo data capture (before PLoT submission)
     operations = populateOldValues(
       operations,
@@ -3948,13 +3983,40 @@ export async function handleEditGraph(
       // intervention-subtree spelling that `encodeOptionInterventionsForEdit`
       // translated into canonical `interventions`. Everything else that was
       // stripped is refused.
-      if (!batchFullyLanded(opsToApply, rawApplied, canonicalApplied, context.graph as GraphV3T)) {
+      const nonLanding = firstOperationThatDidNotLand(
+        opsToApply,
+        rawApplied,
+        canonicalApplied,
+        context.graph as GraphV3T,
+      );
+      if (nonLanding !== null) {
         log.warn(
           {
             request_id: requestId,
             scenario_id: context.scenario_id ?? null,
             attempt,
             operations_count: operations.length,
+            // ⭐ WHICH operation, not merely THAT one failed. Without this the
+            // line cannot distinguish "the op spelling is outside the
+            // intervention recogniser" from "the encoder is not on this path" —
+            // two causes with OPPOSITE remedies — and answering it cost an hour
+            // of log archaeology plus a source dive on 2026-09-14.
+            //
+            // Content-free by construction: `op` and `reason` are closed enums,
+            // and `key_shape` masks every non-structural segment to `*` because
+            // op keys are model-controlled AND embed entity ids, which in this
+            // codebase are slug-shaped renderings of the user's own labels. See
+            // the redaction note on `firstOperationThatDidNotLand`. The op's
+            // `value` and `path` are never read here.
+            //
+            // ⚠ QUERY NOTE FOR OPERATORS. Render's log `text=` filter is
+            // CASE-INSENSITIVE, so searching `did_not_land` also matches the
+            // long-standing rejection code `OPERATION_DID_NOT_LAND` — measured
+            // 2026-09-14: 33 hits over 24h, every one of them the old code and
+            // none of them this field. Grep `key_is_intervention_subtree`
+            // instead: it is unique to this descriptor and is always present
+            // (null when the reason is not key-specific).
+            did_not_land: nonLanding,
           },
           'edit_graph B5 — an operation did not survive canonicalisation onto the persisted graph; refusing the WHOLE edit (no silent partial, no false success)',
         );
@@ -3976,6 +4038,14 @@ export async function handleEditGraph(
           undefined,
           attempt,
           diagnostics(),
+          // ⭐ THE SECOND HALF OF THE FIX: make the strip LOUD. The sentence
+          // above is all the user got for 100 of 100 measured refusals in a
+          // 20h window — no request id to quote, no statement of whose fault
+          // it was, no account of what happened to their change. The reason
+          // enum the guard already computed is right here; the disclosure is
+          // derived from it rather than re-diagnosed, so the wire and the warn
+          // line above cannot disagree about why this turn refused.
+          buildNonLandingDisclosure(requestId, nonLanding.reason),
         );
       }
 
@@ -4374,6 +4444,15 @@ function buildRejectionResult(
   plotDetails?: { plot_code?: string; plot_violations?: unknown[] },
   attempts?: number,
   diagnostics?: EditGraphTraceDiagnostics,
+  /**
+   * ⭐ NOTHING FAILS SILENTLY. The user-facing account of this refusal —
+   * request id, fault, plain English. Optional because it is being threaded
+   * one refusal class at a time (the measured dominant one first), and an
+   * ABSENT disclosure is honestly absent rather than a manufactured default:
+   * "we did not state whose fault it was" and "it was nobody's fault" are
+   * different claims and must not share a representation.
+   */
+  disclosure?: EditFailureDisclosure,
 ): EditGraphResult {
   const patchData: GraphPatchBlockData = {
     patch_type: 'edit',
@@ -4382,6 +4461,7 @@ function buildRejectionResult(
     base_graph_hash: baseGraphHash,
     rejection: {
       reason,
+      ...(disclosure && { disclosure }),
       ...(code && { code }),
       ...(plotDetails?.plot_code && { plot_code: plotDetails.plot_code }),
       ...(plotDetails?.plot_violations && plotDetails.plot_violations.length > 0 && { plot_violations: plotDetails.plot_violations }),
@@ -4644,6 +4724,33 @@ export function mapCodeToRejectionReason(code?: EditRejectionCode): EditRejectio
  * true split/continuation. The user-facing prose stays banned-token clean
  * (no operation counts / schema language — see edit-rejection-text.test.ts).
  */
+/**
+ * Recovery chips for the over-cap split refusal, exported so the no-dead-end
+ * rule can be pinned as an EXACT SET (see
+ * `tests/unit/orchestrator-v5/compose/recovery-chip-actionability.test.ts`).
+ *
+ * ⭐ NAMES A MOVE, NOT A MANNER OF SPEAKING. The first prompt used to read
+ * "Let's start with the single most important change." — which tells the
+ * product nothing it can act on, because only the user knows which change that
+ * is. Clicking it re-submits that sentence as a fresh user turn and the router
+ * has no referent, so the product refuses the move it just offered. Measured on
+ * the sibling edit-rejection path (staging 2026-09-14, scenario 9677de7d,
+ * request 809d0ee2). The replacement is an INSTRUCTION over the batch the
+ * product is already holding.
+ */
+export const OVER_CAP_SPLIT_CHIPS: readonly SuggestedAction[] = [
+  {
+    label: 'Start with the key change',
+    prompt: 'Make just the most important part of that change and leave the rest for now.',
+    role: 'facilitator',
+  },
+  {
+    label: 'Split into smaller edits',
+    prompt: 'Help me break this into a few smaller edits.',
+    role: 'challenger',
+  },
+];
+
 function buildOverCapSplitResult(
   reason: string,
   operations: PatchOperation[],
@@ -4680,18 +4787,7 @@ function buildOverCapSplitResult(
   const assistantText =
     "That's more than I can change in a single step. Let's do it in a couple of " +
     'smaller passes — tell me the change that matters most and we can take it from there.';
-  const suggestedActions: SuggestedAction[] = [
-    {
-      label: 'Start with the key change',
-      prompt: "Let's start with the single most important change.",
-      role: 'facilitator',
-    },
-    {
-      label: 'Split into smaller edits',
-      prompt: 'Help me break this into a few smaller edits.',
-      role: 'challenger',
-    },
-  ];
+  const suggestedActions: SuggestedAction[] = [...OVER_CAP_SPLIT_CHIPS];
 
   return {
     blocks: [block],

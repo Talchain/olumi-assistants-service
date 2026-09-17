@@ -125,12 +125,12 @@ describe('process-narration guard — wired at all three dispatch finalisers', (
     // no forbidden phrase, leader claim or success claim — is pinned in
     // `compose/__tests__/process-narration.test.ts`.
     const narration = EXECUTOR.indexOf(
-      "enforceProcessNarrationGuard('turn_executor_finalise');",
+      'enforceProcessNarrationGuard(dispatchPath);',
     );
     expect(narration).toBeGreaterThan(-1);
     for (const later of [
-      "enforceWithheldLeaderClaimGuard('turn_executor_finalise');",
-      "enforceEgressForbiddenPhraseGuard('turn_executor_finalise');",
+      'enforceWithheldLeaderClaimGuard(dispatchPath);',
+      'enforceEgressForbiddenPhraseGuard(dispatchPath);',
     ]) {
       const at = EXECUTOR.indexOf(later);
       expect(at, `${later} not found`).toBeGreaterThan(-1);
@@ -138,7 +138,7 @@ describe('process-narration guard — wired at all three dispatch finalisers', (
     }
   });
 
-  it('5 · in the executor the guard is INSIDE finalizeRun — AST containment, not an index comparison', () => {
+  it('5 · the shared guard policy is INSIDE finalizeRun and the commit projector — AST containment', () => {
     // The property that makes "every executor exit" true: the call sits in the
     // finaliser BODY, so it cannot be one exit's local decision.
     //
@@ -180,34 +180,45 @@ describe('process-narration guard — wired at all three dispatch finalisers', (
     };
 
     let finaliser: ts.FunctionDeclaration | undefined;
+    let policy: ts.FunctionDeclaration | undefined;
+    let projector: ts.FunctionDeclaration | undefined;
     const findFinaliser = (node: ts.Node): void => {
-      if (ts.isFunctionDeclaration(node) && node.name?.text === 'finalizeRun') {
-        finaliser = node;
+      if (ts.isFunctionDeclaration(node)) {
+        if (node.name?.text === 'finalizeRun') finaliser = node;
+        if (node.name?.text === 'enforcePublicAnswerGuards') policy = node;
+        if (node.name?.text === 'projectConversationResponseForCommit') projector = node;
       }
       ts.forEachChild(node, findFinaliser);
     };
     findFinaliser(sf);
     expect(finaliser, 'finalizeRun declaration not found').toBeDefined();
     expect(finaliser?.body, 'finalizeRun has no body').toBeDefined();
+    expect(policy?.body, 'shared policy has no body').toBeDefined();
+    expect(projector?.body, 'commit projector has no body').toBeDefined();
 
     /** Walk parents — exact containment, not a character-offset comparison. */
-    const insideFinaliser = (node: ts.Node): boolean => {
+    const inside = (node: ts.Node, owner: ts.FunctionDeclaration | undefined): boolean => {
       for (let p: ts.Node | undefined = node.parent; p; p = p.parent) {
-        if (p === finaliser) return true;
+        if (p === owner) return true;
       }
       return false;
     };
 
     // PRECONDITION 1 — exactly one invocation, so a second copy elsewhere in
     // the file cannot satisfy this on behalf of the finaliser's own.
-    const guardCalls = callsTo('enforceProcessNarrationGuard');
-    expect(guardCalls).toHaveLength(1);
-
-    // THE PROPERTY.
-    expect(
-      insideFinaliser(guardCalls[0]!),
-      'enforceProcessNarrationGuard is not inside finalizeRun',
-    ).toBe(true);
+    for (const guard of [
+      'enforceProcessNarrationGuard', 'enforceWithheldLeaderClaimGuard',
+      'enforceEgressForbiddenPhraseGuard', 'enforceStructuralSuccessClaimGuard',
+      'enforceDefaultedValueDisclosureGuard', 'enforceBlockedSlotClaimGuard',
+    ]) {
+      const calls = callsTo(guard);
+      expect(calls, guard).toHaveLength(1);
+      expect(inside(calls[0]!, policy), `${guard} is not inside the shared policy`).toBe(true);
+    }
+    const policyCalls = callsTo('enforcePublicAnswerGuards');
+    expect(policyCalls).toHaveLength(2);
+    expect(policyCalls.filter((call) => inside(call, finaliser))).toHaveLength(1);
+    expect(policyCalls.filter((call) => inside(call, projector))).toHaveLength(1);
 
     // PRECONDITION 2 — THE DISCRIMINATING TWIN. `insideFinaliser` returning
     // `true` proves nothing on its own: a walk that ran away to the source file
@@ -218,7 +229,7 @@ describe('process-narration guard — wired at all three dispatch finalisers', (
     const siblingCalls = callsTo('applyProcessNarrationGuard');
     expect(siblingCalls).toHaveLength(1);
     expect(
-      insideFinaliser(siblingCalls[0]!),
+      inside(siblingCalls[0]!, finaliser),
       'the containment walk no longer discriminates — it reports a node ' +
         'declared outside finalizeRun as inside it',
     ).toBe(false);

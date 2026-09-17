@@ -64,6 +64,10 @@ import {
   mergeRephrasedOptions,
   type RephraseMergeResult,
 } from "./option-rephrase-merge.js";
+import {
+  adoptStatedFiguresForStatedOptions,
+  type StatedOptionCoverageResult,
+} from "./stated-option-figure-adoption.js";
 import { detectUnreconciledStatedMagnitudes } from "../provenance/money-invariant.js";
 import { UNAUTHORED_DECISION_LABEL } from "../draft/records/objective-label.js";
 
@@ -414,6 +418,134 @@ export function transformNodeToV3(
     }
     if (node.data.uncertainty_drivers !== undefined) {
       v3Node.uncertainty_drivers = node.data.uncertainty_drivers;
+    }
+  }
+
+  // ⭐⭐ THE PROMOTED SCALE — READ FROM THE NODE WHEN `data` IS GONE.
+  //
+  // ⚠⚠ WITHOUT THIS, A SCALE THE PIPELINE CHOSE AND APPLIED IS DISCARDED, and
+  // that is measured rather than argued. `unreachable-factors.ts` promotes
+  // `raw_value` / `cap` / `declared_scale` to NODE level and then deletes
+  // `node.data`, precisely because a field-by-field rebuild drops anything left
+  // on a deleted `data`. Every branch above reads `node.data.*` ONLY, so the
+  // promotion landed at a level this rebuild also never read — the same defect
+  // one storey up. That lane located the hop and handed it here verbatim:
+  // "correcting it means teaching the V3 transform to read node-level values".
+  //
+  // Measured, two ways:
+  //   · that lane, across four deployed captures: ZERO of 29 factors carried
+  //     node-level `raw_value`, `cap` or `unit` on the wire;
+  //   · executed on this function before the change — a node carrying promoted
+  //     `{raw_value: 55000, cap: 100000, unit: '$'}` with no `data` produced NO
+  //     `observed_state` AT ALL, while the same values under `data` produced a
+  //     complete one.
+  //
+  // THE USER-VISIBLE COST, from Paul's 16 Sep capture: `Annual Assistant Cost`
+  // reached the wire carrying only id/label/type/kind/category, while its four
+  // option cells were encoded at a consistent 1:100,000 ratio. The scale was
+  // chosen, applied to every cell, and recorded nowhere — so a money limit on
+  // that factor can never be checked, and nothing downstream can reproduce the
+  // encoding.
+  //
+  // ⚠ CARRIES, NEVER DERIVES. Every value here was already extracted by the
+  // pipeline and promoted by the repair stage; this copies it to the level the
+  // contract reads. Nothing is read from the brief and nothing is computed — a
+  // number taken out of prose and attributed to the user is the ROADMAP 2.714
+  // defect class, reverted 8 Aug 2026.
+  //
+  // ⚠ FALLBACK ONLY. If a branch above already built `observed_state`, it wins
+  // untouched: `data` is the richer source and this must not shadow it.
+  if (v3Node.observed_state === undefined) {
+    const promotedRaw = (node as { raw_value?: unknown }).raw_value;
+    const promotedCap = (node as { cap?: unknown }).cap;
+    const promotedUnit = (node as { unit?: unknown }).unit;
+    const rawOk = typeof promotedRaw === 'number' && Number.isFinite(promotedRaw);
+    const capOk = typeof promotedCap === 'number' && Number.isFinite(promotedCap) && promotedCap !== 0;
+
+    // ⚠⚠ `observed_state.value` IS REQUIRED BY `NodeV3`, so a partial object is
+    // not a weaker record — it is an INVALID one. A first cut emitted
+    // {raw_value, cap, unit} with no value; six specs passed because they
+    // asserted on this function's OUTPUT and never parsed it through the schema
+    // the wire actually uses. `NodeV3.safeParse` rejects it with
+    // "observed_state.value Required" (Codex CX-147, reproduced here).
+    //
+    // So the pair is the unit of carry: `value = raw_value / cap` is the
+    // contract's OWN stated relationship — `unreachable-factors.ts` says it
+    // verbatim, "value = raw_value / cap ... When `cap` is absent, value =
+    // raw_value" — so computing it from two carried numbers is carrying, not
+    // deriving a new fact. With only a unit, or only one of the pair, there is
+    // no valid record to make and this correctly does nothing rather than
+    // emitting something the strict re-parse will delete or refuse.
+    // ⭐⭐ AND THE PROVENANCE TRAVELS WITH THE SCALE, OR THE CARRY MOVES NOTHING
+    // THE USER CAN SEE.
+    //
+    // A first cut of this fallback carried `{value, raw_value, cap, unit}` and
+    // stopped there. It restores the SCALE and drops the AUTHORSHIP, and the
+    // authorship is what the product actually gates on:
+    //
+    //   `obligation-provenance.ts` `structureProvenance` reads
+    //   `observed_state.source`, then `observed_state.extractionType`, and
+    //   returns `'unattributed'` when it finds neither
+    //     → `censusConfidenceParameters` does not increment
+    //       `material_parameters_user_stated`
+    //     → `semanticQualitySufficient` is literally
+    //       `signals.material_parameters_user_stated > 0` → false
+    //     → `deriveMode` withholds `comparative_leader`
+    //     → the run is confined: no leading option, no win probabilities, and
+    //       the user is told "Nothing in it is confirmed yet".
+    //
+    // So a restored factor with no `extractionType` reaches the wire carrying a
+    // perfectly good number that counts for NOTHING at the only gate that
+    // decides whether the analysis may say anything. That is this estate's
+    // trap 23 — validating against the symptom's metric (is the scale on the
+    // wire?) while the outcome metric (may the product speak?) never moves.
+    //
+    // `extractionType` is promoted to NODE level by the same repair stage that
+    // promotes the pair (`unreachable-factors.ts:502`), and the `data`-present
+    // branch above already nests it inside `observed_state`. This carries it to
+    // the same place from the same source. ⚠ CARRIES, NEVER INFERS: absent
+    // upstream, it stays absent here — a fabricated authorship is far worse
+    // than a withheld one.
+    // ⛔⛔ A DECLARED PRIOR OUTRANKS THE PAIR — DO NOT RESTORE A REJECTED
+    // DEFAULT (Codex CX-175, an independent review that BLOCKED this change
+    // with an executed reproduction, confirmed here by running it).
+    //
+    // `handleUnreachableFactors` DELIBERATELY removes a fabricated point value
+    // and substitutes `buildUnquantifiedPrior()` — "Do not disguise ignorance
+    // as a 0–1 distribution", "MARK, NEVER SUPPRESS" — but it leaves the
+    // promoted `raw_value`/`cap` ON THE NODE. So this fallback saw the pair,
+    // recreated `observed_state.value = raw_value / cap`, reinstated exactly
+    // the default the repair had REJECTED, and PLoT sampled that point instead
+    // of the declared distribution. Genuine prior-backed externals too.
+    //
+    // ⭐ THE TELL, AND IT WAS IN MY OWN COMMENT: "CARRIES, NEVER DERIVES" sat
+    // directly above a DIVISION. Dividing two numbers is a derivation; it is
+    // defensible as carrying only into a VACUUM. A prior is not a vacuum — it
+    // is the pipeline's considered statement about this factor's level, and it
+    // wins.
+    //
+    // ⚠ RESIDUAL RECORDED, NOT CHASED: a prior-backed factor still reaches the
+    // wire with no unit. That is a real display/comparison gap and it needs a
+    // carrier that is NOT `observed_state` (`scale_frame` is the typed one the
+    // estate already designed). Synthesising one here would trade a display gap
+    // for a corrupted computation, which is the worse of the two by far.
+    const declaredPrior = (node as { prior?: unknown }).prior;
+    const hasDeclaredPrior =
+      declaredPrior !== null && typeof declaredPrior === 'object' && !Array.isArray(declaredPrior);
+
+    if (rawOk && capOk && !hasDeclaredPrior) {
+      const derived = promotedRaw / promotedCap;
+      if (Number.isFinite(derived)) {
+        const promotedExtraction = (node as { extractionType?: unknown }).extractionType;
+        (v3Node as { observed_state?: unknown }).observed_state = {
+          value: derived,
+          raw_value: promotedRaw,
+          cap: promotedCap,
+          ...(typeof promotedUnit === 'string' && promotedUnit.trim() !== ''
+            ? { unit: promotedUnit } : {}),
+          ...(promotedExtraction !== undefined ? { extractionType: promotedExtraction } : {}),
+        };
+      }
     }
   }
 
@@ -1235,6 +1367,11 @@ export interface V3GraphOptionsProjection extends GraphTransformResult {
   readonly goal_node_id: string;
   readonly extracted_options: ExtractedOption[];
   readonly rephrase_merge: RephraseMergeResult;
+  /**
+   * What the stated options were completed with, and which elements of a stated
+   * proposal remain unwired. See `stated-option-figure-adoption.ts`.
+   */
+  readonly stated_option_coverage: StatedOptionCoverageResult;
 }
 
 /**
@@ -1387,12 +1524,23 @@ export function projectGraphAndOptionsToV3(
     options,
   });
 
+  // ⭐ AFTER absorption, and that order is load-bearing. A rephrase twin that is
+  // about to be removed must not fund an adoption, and an option that survives
+  // absorption must be complete before either consumer reads it. Running this
+  // first would let a donor disappear between the write and the read.
+  const statedOptionCoverage = adoptStatedFiguresForStatedOptions({
+    nodes: projectedNodes,
+    edges: projectedEdges,
+    options,
+  });
+
   return {
     ...transformed,
     options,
     goal_node_id: goalNodeId,
     extracted_options: extractedOptions,
     rephrase_merge: rephraseMerge,
+    stated_option_coverage: statedOptionCoverage,
   };
 }
 

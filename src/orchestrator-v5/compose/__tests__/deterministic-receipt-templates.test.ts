@@ -133,6 +133,23 @@ const TEMPLATE_PRODUCERS: Readonly<Record<string, () => string>> = {
     receipts.formatConstraintUnchanged({ targetLabel: SLOT, operator: '>=', value: 2 }),
   formatConstraintLabelUpdated: () =>
     receipts.formatConstraintLabelUpdated({ targetLabel: SLOT, operator: '>=', value: 2 }),
+  // The correction receipt. THREE label positions, and all three are slots on
+  // purpose: it names the node the limit LEFT as well as the one it landed on,
+  // because "moved" with one end named is as ambiguous as not saying it. The
+  // third is the constraint's own label, which on a correction carries the
+  // user's attested description rather than a node name.
+  formatConstraintMoved: () =>
+    receipts.formatConstraintMoved({ fromLabel: SLOT, toLabel: SLOT, label: SLOT }),
+  // The write-time honesty pair. `formatConstraintNotCheckable` reuses the
+  // run_analysis-time `unmeasured_target` voice verbatim (one shared definition
+  // in `coaching/constraint-gap-copy.ts`), so a doctrine failure here would
+  // also be a doctrine failure in the disclosure that already ships.
+  formatConstraintNotCheckable: () =>
+    receipts.formatConstraintNotCheckable({ targetLabel: SLOT }),
+  // The span slot carries the user's own words, quoted back — the strongest
+  // reason to classify the TEMPLATE and never the composed string.
+  formatConstraintDurationNotEvaluated: () =>
+    receipts.formatConstraintDurationNotEvaluated({ span: SLOT }),
   formatBaselineNoted: () =>
     receipts.formatBaselineNoted({ targetLabel: SLOT, value: 12, unit: '%' }),
   // ROADMAP 2.918 — the baseline elicitation question (the mint receipt's
@@ -318,7 +335,11 @@ describe('REVERTED APPROACH — B2: a label FRAGMENT must NOT disable a frame', 
   ];
   for (const text of CEE_AUTHORED_DIRECTIVES) {
     it(`still fatal regardless of any label content: ${text}`, () => {
-      expect(applyEgressForbiddenPhraseGuard(text).remedy).toBe('fallback_replacement');
+      // The frame is still DETECTED regardless of label content — that is what this block guards and it is
+      // unchanged. What moved is the REMEDY: a crowning is now rewritten into sanctioned vocabulary rather
+      // than deleting the whole response. `findForbiddenPhraseHit` is asserted directly so this block keeps
+      // testing detection rather than a downstream policy that may change again.
+      expect(findForbiddenPhraseHit(text)).not.toBeNull();
     });
   }
 });
@@ -473,7 +494,11 @@ describe('⚠ KNOWN FALSE POSITIVES — RIDER F1: compliant sentences the guard 
         `PINNING AN ACCEPTED COST, NOT APPROVING IT. This sentence is compliant: ${why} ` +
           'RED here means the guard learned to allow it — delete the pin.',
       ).not.toBeNull();
-      expect(applyEgressForbiddenPhraseGuard(text).remedy).toBe('fallback_replacement');
+      // The frame is still DETECTED regardless of label content — that is what this block guards and it is
+      // unchanged. What moved is the REMEDY: a crowning is now rewritten into sanctioned vocabulary rather
+      // than deleting the whole response. `findForbiddenPhraseHit` is asserted directly so this block keeps
+      // testing detection rather than a downstream policy that may change again.
+      expect(findForbiddenPhraseHit(text)).not.toBeNull();
     });
   }
 

@@ -19,6 +19,7 @@ import { CausalClaimsArraySchema } from "./causal-claims.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
+import { OBSERVED_STATE_STATED_ROLES } from "../cee/context-integrity/stated-role-vocabulary.js";
 
 // ============================================================================
 // Node Types
@@ -131,6 +132,36 @@ export const ObservedStateV3 = z.object({
   cap: z.number().optional(),
   /** How the value was extracted (explicit, inferred, range, observed) */
   extractionType: z.enum(["explicit", "inferred", "range", "observed"]).optional(),
+  /**
+   * ⭐⭐ WHAT THE USER STATED THIS MAGNITUDE **AS** — the role axis.
+   *
+   * `extractionType` beside it answers a DIFFERENT question and the two must
+   * not be collapsed (CLAUDE.md trap 21): its four members all describe HOW THE
+   * PIPELINE READ THE BRIEF, and `explicit` is stamped just as readily on a
+   * ceiling as on a measurement. Measured live 14 Sep 2026: a brief saying
+   * *"keeping monthly churn under 4%"* reached this object as
+   * `{ value: 0.04, extractionType: "explicit" }` — an `observed_state`, the
+   * field for what is CURRENTLY TRUE, asserting that churn IS 4%.
+   *
+   * `constraint` means: the user stated this magnitude as a LIMIT, and the
+   * level stored beside it is that limit re-used as the node's position, NOT a
+   * level the user asserted. The value is deliberately left in place — PLoT
+   * needs `observed_state.value` to evaluate the limit at all
+   * (`constraint-pu-injection.ts` → `missing_observed_state`), so deleting it
+   * would trade a false statement for an unevaluable one. What changes is that
+   * the claim is no longer silent.
+   *
+   * ABSENCE MEANS UNDECLARED and MUST fail open to today's behaviour. It is
+   * absent on every node written before this field existed and on every node
+   * whose role no producer could settle — a consumer must never read absence as
+   * "therefore an observation".
+   *
+   * Producer: `deriveStatedQuantityRoles`
+   * (`cee/context-integrity/not-modelled-manifest.ts`), stamped at the V3
+   * boundary. Vocabulary derived from `OBSERVED_STATE_STATED_ROLES` rather than
+   * restated, and that module explains why it has one member.
+   */
+  stated_role: z.enum(OBSERVED_STATE_STATED_ROLES).optional(),
   /** Factor type classification for downstream enrichment */
   factor_type: FactorTypeV3.optional(),
   /** 1-2 short phrases explaining sources of epistemic uncertainty */

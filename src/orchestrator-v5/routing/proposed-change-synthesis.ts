@@ -116,6 +116,8 @@ interface FactResultLike {
   readonly status?: string;
   readonly target_id?: string;
   readonly after?: unknown;
+  /** Present on an `add_constraint` update or CORRECTION — see {@link matchAddConstraint}. */
+  readonly before?: unknown;
 }
 
 function readFactResult(fact: HandlerFact): FactResultLike | null {
@@ -230,6 +232,39 @@ function matchAddConstraint(
   // proposalTargets is rejected upstream by the synthesis gate.
   const nodeId = typeof after.node_id === 'string' ? after.node_id : null;
   if (nodeId === null || !proposalTargets.includes(nodeId)) return false;
+
+  // ⛔⛔ A CORRECTION IS COMPLETED BY THE MOVE, NOT BY EITHER ENDPOINT BEING
+  // TOUCHED (Codex CX-210, found by executing the real builder → emitter →
+  // synthesis chain with a same-turn source fact).
+  //
+  // A correction proposal lists BOTH endpoints in `target_entity_ids`, and it
+  // must: that is what invalidates the offer if either node disappears. But
+  // the target gate above then accepts a fact at EITHER end — and the fact
+  // that CREATED the wrong row is committed AFTER the proposal is emitted, so
+  // it passes the timestamp filter too. Its node_id, operator, value and unit
+  // all match the proposal, because the proposal is offering to move THAT
+  // limit. Result: `already_applied`, and the limit never moves.
+  //
+  // ⚠ THE SHORTCUT IS TO DROP THE SOURCE FROM `target_entity_ids`. That hides
+  // this symptom and removes the source-side freshness protection — the offer
+  // would stay live after the row it is moving had gone. Both protections stay;
+  // it is the COMPLETION test that becomes move-aware.
+  //
+  // A move is completed only by a fact that shows the move: written at the
+  // DESTINATION (never the source), with `before` naming the row it displaced.
+  // `before` is the source row precisely because CX-195 required it to be, so
+  // this reads the field that finding created rather than inventing a carrier.
+  const correctsNodeId =
+    typeof proposalParams.corrects_node_id === 'string' &&
+    proposalParams.corrects_node_id.trim() !== ''
+      ? proposalParams.corrects_node_id.trim()
+      : null;
+  if (correctsNodeId !== null) {
+    if (nodeId === correctsNodeId) return false;
+    const before = isPlainObject(result.before) ? result.before : null;
+    if (before === null) return false;
+    if (before.node_id !== correctsNodeId) return false;
+  }
 
   // Operator gate: derive from constraint_type and compare to after.operator.
   let sawMatchingField = false;

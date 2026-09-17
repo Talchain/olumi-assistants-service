@@ -1592,6 +1592,9 @@ async function runUnifiedPipelineAttempt(
     return {
       statusCode: 200,
       body: ctx.finalResponse,
+      // ROUND 6 (CEE #1328) — the candidate leaves the pipeline BESIDE the body,
+      // not on it (see UnifiedPipelineResult). The stage context dies here.
+      ...(ctx.goal_target_candidate !== undefined && { goal_target_candidate: ctx.goal_target_candidate }),
     };
   } catch (error) {
     // Pre-sweep failures (Stage 1-3) or unexpected errors still map to error responses.

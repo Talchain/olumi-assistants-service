@@ -8,6 +8,34 @@
  *   - Chips omit `action_type` so the boundary mapper drops to a plain
  *     prompt-replay button via the chip `message`/`prompt` field
  *     (BOUNDARY_ACTION_TYPES whitelist in edit-graph-dispatch.ts).
+ *   - ⭐ EVERY CHIP'S `prompt` NAMES A MOVE THE PRODUCT CAN ROUTE. See the
+ *     rule below; pinned as an exact set in
+ *     `tests/unit/orchestrator-v5/compose/recovery-chip-actionability.test.ts`.
+ *
+ * ⭐⭐ THE NO-DEAD-END RULE FOR RECOVERY CHIPS (2026-09-14, wire-witnessed).
+ *
+ * A chip here carries no `action_type`, so a click re-submits its `prompt` as
+ * a fresh user turn and routes normally. That makes the prompt the WHOLE of
+ * what the product receives. It must therefore NAME A MOVE: an instruction
+ * ("Add churn rate to the model.") or something to look at ("Show me what's in
+ * my model."). **A sentence ABOUT HOW THE USER WILL SPEAK NEXT is not a move.**
+ *
+ * Measured, scenario 9677de7d, staging 2026-09-14: request 809d0ee2 rejected an
+ * edit with `failure_code: OPERATION_DID_NOT_LAND` → `unknown_failure` → this
+ * module offered `prompt: 'Let me describe the change differently.'`. The user
+ * clicked it, and the product answered that the message "doesn't yet say what
+ * you want to update" — a dead end the product built, offered, and refused.
+ *
+ * This is the SAME HARM the egress invariant `no_chip_replays_the_user_message`
+ * (compose/looping-chip-guard.ts) exists to stop, in a DIFFERENT SHAPE: there
+ * the chip replays what the user said, here it says nothing at all. It is NOT
+ * fixed at egress, deliberately — that guard's predicate is structural (chip
+ * message === user message), whereas "carries no instruction" is a predicate
+ * over open natural language, and a chip's text can be MODEL-AUTHORED
+ * (coaching/post-analysis-wrapper.ts builds chip messages from review-card
+ * prose). A prose classifier there would be unbounded and would DROP chips,
+ * leaving the user with fewer options rather than better ones. The fix belongs
+ * where the log line says it does: in the composer.
  *
  * ⚠ CORRECTED 2026-09-07 — this header used to say *"Used by both the
  * deterministic template path (apply-template.ts) and the LLM path"*.
@@ -62,6 +90,27 @@ export interface EditRejectionContext {
   label?: string;
 }
 
+/**
+ * The one recovery move that is routable on EVERY scenario state and is a real
+ * step for a user whose edit named the wrong thing: look at the model, then
+ * restate. Witnessed routable on staging 2026-09-14 (scenario 74a72412, a
+ * no-model state class — the product answered with the model's state rather
+ * than asking what was meant).
+ *
+ * Existing precedent for the same sentence as a recovery chip:
+ * `compose/handler-failure-responses.ts` `restateTargetPrompt()`.
+ *
+ * It replaced four chips whose prompts described the act of rephrasing
+ * ("Let me describe the change differently.") and so named nothing to route.
+ */
+function showModelChip(): SuggestedAction {
+  return {
+    label: "Show what's in my model",
+    prompt: "Show me what's in my model.",
+    role: 'facilitator',
+  };
+}
+
 export function buildEditRejectionResponse(
   reason: EditRejectionReason,
   ctx: EditRejectionContext = {},
@@ -86,26 +135,14 @@ export function buildEditRejectionResponse(
         assistantText:
           "I wasn't able to make that change safely. " +
           "Can you describe what you'd like to add or change in simpler terms?",
-        suggestedActions: [
-          {
-            label: 'Describe what to change',
-            prompt: 'Let me describe the change differently.',
-            role: 'facilitator',
-          },
-        ],
+        suggestedActions: [showModelChip()],
       };
     case 'parse_failure':
       return {
         assistantText:
           "I had trouble understanding how to make that edit. " +
           "Could you try describing it differently?",
-        suggestedActions: [
-          {
-            label: 'Try a different description',
-            prompt: 'Let me try describing the edit differently.',
-            role: 'facilitator',
-          },
-        ],
+        suggestedActions: [showModelChip()],
       };
     case 'service_unavailable':
       // ⚠ THE FIRST CLAUSE IS THE NARROW ONE. "I couldn't reach the analysis
@@ -149,11 +186,7 @@ export function buildEditRejectionResponse(
             prompt: 'Try that change again.',
             role: 'facilitator',
           },
-          {
-            label: 'Describe it differently',
-            prompt: 'Let me describe the change differently.',
-            role: 'facilitator',
-          },
+          showModelChip(),
         ],
       };
     case 'unknown_failure':
@@ -170,11 +203,7 @@ export function buildEditRejectionResponse(
             prompt: 'Try that change again.',
             role: 'facilitator',
           },
-          {
-            label: 'Describe it differently',
-            prompt: 'Let me describe the change differently.',
-            role: 'facilitator',
-          },
+          showModelChip(),
         ],
       };
     case 'entity_not_found': {

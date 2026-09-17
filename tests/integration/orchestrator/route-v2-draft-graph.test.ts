@@ -26,15 +26,33 @@ vi.mock('../../../src/orchestrator-v5/handlers/draft-graph-dispatch.js', () => (
 }));
 
 // Session store mock for TurnExecutor fallthrough cases.
+//
+// ⚠ WIDENED 2026-09-15, and the reason matters more than the diff. The
+// post-enforcement block now COMMITS a speaking 200 instead of a dead 500
+// (Paul's ruling: "nothing should fail silently"), and that commit reads the
+// prior pendings. With those readers missing, the read THREW, the route's
+// fail-closed arm caught it, and Test 6c2 below went on passing its 500
+// assertion FOR AN INSTRUMENT REASON — a mock gap wearing a product verdict.
+// The readers below exist so the suite exercises the real path.
 const appendMock = vi.fn().mockResolvedValue({ id: 'mock-row-id' });
+const markGraphWriteFailedMock = vi.fn(async () => undefined);
 vi.mock('../../../src/orchestrator-v5/session/index.js', () => ({
   getSessionStore: () => ({
     append: appendMock,
     readRecent: async () => [],
     readFactsFor: async () => [],
+    readFactsWithTurnFor: async () => [],
     invalidateScoped: async (_s: string, scope: unknown) => ({ scope, entries_invalidated: [] }),
     invalidateAll: async () => ({ scope: { kind: 'structural' as const }, entries_invalidated: [] }),
     ensureScenarioExists: async (_id: string, userId: string) => ({ user_id: userId }),
+    storeDraftGraph: async () => undefined,
+    loadGraph: async () => null,
+    loadGraphAndBriefText: async () => ({ graph: null, briefText: null }),
+    readMostRecentPendingActions: async () => [],
+    hasPriorTurns: async () => false,
+    hasOtherAdmittedLiveTurn: async () => false,
+    scenarioDraftLossStands: async () => false,
+    markGraphWriteFailed: markGraphWriteFailedMock,
   }),
   resetSessionStoreForTests: () => {},
   SessionReadError: class SessionReadError extends Error {},
@@ -130,6 +148,7 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
   beforeEach(() => {
     dispatchDraftGraphMock.mockReset();
     appendMock.mockClear();
+    markGraphWriteFailedMock.mockClear();
   });
 
   it('stage=frame + no graph + message >= MIN_BRIEF_LENGTH → dispatches draft_graph, returns 200', async () => {
@@ -513,29 +532,52 @@ describe('POST /orchestrate/v2/turn — draft_graph dispatch', () => {
         source: 'composer',
       },
     });
-    // HTTP 500 preserved (Strategy B): no DGAI status-code change.
-    expect(res.statusCode).toBe(500);
+    // ⚠⚠ THIS ASSERTION FLIPPED ON 2026-09-15 AND 2.718'S FACTS ARE UNCHANGED.
+    //
+    // It used to assert the 500 "preserved (Strategy B)". Paul's ruling that
+    // day made the bare 500 unreachable for this class: the user got nothing,
+    // learnt nothing, and the retry-first copy asserted three lines below rode
+    // an envelope with no `assistant_text`, so NOBODY EVER READ IT. Keeping the
+    // 500 assertion would now pin the defect 2.718 was written to expose.
+    //
+    // Every 2.718 fact is re-asserted below, at its new address inside the
+    // ErrorBlock's passthrough `details` — and one of them is now stronger: the
+    // recovery sentence is in `assistant_text`, i.e. on a surface a user reads.
+    expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.error).toBe('INTERNAL_ERROR');
-    expect(body.details.reason).toBe('draft_graph_cee_graph_invalid');
-    // THE FIX: the producer declared this failure retryable (stochastic
-    // topology, not a bad brief) — the wire must agree with the copy it
-    // carries, at BOTH levels.
-    expect(body.details.retryable).toBe(true);
-    expect(body.retryable).toBe(true);
-    // The retry-first copy survives untouched, with its pinned flat mirror.
-    expect(body.details.recovery).toEqual(recovery);
-    expect(body.details.recovery_suggestion).toBe(recovery.suggestion);
-    expect(body.details.pipeline_error_code).toBe('CEE_GRAPH_INVALID');
+    const errorBlock = (body.blocks ?? []).find(
+      (b: { type?: string }) => b.type === 'error',
+    );
+    expect(errorBlock, 'the failure must be user-visible, not swallowed').toBeDefined();
+    expect(errorBlock.error_code).toBe('INTERNAL_ERROR');
+    expect(errorBlock.details.reason).toBe('draft_graph_cee_graph_invalid');
+    // THE 2.718 FIX: the producer declared this failure retryable (stochastic
+    // topology, not a bad brief) — the wire must agree with the copy it carries.
+    expect(errorBlock.details.retryable).toBe(true);
+    // The retry-first copy now reaches the CONVERSATION, which is what 2.718
+    // could only put on the wire.
+    expect(body.assistant_text).toContain(recovery.suggestion);
+    for (const hint of recovery.hints) {
+      expect(body.assistant_text).toContain(hint);
+    }
+    // Paul's ruling, 2026-09-15: request_id copyable, fault named, readable
+    // plain English rather than a code.
+    expect(typeof errorBlock.details.request_id).toBe('string');
+    expect(errorBlock.details.request_id.length).toBeGreaterThan(0);
+    expect(errorBlock.details.fault).toBe('olumi');
+    expect(errorBlock.details.readable).toBe(recovery.suggestion);
     // Diagnosability (2.718): the validator codes that blocked packaging are
-    // on the wire — today they were only recoverable from Render logs.
-    expect(body.details.validation_error_codes).toEqual([
+    // still on the wire — today they were only recoverable from Render logs.
+    expect(errorBlock.details.validation_error_codes).toEqual([
       'MISSING_BRIDGE',
       'NO_PATH_TO_GOAL',
       'NO_EFFECT_PATH',
     ]);
-    expect(body.details.last_phase).toBe('deterministic_enforcement');
-    expect(() => BoundaryErrorSchema.parse(body)).not.toThrow();
+    // Nothing partial is shipped: no graph, so no gutted model can be mistaken
+    // for a whole one.
+    expect(body.draft_graph).toBeUndefined();
+    // …and the turn is a real answer, so it is not marked dead.
+    expect(markGraphWriteFailedMock).not.toHaveBeenCalled();
   });
 
   it('typed mapping: 400 CEE_VALIDATION_FAILED → generic validation reason + retryable=false (Test 6d)', async () => {

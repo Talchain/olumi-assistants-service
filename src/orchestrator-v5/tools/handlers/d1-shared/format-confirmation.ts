@@ -13,6 +13,12 @@ import {
   bandFromMagnitude,
   NEAR_ZERO_INFLUENCE_THRESHOLD,
 } from '../../../format/influence-bands.js';
+import {
+  durationNotEvaluatedSentence,
+  UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE,
+  UNMEASURED_TARGET_LEAD_IN,
+  unmeasuredTargetRepairAsk,
+} from '../../../coaching/constraint-gap-copy.js';
 
 const NO_SPACE_UNITS = new Set(['%']);
 const PREFIX_UNITS = new Set(['£', '$', '€', '¥']);
@@ -169,6 +175,88 @@ export function formatConstraintLabelUpdated(input: ConstraintAddedInput): strin
   const phrase = OPERATOR_PHRASE[input.operator];
   const value = formatValueWithUnit(input.value, input.unit);
   return `Updated the label to ${input.targetLabel} — the constraint (must be ${phrase} ${value}) is unchanged.`;
+}
+
+/**
+ * ⭐⭐ THE RECEIPT MAY NOT CLAIM AN ENFORCEMENT THAT WILL NOT HAPPEN.
+ *
+ * Appended to whichever constraint receipt applies when the limit's TARGET NODE
+ * records no value, so the compute path cannot evaluate the row that was just
+ * written. Measured on staging 14 Sep 2026 (debug export `44e349fa`): the
+ * product said "Added constraint: …", PLoT logged
+ * `plot.constraint_no_observed_value` and `constraint_analysis_absent` for
+ * every option, and the truth reached the user TWO TURNS LATER on the rerun.
+ * The admissibility test itself lives in
+ * `constraint-write-admissibility.ts`, derived at PLoT's own
+ * `classifyConstraintPu` bytes.
+ *
+ * ⚠ EVERY WORD HERE IS REUSED, NOT WRITTEN. The lead-in, the repair ask and its
+ * residual disclosure are the run_analysis-time `unmeasured_target` voice's own
+ * ratified copy, imported from `constraint-gap-copy.ts` so the two moments
+ * cannot drift into saying different things about one fact. The ONLY change is
+ * the consequence's TENSE — after a run the true sentence is "It was not part of
+ * the comparison"; before one there is no comparison to be absent from.
+ *
+ * ⚠ AND IT IS DELIBERATELY NOT A FRESH DIAGNOSIS. The repair asks for the
+ * REFERENT (point the limit at a part of the model that carries a number)
+ * rather than asserting that a missing baseline is the cause — which is the
+ * discipline the sibling voices already document, and the reason this reuses
+ * their sentence instead of inventing a units-or-baseline instruction the
+ * observable does not support.
+ *
+ * No sentence-leading commit verb, no engine names, no ids, no em dash.
+ */
+export function formatConstraintNotCheckable(input: { readonly targetLabel: string }): string {
+  return (
+    `${UNMEASURED_TARGET_LEAD_IN}this limit: ${input.targetLabel} has no number ` +
+    `recorded against it${UNMEASURED_TARGET_CONSEQUENCE_AT_WRITE}` +
+    `${unmeasuredTargetRepairAsk(1)}`
+  );
+}
+
+/**
+ * ⭐⭐ THE LIMIT MOVED — SAY SO, NAMING BOTH ENDS.
+ *
+ * A correction REMOVES the row on one node and writes it on another. Before
+ * this, that turn produced `formatConstraintAdded` ("Added constraint: …") and
+ * `fact.result.before = null`: a row was destroyed and BOTH channels narrated
+ * a fresh add. An independent copy audit found it. Under-reporting a deletion
+ * is the same class as over-claiming a write — the user cannot see what their
+ * model now says.
+ *
+ * Names the node it LEFT as well as the one it landed on, because "moved" with
+ * one end named is exactly as ambiguous as not saying it.
+ */
+export function formatConstraintMoved(input: {
+  readonly fromLabel: string;
+  readonly toLabel: string;
+  readonly label: string;
+}): string {
+  return (
+    `Moved that limit off ${input.fromLabel} and onto ${input.toLabel}: `
+    + `${input.label}. It is no longer recorded against ${input.fromLabel}.`
+  );
+}
+
+/**
+ * ⭐ THE TIME CONDITION IS RECORDED AS DESCRIPTION, AND SAYS SO.
+ *
+ * `goal_constraints[]` rows carry `{operator, value, unit}` and no temporal
+ * field at any schema version, so a span the user stated ("for more than 3
+ * months") survives only inside the label and is never evaluated. On the
+ * witnessed session the stored rule was "churn ≤ 7%", which is NOT what the
+ * user said: a one-month spike is fine by their meaning and violates the row.
+ *
+ * This states that, scoped to THIS limit. It does not claim the timing is
+ * unmodelled everywhere — a deadline can still reach the model by other routes
+ * (`extractDeadline`) — and it does not imply any temporal calculation works.
+ * The span is quoted verbatim from the label so the user can see which words
+ * were kept as wording.
+ */
+export function formatConstraintDurationNotEvaluated(input: {
+  readonly span: string;
+}): string {
+  return durationNotEvaluatedSentence(input.span);
 }
 
 /**

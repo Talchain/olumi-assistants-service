@@ -1,0 +1,275 @@
+{
+  "stated_items": [
+    {
+      "kind": "goal",
+      "source_quote": "increase productivity",
+      "role": "target"
+    },
+    {
+      "kind": "option",
+      "source_quote": "hire a Tech lead",
+      "is_baseline": false
+    },
+    {
+      "kind": "option",
+      "source_quote": "two developers",
+      "is_baseline": false
+    }
+  ],
+  "claims": [
+    {
+      "claim_kind": "option_refinement",
+      "label": "Status Quo: No New Hire",
+      "basis": [],
+      "is_baseline": true
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Tech Lead Hiring Cost",
+      "basis": [
+        1
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Developer Hiring Cost",
+      "basis": [
+        2
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Team Delivery Capacity",
+      "basis": [
+        1,
+        2
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Code Quality and Architecture",
+      "basis": [
+        1
+      ]
+    },
+    {
+      "claim_kind": "factor",
+      "label": "Engineering Attrition Risk",
+      "basis": []
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Team Throughput",
+      "basis": [
+        1,
+        2
+      ]
+    },
+    {
+      "claim_kind": "outcome",
+      "label": "Technical Debt Reduction",
+      "basis": [
+        1
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Onboarding and Ramp-Up Time",
+      "basis": [
+        1,
+        2
+      ]
+    },
+    {
+      "claim_kind": "risk",
+      "label": "Budget Overrun Risk",
+      "basis": [
+        1,
+        2
+      ]
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hiring a Tech Lead sets hiring cost",
+      "basis": [
+        1
+      ],
+      "from_stated": 1,
+      "to_claim": 1,
+      "effect": "positive",
+      "sets_to": 90000
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hiring two developers sets hiring cost",
+      "basis": [
+        2
+      ],
+      "from_stated": 2,
+      "to_claim": 2,
+      "effect": "positive",
+      "sets_to": 130000
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Status Quo sets hiring cost to zero",
+      "basis": [],
+      "from_claim": 0,
+      "to_claim": 1,
+      "effect": "positive",
+      "sets_to": 0
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hiring a Tech Lead increases delivery capacity through mentoring and unblocking",
+      "basis": [
+        1
+      ],
+      "from_stated": 1,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 0.6
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hiring two developers directly increases delivery capacity",
+      "basis": [
+        2
+      ],
+      "from_stated": 2,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 0.8
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Status Quo leaves delivery capacity unchanged",
+      "basis": [],
+      "from_claim": 0,
+      "to_claim": 3,
+      "effect": "positive",
+      "sets_to": 0.3
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hiring a Tech Lead improves code quality and architecture",
+      "basis": [
+        1
+      ],
+      "from_stated": 1,
+      "to_claim": 4,
+      "effect": "positive",
+      "sets_to": 0.75
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hiring two developers has limited effect on code quality",
+      "basis": [
+        2
+      ],
+      "from_stated": 2,
+      "to_claim": 4,
+      "effect": "positive",
+      "sets_to": 0.35
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Status Quo leaves code quality unchanged",
+      "basis": [],
+      "from_claim": 0,
+      "to_claim": 4,
+      "effect": "positive",
+      "sets_to": 0.3
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Delivery capacity drives team throughput",
+      "basis": [],
+      "from_claim": 3,
+      "to_claim": 6,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Code quality and architecture reduces technical debt",
+      "basis": [],
+      "from_claim": 4,
+      "to_claim": 7,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Hiring cost increases budget overrun risk",
+      "basis": [],
+      "from_claim": 1,
+      "to_claim": 9,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Developer hiring cost increases budget overrun risk",
+      "basis": [],
+      "from_claim": 2,
+      "to_claim": 9,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "New hires require onboarding time before contributing",
+      "basis": [],
+      "from_claim": 3,
+      "to_claim": 8,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Team throughput positively drives productivity goal",
+      "basis": [
+        0
+      ],
+      "from_claim": 6,
+      "to_stated": 0,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Technical debt reduction positively drives productivity goal",
+      "basis": [
+        0
+      ],
+      "from_claim": 7,
+      "to_stated": 0,
+      "effect": "positive"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Onboarding time negatively impacts productivity goal",
+      "basis": [
+        0
+      ],
+      "from_claim": 8,
+      "to_stated": 0,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "causal_link",
+      "label": "Budget overrun risk negatively impacts productivity goal",
+      "basis": [
+        0
+      ],
+      "from_claim": 9,
+      "to_stated": 0,
+      "effect": "negative"
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Tech Lead Ramp-Up Duration",
+      "basis": []
+    },
+    {
+      "claim_kind": "prior",
+      "label": "Developer Productivity Multiplier",
+      "basis": []
+    }
+  ]
+}

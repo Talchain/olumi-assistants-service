@@ -1601,6 +1601,14 @@ export async function dispatchChipClickRunAnalysis(
         scenarioId: context.session_id,
         signal: turnAbort.signal,
         brief: context.scenarioBriefText,
+        // ⭐ THE GRAPH THIS RUN ANALYSED, not the turn-start reread.
+        // `cachedSnapshot.rawPersistedGraph` is what the run handler submitted
+        // and hashed; `context.persistedGraph` is the graph as it stood when
+        // the TURN began, and on an edit-then-analyse turn those are different
+        // models. The same `?? context.persistedGraph` idiom is already used
+        // twice in this dispatcher (:1662, :1765) — this is the third reader of
+        // the same fact, not a new channel.
+        runGraph: cachedSnapshot?.rawPersistedGraph ?? context.persistedGraph,
         ...(timingsEnabled ? { callTelemetrySink } : {}),
         // D-ask-1 (2.11 P0-1) — P1-2: same scaffolded-placeholder
         // disclosure threading as the turn-executor decision-review block —
