@@ -2147,10 +2147,69 @@ function amendReceiptsForPrunedNodes(
   }
 }
 
+/**
+ * ⭐⭐ AND THE CLAIM THE PRUNE MUST NOT LEAVE STANDING EITHER: "RETAINED".
+ *
+ * `handleUnreachableFactors` marks a factor it could not connect with
+ * `UNREACHABLE_FACTOR_RETAINED` (`unreachable-factors.ts:876`), under its own
+ * comment *"mark as droppable but do NOT remove"*, and writes `nodes[<id>]` so
+ * a surface can point the user at it. Twenty-nine lines later this function
+ * removes a SUBSET of exactly those nodes, and the record survives to describe
+ * a node that is gone.
+ *
+ * ⚠ MEASURED, 32 real staging responses (`olumi-evidence-v202-measure-20260917`,
+ * 2026-09-17): **0 of 34** `UNREACHABLE_FACTOR_RETAINED` node references
+ * resolved to any `draft_graph.nodes[].id`, and all 34 also appeared under
+ * `DISCONNECTED_OBSERVABLE_PRUNED`. Contrast control in the same sweep, so the
+ * probe is not simply blind: `CONTROLLABLE_MISSING_DATA` resolved 102/102 and
+ * `STATUS_QUO_NO_TARGETS` 4/4. The reference is not mis-shaped — its subject
+ * was deleted.
+ *
+ * ⚠ THIS IS ONE CODE ANSWERING TWO QUESTIONS (trap 21), NOT A BROKEN ID, and
+ * the distinction decides the fix. Retention is decided on *"no path to goal"*;
+ * the prune decides on *"category is observable/external AND zero edges"*:
+ *
+ *   • a factor with an edge that leads nowhere → retained, node SURVIVES, and
+ *     its reference already resolves. That arm is live and must keep working.
+ *   • a factor with no edges at all            → "retained", node DELETED.
+ *
+ * Only the second arm is false, and it is false in the one way a consumer
+ * cannot detect: the record is well-formed and points at nothing. The observed
+ * corpus contains only that arm, which is why the rate is 0/34 rather than
+ * something in between.
+ *
+ * ⚠ WHY WITHDRAW RATHER THAN AMEND THE PROSE, which is what the receipt above
+ * does. There the falsehood was a SENTENCE, and a sentence can be corrected.
+ * Here the falsehood is the CODE — the machine-readable half a consumer
+ * switches on. Rewording the action would leave the lie exactly where it is
+ * read. Nothing is lost by withdrawal: `DISCONNECTED_OBSERVABLE_PRUNED` is
+ * pushed for the same node in the same pass with a truthful action, so the
+ * account of what happened to that factor stays complete.
+ */
+function withdrawRetentionClaimsForPrunedNodes(
+  priorRepairs: Repair[],
+  prunedIds: ReadonlySet<string>,
+): Repair[] {
+  const withdrawn: Repair[] = [];
+  // Reverse order: a splice must not move an index still to be examined.
+  for (let i = priorRepairs.length - 1; i >= 0; i--) {
+    const repair = priorRepairs[i]!;
+    if (repair.code !== "UNREACHABLE_FACTOR_RETAINED") continue;
+    // The retention repair's path is `nodes[<id>]`, with no trailing field —
+    // unlike the reclassification receipt's `nodes[<id>].category`. Anchoring
+    // on that keeps this from reaching a different repair about the same node.
+    const nodeId = /^nodes\[(.+)\]$/.exec(repair.path)?.[1];
+    if (nodeId === undefined || !prunedIds.has(nodeId)) continue;
+    priorRepairs.splice(i, 1);
+    withdrawn.push(repair);
+  }
+  return withdrawn.reverse();
+}
+
 export function fixDisconnectedObservables(
   graph: GraphT,
-  priorRepairs: readonly Repair[] = [],
-): { repairs: Repair[]; pruned: string[] } {
+  priorRepairs: Repair[] = [],
+): { repairs: Repair[]; pruned: string[]; withdrawn: Repair[] } {
   const repairs: Repair[] = [];
   const nodes = (graph as any).nodes as NodeT[];
   const edges = (graph as any).edges as EdgeT[];
@@ -2162,6 +2221,7 @@ export function fixDisconnectedObservables(
   }
 
   const pruned: string[] = [];
+  let withdrawn: Repair[] = [];
   const keptNodes: NodeT[] = [];
   for (const node of nodes) {
     const disconnectedPrunableFactor =
@@ -2193,13 +2253,16 @@ export function fixDisconnectedObservables(
   }
 
   if (pruned.length > 0) {
+    const prunedSet = new Set(pruned);
     // A receipt this sweep already wrote for one of these nodes is now false.
     // Correct it here, before the node list changes underneath it.
-    amendReceiptsForPrunedNodes(priorRepairs, new Set(pruned));
+    amendReceiptsForPrunedNodes(priorRepairs, prunedSet);
+    // A RETENTION claim for one of them is not correctable by rewording — the
+    // node is gone, so withdraw it. The truthful prune record below replaces it.
+    withdrawn = withdrawRetentionClaimsForPrunedNodes(priorRepairs, prunedSet);
     (graph as any).nodes = keptNodes;
 
     // Clean up intervention references on option nodes that point to pruned factors
-    const prunedSet = new Set(pruned);
     for (const node of keptNodes) {
       if (node.kind !== "option") continue;
       const data = (node as any).data;
@@ -2217,7 +2280,7 @@ export function fixDisconnectedObservables(
     }
   }
 
-  return { repairs, pruned };
+  return { repairs, pruned, withdrawn };
 }
 
 // ---------------------------------------------------------------------------
@@ -2760,6 +2823,9 @@ export async function runDeterministicSweep(ctx: StageContext): Promise<void> {
     disconnected_before: disconnectedBefore.length,
     disconnected_after: disconnectedAfter.length,
     disconnected_observables_pruned: disconnectedObservableResult.pruned.length,
+    // Non-zero here means the sweep caught itself calling a deleted node
+    // "retained". Observable so the withdrawal cannot go quiet.
+    retention_claims_withdrawn: disconnectedObservableResult.withdrawn.length,
     complexity_cap_pruned: complexityCapResult.prunedCount,
     edge_format: format,
   }, "Deterministic sweep completed");
