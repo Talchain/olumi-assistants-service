@@ -68,7 +68,16 @@ export type GroundingCoverage =
  */
 export interface GroundingReport {
   coverage: GroundingCoverage;
-  /** Size of the corpus derived from the INPUT. 0 ⇔ coverage is `corpus_absent`. */
+  /**
+   * Size of the corpus derived from the INPUT.
+   *
+   * ⚠ ONE DIRECTION ONLY: `corpus_absent ⇒ 0`, but NOT the converse.
+   * `not_requested` and `skipped_shape_invalid` also carry 0, because no scan
+   * ran at all — so THREE coverages are indistinguishable on this field.
+   * `coverage` is the authority; never branch on `corpusSize` alone, or the
+   * exact "did not look" / "looked and found nothing" conflation this report
+   * exists to abolish is recreated one level down.
+   */
   corpusSize: number;
   /**
    * How many numeric tokens in the descriptive fields the rule inspected.

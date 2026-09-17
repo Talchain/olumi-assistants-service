@@ -253,6 +253,11 @@ describe("grounding coverage — the remaining not-scanned states are named apar
     // asserting the wrong branch.
     expect(result.valid, "fixture is no longer shape-invalid").toBe(false);
     expect(result.grounding.coverage).toBe("skipped_shape_invalid");
+    // No scan ran, so both counters are 0 — even though the INPUT here DOES
+    // carry a corpus. See the three-way test below: `corpusSize` is 0 for a
+    // reason that has nothing to do with the corpus.
+    expect(result.grounding.corpusSize).toBe(0);
+    expect(result.grounding.scannedNumbers).toBe(0);
   });
 
   it("distinguishes the two on a non-object response", () => {
@@ -260,6 +265,45 @@ describe("grounding coverage — the remaining not-scanned states are named apar
     expect(performShapeCheck(null, makeGroundedInput()).grounding.coverage).toBe(
       "skipped_shape_invalid",
     );
+  });
+
+  // The corrected invariant on `corpusSize`, PINNED rather than described.
+  //
+  // `corpus_absent ⇒ corpusSize === 0` holds; the CONVERSE does not. A reader
+  // who branches on `corpusSize === 0` to detect vacuous grounding sweeps all
+  // three states into one. This test exists so that a future change which made
+  // `corpusSize` discriminating — or a doc comment that claimed it already was
+  // — fails here instead of shipping.
+  it("carries corpusSize 0 in THREE coverages, so the field alone cannot discriminate", () => {
+    const groundedInput = makeGroundedInput();
+
+    // PRECONDITION PIN: the shape-invalid arm must be fed an input that really
+    // does carry a corpus, or its 0 would prove nothing about the converse.
+    expect(
+      extractGroundedNumbers(groundedInput).length,
+      "fixture no longer yields a corpus — the skipped_shape_invalid arm would read 0 for the wrong reason",
+    ).toBeGreaterThan(0);
+
+    const corpusAbsent = performShapeCheck(makeValidReviewOutput(), makeCorpuslessInput());
+    const notRequested = performShapeCheck(makeValidReviewOutput());
+    const skipped = performShapeCheck(
+      makeValidReviewOutput({ narrative_summary: 123 }),
+      groundedInput,
+    );
+
+    // The three coverages really are three (bound by identity, not by count).
+    expect(corpusAbsent.grounding.coverage).toBe("corpus_absent");
+    expect(notRequested.grounding.coverage).toBe("not_requested");
+    expect(skipped.grounding.coverage).toBe("skipped_shape_invalid");
+
+    // ...and all three read 0 on corpusSize.
+    expect(corpusAbsent.grounding.corpusSize).toBe(0);
+    expect(notRequested.grounding.corpusSize).toBe(0);
+    expect(skipped.grounding.corpusSize).toBe(0);
+
+    // Stated as the rule a reader must follow: only `coverage` separates them.
+    const coverages = [corpusAbsent, notRequested, skipped].map((r) => r.grounding.coverage);
+    expect(new Set(coverages).size, "the three states must stay distinguishable").toBe(3);
   });
 
   it("never reports corpus_absent for a run that was simply not scanned", () => {
