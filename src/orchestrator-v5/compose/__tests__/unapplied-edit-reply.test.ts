@@ -1293,23 +1293,51 @@ describe('NON-FACTOR TARGETS — a value chip must never name a node the value l
     }
   });
 
-  it("the DELIBERATION proceed chip keeps the user's OWN word — the level is not silently dropped", () => {
+  it("the DELIBERATION reply repeats the user's OWN word back — in the TEXT, which routes nowhere", () => {
     // Review finding 3 (CEE #1351): `levelSuffix` reads `'level' in
-    // understanding`. The kind-refusal variant carried no `level`, so a
-    // deliberation naming a non-factor yielded "Change Deploy the AI chatbot."
-    // where every other branch yields "… to low." Nothing pinned it, because
-    // `EDIT_GRAPH_POSITIVE_REGEX` matches either string — so the assertion
-    // here is on the SUFFIX, not on the routing.
+    // understanding`, and the kind-refusal variant carried none, so the level
+    // the user stated was dropped from the reply entirely. The variant now
+    // carries it and the SENTENCE says it back.
+    const reply = composeUnappliedEditReply({
+      message: 'Do you agree? Change Deploy the AI chatbot to low.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    expect(reply.text).toContain('"Deploy the AI chatbot" to low');
+  });
+
+  it('⭐ but the PROCEED CHIP withholds it — a chip is a turn, and its wording picks its lane', () => {
+    // ⚠ THIS ASSERTION IS VACUOUS AT THIS BRANCH'S MERGE-BASE AND IS KEPT
+    // ANYWAY. `697c409f` predates staging's #1482, which admitted `change` to
+    // the value-update clause; before it the predicate answers `false` for
+    // BOTH spellings, so a local run here cannot discriminate. Merged with
+    // current staging it discriminates sharply: "Change X to low." SUPPRESSES
+    // edit_graph and routes to the value lane, where `set_factor_value`
+    // refuses an option — this branch's own defect, one surface over. CI
+    // caught exactly that; a green local suite is evidence about the base you
+    // are standing on, not about the merge.
     const reply = composeUnappliedEditReply({
       message: 'Do you agree? Change Deploy the AI chatbot to low.',
       nodes: NODES_WITH_VALUED_NON_FACTORS,
     })!;
     const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
-    expect(proceed.message).toBe('Change Deploy the AI chatbot to low.');
-    expect(reply.text).toContain('"Deploy the AI chatbot" to low');
-    // The routing is unchanged — still the edit lane, never the value lane.
+    // Base-independent: the chip carries no level for a node the value lane
+    // refuses, so it cannot match the value-update clause under EITHER base.
+    expect(proceed.message).toBe('Change Deploy the AI chatbot.');
     expect(shouldSuppressEditDispatchForValueUpdate(proceed.message)).toBe(false);
     expect(EDIT_GRAPH_POSITIVE_REGEX.test(proceed.message)).toBe(true);
+  });
+
+  it('OPPOSITE DIRECTION — a FACTOR keeps the level on its proceed chip, so this is not a blanket strip', () => {
+    // The discriminating twin. A guard that dropped the level from EVERY
+    // proceed chip would read identically green on the option case while
+    // silently changing a factor's behaviour — and that behaviour is
+    // pre-existing and not this PR's to change.
+    const reply = composeUnappliedEditReply({
+      message: 'Do you agree? Change Team coordination overhead to low.',
+      nodes: NODES_WITH_VALUED_NON_FACTORS,
+    })!;
+    const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
+    expect(proceed.message).toBe('Change Team coordination overhead to low.');
   });
 
   it('OPPOSITE DIRECTION — a deliberation that bounded NO level gains no invented one', () => {
@@ -1322,6 +1350,7 @@ describe('NON-FACTOR TARGETS — a value chip must never name a node the value l
     })!;
     const proceed = reply.chips.find((c) => c.id === 'unapplied_edit_deliberation_proceed')!;
     expect(proceed.message).toBe('Change Deploy the AI chatbot.');
+    expect(reply.text).not.toContain(' to low');
   });
 
   it('KNOWN-DROPPED does not grow — every new case is grounded, not silently dropped', () => {

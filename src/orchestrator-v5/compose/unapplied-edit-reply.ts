@@ -770,6 +770,32 @@ export function composeUnappliedEditReply(input: {
         'level' in understanding && typeof understanding.level === 'string'
           ? ` to ${understanding.level.toLowerCase()}`
           : '';
+      // ⭐⭐ THE SENTENCE MAY REPEAT THE USER'S WORD; THE CHIP MAY NOT — AND
+      // THE REASON IS A ROUTING FACT, MEASURED, NOT A STYLE CHOICE.
+      //
+      // The proceed chip's message is submitted as a turn, so its WORDING
+      // decides its lane. `#1482` (staging, 14 Sep 2026) admitted `change` to
+      // the value-update clause of `shouldSuppressEditDispatchForValueUpdate`,
+      // which had previously excluded it as ambiguous. From that commit on,
+      // `"Change <label> to low."` SUPPRESSES `edit_graph` dispatch and routes
+      // the resubmitted turn to the deterministic value lane — where
+      // `set_factor_value` refuses every kind outside its allowed set.
+      //
+      // So appending the level to the chip for a node this module has just
+      // refused would re-open the exact defect this branch exists to close,
+      // one surface over: an advertised action that terminates in refusal.
+      // The level is therefore carried in the TEXT, which is prose and routes
+      // nowhere, and withheld from the CHIP whenever the named node is not
+      // value-editable. A factor's chip is unchanged.
+      //
+      // ⚠ THIS IS INVISIBLE AT THIS BRANCH'S MERGE-BASE. `697c409f` predates
+      // #1482, so the predicate answers `false` there for BOTH spellings and a
+      // local run cannot discriminate. It was caught by CI, which tests the PR
+      // MERGED WITH CURRENT STAGING — a reminder that a green local suite is
+      // evidence about the base you are standing on, not about the merge.
+      const chipLevelSuffix = isValueEditableTarget(understanding.node)
+        ? levelSuffix
+        : '';
       return {
         text:
           `${NOTHING_WRITTEN} That read as a question about whether to make a ` +
@@ -782,7 +808,7 @@ export function composeUnappliedEditReply(input: {
           chip(
             'unapplied_edit_deliberation_proceed',
             `Yes — change ${named}`,
-            `Change ${named}${levelSuffix}.`,
+            `Change ${named}${chipLevelSuffix}.`,
           ),
         ],
         // This copy makes no kind-capability claim — it says what we
