@@ -18,6 +18,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 import {
+  GM_REJECTED_COPY_BY_BLOCKER_CODE,
   evaluateEditGraphMutations,
   gmHeldProposalRef,
   GM_HELD_PENDING_TURN_TTL,
@@ -288,8 +289,18 @@ describe('live verdict routing', () => {
     );
     expect(d.governing).toBe('rejected');
     expect(d.blockApply).toBe(true);
-    expect(d.assistantText).toBe(GM_REJECTED_ASSISTANT_TEXT);
+    // ⭐ THIS ASSERTION USED TO READ `toBe(GM_REJECTED_ASSISTANT_TEXT)`, AND ITS
+    // FAILURE IS THE FIX. The generic sentence answered every rejection
+    // identically — including, on a witnessed staging session, an ADVICE
+    // request and an EDIT request byte-for-byte alike. The reason was already
+    // here: note the very next line asserts `blocker_code` on the SAME object.
+    // The cause was computed, attached, logged, and withheld only from the
+    // person reading the reply.
+    expect(d.assistantText).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE.ENTITY_ID_COLLISION);
+    expect(d.assistantText).not.toBe(GM_REJECTED_ASSISTANT_TEXT);
     expect(d.publicReason).toMatchObject({ verdict: 'rejected', blocker_code: 'ENTITY_ID_COLLISION' });
+    // The reason reaching the prose must not stop it reaching the wire.
+    expect(d.suggestedActions, 'a rejection must leave at least one route').toHaveLength(1);
     // NEVER RefereeVerdict.candidate internals on the public reason.
     expect(Object.keys(d.publicReason!)).not.toContain('candidate');
   });

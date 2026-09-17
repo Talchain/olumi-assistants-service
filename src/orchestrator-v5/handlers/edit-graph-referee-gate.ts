@@ -315,8 +315,123 @@ export const GM_STALE_ASSISTANT_TEXT =
 
 /** rejected — integrity/safety failure. provisional_doctrine_v0. */
 export const GM_REJECTED_ASSISTANT_TEXT =
-  "I couldn't take that change forward, so the model is unchanged. Tell me " +
-  'a different way you would like to change it and I will try again.';
+  'I put a change together from that and it did not fit the model as it ' +
+  'stands, so the model is unchanged. I can try a different version, or ' +
+  'talk through what I would suggest instead.';
+
+/**
+ * ⭐⭐⭐ WHY THE REJECTED ARM STOPPED BEING MUTE.
+ *
+ * Witnessed on a real staging session, 16 Sep 2026. The user had a three-turn
+ * discussion in which Olumi AGREED, twice, that a morale risk belonged in the
+ * model. Then:
+ *
+ *   USER: "Update the model to reflect all of this, then."
+ *   OLUMI: "I couldn't take that change forward, so the model is unchanged.
+ *           Tell me a different way you would like to change it..."
+ *   USER: "What's one update based on this discussion that you recommend we
+ *          make now?"
+ *   OLUMI: (BYTE-IDENTICAL SAME SENTENCE)
+ *
+ * ⛔ THE SILENCE WAS A LOSS, NOT AN ABSENCE. At the moment that sentence is
+ * chosen, `publicReason` — carrying `blocker_code` AND `blocker_readable` — is
+ * already computed and sits on the SAME returned object. This file's own test
+ * asserts both on one decision, one line apart. The reason was emitted to the
+ * wire's machine block, to telemetry and to the log, and forbidden only from
+ * the prose the user reads.
+ *
+ * ⛔ AND THE SECOND HALF WAS STRUCTURAL: `suggestedActions: []` on this arm is
+ * REPLACED WHOLESALE downstream, not merged, so a rejected turn deleted the
+ * chips the edit lane had already built. No reason and no onward path is why
+ * the same sentence could answer two different requests.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * ⭐ EVERY STRING BELOW IS ABOUT *MY ATTEMPT*, NEVER ABOUT THE USER'S REQUEST.
+ *
+ * This is the load-bearing constraint, not a style choice. The same sentence
+ * has to be true on an EDIT turn and on an ADVICE turn, because this arm cannot
+ * tell them apart — `EditGmEvaluationInput` carries no intent field. Telling
+ * someone who asked "what do you recommend?" that "the node you asked to rename
+ * does not exist" is a false statement about a request they never made.
+ * "The part I tried to change is not in the model" is true either way, and on
+ * an advice turn it also DISCLOSES that a mutation was attempted unasked —
+ * visible failure in place of confident silence.
+ *
+ * `blocker_readable` is deliberately NOT passed through: it is diagnostic prose
+ * carrying em dashes, backticks and internal vocabulary ("failed schema
+ * validation", "top-level `options`"), which this lane's copy rules forbid.
+ * The CODE is the stable join; the sentence is written here.
+ *
+ * Unmapped codes fall back to {@link GM_REJECTED_ASSISTANT_TEXT}, which is
+ * still truthful and still carries the onward chip.
+ */
+export const GM_REJECTED_COPY_BY_BLOCKER_CODE: Readonly<Record<string, string>> =
+  Object.freeze({
+    ENTITY_NOT_FOUND:
+      'The part I tried to change is not in the model, so the model is ' +
+      'unchanged. I can try again on something that is there, or talk ' +
+      'through what I would suggest instead.',
+    ENTITY_ID_COLLISION:
+      'Something with that name is already in the model, so the model is ' +
+      'unchanged. I can add it under a different name, or talk through what ' +
+      'I would suggest instead.',
+    OPTION_ID_COLLISION:
+      'An option with that name is already on the board, so the model is ' +
+      'unchanged. I can add it under a different name, or talk through what ' +
+      'I would suggest instead.',
+    READINESS_DOWNGRADE:
+      'That change would have left the model less ready to analyse than it ' +
+      'is now, so the model is unchanged. I can try a version that keeps it ' +
+      'analysable, or talk through what I would suggest instead.',
+    ADD_OPTION_APPLY_UNWIRED:
+      'I could not connect that option to anything the analysis measures, so ' +
+      'the model is unchanged. Tell me which factor it changes, or I can talk ' +
+      'through what I would suggest instead.',
+    OPTION_TOP_LEVEL_OPTIONS_DIVERGENCE:
+      'That change left the options on the board disagreeing with the ones ' +
+      'the analysis uses, so the model is unchanged. I can try a different ' +
+      'version, or talk through what I would suggest instead.',
+    GRAPH_OPTIONS_MALFORMED:
+      'I could not read the current options well enough to change them ' +
+      'safely, so the model is unchanged. I can talk through what I would ' +
+      'suggest instead.',
+    CURRENT_GRAPH_UNREADABLE:
+      'I could not read the current model well enough to change it safely, ' +
+      'so the model is unchanged. I can talk through what I would suggest ' +
+      'instead.',
+  });
+
+/**
+ * ⭐ THE ONE ONWARD CHIP, AND IT IS THE FALL-THROUGH DEFERRED BY A TURN.
+ *
+ * The alternative considered and rejected was routing a failed edit straight
+ * into the coaching path. That risks the opposite silent failure: answering
+ * conversationally while quietly dropping a genuine edit the user asked for.
+ *
+ * A chip hands the choice back instead. Its message carries NO edit stem, so it
+ * does not satisfy the edit-verb candidacy test, reaches the turn executor by
+ * the ordinary route, and is answered by the coach — using machinery that
+ * already exists, with no new lane and no predicate change.
+ *
+ * Exactly one chip: the estate's sibling refusal builder holds the invariant
+ * that every reason emits at least one recovery route, and this arm held zero.
+ */
+export const GM_REJECTED_ONWARD_CHIP: EditGmChip = Object.freeze({
+  id: 'chip_rejected_edit_ask_advice',
+  label: 'What would you suggest?',
+  message: 'What would you suggest?',
+});
+
+/**
+ * Pick the user-facing cause for a rejected batch. Falls back loudly rather
+ * than inventing: an unmapped code keeps the generic sentence, which is true.
+ */
+export function selectRejectedAssistantText(blockerCode: unknown): string {
+  return typeof blockerCode === 'string'
+    && Object.prototype.hasOwnProperty.call(GM_REJECTED_COPY_BY_BLOCKER_CODE, blockerCode)
+    ? (GM_REJECTED_COPY_BY_BLOCKER_CODE[blockerCode] as string)
+    : GM_REJECTED_ASSISTANT_TEXT;
+}
 
 /** clarify_required — well-formed but non-mutating/ambiguous. provisional_doctrine_v0. */
 export const GM_CLARIFY_ASSISTANT_TEXT =
@@ -1216,8 +1331,16 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
       return {
         governing,
         blockApply: true,
-        assistantText: GM_REJECTED_ASSISTANT_TEXT,
-        suggestedActions: [],
+        // The reason was ALREADY on `publicReason` at this line and was going
+        // only to the machine block, telemetry and the log. It now reaches the
+        // person, phrased about my own attempt rather than their request.
+        assistantText: selectRejectedAssistantText(
+          (publicReason as { blocker_code?: unknown } | null)?.blocker_code,
+        ),
+        // Was `[]`, and downstream REPLACES this list wholesale rather than
+        // merging, so a rejected turn deleted every chip the edit lane had
+        // built and left the user with no route at all.
+        suggestedActions: [GM_REJECTED_ONWARD_CHIP],
         pendingActions: null,
         publicReason,
         verdictCounts,
