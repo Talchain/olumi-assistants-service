@@ -118,9 +118,9 @@ describe("A3 — the person's stated figures still reach the graph as evidence",
   it.each(CAPTURES.map((c) => [c.name, c] as const))(
     "%s: every stated figure the model cited survives in basis_figures",
     (_name, capture) => {
-      const stated = capture.records.stated_items as ReadonlyArray<Record<string, unknown>>;
+      const stated = capture.records.stated_items as unknown as ReadonlyArray<Record<string, unknown>>;
       const cited = new Set<number>();
-      for (const c of capture.records.claims as ReadonlyArray<Record<string, unknown>>) {
+      for (const c of capture.records.claims as unknown as ReadonlyArray<Record<string, unknown>>) {
         for (const b of (Array.isArray(c.basis) ? c.basis : []) as number[]) {
           const item = stated[b];
           if (item?.kind === "figure" && typeof item.value === "number") cited.add(item.value as number);
