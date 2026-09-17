@@ -2110,7 +2110,22 @@ export async function draftGraphWithAnthropic(
             : ({ ok: false, reason: "no_new_claims" } as const);
         completionMeta.parsed = completionParsed !== undefined;
         if (merged.ok) {
-          const reprojected = projectRecordsToGraph(merged.records, args.brief);
+          // ⭐⭐ THE PASS BOUNDARY, THREADED — without this the guard it feeds is
+          // DEAD CODE, which is how a change ships dark in this estate.
+          //
+          // `completionAsk.baseClaimIndex` is the claim index at which THIS
+          // completion pass began; it is already logged four lines above. Pass 3d
+          // needs it because it derives ONE scale frame per factor from whatever
+          // magnitudes are present by then, and a magnitude authored in pass 1
+          // was framed against a population that no longer exists once completion
+          // has added its own. Measured live: an option read as £0.85 against
+          // £80,000 and £120,000, ~141,000x understated — see
+          // `option_magnitude_scale_unreconciled`.
+          const reprojected = projectRecordsToGraph(
+            merged.records,
+            args.brief,
+            completionAsk.baseClaimIndex,
+          );
           // ⭐⭐ THE NON-INFERIORITY CHECK — THE BLOCKING CLASSES ONLY.
           //
           // ⚠ THIS IS THE THIRD SHAPE OF THIS LINE, AND THE FIRST DERIVED ONE.
