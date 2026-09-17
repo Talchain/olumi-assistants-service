@@ -19,25 +19,49 @@
  * DRAW EACH, and one draw per date reads variance as a trend. No causal claim is
  * made here and none should be inherited from this file.
  *
- * ⛔⛔ AND MY FIRST VERSION OF THIS FILE OVERCLAIMED, in the exact way independent
- * review predicted. I wrote that the AI-invented near-duplicate "took the
- * baseline flag". My fixture had DROPPED `is_baseline` while banking
- * `provenance` and `display_value` from the same node object, so "status-quo
- * marked" meant only "the label matches a regex". Review named three states the
- * fixture could not separate and the truth is the one that is WORSE than my
- * story:
+ * ⛔⛔ THE BASELINE CLAIM HAS NOW BEEN WRONG TWICE, IN OPPOSITE DIRECTIONS, AND
+ * THE REASON IS THAT `is_baseline` HAS THREE CARRIERS THAT DO NOT AGREE.
  *
- *     16 Sep  Hire Tech Lead (Status Quo Headcount)  is_baseline ABSENT
- *             Two Developers                         is_baseline false
- *             Hire a Tech Lead                       is_baseline false
- *     15 Sep  Status Quo: Keep Current Team          is_baseline TRUE
+ *   v1  "the AI-invented near-duplicate TOOK the baseline flag."
+ *       Refuted: my fixture had DROPPED `is_baseline` while banking `provenance`
+ *       from the same node object, so "status-quo marked" meant only "the label
+ *       matches a regex".
+ *   v2  "the 16 Sep graph declares NO baseline at all."
+ *       Also wrong — as a general statement. True of the carriers I measured,
+ *       false of the one a peer measured, in a different bundle of the same
+ *       session.
  *
- * **The 16 Sep draft graph declares NO baseline at all.** Nothing took the flag;
- * the flag was never set. `analysis_ready` later reports the label-matching
- * option as the baseline, and `analysable-option-gate` reads `is_baseline ===
- * true` strictly — so a MISSING verdict EXCLUDES rather than holds.
- * ⭐ An honest measurement (labels) became a structural claim (the ranking's
- * reference point) in the act of my recording it. The measurement was fine.
+ * ⭐ MEASURED ACROSS ALL THREE CARRIERS, which is what finally settled it:
+ *
+ *   bundle      option                                  node   OptionV3  analysis_ready
+ *   08513e02    Hire Tech Lead (Status Quo Headcount)    -      -         TRUE
+ *   (16 Sep)    Hire a Tech Lead / Two Developers        false  false     -
+ *   1994c9c1    Hire Tech Lead (Status Quo Headcount)    -      TRUE      TRUE
+ *   (16 Sep)    every other option                       -      false     false
+ *   573ebbd7    Status Quo: Keep Current Team            TRUE   TRUE      TRUE
+ *   (15 Sep)    every other option                       false  false     -
+ *
+ * ⇒ In `08513e02` NEITHER declared carrier sets a baseline and `analysis_ready`
+ *   reports one anyway — so it is INFERRED, not declared, and it picks the
+ *   AI-invented hiring option.
+ * ⇒ In `1994c9c1` the node carrier is absent while `OptionV3` is TRUE — the two
+ *   DECLARED carriers disagree on one graph.
+ * ⇒ `analysable-option-gate` reads `input.options` and its `optionIdOf` prefers
+ *   `option_id` over `id`, so it is reading the OptionV3-shaped carrier, not the
+ *   node.
+ *
+ * ⛔ SO NO SENTENCE ABOUT "THE BASELINE" IS TRUE WITHOUT NAMING ITS CARRIER AND
+ * ITS BUNDLE, and this file now names both everywhere. Three carriers for one
+ * concept is trap 21 on a single field; reconciling their VALUES is the wrong
+ * move, and naming them apart is the right one.
+ *
+ * ⭐⭐ AND THE FINDING THAT SURVIVES ALL OF IT, which is the one that matters to
+ * the person: in BOTH 16 Sep bundles the baseline — however it is carried — is
+ * `Hire Tech Lead (Status Quo Headcount)`, **a hiring action**. On a brief whose
+ * entire question is WHETHER to hire, the reference point every option is ranked
+ * against is itself a hire, and "do neither" is never on the board. That holds
+ * under every carrier and both bundles, and it does not depend on which of us
+ * was right about the flag.
  *
  * Offline. Zero provider calls. Fixtures are minimal structural extracts.
  */
@@ -189,13 +213,31 @@ describe("a stated option carries a magnitude", () => {
  * right one — and that is a decision with an owner, not a patch for this file.
  */
 describe("the missing-baseline warning, on the product's own detector", () => {
-  it("⛔ 16 Sep: NO warning, on a graph where no option declares a baseline", () => {
+  it("⛔ 16 Sep (08513e02): no warning, and no DECLARED baseline on the node carrier", () => {
+    // ⚠ CARRIER NAMED DELIBERATELY. This asserts the NODE carrier only. A
+    // different bundle of the same session (`1994c9c1`) carries TRUE on the
+    // OptionV3 carrier, and `analysis_ready` reports TRUE even here — so
+    // "declares no baseline" is only true of the carrier it names.
     const g = at("08513e02");
+    const declaredOnNode = g.nodes.filter((n) => n.kind === "option" && n.is_baseline === true);
+    expect(declaredOnNode, "node carrier: nothing declares a baseline").toEqual([]);
     const result = detectMissingBaseline(asGraphV1(g) as never);
-    const declared = g.nodes.filter((n) => n.kind === "option" && n.is_baseline === true);
-    expect(declared, "not one option carries is_baseline === true").toEqual([]);
     expect(result.hasBaseline, "yet the detector is satisfied").toBe(true);
     expect(result.detected, "so the warning is never raised").toBe(false);
+  });
+
+  it("⭐ and `analysis_ready` reports a baseline the declared carriers never set", () => {
+    // The inference, isolated. This is the substantive finding of the whole
+    // block: where nothing declares a baseline, something downstream supplies
+    // one — and it supplies the AI-invented hiring option.
+    const g = at("08513e02");
+    const inferred = g.nodes.filter(
+      (n) => n.kind === "option" && n.analysis_ready_is_baseline === true,
+    );
+    expect(inferred.map((n) => String(n.label)), "inferred, not declared").toEqual([
+      "Hire Tech Lead (Status Quo Headcount)",
+    ]);
+    expect(inferred[0]?.is_baseline ?? null, "and the node carrier is silent").not.toBe(true);
   });
 
   it("⭐ and it is satisfied by the LABEL alone — the discriminator", () => {
@@ -215,7 +257,10 @@ describe("the missing-baseline warning, on the product's own detector", () => {
     expect(flipped.detected, "and the warning the person should have seen appears").toBe(true);
   });
 
-  it("15 Sep: the same brief DID declare a baseline, and the detector agrees", () => {
+  it("15 Sep: the same brief declared one on EVERY carrier, and the detector agrees", () => {
+    // The contrast that makes the 16 Sep state legible: here all three carriers
+    // say TRUE on a genuine do-nothing. Consistency is achievable; 16 Sep is not
+    // the normal case.
     const g = at("573ebbd7");
     const declared = g.nodes.filter((n) => n.kind === "option" && n.is_baseline === true);
     expect(declared.map((n) => String(n.label)), "explicitly flagged, not inferred").toEqual([
