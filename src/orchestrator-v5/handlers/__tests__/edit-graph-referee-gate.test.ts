@@ -299,8 +299,6 @@ describe('live verdict routing', () => {
     expect(d.assistantText).toBe(GM_REJECTED_COPY_BY_BLOCKER_CODE.ENTITY_ID_COLLISION);
     expect(d.assistantText).not.toBe(GM_REJECTED_ASSISTANT_TEXT);
     expect(d.publicReason).toMatchObject({ verdict: 'rejected', blocker_code: 'ENTITY_ID_COLLISION' });
-    // The reason reaching the prose must not stop it reaching the wire.
-    expect(d.suggestedActions, 'a rejection must leave at least one route').toHaveLength(1);
     // NEVER RefereeVerdict.candidate internals on the public reason.
     expect(Object.keys(d.publicReason!)).not.toContain('candidate');
   });
@@ -328,7 +326,8 @@ describe('live verdict routing', () => {
     expect(text, 'must not assert a duplicate displayed name').not.toMatch(/that name|same name|already called/i);
     expect(text, 'must not prescribe a rename that cannot work').not.toMatch(/different name|rename/i);
     expect(text, 'but must still say nothing changed').toContain('unchanged');
-    expect(d.suggestedActions, 'and must still leave a route').toHaveLength(1);
+    // Still no chips: the atomicity guard's posture is unchanged by this fix.
+    expect(d.suggestedActions).toEqual([]);
   });
 
   it('unknown op (R1 reject) blocks in live — a malformed projection can never silently apply', () => {

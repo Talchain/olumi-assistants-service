@@ -27,13 +27,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  EDIT_GRAPH_NEGATIVE_REGEX,
-  EDIT_GRAPH_POSITIVE_REGEX,
-} from '../../../orchestrator/routing/edit-graph-intent-regex.js';
-import {
   GM_REJECTED_ASSISTANT_TEXT,
   GM_REJECTED_COPY_BY_BLOCKER_CODE,
-  GM_REJECTED_ONWARD_CHIP,
   selectRejectedAssistantText,
 } from '../edit-graph-referee-gate.js';
 
@@ -75,33 +70,21 @@ describe('R1 — a known cause is stated, an unknown one falls back truthfully',
   });
 });
 
-// ── R3/R4 — the route, and that it actually leads somewhere ────────────────
-
-describe('R3 — a rejection leaves exactly one onward route', () => {
-  it('R3a the chip exists and is a single offer, not a menu', () => {
-    expect(GM_REJECTED_ONWARD_CHIP.id).toBeTruthy();
-    expect(GM_REJECTED_ONWARD_CHIP.label).toBeTruthy();
-    expect(GM_REJECTED_ONWARD_CHIP.message).toBeTruthy();
-  });
-
-  it('R3b ⭐ THE LOAD-BEARING ONE: the chip message must NOT re-enter the edit lane', () => {
-    // This is the entire reason a chip was chosen over a direct fall-through.
-    // If its message looked like an edit instruction, clicking it would be
-    // claimed by the V4 edit lane and dead-end again — the fix would loop.
-    const m = GM_REJECTED_ONWARD_CHIP.message;
-    const claimed = EDIT_GRAPH_POSITIVE_REGEX.test(m) && !EDIT_GRAPH_NEGATIVE_REGEX.test(m);
-    expect(claimed, `"${m}" must reach the coach, not the edit lane`).toBe(false);
-  });
-
-  it('R3c CONTRAST CONTROL: the probe in R3b can see a real edit instruction', () => {
-    // Without this, R3b passes if the regex is broken or the import is wrong.
-    const realEdit = 'Update the leadership factor to 30%.';
-    expect(
-      EDIT_GRAPH_POSITIVE_REGEX.test(realEdit) && !EDIT_GRAPH_NEGATIVE_REGEX.test(realEdit),
-      'the edit-lane probe must fire on an actual edit instruction',
-    ).toBe(true);
-  });
-});
+/**
+ * ⛔ R3 (the onward chip) IS DELIBERATELY ABSENT FROM THIS SPEC.
+ *
+ * The chip shipped here first and turned `structural-edit-batch-atomicity
+ * .test.ts:182` red — an assertion that a rejected batch carries no chips,
+ * written under the name "no chip to confirm". I established that the harm
+ * that guard prevents is a confirmable PENDING (resumption is gated on
+ * `pendingActions`, not chips) and that this arm leaves pendings null, so the
+ * assertion is a proxy rather than the invariant.
+ *
+ * That is an argument for narrowing another lane's safety assertion, and it is
+ * not one to act on unreviewed as the author of the change it blocks. The
+ * cause ships; the route is a separate reviewed change. Tests for the chip
+ * belong with it, not here asserting behaviour that no longer exists.
+ */
 
 // ── R5 — authorship: true on an advice turn as well as an edit turn ────────
 

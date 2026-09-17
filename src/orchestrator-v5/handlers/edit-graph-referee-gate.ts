@@ -418,25 +418,33 @@ export const GM_REJECTED_COPY_BY_BLOCKER_CODE: Readonly<Record<string, string>> 
   });
 
 /**
- * ⭐ THE ONE ONWARD CHIP, AND IT IS THE FALL-THROUGH DEFERRED BY A TURN.
+ * ⛔ THE ONWARD CHIP IS DEFERRED, AND THE REASON IS A CONTRACT I WILL NOT
+ * WEAKEN UNREVIEWED.
  *
- * The alternative considered and rejected was routing a failed edit straight
- * into the coaching path. That risks the opposite silent failure: answering
- * conversationally while quietly dropping a genuine edit the user asked for.
+ * This arm originally shipped with one chip ("What would you suggest?") so a
+ * refused turn had a route. `structural-edit-batch-atomicity.test.ts:182` then
+ * went red: `expect(decision.suggestedActions).toEqual([])`, under the name
+ * "whole batch rejected, zero pendings, NO CHIP TO CONFIRM".
  *
- * A chip hands the choice back instead. Its message carries NO edit stem, so it
- * does not satisfy the edit-verb candidacy test, reaches the turn executor by
- * the ordinary route, and is answered by the coach — using machinery that
- * already exists, with no new lane and no predicate change.
+ * What I established before deciding: the harm that guard exists to prevent is
+ * a PENDING the user can confirm, which would apply a batch containing an
+ * impossible operation — its sibling at :185 says exactly that. Resumption is
+ * gated on `input.pendingActions` (deterministic-short-confirm.ts:497), not on
+ * chips, and this arm leaves `pendingActions: null`. So a non-applying chip
+ * cannot cause that harm, and `toEqual([])` is a PROXY for the invariant
+ * rather than the invariant itself — exact when written, because at the time
+ * any chip on this arm would have been a confirm chip.
  *
- * Exactly one chip: the estate's sibling refusal builder holds the invariant
- * that every reason emits at least one recovery route, and this arm held zero.
+ * ⚠ THAT IS AN ARGUMENT FOR CHANGING THE ASSERTION, AND I AM NOT MAKING IT
+ * ALONE AT 04:00 AS THE AUTHOR OF THE CHANGE IT BLOCKS. Narrowing another
+ * lane's atomicity guard to fit my own diff is the exact shape that should
+ * attract the most suspicion, whatever the reasoning looks like from inside.
+ *
+ * So the CAUSE ships now and the route does not. The prose still offers one
+ * ("I can talk through what I would suggest instead"), which the user can take
+ * by typing; only the affordance is missing. The chip returns through a
+ * reviewed change that reconciles the atomicity contract deliberately.
  */
-export const GM_REJECTED_ONWARD_CHIP: EditGmChip = Object.freeze({
-  id: 'chip_rejected_edit_ask_advice',
-  label: 'What would you suggest?',
-  message: 'What would you suggest?',
-});
 
 /**
  * Pick the user-facing cause for a rejected batch. Falls back loudly rather
@@ -1353,10 +1361,8 @@ export function evaluateEditGraphMutations(input: EditGmEvaluationInput): EditGm
         assistantText: selectRejectedAssistantText(
           (publicReason as { blocker_code?: unknown } | null)?.blocker_code,
         ),
-        // Was `[]`, and downstream REPLACES this list wholesale rather than
-        // merging, so a rejected turn deleted every chip the edit lane had
-        // built and left the user with no route at all.
-        suggestedActions: [GM_REJECTED_ONWARD_CHIP],
+        // Deliberately still `[]` — see the deferral note above the copy map.
+        suggestedActions: [],
         pendingActions: null,
         publicReason,
         verdictCounts,
