@@ -371,14 +371,30 @@ export const GM_REJECTED_COPY_BY_BLOCKER_CODE: Readonly<Record<string, string>> 
       'The part I tried to change is not in the model, so the model is ' +
       'unchanged. I can try again on something that is there, or talk ' +
       'through what I would suggest instead.',
+    // ⛔⛔ THIS COPY CLAIMED A DUPLICATE *NAME* AND OFFERED A RENAME. BOTH WERE
+    // FALSE, and independent review caught it.
+    //
+    // The check is `graphHasNodeId(currentGraph, env.payload.node.id)`
+    // (referee.ts:151). It compares the node ID, which is derived from the
+    // operation path SEPARATELY from the displayed label. So adding "Team
+    // morale" at an id that already exists produced a confident claim that the
+    // NAME was taken — which may simply not be true — and prescribed a remedy
+    // (rename it) that could not have worked, because changing a label leaves
+    // the id untouched and the collision intact.
+    //
+    // ⭐ That is precisely the failure this map exists to prevent: a sentence
+    // asserting something about the user's model that the check never
+    // established. I wrote the guard and then walked into it one constant
+    // later. It now states only what the check proves — that the addition
+    // clashed with something already there — and prescribes nothing.
+    //
+    // ⚠ `OPTION_ID_COLLISION` IS DELIBERATELY ABSENT. It resolves to
+    // `verdict: 'held'` (referee.ts:360), never `rejected`, so an entry for it
+    // here could never fire: a hand-maintained mirror that would read green
+    // forever and quietly imply coverage this arm does not have.
     ENTITY_ID_COLLISION:
-      'Something with that name is already in the model, so the model is ' +
-      'unchanged. I can add it under a different name, or talk through what ' +
-      'I would suggest instead.',
-    OPTION_ID_COLLISION:
-      'An option with that name is already on the board, so the model is ' +
-      'unchanged. I can add it under a different name, or talk through what ' +
-      'I would suggest instead.',
+      'What I tried to add clashes with something already in the model, so ' +
+      'the model is unchanged. I can talk through what I would suggest instead.',
     READINESS_DOWNGRADE:
       'That change would have left the model less ready to analyse than it ' +
       'is now, so the model is unchanged. I can try a version that keeps it ' +

@@ -305,6 +305,32 @@ describe('live verdict routing', () => {
     expect(Object.keys(d.publicReason!)).not.toContain('candidate');
   });
 
+  it('⭐ an existing ID with a DISTINCT label must not be explained as a duplicate name', () => {
+    // The review case. `f-spend` exists; the label offered is different from
+    // the one already on it. The collision is on the ID
+    // (referee.ts:151 graphHasNodeId), which is derived from the operation
+    // path SEPARATELY from value.label.
+    //
+    // ⛔ The first version of this copy said "Something with that name is
+    // already in the model" and offered to "add it under a different name".
+    // Against THIS operation both halves are false: the name may be entirely
+    // new, and renaming would leave the id — and so the collision — untouched.
+    const d = evaluateEditGraphMutations(
+      baseInput({
+        operations: [
+          { op: 'add_node', path: 'f-spend', value: { id: 'f-spend', kind: 'factor', label: 'Team morale' } },
+        ],
+      }),
+    );
+    expect(d.governing).toBe('rejected');
+    expect(d.publicReason).toMatchObject({ blocker_code: 'ENTITY_ID_COLLISION' });
+    const text = d.assistantText ?? '';
+    expect(text, 'must not assert a duplicate displayed name').not.toMatch(/that name|same name|already called/i);
+    expect(text, 'must not prescribe a rename that cannot work').not.toMatch(/different name|rename/i);
+    expect(text, 'but must still say nothing changed').toContain('unchanged');
+    expect(d.suggestedActions, 'and must still leave a route').toHaveLength(1);
+  });
+
   it('unknown op (R1 reject) blocks in live — a malformed projection can never silently apply', () => {
     const d = evaluateEditGraphMutations(baseInput({ operations: [UNKNOWN_OP] }));
     expect(d.governing).toBe('rejected');
