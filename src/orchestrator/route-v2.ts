@@ -237,6 +237,10 @@ import {
   PENDING_ACTION_DEFAULT_TURN_TTL,
   PENDING_ACTION_DEFAULT_WALL_TTL_MS,
 } from '../orchestrator-v5/session/pending-action.js';
+// ⭐ OFFER↔HANDLER PARITY — the draft/redraft offer's pending is built by ONE
+// shared builder so every emit site mints the same resumable object (this
+// module's C3/C4 declines, and the patch-rejection rebuild offer).
+import { buildDraftOfferPending } from '../orchestrator-v5/session/draft-offer.js';
 import { randomUUID } from 'node:crypto';
 import { composeGoalNeverStatedAsk } from '../orchestrator-v5/clarify-v2/goal-never-stated-ask.js';
 import {
@@ -659,41 +663,6 @@ function deriveDraftOfferSeed(
     return undefined;
   }
   return value;
-}
-
-function buildDraftOfferPending(input: {
-  readonly scenarioId: string;
-  readonly chipId: string;
-  readonly publicLabel: string;
-  readonly publicMessage: string;
-  readonly briefSeed?: string;
-  readonly redraft?: boolean;
-  readonly graphHash?: string | null;
-  readonly nowMs: number;
-}): PendingAction {
-  return {
-    id: randomUUID(),
-    scenario_id: input.scenarioId,
-    chip_id: input.chipId,
-    action: {
-      kind: 'draft_graph',
-      ...(input.briefSeed !== undefined ? { brief_seed: input.briefSeed } : {}),
-      ...(input.redraft === true ? { redraft: true } : {}),
-      public_label: input.publicLabel,
-      public_message: input.publicMessage,
-    },
-    // The redraft offer pins the persisted graph's analysis-affecting hash
-    // (when computable) so the commit carry-forward's existing hash rule
-    // invalidates the offer if an edit lands between offer and consent —
-    // consent must never silently cover a graph the user changed since.
-    preconditions:
-      typeof input.graphHash === 'string' && input.graphHash.length > 0
-        ? { graph_hash: input.graphHash }
-        : {},
-    expires_at_turn_count: PENDING_ACTION_DEFAULT_TURN_TTL,
-    expires_at_iso: new Date(input.nowMs + PENDING_ACTION_DEFAULT_WALL_TTL_MS).toISOString(),
-    emitted_at_iso: new Date(input.nowMs).toISOString(),
-  };
 }
 
 // ───────────────────────────────────────────────────────────────────
