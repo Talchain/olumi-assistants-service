@@ -91,6 +91,7 @@ import {
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
 import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
+import type { DraftRecordValueScale } from "./grammar.js";
 import { boundNodeLabel } from "./label-bound.js";
 import { isNameShapedLabel } from "./claim-label-shape.js";
 // ⭐ THE CONSTRAINT-BINDING AUTHORITIES, all DERIVED rather than re-spelled.
@@ -913,6 +914,29 @@ export interface ProjectedNode {
    * They travel as ONE set, minted at ONE site, or not at all — see the goal
    * branch in `projectOnce`. `goal_baseline` is deliberately NEVER minted here.
    */
+  /**
+   * ⭐ v10 — the model's declared scale class, NODE-LEVEL, because that is what
+   * the reader reads: `transforms/schema-v3.ts:660` passes
+   * `anyNode.declared_scale` into `synthesiseRangeDisplayValue`.
+   *
+   * ⚠ NEITHER CONTRACT DECLARES IT AT NODE LEVEL — checked, not assumed. In
+   * `@talchain/schemas` it sits INSIDE `observed_state`, and CEE's own
+   * `src/schemas/graph.ts` has ZERO occurrences of it. The node-level carrier is
+   * an untyped CEE-internal extension that `repair/unreachable-factors.ts:582`
+   * writes as `(node as any).declared_scale`. Typing it here rather than casting
+   * is the difference between a field the compiler protects and one it cannot
+   * see.
+   *
+   * ⚠ WRITTEN ALONGSIDE `observed_state.declared_scale`, WHICH IS THE PUBLISHED
+   * CARRIER — the same two-carrier shape this file already uses for
+   * `value`/`raw_value`, and for the same stated reason: *"Both carriers are
+   * written because `schema-v3.ts` rebuilds factor observed_state FROM `data`."*
+   * A field-by-field rebuild drops whatever it does not name, which is exactly
+   * how `sets_to` was lost for a release. The two carriers must AGREE, and trap
+   * 21 says two authorities on one question do not get to drift — so
+   * `__tests__/declared-scale-carriage.test.ts` asserts they cannot.
+   */
+  declared_scale?: DraftRecordValueScale;
   goal_threshold?: number;
   goal_threshold_raw?: number;
   goal_threshold_unit?: string;
@@ -3401,6 +3425,54 @@ function projectOnce(
         // refused against a %-measured factor, and refusing that weld does not
         // require a level.
         node.data = { unit: claim.unit };
+      }
+
+      // ⭐⭐ v10 — THE DECLARED SCALE, STAMPED FROM A DECLARATION AND NEVER FROM
+      // A MAGNITUDE. This is the consumer that stops `value_scale` being a dark
+      // grammar field, and it is deliberately OUTSIDE the `typeof claim.value
+      // === "number"` guard above for exactly the reason that branch's own
+      // comment gives: 21 of 22 factor claims carry no value, and v9's unit
+      // carriage was nearly a no-op for a whole release because it sat inside
+      // it. Repeating that mistake one field along would be indefensible.
+      //
+      // ⚠ AND IT IS MEANINGFUL WITHOUT A VALUE, which is the case that matters
+      // most. `declared_scale` is a property of THE FACTOR'S MEASUREMENT SCALE,
+      // not of one number — so a factor the model gave a RANGE for and no level
+      // is precisely where the declaration earns its keep. Measured on two live
+      // v202 draws: 2 of 9 drafted factors take the `prior` display path
+      // (`Team Churn Rate` `{uniform, 0.02, 0.22}`, unit absent), and that path
+      // is where `display-value.ts` sniffs the scale from the bounds today.
+      //
+      // ⭐ THE CARRIER IS NODE-LEVEL BECAUSE THAT IS WHAT THE READER READS.
+      // `transforms/schema-v3.ts:660` passes `anyNode.declared_scale` into
+      // `synthesiseRangeDisplayValue`, and `display-value.ts:507-515` carries a
+      // DATED DELETION CONDITION addressed to this change: *"The `else` limb
+      // below exists ONLY because `declared_scale` is stamped by the repair
+      // stage and NOT by the draft/edit transform … WHEN THE MODEL-AUTHORED
+      // PRODUCER STAMPS `declared_scale` … THE ENTIRE `else` BRANCH IS DELETED,
+      // NOT EXTENDED."* That deletion is NOT taken here: it changes displayed
+      // values and belongs in its own reviewed change, against a corpus.
+      //
+      // ⛔ WHY NOT DERIVE IT FROM THE MAGNITUDES, which is free and was my first
+      // instinct. `display-value.ts:541` states the standing condition from the
+      // consumer side: *"if any producer ever stamps `declared_scale` WITHOUT
+      // deriving the prior from the same value, this read must be re-verified
+      // before it is trusted."* A magnitude sniff is VISIBLY a guess; a
+      // declaration is TRUSTED. Laundering the first into the second is strictly
+      // worse than leaving the field absent, and the contract agrees that
+      // absence is the safe state: *"A consumer MUST NOT treat absence as
+      // `unit_interval`: that is the unsound guess 2.193 exists to retire."*
+      // So: the model declares, or nothing is stamped.
+      //
+      // ⚠ NOT A PERMISSION, AND NO `extractionType` IS EARNED — the same
+      // boundary the unit carriage above holds. Declaring a scale says what the
+      // number means, never whose number it is; the value stays `ai_inferred`.
+      if (claim.value_scale !== undefined) {
+        node.declared_scale = claim.value_scale;
+        node.observed_state = {
+          ...(node.observed_state ?? {}),
+          declared_scale: claim.value_scale,
+        };
       }
     }
     nodes.push(node);

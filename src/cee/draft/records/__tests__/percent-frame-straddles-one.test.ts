@@ -1,4 +1,11 @@
 /**
+ * ⛔⛔⛔ READ THIS FIRST: THIS FILE MUST NOT BE "UPDATED TO MATCH" A CHANGE.
+ * It pins a KNOWN GAP. A RED here means a frame decision has been taken, and
+ * that decision has to be taken deliberately, with a frame table and its own
+ * independent seat — not absorbed by re-pointing these numbers. Hoisted to the
+ * top on an independent reviewer's note, because it is the one line a future
+ * lane most needs before it starts editing.
+ *
  * ⛔⛔ ONE FRAME PER FACTOR, OVER A SET THAT MIXES THE TWO PERCENT CONVENTIONS.
  *
  * MEASURED ON A LIVE DRAFT, 2026-09-17, `draft_graph@v202`
@@ -108,9 +115,16 @@ describe("percent frame over a set that straddles 1 (KNOWN GAP, measured live)",
 
   it("CONTRAST CONTROL: the non-percent factor in the same live draw is unaffected", () => {
     // `Pro Plan Monthly Price`, raws {49, 54, 59}, frame 100, level 0.49 —
-    // one convention throughout, and the 100x does not appear. A currency unit
-    // pins no frame, so this is the LADDER's answer, which is the contrast that
-    // matters: the defect is specific to the pinned percent limb.
+    // one convention throughout, and the 100x does not appear.
+    //
+    // ⚠ TWO DIFFERENT LIMBS, AND THE EARLIER WORDING HERE READ AS A
+    // CONTRADICTION (independent reviewer's note): it said "a currency unit pins
+    // no frame" and then asserted 100. Both are true and they are about
+    // different limbs. `classifyUnitScaleClass("£")` is `unknown`, so
+    // `unitPinnedScaleFrame` returns undefined — NO PINNED frame. The 100 comes
+    // from the fall-through, `nextNiceNumberAbove(59)`, i.e. the LADDER. That is
+    // exactly the contrast that matters: the defect is specific to the PINNED
+    // percent limb, and the laddered answer is unaffected by it.
     expect(deriveFactorScaleFrame([49, 54, 59], "£")).toBe(100);
     const levelRatio = 59 / 100 / (49 / 100);
     expect(levelRatio).toBeCloseTo(59 / 49, 12);
