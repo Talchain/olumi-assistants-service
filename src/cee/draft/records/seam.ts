@@ -39,6 +39,7 @@ import {
   DRAFT_RECORD_EFFECTS,
   DRAFT_RECORD_ROLES,
   DRAFT_RECORD_STATED_KINDS,
+  DRAFT_RECORD_VALUE_SCALES,
   type DraftRecordSet,
 } from "./grammar.js";
 import { projectRecordsToGraph, type RecordProjection } from "./projector.js";
@@ -152,6 +153,13 @@ const InferenceClaimWire = z.object({
   // that comment promised now exists and it RED-ed on this change before I had
   // wired it — which is the guard working, not a nuisance.
   unit: z.string().optional(),
+  // ⭐ WHAT CONVENTION THAT NUMBER IS WRITTEN IN — v10, and it is carried here
+  // in the SAME change as the grammar field for the reason the comment above
+  // gives. `unit` and `value_scale` answer different questions and are the two
+  // halves of one quantity; carrying one without the other would leave the
+  // projector inferring the convention from magnitudes, which is the defect
+  // v10 exists to remove.
+  value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
   // `option_refinement` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
 }).passthrough();
@@ -273,6 +281,7 @@ export function projectDraftRecords(
       ...(claim.value !== undefined ? { value: claim.value } : {}),
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
       ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
+      ...(claim.value_scale !== undefined ? { value_scale: claim.value_scale } : {}),
       ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };

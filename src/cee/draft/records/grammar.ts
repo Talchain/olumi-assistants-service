@@ -402,6 +402,51 @@ export const DRAFT_RECORDS_STATED_PROGRESS_RE = new RegExp(
 export const DRAFT_RECORDS_CLAIM_PROGRESS_RE = new RegExp(`"${DRAFT_RECORD_CLAIM_DISCRIMINATOR}"\\s*:`);
 
 /** `FactorCategory` (graph.ts). */
+/**
+ * ⭐⭐ WHAT CONVENTION THE MODEL'S OWN NUMBER IS WRITTEN IN — v10.
+ *
+ * `unit` says what the number is measured in. It does NOT say what the number
+ * MEANS: under `unit: "%"`, `4` and `0.04` are both well-formed and mean the
+ * same thing, and nothing in v9's grammar could tell them apart. Measured on a
+ * live v202 draw (17 Sep): the churn baseline arrived as `0.04` while its own
+ * option intervention arrived as `5.5`, both under `"%"`, and
+ * `deriveFactorScaleFrame` — which must pick ONE frame per factor from
+ * `Math.max(...)` — framed both by 100. A real x1.375 move was stored as x137.5
+ * and the baseline was understated 100x. Pinned in
+ * `__tests__/percent-frame-straddles-one.test.ts`.
+ *
+ * ⛔ THE FIX IS NOT A BETTER MAGNITUDE TEST, AND THE REPAIR LANE ALREADY SAID SO.
+ * `repair/unreachable-factors.ts:337`: *"The `declared_scale` read this repair
+ * stage feeds was added to stop a 100x UNDER-statement, and THE TWO HARMS CANNOT
+ * SHARE ONE WINDOW — a single `value > 1` test tries to serve both and serves
+ * the wrong one on non-compliant input."* `unitPinnedScaleFrame`'s
+ * `magnitude > 1` IS that single test. A window cannot be widened into evidence;
+ * the producer has to declare.
+ *
+ * ⚠ NAMED APART FROM `declared_scale` DELIBERATELY (trap 21). The contract's
+ * `observed_state.declared_scale` describes the STORED value. This describes the
+ * MODEL'S value, BEFORE pass 3d divides it by a frame. After framing the two are
+ * different numbers, so sharing one name would be two questions under one label
+ * — which is the defect this file's header warns about in its own first section.
+ * `display-value.ts:541` states the matching standing condition from the
+ * consumer side: a producer that stamps a declaration without deriving it from
+ * the same number it describes invalidates that read.
+ *
+ * ⚠ VOCABULARY MIRRORED FROM THE CONTRACT'S `DeclaredScale`, AND NOT IMPORTED
+ * FROM IT — because this file's header forbids exactly that: *"Changes on
+ * instruction/grammar iteration and NEVER on a `@talchain/schemas` train."* An
+ * imported enum would add a MODEL-FACING token on a contract bump, with no
+ * grammar iteration and no measurement. So the tokens are local and
+ * `__tests__/value-scale-vocabulary-matches-the-contract.test.ts` REDs if the
+ * two ever diverge — trap 12's remedy where derivation is not available: the
+ * mirror must fail loud, never assume-good.
+ *
+ * Optional and additive, exactly as `unit` was: an older consumer drops an
+ * unknown field silently, where a new enum member fails validation outright.
+ */
+export const DRAFT_RECORD_VALUE_SCALES = ["unit_interval", "ratio", "raw_count"] as const;
+export type DraftRecordValueScale = (typeof DRAFT_RECORD_VALUE_SCALES)[number];
+
 export const DRAFT_RECORD_CATEGORIES = ["controllable", "observable", "external"] as const;
 export type DraftRecordCategory = (typeof DRAFT_RECORD_CATEGORIES)[number];
 
@@ -494,6 +539,16 @@ export interface DraftInferenceClaim {
    * silently, where a new enum member would fail its validation outright.
    */
   unit?: string;
+  /**
+   * The convention `value` (and `sets_to`) are written in. See
+   * `DRAFT_RECORD_VALUE_SCALES`.
+   *
+   * Absence means UNDECLARED and MUST NOT be read as `unit_interval` — the
+   * contract's own failure semantics for the field this feeds: *"that is the
+   * unsound guess 2.193 exists to retire."* Undeclared behaves exactly as v9
+   * did, so every graph drafted before v10 is unaffected.
+   */
+  value_scale?: DraftRecordValueScale;
   /**
    * `causal_link` FROM AN OPTION ONLY — the value the target factor takes if
    * that option is chosen, in the factor's own unit. Becomes an entry in the
@@ -632,6 +687,9 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       // See the interface note: without this a model-authored quantity is
       // unitless BY CONTRACT, and SAFETY 2's target side is always `unknown`.
       unit: { type: "string" },
+      // What convention `value`/`sets_to` are written in. See the interface
+      // note: `unit` says what it is measured in, this says what it means.
+      value_scale: { type: "string", enum: [...DRAFT_RECORD_VALUE_SCALES] },
       // Option→factor intervention level. See the interface note: named apart
       // from `strength` on purpose.
       sets_to: { type: "number" },
