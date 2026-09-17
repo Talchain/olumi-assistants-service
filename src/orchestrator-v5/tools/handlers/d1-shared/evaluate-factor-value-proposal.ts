@@ -149,14 +149,29 @@ export type ProposalRejectionReason =
  *     `observed_state.cap`, an inherited fact the user is now contradicting.
  *
  * ⚠ THE SECOND MEMBER IS DELIBERATELY NOT CALLED "UNATTESTED" OR "AI-DRAFTED",
- * AND THE RESTRAINT IS THE POINT. This estate holds NO provenance for a cap.
- * Measured at this tip with a contrast control in the same sweep: `rg -a` over
- * `src/` for `cap_source|capSource|cap_provenance|capProvenance|cap_confirmed|
- * capConfirmed|cap_extraction` returns **0**, while the contrast `source:` /
- * `observed_state.source` returns **1,609**; and `ObservedStateSchema` in the
- * pinned contract (`@talchain/schemas` 0.50.0, `dist/graph.d.ts`) declares
- * `value`, `std`, `baseline`, `unit`, `source`, `declared_scale`,
- * `elicited_from` — and no cap-provenance field of any kind.
+ * AND THE RESTRAINT IS THE POINT. No field names a cap's provenance under that
+ * name: `rg -a` over `src/` for `cap_source|capSource|cap_provenance|
+ * capProvenance|cap_confirmed|capConfirmed|cap_extraction` returns **0**, with
+ * the contrast `source:` non-zero in the same sweep.
+ *
+ * ⚠⚠ BUT THAT SWEEP ENUMERATED GUESSED NAMES, AND A POSITIVE RECORD EXISTS
+ * UNDER A NAME IT NEVER SPELLED. Corrected on independent review and
+ * re-verified at the bytes here: `schemas/cee-v3.ts:133` declares
+ * `extractionType: z.enum(["explicit", "inferred", "range", "observed"])` —
+ * two fields below `cap:` at `:131`. It is written, not vestigial
+ * (`adapters/llm/normalisation.ts:1093`), the draft prompt teaches the model
+ * to emit it (`prompts/defaults-v12.ts:151`), and
+ * `cee/transforms/provenance-display.ts` already classifies it. A brief
+ * reading "£80–120k" is precisely the `range` class.
+ *
+ * So the accurate statement is NOT "no such record could exist". It is:
+ * **a positive record exists and is not threaded to this seam.**
+ * `FactorObservedStateSnapshot` (`routing/validator.ts:83-107`) carries `unit`
+ * and `cap` and NOT `extractionType`, so this predicate cannot read it today.
+ * `inherited ⇒ unconfirmed` therefore stands as the correct conservative
+ * default HERE — but it is a WIRING GAP, not a structural absence, and
+ * threading `extractionType` into that snapshot is the implementable next
+ * step rather than a re-derivation.
  *
  * ⚠ AND `observed_state.source` IS NOT A SUBSTITUTE, WHICH IS WHY THIS
  * FUNCTION DOES NOT READ IT. That field answers *"who authored the VALUE?"*
@@ -187,8 +202,10 @@ export type ProposalRejectionReason =
  *   > neutral, never guess.
  *
  * Neutral is not "confirmed". A bound may only be enforced against the user on
- * a positive record that someone set it, and there is no field in which such a
- * record could be written. Hence: inherited ⇒ unconfirmed, structurally.
+ * a positive record that someone set it, and no such record reaches this
+ * predicate — see the correction above: the record exists on the node
+ * (`extractionType`) but is absent from the snapshot this function is given.
+ * Hence: inherited ⇒ unconfirmed, on the evidence available HERE.
  */
 export type CapBoundOrigin = 'stated_on_this_proposal' | 'inherited_from_the_factor';
 
@@ -921,9 +938,16 @@ function evaluateFactorValueProposalImpl(
         ok: false,
         reason: 'value_exceeds_cap',
         specific_issue:
-          `${formattedInput} is above the upper limit of ${formattedCap} recorded for ` +
-          `this factor, and nothing on record confirms that limit. The limit is the ` +
-          `more likely thing to be wrong.`,
+          // ⚠ BUDGET: `specific_issue` is rendered through `sanitiseForUser`
+          // (compose/helpers.ts), which truncates at MAX_USER_STRING = 100 with a
+          // trailing "...". The previous wording had a 146-char skeleton BEFORE
+          // interpolation, so it was cut mid-word for every value and every unit —
+          // the remedy clause was never reachable by a user. This skeleton is 67;
+          // worst realistic case (£1,000,000,000 twice) composes to 95. Pinned on
+          // the COMPOSED assistant_text, not on this string, so a copy change that
+          // re-crosses the budget REDs instead of truncating silently.
+          `${formattedInput} is above an unconfirmed limit of ${formattedCap}. ` +
+          `The limit may be what is wrong.`,
         unconfirmed_bound: { cap, rescale_cap_to: suggestExtendedCap(effectiveRaw) },
       };
     }
