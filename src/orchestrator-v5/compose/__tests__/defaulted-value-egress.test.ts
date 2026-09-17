@@ -571,3 +571,71 @@ describe('F6 egress — the disclosure’s append point', () => {
     expect(disclosureJoiner('two\nlines')).toBe('\n\n');
   });
 });
+
+/**
+ * PLACEMENT AND NUMBER AGREEMENT.
+ *
+ * The disclosure is CORRECT and stays — this block is only about where it
+ * lands and whether it agrees with itself. On the 2026-09-05 founder journey
+ * it was the final sentence on 6 of 12 turns and occupied up to 48.8% of one,
+ * so turn 9 asked "Which of these three failure modes worries you most…?" and
+ * then buried that question under boilerplate.
+ */
+describe('defaulted-value disclosure — placement and number agreement', () => {
+  const ONE: DefaultedAssumptionsSignal = { count: 1, named: [] } as DefaultedAssumptionsSignal;
+
+  const ENDS_ON_QUESTION =
+    'The analysis currently favours Option A, with a probability of 82%.\n\n'
+    + 'Two of your own decision-quality prompts point the same direction.\n\n'
+    + 'Which of these three failure modes worries you most, the conversion assumption, '
+    + 'the runway timing, or the competitive window?';
+
+  const ENDS_ON_STATEMENT =
+    'The analysis currently favours Option A, with a probability of 82%.\n\n'
+    + 'Two of your own decision-quality prompts point the same direction.';
+
+  it('PRECONDITION — both fixtures really do differ in how they end', () => {
+    // Without this the two cases below could be measuring the same branch.
+    expect(ENDS_ON_QUESTION.trim().endsWith('?')).toBe(true);
+    expect(ENDS_ON_STATEMENT.trim().endsWith('?')).toBe(false);
+  });
+
+  it('places the disclosure BEFORE a trailing closing question', () => {
+    const out = applyDefaultedValueEgress(ENDS_ON_QUESTION, ONE);
+    expect(out.disclosureAdded).toBe(true);
+    expect(occurrences(out.text, DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
+    // The user's eye lands on the question, not on the caveat.
+    expect(out.text.trim().endsWith('?')).toBe(true);
+    expect(out.text.indexOf(DEFAULTED_DISCLOSURE_TAIL)).toBeLessThan(
+      out.text.indexOf('Which of these three failure modes'),
+    );
+  });
+
+  it('still appends at the END when the reply does not close on a question', () => {
+    // The narrow-scope guard: replies that were not burying a question keep
+    // the previous behaviour byte for byte.
+    const out = applyDefaultedValueEgress(ENDS_ON_STATEMENT, ONE);
+    expect(out.disclosureAdded).toBe(true);
+    expect(out.text).toBe(
+      `${ENDS_ON_STATEMENT}${disclosureJoiner(ENDS_ON_STATEMENT)}${buildDefaultedAssumptionsDisclosure(ONE)}`,
+    );
+    expect(out.text.trim().endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+  });
+
+  it('agrees with itself in number at count 1 and count N', () => {
+    const singular = buildDefaultedAssumptionsDisclosure(ONE);
+    const plural = buildDefaultedAssumptionsDisclosure(
+      { count: 3, named: [] } as DefaultedAssumptionsSignal,
+    );
+    // The observed defect: "one of the factors … which HAS no value set …
+    // until THOSE VALUES are set" — an anaphoric plural with a singular
+    // antecedent.
+    expect(singular).toContain('which has no value set');
+    expect(plural).toContain('which have no value set');
+    expect(singular).not.toContain('those values');
+    expect(plural).not.toContain('those values');
+    // One invariant tail, still shared by every permutation.
+    expect(singular.endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+    expect(plural.endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+  });
+});

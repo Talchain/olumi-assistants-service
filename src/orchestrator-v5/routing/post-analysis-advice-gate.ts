@@ -1921,10 +1921,8 @@ function marginPpString(margin: number | null | undefined): string | null {
  * ROADMAP 2.1067. Before this existed, `composeAdvice` and `composeMeaning`
  * carried the same sentence twice, differing only in whether the label was
  * quoted — so a reword had to be remembered in two places and neither was
- * covered by a guard. The label arrives ALREADY RENDERED because label quoting
- * is each composer's own voice (`advice` quotes nothing, `meaning` quotes
- * everything) and that is the one thing these two surfaces legitimately differ
- * on.
+ * covered by a guard. The label arrives ALREADY RENDERED: both call sites
+ * pass `quoteLabel(runnerLabel)`.
  *
  * It reports the runner-up's OWN win share. The leading option's share is
  * stated by both composers' openers one clause earlier, so the pair gives each
@@ -2030,7 +2028,14 @@ function composeAdvice(
   // wording inside the bullet is unchanged so existing `.toContain`
   // pinning continues to match.
   const probability = probabilityFragment(analysis.leading_option?.probability);
-  const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
+  // Labels are QUOTED here, as they already are in `composeMeaning`,
+  // `composeExplainResults` and `composeWhatWouldFlip`. This composer was the
+  // odd one out: on the 2026-09-05 founder journey turn 3 (quoted) and turn 10
+  // (bare) narrated the SAME run with the SAME labels, and the bare one was not
+  // a grammatical sentence, because a node label can be a raw span of the
+  // user's brief ("The biggest thing to examine next is we believe is partly
+  // driven by product quality and…"). `quoteLabel` exists for exactly this.
+  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
   const margin = marginPpString(analysis.margin_pp);
   const runnerLabel = analysis.runner_up?.label;
   // ROUND 4: `advice` makes no stability claim, but it DOES compose a margin
@@ -2044,15 +2049,15 @@ function composeAdvice(
   const verdict = robustnessVerdictFor(analysis, rawRobustness, 'explain');
   const marginClause =
     runnerLabel && verdict.margin_category === 'near_tie'
-      ? ` It is effectively tied with ${runnerLabel}.`
+      ? ` It is effectively tied with ${quoteLabel(runnerLabel)}.`
       : margin && runnerLabel
-        ? ` ${runnerUpStandingSentence(runnerLabel, analysis.runner_up?.probability)}`
+        ? ` ${runnerUpStandingSentence(quoteLabel(runnerLabel), analysis.runner_up?.probability)}`
         : '';
   const lead = `${opener}${marginClause}`;
   const nextStep = topDriverLabel
     ? noFlip
-      ? `The biggest thing to examine next is ${topDriverLabel}, because it carries more of the margin than anything else.`
-      : `The biggest thing to examine next is ${topDriverLabel}, because it could change the result.`
+      ? `The biggest thing to examine next is ${quoteLabel(topDriverLabel)}, because it carries more of the margin than anything else.`
+      : `The biggest thing to examine next is ${quoteLabel(topDriverLabel)}, because it could change the result.`
     : "Let me know which factor you'd like to look at next.";
   return `${lead}\n\nWhat to check next\n• ${nextStep}`;
 }
@@ -2071,7 +2076,8 @@ function composeImprovement(
   // existing `.toContain('To improve confidence')` style pinning keeps
   // matching.
   const probability = probabilityFragment(analysis.leading_option?.probability);
-  const opener = `Based on this model, the analysis currently favours ${leadingLabel}${probability}.`;
+  // Quoted, matching every sibling composer — see `composeAdvice`.
+  const opener = `Based on this model, the analysis currently favours ${quoteLabel(leadingLabel)}${probability}.`;
   // ROUND 4: routed through the shared composer. `improvement` is the one
   // surface with NO closeness sentence of its own — its opener states the
   // leader flatly — so on a near-tie this slot is the ONLY place honesty can
@@ -2108,7 +2114,7 @@ function composeImprovement(
   }
   const lead = `${opener}${robustness}`;
   const nextStep = topDriverLabel
-    ? `To improve confidence here, the most useful thing to examine is ${topDriverLabel}, because it has the most influence on the result.`
+    ? `To improve confidence here, the most useful thing to examine is ${quoteLabel(topDriverLabel)}, because it has the most influence on the result.`
     // `improvement` requires a top driver per CLASS_REQUIREMENTS, so this
     // branch is unreachable in normal flow. Kept as a defensive default.
     : 'To improve confidence, look at the most influential factor for this decision.';
@@ -2246,7 +2252,7 @@ function composeEvidenceGap(
   if (filteredEdges.length > 0) {
     for (const edge of filteredEdges.slice(0, 2)) {
       gaps.push(
-        `the link from "${edge.from_label}" to "${edge.to_label}" is fragile, so the analysis is sensitive to its true strength`,
+        `the link from ${quoteLabel(edge.from_label)} to ${quoteLabel(edge.to_label)} is fragile, so the analysis is sensitive to its true strength`,
       );
     }
   }
@@ -2303,9 +2309,9 @@ function composeFactorEvppiValidationGuidance(
 ): string | null {
   if (guidance?.outcome !== 'selected') return null;
   if (guidance.specificAction !== null) {
-    return `The first evidence priority from this analysis is ${guidance.factorLabel}:\n• ${guidance.specificAction}`;
+    return `The first evidence priority from this analysis is ${quoteLabel(guidance.factorLabel)}:\n• ${guidance.specificAction}`;
   }
-  return `The first evidence priority from this analysis is ${guidance.factorLabel}. Review the evidence behind its current estimate or range, then gather relevant data or expert judgement to narrow that uncertainty.`;
+  return `The first evidence priority from this analysis is ${quoteLabel(guidance.factorLabel)}. Review the evidence behind its current estimate or range, then gather relevant data or expert judgement to narrow that uncertainty.`;
 }
 
 function readRecord(value: unknown): Record<string, unknown> | null {
