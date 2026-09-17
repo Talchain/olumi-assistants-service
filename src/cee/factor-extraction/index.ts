@@ -1879,6 +1879,50 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
 /**
  * Infer a label from the surrounding context of a match
  */
+/**
+ * ⭐⭐ THE FALLBACK VOCABULARY `inferLabel` USES WHEN IT CANNOT IDENTIFY THE
+ * SUBJECT OF A NUMBER — the ONE list, held at the producer that emits it.
+ *
+ * `inferLabel` reads a 50-character lookbehind for a context word. When no
+ * context word is found it falls back to one of these three, which name the
+ * SHAPE of the quantity ("it is a percentage", "it is money", "it is a
+ * number") and say nothing about WHAT the number measures.
+ *
+ * ⚠ DERIVED, NOT MIRRORED (CLAUDE.md trap 12). `enricher.ts` previously
+ * carried this vocabulary a second time as an inline
+ * `/^(?:value|rate|factor)$/` inside `hasUnboundQuantityLabel`; two copies of
+ * a list nobody re-checks is the estate's dominant defect class. The fallback
+ * branches below now RETURN these values, so the set cannot drift from what
+ * the function emits without the emission changing too — and
+ * `unidentified-quantity-vocabulary.test.ts` fails loud if a member is
+ * renamed, removed or added without thought.
+ */
+export const UNIDENTIFIED_QUANTITY_LABELS = {
+  /** A percentage with no identified subject. */
+  percentage: "Rate",
+  /** A currency amount with no identified subject. */
+  currency: "Value",
+  /** A bare number with no identified subject. */
+  bare: "Factor",
+} as const;
+
+const UNIDENTIFIED_QUANTITY_LABEL_SET: ReadonlySet<string> = new Set(
+  Object.values(UNIDENTIFIED_QUANTITY_LABELS).map((label) => label.toLowerCase()),
+);
+
+/**
+ * Does this label name a SUBJECT, or is it one of `inferLabel`'s fallbacks?
+ *
+ * ⭐ THE DISTINCTION IS STRUCTURAL, NOT A READING OF THE PROSE. A fallback
+ * label is what the extractor emits when its lookbehind found no context word
+ * at all — so it is a RECORD that the subject was not identified, not a guess
+ * about what the subject is. Everything that consumes this predicate is
+ * therefore reasoning about the extractor's own admission, never about English.
+ */
+export function isUnidentifiedQuantityLabel(label: string): boolean {
+  return UNIDENTIFIED_QUANTITY_LABEL_SET.has(label.trim().toLowerCase());
+}
+
 function inferLabel(brief: string, matchIndex: number, matchText: string): string {
   // Look for context words before the match
   const beforeText = brief.substring(Math.max(0, matchIndex - 50), matchIndex).toLowerCase();
@@ -1912,15 +1956,18 @@ function inferLabel(brief: string, matchIndex: number, matchText: string): strin
     }
   }
 
-  // Default: use the matched text as a hint
+  // Default: the matched text can only tell us the SHAPE of the quantity, not
+  // its subject. Every branch below returns a member of
+  // `UNIDENTIFIED_QUANTITY_LABELS` — see that constant for why the set lives
+  // here rather than being spelled a second time downstream.
   if (matchText.includes("%")) {
-    return "Rate";
+    return UNIDENTIFIED_QUANTITY_LABELS.percentage;
   }
   if (/[£$€]/.test(matchText)) {
-    return "Value";
+    return UNIDENTIFIED_QUANTITY_LABELS.currency;
   }
 
-  return "Factor";
+  return UNIDENTIFIED_QUANTITY_LABELS.bare;
 }
 
 /**

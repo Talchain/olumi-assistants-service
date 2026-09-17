@@ -18,6 +18,7 @@ import {
   extractFactors,
   extractFactorsOrchestrated,
   generateFactorId,
+  isUnidentifiedQuantityLabel,
   type ExtractedFactor,
 } from "./index.js";
 import { log, emit, TelemetryEvents } from "../../utils/telemetry.js";
@@ -498,9 +499,11 @@ function labelsMatch(label1: string, label2: string): boolean {
  * selected write (including replacement-node creation) rather than guessing.
  */
 function hasUnboundQuantityLabel(node: NodeT, factor: ExtractedFactor): boolean {
-  const extractedLabel = factor.label.trim().toLowerCase();
-  return /^(?:value|rate|factor)$/.test(extractedLabel)
-    && node.label?.trim().toLowerCase() !== extractedLabel;
+  // ⚠ The `/^(?:value|rate|factor)$/` that used to be spelled here was a second
+  // copy of `inferLabel`'s fallback vocabulary. It now consumes the producer's
+  // own list (`UNIDENTIFIED_QUANTITY_LABELS`, index.ts) so the two cannot drift.
+  return isUnidentifiedQuantityLabel(factor.label)
+    && node.label?.trim().toLowerCase() !== factor.label.trim().toLowerCase();
 }
 
 /**
@@ -1228,9 +1231,39 @@ function qualifyExtractedFactors(
       // Check unit compatibility first
       if (!unitsCompatible(existing.unit, factor.unit)) continue;
 
+      // ⭐⭐⭐ NUMERIC PROXIMITY IS ONLY EVIDENCE OF SAMENESS WHEN AT LEAST ONE
+      // SIDE NAMED NO SUBJECT (measured on the wire, Render
+      // srv-d4slpaili9vc73eiq4og, 17 Sep 17:58:34Z and 18:00:34Z).
+      //
+      // A pricing brief put three prices and a churn figure in one paragraph.
+      // `inferLabel`'s 50-character lookbehind bound the prices to "Churn Rate";
+      // the correctly-labelled {Plan Price, 59} then arrived and was DISCARDED
+      // as a duplicate — `cee.factor_extraction.dedupe_within_extraction`,
+      // skippedLabel "Plan Price", skippedValue 59 — because a wrongly-labelled
+      // factor already held 59 and the value limb below carried NO label
+      // condition at all. So the failure did not merely mislabel a number: it
+      // deleted the correct factor to keep the incorrect one, and a
+      // required-fields guard saw a factor carrying a value and called it
+      // healthy. "More fields populated" is the wrong success metric.
+      //
+      // ⛔ THE FIX IS NOT A BETTER SUBJECT-INFERENCE RULE OVER PROSE. This
+      // estate has already spent four rounds oscillating on one such predicate
+      // (CLAUDE.md trap 22f); a fifth rule is the forbidden move. The
+      // discriminator used here is STRUCTURAL and comes from the extractor's own
+      // record: `isUnidentifiedQuantityLabel` is true exactly when `inferLabel`
+      // found NO context word and fell back to naming the quantity's shape
+      // ("Value"/"Rate"/"Factor"). When BOTH sides name a subject and those
+      // names do not match, a shared number is not evidence they are the same
+      // quantity — the labels are, and the label limb below is what decides it.
+      // When either side named nothing, proximity is still the best available
+      // reading and the limb applies unchanged (this is what keeps ROADMAP
+      // 2.299's {Factor, 6M} vs {Target, 6M} collision collapsing).
+      const eitherSideNamedNoSubject =
+        isUnidentifiedQuantityLabel(existing.label) || isUnidentifiedQuantityLabel(factor.label);
+
       // Check value within 10% tolerance
       let isDuplicate = false;
-      if (existing.value !== undefined && factor.value !== undefined) {
+      if (eitherSideNamedNoSubject && existing.value !== undefined && factor.value !== undefined) {
         const tolerance = Math.abs(existing.value * 0.1);
         if (Math.abs(existing.value - factor.value) <= tolerance) {
           isDuplicate = true;
@@ -1266,6 +1299,18 @@ function qualifyExtractedFactors(
       const challengerIsTarget = isTargetGoalLabel(factor.label);
       const incumbentIsTarget = isTargetGoalLabel(incumbent.label);
       if (challengerIsTarget !== incumbentIsTarget) return challengerIsTarget;
+      // ⭐ SECOND RUNG ON THE SAME ROLE AXIS: a factor that NAMES its subject
+      // beats one that admits it could not identify one. Without this, the
+      // surviving collision above is decided by confidence alone — and both
+      // sides of a "Value 59" / "Plan Price 59" collision carry the same 0.6
+      // inferred confidence, so the generic label wins on push order and the
+      // named one is discarded. That is the same harm one rung down from the
+      // measured defect, and the module already rules this way at the write
+      // seam (`hasUnboundQuantityLabel`): a fallback word "does not establish
+      // that the number measures that node".
+      const challengerNamesSubject = !isUnidentifiedQuantityLabel(factor.label);
+      const incumbentNamesSubject = !isUnidentifiedQuantityLabel(incumbent.label);
+      if (challengerNamesSubject !== incumbentNamesSubject) return challengerNamesSubject;
       return factor.confidence > incumbent.confidence;
     });
 
