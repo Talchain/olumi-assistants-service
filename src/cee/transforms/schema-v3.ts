@@ -19,7 +19,7 @@ import type {
   GraphV3T,
   ValidationWarningV3T,
 } from "../../schemas/cee-v3.js";
-import { deriveEffectDirection } from "../../schemas/cee-v3.js";
+import { resolveEffectDirection } from "../../schemas/cee-v3.js";
 import { deriveStrengthStd, type ProvenanceObject } from "./strength-derivation.js";
 import type { V1DraftGraphResponse, V1Node, V1Edge, V1Graph } from "./schema-v2.js";
 import { isFactorData, isOptionData } from "./schema-v2.js";
@@ -995,8 +995,30 @@ export function transformEdgeToV3(
   // P1-CEE-2: Apply std bounds (floor 1e-6, cap max(0.5, 2×|mean|))
   strengthStd = boundStrengthStd(strengthStd, strengthMean, edge.from, edge.to);
 
-  // Derive effect direction from strength_mean
-  const effectDirection = deriveEffectDirection(strengthMean);
+  // Resolve effect direction from BOTH carriers — the magnitude's sign and the
+  // stated label — through the one definition in `schemas/cee-v3.ts`.
+  //
+  // ⚠ `existingDirection` MUST be passed. Without it a zero magnitude resolved
+  // to "positive", so an edge stating `effect_direction: "negative"` with
+  // `strength_mean: 0` left this function as "positive" — an authored negative
+  // silently inverted on the wire, with every reconciliation authority
+  // abstaining at zero (each is guarded `!== 0`). The sign-transfer above is
+  // guarded `rawStrength > 0` and so abstains too, which is why this call is
+  // the only place the zero case can be got right.
+  const directionResolution = resolveEffectDirection(strengthMean, existingDirection);
+  const effectDirection = directionResolution.direction;
+  if (directionResolution.invented) {
+    // Neither carrier stated a direction. The V3 egress enum has no member for
+    // "unresolved", so one is chosen — and recorded in the same channel every
+    // other invented edge value already uses, so it cannot become positive
+    // SILENTLY.
+    defaults.push({
+      edge_id: edgeId,
+      field: "effect_direction",
+      default_value: effectDirection,
+      reason: "zero magnitude carries no sign information and no direction was stated",
+    });
+  }
 
   // Extract provenance — prefer structured edge.provenance, fall back to
   // edge.provenance_source (flat enum from Anthropic structured outputs).

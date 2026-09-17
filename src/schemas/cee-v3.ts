@@ -914,12 +914,105 @@ export function isValidInterventionTarget(node: NodeV3T): boolean {
 }
 
 /**
+ * What a magnitude says about causal direction. THREE classes, not two.
+ *
+ * ⚠ ZERO IS ITS OWN CLASS, AND COLLAPSING IT INTO "positive" IS THE DEFECT THIS
+ * EXISTS TO NAME. The previous definition was `mean >= 0 ? "positive" :
+ * "negative"`, which is total over `number` but has only two outputs, so a
+ * magnitude that states NOTHING about direction was resolved to a POSITIVE
+ * CAUSAL CLAIM. `EffectDirection` documents "positive" as "increasing source
+ * increases target" (`schemas/graph.ts:459-462`) — false of a zero coefficient.
+ *
+ * Two user-facing surfaces already refuse to name a direction here, written
+ * independently of each other and of this function:
+ * `orchestrator/context/graph-compact.ts:529-532` returns `undefined` at
+ * `mean === 0`, and `edgeSign()`
+ * (`orchestrator-v5/coaching/post-draft-narrative.ts:1344`) returns `null`,
+ * its comment noting that `-0 >= 0` would otherwise call every zero positive.
+ * They are the evidence that `>= 0` was the wrong DEFINITION rather than merely
+ * an inconsistency between copies.
+ *
+ * ⚠ `-0` MUST classify as carrying no sign information. `-0 >= 0` and
+ * `-0 > 0 === false` and `-0 < 0 === false`, so the ordering comparisons below
+ * place it in this class correctly — but only because zero is the FALL-THROUGH
+ * rather than a `>= 0` test. Do not "simplify" this to `mean >= 0`.
+ */
+export type MagnitudeSignClass = "positive" | "negative" | "no_sign_information";
+
+export function classifyMagnitudeSign(strengthMean: number): MagnitudeSignClass {
+  if (strengthMean > 0) return "positive";
+  if (strengthMean < 0) return "negative";
+  return "no_sign_information";
+}
+
+/** The outcome of resolving the two direction carriers against each other. */
+export interface EffectDirectionResolution {
+  /** The direction to put on the wire. */
+  readonly direction: "positive" | "negative";
+  /**
+   * `true` when NEITHER carrier stated a direction and one had to be invented
+   * to satisfy the two-member egress enum. The caller MUST disclose it — see
+   * `transformEdgeToV3`, which records it in `transform_defaults` alongside
+   * every other invented edge value.
+   */
+  readonly invented: boolean;
+}
+
+/**
+ * Resolve causal direction from its two carriers.
+ *
+ * Direction is carried TWICE — as the `effect_direction` enum and as the SIGN
+ * of `strength_mean` (`schemas/graph.ts:488`: "sign indicates direction"). This
+ * is the single place that decides what the pair jointly states, so the two
+ * cannot drift apart at the point of use.
+ *
+ * The two ordering rulings are UNCHANGED and are not reopened here:
+ *   Q_A (`cee.edge-direction-derives-from-mean-sign.test.ts`) — a SIGNED
+ *       magnitude is self-describing, so it wins and a stale label is corrected.
+ *   Q_B (`cee.edge-polarity-direction-authority.test.ts`) — an UNSIGNED
+ *       magnitude carries no polarity, so the label wins and the SIGN is moved
+ *       onto the magnitude upstream (`transformEdgeToV3`), which is why by the
+ *       time this runs the mean is already signed.
+ *
+ * What is NEW is the third class. Both rulings, STRP Rule 4
+ * (`validators/structural-reconciliation.ts:901`, guarded `!== 0`) and
+ * `fixSignMismatch` (via `graph-validator.ts:1405`, guarded `!== 0`) ABSTAIN at
+ * a zero magnitude. Nothing reconciled it, and this function then filled the
+ * silence with "positive". Now: at zero the magnitude states nothing, so a
+ * STATED direction is preserved, and if nothing was stated the invention is
+ * reported to the caller rather than made silently.
+ */
+export function resolveEffectDirection(
+  strengthMean: number,
+  statedDirection?: unknown
+): EffectDirectionResolution {
+  const cls = classifyMagnitudeSign(strengthMean);
+  if (cls !== "no_sign_information") {
+    return { direction: cls, invented: false };
+  }
+  if (statedDirection === "positive" || statedDirection === "negative") {
+    return { direction: statedDirection, invented: false };
+  }
+  // Nothing stated a direction and the magnitude states none either. The egress
+  // enum has no member for "unresolved" (see this file's EdgeV3
+  // `effect_direction`), so a value must be chosen — but it is DISCLOSED.
+  return { direction: "positive", invented: true };
+}
+
+/**
  * Derive effect_direction from strength_mean.
+ *
+ * Thin wrapper over `resolveEffectDirection` so there is ONE definition. Callers
+ * that hold a stated direction should call `resolveEffectDirection` directly and
+ * disclose an invented result; this single-argument form is retained for the
+ * call sites that genuinely have only a magnitude, and is byte-identical to the
+ * previous implementation for every magnitude that carries its own sign.
  */
 export function deriveEffectDirection(
-  strengthMean: number
+  strengthMean: number,
+  statedDirection?: unknown
 ): "positive" | "negative" {
-  return strengthMean >= 0 ? "positive" : "negative";
+  return resolveEffectDirection(strengthMean, statedDirection).direction;
 }
 
 // ============================================================================
