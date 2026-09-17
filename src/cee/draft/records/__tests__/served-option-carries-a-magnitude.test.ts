@@ -31,7 +31,23 @@
  *       false of the one a peer measured, in a different bundle of the same
  *       session.
  *
- * ⭐ MEASURED ACROSS ALL THREE CARRIERS, which is what finally settled it:
+ * ⚠⚠ THE TABLE BELOW IS HISTORICAL ANNOTATION, NOT EXECUTABLE COVERAGE — read
+ * this before citing it. Independent review named the boundary and it is worth
+ * having in the file rather than only on the PR, because a file outlives a
+ * comment thread:
+ *
+ *   EXECUTABLE here: the NODE carrier, and the captured `analysis_ready` flag,
+ *                    both banked in the fixtures and asserted below.
+ *   PROSE ONLY:      the `OptionV3` carrier, and the third bundle `1994c9c1`.
+ *                    Neither is banked, so nothing in this file would RED if
+ *                    either changed.
+ *
+ * ⛔ So do NOT read "measured across all three carriers" as proof about all
+ * three. It is a record of what I measured by hand on 17 Sep, kept because the
+ * shape of the disagreement is the finding — not a guard over it. Banking the
+ * third carrier and third bundle is real work and is not done here.
+ *
+ * ⭐ MEASURED ACROSS ALL THREE CARRIERS BY HAND, which is what finally settled it:
  *
  *   bundle      option                                  node   OptionV3  analysis_ready
  *   08513e02    Hire Tech Lead (Status Quo Headcount)    -      -         TRUE
