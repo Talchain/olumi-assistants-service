@@ -1,0 +1,228 @@
+{
+ "source_bundle": "olumi-debug-573ebbd7-20260915.json",
+ "nodes": [
+  {
+   "id": "0462a5b8",
+   "kind": "option",
+   "label": "Status Quo: Keep Current Team",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "0dde265b",
+   "kind": "goal",
+   "label": "Increase Productivity",
+   "provenance": "from_brief",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "124ec3bb",
+   "kind": "factor",
+   "label": "Team Coordination Overhead",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "5beedb51",
+   "kind": "risk",
+   "label": "Budget Strain",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "71589191",
+   "kind": "outcome",
+   "label": "Code Quality and Architecture",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "79aa7504",
+   "kind": "decision",
+   "label": "Question",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "7b8fe1ef",
+   "kind": "factor",
+   "label": "Tech Lead Capacity",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "7eea9d67",
+   "kind": "outcome",
+   "label": "Engineering Output",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "85dd1a1d",
+   "kind": "factor",
+   "label": "Hiring Cost",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "8924ff95",
+   "kind": "risk",
+   "label": "Onboarding and Ramp-Up Delay",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "943110e8",
+   "kind": "factor",
+   "label": "Developer Headcount Added",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "be215545",
+   "kind": "option",
+   "label": "Two Developers",
+   "provenance": "from_brief",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "e70301eb",
+   "kind": "option",
+   "label": "Hire a Tech Lead",
+   "provenance": "from_brief",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  }
+ ],
+ "edges": [
+  {
+   "from": "0462a5b8",
+   "to": "7b8fe1ef"
+  },
+  {
+   "from": "0462a5b8",
+   "to": "85dd1a1d"
+  },
+  {
+   "from": "0462a5b8",
+   "to": "943110e8"
+  },
+  {
+   "from": "124ec3bb",
+   "to": "7eea9d67"
+  },
+  {
+   "from": "5beedb51",
+   "to": "0dde265b"
+  },
+  {
+   "from": "71589191",
+   "to": "0dde265b"
+  },
+  {
+   "from": "79aa7504",
+   "to": "0462a5b8"
+  },
+  {
+   "from": "79aa7504",
+   "to": "be215545"
+  },
+  {
+   "from": "79aa7504",
+   "to": "e70301eb"
+  },
+  {
+   "from": "7b8fe1ef",
+   "to": "124ec3bb"
+  },
+  {
+   "from": "7b8fe1ef",
+   "to": "71589191"
+  },
+  {
+   "from": "7b8fe1ef",
+   "to": "8924ff95"
+  },
+  {
+   "from": "7eea9d67",
+   "to": "0dde265b"
+  },
+  {
+   "from": "85dd1a1d",
+   "to": "5beedb51"
+  },
+  {
+   "from": "8924ff95",
+   "to": "0dde265b"
+  },
+  {
+   "from": "943110e8",
+   "to": "124ec3bb"
+  },
+  {
+   "from": "943110e8",
+   "to": "7eea9d67"
+  },
+  {
+   "from": "943110e8",
+   "to": "8924ff95"
+  },
+  {
+   "from": "be215545",
+   "to": "85dd1a1d"
+  },
+  {
+   "from": "be215545",
+   "to": "943110e8"
+  },
+  {
+   "from": "e70301eb",
+   "to": "7b8fe1ef"
+  },
+  {
+   "from": "e70301eb",
+   "to": "85dd1a1d"
+  }
+ ],
+ "option_interventions": {
+  "Status Quo: Keep Current Team": {
+   "7b8fe1ef": 0,
+   "85dd1a1d": 0,
+   "943110e8": 0
+  },
+  "Two Developers": {
+   "85dd1a1d": 0.85,
+   "943110e8": 0.8
+  },
+  "Hire a Tech Lead": {
+   "7b8fe1ef": 0.85,
+   "85dd1a1d": 0.7
+  }
+ },
+ "goal_constraints": []
+}

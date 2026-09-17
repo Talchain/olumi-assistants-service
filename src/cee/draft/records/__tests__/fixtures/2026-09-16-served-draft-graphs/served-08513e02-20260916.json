@@ -1,0 +1,272 @@
+{
+ "source_bundle": "olumi-debug-08513e02-20260916.json",
+ "nodes": [
+  {
+   "id": "0336c6f7",
+   "kind": "risk",
+   "label": "Launch Delay Risk",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "06c4431f",
+   "kind": "option",
+   "label": "Hire Tech Lead (Status Quo Headcount)",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "0959bd0c",
+   "kind": "decision",
+   "label": "Question",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "13b27d82",
+   "kind": "outcome",
+   "label": "Team Productivity",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "49a8f419",
+   "kind": "factor",
+   "label": "we're lacking leadership",
+   "provenance": "from_brief",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "553faba1",
+   "kind": "factor",
+   "label": "Tech Lead Hiring Cost",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": 0.8,
+   "display_value": "80,000"
+  },
+  {
+   "id": "6cc6212a",
+   "kind": "option",
+   "label": "Hire One Developer and One Tech Lead",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "9672f007",
+   "kind": "factor",
+   "label": "Engineering Headcount",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": 0.6,
+   "display_value": "6"
+  },
+  {
+   "id": "b87d004b",
+   "kind": "risk",
+   "label": "Budget Overrun",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "be03886e",
+   "kind": "factor",
+   "label": "Developer Hiring Cost",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "be215545",
+   "kind": "option",
+   "label": "Two Developers",
+   "provenance": "from_brief",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "c3636f2d",
+   "kind": "goal",
+   "label": "Increase Productivity, While Maintaining Code Quality",
+   "provenance": "from_brief",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "d095fa5c",
+   "kind": "option",
+   "label": "Engage Fractional/Contract Tech Lead",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "e70301eb",
+   "kind": "option",
+   "label": "Hire a Tech Lead",
+   "provenance": "from_brief",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  },
+  {
+   "id": "f8c1d393",
+   "kind": "outcome",
+   "label": "Code Quality",
+   "provenance": "ai_inferred",
+   "unit": null,
+   "observed_state_value": null,
+   "display_value": null
+  }
+ ],
+ "edges": [
+  {
+   "from": "0336c6f7",
+   "to": "c3636f2d"
+  },
+  {
+   "from": "06c4431f",
+   "to": "49a8f419"
+  },
+  {
+   "from": "0959bd0c",
+   "to": "06c4431f"
+  },
+  {
+   "from": "0959bd0c",
+   "to": "6cc6212a"
+  },
+  {
+   "from": "0959bd0c",
+   "to": "be215545"
+  },
+  {
+   "from": "0959bd0c",
+   "to": "d095fa5c"
+  },
+  {
+   "from": "0959bd0c",
+   "to": "e70301eb"
+  },
+  {
+   "from": "13b27d82",
+   "to": "c3636f2d"
+  },
+  {
+   "from": "49a8f419",
+   "to": "0336c6f7"
+  },
+  {
+   "from": "49a8f419",
+   "to": "13b27d82"
+  },
+  {
+   "from": "49a8f419",
+   "to": "f8c1d393"
+  },
+  {
+   "from": "553faba1",
+   "to": "b87d004b"
+  },
+  {
+   "from": "6cc6212a",
+   "to": "49a8f419"
+  },
+  {
+   "from": "6cc6212a",
+   "to": "9672f007"
+  },
+  {
+   "from": "9672f007",
+   "to": "0336c6f7"
+  },
+  {
+   "from": "9672f007",
+   "to": "13b27d82"
+  },
+  {
+   "from": "9672f007",
+   "to": "f8c1d393"
+  },
+  {
+   "from": "b87d004b",
+   "to": "c3636f2d"
+  },
+  {
+   "from": "be03886e",
+   "to": "b87d004b"
+  },
+  {
+   "from": "be215545",
+   "to": "9672f007"
+  },
+  {
+   "from": "d095fa5c",
+   "to": "49a8f419"
+  },
+  {
+   "from": "d095fa5c",
+   "to": "553faba1"
+  },
+  {
+   "from": "e70301eb",
+   "to": "49a8f419"
+  },
+  {
+   "from": "e70301eb",
+   "to": "553faba1"
+  },
+  {
+   "from": "e70301eb",
+   "to": "9672f007"
+  },
+  {
+   "from": "f8c1d393",
+   "to": "c3636f2d"
+  }
+ ],
+ "option_interventions": {
+  "Hire Tech Lead (Status Quo Headcount)": {
+   "49a8f419": 0.85
+  },
+  "Hire One Developer and One Tech Lead": {
+   "49a8f419": 0.6,
+   "9672f007": 0.7
+  },
+  "Two Developers": {
+   "9672f007": 0.8
+  },
+  "Engage Fractional/Contract Tech Lead": {
+   "49a8f419": 0.65,
+   "553faba1": 0.35
+  },
+  "Hire a Tech Lead": {}
+ },
+ "goal_constraints": [
+  {
+   "node_id": "b87d004b",
+   "operator": "<=",
+   "value": 200000,
+   "label": "Keep budget at or below \u00a3200,000",
+   "unit": "\u00a3"
+  }
+ ]
+}
