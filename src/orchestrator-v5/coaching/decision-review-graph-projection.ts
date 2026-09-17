@@ -60,6 +60,7 @@
  */
 
 import { GraphV3, NodeV3 } from '../../schemas/cee-v3.js';
+import { canonicalEdgeAddress } from '../compose/edge-address.js';
 import {
   boundNodeDescriptionForContext,
   compactGraph,
@@ -123,7 +124,11 @@ function hasEntities(graph: Record<string, unknown> | null): boolean {
  * contract corpus accepts (`collectGraphEntityIds`).
  */
 function endpointAddress(from: string, to: string): string {
-  return `${from}->${to}`;
+  // DELEGATED to the single owner of the address vocabulary
+  // (`compose/edge-address.ts`), which the Phase 3 graph lookup now resolves
+  // against. The projection hands the model this exact spelling; the lookup is
+  // keyed on it. One function, so they cannot drift apart.
+  return canonicalEdgeAddress(from, to);
 }
 
 /**
