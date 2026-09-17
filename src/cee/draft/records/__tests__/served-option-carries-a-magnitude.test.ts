@@ -133,3 +133,76 @@ describe("served draft graphs — a stated option carries a magnitude", () => {
     ).toBeGreaterThan(0);
   });
 });
+
+/**
+ * ⭐⭐ THE SAME SPLIT ALSO TOOK THE BASELINE — so "do nothing" left the board.
+ *
+ * ⛔ FIRST, THE THING THAT IS **NOT** A DEFECT, because the obvious reading is
+ * wrong and would produce a harmful "fix". Almost every baseline in the corpus
+ * is model-authored — "Status Quo: Keep Current Team", "Continue as-is",
+ * "Hold Price at £49 (Status Quo)". That is CORRECT and wanted: a person asking
+ * "should I do A or B" rarely writes down "neither", and the model supplying it
+ * is the product working. A rule that refused model-authored baselines would
+ * delete the most useful option on most graphs.
+ *
+ * ⭐ THE ACTUAL DEFECT is narrower and it is the same split this file already
+ * pins. On 16 Sep the baseline is `Hire Tech Lead (Status Quo Headcount)` — a
+ * near-duplicate of the person's own option, and an option that HIRES. Every one
+ * of that graph's five options hires somebody. **There is no do-nothing option
+ * at all**, so every ranking is measured against a fabricated hiring action and
+ * the person can never see what happens if they do neither.
+ *
+ * The 15 Sep draft of the SAME brief gets it right — `Status Quo: Keep Current
+ * Team`, a genuine do-nothing. Same discriminating pair, same root cause: the
+ * model split the person's option in two, and the invention took the magnitudes
+ * AND the baseline flag while the person's own option was left inert.
+ *
+ * ⚠ SCOPE, because the summary number is easy to misread: only 2 of 21 bundles
+ * carry the `draft_graph` provenance this needs. The other 19 are UNMEASURABLE
+ * for baseline authorship, not clean.
+ */
+describe("served draft graphs — the baseline is a real alternative", () => {
+  /**
+   * ⚠ MY FIRST VERSION OF THIS ASSERTED "every option hires" VIA A LABEL REGEX
+   * AND IT WAS WRONG — `Two Developers` and `Engage Fractional/Contract Tech
+   * Lead` carry no hiring verb, so the regex said the graph was fine. The claim
+   * I wanted was SEMANTIC ("no option leaves the team as it is") and a label
+   * predicate cannot carry it. Rather than widen the pattern — this estate's
+   * documented way to lose four rounds — the assertion is narrowed to the
+   * structural fact, which is the part that is actually checkable and is also
+   * the part that matters.
+   */
+  const statusQuoMarked = (g: Served) =>
+    g.nodes.filter((n) => n.kind === "option" && /status quo|as-is|as is|keep current/i.test(String(n.label)));
+
+  it("16 Sep: the only status-quo-marked option is itself a hiring action", () => {
+    const g = GRAPHS.find((x) => x.source_bundle.includes("08513e02"))!;
+    const marked = statusQuoMarked(g).map((n) => String(n.label));
+    // The reference point everything is ranked against is `Hire Tech Lead
+    // (Status Quo Headcount)` — "status quo" qualifies the HEADCOUNT, not the
+    // decision. It is a near-duplicate of the person's own option, and it is the
+    // option that took the magnitudes while theirs was left inert.
+    expect(marked, "one status-quo-marked option, and it hires").toEqual([
+      "Hire Tech Lead (Status Quo Headcount)",
+    ]);
+    expect(marked[0].startsWith("Hire"), "the reference point is an action").toBe(true);
+  });
+
+  it("15 Sep: the SAME brief produced a genuine do-nothing — not inherent to the brief", () => {
+    const g = GRAPHS.find((x) => x.source_bundle.includes("573ebbd7"))!;
+    expect(
+      statusQuoMarked(g).map((n) => String(n.label)),
+      "model-authored and exactly right — this is the product working",
+    ).toContain("Status Quo: Keep Current Team");
+  });
+
+  it("and that 15 Sep baseline is model-authored, which is CORRECT", () => {
+    // ⛔ Pinned so nobody reads this block as "model-authored baselines are bad".
+    // A person asking "should I do A or B" rarely writes down "neither"; the
+    // model supplying it is the product working. A rule refusing model-authored
+    // baselines would delete the most useful option on most graphs.
+    const g = GRAPHS.find((x) => x.source_bundle.includes("573ebbd7"))!;
+    const sq = g.nodes.find((n) => String(n.label) === "Status Quo: Keep Current Team");
+    expect(sq?.provenance).toBe("ai_inferred");
+  });
+});
