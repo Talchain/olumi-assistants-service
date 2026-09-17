@@ -198,3 +198,140 @@ describe("B2 — single-pass magnitudes are untouched, which is what keeps penny
     expect(iv(p, "penny pricing", "Unit Price")).toBe(0.5 / 100000);
   });
 });
+
+/**
+ * ⭐⭐⭐ B3 — THE TWO DOORS THE MAXIMA FORM COULD NOT WATCH, supplied by
+ * independent review in its own words: *"reversed order (native amounts first,
+ * normalised completion later) is not detected, and a large earlier sibling
+ * masks a small wrong earlier value because the detector compares maxima."*
+ *
+ * Both are the SAME defect — reducing each side to `Math.max` discards the
+ * value being asked about — and both are fixed by comparing the GLOBAL extremes
+ * and asking which side each came from. ⚠ The 1000 constant is NOT tuned; review
+ * forbade that explicitly and it would not have helped either case (b's maxima
+ * ratio is 1e-5 and c's is 1.5 — no threshold reaches them).
+ *
+ * ⛔ These are trap 22b twins for B1: B1 tests LATER-BIGGER and SMALL-VALUE-IS-
+ * THE-MAXIMUM, so it was structurally incapable of observing either of these.
+ * Every case here fails on the maxima form and passes on the extremes form.
+ */
+describe("B3 — order-independence and no masking by a large sibling", () => {
+  const COST3 = "Hiring and Onboarding Cost";
+
+  it("B3a REVERSED ORDER: native pounds in pass 1, the normalised value from completion", () => {
+    // Maxima form: biggestLater/biggestEarlier = 0.85/120000 ≈ 7e-6. Silent.
+    const rec = {
+      stated_items: [
+        { kind: "goal", source_quote: "increase productivity", role: "target" },
+        { kind: "option", source_quote: "hire a Tech lead" },
+        { kind: "option", source_quote: "two developers" },
+      ],
+      claims: [
+        /* 0 */ { claim_kind: "factor", label: COST3, basis: [] },
+        /* 1 */ { claim_kind: "outcome", label: "Delivery Speed to Launch", basis: [] },
+        /* 2 */ { claim_kind: "causal_link", label: "lead costs", from_stated: 1, to_claim: 0, effect: "positive", strength: 0.5, sets_to: 80000 },
+        /* 3 */ { claim_kind: "causal_link", label: "devs cost", from_stated: 2, to_claim: 0, effect: "positive", strength: 0.5, sets_to: 120000 },
+        /* 4 */ { claim_kind: "causal_link", label: "cost slows delivery", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.4 },
+        /* 5 */ { claim_kind: "causal_link", label: "delivery drives goal", from_claim: 1, to_stated: 0, effect: "positive", strength: 0.8 },
+        /* 6 */ { claim_kind: "option_refinement", label: "Hire One Tech Lead and One Developer", basis: [1, 2] },
+        /* 7 */ { claim_kind: "causal_link", label: "hybrid costs", from_claim: 6, to_claim: 0, effect: "positive", strength: 0.5, sets_to: 0.85 },
+      ],
+    } as unknown as DraftRecordSet;
+    const p = projectRecordsToGraph(rec, undefined, 6);
+    expect(
+      dropped(p).map((d) => d.reason),
+      "the identical clash, arriving the other way round, is still reported",
+    ).toContain("option_magnitude_scale_unreconciled");
+    expect(iv(p, "Hire One Tech Lead and One Developer", COST3), "and still nothing is deleted").toBeDefined();
+  });
+
+  it("B3b MASKING: a large pass-1 sibling hid a small pass-1 value from the maxima comparison", () => {
+    // Maxima form: biggestEarlier = 80000 (not 0.85), biggestLater = 120000,
+    // ratio 1.5. The 0.85 was discarded by `Math.max` before anything looked at
+    // it — the value the whole rule exists to notice.
+    const rec = {
+      stated_items: [
+        { kind: "goal", source_quote: "increase productivity", role: "target" },
+        { kind: "option", source_quote: "hire a Tech lead" },
+        { kind: "option", source_quote: "two developers" },
+      ],
+      claims: [
+        /* 0 */ { claim_kind: "factor", label: COST3, basis: [] },
+        /* 1 */ { claim_kind: "outcome", label: "Delivery Speed to Launch", basis: [] },
+        /* 2 */ { claim_kind: "option_refinement", label: "Hire One Tech Lead and One Developer", basis: [1, 2] },
+        /* 3 */ { claim_kind: "causal_link", label: "hybrid costs", from_claim: 2, to_claim: 0, effect: "positive", strength: 0.5, sets_to: 0.85 },
+        /* 4 */ { claim_kind: "causal_link", label: "lead costs", from_stated: 1, to_claim: 0, effect: "positive", strength: 0.5, sets_to: 80000 },
+        /* 5 */ { claim_kind: "causal_link", label: "cost slows delivery", from_claim: 0, to_claim: 1, effect: "negative", strength: 0.4 },
+        /* 6 */ { claim_kind: "causal_link", label: "delivery drives goal", from_claim: 1, to_stated: 0, effect: "positive", strength: 0.8 },
+        /* 7 */ { claim_kind: "causal_link", label: "devs cost", from_stated: 2, to_claim: 0, effect: "positive", strength: 0.5, sets_to: 120000 },
+      ],
+    } as unknown as DraftRecordSet;
+    const p = projectRecordsToGraph(rec, undefined, 7);
+    expect(
+      dropped(p).map((d) => d.reason),
+      "the 0.85 is the global minimum and it straddles the boundary against 120000",
+    ).toContain("option_magnitude_scale_unreconciled");
+  });
+
+  it("B3c THE DISCLOSURE NAMES THE WHOLE SET, never only the pass-1 side", () => {
+    // ⛔ Review's words: "without silently favouring completion". Disclosing one
+    // side asserts the other side is sound, and four refuted shapes say I have
+    // no evidence for that. The object of the disclosure is the SET.
+    const rows = dropped(projectRecordsToGraph(CROSS_BOUNDARY(), undefined, 6))
+      .filter((d) => d.reason === "option_magnitude_scale_unreconciled")
+      .map((d) => d.label);
+    expect(rows.some((l) => l.includes("Hire One Tech Lead and One Developer")), "the pass-1 value").toBe(true);
+    expect(rows.some((l) => l.includes("hire a Tech lead")), "the completion-authored value too").toBe(true);
+  });
+
+  it("B3d SINGLE-PASS PENNY PRICING IS STILL UNREACHABLE, at any ratio", () => {
+    // The load-bearing negative. Both extremes sit on the same side of the
+    // boundary, so the rule cannot fire however far apart they are — this is
+    // what makes the change safe rather than merely wider.
+    const penny = {
+      stated_items: [
+        { kind: "goal", source_quote: "price sustainably" },
+        { kind: "option", source_quote: "penny pricing" },
+        { kind: "option", source_quote: "enterprise pricing" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Unit Price" },
+        { claim_kind: "causal_link", label: "penny sets low", from_stated: 1, to_claim: 0, effect: "negative", sets_to: 0.5 },
+        { claim_kind: "causal_link", label: "enterprise sets high", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 50000 },
+        { claim_kind: "causal_link", label: "price bears on goal", from_claim: 0, to_stated: 0, effect: "positive" },
+      ],
+    } as unknown as DraftRecordSet;
+    const p = projectRecordsToGraph(penny, undefined, 4);
+    expect(dropped(p).map((d) => d.reason).some((r) => r.includes("scale"))).toBe(false);
+    expect(iv(p, "penny pricing", "Unit Price")).toBe(0.5 / 100000);
+  });
+
+  it("B3e KNOWN FALSE POSITIVE, pinned rather than hidden: cross-pass penny pricing", () => {
+    // ⚠ £0.50 in pass 1 and £50,000 from completion is a LEGITIMATE pair and the
+    // rule reports it as unreconciled. I cannot separate it from the live £0.85
+    // clash using magnitude and pass origin — that is four refuted shapes, not an
+    // opinion, and review's ruling is that "a detector may flag suspicion, not
+    // prove a value invalid". So the cost of the false positive is a sentence,
+    // never a number: both prices survive untouched. Settling it properly means
+    // reconciling the declared unit/frame at the WRITER, which is #1546.
+    const penny = {
+      stated_items: [
+        { kind: "goal", source_quote: "price sustainably" },
+        { kind: "option", source_quote: "penny pricing" },
+        { kind: "option", source_quote: "enterprise pricing" },
+      ],
+      claims: [
+        { claim_kind: "factor", label: "Unit Price" },
+        { claim_kind: "causal_link", label: "penny sets low", from_stated: 1, to_claim: 0, effect: "negative", sets_to: 0.5 },
+        { claim_kind: "causal_link", label: "price bears on goal", from_claim: 0, to_stated: 0, effect: "positive" },
+        { claim_kind: "causal_link", label: "enterprise sets high", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 50000 },
+      ],
+    } as unknown as DraftRecordSet;
+    const p = projectRecordsToGraph(penny, undefined, 3);
+    expect(dropped(p).map((d) => d.reason), "flagged — honestly, and known wrong here").toContain(
+      "option_magnitude_scale_unreconciled",
+    );
+    expect(iv(p, "penny pricing", "Unit Price"), "and it costs a sentence, not a price").toBeDefined();
+    expect(iv(p, "enterprise pricing", "Unit Price")).toBeDefined();
+  });
+});

@@ -4179,15 +4179,54 @@ function projectOnce(
         // orders of magnitude, which no single quantity plausibly spans within
         // one draft. Penny pricing is single-pass, so it can never reach this
         // test at all, whatever its ratio.
-        const completionSide = carried.filter(authoredByCompletion).map((x) => Math.abs(x.v));
-        const earlierSide = carried.filter((x) => !authoredByCompletion(x)).map((x) => Math.abs(x.v));
-        const biggestLater = completionSide.length > 0 ? Math.max(...completionSide) : 0;
-        const biggestEarlier = earlierSide.length > 0 ? Math.max(...earlierSide) : 0;
+        // ⛔⛔ COMPARE THE EXTREMES OF THE WHOLE SET, NOT THE MAXIMUM OF EACH
+        // SIDE — and compare them SYMMETRICALLY. The maxima form shipped first
+        // and independent review named exactly what it cannot see:
+        //
+        //   (b) REVERSED ORDER. Native amounts in pass 1, the normalised value
+        //       from completion: {80000 @pass1, 0.85 @completion}. The maxima
+        //       ratio is 0.85/80000 ≈ 1e-5, nowhere near 1000, so the identical
+        //       clash went unreported purely because it arrived the other way
+        //       round. A rule that only looks for LATER-BIGGER is answering
+        //       "did completion inflate?" when the question is "do these
+        //       reconcile?" — and the second question has no direction.
+        //
+        //   (c) MASKING BY A LARGE SIBLING. {0.85 @pass1, 80000 @pass1,
+        //       120000 @completion}: maxima give 120000/80000 = 1.5 and the
+        //       0.85 — the actually-unreconciled value — is invisible, because
+        //       `Math.max` on its own side discarded it before the comparison.
+        //       A detector that reduces each side to one number cannot see a
+        //       value that is not that number.
+        //
+        // ⭐ BOTH ARE THE SAME DEFECT: reducing to per-side maxima throws away
+        // the quantity being asked about. The span of a SET is max/min over the
+        // set, and the boundary question is whether that span is straddled —
+        // so take the global extremes and ask which side each came from. Order
+        // stops mattering (fixes b) and no value is discarded before the
+        // comparison (fixes c). The 1000 constant is untouched: this changes
+        // WHICH numbers are compared, not how far apart they must be.
+        //
+        // The two live refutations still hold, and that is the point of stating
+        // them as the precondition rather than the outcome:
+        //   · single-pass penny pricing (£0.50 and £50,000 both pass 1) puts
+        //     BOTH extremes on the same side ⇒ never fires, at any ratio;
+        //   · `option-framing-adapter` (0.4 completion, 0.8/0.6 pass 1) straddles
+        //     but spans only 2x ⇒ never fires.
+        const withSide = carried.map((x) => ({
+          mag: Math.abs(x.v),
+          fromCompletion: authoredByCompletion(x),
+        })).filter((x) => x.mag > 0);
+        let lo = withSide[0];
+        let hi = withSide[0];
+        for (const x of withSide) {
+          if (lo === undefined || x.mag < lo.mag) lo = x;
+          if (hi === undefined || x.mag > hi.mag) hi = x;
+        }
         const spansBoundary =
-          completionSide.length > 0 &&
-          earlierSide.length > 0 &&
-          biggestEarlier > 0 &&
-          biggestLater / biggestEarlier >= 1000;
+          lo !== undefined &&
+          hi !== undefined &&
+          lo.fromCompletion !== hi.fromCompletion &&
+          hi.mag / lo.mag >= 1000;
         if (spansBoundary) {
           // ⛔⛔ DISCLOSE, DO NOT DELETE — AND THIS IS THE FOURTH SHAPE OF THIS
           // RULE, WITH THE FIRST THREE REFUTED BY EXECUTION.
@@ -4216,7 +4255,15 @@ function projectOnce(
           // that visible to a consumer instead of silent. Choosing what the
           // product then DOES about the ranking is a decision with an owner, not
           // a guess for this function to make.
-          for (const x of carried.filter((y) => !authoredByCompletion(y))) {
+          // ⛔⛔ NAME EVERY MAGNITUDE ON THE FACTOR, NOT THE PASS-1 ONES. The
+          // first form disclosed only the earlier side, which is precisely the
+          // "silently favouring completion" review warned against: it asserts
+          // the completion's number is the sound one, and I have no evidence for
+          // that. Four refuted shapes say I cannot tell WHICH value is wrong —
+          // so the honest object of the disclosure is THE SET THAT DID NOT
+          // RECONCILE, and a consumer reading it is told that and nothing more.
+          // Nothing is deleted either way, so naming all of them loses no data.
+          for (const x of carried) {
             dropped.push({
               claim_index: Math.min(...x.origins),
               claim_kind: "claim",

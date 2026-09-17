@@ -67,26 +67,36 @@ describe("A0 — the corpus is non-empty and named, so a shrunk one cannot pass 
   });
 });
 
-describe("A1 — no option is priced absurdly against its siblings", () => {
+/**
+ * ⛔⛔ A1 PREVIOUSLY ASSERTED `ratio < 1000` AND THAT WAS WRONG — struck on
+ * independent review, in its own words: "the new morning-acceptance ratio<1000
+ * assertion likewise encodes a rule contradicted by legitimate native
+ * quantities; it is not a general acceptance criterion."
+ *
+ * The reviewer is right and the counterexample is already in this repo:
+ * `projector-scale-projection` asserts, deliberately, that £0.50 penny pricing
+ * beside £50,000 enterprise pricing shares one frame — a legitimate 100,000x
+ * span. An acceptance criterion that fails that is asserting my detector's
+ * heuristic as a property of good models. It is not one.
+ *
+ * ⭐ WHAT IS ACTUALLY TRUE AND WORTH ASSERTING: nothing is deleted, and a
+ * cross-pass divergence is reported. A detector may flag suspicion; it may not
+ * prove a value invalid, and acceptance may not encode the detector's guess as
+ * a fact about the world.
+ */
+describe("A1 — no magnitude is deleted, whatever its scale", () => {
   it.each(CAPTURES.map((c) => [c.name, c] as const))(
-    "%s: option magnitudes on one factor stay within three orders of magnitude",
+    "%s: supplying the pass boundary removes no option magnitude",
     (_name, capture) => {
-      const boundary = capture.records.claims.length; // everything is pass-1 here
-      const p = project(capture.records, boundary);
-      const factors = p.graph.nodes.filter((n) => n.kind === "factor");
-      for (const f of factors) {
-        const vals = p.graph.nodes
+      const boundary = capture.records.claims.length;
+      const count = (p: ReturnType<typeof project>) =>
+        p.graph.nodes
           .filter((n) => n.kind === "option")
-          .map((o) => (o.data?.interventions ?? {})[String(f.id)])
-          .filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v !== 0)
-          .map(Math.abs);
-        if (vals.length < 2) continue;
-        const ratio = Math.max(...vals) / Math.min(...vals);
-        expect(
-          ratio,
-          `factor "${f.label}" spans ${ratio.toExponential(1)}x — the live defect was 1.4e5x`,
-        ).toBeLessThan(1000);
-      }
+          .reduce((acc, o) => acc + Object.keys((o.data?.interventions ?? {}) as object).length, 0);
+      expect(
+        count(project(capture.records, boundary)),
+        "a detector may flag suspicion; it may not delete a value",
+      ).toBe(count(project(capture.records)));
     },
   );
 });
