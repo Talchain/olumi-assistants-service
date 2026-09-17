@@ -31,6 +31,25 @@
  * change waiting: X — reply yes to apply", which costs a round trip and cannot
  * mutate anything the user did not name. That needs coordination with the CEE
  * orchestration lane, which owns the adjacent pre-route ordering.
+ *
+ * ⭐ THE WIRE CALLS THESE GATES BY DIFFERENT NAMES THAN THE CODE DOES, AND
+ * THAT COST A ROUND TRIP. Render logs for the witnessed turn (18:12:12Z) read
+ * `v5.pending_action.skipped reason=message_likely_value_update`, which looks
+ * like a third mechanism and is not: `clarification-resume.ts:616` emits that
+ * skip_reason FROM `EDIT_VERB_OR_QUANTITY_PATTERN` — the same predicate this
+ * file pins through `isClaimableByClarificationResume`. The mapping, so nobody
+ * else reads two names as two gates:
+ *
+ *     EDIT_VERB_OR_QUANTITY_PATTERN  -> skip_reason 'message_likely_value_update'
+ *     SHORT_CONFIRM_LIKELIHOOD       -> skip_reason 'message_likely_short_confirm'
+ *
+ * ⭐ AND THE PENDING WAS LIVE WHEN HE ASKED, which is what makes the re-offer
+ * unambiguous rather than speculative. Same logs: `pending_action_count=1
+ * new=0 carried_forward=1` at 18:11:46, and the skip reason at 18:11:38 was
+ * `no_pending_clarification` (nothing to claim) while at 18:12:12 it had CHANGED
+ * to `message_likely_value_update` (something to claim, gate refused it). The
+ * change in reason between the two turns is independent evidence that a pending
+ * came into existence and was carried forward.
  */
 
 import { describe, expect, it } from 'vitest';
