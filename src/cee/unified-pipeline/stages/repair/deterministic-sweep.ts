@@ -483,8 +483,49 @@ function fixControllableMissingData(
       data.factor_type = "other";
       changed = true;
     }
+    // ⛔⛔ AN EMPTY LIST, NEVER A SENTENCE SAYING THE LIST IS EMPTY.
+    //
+    // This wrote `["Not provided"]` — a PLACEHOLDER SENTENCE standing in for an
+    // empty list. The consuming overconfidence check is the natural one,
+    // `!drivers || drivers.length === 0`, and a placeholder array has LENGTH
+    // ONE, so the warning it gates never fired:
+    //
+    //   "X is among the highest-priority factors to review but has no
+    //    supporting evidence. Validate it before relying on it."
+    //
+    // The product went silent on precisely the population that most needed the
+    // coaching, and it read as working — no error, no empty state, just a line
+    // that never appeared. MEASURED on 32 fresh v202 staging drafts
+    // (2026-09-17): `uncertainty_drivers` occurs 102 times and 102 of 102 are
+    // exactly `["Not provided"]`. Contrast controls in the same sweep (trap
+    // 13e): `factor_type` 102, `observed_state` 106, `label` 660.
+    //
+    // ⚠ A DIFFERENT SPELLING WOULD REPRODUCE THE DEFECT EXACTLY — the consumer
+    // would simply mis-parse a different sentence. Whole-string matching is
+    // load-bearing on their side, because genuine drivers contain placeholder
+    // WORDS ("Onboarding complexity unknown" is real evidence). So this must
+    // never emit a placeholder of any wording.
+    //
+    // ⭐ WHY `[]` AND NOT AN ABSENT KEY. Both read equally honest; only one
+    // survives the pipeline, and both alternatives are pinned as executable
+    // cases in `__tests__/no-evidence-is-reported-as-none.test.ts`:
+    //   1. ABSENT re-raises the ERROR this repair exists to close —
+    //      `graph-validator.ts:848` is `if (!data?.uncertainty_drivers)`,
+    //      severity "error".
+    //   2. ABSENT IS REFILLED WITH A DIFFERENT PLACEHOLDER. This sweep is
+    //      substep 1 of Stage 4; late-STRP is substep 6 and runs
+    //      `fillControllableData: true`, whose rule 5 is
+    //      `if (!data.uncertainty_drivers) data.uncertainty_drivers =
+    //      ["Estimation uncertainty"]` (`structural-reconciliation.ts:260`).
+    //      Omitting the key hands the consumer a NEW sentence to mis-parse.
+    //   3. `[]` IS TRUTHY, so it passes both guards untouched and reaches the
+    //      wire. It raises only `EMPTY_UNCERTAINTY_DRIVERS`, severity "warn" —
+    //      a code the validator ALREADY defines, i.e. this codebase had already
+    //      named "a controllable factor with no uncertainty drivers" as a
+    //      legitimate, non-fatal state. The gap is now honest and visible
+    //      instead of dressed as evidence.
     if (data.uncertainty_drivers === undefined) {
-      data.uncertainty_drivers = ["Not provided"];
+      data.uncertainty_drivers = [];
       changed = true;
     }
 
