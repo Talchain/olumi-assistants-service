@@ -35,7 +35,16 @@ import {
 import { selectAnswerableBlockers } from '../../routing/readiness-answer-chips.js';
 import { parseEditGraphResponse } from '../../../orchestrator/tools/edit-graph.js';
 import { applyPatchOperations } from '../../../orchestrator/patch-applier.js';
-import { encodeOptionInterventionsForEdit } from '../../../orchestrator/tools/encode-option-interventions.js';
+import {
+  PRESERVED_INTERVENTION_SOURCES,
+  encodeOptionInterventionsForEdit,
+} from '../../../orchestrator/tools/encode-option-interventions.js';
+import {
+  classifyIssueObligation,
+  classifyValueSource,
+  obligationFor,
+} from '../../../cee/graph-readiness/obligation-provenance.js';
+import { projectGraphForPersistence } from '../../persisted-graph-projection.js';
 import { GraphV3 } from '../../../schemas/cee-v3.js';
 import type { PatchOperation } from '../../../orchestrator/types.js';
 import {
@@ -105,15 +114,37 @@ describe('readiness value batch — membership', () => {
     const membership = selectValueBatchMembership(assessment);
     // Derived from the producer at test time, never transcribed.
     const answerable = selectAnswerableBlockers(assessment.blockingIssues);
+
+    /**
+     * ⚠ THE EXPECTATION IS BOUND TO AN INDEPENDENT PRODUCER PROPERTY, NOT TO A
+     * COPY OF THE SPLIT PREDICATE. An earlier revision derived it with
+     * `typeof i.factor_id === 'string' && i.factor_id.length > 0` — byte-identical
+     * to the production line it was checking, so if the split were wrong (a
+     * whitespace-only `factor_id`, say) both sides would be wrong together and
+     * this test could not see it. A guard agreeing with itself.
+     *
+     * The independent property is the blocker CODE, which the producer sets and
+     * this module never reads: `OPTION_NEEDS_MAPPING`'s entire content is that
+     * the factor is unknown, so it is exactly the unsettable class. Measured on
+     * this capture: 3 × `MISSING_OPTION_VALUE` (settable) and 3 ×
+     * `OPTION_NEEDS_MAPPING` (unsettable).
+     */
     const expectedSettable = answerable
-      .filter((i) => typeof i.factor_id === 'string' && i.factor_id.length > 0)
+      .filter((i) => i.code !== 'OPTION_NEEDS_MAPPING')
       .map((i) => i.issue_id);
     const expectedUnsettable = answerable
-      .filter((i) => !(typeof i.factor_id === 'string' && i.factor_id.length > 0))
+      .filter((i) => i.code === 'OPTION_NEEDS_MAPPING')
       .map((i) => i.issue_id);
+    // Neither arm may be vacuous, and the two codes must really both be present
+    // — otherwise this passes by partitioning nothing.
+    expect(expectedSettable.length).toBeGreaterThan(0);
+    expect(expectedUnsettable.length).toBeGreaterThan(0);
 
     expect(membership.cells.map((c) => c.issue_id)).toEqual(expectedSettable);
     expect(membership.unsettable.map((u) => u.issue_id)).toEqual(expectedUnsettable);
+    // Every unsettable issue really is the factor-unknown class, read off the
+    // producer rather than off the split.
+    expect(membership.unsettable.every((u) => u.reason === 'factor_unknown')).toBe(true);
     // Nothing the producer named is silently absent from the plan.
     expect([...membership.cells.map((c) => c.issue_id), ...membership.unsettable.map((u) => u.issue_id)].sort())
       .toEqual(answerable.map((i) => i.issue_id).sort());
@@ -276,7 +307,15 @@ describe('readiness value batch — atomicity', () => {
     // Remove one option entirely → the derived membership no longer matches.
     const optionId = proposal.cells[0]!.option_id;
     moved.nodes = moved.nodes.filter((n) => n.id !== optionId);
-    moved.edges = moved.edges.filter((e) => e.source !== optionId && e.target !== optionId);
+    // `EdgeV3` is `from`/`to`, NOT `source`/`target`. An earlier revision used
+    // the react-flow spelling: it matched 0 of 33 edges on this capture, so the
+    // arm left 33 dangling edges pointing at a deleted node and passed on the
+    // node removal alone — green for a different reason than it states, on a
+    // structurally invalid graph. The assertion below pins the filter itself.
+    const edgesBefore = moved.edges.length;
+    moved.edges = moved.edges.filter((e) => e.from !== optionId && e.to !== optionId);
+    expect(moved.edges.length).toBeLessThan(edgesBefore);
+    expect(moved.edges.some((e) => e.from === optionId || e.to === optionId)).toBe(false);
     const outcome = executeValueBatch({ proposal, currentGraph: moved });
     expect(outcome.status).toBe('invalid');
     if (outcome.status !== 'invalid') throw new Error('expected invalid');
@@ -365,16 +404,18 @@ describe('readiness value batch — one approval, one apply', () => {
     const proposal = proposalOrThrow(graph, fullEstimates(graph));
 
     // ONE approval covers the whole set.
-    const offer = buildValueBatchOffer({
+    const outcomeOffer = buildValueBatchOffer({
       proposal,
       currentGraphHash: 'hash-a',
       scenarioId: 'scn-value-batch',
     });
-    expect(offer).not.toBeNull();
+    expect(outcomeOffer.kind).toBe('offer');
+    if (outcomeOffer.kind !== 'offer') throw new Error('expected an offer');
+    const offer = outcomeOffer.offer;
     // Narrowed on the discriminant rather than cast through it: `inline_patch`
     // exists only on the `apply_proposed_change` member of the union, so this
     // asserts the offer really is that kind before reading the field.
-    const action = offer!.pending.action;
+    const action = offer.pending.action;
     if (action.kind !== 'apply_proposed_change') {
       throw new Error(`expected apply_proposed_change, got ${action.kind}`);
     }
@@ -392,11 +433,11 @@ describe('readiness value batch — one approval, one apply', () => {
     // `buildReadinessRepairOffer` copy ("Apply 3 safe model fixes"). So this
     // binds BY IDENTITY to the values actually proposed (trap 19) and also
     // applies the estate's own shipped pattern.
-    const chipText = `${offer!.chip.label} ${offer!.chip.message}`;
+    const chipText = `${offer.chip.label} ${offer.chip.message}`;
     for (const cell of writableCells(proposal)) {
       expect(chipText.includes(String(cell.value))).toBe(false);
     }
-    expect(/\boption's effect on\b.*\bto\s+\d/.test(offer!.chip.message)).toBe(false);
+    expect(/\boption's effect on\b.*\bto\s+\d/.test(offer.chip.message)).toBe(false);
 
     const outcome = executeValueBatch({ proposal, currentGraph: graph });
     if (outcome.status !== 'executed') throw new Error(`expected executed, got ${outcome.reason}`);
@@ -564,5 +605,235 @@ describe('readiness value batch — provenance survives the write', () => {
       expect(stored.source).toBe(VALUE_BATCH_INTERVENTION_SOURCE);
       expect(stored.reasoning).toBe('Reviewed estimate.');
     }
+  });
+});
+
+describe('readiness value batch — the mark survives persistence, and it changes the obligation', () => {
+  /**
+   * ⭐⭐ THE RELOAD HALF, WHICH THE FIRST REVISION OF THIS SUITE DID NOT PIN.
+   *
+   * `executeValueBatch` calls its mark "permanent — written into the graph, not
+   * merely into the turn", and the guard above reads `outcome.appliedGraph` —
+   * the IN-MEMORY return value. That is not the same claim. A mark is permanent
+   * when it survives the write.
+   *
+   * ⚠ AND THERE IS A SECOND, UNRELATED STAMPER ON THAT PATH.
+   * `normalise-option-interventions.ts` `freshInterventionV3` writes
+   * `source: 'user_specified'` UNCONDITIONALLY and runs inside
+   * `projectGraphForPersistence`. It is a no-op for this module's output only
+   * because `encodeOptionInterventionsForEdit` deletes `data.interventions`
+   * before it looks — an ORDERING, and nothing enforced it.
+   *
+   * If that ordering ever inverts, every AI estimate persists as
+   * `user_specified`, which `obligation-provenance.ts` classes `user_stated`
+   * and turns into `required`: the product would DEMAND the user answer for
+   * numbers it invented, and attribute them to the user. Silently.
+   *
+   * This runs the real projection and goes RED the day that happens.
+   */
+  it('⭐ the mark survives the persistence projection, not just the turn', () => {
+    const graph = zeroConfiguredGraph();
+    const proposal = proposalOrThrow(graph, fullEstimates(graph));
+    const outcome = executeValueBatch({ proposal, currentGraph: graph });
+    if (outcome.status !== 'executed') throw new Error(`expected executed, got ${outcome.reason}`);
+
+    const persisted = projectGraphForPersistence(outcome.appliedGraph, {}) as {
+      nodes: Array<Record<string, unknown>>;
+    };
+
+    const written = writableCells(proposal);
+    expect(written.length).toBeGreaterThan(0);
+    for (const cell of written) {
+      const node = persisted.nodes.find((n) => n.id === cell.option_id);
+      expect(node, `option ${cell.option_id} survives persistence`).toBeDefined();
+      const stored = (node!.interventions as Record<string, Record<string, unknown>>)[
+        cell.factor_id
+      ];
+      // Reachability first: a missing entry would make the source assertion
+      // pass-by-absence rather than by survival.
+      expect(stored, `intervention ${cell.option_id}/${cell.factor_id} survives`).toBeDefined();
+      expect(stored!.source).toBe(VALUE_BATCH_INTERVENTION_SOURCE);
+      expect(stored!.value).toBe(0.4);
+    }
+  });
+
+  /**
+   * ⭐⭐ THE BEHAVIOUR THE STRING EXISTS FOR — asserted, not just the string.
+   *
+   * Every other provenance guard in this suite asserts the literal
+   * `'cee_hypothesis'`. None asserts what it BUYS, so a tidy-up that collapsed
+   * the allowlist would keep them all green while restoring the demand.
+   *
+   * The live chain is `analysis-ready-helper` → `classifyIssueObligation` →
+   * `structureProvenanceOfEffect` → `classifyValueSource(entry.source)`. So this
+   * PR silently changes obligation classification on the shared edit path:
+   * before, every encoder-written value was `user_specified` → `user_stated` →
+   * `required`; now a batch-written one is `ai_drafted` → `offered`.
+   *
+   * That is the entire point of the mark — the product may OFFER to fill a
+   * number it invented and may never DEMAND that the user own it — and it is
+   * pinned here with a DISCRIMINATING CONTROL rather than alone: the same issue,
+   * the same graph, the same call, differing only in who wrote the value.
+   */
+  it('⭐ a batch-written value is ai_drafted/offered — and a user-written one is still user_stated/required', () => {
+    const graph = zeroConfiguredGraph();
+    const assessment = assess(graph);
+    const cell = selectValueBatchMembership(assessment).cells[0]!;
+
+    // The real issue from the producer, not a hand-built one — so the category
+    // and code are the ones the live path classifies.
+    const issue = assessment.blockingIssues.find(
+      (i) => i.option_id === cell.option_id && i.factor_id === cell.factor_id,
+    );
+    expect(issue, 'the producer really raises this cell as a blocker').toBeDefined();
+
+    // Precondition, in-test: before either write, this cell is unattributed —
+    // so neither arm below can pass on state that was already there.
+    expect(classifyIssueObligation(issue!, graph).provenance).toBe('unattributed');
+
+    const proposal = proposalOrThrow(graph, fullEstimates(graph));
+    const outcome = executeValueBatch({ proposal, currentGraph: graph });
+    if (outcome.status !== 'executed') throw new Error(`expected executed, got ${outcome.reason}`);
+
+    const aiDecision = classifyIssueObligation(issue!, outcome.appliedGraph);
+    expect(aiDecision.provenance).toBe('ai_drafted');
+    expect(aiDecision.obligation).toBe('offered');
+
+    // ⭐ THE CONTROL. Identical call, identical issue, identical graph shape —
+    // the ONLY difference is that the user stated this value. If it did not
+    // come back `required`, the arm above would be agreeing with itself.
+    const userGraph = structuredClone(graph);
+    const userNode = userGraph.nodes.find((n) => n.id === cell.option_id)!;
+    userNode.interventions = {
+      [cell.factor_id]: {
+        value: 0.4,
+        source: 'user_specified',
+        target_match: { node_id: cell.factor_id, match_type: 'exact_id', confidence: 'high' },
+      },
+    };
+    const userDecision = classifyIssueObligation(issue!, userGraph);
+    expect(userDecision.provenance).toBe('user_stated');
+    expect(userDecision.obligation).toBe('required');
+  });
+
+  /**
+   * ⭐ THE ALLOWLIST'S INVARIANT, DERIVED FROM THE AUTHORITY RATHER THAN RESTATED.
+   *
+   * `PRESERVED_INTERVENTION_SOURCES` may only ever hold provenances the estate
+   * classes as NOT the user's. An earlier revision of this PR also allowlisted
+   * `brief_extraction` under a comment calling it one of "the two NON-user
+   * provenances" — but `obligation-provenance.ts` maps it to `user_stated`,
+   * the SAME class as `user_specified`, and `obligationFor('user_stated')` is
+   * `required`.
+   *
+   * This reads the mapping out of the authority at test time, so it goes RED if
+   * anyone re-adds a user provenance to the carry — including by a rename.
+   */
+  it('⭐ every preserved source is a NON-user provenance, checked against the authority', () => {
+    expect(PRESERVED_INTERVENTION_SOURCES.size).toBeGreaterThan(0);
+    for (const source of PRESERVED_INTERVENTION_SOURCES) {
+      expect(classifyValueSource(source), `${source} must not be a user provenance`)
+        .not.toBe('user_stated');
+    }
+    // CONTRAST CONTROL: the authority really does discriminate, so a green
+    // result above is a fact about the allowlist and not about a probe that
+    // returns the same answer for every input.
+    expect(classifyValueSource('user_specified')).toBe('user_stated');
+    expect(classifyValueSource('brief_extraction')).toBe('user_stated');
+    expect(classifyValueSource('cee_hypothesis')).toBe('ai_drafted');
+    // And the consequence, stated where it bites.
+    expect(obligationFor('user_stated')).toBe('required');
+    expect(obligationFor('ai_drafted')).toBe('offered');
+  });
+
+  it('a brief_extraction record is NOT carried — it defaults exactly as it did before this PR', () => {
+    // Not a regression: `brief_extraction` and the `user_specified` default are
+    // the same `user_stated` class, so the obligation is unchanged either way.
+    // What the removal buys is that the live edit path gains no new way to
+    // persist a "we read this in your brief" stamp the product wrote itself.
+    const graph = zeroConfiguredGraph();
+    const cell = selectValueBatchMembership(assess(graph)).cells[0]!;
+    const operations = parseEditGraphResponse(
+      JSON.stringify({
+        operations: [
+          {
+            op: 'update_node',
+            path: `/nodes/${cell.option_id}/data/interventions/${cell.factor_id}`,
+            value: { value: 0.4, source: 'brief_extraction', value_confidence: 'high' },
+            old_value: null,
+            impact: 'moderate',
+            rationale: 'brief',
+          },
+        ],
+        removed_edges: [],
+        warnings: [],
+        coaching: null,
+      }),
+    ).operations as PatchOperation[];
+    const applied = applyPatchOperations(GraphV3.parse(graph), operations);
+    const { graph: encoded } = encodeOptionInterventionsForEdit(applied, new Set([cell.option_id]));
+    const node = (encoded as { nodes: Array<Record<string, unknown>> }).nodes.find(
+      (n) => n.id === cell.option_id,
+    )!;
+    const stored = (node.interventions as Record<string, Record<string, unknown>>)[cell.factor_id]!;
+    expect(stored.source).toBe('user_specified');
+    expect(stored.value_confidence).toBeUndefined();
+  });
+});
+
+describe('readiness value batch — an all-declined set is a RESULT, not silence', () => {
+  /**
+   * ⭐⭐ THE WITNESSED HARM'S SHAPE, ARRIVING THROUGH A NEW DOOR.
+   *
+   * The module refuses a SILENT decline at compose time
+   * (`declined_without_reason`) — and then, when EVERY cell declined,
+   * `buildValueBatchOffer` returned a bare `null`, throwing the reasons and the
+   * `unsettable` list away together. The user asks a fifth time, the model
+   * declines all of them with good reasons, and the product shows nothing.
+   *
+   * The outcome is discriminated so those reasons can reach a surface. There is
+   * still no chip, because there is still nothing to approve.
+   */
+  it('⭐ every cell declined ⇒ no_writable carrying the reasons, never a bare absence', () => {
+    const graph = zeroConfiguredGraph();
+    const declined = fullEstimates(graph).map((estimate) => ({
+      option_id: estimate.option_id,
+      factor_id: estimate.factor_id,
+      value: null,
+      declined_reason: 'No evidence in the brief to base this on.',
+    })) as ValueBatchEstimate[];
+    const proposal = proposalOrThrow(graph, declined);
+    // Precondition in-test: this really is the all-declined case.
+    expect(writableCells(proposal)).toHaveLength(0);
+    expect(proposal.cells.length).toBeGreaterThan(0);
+
+    const outcome = buildValueBatchOffer({
+      proposal,
+      currentGraphHash: 'hash-a',
+      scenarioId: 'scn-value-batch',
+    });
+
+    expect(outcome.kind).toBe('no_writable');
+    if (outcome.kind !== 'no_writable') throw new Error('expected no_writable');
+    // The reasons survive — this is the whole point of not returning null.
+    expect(outcome.proposal.cells.length).toBe(proposal.cells.length);
+    expect(outcome.proposal.cells.every((c) => typeof c.declined_reason === 'string'
+      && c.declined_reason.length > 0)).toBe(true);
+    // And so do the gaps we could never have estimated.
+    expect(outcome.proposal.unsettable.length).toBeGreaterThan(0);
+  });
+
+  it('CONTROL — a writable set still produces an offer, so the discriminant is real', () => {
+    // Without this, the arm above would pass on a function that returned
+    // `no_writable` unconditionally.
+    const graph = zeroConfiguredGraph();
+    const proposal = proposalOrThrow(graph, fullEstimates(graph));
+    expect(writableCells(proposal).length).toBeGreaterThan(0);
+    const outcome = buildValueBatchOffer({
+      proposal,
+      currentGraphHash: 'hash-a',
+      scenarioId: 'scn-value-batch',
+    });
+    expect(outcome.kind).toBe('offer');
   });
 });

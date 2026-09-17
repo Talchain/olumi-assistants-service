@@ -48,6 +48,12 @@
  *     (trap 21); this is the inverse case, where a second copy of the code set
  *     would be the hand-maintained mirror. `membershipMatchesAnswerableLoop`
  *     below is the pin that goes RED if the two ever diverge.
+ *     ⚠ SCOPE OF "CANNOT DROP A CELL", STATED EXACTLY: it is true RELATIVE TO
+ *     that module's `ANSWERABLE_BLOCKER_CODES`, which is a hand-maintained set.
+ *     A NEW blocker code that a value would answer lands outside the batch
+ *     silently — the membership derivation cannot see what the code set does
+ *     not admit. That is one list to keep, not two, which is the point of
+ *     reusing it; it is not a claim that the list is complete.
  *   - READINESS → `assessCanonicalAnalysisReadiness`, THE readiness authority.
  *     No new admission predicate is introduced anywhere in this file.
  *   - APPLY → `parseEditGraphResponse` → `applyPatchOperations` →
@@ -85,6 +91,43 @@
  * rather than a bare number, so a range carrier can be added additively to
  * `ValueBatchEstimate` and to the written object WITHOUT a second migration.
  * No range parsing is done here and none is implied.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠⚠ TWO UNSTATED PRECONDITIONS THE WIRING LANE INHERITS. Both are true at
+ * this commit and neither is enforced by this module, so both are written down
+ * here rather than left to be rediscovered.
+ *
+ * ── 1. THE SECOND `user_specified` STAMPER, WHICH THIS PR DID NOT FIX ───────
+ *
+ * `normalise-option-interventions.ts` `freshInterventionV3` stamps
+ * `source: 'user_specified'` UNCONDITIONALLY, and it runs at the persistence
+ * chokepoint (`normaliseOptionInterventionContract`, called by
+ * `projectGraphForPersistence`). It is a no-op for THIS module's output only
+ * because `encodeOptionInterventionsForEdit` deletes `node.data.interventions`,
+ * so its `recoverFromDataSources` finds nothing to promote.
+ *
+ * That ordering is the precondition. Commit BEFORE encode — or let a later turn
+ * re-write `data.interventions` for the same cell — and every AI estimate
+ * persists as `user_specified`, which `obligation-provenance.ts` classes
+ * `user_stated` and `obligationFor` turns into **`required`**. The product then
+ * DEMANDS that the user answer for numbers it invented, and attributes them to
+ * the user. It is silent, and it is the exact inversion of `obligation:
+ * "offered"`.
+ *
+ * `the mark survives the persistence projection` in the spec runs this module's
+ * `appliedGraph` through `projectGraphForPersistence` and asserts
+ * `cee_hypothesis` survives. It passes today and goes RED the day a successor
+ * commits pre-encode.
+ *
+ * ── 2. THE FRAMEWORK HASH IS THE CAS, AND RE-DERIVATION IS NOT A SUBSTITUTE ──
+ *
+ * `buildValueBatchOffer` sets `preconditions.graph_hash`, and `route-v2.ts`
+ * filters pending actions on it. THE WIRING LANE MUST ROUTE THROUGH THAT
+ * HASH-CHECKED RESUME PATH. `executeValueBatch` takes no hash, and its
+ * membership re-derivation is deliberately weaker than one: an interleaved turn
+ * that changes a target factor's `observed_state.cap` from 10 to 100 leaves the
+ * membership IDENTICAL (the cell still blocks) while changing what the approved
+ * `0.4` MEANS by 10×. Only the hash catches that.
  */
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -121,7 +164,17 @@ export const READINESS_VALUE_BATCH_PROPOSAL_VERSION = 'readiness_value_batch_v1'
  */
 export const VALUE_BATCH_INTERVENTION_SOURCE = 'cee_hypothesis' as const;
 
-/** The 0–1 model-unit scale every option effect value lives on. */
+/**
+ * The 0–1 model-unit scale every option effect value lives on.
+ *
+ * ⚠ ASSERTED, NOT DERIVED FROM THE FACTOR. A factor whose canonical
+ * intervention scale is not 0–1 would have its estimate refused as
+ * `invalid_value` rather than encoded on its own scale. That FAILS CLOSED —
+ * nothing is written and the cell is named — which is why it is acceptable
+ * here rather than a defect; but it is an assumption, so it is written down.
+ * The batch never touches raw magnitudes: it writes `value` directly, on this
+ * scale, and never goes near `deriveValue`/`normaliseFactorValue`.
+ */
 const MODEL_UNIT_MIN = 0;
 const MODEL_UNIT_MAX = 1;
 
@@ -376,6 +429,30 @@ export interface ValueBatchOffer {
   readonly chip: ValueBatchChip;
 }
 
+/**
+ * ⭐ THE ALL-DECLINED CASE IS A RESULT, NOT AN ABSENCE.
+ *
+ * This module goes to real trouble to refuse a SILENT decline at compose time
+ * (`declined_without_reason`): a cell the model will not estimate must say why,
+ * because visible absence beats confident wrongness. Returning a bare `null`
+ * when EVERY cell declines threw that away again — the reasons and the
+ * `unsettable` list both vanished, and a caller could not tell "there was
+ * nothing to offer" from "we looked at all ten and here is why we can do none
+ * of them".
+ *
+ * That is the witnessed harm's shape arriving through a new door: the user asks
+ * a fifth time, the model declines every cell with good reasons, and the
+ * product shows them nothing.
+ *
+ * So the outcome is DISCRIMINATED. `no_writable` carries the whole proposal, so
+ * the wiring lane can surface the declined reasons and the unsettable gaps
+ * instead of falling silent. There is still no chip, because there is still
+ * nothing to approve.
+ */
+export type ValueBatchOfferOutcome =
+  | { readonly kind: 'offer'; readonly offer: ValueBatchOffer }
+  | { readonly kind: 'no_writable'; readonly proposal: ValueBatchProposal };
+
 function proposalRef(scenarioId: string, graphHash: string): string {
   const digest = createHash('sha256')
     .update(`${scenarioId}:${graphHash}:${READINESS_VALUE_BATCH_HANDLER_ID}`, 'utf8')
@@ -413,9 +490,11 @@ export function buildValueBatchOffer(input: {
   readonly proposal: ValueBatchProposal;
   readonly currentGraphHash: string;
   readonly scenarioId: string;
-}): ValueBatchOffer | null {
+}): ValueBatchOfferOutcome {
   const writable = writableCells(input.proposal);
-  if (writable.length === 0) return null;
+  // Not `null`: the declined reasons and the unsettable gaps are the only thing
+  // the user can be told here, and a bare absence deletes them.
+  if (writable.length === 0) return { kind: 'no_writable', proposal: input.proposal };
   const ref = proposalRef(input.scenarioId, input.currentGraphHash);
   const count = writable.length;
   const label = count === 1 ? 'Apply the estimate' : `Apply all ${count} estimates`;
@@ -444,7 +523,7 @@ export function buildValueBatchOffer(input: {
     expires_at_iso: new Date(now + PENDING_ACTION_DEFAULT_WALL_TTL_MS).toISOString(),
     emitted_at_iso: new Date(now).toISOString(),
   };
-  return { pending, chip: { id: ref, label, message } };
+  return { kind: 'offer', offer: { pending, chip: { id: ref, label, message } } };
 }
 
 export type ValueBatchExecuteOutcome =

@@ -173,15 +173,38 @@ const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium',
  * moment the product proposes estimates for approval: "whose number is this?"
  * is the question the whole review rests on, and the graph could not answer it.
  *
- * ⚠ THE ALLOWLIST IS NOT `user_specified`, DELIBERATELY. It holds only the two
- * NON-user provenances, so this carry can never be used to UPGRADE a value's
- * claim to user-authored — the direction that would matter. Every raw record
- * that does not name one of these still defaults exactly as before, so no
- * existing caller's behaviour changes.
+ * ⚠⚠ THE ALLOWLIST IS EXACTLY ONE MEMBER, AND THE REASON IS A FACT ABOUT THIS
+ * ESTATE RATHER THAN A STYLE CHOICE. `cee_hypothesis` is the ONLY
+ * `InterventionV3.source` the estate's provenance authority classes as the
+ * model speaking:
+ *
+ *   `obligation-provenance.ts` `INTERVENTION_SOURCE` —
+ *     `cee_hypothesis: 'ai_drafted'`
+ *     `user_specified: 'user_stated'`
+ *     `brief_extraction: 'user_stated'`   ← the SAME class as `user_specified`
+ *
+ * and `obligationFor('user_stated') === 'required'`. So `brief_extraction` is a
+ * USER provenance here, not a second non-user one — that file's own header
+ * names it among the producer-written stamps whose gaps "must STILL block".
+ *
+ * An earlier revision of this comment called it one of "the two NON-user
+ * provenances" and allowlisted it. The safety property happened to survive (the
+ * default it displaced, `user_specified`, is `user_stated` too, so nothing could
+ * widen) — but it survived for a reason the sentence did not give, and a
+ * successor pruning this list would have reasoned from a false premise. It is
+ * removed: this encoder's only non-user writer is the estimate batch, which
+ * writes `cee_hypothesis` alone, so carrying `brief_extraction` bought nothing
+ * and widened the live `edit_graph` path for no caller.
+ *
+ * ⚠ A `brief_extraction` record therefore defaults to `user_specified` exactly
+ * as it did before this PR — same `user_stated` class, same `required`
+ * obligation, no behaviour change for any existing writer. The invariant this
+ * set must keep is the narrow one: NOTHING in it may map to `user_stated`, so
+ * the carry can only ever NARROW a value's claim, never widen it to
+ * user-authored. `preservedSourcesAreNonUser` in the spec is that pin.
  */
-const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
+export const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
   'cee_hypothesis',
-  'brief_extraction',
 ]);
 
 const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
