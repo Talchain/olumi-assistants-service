@@ -536,8 +536,28 @@ describe('tryPostAnalysisAdviceGate — composer copy contract', () => {
    * partly driven by product quality and…" — not a grammatical sentence.
    */
   it('advice composer, attested-no-flip arm: the top driver is QUOTED', () => {
+    // ⚠ THE MESSAGE CHANGED, THE ASSERTIONS DID NOT — and the reason is a
+    // STAGING change, not this PR's. This case was written with
+    // `'What would you recommend?'`, which reached the gate when it was
+    // written. `staging` has since added `matchedClass === 'advice' ||` to the
+    // reasoning-request precedence (`post-analysis-advice-gate.ts`, "Open-ended
+    // advice needs the user's context, beyond a standings summary"), so the
+    // whole open-ended `advice` class now falls through to the LLM router and
+    // never reaches `composeAdvice`. Measured at the merge of this branch into
+    // staging `f31b84c8`: `'What would you recommend?'` →
+    // `{ matched: false, reason: 'reasoning_request' }`, and the sibling case
+    // above now pins exactly that.
+    //
+    // ⚠ AND SO DOES THE FOUNDER'S OWN WORDING: `'What would you do next?'` —
+    // the literal turn-10 message this suite exists for — also no longer
+    // reaches the gate. Measured, not assumed. The turn-10 SHAPE is still
+    // produced, via the `next_step` class used here (the sibling case above
+    // drives `composeAdvice` the same way), so the arm under test and the
+    // quoting contract are unchanged; what narrowed is which user phrasings
+    // arrive. Recorded rather than absorbed — it is a product fact about the
+    // merged state, and it is the reviewer's to weigh.
     const out = tryPostAnalysisAdviceGate({
-      message: 'What would you recommend?',
+      message: 'What is the next step?',
       analysis: FIXTURE_ANALYSIS,
       freshness: 'fresh',
       flipClaimPosture: 'attested_no_flip',
