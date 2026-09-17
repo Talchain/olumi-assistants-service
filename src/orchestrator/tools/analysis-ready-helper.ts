@@ -7,7 +7,7 @@
  * remains exported only for compatibility tests and per-option diagnostics.
  */
 
-import { GraphV3 } from "../../schemas/cee-v3.js";
+import { GraphV3, OptionStatusV3 } from "../../schemas/cee-v3.js";
 import type { GraphV3T, OptionV3T } from "../../schemas/cee-v3.js";
 import type { GraphPatchBlockData } from "../types.js";
 import { log } from "../../utils/telemetry.js";
@@ -19,7 +19,8 @@ import { pickGoalThresholdTrio } from "../../utils/goal-threshold-trio.js";
 // The PUBLISHED blocker contract, used to decide which rows the refusal carrier
 // may keep. Imported rather than restated: a hand-copied field list here would
 // be a mirror of the schema and would drift the first time a field is added.
-import { AnalysisBlocker, blockedIdentityCarrier } from "../../schemas/analysis-ready.js";
+import { AnalysisBlocker, AnalysisBlockerType, blockedIdentityCarrier } from "../../schemas/analysis-ready.js";
+import type { AnalysisBlockerTypeT } from "../../schemas/analysis-ready.js";
 import {
   validateGraphStructure,
   CURRENT_STATE_VIOLATION_MESSAGES,
@@ -383,10 +384,16 @@ function readNonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
 
+/**
+ * DERIVED, NOT RESTATED. This previously spelled out `'ready' | 'needs_user_mapping'
+ * | 'needs_encoding'` — a second hand-maintained copy of `OptionStatusV3`, in the
+ * same file as the blocker-vocabulary copy and with the same silent failure mode:
+ * a member added to the enum would fall through to `undefined` with nothing red.
+ * Parsing against the schema means the two cannot disagree at all.
+ */
 function readOptionStatus(value: unknown): OptionV3T['status'] | undefined {
-  return value === 'ready' || value === 'needs_user_mapping' || value === 'needs_encoding'
-    ? value
-    : undefined;
+  const parsed = OptionStatusV3.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function readRawInterventions(value: unknown): OptionV3T['raw_interventions'] | undefined {
@@ -677,6 +684,123 @@ function structuralIssue(
   };
 }
 
+/** Everything the per-type message composers are allowed to see. */
+interface BlockerMessageContext {
+  readonly suffix: string;
+  readonly optionId: string | undefined;
+  readonly factorId: string | undefined;
+  readonly producerMessage: string | undefined;
+}
+
+interface BlockerIssueShape {
+  readonly code: CanonicalReadinessIssueCode;
+  readonly category: CanonicalReadinessIssueCategory;
+  readonly message: (context: BlockerMessageContext) => string;
+}
+
+/**
+ * ⭐⭐ THE ANTI-MIRROR. One entry per member of the PUBLISHED blocker vocabulary,
+ * keyed BY that vocabulary.
+ *
+ * This replaced a four-case `switch (blockerType)` whose `default` returned
+ * `null`. That switch was a hand-maintained copy of `AnalysisBlockerType`
+ * (`schemas/analysis-ready.ts`) sitting inside the estate's single named
+ * readiness authority — and `blockerType` reaches it as a bare `string` (it is
+ * read off untyped wire bytes through `readNonEmptyString`), so TypeScript could
+ * not check the switch for exhaustiveness. A member added to the enum would have
+ * fallen straight through to `default`, and all THREE call sites drop a `null`:
+ * `appendSemanticIssues` here, `mapWireBlockers` in `compose/analysis-state-v1.ts`,
+ * and `readiness-summary.ts`. The blocker would have vanished from every
+ * readiness surface with nothing red anywhere. The drift read as green.
+ *
+ * `satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>` is what closes it:
+ * a member added to the enum is now a COMPILE ERROR here until it is handled, and
+ * a key here that the enum does not publish is a compile error too. The two
+ * statements cannot silently disagree in either direction.
+ *
+ * ⚠ AND A COMPILE-TIME CHECK IS NOT THE WHOLE JOB — it proves the copies AGREE,
+ * never that the LIST IS RIGHT. `blocker-type-wire-corpus.test.ts` supplies the
+ * other half from recorded wire captures rather than from this file.
+ */
+const BLOCKER_ISSUE_BY_TYPE = {
+  missing_value: {
+    code: 'MISSING_OPTION_VALUE',
+    category: 'option_values',
+    // ⭐⭐ THE PAIR-SCOPED CASE IS THE ONE CLASS WHOSE PRODUCER AUTHORS PROSE FIT
+    // FOR A USER — so it is the one class that keeps it.
+    //
+    // `analysis-ready.ts:817` emits, for an option×factor pair:
+    //   `Factor "CRM Annual Licence Cost" is currently 50,000. What should
+    //    option "Switch to HubSpot" set it to?`
+    // It names both scopes, gives the factor's CURRENT VALUE in the factor's own
+    // display units, and asks the question the user must answer. The substitute
+    // below names the scopes and nothing else.
+    //
+    // ⚠ THE OTHER THREE CLASSES DELIBERATELY DO NOT GET THIS, AND THAT IS A
+    // MEASURED CALL, NOT TIMIDITY. A blanket rule would trade one truthfulness
+    // defect for three:
+    //   · `ambiguous_value` emits "…its analysis-scale source binding is
+    //     unresolved" — internal jargon;
+    //   · the factor-only `missing_value` (`analysis-ready.ts:1124`) emits
+    //     "Factor …  is not connected to any option" — a DIAGNOSIS with no
+    //     remedy, where the composed sentence gives one;
+    //   · `constraint_dropped` emits an internal constraint id and reason.
+    // (A)'s messages were never written to be the live user-facing sentence;
+    // only this one is. The canned copy is at least written for a human, so
+    // replacing it with jargon would be worse than the defect.
+    //
+    // THE DISCRIMINATOR IS STRUCTURAL, NEVER PROSE (trap 22f). The two
+    // `missing_value` producers are told apart by whether the blocker names an
+    // OPTION — `:817` always does, `:1124` never does. A field-presence test
+    // cannot oscillate the way a natural-language classifier would.
+    message: ({ suffix, optionId, factorId, producerMessage }) =>
+      optionId && factorId && producerMessage
+        ? producerMessage
+        : `Choose the missing effect value${suffix}.`,
+  },
+  ambiguous_value: {
+    code: 'AMBIGUOUS_OPTION_VALUE',
+    category: 'option_values',
+    message: ({ suffix }) => `Confirm the effect value${suffix}.`,
+  },
+  missing_connection: {
+    code: 'MISSING_OPTION_CONNECTION',
+    category: 'option_mapping',
+    message: ({ suffix }) => `Choose the missing connection${suffix}.`,
+  },
+  constraint_dropped: {
+    code: 'CONSTRAINT_REVIEW_REQUIRED',
+    category: 'option_values',
+    message: ({ suffix }) => `Review the unresolved constraint${suffix}.`,
+  },
+} as const satisfies Record<AnalysisBlockerTypeT, BlockerIssueShape>;
+
+/**
+ * Lookup built from the TABLE'S OWN KEYS, deliberately — not from
+ * `AnalysisBlockerType.options`.
+ *
+ * ⚠ THIS DISTINCTION IS LOAD-BEARING AND IT IS EASY TO GET BACKWARDS. Building
+ * the map by walking the enum would make `MAPPED_BLOCKER_TYPES` a restatement of
+ * the enum rather than a reading of the table, so the guard would be comparing
+ * the enum with itself — a guard agreeing with itself, which is exactly the
+ * shape this whole change exists to remove. Reading the table's keys is what
+ * makes the two sides independent, so a divergence is genuinely observable.
+ *
+ * `Object.entries` returns own enumerable keys only, so a blocker carrying
+ * `blocker_type: "constructor"` or `"__proto__"` resolves to nothing rather than
+ * reaching an inherited property.
+ */
+const BLOCKER_ISSUE_LOOKUP: ReadonlyMap<string, BlockerIssueShape> = new Map(
+  Object.entries(BLOCKER_ISSUE_BY_TYPE as Record<string, BlockerIssueShape>),
+);
+
+/** The published vocabulary, exposed for the derived guard. Never restated. */
+export const PUBLISHED_BLOCKER_TYPES: readonly string[] = AnalysisBlockerType.options;
+
+/** Exported so the guard can assert the table's KEYS against the enum in BOTH
+ *  directions — a behavioural probe alone cannot see an extra key. */
+export const MAPPED_BLOCKER_TYPES: readonly string[] = [...BLOCKER_ISSUE_LOOKUP.keys()];
+
 /**
  * Map ONE wire `analysis_ready` blocker onto a canonical readiness issue.
  *
@@ -734,68 +858,46 @@ export function blockerIssue(
       message: `Choose which option changes${suffix} and by how much.`,
     };
   }
-  switch (blockerType) {
-    case 'missing_value':
-      return {
-        ...common,
-        code: 'MISSING_OPTION_VALUE',
-        category: 'option_values',
-        // ⭐⭐ THE PAIR-SCOPED CASE IS THE ONE CLASS WHOSE PRODUCER AUTHORS
-        // PROSE FIT FOR A USER — so it is the one class that keeps it.
-        //
-        // `analysis-ready.ts:817` emits, for an option×factor pair:
-        //   `Factor "CRM Annual Licence Cost" is currently 50,000. What should
-        //    option "Switch to HubSpot" set it to?`
-        // It names both scopes, gives the factor's CURRENT VALUE in the
-        // factor's own display units, and asks the question the user must
-        // answer. The substitute below names the scopes and nothing else.
-        //
-        // ⚠ THE OTHER THREE CLASSES DELIBERATELY DO NOT GET THIS, AND THAT IS
-        // A MEASURED CALL, NOT TIMIDITY. A blanket rule would trade one
-        // truthfulness defect for three:
-        //   · `ambiguous_value` emits "…its analysis-scale source binding is
-        //     unresolved" — internal jargon;
-        //   · the factor-only `missing_value` (`analysis-ready.ts:1124`) emits
-        //     "Factor …  is not connected to any option" — a DIAGNOSIS with no
-        //     remedy, where the composed sentence gives one;
-        //   · `constraint_dropped` emits an internal constraint id and reason.
-        // (A)'s messages were never written to be the live user-facing
-        // sentence; only this one is. The canned copy is at least written for
-        // a human, so replacing it with jargon would be worse than the defect.
-        //
-        // THE DISCRIMINATOR IS STRUCTURAL, NEVER PROSE (trap 22f). The two
-        // `missing_value` producers are told apart by whether the blocker names
-        // an OPTION — `:817` always does, `:1124` never does. A field-presence
-        // test cannot oscillate the way a natural-language classifier would.
-        message:
-          optionId && factorId && producerMessage
-            ? producerMessage
-            : `Choose the missing effect value${suffix}.`,
-      };
-    case 'ambiguous_value':
-      return {
-        ...common,
-        code: 'AMBIGUOUS_OPTION_VALUE',
-        category: 'option_values',
-        message: `Confirm the effect value${suffix}.`,
-      };
-    case 'missing_connection':
-      return {
-        ...common,
-        code: 'MISSING_OPTION_CONNECTION',
-        category: 'option_mapping',
-        message: `Choose the missing connection${suffix}.`,
-      };
-    case 'constraint_dropped':
-      return {
-        ...common,
-        code: 'CONSTRAINT_REVIEW_REQUIRED',
-        category: 'option_values',
-        message: `Review the unresolved constraint${suffix}.`,
-      };
-    default:
-      return null;
+  // A carrier with no usable `blocker_type` at all is malformed, not
+  // off-contract. Its handling is unchanged: inventing a blocker out of noise
+  // would be a different defect from the one being fixed here.
+  if (blockerType === null) return null;
+
+  const mapped = BLOCKER_ISSUE_LOOKUP.get(blockerType);
+  if (mapped) {
+    return {
+      ...common,
+      code: mapped.code,
+      category: mapped.category,
+      message: mapped.message({ suffix, optionId, factorId, producerMessage }),
+    };
   }
+
+  // ⚠ OFF-CONTRACT, AND IT IS SURFACED RATHER THAN DROPPED — the behavioural
+  // half of this repair. The old `default: return null` discarded a gap the
+  // producer had genuinely detected, on all three surfaces, in silence.
+  //
+  // The direction is FAIL-SAFE by choice: this build cannot CHARACTERISE the
+  // gap, so it must not go on claiming the model is ready. `internal` is
+  // hard-blocking in `assessCanonicalAnalysisReadiness`, so the run refuses
+  // loudly instead of waiving something new — the same direction
+  // `analysis-ready-core.ts` states for its own unreachable-code removals.
+  //
+  // Unreachable from any in-repo producer at this tip (the table is exhaustive
+  // over the enum, enforced by `satisfies`). It exists for what a compile-time
+  // check cannot reach: bytes from a DIFFERENT build, or an untyped passthrough
+  // — which is precisely how blockers arrive at
+  // `mapWireBlockers(blockers: readonly unknown[])`.
+  log.warn(
+    { blocker_type: blockerType, status },
+    'analysis_ready blocker carries a blocker_type outside the published AnalysisBlockerType vocabulary; surfacing it as an internal readiness fault rather than dropping it',
+  );
+  return {
+    ...common,
+    code: 'INTERNAL_ERROR',
+    category: 'internal',
+    message: producerMessage ?? `Review the unresolved blocker${suffix}.`,
+  };
 }
 
 /**
