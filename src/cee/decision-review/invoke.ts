@@ -27,7 +27,10 @@ import {
 } from '../../adapters/llm/router.js';
 import type { CallOpts } from '../../adapters/llm/types.js';
 import { extractJsonFromResponse } from '../../utils/json-extractor.js';
-import { emitContextBudget } from '../../orchestrator-v5/context/context-budget-telemetry.js';
+import {
+  emitContextBudget,
+  jsonStructureManifest,
+} from '../../orchestrator-v5/context/context-budget-telemetry.js';
 import {
   buildScienceClaimsSection,
   injectScienceClaimsSection,
@@ -779,6 +782,22 @@ function taggedBlockChars(message: string, tag: string): number {
   return end + close.length - start;
 }
 
+/**
+ * Context v2 S0: the BODY of one `<TAG>…</TAG>` block — the bytes between the
+ * tags, trimmed. `null` when the tag is absent (distinct from an empty body,
+ * which returns `''`). Pure; the source of truth is the assembled user message
+ * itself, so a manifest derived from it describes what was SENT.
+ */
+function taggedBlockBody(message: string, tag: string): string | null {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const start = message.indexOf(open);
+  if (start === -1) return null;
+  const end = message.indexOf(close, start);
+  if (end === -1) return null;
+  return message.slice(start + open.length, end).trim();
+}
+
 // ============================================================================
 // Single-shot invocation
 // ============================================================================
@@ -864,6 +883,13 @@ export async function invokeDecisionReview(
       deterministic_coaching: taggedBlockChars(userMessage, 'DETERMINISTIC_COACHING'),
       decision_context: taggedBlockChars(userMessage, 'DECISION_CONTEXT'),
       flip_threshold_data: taggedBlockChars(userMessage, 'FLIP_THRESHOLD_DATA'),
+    },
+    // CONTENT MANIFEST. `graph_json: 21` was a real staging reading meaning
+    // "no graph reached the reviewing model", and it took arithmetic over three
+    // hypothetical renderings to establish that (enricher docs, :121-134). Read
+    // straight off the assembled message, so it describes the SENT bytes.
+    section_shape: {
+      graph_json: jsonStructureManifest(taggedBlockBody(userMessage, 'GRAPH')),
     },
     total_chars: userMessage.length,
     truncations: [],

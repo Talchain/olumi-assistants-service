@@ -27,8 +27,11 @@ import {
   REDACT_CENSOR,
   REDACT_PATHS,
   createLoggerConfig,
+  MEASUREMENT_CONTAINER_FIELDS,
   decisionContentRedactPaths,
   isDecisionContentField,
+  isMeasurementValue,
+  measurementContainerRedactPaths,
   redactCensor,
   sha8,
 } from "../logger-config.js";
@@ -377,13 +380,35 @@ describe("decision-content redaction at the pino boundary", () => {
     expect(lines.join("")).toMatch(DIGEST_RE);
   });
 
-  it("REDACT_PATHS is derived: credential paths + generated decision-content paths, nothing hand-merged", () => {
+  it("REDACT_PATHS is derived: credential paths + generated decision-content paths + generated measurement-container paths, nothing hand-merged", () => {
     expect([...REDACT_PATHS]).toEqual([
       ...BASE_REDACT_PATHS,
       ...decisionContentRedactPaths(DECISION_CONTENT_FIELDS),
+      ...measurementContainerRedactPaths(
+        MEASUREMENT_CONTAINER_FIELDS,
+        DECISION_CONTENT_FIELDS,
+      ),
     ]);
     // Depth contract: 3 paths per protected field, for BOTH classes.
     expect(decisionContentRedactPaths(["x"])).toEqual(["x", "*.x", "*.*.x"]);
+    // The measurement-container limb is EXPLICIT (wildcard-free at the
+    // container) — that is the whole point: fast-redact reports `null` for a
+    // wildcard segment, so only an explicit path lets the censor see WHICH
+    // container a value sits under.
+    expect(measurementContainerRedactPaths(["c"], ["x"])).toEqual(["c.x", "*.c.x"]);
+    expect(REDACT_PATHS).toHaveLength(
+      BASE_REDACT_PATHS.length +
+        DECISION_CONTENT_FIELDS.length * 3 +
+        MEASUREMENT_CONTAINER_FIELDS.length * DECISION_CONTENT_FIELDS.length * 2,
+    );
+    // It ADDS no coverage — every location was already matched by `*.f`.
+    // Asserting that keeps the limb honest: it changes visibility, not policy.
+    for (const c of MEASUREMENT_CONTAINER_FIELDS) {
+      for (const f of DECISION_CONTENT_FIELDS) {
+        expect(decisionContentRedactPaths(DECISION_CONTENT_FIELDS)).toContain(`*.${f}`);
+        expect(REDACT_PATHS).toContain(`${c}.${f}`);
+      }
+    }
     expect(BASE_REDACT_PATHS).toHaveLength(
       CREDENTIAL_FIELDS.length * 3 + CREDENTIAL_HEADER_NAMES.length * 3,
     );
@@ -412,5 +437,39 @@ describe("decision-content redaction at the pino boundary", () => {
     const { logger, lines } = protectedLogger();
     logger.info({ a: { b: { c: { node_label: SENTINEL } } } });
     expect(lines.join("")).toContain(SENTINEL);
+  });
+});
+
+describe("measurement containers — the exemption is on the VALUE, never the name", () => {
+  it("isMeasurementValue accepts counts and flat count-manifests only", () => {
+    expect(isMeasurementValue(0)).toBe(true);
+    expect(isMeasurementValue(1847)).toBe(true);
+    expect(isMeasurementValue(-1)).toBe(true);
+    expect(isMeasurementValue({ nodes: 0, edges: 0, constraints: 0 })).toBe(true);
+    expect(isMeasurementValue({})).toBe(true);
+  });
+
+  it("isMeasurementValue REFUSES anything that could carry content", () => {
+    expect(isMeasurementValue(SENTINEL)).toBe(false);
+    expect(isMeasurementValue("1847")).toBe(false);
+    expect(isMeasurementValue(null)).toBe(false);
+    expect(isMeasurementValue(undefined)).toBe(false);
+    expect(isMeasurementValue(true)).toBe(false);
+    expect(isMeasurementValue([1, 2, 3])).toBe(false);
+    expect(isMeasurementValue(Number.NaN)).toBe(false);
+    expect(isMeasurementValue(Number.POSITIVE_INFINITY)).toBe(false);
+    // A nested object is not a flat manifest — refuse rather than walk.
+    expect(isMeasurementValue({ graph: { nodes: 1 } })).toBe(false);
+    // The dangerous one: a manifest with ONE text field among the counts.
+    expect(isMeasurementValue({ nodes: 3, label: SENTINEL })).toBe(false);
+  });
+
+  it("END-TO-END: a text value under a measurement container is still digested (the exemption cannot be used as a bypass)", () => {
+    const { logger, lines } = protectedLogger();
+    logger.info({ section_chars: { brief: SENTINEL, node_label: SENTINEL } });
+    logger.info({ section_shape: { brief: { nodes: 1, goal_text: 2 }, label: SENTINEL } });
+    const raw = lines.join("\n");
+    expect(raw).not.toContain(SENTINEL);
+    expect(raw).toMatch(DIGEST_RE);
   });
 });
