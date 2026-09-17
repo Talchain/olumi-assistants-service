@@ -269,6 +269,19 @@ brief: do not paraphrase, tidy, translate or summarise it. Use \`kind\`:
 - \`figure\` — a quantity the user stated
 Set \`value\` and \`unit\` when the user gave a number. Do not invent a number the
 user did not state, and do not round or rescale one they did.
+Set \`value_scale\` whenever you set a number, to say WHAT THE NUMBER MEANS —
+\`unit_interval\` for a share or a bounded percentage written as a decimal (3%
+churn is \`value: 0.03\`, \`unit: "%"\`, \`value_scale: "unit_interval"\`),
+\`ratio\` for a measure that can meaningfully pass 100% (NRR, growth, ROI —
+110% is \`value: 1.1\`), and \`raw_count\` for a plain count left in its own
+unit (6 engineers is \`value: 6\`, \`unit: "engineers"\`,
+\`value_scale: "raw_count"\`). This does not change any number you were already
+going to write; it records which convention you used. Under \`unit: "%"\` alone,
+\`4\` and \`0.04\` are both well formed and mean the same thing, so a reader has
+to guess — and a limit the user set in one convention cannot be compared against
+a level recorded in the other. Leave \`value_scale\` out if you genuinely cannot
+tell: an omission is read as "not declared" and nothing downstream will guess,
+whereas a wrong declaration is believed.
 On a \`goal\` carrying a number, set \`role\` to \`target\` when the number is what
 the user wants to REACH, and \`baseline\` when it is where they are NOW. That one
 word decides whether the number is registered as the success threshold, so an

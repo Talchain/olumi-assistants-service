@@ -643,9 +643,77 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  *
  * SHAPE AND CONNECT HALVES BOTH TOUCHED — the connect half loses the duplicate.
  */
-const PREREGISTERED_V18_INSTRUCTION_SHA256 =
+/**
+ * v19 — SAY WHICH CONVENTION THE NUMBER IS IN. Grammar v10's `value_scale`.
+ *
+ * PRE-REGISTERED: hashed and written here in the same commit that produced the
+ * bytes, BEFORE any draw was taken under them.
+ *
+ * ⚠⚠ WHY IT IS HERE AT ALL — v10 WOULD OTHERWISE HAVE SHIPPED AS A NO-OP, which
+ * is v9's defect one storey up and I caught it BEFORE merge rather than twenty
+ * minutes after. Grammar v10 added the `value_scale` slot; measured on this file
+ * before this change, with contrast controls in the same sweep (`unit` 4,
+ * `sets_to` 6, `basis` 10, `stated_items` 9 — the probe is sighted):
+ * **`value_scale` 0, `percent` 0, `fraction` 0.** The model had a field it was
+ * never told about. A grammar slot is an opportunity; the instruction is what
+ * turns it into an outcome.
+ *
+ * ⭐ AND IT CHANGES NO NUMBER THE MODEL WAS ALREADY GOING TO WRITE, which is what
+ * makes it low-risk. Per the contract's own SCALE_DISCIPLINE rule, quoted in
+ * `@talchain/schemas` beside `DeclaredScale`: *"`unit_interval` … covers
+ * SCALE_DISCIPLINE's bounded-percentage rule ('3% churn -> value 0.03')."* So on
+ * Paul's 17 Sep capture the model's `0.03` under `unit: '%'` was **already
+ * correct**. What it could not do was say so.
+ *
+ * ⛔ THE DEFECT THIS EXISTS TO CLOSE, measured end to end on that capture:
+ *     constraint  '<=' 0.04 · unit 'fraction' · provenance explicit · conf 0.85
+ *     factor node  value 0.0003 · raw_value 0.03 · unit '%' · declared_scale None
+ *     result       CONSTRAINT_TARGET_UNRELIABLE, all four analysis runs
+ *                  -> leader_claim.permitted false -> no recommendation named
+ * **The constraint carrier DECLARES its convention; the factor carrier had no
+ * field to declare with.** Not two subsystems disagreeing — one side declaring
+ * and the other unable to.
+ *
+ * ⚠ AND WHAT THE USER ACTUALLY SAW, stated correctly because my first version of
+ * this claim was wrong and more dramatic: `display_state.rendered_factors[]`
+ * reads `value_displayed: "3%"` — the UI rendered it CORRECTLY. Nobody was shown
+ * a wrong number. What was removed was the answer: "one limit could not be
+ * checked" on every run. I had read `display_value` off the node and called it
+ * the screen; that field is the wire.
+ *
+ * ⚠ SCOPED BY v18'S OWN RULE, which is the one that stops an instruction change
+ * shipping dark: *"Asking for a number the projector would drop is how an
+ * instruction change ships dark, so the ask names `factor`."* This ask is
+ * conditional on the model setting a number at all, and v18 already scoped THAT
+ * to `factor`, so no new kind is invited to carry one.
+ *
+ * ⚠ ABSENCE IS EXPLICITLY LEGITIMATE IN THE WORDING, matching the contract's
+ * failure semantics: *"A consumer MUST NOT treat absence as `unit_interval`."*
+ * The instruction says to leave it out when the model cannot tell, and says why
+ * — an omission is not guessed at downstream, a wrong declaration is believed.
+ *
+ * COST: **17,139 -> 18,083 bytes (+944), ENTIRELY IN THE SHAPE HALF** (12,258 ->
+ * 13,202). The connect half is byte-identical to v18, asserted below — which is
+ * the legible statement that this edit is about what goes IN a record, not about
+ * how two records connect.
+ *
+ * ⚠ v18's VALUE STAYS AND IS ASSERTED DISTINCT: v18 is the artefact both live
+ * v202 draws and Paul's 17 Sep manual test were taken under, including the
+ * `CONSTRAINT_TARGET_UNRELIABLE` x9 measurement above. Re-pointing this literal
+ * would let those findings read as findings about v19, which is the version
+ * written to remove their cause.
+ */
+const PREREGISTERED_V19_INSTRUCTION_SHA256 =
+  "7acd2273ab99654c2d54f553f2d611d2e932d96fecf4a76974cece2a5defca83";
+const PREREGISTERED_V19_INSTRUCTION_BYTES = 18083;
+/**
+ * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
+ * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
+ * nine `CONSTRAINT_TARGET_UNRELIABLE` refusals between 18:01 and 18:17Z.
+ */
+const SUPERSEDED_V18_INSTRUCTION_SHA256 =
   "6bb20a5fffb4b8db518f3788e5386d0cd086244e579ce000343b3b049a6c95fc";
-const PREREGISTERED_V18_INSTRUCTION_BYTES = 17139;
+const SUPERSEDED_V18_INSTRUCTION_BYTES = 17139;
 /**
  * SUPERSEDED — v17's bytes, the widening delta. Retained and asserted DISTINCT
  * so a widening measurement can never be re-attributed to v18's value ask.
@@ -711,10 +779,20 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v18 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V18_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v19 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V19_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V18_INSTRUCTION_BYTES,
+      PREREGISTERED_V19_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v18 bytes, so every 17 Sep measurement stays its own", () => {
+    // Both live v202 draws and Paul's manual test were taken under v18, as were
+    // the nine CONSTRAINT_TARGET_UNRELIABLE refusals. None of those numbers may
+    // be re-attributed to the version written to remove their cause.
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V18_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V18_INSTRUCTION_BYTES,
     );
   });
 
@@ -930,11 +1008,22 @@ describe("the draft records instruction is the measured artefact", () => {
     // so v16 is shape-half in its entirety and the connect half is byte-identical
     // to v15 (asserted in the next test). The edit is legible as "an option's
     // non-numeric clause must reach the model too" without reading a diff.
+    // ⚠⚠ AND AGAIN IN v19 — which convention a number is written in is a
+    // statement about what goes in a record, not about how two records connect,
+    // so v19 is shape-half in its entirety and the connect half is byte-identical
+    // to v18 (asserted in the next test). The edit is legible as "the model must
+    // say which convention its number is in" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      // v17 — the definition replacement plus the two widening paragraphs.
+      // v19 — `value_scale`, the whole of the +944 bytes.
+      "a11f46f861777aaf3fd3b7477de688fcfbb0687ce26a05e0ead9f2d094df4d5d",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(13202);
+    // SUPERSEDED — v18's shape half, the bytes every 17 Sep measurement was
+    // taken under.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "29ca91a152b251191e5f4f740a574324dc7f9eb4e3e9929ebb65c827a3396ae6",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(12258);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(12258);
     // SUPERSEDED — v15's shape half, the bytes the qualitative-conjunct loss was
     // witnessed under (release reached the person's own option in 0 of 5 draws).
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
