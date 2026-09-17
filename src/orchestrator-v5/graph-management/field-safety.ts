@@ -350,6 +350,14 @@ const InterventionSpecScreen = z
 type PayloadContext = 'outside' | 'factor_map' | 'spec';
 
 /**
+ * The key whose VALUE is the factor map — the one boundary where the screen
+ * stops treating keys as vocabulary. Named once so the screen above and the
+ * STRIP below cannot drift about where the interventions grammar begins
+ * (trap 12: the two would otherwise be a hand-maintained pair).
+ */
+const INTERVENTIONS_KEY = 'interventions';
+
+/**
  * RECURSIVE payload screen (ROADMAP 2.478 + the intervention-tunnel
  * obligation). Walks a payload VALUE carrying its grammar context, so a
  * provenance stamp is caught at ANY depth and the interventions subtree is
@@ -404,10 +412,185 @@ function screenPayload(value: unknown, ctx: PayloadContext): FieldSafetyResult {
   for (const [k, v] of entries) {
     const lower = k.toLowerCase();
     if (PIPELINE_OWNED_ROOTS.has(lower)) return { ok: false, code: PIPELINE_OWNED_FIELD };
-    const r = screenPayload(v, lower === 'interventions' ? 'factor_map' : 'outside');
+    const r = screenPayload(v, lower === INTERVENTIONS_KEY ? 'factor_map' : 'outside');
     if (!r.ok) return r;
   }
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// ⭐ STRIP THE PIPELINE-OWNED KEY, DO NOT REFUSE THE ADD (2026-09-17).
+//
+// WITNESSED ON A REAL USER SESSION. The user spent three turns agreeing with
+// the product that a team-morale risk was real and unrepresented, then said
+// "Update the model to reflect all of this, then." CEE's logs, one turn:
+//
+//   edit_graph.structural_edge_enforced   x3   option -> fac_morale(factor)
+//   v5.candidate_mutation.rejected  add_node  PIPELINE_OWNED_FIELD  governing: TRUE
+//   v5.candidate_mutation.rejected  add_edge  ENTITY_NOT_FOUND      governing: false  x4
+//
+// The product built EXACTLY the right change. The `add_node` was refused
+// because its value carried a pipeline-owned field; the four edge rejections
+// are that one refusal's ECHO — `advanceBatchGraph` never materialises a
+// REJECTED add, so every edge referencing the new node failed R3 referential
+// integrity against a graph the node never entered. One rejection governs the
+// batch, so the user was told the model was unchanged.
+//
+// ⭐ AND OUR OWN PROMPT ASKS FOR THE FORBIDDEN FIELDS. The served `edit_graph`
+// prompt tells the model to "Mirror the nearest comparable existing node
+// shape" and invites `provenance` / `raw_value`; `orchestrator/context/
+// budget.ts` drops `source` from the model-visible graph ONLY under token
+// pressure, so in the ordinary case the model SEES `source` on the comparable
+// nodes it is told to mirror. We ask for the field and then refuse the whole
+// candidate for supplying it.
+//
+// WHY STRIPPING IS THE RIGHT ANSWER AND NOT A WEAKENING. These keys were never
+// the producer's to set: `PIPELINE_OWNED_ROOTS` is precisely the set CEE
+// RECOMPUTES or owns, so the pipeline would overwrite or ignore whatever the
+// model wrote. Dropping them therefore loses NOTHING a consumer would have
+// honoured — while refusing loses the user's entire edit. The forgeable-
+// provenance hole ROADMAP 2.478 closed stays closed, because the key is gone
+// from the op the APPLIER runs, not merely from the copy the referee screens.
+//
+// PRECEDENT, not invention — three live rewrite-rather-than-refuse seams:
+//   · `edit-graph.ts` `sanitiseOperations` — deletes LEGACY_FIELDS from op
+//     values and logs a count (the same seam this composes into);
+//   · `canonicalise-value-ops.ts` — `delete nextObserved.raw_value` when the
+//     scale is unrecoverable ("never leave the stale claim standing");
+//   · `orchestrator/context/budget.ts` — strips `extractionType` /
+//     `raw_value` / `source` from the model-visible graph.
+//
+// WHY IT LIVES HERE, beside the screen rather than in the edit pipeline: the
+// strip must remove EXACTLY what `screenPayload` refuses. Co-locating them on
+// one traversal and one constant is the only way to guarantee that without a
+// hand-maintained second opinion about the owned set (trap 12). If a key is
+// added to `PIPELINE_OWNED_ROOTS`, the screen and the strip move together.
+//
+// SCOPE — stated precisely, and each exclusion is pinned by a test:
+//   (1) `add_node` ONLY. Updates keep refusing: an update names a field the
+//       user can see, so a silent rewrite there would change the meaning of an
+//       edit the user asked for. An ADD is a fresh entity — nothing is
+//       overwritten and nothing the user can see is lost.
+//   (2) The `outside` grammar context ONLY. Inside the interventions subtree
+//       `raw_value` / `source` / `cap` are InterventionV3 CONTRACT keys that
+//       the screen ACCEPTS (ROADMAP 2.11), and a factor map's keys are factor
+//       IDS, not vocabulary. The strip stops exactly where the screen stops
+//       treating keys as vocabulary, so the sanctioned option-configure write
+//       is untouched.
+//   (3) Only keys in `PIPELINE_OWNED_ROOTS`. `PIPELINE_OWNED_MARKERS` (the
+//       substring list) and the root allowlist are deliberately NOT applied to
+//       adds today; this change does not start applying them, and every other
+//       refusal reason — FIELD_NOT_ALLOWED, ENGINE_CLAIM_IN_TEXT — survives
+//       unchanged. A genuinely invalid add is still refused.
+// ---------------------------------------------------------------------------
+
+/**
+ * Segments that carry NO model-authored content, so they may be named in a
+ * disclosure. DERIVED from the sets this module already owns — never a second
+ * hand-kept vocabulary. Anything outside it is masked to `*`, the same
+ * treatment `canonicalise-value-ops.ts`'s `describeKeyShape` gives a
+ * model-controlled op key.
+ */
+const DISCLOSABLE_KEY_SEGMENTS: ReadonlySet<string> = new Set<string>([
+  ...PIPELINE_OWNED_ROOTS,
+  ...ALLOWED_OBSERVED_SUBKEYS,
+  ...ALLOWED_NODE_FIELD_ROOTS,
+  ...ALLOWED_EDGE_FIELD_ROOTS,
+  ...INTERVENTION_CONTRACT_KEYS,
+  INTERVENTIONS_KEY,
+  'observed_state',
+  'data',
+]);
+
+/**
+ * Mask a stripped key's PATH down to its structural shape for logging.
+ *
+ * ⚠ THE §5 REDACTION CONTRACT IS NOT BREACHED BY NAMING THE OWNED SEGMENT.
+ * `FieldSafetyResult` carries a code only because the refused `field` / `to`
+ * strings are MODEL-CONTROLLED and could hold user content. A segment that
+ * matched `PIPELINE_OWNED_ROOTS` is by construction one of a CLOSED, CEE-OWNED
+ * vocabulary — it carries no model content, which is exactly the property that
+ * makes `describeKeyShape` safe. Every other segment is masked.
+ */
+function describeStrippedKeyShape(path: readonly string[]): string {
+  if (path.length === 0) return '*';
+  return path.map((seg) => (DISCLOSABLE_KEY_SEGMENTS.has(seg) ? seg : '*')).join('/');
+}
+
+/**
+ * Remove every `PIPELINE_OWNED_ROOTS` key from an add value, walking the SAME
+ * structure `screenPayload` walks in the `outside` context and stopping where
+ * it stops. Returns the input BY REFERENCE when nothing was removed, so an add
+ * with nothing to strip projects a byte-identical op.
+ */
+function stripOutside(value: unknown, path: readonly string[], out: string[]): unknown {
+  if (Array.isArray(value)) {
+    let changed = false;
+    const next = value.map((el) => {
+      const r = stripOutside(el, path, out);
+      if (r !== el) changed = true;
+      return r;
+    });
+    return changed ? next : value;
+  }
+  if (value === null || typeof value !== 'object') return value;
+
+  const next: Record<string, unknown> = {};
+  let changed = false;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const lower = k.toLowerCase();
+    if (PIPELINE_OWNED_ROOTS.has(lower)) {
+      out.push(describeStrippedKeyShape([...path, lower]));
+      changed = true;
+      continue;
+    }
+    // ⭐ THE WALK STOPS AT THE FACTOR MAP, exactly as the screen does. Below
+    // this key the names are factor IDS and then InterventionV3 CONTRACT keys
+    // — `raw_value` there is the option-configure vocabulary, not a provenance
+    // stamp, and the screen accepts it. Descending would destroy the one chat
+    // path that writes option interventions (the defect ROADMAP 2.11 closed).
+    const child = lower === INTERVENTIONS_KEY ? v : stripOutside(v, [...path, lower], out);
+    if (child !== v) changed = true;
+    next[k] = child;
+  }
+  return changed ? next : value;
+}
+
+/** The minimum an operation must expose to be screened here (no `PatchOperation` coupling). */
+export interface AddNodeOperationLike {
+  readonly op: string;
+  readonly value?: unknown;
+}
+
+/** Operations with pipeline-owned keys removed from `add_node` values, plus what went. */
+export interface PipelineOwnedStripResult<T extends AddNodeOperationLike> {
+  readonly operations: T[];
+  /** Redaction-safe shapes of the removed keys, de-duplicated and sorted. */
+  readonly strippedKeyShapes: readonly string[];
+}
+
+/**
+ * Strip pipeline-owned keys from every `add_node` operation's value, so the
+ * referee's R4 screen accepts a candidate it would otherwise refuse WHOLE —
+ * taking every edge that references the new node down with it.
+ *
+ * Pure and total: never throws, never mutates its inputs; an operation with
+ * nothing to strip is returned BY REFERENCE.
+ */
+export function stripPipelineOwnedFromAddOperations<T extends AddNodeOperationLike>(
+  operations: readonly T[],
+): PipelineOwnedStripResult<T> {
+  const shapes: string[] = [];
+  const out = operations.map((op) => {
+    if (op.op !== 'add_node') return op;
+    if (op.value === null || typeof op.value !== 'object' || Array.isArray(op.value)) return op;
+    const stripped = stripOutside(op.value, [], shapes);
+    return stripped === op.value ? op : { ...op, value: stripped };
+  });
+  return {
+    operations: shapes.length === 0 ? [...operations] : out,
+    strippedKeyShapes: [...new Set(shapes)].sort(),
+  };
 }
 
 /**
