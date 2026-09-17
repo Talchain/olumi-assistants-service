@@ -1318,6 +1318,34 @@ const TOP_LEVEL_NODE_FIELDS = ['category', 'kind', 'label', 'id'];
  * Returns a new array — original is not mutated.
  * @internal Exported for testing.
  */
+/**
+ * The user-facing clarification for the `ambiguous_scale_value` rejection class.
+ *
+ * Exported so the rejection path can be tested BY IDENTITY rather than against a
+ * hand-copied string: a test that rebuilds this sentence itself would keep passing
+ * if the product's copy changed underneath it. Used at exactly ONE site, for both
+ * `detail` (the internal log line) and `structural_guidance` (the user copy), so
+ * the two cannot drift apart.
+ *
+ * Deterministic and structural-only by construction: every part comes from the
+ * operation and the user's own graph — the proposed value, the factor's label and
+ * its currently-recorded amount. It asserts nothing about an analysis.
+ */
+export function buildAmbiguousScaleClarification(op: {
+  readonly newValue: number;
+  readonly label?: string | null;
+  readonly currentRawValue?: number | null;
+}): string {
+  const factorName = op.label ?? 'this factor';
+  const currently = Number.isFinite(op.currentRawValue as number)
+    ? ` (currently ${op.currentRawValue})`
+    : '';
+  return (
+    `${op.newValue} reads as a proportion, but \u201c${factorName}\u201d is recorded as an amount` +
+    `${currently}. Tell me the amount you want, or give the value with its unit.`
+  );
+}
+
 export function normaliseEditOpsForPlot(ops: PatchOperation[]): PatchOperation[] {
   if (!config.cee.editNormalisationEnabled) return ops;
 
@@ -3143,12 +3171,27 @@ export async function handleEditGraph(
     if (ambiguousScaleOps.length > 0) {
       const first = ambiguousScaleOps[0]!;
       const factorName = first.label ?? 'this factor';
+      // R2-1 FOLLOW-UP (coaching lane, 17 Sep 2026) — THE CLARIFICATION NOW
+      // REACHES THE USER. This sentence was composed correctly and then
+      // discarded: `buildAssistantText` reads `structural_guidance`, then
+      // `user_safe_reasons`, and NEVER `detail` on a structural_violation, so
+      // the user received the generic "it would create an inconsistency in the
+      // model structure" — which is not what happened and gives them nothing
+      // to act on. The "State the amount" chip below DID survive, so the
+      // product was showing a precise next step beside a vague, wrong reason.
+      //
+      // `structural_guidance` is the purpose-built channel for exactly this:
+      // deterministic, structural-only next-step copy that replaces the generic
+      // line. This copy qualifies on both counts — it is composed from the
+      // operation's own values (no model output), and it names only the user's
+      // own factor and its current recorded amount, asserting nothing about an
+      // analysis. Composed ONCE and used for both so the log detail and the
+      // user copy cannot drift apart.
+      const ambiguousScaleClarification = buildAmbiguousScaleClarification(first);
       const rejectionCtx: PatchRejectionContext = {
         reason: 'structural_violation',
-        detail:
-          `${first.newValue} reads as a proportion, but “${factorName}” is recorded as an amount` +
-          `${Number.isFinite(first.currentRawValue) ? ` (currently ${first.currentRawValue})` : ''}. ` +
-          `Tell me the amount you want, or give the value with its unit.`,
+        detail: ambiguousScaleClarification,
+        structural_guidance: ambiguousScaleClarification,
         violations: ambiguousScaleOps.map(
           (o) => `ambiguous_scale_value: ${o.newValue} on ${o.label ?? o.path}`,
         ),
