@@ -56,6 +56,10 @@ import {
   composeToolCallResponse,
   type AnswerKind,
 } from './compose.js';
+import {
+  attachSelectedLensToRunAnalysisFact,
+} from './compose/selected-lens-record.js';
+import type { LensId } from './compose/lens-selector.js';
 // Ship the run fact the model-facing prose was built from. See the module
 // header for why this is scoped to the substantive prose branches, why it is
 // gated on the SAME freshness rule the prior-fact lifecycle path already uses,
@@ -12194,7 +12198,15 @@ export async function runTurnExecutor(
           });
         }
       }
+      // ROADMAP 2.211 / selected-lens record — the lens THIS turn selected, as
+      // reported by the ONE site that selects it. Captured here and written onto
+      // the fact below, so a later turn READS the selection rather than trying
+      // to re-derive it from inputs it no longer has.
+      let selectedLensThisTurn: LensId | null = null;
       composedOk = composeToolCallResponse({
+        onLensSelected: (lens) => {
+          selectedLensThisTurn = lens;
+        },
         answerKind: toolCallAnswerKind,
         orientation: orientationForCompose,
         confirmation: confirmationForCompose,
@@ -12266,6 +12278,27 @@ export async function runTurnExecutor(
             }
           : {}),
       });
+      // ⭐ RECORD THE SELECTION ON THE FACT THIS TURN COMMITS.
+      //
+      // The lens id is INSIDE the Phase-3 block identity — `phase3-blocks.ts`
+      // mints `coach:lens:${selection.lens}` and derives `block_id` from it — and
+      // the selection's `previousAnalysisLens` input is deliberately NOT passed by
+      // compose's prior-fact branch, so it is genuinely unrecoverable later. A
+      // turn that rebuilds these blocks without knowing the lens mints a
+      // different `block_id`, its match loop falls through, and the user is told
+      // a finding they selected is `not_in_model` when nothing changed.
+      //
+      // Written HERE, after compose and before `commitTurn`, for the same reason
+      // `attachCoachingSignalToRunAnalysisFact` is: this is the first point at
+      // which the value exists, and `handlerFactsForCommit` is not reassigned
+      // again before the commit reads it (the one later write, the withheld-graph
+      // reset to `[]`, correctly drops the fact entirely).
+      //
+      // Selected NOTHING ⇒ nothing written — absence stays absence.
+      handlerFactsForCommit = attachSelectedLensToRunAnalysisFact(
+        handlerFactsForCommit,
+        selectedLensThisTurn,
+      );
       // ROADMAP 1.132 (F1) — capture the execute RECEIPT text so `finalizeRun`
       // marks it functional (→ ships plain). Only for the non-explanation
       // (mutation/run) receipt; the explanation-handler answer is left
