@@ -340,3 +340,75 @@ describe("B3 — order-independence and no masking by a large sibling", () => {
     expect(iv(p, "enterprise pricing", "Unit Price")).toBeDefined();
   });
 });
+
+/**
+ * ⛔⛔⛔ B4 — MY OWN FIX HAS THE SAME HOLE IT CLOSED, ONE LEVEL IN. Found by
+ * applying a lesson I had just written down about someone else's work, to mine,
+ * within the hour — and disclosed here rather than left for a reviewer.
+ *
+ * The rule is a conjunction:
+ *     lo.fromCompletion !== hi.fromCompletion   &&   hi.mag / lo.mag >= 1000
+ *
+ * ⭐ THE DISCIPLINE THAT FOUND IT: for every conjunct you read, write its
+ * COMPLEMENT as a case before believing the rule. Reading a conjunct's
+ * justification feels like having checked it; it is not. The justification tells
+ * you the case the author had in mind — the complement is the one they did not.
+ *
+ * Complement of conjunct 1: what if BOTH global extremes sit on the SAME side,
+ * and only a middle value is completion-authored? Measured below — pass 1 holds
+ * 0.85 AND 120000, completion holds 80000 between them. A real cross-pass clash
+ * exists (0.85 against 80000) and the rule DOES NOT FIRE, because the extremes
+ * no longer straddle.
+ *
+ * ⚠ This is the SAME masking shape review named in the maxima form — reducing
+ * the comparison to two numbers discards the values not chosen — and I did not
+ * escape it by moving from per-side maxima to global extremes. I narrowed it.
+ * The maxima form needed one large sibling to hide a value; this form needs a
+ * large sibling on the SAME SIDE as the small one, which is rarer but not rare.
+ *
+ * ⛔ WHAT I AM NOT DOING ABOUT IT, and the reason is the whole point. The fix
+ * that suggests itself is to compare every cross-boundary PAIR rather than the
+ * extremes — a fifth shape, after four refuted ones, arrived at by the same
+ * reasoning that produced the previous four. Review's ruling already covers
+ * this: "a detector may flag suspicion, not prove a value invalid", and the
+ * settlement is to reconcile the declared unit/frame at the WRITER. Adding
+ * shape five here would be the sunk-cost move wearing engineering clothes.
+ *
+ * So the gap is PINNED, not patched: green for the right reason, and RED if
+ * someone changes this behaviour in either direction without deciding to.
+ */
+describe("B4 — the known hole in my own conjunction, pinned not patched", () => {
+  const SAME_SIDE_EXTREMES = (): DraftRecordSet =>
+    ({
+      stated_items: [
+        { kind: "goal", source_quote: "increase productivity", role: "target" },
+        { kind: "option", source_quote: "hire a Tech lead" },
+        { kind: "option", source_quote: "two developers" },
+      ],
+      claims: [
+        /* 0 */ { claim_kind: "factor", label: "Cost", basis: [] },
+        /* 1 */ { claim_kind: "outcome", label: "Delivery", basis: [] },
+        /* 2 */ { claim_kind: "option_refinement", label: "Hybrid", basis: [1, 2] },
+        /* 3 */ { claim_kind: "causal_link", from_claim: 2, to_claim: 0, effect: "positive", sets_to: 0.85 },
+        /* 4 */ { claim_kind: "causal_link", from_stated: 2, to_claim: 0, effect: "positive", sets_to: 120000 },
+        /* 5 */ { claim_kind: "causal_link", from_claim: 0, to_claim: 1, effect: "negative" },
+        /* 6 */ { claim_kind: "causal_link", from_claim: 1, to_stated: 0, effect: "positive" },
+        /* 7 */ { claim_kind: "causal_link", from_stated: 1, to_claim: 0, effect: "positive", sets_to: 80000 },
+      ],
+    }) as unknown as DraftRecordSet;
+
+  it("B4a KNOWN GAP: a same-side extreme pair hides a real cross-pass clash", () => {
+    const p = projectRecordsToGraph(SAME_SIDE_EXTREMES(), undefined, 7);
+    expect(
+      dropped(p).map((d) => d.reason).includes("option_magnitude_scale_unreconciled"),
+      "0.85 (pass 1) against 80000 (completion) is a genuine clash and this rule CANNOT see it, " +
+        "because the global min and max are both pass-1. Pinned as a known gap, deliberately not patched.",
+    ).toBe(false);
+  });
+
+  it("B4b and nothing is deleted there either, which is what keeps the gap cheap", () => {
+    const p = projectRecordsToGraph(SAME_SIDE_EXTREMES(), undefined, 7);
+    const hybrid = (p as any).graph.nodes.find((n: any) => n.kind === "option" && n.label === "Hybrid");
+    expect(hybrid, "the proposal survives regardless").toBeDefined();
+  });
+});
