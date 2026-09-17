@@ -144,16 +144,74 @@ const HISTORIC_V7_GRAMMAR_SHA256 =
  * INCLUDING the draws in which the dropped-limit defect was witnessed, and a
  * reader of those logs must be able to tell which grammar produced them.
  */
-const PINNED_GRAMMAR_SHA256 =
+const HISTORIC_V8_GRAMMAR_SHA256 =
   "3da0c71e7ea918fb652965fd64cf185072ec4a7aad70698386b59262145b868a";
 
+/**
+ * ⭐ v9 — `unit` on `claims[]`. ONE optional string, closing the field a
+ * MODEL-AUTHORED quantity never had: WHAT ITS OWN NUMBER IS MEASURED IN.
+ *
+ * ⚠ WHY IT WAS WORTH A GRAMMAR CHANGE, which this boundary sets a high bar for.
+ * The unit-family safety gate reads `nodeDeclaredUnit(target)`, which reads
+ * `data.unit`. Every unit write site in the projector read `item.unit` — from a
+ * STATED item — so for anything the model authored `targetFamily` was
+ * `undefined` BY CONTRACT, and the gate's conjunction
+ *   `limitFamily !== "unknown" && targetFamily !== "unknown" && …`
+ * could never hold. **The gate was one-sided not by oversight but because the
+ * other side could not exist.** Measured the same night: across the six banked
+ * 15 Sep record sets, 21 of 22 factor claims carry no value field at all, and
+ * across 25 September bundles every one of the six stated limits fails to reach
+ * a measurable target — including one bound to a factor, the RIGHT kind, which
+ * is what refutes "filter the kinds" as the fix.
+ *
+ * ⭐ AND IT IS WHY FOUR MAGNITUDE-BASED SCALE DETECTORS WERE REFUTED in a row
+ * (#1543): each was trying to reconstruct from `0.85` beside `80000` a fact the
+ * producer was never able to state. The model already knows the unit; it had
+ * nowhere to write it down — the same sentence v8 was registered under, one
+ * field along.
+ *
+ * ⛔ DECLARING IS NOT THE THING ALREADY REFUTED. An earlier attempt BORROWED a
+ * unit from a figure cited in `basis` whenever `claim.value` equalled it, and
+ * review killed it with two reproductions — a £49 PRICE read onto a subscriber
+ * COUNT, and a PROPOSED 59 read as a CURRENT 59. Inferring a unit is a
+ * fabrication; the model stating one is a declaration. Nothing is borrowed and
+ * no `extractionType` is earned.
+ *
+ * COST against the budget that actually binds, MEASURED at this tip via
+ * `measureDraftRecordsSchemaBudget`, not estimated: +25 serialised bytes
+ * (1349 → 1374, against 3400) and +1 optional parameter (18 → 19, against 24).
+ * NO new object schema (3, unchanged) and NO union (0, unchanged).
+ *
+ * ⚠⚠ NOTE THE HEADROOM, because it constrains what comes next: 19 of 24
+ * optional parameters are now used. `role` and `representation` — the other two
+ * quantity-semantics fields a claim cannot express — would take it to 21. The
+ * remaining budget is real and small, so the next field is a decision, not a
+ * habit.
+ *
+ * ⚠ THE STATIC BUDGET IS NOT EVIDENCE ABOUT THE COMPILED BOUNDARY, which is
+ * unpublished and was established empirically. Asserted here: the serialised
+ * size and the SHAPE. A live compiled-grammar probe with a 400-producing
+ * negative control needs provider credentials and is OWED, not cleared.
+ *
+ * ⚠ v8's VALUE STAYS AND IS ASSERTED DISTINCT: every draft between the v8
+ * change and this one emitted `grammar_sha256:3da0c71e…`, including every draw
+ * in which the mixed-scale defect was witnessed, and a reader of those logs
+ * must be able to tell which grammar produced them.
+ */
+const PINNED_GRAMMAR_SHA256 =
+  "c713248012a8e7a3f547ad83c687b5269004596eb37ec7b8fb1aab5e0f2a014d";
+
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("hashes to the PRE-REGISTERED v8 grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v9 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the v7 grammar, so the dropped-limit draws stay attributable to it", () => {
     expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V7_GRAMMAR_SHA256);
+    // v8 kept distinct for the same reason as v3-v7: every draft between the
+    // applies_to widening and the `unit` widening emitted `3da0c71e…`, and a
+    // reader of those logs must be able to tell which grammar produced them.
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V8_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the historic v6 grammar, so #1287's capture stays attributable", () => {

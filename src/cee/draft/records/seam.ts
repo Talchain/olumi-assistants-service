@@ -145,6 +145,13 @@ const InferenceClaimWire = z.object({
   // grammar is therefore covered without anyone updating a mirror — and deleting
   // any line from the rebuild below is a red.
   sets_to: z.number().optional(),
+  // ⭐ WHAT THE MODEL'S OWN NUMBER IS MEASURED IN. Added here in the SAME change
+  // as the grammar field, because this seam is exactly where `sets_to` was lost:
+  // it shipped in the grammar, the instruction and the projector, and was
+  // dropped one line before projection on every live draft. The derived guard
+  // that comment promised now exists and it RED-ed on this change before I had
+  // wired it — which is the guard working, not a nuisance.
+  unit: z.string().optional(),
   // `option_refinement` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
 }).passthrough();
@@ -265,6 +272,7 @@ export function projectDraftRecords(
       ...(claim.category !== undefined ? { category: claim.category } : {}),
       ...(claim.value !== undefined ? { value: claim.value } : {}),
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
+      ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
       ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };

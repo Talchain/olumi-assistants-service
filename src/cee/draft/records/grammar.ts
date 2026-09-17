@@ -473,6 +473,28 @@ export interface DraftInferenceClaim {
   category?: DraftRecordCategory;
   value?: number;
   /**
+   * ⭐⭐ WHAT THE MODEL'S OWN NUMBER IS MEASURED IN — the field whose ABSENCE made
+   * SAFETY 2 unfireable on anything the model authored.
+   *
+   * `nodeDeclaredUnit` (`projector.ts`) reads `data.unit`. Before this field
+   * existed, every write site for a unit read `item.unit` — from a STATED item,
+   * never a claim — so a model-authored factor's `targetFamily` was ALWAYS
+   * `unknown` and the unit-mismatch conjunction could never hold. The gate was
+   * one-sided not by oversight but because the other side could not exist.
+   *
+   * ⛔ DECLARING IS NOT THE THING THAT WAS ALREADY REFUTED. An earlier attempt
+   * BORROWED a unit from a figure cited in `basis` whenever `claim.value`
+   * equalled it, and review killed it with two reproductions — a £49 PRICE read
+   * onto a subscriber COUNT, and a PROPOSED 59 read as a CURRENT 59 — because
+   * `basis` means built on, not equal to. Inferring a unit is a fabrication;
+   * the model stating one is a declaration. Nothing is borrowed here and no
+   * `extractionType` is earned: the value stays `ai_inferred`.
+   *
+   * Optional and additive on purpose. An older consumer drops an unknown field
+   * silently, where a new enum member would fail its validation outright.
+   */
+  unit?: string;
+  /**
    * `causal_link` FROM AN OPTION ONLY — the value the target factor takes if
    * that option is chosen, in the factor's own unit. Becomes an entry in the
    * option node's `OptionData.interventions` (`schemas/graph.ts:163`), which is
@@ -607,6 +629,9 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       strength: { type: "number" },
       category: { type: "string", enum: [...DRAFT_RECORD_CATEGORIES] },
       value: { type: "number" },
+      // See the interface note: without this a model-authored quantity is
+      // unitless BY CONTRACT, and SAFETY 2's target side is always `unknown`.
+      unit: { type: "string" },
       // Option→factor intervention level. See the interface note: named apart
       // from `strength` on purpose.
       sets_to: { type: "number" },

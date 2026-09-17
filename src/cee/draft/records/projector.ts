@@ -3328,7 +3328,12 @@ function projectOnce(
         // does NOT lift a user-authorship permission via an inferred value.
         // Earning the attribution needs an attested subject relationship this
         // record set does not carry; it is not a stamp to guess at.
-        node.data = { value: claim.value };
+        // ⭐ THE DECLARED UNIT IS CARRIED, NOTHING IS INFERRED. `data.unit` is
+        // exactly what `nodeDeclaredUnit` reads, so declaring it here is what
+        // lets SAFETY 2 refuse a £ limit welded to a %-measured factor. The
+        // refuted earlier attempt BORROWED this from a cited figure; this takes
+        // only what the model said, and still earns no `extractionType`.
+        node.data = { value: claim.value, ...(claim.unit ? { unit: claim.unit } : {}) };
         node.observed_state = { value: claim.value, raw_value: claim.value };
       }
     }
