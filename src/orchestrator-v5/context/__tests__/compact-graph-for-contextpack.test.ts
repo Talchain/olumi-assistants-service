@@ -540,8 +540,15 @@ describe('compactGraphForContextPack', () => {
       requestId: 'req-byte-identity',
     });
     if (result.kind !== 'compacted') throw new Error('expected compacted');
+    // ⚠ PROVENANCE FIELDS REMOVED FROM THIS PIN, and the reason matters: this
+    // test's subject is UNCERTAINTY leakage, and `source`/`provenance` were
+    // incidental passengers in the byte string. They no longer reach the model
+    // at all (compactGraphForContextPack strips what field-safety refuses), so
+    // keeping them here would pin bytes the product never emits. This is a
+    // CURRENT-CONTRACT pin, not a historic capture of something once said —
+    // those are append-only and are not edited (trap 14b).
     expect(JSON.stringify(result.compact)).toBe(
-      '{"nodes":[{"id":"n-0","kind":"goal","label":"Node 0 label","category":"observable","value":0,"source":"user","provenance":"from_brief"}],"edges":[],"_node_count":1,"_edge_count":0}',
+      '{"nodes":[{"id":"n-0","kind":"goal","label":"Node 0 label","category":"observable","value":0}],"edges":[],"_node_count":1,"_edge_count":0}',
     );
   });
 

@@ -63,6 +63,63 @@ export type CompactGraphOutcome =
   | { readonly kind: 'absent' };
 
 /**
+ * ⭐⭐⭐ PROVENANCE METADATA NEVER REACHES THE MODEL — because showing it is an
+ * instruction to fail.
+ *
+ * The served `edit_graph` prompt says "Mirror the nearest comparable existing
+ * node shape". `PIPELINE_OWNED_ROOTS` then refuses `source` and `provenance` at
+ * EVERY path segment (`field-safety.ts:253`). So the product showed a field,
+ * told the model to imitate it, and rejected the edit when it did — and the
+ * person saw "I couldn't take that change forward, so the model is unchanged."
+ * Self-inflicted, and indistinguishable from the model simply being bad at
+ * editing, which is the expensive part.
+ *
+ * ⛔⛔ WHY HERE AND NOT IN `budget.ts`, WHERE I PUT IT FIRST AND WAS WRONG.
+ * `budget.ts` already deleted `source` — from pass 3, reached only when the
+ * graph was still over budget — so making THAT unconditional looked like simply
+ * removing a conditional. It is not. **Four existing tests failed and every one
+ * of them was right**: the enforcement layer contracts that an under-budget
+ * context is returned BYTE-IDENTICAL, and it detects "was this trimmed?" by
+ * REFERENCE INEQUALITY (`context-budget-enforcement.ts:104`). An unconditional
+ * edit there makes every context report itself as trimmed, which would mislead
+ * the disclosure and telemetry that read that signal.
+ *
+ * ⭐ The failures named the real distinction: "trimmed under pressure" and
+ * "not part of the model's view" are DIFFERENT QUESTIONS, and budget.ts answers
+ * only the first. This is the compaction seam — where what the model sees is
+ * DEFINED rather than reduced — so the removal belongs here and costs the budget
+ * layer nothing.
+ *
+ * ⛔ `raw_value` IS DELIBERATELY KEPT, and this is the line to argue with. It is
+ * refused by the referee too, so by symmetry it "should" go — but it is not
+ * metadata. It is the NATIVE magnitude: what lets the model see £80,000 rather
+ * than 0.8, and stripping it would degrade the model's view in exactly the
+ * dimension this programme is repairing. Where a field is load-bearing context
+ * AND unsettable, the defect is the REFUSAL, not the showing — that half belongs
+ * to the referee lane (strip-rather-than-refuse, with disclosure).
+ *
+ * ⚠ CONSUMERS CHECKED FIRST, because a dependency exercised only under token
+ * pressure is the shape that passes every suite and breaks in production. Both
+ * readers of `CompactNode.source` are DEAD: `trackEntityStates` — the repo's own
+ * `feature-health.ts:195` asserts it "has no production caller" — and
+ * `buildDecisionContinuity`, zero non-test call sites. Swept with contrast
+ * controls after a first probe returned a FALSE ZERO: the pattern `name(` misses
+ * `name<Generic>(`, which made `enforceContextBudget` read as uncalled when it
+ * plainly is not.
+ */
+function withoutRefusedProvenance(compact: GraphV3Compact): GraphV3Compact {
+  return {
+    ...compact,
+    nodes: compact.nodes.map((node) => {
+      const n = { ...node } as unknown as Record<string, unknown>;
+      delete n['source'];
+      delete n['provenance'];
+      return n as unknown as GraphV3Compact['nodes'][number];
+    }),
+  };
+}
+
+/**
  * Compact a GraphStateIngress for inclusion in the ContextPack.
  *
  * Returns `absent` when graphState is null/undefined (no graph on this turn).
@@ -84,7 +141,7 @@ export function compactGraphForContextPack(
   if (parsed.success) {
     return {
       kind: 'compacted',
-      compact: compactGraph(withProducerContextCarriers(parsed.data, graphState)),
+      compact: withoutRefusedProvenance(compactGraph(withProducerContextCarriers(parsed.data, graphState))),
       via: 'strict_parse',
     };
   }
@@ -102,7 +159,7 @@ export function compactGraphForContextPack(
     const fallback = toStructuralGraphV3(graphState);
     return {
       kind: 'compacted',
-      compact: withoutBaselineIdentity(compactGraph(fallback)),
+      compact: withoutRefusedProvenance(withoutBaselineIdentity(compactGraph(fallback))),
       via: 'structural_fallback',
     };
   } catch (err) {

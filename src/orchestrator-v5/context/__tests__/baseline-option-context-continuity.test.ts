@@ -251,6 +251,13 @@ describe('canonical baseline-option continuity', () => {
     );
   });
 
+  // ⚠ `source` / `provenance` REMOVED FROM THIS PIN. This test's subject is
+  // BASELINE MARKER AUTHORITY under conflicting sources; those two fields were
+  // incidental passengers in the expected object. They no longer reach the model
+  // at all — `compactGraphForContextPack` strips what `field-safety` refuses —
+  // so pinning them here would assert bytes the product never emits. This is a
+  // CURRENT-CONTRACT pin, not a historic capture of something the product once
+  // said; those are append-only and are never edited (trap 14b).
   it('pins the exact pre-feature structural-fallback bytes for every marker source', () => {
     const outcome = compactGraphForContextPack(
       {
@@ -299,8 +306,6 @@ describe('canonical baseline-option continuity', () => {
             id: 'dup',
             kind: 'option',
             label: 'First',
-            source: 'system',
-            provenance: 'ai_inferred',
             // Structural reachability is emitted on every option node,
             // empty set included. Declared here so this exhaustive `toEqual`
             // keeps its second job: failing loud on ANY unexpected field.
@@ -310,16 +315,12 @@ describe('canonical baseline-option continuity', () => {
             id: 'dup',
             kind: 'option',
             label: 'Second',
-            source: 'system',
-            provenance: 'ai_inferred',
             reaches: ['factor'],
           },
           {
             id: 'factor',
             kind: 'factor',
             label: 'Factor',
-            source: 'system',
-            provenance: 'ai_inferred',
           },
         ],
         edges: [
@@ -328,6 +329,11 @@ describe('canonical baseline-option continuity', () => {
             to: 'factor',
             strength: 0,
             exists: 1,
+            // ⛔ EDGE provenance SURVIVES, and that is the scope boundary, not an
+            // oversight. The strip is NODE-scoped because that is where the prompt
+            // points — "mirror the nearest comparable existing NODE shape". Edge
+            // provenance is refused by the same rule and has its own consumers, so
+            // widening to it is a separate change with its own evidence.
             provenance: 'ai_inferred',
           },
         ],
