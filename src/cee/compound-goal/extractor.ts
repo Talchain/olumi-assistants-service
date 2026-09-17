@@ -60,8 +60,10 @@ export interface ExtractedGoalConstraint {
    * ⭐ BY-PRESENCE AUDIT OF A UNIT-**LABEL** REWRITE. NOT A VALUE CONVERSION.
    *
    * Stamped by `normaliseConstraintUnits` when it relabels a sub-unit `'%'`
-   * row to `'fraction'`. It carries NO number on purpose: see that function's
-   * docblock for why a stated-figure claim from that site is unknowable.
+   * row to `'fraction'`. Every key is scoped to THIS RULE'S INPUT, never to
+   * the reader: see that function's docblock for why a stated-figure claim
+   * from that site is unknowable, and why `original_value`/`original_unit`
+   * are left unstamped as a pair.
    *
    * ⚠ ABSENT MEANS "NO REWRITE HAPPENED", which is a different fact from "a
    * rewrite happened and was lost". Never defaulted.
