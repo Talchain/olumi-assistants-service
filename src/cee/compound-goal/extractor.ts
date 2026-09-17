@@ -57,6 +57,28 @@ export interface ExtractedGoalConstraint {
   /** Provenance type */
   provenance: "explicit" | "inferred" | "proxy";
   /**
+   * ⭐ BY-PRESENCE AUDIT OF A UNIT-**LABEL** REWRITE. NOT A VALUE CONVERSION.
+   *
+   * Stamped by `normaliseConstraintUnits` when it relabels a sub-unit `'%'`
+   * row to `'fraction'`. Every key is scoped to THIS RULE'S INPUT, never to
+   * the reader: see that function's docblock for why a stated-figure claim
+   * from that site is unknowable, and why `original_value`/`original_unit`
+   * are left unstamped as a pair.
+   *
+   * ⚠ ABSENT MEANS "NO REWRITE HAPPENED", which is a different fact from "a
+   * rewrite happened and was lost". Never defaulted.
+   */
+  provenance_unit_relabelled?: {
+    rule: "percent_label_to_fraction_label";
+    /**
+     * This rule's INPUT — identical to the sibling `value`, because the rule
+     * changes only the label. Never the reader's stated figure.
+     */
+    pre_normalisation_value: number;
+    /** The label this rule rewrote away from. Never the reader's stated unit. */
+    pre_normalisation_unit: string;
+  };
+  /**
    * ROADMAP 2.855 — the FRAME this branch's `value` is minted in.
    *
    * DELIBERATELY REQUIRED, NOT OPTIONAL. The frame is a property of the
@@ -2222,6 +2244,58 @@ export function extractCompoundGoals(
  * original `value > 0` guard silently skipped negative fractions, which
  * would have left them mislabelled unit "%" (double-encoding risk in the
  * exact way this fix is closing) instead of "fraction".
+ *
+ * ⭐⭐⭐ THIS FUNCTION CANNOT KNOW THE FIGURE THE READER STATED, AND MUST NOT
+ * CLAIM TO — the P0 that removed `provenance_unit_normalised` from this site.
+ *
+ * A reader wrote *"keep monthly churn under 4%"*; the canvas showed **"≤
+ * 0.04%"**. This site used to stamp
+ * `provenance_unit_normalised: { rule: 'percent_to_fraction', original_value:
+ * c.value, original_unit: '%' }`. But the guard one line below fires ONLY when
+ * `0 < |value| < 1` — i.e. only when the value is ALREADY a fraction — so
+ * `original_value` was, BY CONSTRUCTION OF THE GUARD, always the post-relabel
+ * fraction and never the reader's figure.
+ *
+ * ⛔ TWO QUESTIONS UNDER ONE NAME (trap 21). The field answers *"what was this
+ * value before my relabel ran?"*. Its declared consumers read it as *"what did
+ * the reader actually state?"* — `@talchain/schemas` fixtures exemplify it as
+ * `original_value: 15` beside `original_unit: '%'` (a whole-number percent this
+ * guard can never produce), and the UI's `canvas/utils/goalConstraintText.ts`
+ * says so in terms: *"`original_value` is the number the reader actually
+ * stated — 110, not 1.1"*. That read path OUTRANKS the `source_quote`
+ * fallback, so the false stamp did not merely mislead: it SUPPRESSED the
+ * honest rendering (quoting the reader's own sentence) and printed a number a
+ * hundred times too small in its place.
+ *
+ * ⛔ THE REMEDY IS NOT TO MULTIPLY BY 100. The consumer refuses that in terms
+ * this producer must respect: *"Converting `0.04` to `4%` would be this surface
+ * deciding what scale a number is in — the exact mechanism behind the 100×
+ * defect ... **Never infer scale from magnitude.**"* The same applies here.
+ * By the time this runs the model has emitted `0.04`; the reader's "4" survives
+ * only inside `sourceQuote`, as TEXT, and recovering it would be a
+ * natural-language magnitude predicate — the class this estate has repeatedly
+ * failed to bound (traps 22 / 22b / 22f).
+ *
+ * ⭐ SO THIS SITE STATES ONLY WHAT IT KNOWS. `provenance_unit_relabelled`
+ * records this rule's own INPUT under names scoped to this rule
+ * (`pre_normalisation_value` / `pre_normalisation_unit`). An absent claim a
+ * consumer can detect beats a present claim that lies.
+ *
+ * ⛔⛔ `original_value` AND `original_unit` ARE ONE PAIR AND MOVE TOGETHER.
+ * Unstamping the value and leaving the unit would be a half-fix that the next
+ * consumer to pair them regenerates in full: `original_unit: '%'` has the
+ * IDENTICAL two-questions-one-name defect (true of the reader's phrasing,
+ * false of the value beside it), and the consumer's `formatLimitMagnitude`
+ * switches on `kind === 'percent'` and appends `%`. So `0.04` + a surviving
+ * `'%'` is `≤ 0.04%` again, from a different pair of hands. Both fields are
+ * left unstamped, and the contract fixture is the independent evidence that
+ * they are one pair: it carries BOTH, and is coherent only under the
+ * stated-figure reading.
+ *
+ * ⚠ `provenance_unit_normalised` REMAINS DECLARED in the schema and carried
+ * by-presence through `toGoalConstraints`: it is a published contract field
+ * whose meaning is sound, and a producer that genuinely knows the stated figure
+ * may stamp it. This function is simply not such a producer.
  */
 export function normaliseConstraintUnits(
   constraints: ExtractedGoalConstraint[],
@@ -2231,11 +2305,11 @@ export function normaliseConstraintUnits(
       return {
         ...c,
         unit: "fraction",
-        provenance_unit_normalised: {
-          rule: "percent_to_fraction",
-          original_value: c.value,
-          original_unit: c.unit,
-        } as any,
+        provenance_unit_relabelled: {
+          rule: "percent_label_to_fraction_label",
+          pre_normalisation_value: c.value,
+          pre_normalisation_unit: c.unit,
+        },
       };
     }
     return c;
@@ -2265,6 +2339,12 @@ export function toGoalConstraints(
     deadline_metadata: c.deadlineMetadata,
     ...((c as any).provenance_unit_normalised
       ? { provenance_unit_normalised: (c as any).provenance_unit_normalised }
+      : {}),
+    // Same by-presence projection as the sibling above, and for the same
+    // reason: a field absent from this literal never reaches
+    // `graph.goal_constraints` however faithfully the mint site stamps it.
+    ...(c.provenance_unit_relabelled
+      ? { provenance_unit_relabelled: c.provenance_unit_relabelled }
       : {}),
   }));
 }
