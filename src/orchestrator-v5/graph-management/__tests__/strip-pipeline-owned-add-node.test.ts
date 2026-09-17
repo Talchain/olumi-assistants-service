@@ -15,11 +15,12 @@
  * governs the batch, so the user was told the model was unchanged.
  *
  * ⭐ AND OUR OWN PROMPT ASKS FOR THE FORBIDDEN FIELDS. The served `edit_graph`
- * prompt says "Mirror the nearest comparable existing node shape" and invites
- * `provenance` / `raw_value`; `context/budget.ts` drops `source` from the
- * model-visible graph only UNDER TOKEN PRESSURE, so normally the model SEES
- * `source` on comparable nodes and is told to mirror them. The referee then
- * refuses the whole candidate for doing what it was asked.
+ * prompt NAMES `provenance` and `raw_value` (verified against the served
+ * bytes), and `PIPELINE_OWNED_ROOTS` refuses both — so the referee refuses the
+ * whole candidate for doing what the prompt asked. (A stronger "we SHOW the
+ * model these fields and then refuse them" claim was withdrawn as unproven at
+ * the model-facing seam; see field-safety.ts. The contradiction above stands
+ * without it.)
  *
  * THE FIX, precedented (`sanitiseOperations`'s legacy-field strip;
  * `canonicalise-value-ops.ts`'s `delete nextObserved.raw_value`): REWRITE the

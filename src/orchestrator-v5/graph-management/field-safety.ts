@@ -437,12 +437,56 @@ function screenPayload(value: unknown, ctx: PayloadContext): FieldSafetyResult {
 // batch, so the user was told the model was unchanged.
 //
 // ⭐ AND OUR OWN PROMPT ASKS FOR THE FORBIDDEN FIELDS. The served `edit_graph`
-// prompt tells the model to "Mirror the nearest comparable existing node
-// shape" and invites `provenance` / `raw_value`; `orchestrator/context/
-// budget.ts` drops `source` from the model-visible graph ONLY under token
-// pressure, so in the ordinary case the model SEES `source` on the comparable
-// nodes it is told to mirror. We ask for the field and then refuse the whole
-// candidate for supplying it.
+// prompt NAMES `provenance` and `raw_value` (verified against the served
+// bytes), and `PIPELINE_OWNED_ROOTS` refuses both. We ask for the field and
+// then refuse the whole candidate for supplying it.
+//
+// ⚠ WITHDRAWN, and recorded rather than quietly dropped: an earlier version of
+// this note added "and `context/budget.ts` shows the model `source` on the
+// comparable nodes it is told to mirror, except under token pressure". That
+// sharpening is UNPROVEN. The overlap it came from was measured against
+// `compactGraph` directly, not the model-facing `compactGraphForContextPack`,
+// where `GraphV3.safeParse` appears to strip `observed_state.source` BEFORE
+// compaction — so nobody has yet shown those fields reaching the model at all.
+// The prompt-vs-referee contradiction above stands on its own and does not
+// need it.
+//
+// ⭐⭐ WHY THIS CANNOT REMOVE ANYTHING A DOWNSTREAM READER RELIES ON — AND WHY
+// "NO CALL SITE READS IT" WOULD BE THE WRONG ARGUMENT TO MAKE HERE.
+//
+// A sibling lane deleted a field after a careful call-site sweep with contrast
+// controls, and CI killed it: the field was an AUTHORSHIP AXIS whose consumer
+// was THE LANGUAGE MODEL, not a call site. Their rule, adopted here:
+// *a payload field's reader is not always a call site, and a call-site sweep
+// cannot see a reader that is a language model.*
+//
+// This change does not rest on such a sweep, and does not need to. The
+// argument is MONOTONICITY, which is stronger:
+//
+//   TODAY  an `add_node` carrying any owned key is REJECTED (referee.ts:322),
+//          so the node NEVER LANDS and ZERO of its fields reach anything —
+//          no call site, no persisted graph, and no later context pack.
+//   AFTER  the node LANDS, carrying everything except the stamps.
+//
+// So relative to current behaviour this is strictly ADDITIVE: every downstream
+// reader, model included, sees MORE than it does today, never less. There is no
+// field here that is being taken away from a reader that currently has it.
+//
+// ⚠ The one posture where that is not automatic is `CEE_GRAPH_MANAGEMENT_MODE`
+// = `shadow`/`off`, where the referee does not block and a stamp would land
+// today. Removing it THERE is the forgeable-provenance fix ROADMAP 2.478
+// intended, not a regression. (The code default is `live`, and the witnessed
+// session — a governing rejection that told the user the model was unchanged —
+// is itself the behavioural evidence that the deployed posture is `live`.)
+//
+// ⚠ AND THE RESIDUAL THIS MAKES VISIBLE, recorded rather than left to be
+// rediscovered: `stampUserEditProvenance` is `update_node`-ONLY
+// (canonicalise-value-ops.ts:544), so an ADD never earns CEE's user-edit
+// authorship stamp. A node added from chat will therefore render as an Olumi
+// estimate even when the user stated it. That is PRE-EXISTING — today the add
+// is refused outright — and stripping the model's self-asserted `source` is
+// CORRECT regardless, because authorship is precisely what a producer must not
+// self-certify. Granting adds a sanctioned authorship stamp is separate work.
 //
 // WHY STRIPPING IS THE RIGHT ANSWER AND NOT A WEAKENING. These keys were never
 // the producer's to set: `PIPELINE_OWNED_ROOTS` is precisely the set CEE
