@@ -313,7 +313,12 @@ describe("B3 — order-independence and no masking by a large sibling", () => {
     // opinion, and review's ruling is that "a detector may flag suspicion, not
     // prove a value invalid". So the cost of the false positive is a sentence,
     // never a number: both prices survive untouched. Settling it properly means
-    // reconciling the declared unit/frame at the WRITER, which is #1546.
+    // reconciling the declared unit/frame at the WRITER — owned by Core as
+    // operational lead for model-AI integration, handed over with evidence on
+    // #1530. ⛔ THIS LINE PREVIOUSLY CITED "#1546" AND I HAD INVENTED THAT
+    // NUMBER. #1546 is a real PR about something else entirely, so the citation
+    // was not merely vague, it pointed a reader at unrelated work. A file:line
+    // or PR citation is not self-verifying; do not mint one to look precise.
     const penny = {
       stated_items: [
         { kind: "goal", source_quote: "price sustainably" },
