@@ -1726,8 +1726,25 @@ describe('LAYER 2 drift — every compose site declares a verdict stance', () =>
     // TAIL_PATTERN, so appending it anywhere earlier here would compose a
     // summary the egress allowlist rejects and the user would silently receive
     // the bare template.
+    //
+    // The run-level PARTICIPATION disclosure adds a SIXTH slot, appended after
+    // the unset-option-effect one. Same treatment for the same reasons: the
+    // `gated` stance is unaffected — `summary` is still "withheld-able
+    // headline, else a locked template" — and the pin is UPDATED RATHER THAN
+    // LOOSENED, so a future reordering stays visible here.
+    //
+    // ⚠ AND THE PIN EARNED ITS KEEP A FOURTH TIME, in the same way and for the
+    // same reason as the fifth slot: `pnpm typecheck`, `eslint` and every
+    // focused spec the lane ran were GREEN, and the required CI check named
+    // this line. A static-source pin catches exactly the thing a behavioural
+    // suite cannot see — a compose site that was edited without anyone looking
+    // at the composition. The ordering constraint is real for this slot too:
+    // the participation tail sits LAST in `analysis-result-headline.ts`'s
+    // TAIL_PATTERN, so appending it anywhere earlier here would compose a
+    // summary the egress allowlist rejects and the user would silently receive
+    // the bare template.
     expect(RUN_ANALYSIS).toContain(
-      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`;',
+      'const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}`;',
     );
     expect(RUN_ANALYSIS).toContain('assistant_text: summary,');
     // ONE verdict, TWO consumers — the property that makes this `gated` rather
