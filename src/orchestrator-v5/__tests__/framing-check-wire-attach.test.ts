@@ -32,6 +32,10 @@ import type { HandlerFact } from '@talchain/schemas/orchestrator';
 
 import { composeToolCallResponse } from '../compose.js';
 import { GUIDANCE_SIGNAL_CODES } from '../compose/guidance-signals.js';
+import {
+  textAssertsLeadingOption,
+  textNamesLeadingOption,
+} from '../compose/leading-option-egress-guard.js';
 
 const GRAPH_HASH = 'gh_framing_wire_0001';
 const SCENARIO_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -214,5 +218,55 @@ describe('TRACK 3 wiring — the WITHHELD turn, where the card is worth most', (
       }).blocks,
     );
     expect(permitted).toHaveLength(1);
+  });
+
+  /**
+   * ⭐ THE REAL PAYLOAD, ON THE ARM IT WAS CAPTURED FROM.
+   *
+   * `tools/orchestrator-eval/reports/decision-review-v16-2026-09-10/captures/`
+   * `r1-05-constraint-infeasible.json`, `candidates[0].output.framing_check`,
+   * 10 Sep 2026 — the only real `framing_check` in the estate, and it comes
+   * from the CONSTRAINT-INFEASIBLE case, i.e. the withheld arm this exemption
+   * governs. Inlined so the record cannot be broken by a report moving.
+   *
+   * Its concern NAMES AN OPTION on a turn that can put none forward, which
+   * reads like exactly the prose the claim gate exists to catch. It is not:
+   * the sentence explains the withholding rather than asserting a
+   * recommendation, and the shared vocabulary says so. That was MEASURED, and
+   * the measurement is re-asserted here with BOTH contrast controls, so this
+   * group cannot go green against a predicate that has quietly stopped
+   * discriminating.
+   */
+  const REAL_CONCERN =
+    'The option this model points to on outcome grounds, Launch in March, is barred by the stated constraint that shipping cannot happen before the audit closes, so the comparison as framed does not resolve the actual decision.';
+  const REAL_REFRAME =
+    'Reframe around the audit completion date itself, then compare launch timing options that are feasible given that date.';
+
+  it('the shared vocabulary reads the real concern as leader-SAFE, and both contrast controls discriminate', () => {
+    // Contrast ①: a sentence that plainly asserts a leader MUST read true, or
+    // the predicate is not discriminating and the next assertion is vacuous.
+    expect(textAssertsLeadingOption('Annual billing leads by a clear margin.')).toBe(true);
+    // Contrast ②: a plainly neutral sentence MUST read false.
+    expect(textAssertsLeadingOption('The goal is stated as an action rather than an outcome.')).toBe(
+      false,
+    );
+    // Target: the real captured prose — false on the narrow reading AND on the
+    // wider one, because it explains the withholding rather than claiming a win.
+    expect(textAssertsLeadingOption(REAL_CONCERN)).toBe(false);
+    expect(textNamesLeadingOption(REAL_CONCERN)).toBe(false);
+  });
+
+  it('ships on the withheld turn it was captured from, carrying the model’s sentence whole', () => {
+    const cards = framingCards(
+      compose({
+        framingCheck: { addresses_goal: false, concern: REAL_CONCERN, suggested_reframe: REAL_REFRAME },
+        mayNameLeader: false,
+      }).blocks,
+    );
+    expect(cards).toHaveLength(1);
+    // Rung 3 of the budget ladder: the challenge survives entire, the
+    // ready-made answer is what gives way.
+    expect(cards[0]!.body).toBe(REAL_CONCERN);
+    expect(cards[0]!.body).not.toContain('…');
   });
 });

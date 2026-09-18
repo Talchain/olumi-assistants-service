@@ -284,17 +284,115 @@ describe('T9 — segments are dropped WHOLE; a model sentence is never cut', () 
     expect(block.target_refs).toEqual([{ id: 'goal_0', label: GOAL_LABEL, kind: 'goal' }]);
   });
 
-  it('drops the block whole when the producer’s own sentences cannot fit, rather than truncating one', () => {
+  it('RUNG 3 — drops the REFRAME next, keeping the challenge entire; the answer goes before the question', () => {
+    // The reframe segment alone is ~150 chars here, so concern + reframe
+    // overflows while the concern alone fits: the exact shape of the real
+    // captured payload pinned in the group below.
     const block = buildFramingCheckCoachingBlock(
       factWith({
         addresses_goal: false,
         concern: LONG_CONCERN,
-        suggested_reframe: `${LONG_CONCERN} ${LONG_CONCERN}`,
+        suggested_reframe: `${REFRAME} and then re-run the comparison against that restated outcome`,
+      }),
+      lookupWithGoals(1),
+      CTX,
+    )!;
+    expect(block, 'the card must survive on the concern alone').not.toBeNull();
+    expect(block.body).toBe(LONG_CONCERN);
+    expect(block.body).not.toContain('A different framing to weigh');
+    // The chip still opens the conversation in which the reframe can be raised.
+    expect(block.action_prompt).toBeDefined();
+  });
+
+  it('RUNG 4 — drops the block whole when even the concern alone cannot fit, rather than truncating it', () => {
+    const block = buildFramingCheckCoachingBlock(
+      factWith({
+        addresses_goal: false,
+        concern: `${LONG_CONCERN} ${LONG_CONCERN}`,
       }),
       lookupWithGoals(1),
       CTX,
     );
     expect(block).toBeNull();
+  });
+});
+
+/**
+ * ⭐ THE ONLY REAL `framing_check` THIS ESTATE HAS EVER CAPTURED.
+ *
+ * Provenance, inlined rather than read from disk so this record cannot be
+ * broken by a report being regenerated or moved, and APPEND-ONLY thereafter:
+ * `tools/orchestrator-eval/reports/decision-review-v16-2026-09-10/captures/`
+ * `r1-05-constraint-infeasible.json`, `candidates[0].output.framing_check`,
+ * captured 10 Sep 2026 from the v16 decision-review eval, case
+ * `05-constraint-infeasible`.
+ *
+ * WHY IT IS HERE AND NOT JUST CITED. A corpus drawn from the author's head
+ * cannot see the class the author did not imagine, and this payload proved that
+ * twice over in ten minutes:
+ *
+ *   1. IT DOES NOT FIT. Its `concern` is 222 characters and its reframe segment
+ *      150 — 373 against a 300 budget. A two-rung ladder (drop the goal, then
+ *      give up) returned `null`, so the feature would have shipped DARK on its
+ *      one known real input. Every self-authored fixture in this file fitted
+ *      comfortably, because the author wrote them to.
+ *   2. ITS PROSE READS AS LEADER-SAFE, AND THAT WAS MEASURED RATHER THAN
+ *      ASSUMED. The sentence names an option ("the option this model points to
+ *      on outcome grounds, Launch in March") on a CONSTRAINT-INFEASIBLE case —
+ *      i.e. the withheld arm — which reads like exactly the prose the claim
+ *      gate exists to catch. Run through the shared vocabulary it is FALSE on
+ *      both `textAssertsLeadingOption` and the wider `textNamesLeadingOption`,
+ *      and correctly so: the sentence EXPLAINS the withholding ("is barred by
+ *      the stated constraint … the comparison as framed does not resolve the
+ *      actual decision") rather than asserting a recommendation. Reading it and
+ *      concluding otherwise would have been a false claim about somebody else's
+ *      predicate; the wiring suite pins the gate's behaviour on this payload.
+ */
+const REAL_CAPTURE_2026_09_10 = {
+  addresses_goal: false,
+  concern:
+    'The option this model points to on outcome grounds, Launch in March, is barred by the stated constraint that shipping cannot happen before the audit closes, so the comparison as framed does not resolve the actual decision.',
+  suggested_reframe:
+    'Reframe around the audit completion date itself, then compare launch timing options that are feasible given that date.',
+} as const;
+
+describe('T11 — the real captured payload (outside the author’s head)', () => {
+  it('its measurements are what this group claims (precondition, pinned so the record cannot rot)', () => {
+    expect(REAL_CAPTURE_2026_09_10.concern.length).toBe(222);
+    expect(
+      `A different framing to weigh: “${REAL_CAPTURE_2026_09_10.suggested_reframe}”`.length,
+    ).toBe(150);
+  });
+
+  it('SHIPS — and on the concern alone, because the full composition overflows the contract budget', () => {
+    const block = buildFramingCheckCoachingBlock(
+      factWith(REAL_CAPTURE_2026_09_10),
+      lookupWithGoals(1),
+      CTX,
+    );
+    expect(block, 'a two-rung ladder returned null here — the dark-ship this fixture exists to prevent')
+      .not.toBeNull();
+    expect(block!.body).toBe(REAL_CAPTURE_2026_09_10.concern);
+    expect(block!.body.length).toBeLessThanOrEqual(300);
+  });
+
+  it('keeps the model’s sentence WHOLE — not one character of it is cut', () => {
+    const block = buildFramingCheckCoachingBlock(
+      factWith(REAL_CAPTURE_2026_09_10),
+      lookupWithGoals(1),
+      CTX,
+    )!;
+    expect(block.body.endsWith('does not resolve the actual decision.')).toBe(true);
+    expect(block.body).not.toContain('…');
+  });
+
+  it('still validates at the egress authority', () => {
+    const block = buildFramingCheckCoachingBlock(
+      factWith(REAL_CAPTURE_2026_09_10),
+      lookupWithGoals(1),
+      CTX,
+    )!;
+    expect(CoachingBlockSchema.safeParse(block).success).toBe(true);
   });
 });
 

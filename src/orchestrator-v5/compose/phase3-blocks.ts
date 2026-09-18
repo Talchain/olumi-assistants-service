@@ -1259,13 +1259,43 @@ export function buildFramingCheckCoachingBlock(
 
   const goalSegment = goalRef === null ? '' : `You framed this as “${goalRef.label}”.`;
   const reframeSegment = reframe.length === 0 ? '' : `A different framing to weigh: “${reframe}”`;
-  const composeBody = (withGoal: boolean): string =>
-    [withGoal ? goalSegment : '', concern, reframeSegment].filter((s) => s.length > 0).join(' ');
+  const composeBody = (withGoal: boolean, withReframe: boolean): string =>
+    [withGoal ? goalSegment : '', concern, withReframe ? reframeSegment : '']
+      .filter((s) => s.length > 0)
+      .join(' ');
 
-  // Drop the recoverable segment before the irrecoverable ones. Never truncate:
-  // `truncate` would cut a model sentence mid-clause and can invert its meaning.
-  let body = composeBody(true);
-  if (body.length > BODY_MAX) body = composeBody(false);
+  /**
+   * ⭐ THE BUDGET LADDER, AND IT IS NOT A FORMALITY — A TWO-RUNG VERSION OF IT
+   * DROPPED THE ONLY REAL `framing_check` THIS ESTATE HAS EVER CAPTURED.
+   *
+   * Measured: `tools/orchestrator-eval/reports/decision-review-v16-2026-09-10/`
+   * `captures/r1-05-constraint-infeasible.json` carries a genuine model emission
+   * whose `concern` is 222 characters and whose reframe SEGMENT is 150. Concern
+   * plus reframe is 373 against a `BODY_MAX` of 300, so a ladder that could only
+   * drop the goal returned `null` — the feature would have shipped DARK on its
+   * one known real input, which is this estate's chronic failure #1 arriving
+   * through a constant rather than through a missing wire.
+   *
+   * SEGMENTS ARE DROPPED WHOLE, NEVER TRUNCATED, at every rung. Cutting a
+   * framing sentence can invert it ("the options do not address…" → "the
+   * options do"), and a card that says something wrong is worse than no card.
+   *
+   * THE DROP ORDER IS A PRODUCT JUDGEMENT, not a convenience, and it goes the
+   * same way twice:
+   *   1. the GOAL quote goes first — it is the only recoverable segment,
+   *      because the goal also rides as a `target_ref` the card renders
+   *      verbatim and links;
+   *   2. the REFRAME goes next. The `concern` is the CHALLENGE — "your options
+   *      do not answer your goal" — and that is the thinking prompt. The
+   *      `suggested_reframe` is the product's own ready-made answer, which is
+   *      the half that does the team's thinking FOR them. Where only one fits,
+   *      the challenge is worth more than the answer, and the chip still opens
+   *      a conversation in which the reframe can be discussed.
+   *   3. nothing left that fits ⇒ drop the block.
+   */
+  let body = composeBody(true, true);
+  if (body.length > BODY_MAX) body = composeBody(false, true);
+  if (body.length > BODY_MAX) body = composeBody(false, false);
   if (body.length === 0 || body.length > BODY_MAX) return null;
 
   const candidate = {
