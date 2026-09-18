@@ -27,7 +27,11 @@ import {
 // The grammar's own enums, imported rather than restated: the v12 route test
 // binds to the source of truth so a widening there fails this test loud, instead
 // of leaving a hand-copied list to drift (CLAUDE.md trap 12).
-import { DRAFT_RECORD_STATED_KINDS, DRAFT_RECORD_CLAIM_KINDS } from "../grammar.js";
+import {
+  DRAFT_RECORD_STATED_KINDS,
+  DRAFT_RECORD_CLAIM_KINDS,
+  buildDraftClaimItemSchema,
+} from "../grammar.js";
 
 /**
  * HISTORIC — v2. The bytes served on every run measured up to and including
@@ -703,9 +707,36 @@ const WITHDRAWN_V11_INSTRUCTION_BYTES = 11171;
  * would let those findings read as findings about v19, which is the version
  * written to remove their cause.
  */
-const PREREGISTERED_V19_INSTRUCTION_SHA256 =
+const SUPERSEDED_V19_INSTRUCTION_SHA256 =
   "7acd2273ab99654c2d54f553f2d611d2e932d96fecf4a76974cece2a5defca83";
-const PREREGISTERED_V19_INSTRUCTION_BYTES = 18083;
+const SUPERSEDED_V19_INSTRUCTION_BYTES = 18083;
+
+/**
+ * ⭐ PRE-REGISTERED — v20, frozen 2026-09-18 BEFORE any run was spent on it.
+ *
+ * v20 makes ONE change: the current-level ask, which was scoped to `factor`
+ * claims, now also reaches `risk` and `outcome` claims — the node kinds users
+ * attach their limits to — and says explicitly that a risk naming a POSSIBILITY
+ * rather than a measure still carries no level. See the `describe` block at the
+ * foot of this file for the full derivation and the measured chain from the
+ * missing level to the withheld recommendation.
+ *
+ * ⚠ STATUS AT THE TIME OF PINNING: UNMEASURED ON A LIVE DRAW. The gap it closes
+ * is measured (risk 0 of 3, outcome 0 of 3, factor 7 of 9 across both v202 draws;
+ * risk 0/14, outcome 0/10, factor 34/34 on the starter boards) and the downstream
+ * consequence is measured at ISL's and PLoT's own bytes. Whether the model
+ * ANSWERS the widened ask is not — a grammar field is an opportunity, not an
+ * outcome, and the same is true of an instruction sentence. A reader must not
+ * infer a result from the existence of this pin.
+ *
+ * ⚠ v19's VALUE STAYS AND IS ASSERTED DISTINCT. v19 is the artefact #1562
+ * shipped; every measurement taken after 2026-09-17T23:39Z belongs to it.
+ * Re-pointing this literal would let those findings read as findings about v20 —
+ * the version written to remove their cause.
+ */
+const PREREGISTERED_V20_INSTRUCTION_SHA256 =
+  "2d54395ec46d84c2db8523552e0d2553e0947e119090a7c98d9b53918e014d2f";
+const PREREGISTERED_V20_INSTRUCTION_BYTES = 18749;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -779,10 +810,21 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the measured artefact", () => {
-  it("hashes to the PRE-REGISTERED v19 value at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V19_INSTRUCTION_SHA256);
+  it("hashes to the PRE-REGISTERED v20 value at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V20_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V19_INSTRUCTION_BYTES,
+      PREREGISTERED_V20_INSTRUCTION_BYTES,
+    );
+  });
+
+  it("is DISTINCT from the SUPERSEDED v19 bytes, so #1562's measurements stay its own", () => {
+    // v19 is what #1562 shipped. The `declared_scale` producer stamp, the
+    // grammar-v10 `value_scale` slot and every number taken after
+    // 2026-09-17T23:39Z are measurements OF v19. None may be re-attributed to
+    // the version written to widen the ask they exposed.
+    expect(draftRecordsInstructionHash()).not.toBe(SUPERSEDED_V19_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(
+      SUPERSEDED_V19_INSTRUCTION_BYTES,
     );
   });
 
@@ -1014,10 +1056,26 @@ describe("the draft records instruction is the measured artefact", () => {
     // to v18 (asserted in the next test). The edit is legible as "the model must
     // say which convention its number is in" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      // v19 — `value_scale`, the whole of the +944 bytes.
+      // v20 — the current-level ask reaching `risk` and `outcome`, and the
+      // possibility-vs-measure carve-out that keeps it from being an invention
+      // licence. The whole of the +666 bytes.
+      "5725ccb7ee993820b3a9c44009272732c0119bc8604a6c254bbb6409fa4c14d6",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(13868);
+    // SUPERSEDED — v19's shape half, the bytes #1562 shipped and the bytes every
+    // measurement taken after 2026-09-17T23:39Z belongs to.
+    //
+    // ⚠⚠ AND THE SHAPE HALF HAS NOW MOVED AGAIN IN v20, while the CONNECT half is
+    // byte-identical to v19 (`8418e5e0…` / 4,881, asserted in the next test).
+    // v20 is shape-half in its entirety: WHICH claim kinds are asked for a level,
+    // and which risks have no level to give, are both statements about what goes
+    // in a field, not about how two records connect. That asymmetry is legible
+    // here without reading the diff, which is the entire reason the halves are
+    // pinned apart.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "a11f46f861777aaf3fd3b7477de688fcfbb0687ce26a05e0ead9f2d094df4d5d",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(13202);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(13202);
     // SUPERSEDED — v18's shape half, the bytes every 17 Sep measurement was
     // taken under.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
@@ -1510,5 +1568,121 @@ describe("the instruction says nothing it must not say", () => {
   it("keeps both balancing sentences in the connect half", () => {
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("Do not emit a factor you cannot connect.");
     expect(DRAFT_RECORDS_CONNECT_INSTRUCTION).toContain("But never drop something the user\nstated");
+  });
+});
+
+/* ===========================================================================
+ * v20 — THE CURRENT-LEVEL ASK REACHES THE NODE KINDS USERS ATTACH LIMITS TO.
+ *
+ * ⭐ THE DEFECT, measured on two independent corpora and settled at three
+ * services' bytes (2026-09-18).
+ *
+ * The instruction's quantity rule is scoped to ONE claim kind — *"Record what a
+ * quantity IS now. **On a `factor` claim**, set `value` to the level that
+ * quantity sits at today"*. Nothing asks an `outcome` or a `risk` claim for one.
+ * The GRAMMAR is not the constraint: `buildDraftClaimItemSchema()` declares
+ * `value`, `unit` and `value_scale` on the claim item with NO kind scoping, so
+ * every claim kind can already carry them. The ask is what is missing.
+ *
+ * ⚠ AND A SECOND INSTRUCTION ACTIVELY ROUTES MEASURABLE QUANTITIES AWAY FROM
+ * THE ONE KIND THAT IS ASKED. The same file says *"Name a result an `outcome`
+ * and a downside a `risk`. Do not file either as a `factor`"* — so "Pro
+ * Subscriber Churn Rate", a quantity with a perfectly good level today, is
+ * correctly filed as a `risk` and then never asked what that level is. Two
+ * rules answering different questions, neither aware of the other (trap 21).
+ *
+ * MEASURED — `observed_state.value` presence by node kind:
+ *   · both live v202 draws (`output/olumi-evidence-20260917-inert-quantities/`):
+ *       factor 7 of 9 · risk 0 of 3 · outcome 0 of 3 · goal 0 of 2
+ *   · the starter boards, independently, 17 Sep: factor 34/34 · risk 0/14 ·
+ *       outcome 0/10 · decision 0/5
+ *   The contrast control is the factor row: the probe discriminates.
+ *
+ * WHY IT COSTS THE USER THE ANSWER, traced producer -> wire -> consumer:
+ *   · a user's limit attaches to a `risk`/`outcome` node ("Pro Subscriber Churn
+ *     Rate"; "Budget Overrun", both `kind: risk` on live captures);
+ *   · ISL then emits `CONSTRAINT_NOT_CONVERTIBLE` in terms — *"A 'level' frame
+ *     requires constraint target node X to carry `observed_state.baseline` to
+ *     convert the level into the samples' frame, but it carries NO
+ *     `observed_state` at all"* — 13 of 13 in the banked journey corpus;
+ *   · PLoT classifies the target `sample_frame_unanchored` (13 of 13, recovered
+ *     from its own message prose — PLoT never logs the reason) and withholds
+ *     goal-fit under `CONSTRAINT_TARGET_UNRELIABLE`;
+ *   · CEE reads that off the wire and sets `leader_claim.permitted: false`,
+ *     `withheld_reason: constraint_verdict_withheld` — 21 of the 55 withheld
+ *     turns in a 59-turn corpus.
+ *   · The user asked for a recommendation and got none.
+ *
+ * ⚠ WHAT THIS CHANGE IS NOT. It does not widen what may be INVENTED. The two
+ * governing sentences are untouched and are asserted below: the quantity is
+ * recorded only *"on a scale the brief supports"*, and *"Leave `value` out where
+ * you cannot place the quantity"*. A qualitative risk stays qualitative. The
+ * invention surface does widen by construction — more kinds may now carry a
+ * number — which is why the do-not-invent prohibition is re-asserted here rather
+ * than assumed, and why this wants an independent seat.
+ *
+ * ⚠ v19's VALUE STAYS AND IS ASSERTED DISTINCT. v19 is the artefact `#1562`
+ * shipped and the one every post-merge measurement belongs to. Re-pointing the
+ * literal would let those findings read as findings about v20 — the version
+ * written to remove their cause.
+ * ========================================================================= */
+
+describe("v20 — the current-level ask reaches risk and outcome claims", () => {
+  /**
+   * RED-FIRST. At v19 this fails: the only kind named by the quantity rule is
+   * `factor`. It is written against the SPEC ("a claim that names a measurable
+   * quantity is asked for today's level"), not against the failure in hand.
+   */
+  it("asks a risk claim for the level it sits at today", () => {
+    const quantitySection = DRAFT_RECORDS_INSTRUCTION.slice(
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Record what a quantity IS now."),
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Keep the user's stated requirements intact."),
+    );
+    expect(quantitySection.length).toBeGreaterThan(0);
+    expect(quantitySection).toMatch(/`risk`/);
+  });
+
+  it("asks an outcome claim for the level it sits at today", () => {
+    const quantitySection = DRAFT_RECORDS_INSTRUCTION.slice(
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Record what a quantity IS now."),
+      DRAFT_RECORDS_INSTRUCTION.indexOf("Keep the user's stated requirements intact."),
+    );
+    expect(quantitySection.length).toBeGreaterThan(0);
+    expect(quantitySection).toMatch(/`outcome`/);
+  });
+
+  /**
+   * THE COMPLEMENT, and it is the half that stops this becoming an invention
+   * licence. Widening WHICH kinds are asked must not widen WHETHER a number may
+   * be made up. Both governing clauses must survive verbatim.
+   */
+  it("keeps the brief-supported-scale limit that stops the widening inventing numbers", () => {
+    // ⚠ MATCH ON REFLOWED TEXT, NOT ON THE LITERAL. The instruction is a wrapped
+    // template literal, so "on a scale the brief supports" is split by a newline
+    // in the source. My first version of this assertion matched the unwrapped
+    // string and RED-ed on a clause that was present — a false negative in the
+    // guard, which is worse than no guard. Normalise whitespace and the
+    // assertion survives any future reflow of the same sentence.
+    const flat = DRAFT_RECORDS_INSTRUCTION.replace(/\s+/g, " ");
+    expect(flat).toContain("on a scale the brief supports");
+    expect(flat).toContain(
+      "A quantity that is genuinely qualitative, or genuinely unknown, stays",
+    );
+  });
+
+  it("still forbids inventing a number the user did not state", () => {
+    const flat = DRAFT_RECORDS_INSTRUCTION.replace(/\s+/g, " ");
+    expect(flat).toContain("Do not invent a number the user did not state");
+  });
+
+  /**
+   * The grammar was never the constraint — pinned so a future reader does not
+   * re-derive it, and so a kind-scoping regression in the grammar REDs here.
+   */
+  it("is possible at all because the grammar scopes value/unit/value_scale to no kind", () => {
+    const props = (buildDraftClaimItemSchema() as { properties: Record<string, unknown> })
+      .properties;
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(["value", "unit", "value_scale"]));
+    expect(DRAFT_RECORD_CLAIM_KINDS).toEqual(expect.arrayContaining(["risk", "outcome", "factor"]));
   });
 });
