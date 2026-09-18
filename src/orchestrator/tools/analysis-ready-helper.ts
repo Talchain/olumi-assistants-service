@@ -692,6 +692,14 @@ export function blockerIssue(
   blocker: unknown,
   ordinal: number,
   status: string,
+  /**
+   * Per-option count of factors Olumi wired itself during repair. ONLY the
+   * canonical assembler holds this — the upstream producer in
+   * `cee/transforms/analysis-ready.ts` cannot know it — so it is threaded in
+   * rather than re-derived. Absent (the wire composers) degrades to the bare
+   * ask, which is exactly what those callers render today.
+   */
+  repairWiredFactorCount: ReadonlyMap<string, number> = new Map<string, number>(),
 ): CanonicalReadinessIssue | null {
   if (!isPlainObject(blocker)) return null;
   const blockerType = readNonEmptyString(blocker.blocker_type);
@@ -780,11 +788,53 @@ export function blockerIssue(
         message: `Confirm the effect value${suffix}.`,
       };
     case 'missing_connection':
+      // ⭐⭐ THE WHOLE-OPTION CELL KEEPS THE CODE IT ALREADY HAS ON THE WIRE.
+      //
+      // An option-scoped `missing_connection` that names NO factor is the
+      // `needs_user_mapping` cell — "this option reaches no factor at all" —
+      // and `appendSemanticIssues` below has always minted exactly that row,
+      // coded `OPTION_NEEDS_MAPPING`, via its uncovered-option fallback.
+      //
+      // ⚠ THE FALLBACK IS SKIPPED ONCE A BLOCKER ROW EXISTS. It is guarded by
+      // `coveredOptionIds`, which is built from the rows THIS mapper returns.
+      // So a producer that starts minting a blocker for this cell does not add
+      // a row beside the semantic one — it SUPPRESSES it, and substitutes a
+      // different code and a weaker sentence. Measured on the deployed build
+      // `be081be6`: the live wire carries `readiness_issues=OPTION_NEEDS_MAPPING`,
+      // so that substitution is a silent change to a consumed wire vocabulary,
+      // not an internal rename. Nine tests across six files pin the old code
+      // and the admission ladder that depends on it.
+      //
+      // Naming the two apart (trap 21): the PAIR-scoped `missing_connection`
+      // (option × factor) keeps `MISSING_OPTION_CONNECTION` — it is a different
+      // question with a different remedy, and its contrast is what proves this
+      // branch discriminates rather than blanket-renaming.
+      if (optionId && !factorId) {
+        return {
+          ...common,
+          code: 'OPTION_NEEDS_MAPPING',
+          category: 'option_mapping',
+          // ⚠ THE PRODUCER'S SENTENCE IS DELIBERATELY NOT CARRIED HERE, AND
+          // THAT IS THE ONE EXCEPTION TO THE RULE ABOVE.
+          //
+          // This row's honest wording depends on `repairWiredFactorCount` —
+          // how many factors OLUMI wired itself to keep the model connected —
+          // and the upstream producer cannot know that number. Carrying its
+          // sentence would silently DROP the disclosure that the link is
+          // "Olumi's own inference rather than a mapping you stated", which is
+          // a truthfulness regression, not a wording preference. Pinned by
+          // `analysis-not-ready-carry-through.spec.ts`'s six-literal test.
+          message: optionMappingAsk(
+            optionLabel ?? 'this option',
+            repairWiredFactorCount.get(optionId) ?? 0,
+          ),
+        };
+      }
       return {
         ...common,
         code: 'MISSING_OPTION_CONNECTION',
         category: 'option_mapping',
-        message: `Choose the missing connection${suffix}.`,
+        message: producerMessage ?? `Choose the missing connection${suffix}.`,
       };
     case 'constraint_dropped':
       return {
@@ -1034,7 +1084,7 @@ function appendSemanticIssues(
   );
   const seenExact = new Set(out.map(exactKey));
   for (const [index, blocker] of (payload.blockers ?? []).entries()) {
-    const issue = blockerIssue(blocker, out.length + index, payload.status);
+    const issue = blockerIssue(blocker, out.length + index, payload.status, repairWiredFactorCount);
     if (!issue) continue;
     const pair = optionFactorKey(issue);
     // The semantic producer sees an unencoded raw carrier as a missing value.

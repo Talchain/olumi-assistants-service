@@ -400,7 +400,7 @@ describe('the waivable-code set carries no unreachable entries', () => {
     expect(withOption?.option_id).toBe('opt_a');
   });
 
-  it('MISSING_OPTION_CONNECTION now HAS exactly one producer, and stays un-waivable', () => {
+  it('the whole-option cell keeps OPTION_NEEDS_MAPPING; the pair-scoped cell keeps MISSING_OPTION_CONNECTION', () => {
     /**
      * ⚠⚠ THIS FACT FLIPPED, AND THE OLD ASSERTION IS CORRECTED RATHER THAN
      * DELETED (trap 14). It read `MISSING_OPTION_CONNECTION has no producer in
@@ -417,18 +417,64 @@ describe('the waivable-code set carries no unreachable entries', () => {
      * a producer, the run refuses rather than silently waiving something new",
      * and that the decision is to be revisited when this REDs.
      *
-     * REVISITED, AND DELIBERATELY UNCHANGED: `MISSING_OPTION_CONNECTION` stays
-     * OUT of `WAIVABLE_BY_EXCLUSION`. Adding it would LOOSEN a refusal, which is
-     * the opposite of what the producing change is for — that change makes a
-     * refusal ARTICULATE, never weaker. Measured alongside: the route-vs-run
-     * agreement corpus in this file is unaffected.
+     * REVISITED TWICE. The first revisit kept `MISSING_OPTION_CONNECTION` out of
+     * `WAIVABLE_BY_EXCLUSION`, reasoning that adding it "would LOOSEN a refusal".
+     * That text is CORRECTED, not deleted (trap 14), because it answered the
+     * wrong question — and the waiver set is no longer the place this is settled.
+     *
+     * ⭐ THE NEW ROW WAS NOT ADDING A BLOCKER — IT WAS SUPPRESSING A BETTER ONE.
+     * `appendSemanticIssues` mints this cell's row from its uncovered-option
+     * fallback, coded `OPTION_NEEDS_MAPPING`, worded by `optionMappingAsk`. That
+     * fallback is guarded by `coveredOptionIds`, which is built from the rows
+     * `blockerIssue` returns. So minting a blocker upstream did not add a row
+     * beside the semantic one; it took its place, under a different code and a
+     * weaker sentence, and DROPPED the disclosure that any wiring present is
+     * "Olumi's own inference rather than a mapping you stated" — information
+     * only the canonical assembler holds.
+     *
+     * ⭐ AND THE CODE IS CONSUMED. Measured on deployed build `be081be6`
+     * (staging-journey-smoke, 4 consecutive runs, 17 Sep): the live wire carries
+     * `readiness_issues=OPTION_NEEDS_MAPPING`. Substituting a different code for
+     * the same cell is a silent change to a consumed vocabulary, not an internal
+     * rename — and `OPTION_NEEDS_MAPPING` is ALREADY waivable, which is why the
+     * admission ladder ("proceeds at two configured options, naming what it
+     * leaves out") RED on nine tests across six files while this stood.
+     *
+     * SETTLED: the mapper tells the two cells apart, so the waiver set needs no
+     * new entry and keeps its no-unreachable-entries property intact.
      */
-    // The mapper builds it — asserted first so the producer claim below is
-    // about PRODUCERS and not about the mapper.
+    // THE DISCRIMINATING PAIR. One assertion alone would not show the mapper
+    // binds to the CELL rather than blanket-renaming every `missing_connection`:
+    // the whole-option form (no factor named) and the pair-scoped form must
+    // resolve differently in the same probe.
+    const wholeOption = blockerIssue(
+      { blocker_type: 'missing_connection', option_id: 'opt_a', option_label: 'A' },
+      0,
+      'needs_encoding',
+    );
+    expect(wholeOption?.code).toBe('OPTION_NEEDS_MAPPING');
+    expect(wholeOption?.message).toContain('Choose which factor');
+
+    // CONTRAST — same blocker_type, but it names a factor, so it is the other
+    // question and keeps the other code.
     expect(
-      blockerIssue({ blocker_type: 'missing_connection', option_id: 'opt_a' }, 0, 'needs_encoding')
-        ?.code,
+      blockerIssue(
+        { blocker_type: 'missing_connection', option_id: 'opt_a', factor_id: 'fac_x' },
+        0,
+        'needs_encoding',
+      )?.code,
     ).toBe('MISSING_OPTION_CONNECTION');
+
+    // The repair-wiring disclosure survives the mapper when the assembler
+    // supplies the count — the truthfulness half of this row.
+    expect(
+      blockerIssue(
+        { blocker_type: 'missing_connection', option_id: 'opt_a', option_label: 'A' },
+        0,
+        'needs_encoding',
+        new Map([['opt_a', 3]]),
+      )?.message,
+    ).toContain("Olumi's own inference");
 
     // Sweep the source for writes of `blocker_type`, keeping the CONTRAST
     // CONTROL: a sweep that found nothing at all would "prove" any claim.
