@@ -78,9 +78,25 @@ export interface ParticipationRefusal {
 export interface AnalysisParticipationGuardResult<T = unknown> {
   /** A deep CLONE with retained-excluded nodes and their incident edges removed. */
   readonly graph: T;
-  /** Node ids actually withheld from the calculation, in graph order. */
+  /**
+   * Node ids actually withheld from the calculation, in graph order.
+   *
+   * ⭐ CONSUMER, NAMED SO THIS STAYS CHECKABLE: its COUNT is the first number
+   * in the run-level disclosure
+   * (`coaching/analysis-participation-disclosure.ts`, composed at
+   * `run-analysis.ts` §"THE PARTICIPATION DISCLOSURE"). The ids themselves go
+   * only to telemetry — a user-facing surface gets counts, never ids.
+   */
   readonly excludedNodeIds: readonly string[];
-  /** Edges removed because an endpoint left the graph. */
+  /**
+   * Edges removed because an endpoint left the graph.
+   *
+   * ⭐ CONSUMER: the second number in the same disclosure, and the reason that
+   * disclosure exists. The UI already marks the excluded NODE, so a user knows
+   * about the node; nothing tells them their CONNECTIONS went with it. This
+   * count is the only place that fact is available, and it must never be
+   * re-derived from graph shape by a second reader.
+   */
   readonly prunedEdgeCount: number;
   /**
    * Exclusions that CANNOT be honoured without producing a dishonest result.
@@ -127,9 +143,19 @@ function isRetainedExcluded(node: unknown): boolean {
  * it: if the clone throws, the analysis proceeds on the unmodified graph with
  * a warning. Note what that fallback does and does not risk — it can only
  * INCLUDE a node the user excluded, never exclude one they kept, so it cannot
- * silently shrink anybody's model. It is reported through `refusals` as a
- * `goal_node`-free empty list plus a warn log, and the caller's exclusion
- * disclosure is driven by `excludedNodeIds`, which is empty in that case.
+ * silently shrink anybody's model. It is reported through `refusals` as an
+ * empty list plus a warn log, and both counts read zero — so the caller's
+ * disclosure correctly says nothing, because nothing was withheld.
+ *
+ * ⚠ THE SENTENCE ABOVE WAS A CLAIM ABOUT A CONSUMER THAT DID NOT EXIST, AND IT
+ * IS NAMED HERE RATHER THAN QUIETLY FIXED. Until the disclosure landed, this
+ * docblock asserted that "the caller's exclusion disclosure is driven by
+ * `excludedNodeIds`" while `run-analysis.ts` read `participation.graph` and
+ * NOTHING ELSE: both counts went to telemetry and nowhere a user could reach.
+ * A docblock describing a mechanism the code does not have is the most
+ * convincing stale document in the estate, because it reads as settled and
+ * nobody re-derives it. The consumer is now real — see
+ * {@link AnalysisParticipationGuardResult} for where each field goes.
  */
 export function guardAnalysisParticipation<T = unknown>(
   graph: T,
