@@ -43,7 +43,8 @@
  * ratio-scale case rather than rendered wrong — see the third block.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { log } from "../../../../../utils/telemetry.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { handleUnreachableFactors } from "../unreachable-factors.js";
@@ -394,6 +395,10 @@ describe("C — declared_scale is stamped, never inferred by a consumer", () => 
  * Delete the fallback once producer coverage is measured, not before.
  * ========================================================================= */
 describe("D — the producer's declared_scale is never overwritten by this stage", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   /**
    * RED-FIRST, and the FIRST HALF OF A DISCRIMINATING PAIR. The values are
    * chosen so the two authorities genuinely disagree: `value: 1.12, unit: '%'`
@@ -471,6 +476,92 @@ describe("D — the producer's declared_scale is never overwritten by this stage
     const node = factorNode(graph, "f_producer_unit_interval");
     expect(node.declared_scale).toBe("unit_interval");
     expect(node.unit).toBe("%");
+  });
+
+  /**
+   * ⭐ THE DISAGREEMENT MUST BE VISIBLE, not merely harmless.
+   *
+   * Precedence makes the wrong answer harmless; it does not make it observable,
+   * and an invisible disagreement is exactly how this stage's inference would
+   * survive forever. Before this change NOTHING could see it — `declared_scale`
+   * and `value_scale` appear in zero telemetry payloads repo-wide — which is
+   * also why the deletion cannot be scheduled yet. A non-zero rate on this event
+   * is the signal that `declaredScaleOf` must be RETIRED rather than tuned.
+   *
+   * ⚠ The payload is bounded enums and one id: node_id, and the two scale
+   * literals. No value, no unit, no label — same posture as the sibling
+   * `cee.repair.prior_synthesised_from_baseline` in this file.
+   */
+  it("warns once, naming both authorities, when the declaration and the inference disagree", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
+    const graph = statedFactor({
+      id: "f_disagree",
+      value: 1.12,
+      unit: "%",
+      declared_scale: "raw_count",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    const hits = warn.mock.calls.filter(
+      (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_disagreement",
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0][0]).toMatchObject({
+      node_id: "f_disagree",
+      declared: "raw_count",
+      inferred: "ratio",
+    });
+  });
+
+  /**
+   * THE COMPLEMENT. A guard that warned on every reclassified factor would be
+   * noise indistinguishable from signal, and the rate is the whole point of the
+   * event. Agreement, and the producer-silent case, must both stay quiet.
+   */
+  it("stays silent when the two agree, and when the producer declared nothing", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
+
+    const agreeing = statedFactor({
+      id: "f_agree",
+      value: 1.12,
+      unit: "%",
+      declared_scale: "ratio",
+    });
+    handleUnreachableFactors(agreeing, "edge_type" as any);
+
+    const silent = statedFactor({ id: "f_silent", value: 1.12, unit: "%" });
+    handleUnreachableFactors(silent, "edge_type" as any);
+
+    const hits = warn.mock.calls.filter(
+      (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_disagreement",
+    );
+    expect(hits).toHaveLength(0);
+    // ...and the precondition: both payloads really did reach the inference, so
+    // the silence is the guard's doing and not the fixture failing to trigger.
+    expect(factorNode(agreeing, "f_agree").declared_scale).toBe("ratio");
+    expect(factorNode(silent, "f_silent").declared_scale).toBe("ratio");
+  });
+
+  /**
+   * The repair's own disclosure string asserted `declared_scale="ratio" is
+   * stamped`. Deferring made that FALSE whenever the producer declared it — a
+   * notice's truth condition is a claim about its whole domain, so the sentence
+   * had to move with the behaviour rather than be left to read as before.
+   */
+  it("tells the truth about WHO declared the ratio in its withholding disclosure", () => {
+    const declared = statedFactor({
+      id: "f_said_ratio",
+      value: 0.34,
+      unit: "%",
+      declared_scale: "ratio",
+    });
+    const result = handleUnreachableFactors(declared, "edge_type" as any);
+    const withheld = (result.repairs ?? []).filter(
+      (r: { code?: string; path?: string }) =>
+        r.code === "STATED_UNIT_WITHHELD_RATIO_SCALE" && r.path === "nodes[f_said_ratio].unit",
+    );
+    expect(withheld).toHaveLength(1);
+    expect(withheld[0].action).toContain("declared upstream");
+    expect(withheld[0].action).not.toContain('declared_scale="ratio" is stamped');
   });
 
   it("pins that the two authorities disagree on this payload, so the pair discriminates", () => {

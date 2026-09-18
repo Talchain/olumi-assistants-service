@@ -609,10 +609,45 @@ export function handleUnreachableFactors(
         data.cap,
         data.raw_value,
       );
+      // ⚠ THE PRODUCER'S VOCABULARY IS THREE-VALUED AND THIS STAGE'S IS TWO.
+      // `declaredScaleOf` returns `unit_interval | ratio | undefined` — it can
+      // NEVER return `raw_count` (0 occurrences in this file; contrast control:
+      // `DRAFT_RECORD_VALUE_SCALES` at `draft/records/grammar.ts:447` declares
+      // all three). So before this guard, a model-declared `raw_count` on a
+      // factor with `unit: "%"` and `value > 1` was silently rewritten to
+      // `ratio` — and the single consumer maps `ratio` to a x100 display. The
+      // overwrite did not merely duplicate a declaration, it could INVERT one by
+      // two orders of magnitude. Typing this read to the two-valued union would
+      // reproduce that narrowing in the guard written to stop it.
       const producerScale = (node as any).declared_scale as
         | "unit_interval"
         | "ratio"
+        | "raw_count"
         | undefined;
+      // ⭐ FAIL LOUD ON A STANDING DISAGREEMENT. Precedence makes the wrong
+      // answer harmless; it does not make it visible, and an invisible
+      // disagreement is how this stage's inference would survive forever. Today
+      // NOTHING can see it: `declared_scale` and `value_scale` appear in zero
+      // telemetry payloads repo-wide. A non-zero rate here is the signal that
+      // `declaredScaleOf` must be RETIRED, not tuned — which is the deletion this
+      // guard is deliberately deferring.
+      if (
+        producerScale !== undefined &&
+        inferredScale !== undefined &&
+        producerScale !== inferredScale
+      ) {
+        log.warn(
+          {
+            event: "cee.repair.declared_scale_disagreement",
+            node_id: node.id,
+            declared: producerScale,
+            inferred: inferredScale,
+          },
+          "[repair] the draft producer's declared_scale disagrees with this stage's " +
+            "magnitude inference; the DECLARATION wins. A standing non-zero rate here means " +
+            "declaredScaleOf must be retired, not tuned.",
+        );
+      }
       if (producerScale === undefined && inferredScale !== undefined) {
         (node as any).declared_scale = inferredScale;
       }
@@ -680,7 +715,8 @@ export function handleUnreachableFactors(
               `Stated unit "${data.unit}" withheld from display on ratio-scale factor ` +
               `"${node.label ?? node.id}" (value ${originalValue}): the '%' formatter ` +
               `resolves bounds by magnitude and would render this range as a fraction. ` +
-              `declared_scale="ratio" is stamped; the value is preserved, not dropped.`,
+              `declared_scale="ratio" is ${producerScale === "ratio" ? "declared upstream" : "stamped"}; ` +
+              `the value is preserved, not dropped.`,
           });
         }
       }
