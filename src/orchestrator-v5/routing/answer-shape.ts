@@ -71,15 +71,37 @@ export const ANSWER_SHAPE_MAX_BULLETS = 3;
  *
  *     DecisionGuideAI `src/canvas/conversation/MessageBubble.tsx`
  *     CLAMP_CHAR_THRESHOLD = 3000
- *     findNaturalTruncation(text) returns null when text.length <= 3000
+ *     MIN_HIDDEN_CHARS     = 150
+ *     findNaturalTruncation(text) returns null when text.length <= 3000, AND
+ *       also when no cut point would hide at least MIN_HIDDEN_CHARS.
  *
  * DERIVED, NOT INHERITED: read at the DEPLOYED staging bundle's own commit —
  * `https://staging--olumi.netlify.app/version.json` returned
  * `3b7e5d4c050caa75ad4506866109ce76567ac506` on 18 Sep 2026, and the source at
- * that exact SHA carries the two lines quoted above. This is not a repo read
+ * that exact SHA carries the lines quoted above. This is not a repo read
  * generalised to the deployment; it is the deployment's own commit.
  *
- * So below 3,000 characters the UI renders the answer WHOLE of its own accord.
+ * ⭐⭐ AND THE FLOOR IS 3,150, NOT 3,000 — FOUND BY EXECUTING THAT FUNCTION,
+ * NOT BY READING IT. Extracted from the deployed source at `3b7e5d4c` and run:
+ *
+ *     1372 -> null          (renders WHOLE)
+ *     2999 -> null          (renders WHOLE)
+ *     3000 -> null          (renders WHOLE)
+ *     3001 -> null          (renders WHOLE)   <- reading the code says otherwise
+ *     3500 -> truncated to 2987, hiding 513
+ *
+ * The second condition is why. Truncation needs a cut point `c <= 3000` that
+ * hides `len - c >= 150`; the largest available `c` is 3000, so NO input
+ * shorter than 3,150 can be truncated at all. A floor of 3,000 would therefore
+ * have left a ~150-character band where CEE collapses an answer the UI would
+ * have shown whole — the exact defect this constant exists to close, surviving
+ * inside its own fix at one twentieth the size.
+ *
+ * It is expressed as the SUM of the two UI constants rather than as the literal
+ * 3150, so the derivation is visible and a future reader can re-check it
+ * against the deployed pair instead of trusting a number.
+ *
+ * So below the floor the UI renders the answer WHOLE of its own accord.
  * Every sidecar CEE attaches below that floor replaces "the user reads all of
  * it" with "the user reads one sentence". Above it the UI would clamp anyway,
  * and the structured headline/bullets/detail view is the better of the two
@@ -90,10 +112,10 @@ export const ANSWER_SHAPE_MAX_BULLETS = 3;
  * BOTH directions — stated rather than argued away (CLAUDE.md trap 12: a
  * hand-maintained mirror must be shown to fail safe, since CEE cannot import a
  * UI constant):
- *   - UI threshold moves DOWN: answers between the two are clamped by the UI's
- *     own truncation instead of by the sidecar. Still far more visible text
+ *   - EITHER UI constant moves DOWN: answers between the two are clamped by the
+ *     UI's own truncation instead of by the sidecar. Still far more visible text
  *     than a 138-char headline. No lie, no hidden substance.
- *   - UI threshold moves UP: answers between the two render whole. That is the
+ *   - EITHER moves UP: answers between the two render whole. That is the
  *     direction this change is FOR.
  * There is no drift that returns the measured defect. That is why a mirrored
  * constant is acceptable here and a fail-loud guard is not required.
@@ -103,7 +125,16 @@ export const ANSWER_SHAPE_MAX_BULLETS = 3;
  * prose arriving in the first place and it is doing useful work. Only the WIRE
  * DIRECTIVE — "hide everything after sentence one" — is now conditional.
  */
-export const ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS = 3000;
+/** DecisionGuideAI `MessageBubble.tsx` — `CLAMP_CHAR_THRESHOLD`, deployed `3b7e5d4c`. */
+const UI_CLAMP_CHAR_THRESHOLD = 3000;
+/** DecisionGuideAI `MessageBubble.tsx` — `MIN_HIDDEN_CHARS`, deployed `3b7e5d4c`. */
+const UI_MIN_HIDDEN_CHARS = 150;
+/**
+ * The shortest answer the deployed UI is capable of truncating. Below this it
+ * renders whole whatever CEE does, so a collapse directive can only subtract.
+ */
+export const ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS =
+  UI_CLAMP_CHAR_THRESHOLD + UI_MIN_HIDDEN_CHARS;
 
 /**
  * True when the answer the user is about to receive is long enough that the

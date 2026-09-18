@@ -223,11 +223,19 @@ describe('route-v2 — the collapse floor on `_answer_shape`', () => {
     runTurnExecutorMock.mockReset();
   });
 
-  it('the floor is the deployed UI clamp (DecisionGuideAI 3b7e5d4c, CLAMP_CHAR_THRESHOLD)', () => {
-    // Pins the VALUE, not just the mechanism. If someone moves this constant
-    // the deployed-bundle derivation in answer-shape.ts must be re-run, and
-    // this assertion is where they are told so.
-    expect(ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS).toBe(3000);
+  it('the floor is the shortest answer the deployed UI can truncate (3b7e5d4c: 3000 + 150)', () => {
+    // ⭐ PINS THE VALUE, AND THE VALUE WAS FOUND BY EXECUTION. Reading
+    // `findNaturalTruncation` suggests 3,000. Running it — extracted from the
+    // deployed source at `3b7e5d4c` — gives null at 3,001 as well, because
+    // truncation also requires a cut point hiding at least MIN_HIDDEN_CHARS
+    // (150) and the largest available cut point is 3,000. Nothing shorter than
+    // 3,150 can be truncated at all.
+    //
+    // A floor of 3,000 would have left a ~150-character band where CEE
+    // collapses an answer the UI would have shown whole — this PR's own defect,
+    // surviving inside its fix. If someone moves this number, the deployed
+    // derivation must be re-run, and this assertion is where they are told so.
+    expect(ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS).toBe(3150);
     expect(FOUNDER_MEASURED_CHARS).toBeLessThan(ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS);
   });
 
@@ -257,6 +265,9 @@ describe('route-v2 — the collapse floor on `_answer_shape`', () => {
   });
 
   it('OPPOSITE DIRECTION — a 3,500-character answer is STILL collapsed (the capability is intact, not switched off)', async () => {
+    // 3,500 sits above the 3,150 floor AND is genuinely truncated by the
+    // deployed UI (measured: cut to 2,987, hiding 513), so this is the regime
+    // where the structured view is the better of the two clamps.
     const prose = proseWithDerivedLength(3500);
     runTurnExecutorMock.mockResolvedValue(mkProseRun(prose));
     const { status, body } = await postTurn(app, '5c011a95-1111-4000-8000-000000000002');
