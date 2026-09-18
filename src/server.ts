@@ -57,6 +57,14 @@ import { buildBootModelRegistryBatch } from "./config/boot-model-registry-batch.
 import { DEFAULT_SUMMARY_MODEL } from "./orchestrator-v5/rolling-summary/summary-types.js";
 import { DEFAULT_DECOMPOSE_MODEL } from "./cee/decision-review/decompose.js";
 import { SERVICE_VERSION, GIT_COMMIT_SHA, GIT_COMMIT_SHORT } from "./version.js";
+// The contract-health manifest, published on /healthz. Imported from the
+// RUNTIME-RESOLVED module, never from the package.json pin — see the block at
+// the /healthz 200 return for why that distinction is the whole point.
+import {
+  SCHEMA_PACKAGE_VERSION,
+  SCHEMA_SHA,
+  CONTRACT_MANIFEST_SHA,
+} from "@talchain/schemas";
 import { getAllFeatureFlags } from "./utils/feature-flags.js";
 import { attachRequestId, getRequestId, REQUEST_ID_HEADER } from "./utils/request-id.js";
 import { buildErrorV1, toErrorV1, getStatusCodeForErrorCode, isClientAbortError, RateLimitedError, retryAfterSecondsFromRateLimitContext } from "./utils/errors.js";
@@ -941,6 +949,60 @@ app.get("/healthz", async (_request, reply) => {
       enforcing: config.features.graphCas.rpcEnforce,
       requires_expected_hash: config.features.graphCas.requiresExpectedHash,
     },
+
+    // ⭐ THE CONTRACT THIS BOX IS ACTUALLY RUNNING — published because
+    // SCHEMA-VERSION SKEW IS THIS ESTATE'S DOMINANT CROSS-CUTTING RISK AND
+    // WAS, UNTIL THIS FIELD, UNMEASURABLE FROM OUTSIDE THE BOX.
+    //
+    // `CLAUDE.md` states the risk: each repo pins its own `@talchain/schemas`,
+    // the versions drift, and a consumer on an older version SILENTLY DROPS
+    // fields it does not know — coaching, evidence and enrichment have all
+    // been lost this way. A value that validates at the producer vanishes at
+    // the consumer with no error anywhere.
+    //
+    // A real cost, measured 18 Sep 2026: a live debug capture reported all six
+    // `schema_versions.*` fields null with `consistency_status: "unknown"`,
+    // reason `missing_schema_versions`. The bundle could not see the risk the
+    // doctrine calls dominant. Those six fields read a WIRE field named
+    // `schema_version`, which — where it exists at all — is a per-endpoint
+    // FORMAT LABEL (`"sequential.v1"`, `"optimise.v1"`; olumi-schemas
+    // `src/boundary/group-a.ts:119,236-238`), never a package version. They
+    // could not have answered this question even fully populated. This field
+    // answers it directly.
+    //
+    // ⚠ THE RUNTIME-RESOLVED VERSION, NOT THE PIN. `package.json:97` is a
+    // DECLARATION; the loaded module is the FACT, and they diverge exactly
+    // when it matters — a stale `node_modules`, a hoisted duplicate, a
+    // vendored tarball re-cut under the same version string. The divergence
+    // is live TODAY: the published 0.55.0 tarball carries
+    // `CONTRACT_MANIFEST_SHA = 088fb46a…` while olumi-schemas `main`, also
+    // calling itself 0.55.0, carries `4d3b0995…`. Two byte-sets, one version
+    // string — which is exactly why the two digests are published beside the
+    // version and why a pin-derived value would be worse than useless here.
+    //
+    // ⚠ NOT NESTED, DELIBERATELY. The four keys and their names are fixed by
+    // the contract (`@talchain/schemas` `HEALTH_MANIFEST_FIELDS`, shipped
+    // 2026-07-26): "a nested object is easy to add and easy for a load
+    // balancer / smoke test to never look at. Top-level fields sit next to
+    // `build` and get read." `parseHealthManifest()` parses them `.strict()`,
+    // so a typo fails loudly instead of being ignored. CEE is the FIRST
+    // adopter — measured the same day, all four services scored zero.
+    //
+    // Non-secret by construction: a semver string and two sha256 digests over
+    // PUBLIC contract bytes. Never a key, a host, a path or a magnitude. It
+    // sits beside `build`, `version` and `graph_cas`, published on the same
+    // unauthenticated probe for the same reason.
+    schema_write_version: SCHEMA_PACKAGE_VERSION,
+    // DELIBERATELY CONSERVATIVE: exactly what this service writes. CEE's
+    // boundary schemas are tolerant-additive and would in practice read more
+    // than one release line, but a wider claim here is one I cannot
+    // substantiate, and this field is the input to `compareHealthManifest`'s
+    // reader-first deploy gate — a writer may only be promoted once every
+    // downstream reader lists its release line. An unearned entry would
+    // silently widen that gate. Widen it only with evidence per version.
+    schema_read_versions: [SCHEMA_PACKAGE_VERSION],
+    schema_sha: SCHEMA_SHA,
+    contract_manifest_sha: CONTRACT_MANIFEST_SHA,
   };
 });
 
