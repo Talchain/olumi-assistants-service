@@ -84,6 +84,7 @@ import {
 } from './model-management/mutation-receipt.js';
 import type { ModelVersionMutationReceiptV1Local } from './model-management/mutation-receipt.js';
 import { recordDecisionRecordForCommit } from './decision-records/capture.js';
+import { recordBriefProvenanceForCommit } from './brief-provenance/capture.js';
 import { maintainRollingSummaryForCommit } from './rolling-summary/capture.js';
 import { isSuccessfulRunAnalysisFact } from './context/freshness.js';
 
@@ -1734,6 +1735,44 @@ export async function commitDirectAnswer(
       // getScenarioOwner (structural ScenarioOwnerReader slice — keeps
       // the SessionStore import surface at its declared three files).
       sessionStore: store,
+    });
+  }
+
+  // ROADMAP 2.1229 (CEE half) — brief + analysis-provenance capture hook.
+  //
+  // THE USER OUTCOME: a person who has run an analysis can send their model
+  // to a colleague, and the colleague opens the link and sees it. Today
+  // `create_shared_brief` raises 'No brief to share - generate a brief
+  // first' on every real share, because `scenarios.brief` is NULL on 14,157
+  // of 14,158 rows. The DB-side producers were always correct — they lost
+  // their CALLER when the direct browser→PLoT `/v2/run` path was retired
+  // (ROADMAP 2.1229). CEE already mints all four required values on every
+  // run and writes them only to the telemetry table `v5_handler_facts`;
+  // this hook forwards them to the row the share path actually reads.
+  //
+  // SIBLING of the decision-record hook above and deliberately INDEPENDENT
+  // of it: same predicate, same fire-and-forget contract, its own `find` and
+  // its own failure handling, so neither can silently change the other's
+  // firing condition (two hooks answering two questions — they are not one
+  // concept with two writes). Fires ONLY after the durable append succeeded
+  // AND this commit carries a successful (non-noop) run_analysis fact; the
+  // predicate already excludes 'refused' attempts, which carry no brief.
+  // Any failure logs and NEVER affects the turn result. No qualifying fact
+  // ⇒ byte-identical commit path (no store construction, no env reads —
+  // pinned by commit-brief-provenance-hook.test.ts, which asserts the
+  // store-construction COUNT rather than merely that the RPC went uncalled).
+  // The hook needs no session store: `store_brief_and_provenance` runs with
+  // the SERVICE ROLE and updates `scenarios` by id, so there is no guest
+  // pre-check to do and no SessionStore import to add.
+  const briefProvenanceFact = metadata.handler_facts.find(
+    (f): f is RunAnalysisHandlerFact => isSuccessfulRunAnalysisFact(f),
+  );
+  if (briefProvenanceFact !== undefined) {
+    void recordBriefProvenanceForCommit({
+      scenarioId: metadata.scenario_id,
+      turnId: metadata.turn_id,
+      persistedRowId,
+      fact: briefProvenanceFact,
     });
   }
 
