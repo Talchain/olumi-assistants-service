@@ -12,6 +12,7 @@
  */
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
+import { recoverScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
@@ -383,6 +384,14 @@ export function projectUncertaintyDriversForContext(
 function buildInterventionSummary(
   interventions: Record<string, unknown>,
   labelMap: Map<string, string>,
+  /**
+   * The target factor's own `observed_state`, by factor id — the `{value,
+   * raw_value}` pair `recoverScaleFrame` needs.
+   *
+   * OPTIONAL so every existing caller and test stays byte-identical: absent,
+   * the function behaves exactly as it did before this change.
+   */
+  framePairs?: ReadonlyMap<string, Record<string, unknown>>,
 ): string | undefined {
   const entries = Object.entries(interventions);
   if (entries.length === 0) return undefined;
@@ -429,6 +438,43 @@ function buildInterventionSummary(
     if (typeof entry === 'number') {
       const label = labelMap.get(factorId)!;
       if (!Number.isFinite(entry)) return `${label}=${entry}`;
+      // ⭐⭐ RECOVER THE MEANING WHEN IT IS RECOVERABLE, AND ONLY THEN.
+      //
+      // The "real-world meaning not established" clause below is correct for
+      // the case the ruling that introduced it considered: a bare scalar whose
+      // target factor carries nothing to interpret it against. It is WRONG for
+      // the common case, where the factor carries a framed `{value, raw_value}`
+      // pair and the meaning is fully derivable ON THE SAME TURN.
+      //
+      // Measured on a live capture (18 Sep): the three options carried
+      // interventions 0.49 / 0.54 / 0.59 against `Pro Plan Price`
+      // {value: 0.49, raw_value: 49, unit: "£"}. The model was told each lever's
+      // meaning was not established, while the response beside it rendered
+      // "£59". Worse, the band is an artefact of the 0.5 boundary — 0.49
+      // Moderate, 0.54 High, 0.59 High — so the two RAISE options shared a band
+      // and the BASELINE differed, on a £5 axis.
+      //
+      // ⚠ `recoverScaleFrame` is IMPORTED, never reimplemented. It is the
+      // estate's single owner of this derivation and already has seven consumer
+      // modules; a second spelling here would be trap 12 in the file that
+      // assembles the model's context. It is total and fail-closed — a pair
+      // that is absent, non-numeric, non-positive, or not `raw > value` yields
+      // `undefined` and the honest clause below survives unchanged.
+      const pair = framePairs?.get(factorId);
+      const frame = pair ? recoverScaleFrame(pair) : undefined;
+      if (frame !== undefined && Number.isFinite(entry)) {
+        const native = entry * frame;
+        // Rounded to the pair's own precision rather than printed raw: the
+        // multiplication reintroduces float dirt (0.59 * 100 = 58.99999…) and a
+        // context line reading "£58.99999999999999" would be a new defect.
+        const rounded = Math.round(native * 1e6) / 1e6;
+        const unit = typeof (pair as { unit?: unknown }).unit === 'string'
+          ? ((pair as { unit?: string }).unit as string).trim()
+          : '';
+        return unit
+          ? `${label}=${rounded} ${unit} (model value ${entry})`
+          : `${label}=${rounded} (model value ${entry})`;
+      }
       return entry >= 0 && entry <= 1
         ? `${label}=model value ${entry} (display band ${qualitativeBand(entry)}; real-world meaning not established)`
         : `${label}=model value ${entry} (real-world meaning not established)`;
@@ -686,10 +732,15 @@ function buildOptionReachability(
 export function compactGraph(graph: GraphV3T): GraphV3Compact {
   // Build lookup maps for resolving factor IDs to labels and node kinds
   const labelMap = new Map<string, string>();
+  const framePairs = new Map<string, Record<string, unknown>>();
   const kindMap = new Map<string, string>();
   const knownNodeIds = new Set<string>();
   for (const node of graph.nodes) {
     labelMap.set(node.id, node.label ?? node.id);
+    // The frame pair, beside the label, from the SAME loop — so a node can
+    // never appear in one map and not the other.
+    const os = (node as { observed_state?: Record<string, unknown> }).observed_state;
+    if (os && typeof os === 'object') framePairs.set(node.id, os);
     kindMap.set(node.id, node.kind);
     knownNodeIds.add(node.id);
   }
@@ -885,6 +936,7 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
         const summary = buildInterventionSummary(
           mergeInterventionSourceObjects(anyNode),
           labelMap,
+          framePairs,
         );
         if (summary) {
           n.intervention_summary = summary;
