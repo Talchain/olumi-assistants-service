@@ -915,6 +915,11 @@ export const TelemetryEvents = {
   // Track S 0.13c-1 — run_analysis load-time intercept guard summary.
   // Redacted: corrected_count + node IDs only, no observed magnitudes.
   V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+  // COLLAB Track A — run_analysis participation guard summary.
+  // Redacted: excluded/pruned COUNTS + node IDs only. Never a label and never a
+  // value: the excluded node's number is exactly what the user kept out of the
+  // calculation, so it must not leak through telemetry either.
+  V5RunAnalysisParticipationGuard: "v5.run_analysis.participation_guard",
   // ROADMAP 2.229 fix 4 — deterministic IMPERATIVE RE-RUN pre-route.
   //
   // Fires once per turn whose message reads as an instruction to re-run
