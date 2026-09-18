@@ -319,7 +319,6 @@ import {
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
 import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
 import { prepareValueBatchOffer } from '../orchestrator-v5/handlers/readiness-value-batch-flow.js';
-import { chatWithAnthropic } from '../adapters/llm/anthropic.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -3322,6 +3321,16 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
        * served by the per-cell chip, which asks a precise question the user can
        * answer in a sentence. The witnessed harm is TEN values and ten
        * round-trips, and the cost should be proportional to that.
+       *
+       * ⭐ AND THE ROUTER DOES NOT KNOW A MODEL EXISTS. It asks for an offer and
+       * gets one. The shared-Anthropic binding — temperature, token budget, the
+       * output schema — belongs to `readiness-value-estimator.ts`, which owns the
+       * prompt those settings serve. It used to live HERE, which made the router
+       * a dedicated Anthropic chat caller for a prompt it does not own, and
+       * `tests/unit/ai-task-lifecycle-authority.test.ts` derives that set from the
+       * source and requires each member to declare a model/prompt authority row.
+       * It fired, correctly. Moving the binding is the fix; widening the expected
+       * array would have been the hand-maintained mirror the guard exists to stop.
        */
       let valueBatchOffer: Awaited<ReturnType<typeof prepareValueBatchOffer>> | null = null;
       if (
@@ -3335,26 +3344,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             persistedGraph as GraphStateIngress,
           );
           if (graphHash !== null) {
-            valueBatchOffer = await prepareValueBatchOffer(
-              {
-                assessment: readiness.assessment,
-                graph: persistedGraph,
-                currentGraphHash: graphHash,
-                scenarioId: ingress.scenario_id,
-                brief: ingress.message,
-              },
-              async ({ system, userMessage, outputSchema }) => {
-                const res = await chatWithAnthropic({
-                  system,
-                  userMessage,
-                  temperature: 0.1,
-                  maxTokens: 2048,
-                  requestId,
-                  outputSchema,
-                });
-                return { content: res.content };
-              },
-            );
+            valueBatchOffer = await prepareValueBatchOffer({
+              assessment: readiness.assessment,
+              graph: persistedGraph,
+              currentGraphHash: graphHash,
+              scenarioId: ingress.scenario_id,
+              brief: ingress.message,
+              requestId,
+            });
           }
         } catch (err) {
           // Fail CLOSED to the existing route: the per-cell chip and the typed

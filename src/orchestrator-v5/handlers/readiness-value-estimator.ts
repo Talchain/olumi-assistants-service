@@ -41,6 +41,7 @@
  */
 
 import { z } from 'zod';
+import { chatWithAnthropic } from '../../adapters/llm/anthropic.js';
 import type { ValueBatchCell, ValueBatchEstimate } from './readiness-value-batch.js';
 
 /**
@@ -112,22 +113,77 @@ export interface ValueEstimateRequest {
   readonly factors: readonly ValueEstimateFactorContext[];
   /** The user's own framing of the decision, when the turn carries it. */
   readonly brief: string | undefined;
+  /** Correlation id for the model call's telemetry. Absent off a request. */
+  readonly requestId?: string;
 }
 
 /**
- * The network boundary, INJECTED.
+ * The network boundary, INJECTED — and now also BOUND, in this module.
  *
- * ⚠ This is why the module is testable without a paid call, and it is not
+ * ⚠ Injection is why the module is testable without a paid call, and it is not
  * decoration: a fixture you wrote yourself is not evidence about the wire, so
  * the unit tests here prove the PROMPT CONTRACT and the PARSE and make no claim
  * about model behaviour. Anything claiming the latter needs a live call and
- * must say so.
+ * must say so. Every test still passes its own `call`.
+ *
+ * ⭐ WHAT CHANGED, AND WHY IT IS NOT A LOSS OF THE INJECTION SEAM. The
+ * production binding used to live in `orchestrator/route-v2.ts`, which made the
+ * ROUTER a dedicated Anthropic chat caller: it imported `chatWithAnthropic` and
+ * chose the temperature and token budget for a prompt it does not own.
+ * `tests/unit/ai-task-lifecycle-authority.test.ts` derives that set from the
+ * source and requires each member to declare a model/prompt authority row — and
+ * it fired, correctly. The answer is not a longer expected array; it is to put
+ * the model call beside the prompt it uses, which is here. The injection point
+ * survives as a DEFAULT parameter, so the seam is unchanged for every caller
+ * that wants a fake and the router no longer needs to know a model exists.
  */
 export type ValueEstimateModelCall = (args: {
   system: string;
   userMessage: string;
   outputSchema: Record<string, unknown>;
+  requestId?: string;
 }) => Promise<{ content: string }>;
+
+/**
+ * Budget for one estimate batch. Carried over unchanged from the route-v2 call
+ * site this replaced — the numbers are the ones that were already shipping, not
+ * new choices made while moving the binding.
+ */
+export const VALUE_ESTIMATE_MAX_TOKENS = 2048;
+/** Low but non-zero: the model is judging, not transcribing. */
+export const VALUE_ESTIMATE_TEMPERATURE = 0.1;
+
+/**
+ * The production binding: the shared Anthropic chat boundary.
+ *
+ * ⚠ THE MODEL IS NOT NAMED HERE, AND THAT IS A FACT ABOUT THIS TASK RATHER THAN
+ * AN OMISSION. `chatWithAnthropic` resolves `explicit -> LLM_MODEL ->
+ * FALLBACK_ANTHROPIC_MODEL`, and this call site passes no explicit model — which
+ * is exactly what the route-v2 site did. So this task, alone among the dedicated
+ * Anthropic chains, has NO checked-in model of its own: its model is whatever
+ * `LLM_MODEL` says, and if that names a non-Anthropic model the call fails
+ * closed at the boundary with MODEL_PROVIDER_MISMATCH and the caller degrades to
+ * the per-cell chip. `RUNTIME_AI_TASK_AUTHORITY.readiness_value_estimate` states
+ * that posture rather than hiding it behind a model id this code does not send.
+ * Pinning a dedicated model/env key for it is a behaviour change and belongs in
+ * its own lane, not in the move that relocated the binding.
+ */
+export const anthropicValueEstimateCall: ValueEstimateModelCall = async ({
+  system,
+  userMessage,
+  outputSchema,
+  requestId,
+}) => {
+  const res = await chatWithAnthropic({
+    system,
+    userMessage,
+    temperature: VALUE_ESTIMATE_TEMPERATURE,
+    maxTokens: VALUE_ESTIMATE_MAX_TOKENS,
+    requestId,
+    outputSchema,
+  });
+  return { content: res.content };
+};
 
 export type ValueEstimateOutcome =
   | { readonly status: 'ok'; readonly estimates: readonly ValueBatchEstimate[] }
@@ -197,7 +253,7 @@ export function buildValueEstimateUserContent(req: ValueEstimateRequest): string
  */
 export async function estimateValueBatch(
   req: ValueEstimateRequest,
-  call: ValueEstimateModelCall,
+  call: ValueEstimateModelCall = anthropicValueEstimateCall,
 ): Promise<ValueEstimateOutcome> {
   if (req.cells.length === 0) return { status: 'no_cells' };
 
@@ -205,6 +261,7 @@ export async function estimateValueBatch(
     system: VALUE_ESTIMATE_SYSTEM_PROMPT,
     userMessage: buildValueEstimateUserContent(req),
     outputSchema: VALUE_ESTIMATE_OUTPUT_SCHEMA,
+    requestId: req.requestId,
   });
 
   let raw: unknown;

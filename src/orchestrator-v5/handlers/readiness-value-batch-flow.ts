@@ -2,10 +2,18 @@
  * ⭐ THE COMPOSITION: readiness gap -> estimates -> reviewed proposal -> one chip.
  *
  * `readiness-value-batch` holds the validator, the assembler, the offer and the
- * atomic apply. `readiness-value-estimator` holds the producer. Neither knows
- * about the other, deliberately — the estimator carries no adapter dependency
- * and the batch module carries no model dependency. This is the one place that
- * knows both, and it is the seam a caller wires.
+ * atomic apply. `readiness-value-estimator` holds the producer AND, since the
+ * binding moved off `orchestrator/route-v2.ts`, the shared-Anthropic call that
+ * serves it. The batch module still carries no model dependency. This is the one
+ * place that knows both, and it is the seam a caller wires.
+ *
+ * ⚠ THE ESTIMATOR'S "no adapter dependency" IS NO LONGER TRUE, and this line
+ * used to say it was. The router was the dedicated Anthropic chat caller for a
+ * prompt it does not own; `tests/unit/ai-task-lifecycle-authority.test.ts`
+ * derives that set from source and requires an authority row per member, and it
+ * fired. The call now sits beside its prompt, and the injection seam survives as
+ * a default parameter — so the batch module's independence is unchanged and only
+ * the estimator's import graph moved.
  *
  * ⚠ WHY A SEPARATE MODULE RATHER THAN A FUNCTION IN EITHER. Putting it in the
  * batch module would give a pure validator a network dependency; putting it in
@@ -31,6 +39,7 @@ import {
   type ValueBatchOffer,
 } from './readiness-value-batch.js';
 import {
+  anthropicValueEstimateCall,
   estimateValueBatch,
   type ValueEstimateFactorContext,
   type ValueEstimateModelCall,
@@ -128,8 +137,10 @@ export function deriveFactorContext(graph: unknown, factorIds: ReadonlySet<strin
 /**
  * Turn an open readiness assessment into one reviewable offer.
  *
- * The caller supplies the model call, so this is testable end to end without a
- * paid request and the estimator's injection point survives all the way up.
+ * A caller MAY supply the model call, so this is testable end to end without a
+ * paid request and the estimator's injection point survives all the way up. When
+ * it does not, the estimator's own production binding is used — the router does
+ * not need to know a model exists in order to ask for an offer.
  */
 export async function prepareValueBatchOffer(
   input: {
@@ -138,8 +149,10 @@ export async function prepareValueBatchOffer(
     readonly currentGraphHash: string;
     readonly scenarioId: string;
     readonly brief: string | undefined;
+    /** Correlation id forwarded to the model call's telemetry, when on a request. */
+    readonly requestId?: string;
   },
-  call: ValueEstimateModelCall,
+  call: ValueEstimateModelCall = anthropicValueEstimateCall,
 ): Promise<PrepareValueBatchOutcome> {
   const membership = selectValueBatchMembership(input.assessment);
   if (membership.cells.length === 0) return { kind: 'no_cells' };
@@ -154,6 +167,7 @@ export async function prepareValueBatchOffer(
       cells: membership.cells,
       factors: deriveFactorContext(input.graph, factorIds),
       brief: input.brief,
+      requestId: input.requestId,
     },
     call,
   );
