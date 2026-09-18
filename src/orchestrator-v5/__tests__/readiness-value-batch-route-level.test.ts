@@ -330,6 +330,52 @@ describe('value batch chip click — the discrimination', () => {
   });
 });
 
+describe('value batch chip click — reachable by its own affordance', () => {
+  /**
+   * ⭐⭐ THE AFFORDANCE TEST, AND IT CAUGHT A SECOND DEFECT.
+   *
+   * A real chip click replays the chip's own MESSAGE, which lands in the
+   * deterministic label/ordinal pre-route. Wiring only the bare-confirm "yes"
+   * site would leave the feature unreachable by the one control that offers it
+   * — a component witness that never composes into a journey.
+   *
+   * ⛔ At pristine this REDed for a reason that had nothing to do with the
+   * wiring: the chip's message was `Approved — apply all N estimates.`, and the
+   * EM DASH is a `SAFETY_FORBIDDEN_TOKEN`. `resolveProposalRenderCopy` therefore
+   * replaced the whole message with the generic fallback "Apply the proposed
+   * change" — which is the string the matcher compares against — so the click
+   * matched nothing and the approval reached the LLM. Measured with a contrast
+   * control: the sibling `readiness_multi_repair_v1` message ("Yes, apply all N
+   * safe model fixes.") carries no em dash, survives the sanitiser and matches.
+   * One character made the difference between a reachable feature and a dark
+   * one, and NO suite below this level could see it.
+   *
+   * The message is read off the pending rather than restated here, so this
+   * binds to the copy the product actually ships.
+   */
+  it('a chip click replaying the batch chip’s own message reaches the batch writer', async () => {
+    const action = BATCH_PENDING.action;
+    if (action.kind !== 'apply_proposed_change') throw new Error('fixture');
+    const chipMessage = action.public_message;
+    expect(typeof chipMessage).toBe('string');
+    pendingActionsForRead = [BATCH_PENDING];
+    const result = await runTurnExecutor(
+      { ...payload(), message: chipMessage as string },
+      'req-value-batch-label',
+      { routingAdapter: throwingRoutingAdapter() },
+    );
+    expect(appendCalls).toHaveLength(1);
+    const write = appendCalls[0]!;
+    expect(write.graph, 'the chip’s own message must reach the writer').toBeDefined();
+    for (const cell of WRITABLE) {
+      const stored = writtenIntervention(write, cell.option_id, cell.factor_id);
+      expect(stored, `${cell.option_id}/${cell.factor_id} must be written`).toBeDefined();
+      expect(stored!.source).toBe(VALUE_BATCH_INTERVENTION_SOURCE);
+    }
+    expect(result.response.assistant_text).toContain('estimate');
+  });
+});
+
 describe('value batch chip click — degrade with disclosure, never a partial write', () => {
   it('⭐ A STALE PIN APPLIES NOTHING: zero graph writes, and the user is told why', async () => {
     pendingActionsForRead = [{

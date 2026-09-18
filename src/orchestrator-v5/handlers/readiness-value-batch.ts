@@ -498,9 +498,18 @@ export function buildValueBatchOffer(input: {
   const ref = proposalRef(input.scenarioId, input.currentGraphHash);
   const count = writable.length;
   const label = count === 1 ? 'Apply the estimate' : `Apply all ${count} estimates`;
+  // ⛔ NO EM DASH. The em dash is a SAFETY_FORBIDDEN_TOKEN
+  // (`compose/proposed-change.ts`), so `resolveProposalRenderCopy` replaces any
+  // message carrying one with the generic fallback "Apply the proposed change".
+  // That fallback is what the deterministic label/ordinal pre-route then matches
+  // against, so a chip click replaying THIS message matched NOTHING and the
+  // approval fell through to the LLM. Measured with a contrast control: the
+  // sibling `readiness_multi_repair_v1` message survives the sanitiser and
+  // matches; this one did not. The feature was unreachable by its own
+  // affordance because of one character.
   const message = count === 1
-    ? 'Approved — apply the estimate.'
-    : `Approved — apply all ${count} estimates.`;
+    ? 'Approved, apply the estimate.'
+    : `Approved, apply all ${count} estimates.`;
   const now = Date.now();
   const pending: PendingAction = {
     id: randomUUID(),
