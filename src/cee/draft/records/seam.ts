@@ -160,6 +160,24 @@ const InferenceClaimWire = z.object({
   // projector inferring the convention from magnitudes, which is the defect
   // v10 exists to remove.
   value_scale: z.enum(DRAFT_RECORD_VALUE_SCALES).optional(),
+  // ⭐⭐ DECLARED HERE TOO, AND THE OMISSION WAS A SECOND LAYER OF THE SAME
+  // DEFECT. `likelihood` was added to the model-facing JSON Schema and to
+  // `DraftInferenceClaim`, and the rebuild below was then taught to name it —
+  // and it still did not compile, because THIS schema is what `parsed.data`
+  // is typed from. Undeclared here, the field arrives as passthrough-unknown
+  // (`{}`) and cannot be assigned to a `number`.
+  //
+  // ⚠ THE TYPE ERROR WAS THE ONLY THING THAT CAUGHT IT, and only because the
+  // rebuild is a CONVERSION rather than an assertion (see this function's own
+  // note above). Had the rebuild used `as`, the field would have validated,
+  // been named, compiled, and still arrived `undefined` at the projector.
+  //
+  // ⚠ `.passthrough()` IS WHY THIS IS SILENT. It admits the field at runtime,
+  // so nothing REDs at validation; the wire carries a value that the typed
+  // surface does not know exists. A `.strict()` schema would have rejected it
+  // loudly — which is worse for tolerance and better for this class, and is a
+  // trade this seam has already made deliberately.
+  likelihood: z.number().optional(),
   // `option_refinement` only — grammar design note 5.
   is_baseline: z.boolean().optional(),
 }).passthrough();
