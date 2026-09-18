@@ -1,0 +1,15 @@
+{
+  "$comment": "SHRINK-ONLY RATCHET, measured in CI (never locally - the tool's governed suite depends on the repo-root install). Every entry is a KNOWN failure that predates this CI job; the job is advisory only while this file is non-empty. Fails in BOTH directions: a new failure REDs at once, a fixed one REDs until its entry is removed. When both maps are empty, drop `continue-on-error` from .github/workflows/graph-evaluator.yml and promote the job to a required check.",
+  "measuredAt": "b6fc704c7424744611f95d5c1d3a7a0473da1837",
+  "measuredAtNote": "GITHUB_SHA. On a pull_request event this is the EPHEMERAL MERGE COMMIT, not the PR head - use measuredIn (the run id) for provenance. Seeded from PR #1605, head 6652d6dcbd66a5b73445eff812a6768a9061b1fa.",
+  "measuredIn": "Talchain/olumi-assistants-service run 35387588918",
+  "minPassingTests": 218,
+  "knownRedTestFiles": {
+    "tests/adapters.test.ts": 1,
+    "tests/governed-draft-graph.test.ts": 1
+  },
+  "knownRedTypecheckFiles": {
+    "src/e2e-pipeline-test.ts": 2,
+    "src/validate-graph-tester.ts": 2
+  }
+}

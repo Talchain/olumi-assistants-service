@@ -264,6 +264,8 @@ const observedBlock = {
     "Fails in BOTH directions: a new failure REDs at once, a fixed one REDs until its entry is removed. " +
     "When both maps are empty, drop `continue-on-error` from .github/workflows/graph-evaluator.yml and promote the job to a required check.",
   measuredAt: process.env.GITHUB_SHA ?? "UNRECORDED",
+  measuredAtNote:
+    "GITHUB_SHA. On a pull_request event this is the EPHEMERAL MERGE COMMIT, not the PR head - use measuredIn (the run id) for provenance.",
   measuredIn: process.env.GITHUB_RUN_ID
     ? `${process.env.GITHUB_REPOSITORY} run ${process.env.GITHUB_RUN_ID}`
     : "UNRECORDED",
