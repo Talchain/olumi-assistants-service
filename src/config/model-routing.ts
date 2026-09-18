@@ -344,7 +344,8 @@ export type AiTaskLifecycleId =
   | 'clarify_brief'
   | 'explain_diff'
   | 'rolling_summary'
-  | 'decision_review_decompose';
+  | 'decision_review_decompose'
+  | 'readiness_value_estimate';
 
 export type AiTaskExecutionState =
   | 'live_router'
@@ -526,6 +527,12 @@ export const AI_TASK_LIFECYCLE: Readonly<
     note:
       'When its explicit experiment gate is enabled, decision review fans out four provider-specific code-constant Anthropic calls.',
   },
+  readiness_value_estimate: {
+    executable: true,
+    state: 'dedicated_adapter',
+    note:
+      'The readiness value-batch estimate producer calls the shared Anthropic chat boundary with its code-constant prompt and structured-output schema. Reached on a readiness turn only when the value-preserving repair path found nothing AND at least VALUE_BATCH_MIN_CELLS settable cells are open, so a below-floor turn makes no call at all.',
+  },
 };
 
 export type RuntimeAiTaskId =
@@ -541,6 +548,7 @@ export type RuntimeAiTaskId =
   | 'extraction'
   | 'rolling_summary'
   | 'decision_review_decompose'
+  | 'readiness_value_estimate'
   | 'm2_graph_review'
   | 'draft_quality_review';
 
@@ -731,6 +739,34 @@ export const RUNTIME_AI_TASK_AUTHORITY = {
       'four JSON fragment schemas + deterministic composer and composed-consistency check',
     fallback:
       'CEE_MODEL_DECISION_REVIEW_HAIKU then DEFAULT_DECOMPOSE_MODEL; failed/inconsistent fan-out falls back to the governed monolith',
+    promotionGate: 'none_no_real_pack',
+  },
+  /**
+   * ⚠ THE ONLY DEDICATED CHAIN WITH NO CHECKED-IN MODEL OF ITS OWN, AND THE ROW
+   * SAYS SO RATHER THAN INVENTING ONE.
+   *
+   * `anthropicValueEstimateCall` passes NO explicit model, so
+   * `chatWithAnthropic` resolves `LLM_MODEL -> FALLBACK_ANTHROPIC_MODEL`. That
+   * is byte-for-byte what the route-v2 call site it replaced did, so recording
+   * a dedicated model id here would describe behaviour this code does not have.
+   * The consequence is real and is the reason it is written down: if `LLM_MODEL`
+   * names a non-Anthropic model the call fails closed at the boundary with
+   * MODEL_PROVIDER_MISMATCH and the readiness turn degrades to the per-cell
+   * chip — the same provider-by-deployment-accident posture explain_diff was
+   * corrected out of, one level down. Giving this task its own env key and
+   * checked-in default is a BEHAVIOUR change and belongs in its own lane.
+   */
+  readiness_value_estimate: {
+    hasExecutablePath: true,
+    modelAuthority: 'dedicated_anthropic_chain',
+    checkedInModel: null,
+    promptAuthority: 'code_constant',
+    promptTask: null,
+    promptIdentity: 'code_hash',
+    structuredContract:
+      'VALUE_ESTIMATE_OUTPUT_SCHEMA (Anthropic Structured Outputs) + a strict Zod re-parse that requires declined_reason on a null value, and an identity filter to the cells asked',
+    fallback:
+      'LLM_MODEL then FALLBACK_ANTHROPIC_MODEL; a non-Anthropic assignment fails before the shared network boundary and the readiness turn degrades to the per-cell chip',
     promotionGate: 'none_no_real_pack',
   },
   m2_graph_review: {

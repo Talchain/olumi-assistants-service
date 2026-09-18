@@ -36,6 +36,7 @@ import {
   type ResolvedModelAssignment,
 } from '../../config/model-assignment.js';
 import { config } from '../../config/index.js';
+import { FALLBACK_ANTHROPIC_MODEL } from './model-fallback.js';
 import { resolveConfiguredRouterPlan } from './router.js';
 import type {
   RouterResolutionOutcome,
@@ -115,6 +116,27 @@ const DEDICATED_MODEL_CHAINS: Record<
       RUNTIME_AI_TASK_AUTHORITY.decision_review_decompose.checkedInModel,
     defaultKey: 'DEFAULT_DECOMPOSE_MODEL',
     whitespaceMeansUnset: true,
+    requiredProvider: 'anthropic',
+  },
+  /**
+   * ⚠ NOT A TYPO: this chain reads the GLOBAL `LLM_MODEL`, not a task-specific
+   * env key, because `anthropicValueEstimateCall` sends no explicit model and
+   * `chatWithAnthropic` therefore resolves `LLM_MODEL -> FALLBACK_ANTHROPIC_MODEL`.
+   * Reporting a dedicated key it does not read would be the mirror this seam
+   * exists to avoid. `whitespaceMeansUnset: false` mirrors `resolveAnthropicModel`,
+   * whose `||` treats "" as unset and a whitespace-only value as set — the report
+   * must agree with the resolver, not with what the resolver ought to do.
+   *
+   * `requiredProvider: 'anthropic'` makes the hazard VISIBLE rather than silent:
+   * with `LLM_MODEL` pointing at another provider this row reports
+   * `configuration_error`, which is what the call does at runtime.
+   */
+  readiness_value_estimate: {
+    configuredModel: () => config.llm.model,
+    envKey: 'LLM_MODEL',
+    defaultModel: FALLBACK_ANTHROPIC_MODEL,
+    defaultKey: 'FALLBACK_ANTHROPIC_MODEL',
+    whitespaceMeansUnset: false,
     requiredProvider: 'anthropic',
   },
 };

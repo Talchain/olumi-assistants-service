@@ -323,6 +323,11 @@ import {
   buildReadinessRepairOffer,
   withReadinessApplyControl,
 } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import { prepareValueBatchOffer } from '../orchestrator-v5/handlers/readiness-value-batch-flow.js';
+import {
+  buildValueBatchReviewBlock,
+  composeValueBatchReviewText,
+} from '../orchestrator-v5/handlers/readiness-value-batch.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -3366,16 +3371,177 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           readinessOffer = null;
         }
       }
-      if (readinessOffer) {
+      /**
+       * ⭐ THE SECOND APPLY CONTROL, AND IT ANSWERS A DIFFERENT QUESTION FROM THE
+       * FIRST (trap 21 — named apart, deliberately, not collapsed).
+       *
+       *   `readiness_multi_repair_v1` — "can these blockers be CANONICALISED
+       *      without guessing?" It is value-preserving by construction and its
+       *      module states it never guesses a missing scalar.
+       *   `readiness_value_batch_v1` — "can the missing VALUES be estimated and
+       *      reviewed in one action?" It proposes numbers the model authored,
+       *      every one marked as an AI estimate and none applied unreviewed.
+       *
+       * So the batch is tried ONLY when the repair path found nothing to
+       * canonicalise: where a value-preserving fix exists it is strictly better
+       * than an estimate, and offering both would ask the user to choose between
+       * two controls that sound alike.
+       *
+       * ⚠ THE MODEL CALL SITS BEHIND THE FLOOR CHECK, NOT IN FRONT OF IT.
+       * `prepareValueBatchOffer` returns `below_floor` without calling anything
+       * when fewer than two cells are open — a single missing value is already
+       * served by the per-cell chip, which asks a precise question the user can
+       * answer in a sentence. The witnessed harm is TEN values and ten
+       * round-trips, and the cost should be proportional to that.
+       *
+       * ⭐ AND THE ROUTER DOES NOT KNOW A MODEL EXISTS. It asks for an offer and
+       * gets one. The shared-Anthropic binding — temperature, token budget, the
+       * output schema — belongs to `readiness-value-estimator.ts`, which owns the
+       * prompt those settings serve. It used to live HERE, which made the router
+       * a dedicated Anthropic chat caller for a prompt it does not own, and
+       * `tests/unit/ai-task-lifecycle-authority.test.ts` derives that set from the
+       * source and requires each member to declare a model/prompt authority row.
+       * It fired, correctly. Moving the binding is the fix; widening the expected
+       * array would have been the hand-maintained mirror the guard exists to stop.
+       */
+      let valueBatchOffer: Awaited<ReturnType<typeof prepareValueBatchOffer>> | null = null;
+      // Hoisted out of the try: the review surface below needs the SAME hash the
+      // offer was built against, so the block's `graph_hash_at_generation` names
+      // the model the user is looking at rather than one re-derived later.
+      let valueBatchGraphHash: string | null = null;
+      if (
+        readinessOffer === null
+        && readiness.assessment
+        && readinessPendingReadOk
+        && persistedGraph !== null
+      ) {
+        try {
+          const graphHash = computeAnalysisAffectingGraphHash(
+            persistedGraph as GraphStateIngress,
+          );
+          if (graphHash !== null) {
+            valueBatchGraphHash = graphHash;
+            valueBatchOffer = await prepareValueBatchOffer({
+              assessment: readiness.assessment,
+              graph: persistedGraph,
+              currentGraphHash: graphHash,
+              scenarioId: ingress.scenario_id,
+              brief: ingress.message,
+              requestId,
+            });
+          }
+        } catch (err) {
+          // Fail CLOSED to the existing route: the per-cell chip and the typed
+          // issue list are still there, so the user is never worse off than
+          // before this control existed.
+          valueBatchOffer = null;
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'S2-L1 readiness arm — value batch unavailable; readiness remains available without it',
+          );
+        }
+      }
+      if (valueBatchOffer && valueBatchOffer.kind !== 'offer') {
+        // Recorded by NAME rather than collapsed to a null: `below_floor` and
+        // `estimator_failed` are different facts and only one of them is a defect.
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            outcome: valueBatchOffer.kind,
+          },
+          'S2-L1 readiness arm — no value batch offered',
+        );
+      }
+
+      /**
+       * ⭐⭐⭐ THE NUMBERS REACH THE USER HERE, ON THE TURN THAT OFFERS THE CHIP.
+       *
+       * THE DEFECT THIS CLOSES, measured at the bytes on this branch's own first
+       * head: the chip applied N model-authored values to the user's model in one
+       * click and the user saw NONE of them first. `valueBatchOffer.proposal` was
+       * carried into the pending action's `inline_patch` and read by nothing on
+       * the way out — this file consumed `.kind` and `.offer` only, the readiness
+       * response was composed 63 lines ABOVE the estimator call, the chip had no
+       * `detail` and `params: {}`, and `OlumiResponseSchema` is `.strict()` with
+       * no pending/inline_patch key, so NO CLIENT COULD HAVE RENDERED IT however
+       * it was written. Three separate sites told the user they had reviewed
+       * them. That is the product's own ruling — humans remain the authors and
+       * the decision-makers — inverted.
+       *
+       * ⚠ IT RUNS ON `no_writable` TOO, and that is not tidiness. The module
+       * refuses at compose time to accept a silent decline
+       * (`declined_without_reason`) precisely so the reasons can be shown; a
+       * branch that surfaced only the writable set would delete the one thing a
+       * user can act on in the state where the model estimated nothing. There is
+       * still no chip there, because there is still nothing to approve.
+       *
+       * ⛔ AND IT IS ORDERED BEFORE THE APPLY CONTROL DELIBERATELY. `applyOffer`
+       * below reads `valueBatchReviewShown`, so the chip cannot exist on a turn
+       * whose values were not rendered. The previous version of this feature
+       * asserted that coupling in a comment; this one cannot compile without it.
+       */
+      let valueBatchReviewShown = false;
+      if (
+        valueBatchOffer
+        && (valueBatchOffer.kind === 'offer' || valueBatchOffer.kind === 'no_writable')
+        && valueBatchGraphHash !== null
+      ) {
+        const reviewText = composeValueBatchReviewText(valueBatchOffer.proposal);
+        // Fail closed on an empty compose: a chip whose values did not render is
+        // exactly the state this block exists to make impossible.
+        if (reviewText.trim().length > 0) {
+          const reviewBlock = buildValueBatchReviewBlock({
+            proposal: valueBatchOffer.proposal,
+            currentGraphHash: valueBatchGraphHash,
+            createdAtIso: new Date().toISOString(),
+          });
+          readinessResponse = {
+            ...readinessResponse,
+            assistant_text: `${readinessResponse.assistant_text}\n\n${reviewText}`,
+            // The typed mark is ADDITIVE to the numbers, never a substitute for
+            // them: `CoachingBlockSchema.body` caps at 300 characters, so a
+            // ten-cell batch cannot live there. A null block (its own schema
+            // refused it) loses the mark and keeps every number.
+            ...(reviewBlock !== null
+              ? { blocks: [...readinessResponse.blocks, reviewBlock] as typeof readinessResponse.blocks }
+              : {}),
+          };
+          valueBatchReviewShown = true;
+        }
+      }
+
+      /** Whichever apply control this turn earned. At most one is ever offered. */
+      let applyOffer:
+        | { readonly chip: { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string }; readonly pending: PendingAction }
+        | null =
+        readinessOffer
+        ?? (valueBatchOffer && valueBatchOffer.kind === 'offer' && valueBatchReviewShown
+          ? valueBatchOffer.offer
+          : null);
+
+      if (applyOffer) {
         readinessResponse = {
           ...readinessResponse,
           // The composer already filled this row to its cap. Appending here put
           // the apply control at index 3 of 4 and the client rendered the first
           // three, so the control never reached the user. `withReadinessApplyControl`
           // makes room instead of overflowing.
+          //
+          // ⚠ MERGE RESOLUTION, 18 Sep: staging (#1596) passed `readinessOffer.chip`
+          // because on staging the repair offer was the ONLY apply control. This
+          // branch adds a second one, so `applyOffer` is `readinessOffer ?? the
+          // value-batch offer` — and inside this block `readinessOffer` can be
+          // null. Passing it would throw on exactly the turns this branch exists
+          // to serve. Both fixes are kept: staging's cap-preserving insert, this
+          // branch's two-control selection, bound to the control actually chosen.
           suggested_actions: withReadinessApplyControl(
             readinessResponse.suggested_actions,
-            readinessOffer.chip,
+            applyOffer.chip,
           ) as typeof readinessResponse.suggested_actions,
         };
         try {
@@ -3388,7 +3554,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             llm_calls_used: 0,
             duration_ms: Date.now() - routeStartedAt,
             handler_facts: [],
-            pending_actions: [readinessOffer.pending],
+            pending_actions: [applyOffer.pending],
             priorPendingActions: readinessPriorPendings,
             coaching_state: null,
             userMessage: ingress.message,
@@ -3398,7 +3564,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // A review control without a durable pending would be a dead control.
           // Keep the complete issue explanation, but remove the apply action.
           readinessResponse = readiness.response;
-          readinessOffer = null;
+          applyOffer = null;
           log.warn(
             {
               request_id: requestId,

@@ -160,6 +160,21 @@ export const PRESERVED_INTERVENTION_SOURCES: ReadonlySet<string> = new Set([
 
 const INTERVENTION_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
 
+// ⚠ A SECOND COPY OF `PRESERVED_INTERVENTION_SOURCES` AND
+// `INTERVENTION_CONFIDENCES` WAS REMOVED HERE DURING A REBASE (18 Sep 2026).
+//
+// This branch was 231 commits behind, and `staging` had independently shipped
+// both constants with byte-identical values (`new Set(['cee_hypothesis'])` and
+// `new Set(['high','medium','low'])`) plus an equivalent docblock, 40 lines
+// above. Git merged the two additions without a conflict because they landed at
+// different offsets, so the only signal was `TS2451: Cannot redeclare
+// block-scoped variable` — 4 errors, against a control showing `staging` alone
+// typechecks clean.
+//
+// The surviving copy is STAGING'S. Nothing was reverted: the values are
+// identical, and both docblocks make the same argument — that the carry may
+// only ever NARROW a value's claim, never widen it to user-authored.
+
 /** Raw intervention recovered from any location, pre-encoding. */
 interface RawIntervention {
   /** Model-unit value when already present (0..1). */
