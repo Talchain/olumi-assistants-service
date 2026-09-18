@@ -1,0 +1,120 @@
+name: Graph Evaluator
+
+# WHY THIS WORKFLOW EXISTS
+#
+# `tools/graph-evaluator` had NO CI EXECUTION AT ALL. Both repo-root runner
+# configs exclude `tools/graph-evaluator/**` via STANDALONE_TOOL_EXCLUSIONS
+# (vitest.shared.ts), and their own comments say so in as many words:
+#
+#   "with both root configs excluding it, the tool has NO repo-root CI
+#    execution at all until the dedicated graph-evaluator job lands
+#    (Phase 2 wiring)"
+#
+# That exclusion is CORRECT and stays. It is a PACKAGE BOUNDARY, not a red
+# carve-out: the tool has its own package.json, its own package-lock.json and
+# its own runner, and collecting it from the root configs throws
+# ERR_MODULE_NOT_FOUND on its tool-local imports (gray-matter, commander,
+# csv-stringify...). The missing half was never the exclusion - it was this
+# job. This file is that Phase 2 wiring.
+#
+# What was failing in the dark: `tests/governed-draft-graph.test.ts` pins the
+# exact serving prompt composition, and it currently fails on thirteen source
+# hashes. The pin exists, the pin is correct, the pin is failing, and nobody
+# could see it.
+#
+# ADVISORY, DELIBERATELY. Branch protection on `staging` requires exactly one
+# context - `Lint, TypeCheck, Unit Tests` - so this job cannot block a merge,
+# and the two content steps additionally carry `continue-on-error` so their
+# standing red does not redden the job. NEVER add a standing-red job as a
+# required check (D-58): a red everyone learns to ignore is a broken alarm,
+# which is most of how the tool ended up unobserved in the first place.
+#
+# BUT ADVISORY MUST NOT MEAN SILENT, which is why the last step is NOT
+# continue-on-error. It fails the job when:
+#   - the run could not happen or was vacuous (zero collected tests, no
+#     summary line, a collect shrink against the files on disk); or
+#   - the failing set DRIFTS from scripts/ci/graph-evaluator-known-red.json,
+#     in either direction.
+# So a FOURTEENTH drifted prompt hash REDs this job the day it lands, while
+# the thirteen already recorded stay advisory. As entries are fixed, that
+# file shrinks; when it is empty, delete the two `continue-on-error` lines
+# below and promote this job to a required check.
+
+on:
+  push:
+    branches: [main, staging, feat/**]
+  pull_request:
+    branches: [main, staging]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  graph-evaluator:
+    name: Graph Evaluator (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # LOAD-BEARING. tools/graph-evaluator/src/governed-draft-graph.ts
+          # runs `git merge-base <manifest serving sha> HEAD` and
+          # `git show -s --format=%T <sha>` against the repo root. On a shallow
+          # checkout both return null and the governed verification silently
+          # takes a different path - a wrong answer, not an error. The
+          # observability guard cannot see that; the fetch depth is the fix.
+          fetch-depth: 0
+
+      # TWO INSTALLS, AND BOTH ARE REQUIRED. The tool is a separate package
+      # (npm + its own lockfile), but it is NOT self-contained: it reads
+      # repo-root `src/**` and spawns the repo-root `node_modules/.bin/tsx`
+      # with `cwd: REPO_ROOT`. MEASURED at 16d36c5c with the tool-local install
+      # alone: governed-draft-graph.test.ts reports 15 failed instead of 1,
+      # entirely from ENOENT on the root tsx and an unresolvable
+      # `@talchain/schemas`. The guard asserts both installs landed before it
+      # believes any count.
+      - uses: pnpm/action-setup@v4
+        with:
+          # pnpm 9, matching every other installing job. The 35 dependency
+          # overrides live in package.json, which pnpm >=10 IGNORES with only
+          # a [WARN] - see scripts/ci/assert-pnpm-overrides-readable.mjs.
+          version: 9
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install product dependencies (repo root, pnpm)
+        run: pnpm install --frozen-lockfile
+        env:
+          NPM_PACKAGES_TOKEN: ${{ secrets.NPM_PACKAGES_TOKEN }}
+      - name: Install tool dependencies (tools/graph-evaluator, npm - package boundary)
+        working-directory: tools/graph-evaluator
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck the tool (ADVISORY - standing red, see known-red ratchet)
+        continue-on-error: true
+        working-directory: tools/graph-evaluator
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee "$RUNNER_TEMP/graph-evaluator-typecheck.log"
+
+      - name: Run the tool's tests (ADVISORY - standing red, see known-red ratchet)
+        continue-on-error: true
+        working-directory: tools/graph-evaluator
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/graph-evaluator-tests.log"
+
+      # NOT continue-on-error, ON PURPOSE. This is the whole point of the job:
+      # a test step that silently collects nothing exits 0 and looks exactly
+      # like a passing one. This step reddens on a vacuous run and on any drift
+      # from the recorded known-red set. Run from the repo root (never a
+      # ../../ path) so tests/meta/guard-liveness.test.ts can SEE the
+      # invocation edge and classify this guard honestly.
+      - name: Assert the run was OBSERVED, not vacuous
+        if: always()
+        run: |
+          node scripts/ci/assert-graph-evaluator-observed.mjs \
+            --tests-log "$RUNNER_TEMP/graph-evaluator-tests.log" \
+            --typecheck-log "$RUNNER_TEMP/graph-evaluator-typecheck.log"
