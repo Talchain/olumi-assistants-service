@@ -54,6 +54,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDefaultedAssumptionsDisclosure,
   DEFAULTED_DISCLOSURE_TAIL,
+  MAX_NAMED_DEFAULTED_FACTORS,
   readDefaultedAssumptions,
   readDefaultedAssumptionsFromEnrichment,
 } from '../pick-defaulted-assumptions.js';
@@ -212,6 +213,66 @@ describe('the sentence never claims a factor the payload did not name', () => {
     // complete one is the under-disclosure the cap rule already guards against.
     expect(text).toContain('did not attribute to a named factor');
     expect(text.endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+  });
+
+  /**
+   * ⭐⭐ THE BRANCH WHERE THE TWO NUMBERS CAN VISIBLY DISAGREE — and the reason
+   * this test exists is that a mutant found the hole, not a reading.
+   *
+   * Restoring the defect (subject built from `count`) SURVIVED the first
+   * version of this suite. Every mixed case it held was NAMED, and the named
+   * branch prints labels rather than a number, so it hides the difference by
+   * construction. The count form is reached only when the factors cannot all
+   * be shown — past the naming cap, or unnameable — and until that case sat
+   * beside an engine-level code, nothing here could see `count` being spent as
+   * a factor count. A corpus that cannot reach the branch is not coverage of
+   * it (trap 22: the defect lived in the breadth, not the invariant).
+   */
+  it('the COUNT form spends the factor count, not the evidence count', () => {
+    const signal = readDefaultedAssumptions([
+      FACTOR_ENTRY,
+      FACTOR_ENTRY,
+      FACTOR_ENTRY,
+      FACTOR_ENTRY,
+      CODE_ENTRY_A,
+    ])!;
+    // PRECONDITION: past the naming cap (so the count form is reached) AND
+    // carrying an engine-level code (so the two numbers differ). Without both,
+    // this test cannot discriminate.
+    expect(signal.count).toBe(5);
+    expect(signal.factorCount).toBe(4);
+    expect(signal.named).toHaveLength(MAX_NAMED_DEFAULTED_FACTORS);
+
+    const text = buildDefaultedAssumptionsDisclosure(signal);
+    expect(text).toContain('4 of the factors in your model');
+    expect(text).not.toContain('5 of the factors in your model');
+    expect(text).toContain('which have no value set');
+  });
+
+  /**
+   * The same branch at count 1 — the VERB is the second reader of the number,
+   * and a fix applied to the subject alone would leave it disagreeing.
+   *
+   * ⚠ AUTHORED SHAPE PROBE, said so: an id-shaped `factor_label` identifies a
+   * factor without being showable. The seam is untyped and `sanitiseLabel`
+   * exists precisely because ids arrive on it; no committed capture pairs one
+   * with a code, so the pairing is composed here.
+   */
+  it('the verb agrees with the factor count, not the evidence count', () => {
+    const signal = readDefaultedAssumptions([
+      { factor_label: 'fac_7809def4', source: 'value_defaulted' },
+      CODE_ENTRY_A,
+    ])!;
+    expect(signal.count).toBe(2);
+    expect(signal.factorCount).toBe(1);
+    expect(signal.named).toEqual([]);
+
+    const text = buildDefaultedAssumptionsDisclosure(signal);
+    expect(text).toContain('one of the factors in your model, which has no value set');
+    expect(text).not.toContain('2 of the factors');
+    expect(text).not.toContain('which have no value set');
+    // The id is identified, never printed.
+    expect(text).not.toContain('fac_7809def4');
   });
 
   it('never blames the user, on any permutation', () => {
