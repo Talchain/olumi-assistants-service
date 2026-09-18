@@ -545,6 +545,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // shape no longer matched the FINAL assistant_text at finalise /
         // route egress (lengths + seam only).
         V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
+        // THE COLLAPSE FLOOR (18 Sep 2026) — the egress reached a shapeable
+        // answer and DECLINED to attach the collapse directive, because the
+        // answer is short enough that the deployed UI renders it whole anyway.
+        // Announced rather than silent: `emitted` and `declined_below_floor`
+        // are the TWO outcomes of a REACHED egress, and neither means the
+        // dispatch path was never reached.
+        V5AnswerShapeDeclinedBelowFloor: "v5.answer_shape.declined_below_floor",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
         // Neuro-symbolic B1 (ROADMAP 1.77) — decomposition outcome (log-only).
         V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
@@ -1788,6 +1795,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5AnswerShapeEmitted,
         // Same family — stale-sidecar drop signal; diagnostic-only.
         TelemetryEvents.V5AnswerShapeDroppedStale,
+        // Same family — collapse-floor decline; diagnostic-only. Structured
+        // logs are the operational signal (they carry the dispatch path, so a
+        // dispatch family going dark is visible as an event that STOPS).
+        TelemetryEvents.V5AnswerShapeDeclinedBelowFloor,
         // Repair-tax fix (2026-07-22) — first-pass coercion drift alarm.
         // Diagnostic-only structured logs (reason tag + drop count, no user
         // text); the operational signal is the log-based rate, no Datadog
@@ -2306,6 +2317,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching.run_delta_outcome",
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
+        "v5.answer_shape.declined_below_floor",
         "v5.decision_review.contract_violation",
         "v5.decision_review.prose_fact_violation",
         "v5.decision_review.failed",
