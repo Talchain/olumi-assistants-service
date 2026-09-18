@@ -772,6 +772,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
         V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+        V5RunAnalysisParticipationGuard: "v5.run_analysis.participation_guard",
         V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
         V5RunAnalysisTargetRepair: "v5.run_analysis.target_repair",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
@@ -1714,6 +1715,24 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Track S 0.13c-1 — run_analysis intercept guard summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5RunAnalysisInterceptGuard,
+        // COLLAB Track A — run_analysis participation guard summary
+        // (diagnostic-only, no Datadog metric; redacted excluded/pruned counts
+        // + node IDs, never a label and never a value — the excluded node's
+        // number is exactly what the user kept OUT of the calculation).
+        //
+        // NO MAPPING YET, DELIBERATELY, and the reason is not "later": nothing
+        // can set `analysis_participation` today (the write needs a new
+        // `SystemEventKind` in the shared contract), so a dashboard series
+        // added now would be a flat zero of unknown meaning — indistinguishable
+        // from a broken emit. The mapping to add once the UI write half ships
+        // is a RATIO, not a count: honoured exclusions over honoured + refused,
+        // because a bare count of exclusions tracks how much people are USING
+        // the feature rather than whether it WORKS. The refusal reasons
+        // (`goal_node` / `option_intervention_target` / `submitted_option`)
+        // want a separate series split by reason — a rising one means the UI is
+        // offering the gesture where CEE refuses it, which is a product defect,
+        // not a usage signal, and folding it into the ratio hides it.
+        TelemetryEvents.V5RunAnalysisParticipationGuard,
         // ROADMAP 2.229 fix 4 — deterministic imperative re-run pre-route.
         // Diagnostic-only; the structured log is the operational signal (it is
         // the only way a DECLINE is visible at all).
@@ -2471,6 +2490,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.run_analysis.imperative_pre_route",
         "v5.run_analysis.target_repair",
         "v5.run_analysis.intercept_guard",
+        // COLLAB Track A — the participation guard's summary at the analysis
+        // boundary. Deliberate frozen-registry addition per the registry
+        // discipline: purely ADDITIVE (no existing name renamed or removed, so
+        // no dashboard series ends), diagnostic-only, and listed in
+        // `debugOnlyEvents` above with the mapping to add once a dashboard can
+        // meaningfully consume it.
+        "v5.run_analysis.participation_guard",
         "v5.run_analysis.options_scaffolded",
         "v5.run_analysis.constraint_unevaluated",
         "v5.run_analysis.constraint_identity_unresolved",
