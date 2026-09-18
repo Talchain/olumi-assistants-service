@@ -3457,7 +3457,41 @@ function projectOnce(
         // lets SAFETY 2 refuse a £ limit welded to a %-measured factor. The
         // refuted earlier attempt BORROWED this from a cited figure; this takes
         // only what the model said, and still earns no `extractionType`.
-        node.data = { value: claim.value, ...(claim.unit ? { unit: claim.unit } : {}) };
+        // ⛔⛔ `extractionType: "inferred"` IS LOAD-BEARING, AND ITS ABSENCE WAS A
+        // FALSE AUTHORSHIP CLAIM. The comment above says this value "earns no
+        // `extractionType`", meaning it should read as the machine's. The
+        // OPPOSITE happened: `transforms/schema-v3.ts:366` resolves an ABSENT
+        // extractionType to `brief_extraction`, which
+        // `graph-readiness/obligation-provenance.ts:145` maps to **user_stated**.
+        // So every value the MODEL added was counted as the USER's.
+        //
+        // ⚠ AND IT IS NOT CosMETIC — it moves a product decision. Measured by an
+        // adversarial review on BOTH live v202 draws: one levelled material
+        // risk/outcome flips `semanticQualitySufficient` and takes the readiness
+        // mode from `quantified_provisional` ("Olumi cannot name a leader,
+        // everything here is its own estimate") to `comparative_leader` — naming
+        // a leader on a number Olumi invented. That is precisely the harm that
+        // gate exists to prevent.
+        //
+        // ⭐ THE CORRECT VALUE IS NOT A JUDGEMENT CALL — IT IS THE GRAMMAR'S OWN
+        // DEFINITION. `claims` is "one entry for each thing YOU are adding that
+        // the user did not say" (instruction.ts). A claim-projected value is the
+        // model's, by construction. `stated_items` are the user's and keep
+        // `brief_extraction`, which is true of them.
+        //
+        // ⚠ `raw_value` MOVED CARRIER TOO, and it was silently dropped: this
+        // wrote it to `observed_state.raw_value` while `schema-v3.ts:405` reads
+        // `node.data.raw_value`. So a risk levelled `7` for "7% churn" reached
+        // the wire as a bare `7` on a kind PLoT normalises to [0,1], with the
+        // corroborating magnitude gone and PLoT's domain gate keyed on the
+        // CONSTRAINT's threshold rather than the node's level — nothing checked
+        // it. Written to both carriers, as the file already does elsewhere.
+        node.data = {
+          value: claim.value,
+          raw_value: claim.value,
+          extractionType: "inferred",
+          ...(claim.unit ? { unit: claim.unit } : {}),
+        };
         node.observed_state = { value: claim.value, raw_value: claim.value };
       } else if (claim.unit !== undefined) {
         // ⛔⛔ A UNIT WITHOUT A LEVEL, AND THIS IS THE COMMON CASE — the branch

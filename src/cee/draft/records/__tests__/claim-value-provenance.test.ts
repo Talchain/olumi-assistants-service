@@ -28,7 +28,9 @@
  *
  * ⭐ SO THE CONTRACT THIS FILE PINS IS THE NARROW ONE: the number is recorded,
  * `raw_value` preserves it, and NOTHING claims the user authored it. No
- * `extractionType` means the safe `ai_inferred`; no unit is borrowed from a
+ * `extractionType` was believed to mean the safe `ai_inferred` — it does NOT,
+ * it resolves to `brief_extraction`/user_stated, so the value now says
+ * `inferred` explicitly; no unit is borrowed from a
  * figure whose subject was never established. That deliberately does not lift a
  * user-authorship permission via an inferred value.
  */
@@ -72,7 +74,16 @@ describe("P1 — the number is recorded, and it is recorded as OURS", () => {
 
   it("P1b and NOTHING claims the user authored it", () => {
     const n = nodeBy(records({ basis: [1], value: 49 }), "Pro Plan Monthly Price");
-    expect(n?.data?.extractionType, "no extractionType means the safe ai_inferred").toBeUndefined();
+    // ⛔ THIS ASSERTION WAS BACKWARDS AND SO WAS ITS MESSAGE. It read
+    // `.toBeUndefined()` on the belief that "no extractionType means the safe
+    // ai_inferred". An adversarial review proved the opposite by execution:
+    // `transforms/schema-v3.ts:366` resolves an ABSENT extractionType to
+    // `brief_extraction`, which `obligation-provenance.ts:145` maps to
+    // **user_stated**. So the absence this test protected was a FALSE AUTHORSHIP
+    // CLAIM, and on both live v202 draws it flipped the readiness mode from
+    // `quantified_provisional` to `comparative_leader` — naming a leader on a
+    // number the model invented.
+    expect(n?.data?.extractionType, "the model's own value must say so: inferred").toBe("inferred");
     expect(n?.provenance?.provenance_class).toBe("ai_inferred");
   });
 
@@ -91,20 +102,18 @@ describe("P2 — the reviewer's two reproductions, as contrasts", () => {
   it("P2a SAME NUMBER, DIFFERENT SUBJECT: a subscriber count citing a £49 PRICE earns nothing", () => {
     const n = nodeBy(records({ basis: [1], value: 49 }, "Current Subscriber Count"), "Current Subscriber Count");
     expect(n?.observed_state?.raw_value, "the model asserted it, so it is recorded").toBe(49);
-    expect(
-      n?.data?.extractionType,
+    expect(n?.data?.extractionType,
       "but 49 subscribers is not £49 a month — numeric equality proves no subject",
-    ).toBeUndefined();
+    ).toBe("inferred");
     expect(n?.data?.unit, "and £/month must not be welded to a headcount").toBeUndefined();
   });
 
   it("P2b SAME NUMBER, DIFFERENT ROLE: a CURRENT level citing a PROPOSED 59 earns nothing", () => {
     const n = nodeBy(records({ basis: [2], value: 59 }), "Pro Plan Monthly Price");
     expect(n?.observed_state?.raw_value).toBe(59);
-    expect(
-      n?.data?.extractionType,
+    expect(n?.data?.extractionType,
       "'we are proposing £59' says what it WOULD be, never what it IS",
-    ).toBeUndefined();
+    ).toBe("inferred");
   });
 
   it("P2c MEANINGFUL POSITIVE: even the same subject AND the same number earns nothing today", () => {
@@ -114,7 +123,7 @@ describe("P2 — the reviewer's two reproductions, as contrasts", () => {
     // an attested relationship exists, THIS is the case that must flip, and a
     // reviewer can find it here rather than inferring it from an absence.
     const n = nodeBy(records({ basis: [1], value: 49 }), "Pro Plan Monthly Price");
-    expect(n?.data?.extractionType).toBeUndefined();
+    expect(n?.data?.extractionType).toBe("inferred");
   });
 });
 
