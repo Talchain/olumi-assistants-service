@@ -1362,6 +1362,29 @@ export const TelemetryEvents = {
   //   derived_text_length: number
   V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
 
+  // THE COLLAPSE FLOOR (18 Sep 2026). The egress reached a shapeable answer and
+  // DECLINED to attach the `_answer_shape` wire directive, because the answer is
+  // short enough that the deployed UI renders it whole of its own accord
+  // (DecisionGuideAI `CLAMP_CHAR_THRESHOLD`). See
+  // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS in `orchestrator-v5/routing/answer-shape.ts`.
+  //
+  // ⭐ WHY THIS EVENT EXISTS RATHER THAN SILENCE. Four prior F1 fixes each
+  // shipped believing the egress synthesiser ran on a dispatch path where it
+  // never did, and each passed its own tests. The guard against that was
+  // `v5.answer_shape.emitted` — which is now absent on every SHORT answer, for
+  // a completely different reason. An absent event that means two different
+  // things is how the next silent miss goes unnoticed, so the decline is
+  // announced rather than inferred: the two outcomes of a REACHED egress are
+  // `emitted` and `declined_below_floor`, and NEITHER means the path was never
+  // reached.
+  //
+  // Lengths + seam only, never content (PII discipline).
+  //   dispatch_path: 'route_egress_model_shape' | 'route_egress_synthesised'
+  //   final_text_length: number   (the text the user receives, in full)
+  //   floor_chars: number         (the threshold in force, so a moved floor is
+  //                                visible in the telemetry without a deploy diff)
+  V5AnswerShapeDeclinedBelowFloor: "v5.answer_shape.declined_below_floor",
+
   // V5 Coaching State Spine — Stage 2B-1b. Emitted once per turn AFTER the turn's
   // state is successfully persisted (post-append_turn_atomic). Same privacy
   // contract as V5CoachingStateDerived: correlation IDs + counts / closed-enum

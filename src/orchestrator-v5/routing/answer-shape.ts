@@ -44,6 +44,82 @@ import { z } from 'zod';
 export const ANSWER_SHAPE_MAX_BULLETS = 3;
 
 /**
+ * ⭐ THE COLLAPSE FLOOR — how long an answer must be before CEE is entitled to
+ * tell the UI to hide most of it.
+ *
+ * ── THE DEFECT THIS EXISTS TO CLOSE ──────────────────────────────────────
+ * MEASURED ON THE LIVE WIRE, 14 Sep 2026, CEE staging `78515b95`. A real
+ * pre-mortem turn:
+ *
+ *     assistant_text          1,372 chars   <- the whole answer, three scenarios
+ *     _answer_shape.headline    138 chars   <- ONE sentence
+ *     _answer_shape.bullets     874 chars
+ *     _answer_shape.detail      360 chars
+ *
+ * The founder saw 138 characters and a "Show more". His words: useful output
+ * "is being hidden". That is the opposite of what a reasoning tool is for —
+ * the user cannot think with material the product is sitting on.
+ *
+ * ── WHY A FLOOR AND NOT AN OFF SWITCH ────────────────────────────────────
+ * The sidecar is a WIRE DIRECTIVE. `MessageBubble.tsx` reads it as
+ * `showStructuredAnswer = !isUser && !isStreaming && Boolean(message.answerShape)`
+ * and then renders `<AnswerBody>` — headline + <=3 bullets + a Show-more —
+ * INSTEAD of the free-text body. So whenever CEE attaches the sidecar, CEE,
+ * not the UI, has decided to collapse.
+ *
+ * But the UI ALREADY HAS a disclosure rule of its own, and it is a better one:
+ *
+ *     DecisionGuideAI `src/canvas/conversation/MessageBubble.tsx`
+ *     CLAMP_CHAR_THRESHOLD = 3000
+ *     findNaturalTruncation(text) returns null when text.length <= 3000
+ *
+ * DERIVED, NOT INHERITED: read at the DEPLOYED staging bundle's own commit —
+ * `https://staging--olumi.netlify.app/version.json` returned
+ * `3b7e5d4c050caa75ad4506866109ce76567ac506` on 18 Sep 2026, and the source at
+ * that exact SHA carries the two lines quoted above. This is not a repo read
+ * generalised to the deployment; it is the deployment's own commit.
+ *
+ * So below 3,000 characters the UI renders the answer WHOLE of its own accord.
+ * Every sidecar CEE attaches below that floor replaces "the user reads all of
+ * it" with "the user reads one sentence". Above it the UI would clamp anyway,
+ * and the structured headline/bullets/detail view is the better of the two
+ * clamps — that is where progressive disclosure earns its place, and it is
+ * kept.
+ *
+ * ⚠ THIS IS A DELIBERATE CROSS-SERVICE COUPLING, and the drift is benign in
+ * BOTH directions — stated rather than argued away (CLAUDE.md trap 12: a
+ * hand-maintained mirror must be shown to fail safe, since CEE cannot import a
+ * UI constant):
+ *   - UI threshold moves DOWN: answers between the two are clamped by the UI's
+ *     own truncation instead of by the sidecar. Still far more visible text
+ *     than a 138-char headline. No lie, no hidden substance.
+ *   - UI threshold moves UP: answers between the two render whole. That is the
+ *     direction this change is FOR.
+ * There is no drift that returns the measured defect. That is why a mirrored
+ * constant is acceptable here and a fail-loud guard is not required.
+ *
+ * ⛔ NOT TOUCHED: `AnswerShapeSchema`, and the tool property that makes the
+ * MODEL write headline-first. That authoring constraint is what stops a wall of
+ * prose arriving in the first place and it is doing useful work. Only the WIRE
+ * DIRECTIVE — "hide everything after sentence one" — is now conditional.
+ */
+export const ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS = 3000;
+
+/**
+ * True when the answer the user is about to receive is long enough that the
+ * deployed UI would clamp it anyway, so directing it to collapse costs the
+ * user nothing they could otherwise have read.
+ *
+ * ⚠ CALL THIS WITH THE TEXT THE USER ACTUALLY RECEIVES — i.e.
+ * `deriveAnswerTextFromShape(shape)`, the value `assistant_text` will hold on
+ * the wire — never with a pre-reflow draft. The UI's clamp measures the
+ * rendered string, so anything else answers a different question.
+ */
+export function warrantsProgressiveDisclosure(finalAssistantText: string): boolean {
+  return finalAssistantText.length > ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS;
+}
+
+/**
  * "Exactly one sentence" — pragmatic, decimal-safe check.
  *
  * An INTERNAL sentence boundary is a terminator run (`.` `!` `?`, optionally
