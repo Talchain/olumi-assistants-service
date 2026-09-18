@@ -111,6 +111,10 @@ import {
   unsetOptionEffectFactorIds,
   type UnsetOptionEffect,
 } from '../../coaching/unset-option-effect-disclosure.js';
+// The run-level participation disclosure. Consumes the participation guard's
+// OWN return value — see the module docblock for why neither this handler nor
+// the UI may re-derive either count from graph shape.
+import { buildAnalysisParticipationDisclosure } from '../../coaching/analysis-participation-disclosure.js';
 import {
   gateAnalysableOptions,
   PLOT_MIN_COMPARISON_OPTIONS,
@@ -1982,6 +1986,39 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // is an integer count of pairs.
     const unsetOptionEffectDisclosure =
       buildUnsetOptionEffectDisclosure(unsetOptionEffects);
+    // ⭐ THE PARTICIPATION DISCLOSURE, LAST OF THE SIX — and the reason it
+    // exists is the EDGES, not the nodes.
+    //
+    // §2.7 above handed PLoT a graph with every `'retained_excluded'` node
+    // withheld AND EVERY EDGE INCIDENT TO ONE withheld with it (PLoT's
+    // preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for a dangling
+    // endpoint, so the edges cannot stay). The UI already marks the NODE
+    // ("Unfinished — not included in analysis."), so the user knows that one
+    // node was left out. NOTHING told them the RUN excluded anything, and
+    // nothing told them CONNECTIONS went with it — so a user who marks one
+    // factor unfinished can lose several links they never marked, while every
+    // number below stays internally consistent with a graph they are not
+    // looking at. They cannot detect that by reading carefully; only a sentence
+    // reaches it.
+    //
+    // ⛔ BOTH NUMBERS COME FROM `participation`, THE GUARD'S OWN RETURN VALUE,
+    // and are never re-derived here or at the UI. The exclusion decision is
+    // CEE's; two derivations of one fact drift, and the drift is invisible
+    // because both look plausible (trap 21). The builder's parameter type is
+    // bolted to the guard's result type so that binding is structural.
+    //
+    // ⚠ DELIBERATELY *NOT* GATED ON `headline !== null`, for the same reason as
+    // the unset-option-effect tail directly above: it names no option, asserts
+    // no ranking and implies no leader, so it is honest on a withheld turn —
+    // and a withheld turn computed on a reduced model is exactly where the fact
+    // matters most. Its slot is registered in BOTH branches of the egress
+    // allowlist (`analysis-result-headline.ts`) for that reason.
+    //
+    // ⚠ NO TELEMETRY EMIT HERE, deliberately. The guard ALREADY emits
+    // `V5RunAnalysisParticipationGuard` with both counts at the moment it
+    // prunes; a second event on the same fact would give two authorities one
+    // number, which is the defect this disclosure is closing one level down.
+    const participationDisclosure = buildAnalysisParticipationDisclosure(participation);
     // ⚠ NO TELEMETRY EMIT HERE, deliberately. The obvious move was to reuse
     // `V5RunAnalysisOptionsScaffolded`, and it is wrong: that event means "the
     // scaffold filled or excluded a WHOLLY unvalued option", and this is the
@@ -1990,7 +2027,7 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // (trap 21), and it would corrupt the scaffold rate every dashboard reads.
     // A dedicated event is a registered-telemetry change with its own
     // validation gate; it belongs in its own PR, not bundled here.
-    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`;
+    const summary = `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}${participationDisclosure}`;
 
     // V5 link-safe response floor: when the deterministic headline builder
     // picks Case-E ("{label} currently leads.") because stronger cases

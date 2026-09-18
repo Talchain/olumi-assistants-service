@@ -132,6 +132,17 @@ import {
   UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
   UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS,
 } from './unset-option-effect-disclosure.js';
+// The run-level PARTICIPATION disclosure rides LAST. It is registered on the
+// withheld branch for the SAME reason as the tail above and by the SAME test:
+// it names no option, asserts no leader and makes no comparative claim — it
+// states only which parts of the user's own model the calculation did not
+// receive, and how many connections went with them. That is true on a withheld
+// turn, and a user whose model was silently reduced is owed it there most of
+// all.
+import {
+  ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC,
+  ANALYSIS_PARTICIPATION_DISCLOSURE_MAX_CHARS,
+} from './analysis-participation-disclosure.js';
 // P1-3 (derive, don't mirror): the defence-in-depth content rules live in
 // their own leaf module so the scaffold-disclosure BUILDER validates its
 // composed suffix against the SAME functions this egress allowlist applies
@@ -357,7 +368,14 @@ export const MAX_ASSISTANT_TEXT_CHARS =
   // incomplete candidate set, contradict the stated objective AND have run past
   // an unset option effect. Same rule: budgeted from the builder's own worst
   // case, never hand-estimated.
-  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS;
+  UNSET_OPTION_EFFECT_DISCLOSURE_MAX_CHARS +
+  // The participation disclosure rides LAST (matching the handler's append
+  // order) and can co-occur with all five above: a run can hold a status quo,
+  // carry an unevaluated constraint, rank an incomplete candidate set,
+  // contradict the stated objective, have run past an unset option effect AND
+  // have been computed on a model the user had excluded parts of. Same rule:
+  // budgeted from the builder's own worst case, never hand-estimated.
+  ANALYSIS_PARTICIPATION_DISCLOSURE_MAX_CHARS;
 
 /**
  * Minimum win_probability for the leading option before the headline may emit a
@@ -2198,7 +2216,7 @@ const REDUCED_SAMPLES_RE_SRC = escapeForRegex(REDUCED_SAMPLES_SUFFIX);
 // `${headline ?? template}${scaffoldDisclosure}${constraintGapDisclosure}${
 // intakeDisclosure}${objectiveContradictionDisclosure}${unsetOptionEffectDisclosure}`
 // in the run_analysis handler.
-const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?`;
+const TAIL_PATTERN = `(?:${NOT_ROBUST_RE_SRC})?(?:${ELIMINATED_RE_SRC})?(?:${REDUCED_SAMPLES_RE_SRC})?${STATUS_SUFFIX_PATTERN}(?:${SCAFFOLD_ANY_DISCLOSURE_RE_SRC})?(?:${CONSTRAINT_GAP_DISCLOSURE_RE_SRC})?(?:${INTAKE_OPTION_DISCLOSURE_RE_SRC})?(?:${OBJECTIVE_CONTRADICTION_RE_SRC})?(?:${UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC})?(?:${ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC})?`;
 
 /** One disclosure family admitted on the locked-template (withheld) branch. */
 export interface TemplateSuffixDisclosureGrammar {
@@ -2285,6 +2303,24 @@ export const TEMPLATE_SUFFIX_DISCLOSURE_GRAMMARS: readonly TemplateSuffixDisclos
   {
     name: 'UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC',
     source: UNSET_OPTION_EFFECT_DISCLOSURE_RE_SRC,
+  },
+  // ⭐ REGISTERED, NOT EXCLUDED, and the test is the one stated above: does the
+  // tail make a claim the withhold just denied? This one states which parts of
+  // the user's own model the calculation did not receive and how many of their
+  // connections went with them. No option is named, no ranking is asserted, no
+  // leader is implied — so `template + tail` is a composition the handler can
+  // and does emit, and a withheld turn computed on a reduced model is exactly
+  // the turn where the fact matters most.
+  //
+  // ⚠ REGISTERING IT HERE IS ALSO WHAT KEEPS IT SALVAGED. Moving this entry to
+  // the exclusion list with a plausible reason leaves the completeness guard's
+  // union assertion GREEN while the withheld branch stops admitting it and the
+  // confirmation salvage stops rescuing it — green, and wrong. That half is
+  // pinned per-family in
+  // `tools/handlers/__tests__/run-analysis-participation-disclosure-wiring.test.ts`.
+  {
+    name: 'ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC',
+    source: ANALYSIS_PARTICIPATION_DISCLOSURE_RE_SRC,
   },
 ];
 
