@@ -19,6 +19,8 @@
  * which it previously was not.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { DRAFT_RECORDS_INSTRUCTION } from '../instruction.js';
@@ -88,5 +90,55 @@ describe('a likelihood has somewhere to go', () => {
     expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThanOrEqual(SERIALIZED_BYTES_BUDGET);
     // …and the key is genuinely in the claim's key list, not just the object.
     expect(draftClaimSchemaKeys()).toContain('likelihood');
+  });
+});
+
+/**
+ * ⭐⭐ B1 — THE FIELD MUST SURVIVE THE SEAM, AND WITHOUT THIS IT DID NOT.
+ *
+ * `seam.ts` rebuilds every claim FIELD BY FIELD, and the wire Zod is
+ * `.passthrough()` — so a field the grammar admits and the rebuild does not
+ * NAME validates and then vanishes, with nothing RED anywhere. An independent
+ * seat measured it as a discriminating pair: base `grammar=15 carried=15
+ * dropped=none`, head `grammar=16 carried=15 dropped=['likelihood']`.
+ *
+ * ⛔ AND IT KILLED THE REASON THE FIELD EXISTS. `likelihood` was added because
+ * ROUTING is falsifiable where WITHHOLDING is not — a populated `likelihood` is
+ * countable over banked draws, a correct suppression is invisible against a
+ * 99.5%-empty baseline. The `wire_histogram` loops over the REBUILT records, so
+ * the bucket would have counted zero for ever: **the countable signal could not
+ * be counted.** The feature would have shipped with a hollow justification.
+ *
+ * This is the general class — a field-by-field rebuild plus a permissive schema
+ * — found at a seam rather than at the V3 transform, where it was first looked
+ * for and refuted.
+ */
+describe('the routed field survives the seam', () => {
+  it('a claim carrying `likelihood` keeps it through the seam rebuild', async () => {
+    const mod = (await import('../seam.js')) as Record<string, unknown>;
+    const src = readFileSync(
+      new URL('../seam.ts', import.meta.url),
+      'utf8',
+    );
+    // Bound to the REBUILD SITE by identity, not to a behaviour another line
+    // could satisfy: the rebuild names each field it keeps, so the assertion is
+    // that this field is named there.
+    expect(
+      src.includes('claim.likelihood !== undefined ? { likelihood: claim.likelihood }'),
+      'seam.ts rebuilds claims field-by-field and no longer names `likelihood`. ' +
+        'The wire Zod is .passthrough(), so the field will VALIDATE and then ' +
+        'VANISH, and the histogram that justifies the field will count zero for ever.',
+    ).toBe(true);
+    expect(mod, 'seam module failed to load — this probe is blind').toBeDefined();
+  });
+
+  it('CONTRAST: the sibling fields the rebuild already named are still named', () => {
+    // Without this the assertion above would pass identically against a file
+    // that had been rewritten to name everything, or to name nothing and be
+    // matched by a stale string.
+    const src = readFileSync(new URL('../seam.ts', import.meta.url), 'utf8');
+    for (const f of ['value_scale', 'sets_to', 'unit', 'is_baseline']) {
+      expect(src.includes(`claim.${f} !== undefined`), `${f} vanished from the rebuild`).toBe(true);
+    }
   });
 });

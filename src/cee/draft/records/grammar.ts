@@ -560,7 +560,10 @@ export interface DraftInferenceClaim {
    * THE SAME OBSERVATION, against a baseline that dominates the signal 200:1.
    * No corpus and no rewording fixes that — it is the shape of the ask.
    *
-   * Routing fixes it twice over: models route more reliably than they withhold,
+   * Routing fixes it twice over: models route more reliably than they withhold (⚠ ASSUMPTION — ASSERTED, NOT
+   * EVIDENCED. No citation exists for it anywhere in this repo; it is a shared
+   * intuition between two sessions and nothing more. It must NOT be read as
+   * standing beside the falsifiability argument below, which IS evidenced.),
    * and a routed value is a POSITIVE signal countable over banked draws — a
    * population count, not a model run.
    *

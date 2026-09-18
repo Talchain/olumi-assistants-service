@@ -345,6 +345,19 @@ the number ANSWERS: "how big is it right now" is a level and goes in \`value\`;
 would be checked against a probability.
 Put the number somewhere. A risk carrying a number you file in neither field is
 the number lost.
+\`likelihood\` IS ALWAYS A PROBABILITY BETWEEN 0 AND 1. Never a percentage.
+"30%" is \`likelihood: 0.3\`; "4%" is \`likelihood: 0.04\`; "one in five" is
+\`likelihood: 0.2\`. This is NOT the convention \`value\` uses — under \`unit: "%"\`
+a \`value\` of 4 means four percent. The same string "4%" is therefore
+\`likelihood: 0.04\` in one field and \`value: 4, unit: "%"\` in the other, because
+they are different quantities: one is a chance, the other is a level on a scale
+that happens to be percent. Do not carry the convention across.
+Odds and frequencies are NOT likelihoods either. "twice a quarter" is a RATE,
+not a chance, and has no \`likelihood\`; "2 to 1 against" is odds — convert it or
+leave the field out, never write \`2\`.
+And a measure whose dimension genuinely IS a probability — a default rate
+running at 3%, a conversion rate — is a \`value\`, not a \`likelihood\`: it is the
+level something SITS AT today, not the chance of an event.
 Examples, and note that the unit does not decide it:
 - "Vendor slippage: 30%" — a chance. \`likelihood: 0.3\`, no \`value\`.
 - "Contract loss: 4%" — a chance. \`likelihood: 0.04\`, no \`value\`.

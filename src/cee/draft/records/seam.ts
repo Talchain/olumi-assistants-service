@@ -282,6 +282,21 @@ export function projectDraftRecords(
       ...(claim.sets_to !== undefined ? { sets_to: claim.sets_to } : {}),
       ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
       ...(claim.value_scale !== undefined ? { value_scale: claim.value_scale } : {}),
+      // ⭐⭐ CARRIED, AND ITS ABSENCE WAS THE WHOLE POINT OF THE FIELD BEING LOST.
+      //
+      // This rebuild names every field it keeps, and the wire Zod is
+      // `.passthrough()` — so a field the model emits and this line does not
+      // name VALIDATES and then VANISHES. Nothing REDs. Measured as a
+      // discriminating pair before the fix: base `grammar=15 carried=15
+      // dropped=none`, head `grammar=16 carried=15 dropped=['likelihood']`.
+      //
+      // ⚠ AND IT KILLED THE REASON `likelihood` EXISTS. The field was added
+      // because ROUTING is falsifiable and WITHHOLDING is not — a populated
+      // `likelihood` is countable over banked draws, whereas a correct
+      // suppression is invisible against a 99.5%-empty baseline. The histogram
+      // below loops over THESE REBUILT RECORDS, so without this line the bucket
+      // counts zero for ever and the countable signal cannot be counted.
+      ...(claim.likelihood !== undefined ? { likelihood: claim.likelihood } : {}),
       ...(claim.is_baseline !== undefined ? { is_baseline: claim.is_baseline } : {}),
     })),
   };

@@ -761,8 +761,8 @@ const SUPERSEDED_V19_INSTRUCTION_BYTES = 18083;
  * pause.
  */
 const PREREGISTERED_V20_INSTRUCTION_SHA256 =
-  "7765b3cf88bd50a0079d7c041346b34e1ebbdab625490221d6a03f1e5bd3f181";
-const PREREGISTERED_V20_INSTRUCTION_BYTES = 19801;
+  "d28eedb9f44d5c2ba83c0cd4e2c3ada4ce2287b62d9185ebd2c5d70437349f5d";
+const PREREGISTERED_V20_INSTRUCTION_BYTES = 20736;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -1087,7 +1087,21 @@ describe("the draft records instruction is the measured artefact", () => {
       // licence. The whole of the +666 bytes.
       "5725ccb7ee993820b3a9c44009272732c0119bc8604a6c254bbb6409fa4c14d6",
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(13868);
+    // ⚠ RE-PINNED with v20.2. The three pins are ARITHMETICALLY RELATED and the
+    // relationship is the check: SHAPE + 1 (the joining newline) + CONNECT must
+    // equal the total, minus 1 for the `.trimEnd()`. Before this, 13868 + 1 +
+    // 4881 = 18750 against a pinned total of 19801 — a 1,052-byte shortfall that
+    // was EXACTLY the likelihood paragraph, so the sub-pin was v20.0's shape half
+    // left behind when the total was updated. A sub-pin that does not add up is a
+    // pin that stopped describing the artefact it names.
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(15855);
+    expect(
+      Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8") +
+        1 +
+        Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
+        1,
+      "the three pins no longer add up — one of them was updated without the others",
+    ).toBe(PREREGISTERED_V20_INSTRUCTION_BYTES);
     // SUPERSEDED — v19's shape half, the bytes #1562 shipped and the bytes every
     // measurement taken after 2026-09-17T23:39Z belongs to.
     //
