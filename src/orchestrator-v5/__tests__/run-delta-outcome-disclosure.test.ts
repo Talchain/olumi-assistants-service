@@ -421,6 +421,36 @@ describe('run_delta absence reason reaches the client', () => {
     ).toThrow();
   });
 
+  it('SURVIVES RE-FINALISE: the debug surfaces spread the body and finalise again', () => {
+    // `route-v2.ts`'s `sendFinalised200` re-finalises once per enabled debug
+    // surface (`_grounded_selection`, `_prompt_capture`, …), spreading the
+    // previous wire body and passing the SAME ctx. That path re-stamps
+    // `analysis_ready` wholesale from `ctx.analysisReady` — which does NOT carry
+    // this key — so the stamp is only safe because `attachRunDelta` runs AFTER
+    // it on every pass. Pin the idempotence rather than reason about it: if the
+    // stamp ever moves above the `analysis_ready` rebuild, the key goes dark
+    // under any debug posture and nothing else in the suite would notice.
+    const first = finalise(BOUND_SINGLE, BOUND_SINGLE[0]!, CARRIER);
+    expect(wireReason(first)).toBe('insufficient_runs');
+
+    const reFinalised = finaliseV5Response(
+      { ...first, _grounded_selection: { any: 'sidecar' } } as unknown as OlumiResponse,
+      {
+        scenarioId: SCENARIO_ID,
+        priorFacts: BOUND_SINGLE,
+        mayNameLeadingOption: true,
+        analysisReady: CARRIER,
+        freshness: deriveAnalysisFreshness(
+          [BOUND_SINGLE[0] as RunAnalysisHandlerFact],
+          (BOUND_SINGLE[0] as unknown as { result: { graph_hash_at_run: string } }).result
+            .graph_hash_at_run,
+        ),
+      },
+    );
+
+    expect(wireReason(reFinalised)).toBe('insufficient_runs');
+  });
+
   it('LEAK GUARD: the wire key carries a reason CODE and nothing else', () => {
     const SECRET = 'acme_q4_redundancy_programme';
     const leaky = structuredClone(BOUND_SINGLE[0]!) as unknown as {
