@@ -285,6 +285,29 @@ describe("the live node/graph contract, adjudicated", () => {
   const scan = scanSourceTokens(files);
   const report = adjudicate(runDetectors(deriveSurfaces(), scan.occurrences), DECISIONS);
 
+  it("⭐ adjudicate reports BOTH directions BY CONSTRUCTION, not because today is clean", () => {
+    // Without this, the two tests below are a guard agreeing with itself: an
+    // `adjudicate` that returned `stale: []` unconditionally would satisfy
+    // "every decision still reproduces" forever, on a ledger full of rot. Ask
+    // what would have to be true for a test to pass while the property fails,
+    // then write THAT case.
+    const r = adjudicate(
+      [{ detector: "orphan", id: "orphan:present", detail: "d" }],
+      [{ id: "orphan:absent", status: "ACCEPTED", decision: "its finding is gone" }],
+    );
+    expect(r.unadjudicated.map((f) => f.id)).toEqual(["orphan:present"]);
+    expect(r.stale.map((d) => d.id)).toEqual(["orphan:absent"]);
+    // …and a matched pair is neither, and lands in the right status bucket.
+    const matched = adjudicate(
+      [{ detector: "orphan", id: "orphan:x", detail: "d" }],
+      [{ id: "orphan:x", status: "OPEN", decision: "nobody has settled this" }],
+    );
+    expect(matched.unadjudicated).toEqual([]);
+    expect(matched.stale).toEqual([]);
+    expect(matched.open.map((d) => d.id)).toEqual(["orphan:x"]);
+    expect(matched.accepted).toEqual([]);
+  });
+
   it("every finding has a recorded decision (the ledger cannot go short)", () => {
     expect(report.unadjudicated.map((f) => `${f.id} — ${f.detail}`)).toEqual([]);
   });
