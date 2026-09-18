@@ -148,6 +148,23 @@ describe('the count separates EVIDENCE from FACTORS', () => {
     expect(signal.named).toEqual(['Market Conditions']);
   });
 
+  /**
+   * ⚠ AUTHORED, AND SAID SO. The seam is `z.record` — untyped — so the contract
+   * admits a blank label, and a corpus is only evidence over the classes it
+   * contains (trap 13d). This entry is a SHAPE PROBE over what the seam admits,
+   * not a claim that the producer emits it. A blank label names no factor, and
+   * counting it as one would print "one of the factors in your model" with
+   * nothing behind it.
+   */
+  it('a blank label names no factor either', () => {
+    const signal = readDefaultedAssumptions([{ factor_label: '   ', source: 'value_defaulted' }])!;
+    expect(signal.count).toBe(1);
+    expect(signal.factorCount).toBe(0);
+    expect(buildDefaultedAssumptionsDisclosure(signal)).not.toContain(
+      'of the factors in your model',
+    );
+  });
+
   it('reads the same verdict through the producer path, not just the array', () => {
     const enrichment = readJson(
       '../../compose/__tests__/fixtures/analysis-result-live-2026-09-03.json',
