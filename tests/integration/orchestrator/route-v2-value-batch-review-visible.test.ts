@@ -350,4 +350,36 @@ describe('POST /orchestrate/v2/turn — the value batch shows its numbers before
       expect(['option', 'factor']).toContain(ref.kind);
     }
   });
+
+  /**
+   * ⭐ THE GUARD THAT WOULD DELETE THIS CARD, RUN AGAINST THE CARD.
+   *
+   * `scanProse` in `compose/phase3-blocks.ts` DROPS a Phase-3 block whose prose
+   * carries a leading-decimal probability. A correction worth inheriting: the
+   * obvious claim "a 0-1 value rendered as a percentage can never trip it" is
+   * FALSE — fuzzed over 300,000 values in [0, 1] with this same regex, 2,958
+   * hit, every one a value under 0.01 rendering `0.001%`. So the safety here is
+   * NOT that the formatter is safe; it is that the block body carries no value
+   * at all, only integer counts. This pins that, and REDs the day a value is
+   * moved into the body.
+   *
+   * The regex is IMPORTED, never restated — a copy would drift from the guard
+   * it claims to reproduce (trap 12).
+   */
+  it('⭐ the coaching body carries NO raw decimal — the guard that would drop it, run against it', async () => {
+    const { RAW_DECIMAL_RE } = await import(
+      '../../../src/orchestrator-v5/compose/forbidden-user-facing-phrases.js'
+    );
+    // POSITIVE CONTROL FIRST: an absence assertion whose instrument is blind
+    // passes by testing nothing (trap 13).
+    expect(RAW_DECIMAL_RE.test('the value is 0.4 of the top')).toBe(true);
+
+    const body = await readinessTurn();
+    const block = body.blocks.find(
+      (b) => b.type === 'coaching' && b.source_handler === READINESS_VALUE_BATCH_HANDLER_ID,
+    ) as (Dict & { body: string; title: string }) | undefined;
+    expect(block, 'precondition: the block must exist for this absence to mean anything').toBeDefined();
+    expect(RAW_DECIMAL_RE.test(block!.body)).toBe(false);
+    expect(RAW_DECIMAL_RE.test(block!.title)).toBe(false);
+  });
 });

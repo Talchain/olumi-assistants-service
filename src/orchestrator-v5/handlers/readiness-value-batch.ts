@@ -524,6 +524,19 @@ export function writableCells(
  *     user-facing prose, and the Phase-3 prose guard DROPS a block that carries
  *     one. A body reading "0.4" would delete the card that carries the mark.
  *   - `formatEffectSlotReask` (`tools/handlers/d1-shared/format-confirmation.ts`)
+ * ⚠⚠ AND THE OBVIOUS STRONGER CLAIM IS FALSE — MEASURED, NOT ASSUMED. This
+ * comment first said the output "cannot trip `RAW_DECIMAL_RE`, because the
+ * domain is [0, 1] so any decimal point is preceded by a digit". Fuzzed over
+ * 300,000 values in [0, 1] with the real regex and a positive control: **2,958
+ * hit**. Every one is a value under 0.01, which renders `0.001%` — a leading
+ * `0.` after a space, exactly what the guard bans. The TRUE statement is the
+ * narrow one: these per-cell lines go ONLY into `assistant_text`, whose egress
+ * guard is `applyEgressForbiddenPhraseGuard` + the entity-id scrub and does NOT
+ * include `RAW_DECIMAL_RE`; the `coaching` BODY this module builds carries no
+ * value at all, only integer counts. Pinned by
+ * `route-v2-value-batch-review-visible.test.ts`, which runs the imported regex
+ * over the emitted body with a positive control. Move a value into that body
+ * and the pin REDs.
  *     already renders THIS EXACT cell type — an option's effect on a factor —
  *     as `${Math.round(v * 100)}%` "of the top", on the ratified ground that a
  *     strategic user must never be asked to understand the internal normalised
@@ -536,10 +549,6 @@ export function writableCells(
  * flip proposal). `0.405` therefore renders `40.5%`, not `41%`. `toPrecision(12)`
  * removes the binary-float tail (`0.07 * 100 === 7.000000000000001`) without
  * discarding a digit the model actually chose.
- *
- * The output cannot trip `RAW_DECIMAL_RE`: the domain is [0, 1], so the
- * percentage is in [0, 100] and any decimal point is preceded by a digit, never
- * by a line start, space, `(`, `=` or `,`.
  */
 export function formatModelUnitPercent(value: number): string {
   return `${Number((value * 100).toPrecision(12))}%`;
