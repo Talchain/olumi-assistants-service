@@ -22,6 +22,7 @@ import {
   buildCoachingBlocks,
   buildEvidenceBlocks,
   buildFactorConfidenceLookup,
+  buildFramingCheckCoachingBlock,
   buildGraphNodeLookup,
   buildGraphNodeLookupFromGraph,
   buildLensCompanionBlocks,
@@ -83,6 +84,7 @@ import { projectTiedOptionOrderingForTransport } from './compose/tied-option-ord
 import { projectCritiquesForTransport } from './compose/sanitise-enrichment.js';
 import type { LabelResolverContext } from './compose/resolve-label.js';
 import { textAssertsLeadingOption } from './compose/leading-option-egress-guard.js';
+import { GUIDANCE_SIGNAL_CODES } from './compose/guidance-signals.js';
 import { collectInterventionControlledFactorIds } from './context/intervention-controlled-drivers.js';
 
 /**
@@ -1481,7 +1483,20 @@ function rebuildPhase3BlocksFresh(
   });
   const isLegacyGenericEvppiLens =
     lensSurface?.selection.lens === 'evpi_evidence_priority';
+  // ⭐ TRACK 3 — the FRAME card. `framing_check` has ridden the wire with no
+  // renderer for months (see `buildFramingCheckCoachingBlock`'s header for the
+  // contrast-controlled sweep and for why all three recorded blockers are now
+  // dissolved). Built here on the FRESH path only: the stale branch returns
+  // before this helper, so a framing question is never raised off a superseded
+  // analysis. `null` on every doubt, so this spread is empty by default.
+  const framingCheckBlock = buildFramingCheckCoachingBlock(fact, lookup, ctx);
   const built = [
+    // FIRST in the array as well as first by `priority_rank: 5`. The rank is
+    // what the UI sorts on, but composed order is what an un-ranked consumer
+    // (and every reader of a captured payload) sees, and the two disagreeing
+    // about the most upstream card on the turn is the kind of drift that is
+    // invisible until someone is looking at a real capture.
+    ...(framingCheckBlock !== null ? [framingCheckBlock] : []),
     ...reviewCards,
     ...buildCoachingBlocks(fact, lookup, ctx, interventionControlledFactorIds),
     ...evidenceBlocks,
@@ -1672,8 +1687,61 @@ const LEADER_PRESUMING_CARD_KINDS: ReadonlySet<string> = new Set([
 ]);
 const LEADER_PRESUMING_COACHING_KINDS: ReadonlySet<string> = new Set(['strengthen']);
 
+/**
+ * ⭐ TRACK 3 — `coaching_kind: 'strengthen'` NOW NAMES TWO DIFFERENT QUESTIONS,
+ * AND THIS PREDICATE HAD TO LEARN THE DIFFERENCE (CLAUDE.md trap 21).
+ *
+ * `strengthen` is in `LEADER_PRESUMING_COACHING_KINDS` for one specific reason,
+ * recorded at the funnel above: every LENS SUGGESTION is `strengthen`, and a
+ * lens is selected over the analysis's leading option, so on a withheld turn it
+ * would be "a structured decision-science artefact standing alone on exactly
+ * the turn whose disclosure says no option can be put forward". Correct.
+ *
+ * `buildFramingCheckCoachingBlock` is also `strengthen` (the contract enum
+ * admits no framing member, and its draft-time sibling
+ * `handlers/draft-framing-blocks.ts` set that precedent), and it presumes
+ * NOTHING about a leader. It asks whether the model answers the question the
+ * team asked. Two authorities looking like an inconsistency to reconcile, when
+ * in fact they answer different questions — so the fix is to NAME THEM APART,
+ * not to align the defaults.
+ *
+ * ⚠ AND THE DIRECTION OF THE HARM MATTERS, which is why this is not a
+ * convenience exemption. A WITHHELD turn is precisely a turn on which the
+ * analysis could not put an option forward. "Is this the question you meant to
+ * ask?" is the single most useful thing the product can say there. The
+ * kind-level proxy would have suppressed the framing card on exactly the turns
+ * it is worth most — and silently, because the card would simply never appear
+ * and no test keyed on the permitted arm would notice.
+ *
+ * WHAT THE EXEMPTION IS NOT: a licence to skip the claim check. The card's body
+ * quotes the model's own `concern` / `suggested_reframe` sentences, and an LLM
+ * sentence CAN presuppose a leader (measured once already in an
+ * `evidence_gap` — see `evidenceGapPresumesLeadingOption`). So the framing card
+ * is put through the SAME shared vocabulary (`textAssertsLeadingOption`) on the
+ * one field that carries model prose. Kind-level suppression is replaced by a
+ * content test, never removed.
+ *
+ * Bound by `signal_code`, which is the producer's DETECTOR identity and is
+ * derived in `guidance-signals.ts` — never a hand-copied literal here, and
+ * never a value predicate another `strengthen` block could satisfy (trap 19).
+ */
+function isFramingCheckCoachingBlock(block: OlumiResponse['blocks'][number]): boolean {
+  const b = block as { type?: unknown; coaching_kind?: unknown; signal_code?: unknown };
+  return (
+    b.type === 'coaching' &&
+    b.coaching_kind === 'strengthen' &&
+    b.signal_code === GUIDANCE_SIGNAL_CODES.FRAMING_CHECK
+  );
+}
+
 function presumesLeadingOption(block: OlumiResponse['blocks'][number]): boolean {
-  const b = block as { card_kind?: unknown; coaching_kind?: unknown };
+  const b = block as { card_kind?: unknown; coaching_kind?: unknown; body?: unknown };
+  if (isFramingCheckCoachingBlock(block)) {
+    // `title`, `action_label` and `action_prompt` on this block are fixed
+    // producer literals that cannot name an option; `body` is the only field
+    // carrying model prose, so it is the only field scanned.
+    return typeof b.body === 'string' && textAssertsLeadingOption(b.body);
+  }
   return (
     (typeof b.card_kind === 'string' && LEADER_PRESUMING_CARD_KINDS.has(b.card_kind)) ||
     (typeof b.coaching_kind === 'string' &&

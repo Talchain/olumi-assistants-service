@@ -131,6 +131,17 @@ export const GUIDANCE_SIGNAL_CODES = {
    *  class the UI's calibration tray / contested cards key on, so a consumer
    *  can group the turn nudge with the Model-tab surface. */
   UNRESOLVED_DISAGREEMENT: 'UNRESOLVED_DISAGREEMENT',
+  /** coaching `strengthen` (framing check, TRACK 3) — detector class: the
+   *  decision_review enricher's OPTIONAL `framing_check` object, which its two
+   *  producer prompts (`prompts/defaults.ts` and the dark
+   *  `DECOMPOSE_R4_CALIBRATION_PROMPT`) instruct the model to emit ONLY when the
+   *  options do not address the stated goal, or the goal is stated as an action
+   *  rather than an outcome. A DISTINCT code rather than STRENGTHEN_ITEM because
+   *  this module's rule is that `signal_code` names the DETECTOR: the lens
+   *  suggestion's detector is a deterministic selector over analysis results,
+   *  this one's is an LLM framing judgement over the brief, and a consumer
+   *  grouping the two together would be grouping two different questions. */
+  FRAMING_CHECK: 'FRAMING_CHECK',
 } as const;
 
 export type GuidanceSignalCode = (typeof GUIDANCE_SIGNAL_CODES)[keyof typeof GUIDANCE_SIGNAL_CODES];
@@ -203,6 +214,14 @@ const SIGNAL_LINE_BY_CODE: Partial<Readonly<Record<GuidanceSignalCode, string>>>
   // deterministically true for every instance. (`orientation` ⇒ the stale-rerun
   // block is the sole emitter of STALE_ANALYSIS today.)
   [GUIDANCE_SIGNAL_CODES.STALE_ANALYSIS]: 'Graph changed since the last analysis',
+  // `framing_check` is emitted ONLY when the model found a framing concern (both
+  // producer prompts carry that inclusion rule, and the served canonical bytes
+  // `Prompts/canonical/decision_review.txt:618-621` carry it too), so this line
+  // is deterministically true of EVERY instance of the code. It deliberately
+  // does NOT name WHICH of the two framing problems was found: the live
+  // monolith does not require the model to say, so a line that picked one would
+  // be true of some instances only.
+  [GUIDANCE_SIGNAL_CODES.FRAMING_CHECK]: 'The review flagged how this decision is framed',
 };
 
 /** `signal_code` plus `signal` iff a deterministic line exists for the code. */
@@ -400,4 +419,21 @@ export function overrideStressTestSignals(): GuidanceSignalsWithProvenance {
 
 export function disagreementResolutionSignals(): GuidanceSignalsWithProvenance {
   return strengthenOfferSignals(GUIDANCE_SIGNAL_CODES.UNRESOLVED_DISAGREEMENT);
+}
+
+/**
+ * TRACK 3 — the FRAME coaching card's signals.
+ *
+ * `should_fix`, NOT the `could_fix` every other `strengthen`-kind block
+ * resolves to, and the asymmetry is the point rather than an oversight. The
+ * other `strengthen` emitters offer an OPPORTUNITY over a model whose frame is
+ * assumed sound (a lens to run, a judgement to record). This one fires only
+ * when the review found that the model may not answer the question the team
+ * asked — and if the frame is wrong, every number computed under it is wasted,
+ * which is a stronger claim on the reader's attention than any opportunity.
+ * `must_fix` is reserved for defects in the product's own output; a framing
+ * question is the team's to answer, never the product's to assert.
+ */
+export function framingCheckSignals(): GuidanceSignalsWithProvenance {
+  return { ...signalsOf('should_fix'), ...provenanceOf(GUIDANCE_SIGNAL_CODES.FRAMING_CHECK) };
 }

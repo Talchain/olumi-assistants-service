@@ -197,6 +197,7 @@ import {
   disagreementResolutionSignals,
   evidenceSignals,
   fragileEdgeOfferSignals,
+  framingCheckSignals,
   guidanceSignalsForCoachingKind,
   overrideStressTestSignals,
   reviewCardSignals,
@@ -1115,6 +1116,235 @@ export function buildCoachingBlocks(
   }
 
   return blocks;
+}
+
+/**
+ * ⭐ TRACK 3 — THE FRAME CARD. `framing_check` finally reaches a reader.
+ *
+ * ── WHAT WAS ALREADY BUILT, AND WHERE IT STOPPED ──────────────────────────
+ * The decision_review enricher's OPTIONAL `framing_check` object has been
+ * produced, composed and passed through to the wire for months and rendered
+ * NOWHERE. Derived at CEE `1d303b29` with a contrast control in the same
+ * sweep: `framing_check` reaches `cee/decision-review/decompose.ts` (the
+ * `composeFragments` passthrough), `shape-check.ts` (a type warning) and
+ * `coaching/decision-review-enricher.ts` (the `output_has_framing_check`
+ * telemetry counter) — and ZERO block builders; contrast `pre_mortem` in the
+ * same sweep reaches two real builders in this file. That counter was the
+ * field's only reader in the estate.
+ *
+ * This is the consumer. It is the most upstream reasoning move the product
+ * can make: if the question is wrong, every number computed under it is
+ * wasted work.
+ *
+ * ── THE THREE RECORDED BLOCKERS, AND WHY NONE OF THEM STILL BINDS ──────────
+ * `decision-review-enricher.ts:2003-2010` records this consumer as forked on
+ * three items "outside a build lane's authority". All three were derived on
+ * 17 Aug 2026 at the `@talchain/schemas` 0.46.0 pin. Re-derived here at the
+ * 0.55.0 pin this repo vendors, and at the sibling that shipped since:
+ *
+ *   1. "No `coaching_kind` member admits a framing block." ⚠ SUPERSEDED, and
+ *      by a module in this very repo. `handlers/draft-framing-blocks.ts` ships
+ *      the DRAFT-time FRAME card on `coaching_kind: 'strengthen'`, recording
+ *      in its own header why `orientation` is the wrong reuse (it already
+ *      means "lifecycle / freshness nudge" and carries `should_fix`, so
+ *      reusing it would put two different questions under one name). The enum
+ *      needed no new member then and needs none now, so THIS CHANGE CROSSES NO
+ *      REPO AND BUMPS NO CONTRACT — which also means it cannot be dropped by
+ *      hazard 1's silent-field-loss seam at any consumer pin.
+ *   2. "No `data/dsk/v1.json` claim grounds goal-vs-outcome framing." STILL
+ *      TRUE — re-censused here rather than inherited, over all 27 objects in
+ *      the bundle this repo ships, with a contrast control: 12 objects mention
+ *      framing or goals and NONE grounds goal-vs-outcome framing (the nearest,
+ *      DSK-B-007, is option-set SIZE — Nutt 2004), while the contrast term
+ *      `option` returns 14. So this block carries NO `dsk_claim_provenance`,
+ *      deliberately and permanently until the bundle gains such a claim. A
+ *      stretched citation on a user-facing card is a fabrication; the field is
+ *      optional and its absence is the honest shape. The sibling's FRAME arm
+ *      made the identical call for the identical reason.
+ *   3. "No route accepts a goal reframe, so `suggested_reframe` cannot be
+ *      offered without breaching P8." ⚠ TRUE OF THE ACTION IT IMAGINED, and
+ *      that action is not the one shipped here. This card offers NO reframe-
+ *      accepting affordance. Its chip dispatches an ORDINARY CHAT TURN
+ *      (`start_guided_chat`) — the same mechanism the live `calibration_prompt`
+ *      card has used since 2.225 — so it advertises only something CEE already
+ *      answers. Naming the distinction, because P8 is about advertising an
+ *      action that terminates in refusal: "apply this reframe to my graph" has
+ *      no acceptance path and is NOT offered; "talk to me about my framing"
+ *      has one and is.
+ *
+ * ── WHAT THE CARD SAYS, AND WHY IT IS SHAPED AS A CONTRAST ────────────────
+ * A reframe shown as a bare sentence is ADVICE. Shown beside the team's own
+ * stated goal, with the reason, it is a THINKING PROMPT — and this product
+ * exists to make people think, not to hand them an answer. So the body is
+ * composed as up to three segments:
+ *
+ *   1. `You framed this as “<the goal node's own label>”.`  ← what YOU said
+ *   2. `<concern>`                                          ← WHY it is raised
+ *   3. `A different framing to weigh: “<suggested_reframe>”.` ← what to WEIGH
+ *
+ * The title is a QUESTION addressed to the team and the card asserts nothing:
+ * humans remain the authors and the decision-makers. Segments 2 and 3 are the
+ * model's own sentences, quoted, never paraphrased and never rewritten — the
+ * fail-closed prose/schema gate may DROP this block but nothing here edits
+ * what the producer said.
+ *
+ * ── THE EMIT GATE IS THE PROSE, AND `addresses_goal` IS DELIBERATELY UNREAD ─
+ * This is the one judgement in the module that could have gone wrong quietly,
+ * so it is stated in full.
+ *
+ * The obvious gate is `addresses_goal === false`. It is REFUSED here. Both
+ * producer prompts state that the key exists ONLY when there IS a framing
+ * concern, from which the decomposed R4 fragment derives that `addresses_goal`
+ * is "ALWAYS false when you emit this object" — but the historic
+ * `Prompts/Versions /decision_review_prompt_v4_1.txt` twice showed the model a
+ * worked example emitting `"addresses_goal": true`, and the LIVE served
+ * monolith (`Prompts/canonical/decision_review.txt:618-621`) states the
+ * inclusion rule with NO polarity instruction at all. A consumer keying off
+ * `addresses_goal === false` would therefore go dark on exactly the payloads
+ * carrying a framing concern — the inverted-gate class this estate has paid
+ * for repeatedly, and the reason
+ * `cee/decision-review/__tests__/framing-check-producer-polarity.test.ts`
+ * exists at all.
+ *
+ * So the boolean decides nothing. The gate is: IS THERE PROSE TO SHOW? The
+ * `concern` and `suggested_reframe` sentences are simultaneously the evidence
+ * that a concern was found AND the only thing worth rendering, so requiring
+ * one of them is a gate that cannot invert. A `framing_check` carrying neither
+ * ships nothing — which matters, because `composeFragments` RETAINS a
+ * prose-less `{addresses_goal: false}` (pinned by that suite), so such an
+ * object does reach here.
+ *
+ * ── SEGMENTS ARE DROPPED WHOLE, NEVER TRUNCATED MID-SENTENCE ──────────────
+ * `PHASE3_BODY_MAX` is 300. Truncating a model's framing sentence can INVERT
+ * it ("the options do not address…" → "the options do"), so the composer
+ * drops the goal segment — the one piece a reader can still recover, because
+ * it also rides as a `target_ref` the card renders verbatim — and re-measures
+ * rather than cutting a sentence. If the producer's own two sentences still do
+ * not fit, the block is dropped whole. A card that says something wrong is
+ * worse than no card.
+ *
+ * ── RANK 5, AND IT IS LOAD-BEARING ─────────────────────────────────────────
+ * The UI collapses every phase-3 card past `PHASE3_DEFAULT_EXPANDED = 6`
+ * behind "Show N more", and a collapsed card renders NULL — measured live
+ * counts on analysis turns are 8-14 cards. The coaching band in this file is
+ * 100+ (assumption_check) and 200+ (calibration_prompt): a framing card there
+ * would ship DARK. Rank 5 places it above the narrative summary (10), the lens
+ * suggestion (15) and every review card (20-80+), and below only the
+ * stale-rerun nudge (1), which suppresses every other block anyway. That
+ * ordering is also the argument: the frame is upstream of everything ranked
+ * below it.
+ */
+export function buildFramingCheckCoachingBlock(
+  fact: RunAnalysisHandlerFact,
+  lookup: GraphNodeLookup,
+  ctx: BlockBuildCtx,
+): CoachingBlock | null {
+  const dr = readDecisionReview(fact);
+  if (dr === null) return null;
+  const framing = readRecord(dr.framing_check);
+  if (framing === null) return null;
+
+  const concern = typeof framing.concern === 'string' ? framing.concern.trim() : '';
+  const reframe =
+    typeof framing.suggested_reframe === 'string' ? framing.suggested_reframe.trim() : '';
+  // THE EMIT GATE. Prose, never the boolean — see the header.
+  if (concern.length === 0 && reframe.length === 0) return null;
+
+  // The team's own stated goal, resolved by IDENTITY from the graph lookup.
+  // EXACTLY ONE `goal` node or none: with two, "the goal you stated" has no
+  // referent and picking the first would quote an arbitrary one back at a team
+  // being asked whether their framing is right. Fail closed to no quote.
+  const goals = [...lookup.values()].filter((ref) => ref.kind === 'goal');
+  const goalRef = goals.length === 1 ? goals[0] : null;
+
+  const goalSegment = goalRef === null ? '' : `You framed this as “${goalRef.label}”.`;
+  const reframeSegment = reframe.length === 0 ? '' : `A different framing to weigh: “${reframe}”`;
+  const composeBody = (withGoal: boolean, withReframe: boolean): string =>
+    [withGoal ? goalSegment : '', concern, withReframe ? reframeSegment : '']
+      .filter((s) => s.length > 0)
+      .join(' ');
+
+  /**
+   * ⭐ THE BUDGET LADDER, AND IT IS NOT A FORMALITY — A TWO-RUNG VERSION OF IT
+   * DROPPED THE ONLY REAL `framing_check` THIS ESTATE HAS EVER CAPTURED.
+   *
+   * Measured: `tools/orchestrator-eval/reports/decision-review-v16-2026-09-10/`
+   * `captures/r1-05-constraint-infeasible.json` carries a genuine model emission
+   * whose `concern` is 222 characters and whose reframe SEGMENT is 150. Concern
+   * plus reframe is 373 against a `BODY_MAX` of 300, so a ladder that could only
+   * drop the goal returned `null` — the feature would have shipped DARK on its
+   * one known real input, which is this estate's chronic failure #1 arriving
+   * through a constant rather than through a missing wire.
+   *
+   * SEGMENTS ARE DROPPED WHOLE, NEVER TRUNCATED, at every rung. Cutting a
+   * framing sentence can invert it ("the options do not address…" → "the
+   * options do"), and a card that says something wrong is worse than no card.
+   *
+   * THE DROP ORDER IS A PRODUCT JUDGEMENT, not a convenience, and it goes the
+   * same way twice:
+   *   1. the GOAL quote goes first — it is the only recoverable segment,
+   *      because the goal also rides as a `target_ref` the card renders
+   *      verbatim and links;
+   *   2. the REFRAME goes next. The `concern` is the CHALLENGE — "your options
+   *      do not answer your goal" — and that is the thinking prompt. The
+   *      `suggested_reframe` is the product's own ready-made answer, which is
+   *      the half that does the team's thinking FOR them. Where only one fits,
+   *      the challenge is worth more than the answer, and the chip still opens
+   *      a conversation in which the reframe can be discussed.
+   *   3. nothing left that fits ⇒ drop the block.
+   */
+  let body = composeBody(true, true);
+  if (body.length > BODY_MAX) body = composeBody(false, true);
+  if (body.length > BODY_MAX) body = composeBody(false, false);
+  if (body.length === 0 || body.length > BODY_MAX) return null;
+
+  const candidate = {
+    ...commonMetadata('coach:framing', '', ctx),
+    type: 'coaching' as const,
+    // The DRAFT-time sibling's kind, for the DRAFT-time sibling's recorded
+    // reason (`handlers/draft-framing-blocks.ts`): `orientation` already means
+    // a lifecycle nudge, and one name for two questions is this estate's
+    // trap 21. `signal_code` below is what separates the two detectors.
+    coaching_kind: 'strengthen' as const,
+    // A QUESTION, never an assertion: the product raises the frame, the team
+    // settles it.
+    title: truncate('Does this model answer the question you asked?', TITLE_MAX),
+    body,
+    source: 'decision_review' as const,
+    // The goal node, when one resolves — the card renders `target_refs[].label`
+    // verbatim and links it, so "the question you asked" stays clickable even
+    // on the arm where the body's goal segment was dropped for budget.
+    target_refs: (goalRef === null ? [] : [goalRef]) as readonly TargetRef[],
+    priority_rank: 5,
+    // `should_fix` + FRAMING_CHECK + the trigger line, all derived in the one
+    // guidance-signals authority so this card, the canvas node marker and the
+    // inspector cannot drift apart.
+    ...framingCheckSignals(),
+    // P8: an ordinary chat turn, which CEE answers — never "apply this
+    // reframe", which no route accepts. See blocker 3 in the header.
+    action_intent: 'start_guided_chat' as ActionIntentLiteral,
+    action_label: truncate('Challenge the framing', ACTION_LABEL_MAX),
+    // ROADMAP 2.225 — producer-authored, dispatched VERBATIM as the user's own
+    // next message, so it is written in the first person and is self-contained.
+    // Deliberately NOT the `suggested_reframe`: dispatching that would make the
+    // team ASK FOR the model's reframe, when the point of the card is that they
+    // decide whether it is better than their own.
+    action_prompt: truncate(
+      'Help me pressure-test how I have framed this decision — is the goal I stated the outcome I actually want?',
+      ACTION_PROMPT_MAX,
+    ),
+  };
+
+  return validateProseAndSchemaOrDrop(CoachingBlockSchema, candidate, {
+    block_type: 'coaching',
+    kind: 'framing_check',
+    prose: [
+      { name: 'title', value: candidate.title },
+      { name: 'body', value: candidate.body },
+      { name: 'action_label', value: candidate.action_label },
+      { name: 'action_prompt', value: candidate.action_prompt },
+    ],
+  });
 }
 
 /**
