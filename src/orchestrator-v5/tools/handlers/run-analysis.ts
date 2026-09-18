@@ -97,6 +97,7 @@ import { isKnownPlotFailureCode } from '../../compose/handler-failure-responses.
 import { findFirstInvalidNumeric } from './numeric-integrity.js';
 import { validateEnrichmentShadow } from './enrichment-validation.js';
 import { guardAnalysisGraphIntercepts } from './run-analysis-intercept-guard.js';
+import { guardAnalysisParticipation } from './run-analysis-participation-guard.js';
 import {
   AnalysisNotReadyError,
   readinessQuestions,
@@ -300,6 +301,25 @@ function readGraphNodesForCostAsk(
   return Array.isArray(nodes)
     ? (nodes as ReadonlyArray<{ id?: unknown; kind?: unknown; label?: unknown }>)
     : [];
+}
+
+/**
+ * The LABEL of a node whose exclusion could not be honoured, for the refusal
+ * sentence. Reuses the same defensive node reader as the cost-ask path.
+ *
+ * Returns null for a missing, non-string or blank label so the caller falls
+ * back to neutral wording rather than quoting `''` at the user — `NodeV3`
+ * accepts `""` and `"   "` and no validator rejects them.
+ */
+function participationRefusalLabel(graph: unknown, nodeId: string): string | null {
+  for (const node of readGraphNodesForCostAsk(graph)) {
+    if (node.id !== nodeId) continue;
+    const label = node.label;
+    if (typeof label !== 'string') return null;
+    const trimmed = label.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return null;
 }
 
 /**
@@ -541,10 +561,84 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // below for `graph_hash_at_run` / freshness) are deliberately left
     // untouched — this is a runtime guard, not a migration, and must not
     // perturb freshness.
-    const graphForAnalysis = guardAnalysisGraphIntercepts(snapshot.graph, {
+    const graphAfterIntercepts = guardAnalysisGraphIntercepts(snapshot.graph, {
       requestId: invocation.requestId,
       scenarioId: args.scenario_id,
     }).graph;
+
+    // --- 2.7. Participation guard (COLLAB Track A) -------------------------
+    // Honours `node.analysis_participation === 'retained_excluded'`: the node
+    // stays in `scenarios.graph` with its label, value and authorship intact
+    // and is simply ABSENT from the wire graph — the same construction the
+    // option gate above uses, one level down. Incident edges go with it
+    // because PLoT's preflight raises `INVALID_EDGE_ENDPOINT` as a BLOCKER for
+    // a dangling endpoint, so leaving them would refuse the whole run.
+    // See `run-analysis-participation-guard.ts` for the full doctrine.
+    const optionsForParticipation = gate.options as ReadonlyArray<Record<string, unknown>>;
+    const optionInterventionTargetIds = new Set<string>();
+    const submittedOptionIds = new Set<string>();
+    for (const opt of optionsForParticipation) {
+      const optionId =
+        typeof opt.option_id === 'string' && opt.option_id.length > 0
+          ? opt.option_id
+          : typeof opt.id === 'string' && opt.id.length > 0
+            ? opt.id
+            : null;
+      if (optionId !== null) submittedOptionIds.add(optionId);
+      const interventions = opt.interventions;
+      if (interventions !== null && typeof interventions === 'object') {
+        for (const targetId of Object.keys(interventions as Record<string, unknown>)) {
+          optionInterventionTargetIds.add(targetId);
+        }
+      }
+    }
+    const participation = guardAnalysisParticipation(graphAfterIntercepts, {
+      goalNodeId: snapshot.goal_node_id,
+      optionInterventionTargetIds,
+      submittedOptionIds,
+      requestId: invocation.requestId,
+      scenarioId: args.scenario_id,
+    });
+    // An exclusion that cannot be honoured is REFUSED, never quietly dropped.
+    // Computing anyway would produce a number that included a node the field
+    // still marks `'retained_excluded'` — so the surface would render
+    // "excluded" over a result that did not exclude it. No number beats a
+    // number that lies, and the conflict is a real inconsistency in the user's
+    // own model, which is worth saying out loud on a reasoning tool.
+    if (participation.refusals.length > 0) {
+      const refusal = participation.refusals[0];
+      const refusedLabel = participationRefusalLabel(graphAfterIntercepts, refusal.node_id);
+      const named = refusedLabel !== null ? `'${refusedLabel}'` : 'that part of your model';
+      throw new HandlerInvocationFailedError(
+        'A node excluded from the calculation is required by it',
+        {
+          cause_kind: 'analysis_not_ready',
+          retryable: false,
+          details: {
+            handler_id: 'run_analysis',
+            scenario_id: args.scenario_id,
+            reason_code: 'excluded_node_required_by_analysis',
+            next_step:
+              refusal.reason === 'goal_node'
+                ? `You've kept ${named} out of the calculation, but it's the outcome the ` +
+                  `analysis is measuring — so there's nothing left to compare the options ` +
+                  `against. Put ${named} back into the calculation, or choose a different ` +
+                  `goal, and ask me to run the analysis again.`
+                : refusal.reason === 'submitted_option'
+                  ? `You've kept ${named} out of the calculation, but it's one of the options ` +
+                    `I'd be comparing — so I've stopped rather than rank an option you've ` +
+                    `excluded. Put it back into the calculation or remove it from this ` +
+                    `comparison, then ask me to run the analysis again.`
+                  : `You've kept ${named} out of the calculation, but one of your options ` +
+                    `changes it — so I can't leave it out and still work out what that option ` +
+                    `does. That's worth a second look: either ${named} belongs in the ` +
+                    `calculation after all, or that option shouldn't be changing it. Settle ` +
+                    `which, and ask me to run the analysis again.`,
+          },
+        },
+      );
+    }
+    const graphForAnalysis = participation.graph;
 
     // --- 3. ONE request-level scale projection, on the FINAL option set -----
     // ROUND 4: the projection runs HERE — after the scaffold, immediately

@@ -321,6 +321,39 @@ export function projectDraftRecords(
   for (const item of records.stated_items) {
     statedKinds[item.kind] = (statedKinds[item.kind] ?? 0) + 1;
   }
+  // ⭐⭐ DOES THE MODEL ACTUALLY ANSWER? — the one question grammar v10 and
+  // instruction v19 (#1562) left unanswerable.
+  //
+  // `value_scale` is the model's declaration of what its number MEANS, and the
+  // whole producer-declares-it-then-delete-the-inference programme rests on the
+  // model emitting it. Before this line NOTHING could see whether it does:
+  // `value_scale` and `declared_scale` appear in ZERO telemetry payloads
+  // repo-wide, `cee.llm_output.field_presence` tracks six other fields, the
+  // banked v202 witnesses are post-projection payloads that never carry
+  // `claims`, and the projector's own stamp is invisible downstream. So the
+  // rate has been unmeasured AND unmeasurable — which is why the repair stage's
+  // competing inference cannot yet be deleted (`repair/unreachable-factors.ts`),
+  // and why `display-value.ts:507`'s own dated deletion condition cannot be
+  // taken either. Both are waiting on a number nothing produced.
+  //
+  // ⚠ PER CLAIM KIND, NOT A TOTAL, AND THAT IS THE POINT. The projector stamps
+  // `declared_scale` only where the claim mints a factor-kind node
+  // (`CLAIM_KIND_TO_NODE_KIND` maps `factor` and `prior` to "factor"), so a
+  // pooled rate would average a kind that can carry the declaration together
+  // with kinds that structurally cannot, and read as a producer failure when it
+  // is a carrier gap. A per-kind split makes the two distinguishable in the
+  // data rather than in an argument about the data.
+  //
+  // ⛔ KINDS AND INTEGERS ONLY — the block above says a histogram cannot leak a
+  // brief, and that invariant holds here verbatim: `claim_kind` is a grammar
+  // enum and every value below is a count. No value, no unit, no label, no
+  // `source_quote`.
+  const valueScaleByKind: Record<string, { declared: number; absent: number }> = {};
+  for (const claim of records.claims) {
+    const bucket = (valueScaleByKind[claim.claim_kind] ??= { declared: 0, absent: 0 });
+    if (claim.value_scale === undefined) bucket.absent += 1;
+    else bucket.declared += 1;
+  }
   log.info(
     {
       event: "cee.draft.records.wire_histogram",
@@ -328,6 +361,7 @@ export function projectDraftRecords(
       stated_kinds: statedKinds,
       claim_count: records.claims.length,
       stated_count: records.stated_items.length,
+      value_scale_by_kind: valueScaleByKind,
     },
     "Draft record set accepted at the seam",
   );

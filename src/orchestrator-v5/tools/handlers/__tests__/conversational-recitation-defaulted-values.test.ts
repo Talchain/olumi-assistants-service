@@ -154,6 +154,7 @@ describe('conversational recitation — defaulted values', () => {
     it('suppresses the stability clause when the engine reports defaulted values', () => {
       const verdict = composeRobustnessVerdict(clearStableProjection(), null, 'flip', {
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
       expect(verdict.stability_clause).toBeNull();
@@ -173,6 +174,7 @@ describe('conversational recitation — defaulted values', () => {
 
       const after = composeRobustnessVerdict(fragile, null, 'flip', {
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
       expect(after.stability_implies_flippability).toBe(false);
@@ -205,6 +207,7 @@ describe('conversational recitation — defaulted values', () => {
             }
             const withDefaults = composeRobustnessVerdict(projection, null, mode, {
               count: 2,
+              factorCount: 2,
               named: ['Market Conditions', 'Churn Rate'],
             });
             expect(withDefaults.stability_clause).toBeNull();
@@ -233,6 +236,7 @@ describe('conversational recitation — defaulted values', () => {
           };
           const verdict = composeRobustnessVerdict(projection, null, mode, {
             count: 1,
+            factorCount: 1,
             named: ['Market Conditions'],
           });
           expect(verdict.stability_category).toBe('unknown');
@@ -258,6 +262,7 @@ describe('conversational recitation — defaulted values', () => {
     it('leaves the MARGIN axis untouched — the recitation is qualified, not withheld', () => {
       const withDefaults = composeRobustnessVerdict(clearStableProjection(), null, 'flip', {
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
       const without = composeRobustnessVerdict(clearStableProjection(), null, 'flip', null);
@@ -274,6 +279,7 @@ describe('conversational recitation — defaulted values', () => {
 
       const after = composeWhatWouldFlipFallback(clearStableProjection(), null, null, {
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
       expect(after).not.toContain(DEPLOYED_STABILITY_LINE);
@@ -290,6 +296,7 @@ describe('conversational recitation — defaulted values', () => {
     it('the explain fallback carries the same disclosure, from the same source', () => {
       const after = composeExplainResultsFallback(clearStableProjection(), null, null, {
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
       expect(after).toContain("The analysis used a default value for 'Market Conditions'");
@@ -311,18 +318,49 @@ describe('conversational recitation — defaulted values', () => {
   describe('the reader — over the shapes the untyped enrichment seam admits', () => {
     it('reads the REAL producer shape from the captured enrichment', () => {
       const signal = readDefaultedAssumptions([REAL_DEFAULTED_ENTRY]);
-      expect(signal).toEqual({ count: 1, named: ['Market Conditions'] });
+      expect(signal).toEqual({ count: 1, factorCount: 1, named: ['Market Conditions'] });
     });
 
-    it('COUNTS an entry it cannot NAME', () => {
-      // An unnameable label must not silently restore a stability assertion.
+    /**
+     * ⚠ RE-AIMED, NOT WEAKENED. This test used to assert that an entry with no
+     * `factor_label` renders "one of the factors in your model". That
+     * expectation was the defect: an entry that names no factor is not
+     * evidence of a FACTOR, and the live producer shape carrying
+     * `factor_label: null` is an ENGINE-LEVEL code about a raw node id. The
+     * invariant it was written to protect — an unnameable entry must not
+     * silently restore a stability assertion — is about the EVIDENCE count and
+     * is asserted below, unchanged and now separated from the factor claim.
+     * See `coaching/__tests__/defaulted-code-is-not-a-factor.test.ts`.
+     */
+    it('COUNTS as evidence an entry that names no factor — without calling it one', () => {
       const signal = readDefaultedAssumptions([{ source: 'value_defaulted' }]);
       expect(signal).not.toBeNull();
+      // EVIDENCE — unchanged, so the stability suppression still fires.
       expect(signal!.count).toBe(1);
+      // FACTORS — none, because the entry names none.
+      expect(signal!.factorCount).toBe(0);
       expect(signal!.named).toEqual([]);
-      expect(buildDefaultedAssumptionsDisclosure(signal!)).toContain(
-        'one of the factors in your model',
+      expect(buildDefaultedAssumptionsDisclosure(signal!)).not.toContain(
+        'of the factors in your model',
       );
+    });
+
+    /**
+     * DISCRIMINATING TWIN — the factor is IDENTIFIED but not SHOWABLE. An
+     * id-shaped label still attributes the default to a factor, so the count
+     * form is truthful here and the id is never printed. Without this twin the
+     * test above would be consistent with dropping every unnameable factor.
+     */
+    it('an id-shaped label is still a FACTOR, counted but never shown', () => {
+      const signal = readDefaultedAssumptions([
+        { factor_label: 'fac_7809def4', source: 'value_defaulted' },
+      ])!;
+      expect(signal.count).toBe(1);
+      expect(signal.factorCount).toBe(1);
+      expect(signal.named).toEqual([]);
+      const text = buildDefaultedAssumptionsDisclosure(signal);
+      expect(text).toContain('one of the factors in your model');
+      expect(text).not.toContain('fac_7809def4');
     });
 
     it('does not present a capped list as exhaustive', () => {
@@ -331,6 +369,7 @@ describe('conversational recitation — defaulted values', () => {
       }));
       const signal = readDefaultedAssumptions(many)!;
       expect(signal.count).toBe(MAX_NAMED_DEFAULTED_FACTORS + 2);
+      expect(signal.factorCount).toBe(MAX_NAMED_DEFAULTED_FACTORS + 2);
       expect(signal.named).toHaveLength(MAX_NAMED_DEFAULTED_FACTORS);
       const text = buildDefaultedAssumptionsDisclosure(signal);
       expect(text).toContain(`${MAX_NAMED_DEFAULTED_FACTORS + 2} of the factors in your model`);
@@ -348,12 +387,12 @@ describe('conversational recitation — defaulted values', () => {
       // The standing ruling: the product may describe what IT did; it may not
       // tell the user what THEY said or did.
       for (const signal of [
-        { count: 1, named: ['Market Conditions'] },
-        { count: 2, named: ['Market Conditions', 'Churn Rate'] },
-        { count: 5, named: [] },
+        { count: 1, factorCount: 1, named: ['Market Conditions'] },
+        { count: 2, factorCount: 2, named: ['Market Conditions', 'Churn Rate'] },
+        { count: 5, factorCount: 5, named: [] },
       ]) {
         const text = buildDefaultedAssumptionsDisclosure(signal);
-        expect(text).toMatch(/^The analysis used a default value for /);
+        expect(text).toMatch(/^The analysis used /);
         expect(text.toLowerCase()).not.toContain('you ');
         expect(text.toLowerCase()).not.toContain('your fault');
         expect(text.toLowerCase()).not.toContain('because');
@@ -365,6 +404,7 @@ describe('conversational recitation — defaulted values', () => {
     it('reads defaulted_assumptions off the selected run_analysis fact', () => {
       expect(pickLatestDefaultedAssumptions(factWithDefaulted([REAL_DEFAULTED_ENTRY]))).toEqual({
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
     });
@@ -418,6 +458,7 @@ describe('conversational recitation — defaulted values', () => {
       ];
       expect(pickLatestDefaultedAssumptions(topLevel)).toEqual({
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
     });
@@ -445,6 +486,7 @@ describe('conversational recitation — defaulted values', () => {
       ];
       expect(pickLatestDefaultedAssumptions(both)).toEqual({
         count: 1,
+        factorCount: 1,
         named: ['Market Conditions'],
       });
     });

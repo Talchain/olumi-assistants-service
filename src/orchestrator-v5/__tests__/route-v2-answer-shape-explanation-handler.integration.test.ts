@@ -91,7 +91,37 @@ vi.mock('../routing/route-with-tool-use.js', async () => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../orchestrator/route-v2.js');
-const { deriveAnswerTextFromShape } = await import('../routing/answer-shape.js');
+const { deriveAnswerTextFromShape, synthesiseAnswerShapeFromText } = await import(
+  '../routing/answer-shape.js'
+);
+
+/**
+ * THE COLLAPSE FLOOR (18 Sep 2026) — why the reachability assertions below
+ * bind to TELEMETRY rather than to the sidecar's presence.
+ *
+ * `_answer_shape` is a WIRE DIRECTIVE to collapse the answer to its headline,
+ * and CEE now issues it only above `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000
+ * — the deployed UI's own `CLAMP_CHAR_THRESHOLD`, below which the free-text
+ * body renders whole regardless).
+ *
+ * ⛔ This file's subject is REACHABILITY, and the floor would have hollowed it
+ * out silently. Three prior F1 fixes each shipped believing the egress
+ * synthesiser ran on a path it never reached; the explanation handler was the
+ * third such miss and is why this file exists. A real explanation answer is a
+ * few hundred characters, so below the floor it correctly ships plain — and
+ * "no sidecar" would then mean BOTH "correctly below the floor" AND "this
+ * path went dark again". One absence, two meanings, and the second is the one
+ * this file was written to catch.
+ *
+ * The decline is therefore ANNOUNCED. `v5.answer_shape.declined_below_floor`
+ * carries the dispatch path, so a genuinely dark path emits nothing and these
+ * tests RED — the same guarantee as before, bound to an event instead of a
+ * field.
+ */
+const emitted: Array<{ event: string; fields: Record<string, unknown> }> = [];
+function declinesBelowFloor() {
+  return emitted.filter((e) => e.event === 'v5.answer_shape.declined_below_floor');
+}
 
 const SCENARIO_ID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
@@ -221,7 +251,10 @@ describe('route-v2 — `_answer_shape` on the REAL LLM explanation-handler answe
     mockState.persistedGraph = READY_GRAPH;
     routeWithToolUseMock.mockReset();
     routeWithToolUseMock.mockResolvedValue(routedWhatWouldFlip());
-    setTestSink(() => {});
+    emitted.length = 0;
+    setTestSink((event: string, fields: Record<string, unknown>) => {
+      emitted.push({ event, fields });
+    });
   });
   afterEach(() => {
     setTestSink(null);
@@ -246,26 +279,49 @@ describe('route-v2 — `_answer_shape` on the REAL LLM explanation-handler answe
     expect(typeof body.assistant_text).toBe('string');
     expect(body.assistant_text.length).toBeGreaterThan(80);
 
-    // THE FIX: the explanation-handler answer now ships `_answer_shape`.
-    expect(body._answer_shape, 'explanation-handler answer must ship _answer_shape').toBeDefined();
-    expect(typeof body._answer_shape.headline).toBe('string');
-    expect(body._answer_shape.headline.length).toBeGreaterThan(0);
-    expect(Array.isArray(body._answer_shape.bullets)).toBe(true);
-    expect(body._answer_shape.bullets.length).toBeLessThanOrEqual(3);
-    expect(typeof body._answer_shape.detail).toBe('string');
-    expect(body._answer_shape.detail.length).toBeGreaterThan(0);
+    // THE FIX (reachability): the explanation-handler answer REACHES the egress
+    // synthesiser. Before it, `composeToolCallResponse` answers were never
+    // declared substantive and the egress skipped this path entirely.
+    expect(
+      declinesBelowFloor().map((d) => d.fields.dispatch_path),
+      'the explanation-handler answer must REACH the egress — no event means the path is dark again',
+    ).toContain('route_egress_synthesised');
+
+    // And it is genuinely shapeable, so the floor is the ONLY reason it ships
+    // plain. Without this limb the assertion above could be satisfied by an
+    // answer the synthesiser would have refused for its own reasons.
+    const shape = synthesiseAnswerShapeFromText(body.assistant_text);
+    expect(shape, 'the real explanation-handler answer must be shapeable').not.toBeNull();
+    expect(shape!.headline.length).toBeGreaterThan(0);
+    expect(shape!.bullets.length).toBeLessThanOrEqual(3);
+    expect(shape!.detail.length).toBeGreaterThan(0);
+
+    // THE USER OUTCOME: below the floor nothing is hidden.
+    expect(body).not.toHaveProperty('_answer_shape');
   });
 
-  // ── BYTE-EQUALITY on the REAL answer (approach b, by construction) ──────────
-  it('byte-equality: derive(_answer_shape) === assistant_text on the real explanation-handler answer', async () => {
+  // ── THE TWIN OF BYTE-EQUALITY: below the floor, NOTHING IS REWRITTEN ─────
+  // `derive(shape) === assistant_text` is the contract for a SHIPPED sidecar.
+  // Below the floor nothing ships, so asserting it here would assert a
+  // conditional with a false antecedent — true for free, and blind. What must
+  // hold instead is that the treatment was not HALF applied: attaching the
+  // sidecar also reflows the headline/detail join from a single space to a
+  // blank line, and declining must leave the handler's own bytes alone. Both
+  // limbs are DERIVED from the shape, never from hardcoded answer copy.
+  it('below the floor the real explanation-handler answer ships unreflowed and unshaped', async () => {
     const { status, body } = await postTurn(
       app,
       'Give me the bottom line: which option is strongest',
       'aaaaaaaa-1111-4aaa-8aaa-aaaaaaaaaa02',
     );
     expect(status).toBe(200);
-    expect(body._answer_shape).toBeDefined();
-    expect(deriveAnswerTextFromShape(body._answer_shape)).toBe(body.assistant_text);
+    expect(body).not.toHaveProperty('_answer_shape');
+    const shape = synthesiseAnswerShapeFromText(body.assistant_text);
+    expect(shape).not.toBeNull();
+    const wouldHaveShipped = deriveAnswerTextFromShape(shape!);
+    expect(wouldHaveShipped.startsWith(`${shape!.headline}\n\n`)).toBe(true);
+    expect(body.assistant_text.startsWith(`${shape!.headline} `)).toBe(true);
+    expect(body.assistant_text).not.toBe(wouldHaveShipped);
   });
 
   // ── BLOCK-CARRYING answer STILL shapes (narrow draft_graph-only guard) ──────
@@ -284,6 +340,13 @@ describe('route-v2 — `_answer_shape` on the REAL LLM explanation-handler answe
     // No draft_graph block on this path (that is the ONE block type the guard
     // excludes); the prose is still shaped.
     expect(body.blocks.some((b: { type?: string }) => b.type === 'draft_graph')).toBe(false);
-    expect(body._answer_shape, 'a block-carrying explanation answer must still ship _answer_shape').toBeDefined();
+    // The narrow guard still lets this answer through to the synthesiser — the
+    // point of the test. A broad "blocks-empty" guard would have excluded it,
+    // and then NO decline event would be emitted for this turn.
+    expect(
+      declinesBelowFloor().map((d) => d.fields.dispatch_path),
+      'a block-carrying explanation answer must still reach the egress synthesiser',
+    ).toContain('route_egress_synthesised');
+    expect(synthesiseAnswerShapeFromText(body.assistant_text)).not.toBeNull();
   });
 });

@@ -194,12 +194,17 @@ import { readTopLevelFlipRows } from '../context/flip-threshold-rows.js';
 import { findForbiddenPhraseHit, RAW_DECIMAL_RE } from './forbidden-user-facing-phrases.js';
 import { applyTerminologyRewrite } from './terminology-rewrite.js';
 import {
+  composeStatedDissentBody,
+  isStatedDissentOfferComposable,
+} from '../coaching/stated-dissent-offer-text.js';
+import {
   disagreementResolutionSignals,
   evidenceSignals,
   fragileEdgeOfferSignals,
   guidanceSignalsForCoachingKind,
   overrideStressTestSignals,
   reviewCardSignals,
+  statedDissentReviewSignals,
 } from './guidance-signals.js';
 // ROADMAP 2.989 — the fragile-edge selector (pure) and the leader admission.
 // `mayPresentLeaderClaimForFact` is IMPORTED, not restated: the offer's
@@ -1708,6 +1713,43 @@ function buildJudgementLensOffer(selection: LensSelection): JudgementLensOffer |
 }
 
 /**
+ * T3 — the stated-dissent offer, or `null` for every other lens.
+ *
+ * Deliberately NOT folded into {@link buildJudgementLensOffer}: that function's
+ * whole body is an edge — `selection.judgementEdge`, two endpoint labels, an
+ * edge-shaped `target_refs` entry and an edge-shaped action prompt. T3 has no
+ * edge and no graph subject at all, so folding it in would mean four new
+ * `isDissent` branches through a function whose header records that FOUR
+ * readings of one discrimination is how a fifth branch acquires the wrong one.
+ *
+ * ⚠ `targetRefs` IS EMPTY, AND THAT IS DERIVED RATHER THAN LAZY.
+ * `TargetRefKind` is a CLOSED 7-value schema enum — factor, option, edge, goal,
+ * risk, constraint, outcome — with no member for a FINDING, and `target_refs`
+ * is `z.array(TargetRefSchema)` with no minimum, so an empty array is the
+ * contract's own way of saying "this card points at no graph entity". Choosing
+ * the nearest wrong kind would state a false OBJECT on a producer-owned field,
+ * which is the wrong-object class ROADMAP 2.392 exists to kill; inventing an id
+ * would put an id in a user-facing block. Empty is the true answer.
+ */
+function buildStatedDissentOffer(selection: LensSelection): JudgementLensOffer | null {
+  if (selection.lens !== 'stated_dissent_review') return null;
+  const dissent = selection.statedDissent;
+  if (dissent === undefined) return null;
+  // Same backstop stance as the sibling offers: the SAME pure predicate ran at
+  // eligibility inside `selectLens`, so this arm is unreachable through the
+  // live path — it stays because a lens id and its payload travelling as two
+  // fields is exactly the pairing a future refactor can break.
+  if (!isStatedDissentOfferComposable(dissent.openCount)) return null;
+  return {
+    body: composeStatedDissentBody(selection.body, dissent.openCount),
+    // No action pair in v1 — see `coaching/stated-dissent-offer-text.ts`. The
+    // mint emits `action_label`/`action_prompt` together or not at all, so the
+    // card ships with its finding and no inert chip.
+    targetRefs: [],
+  };
+}
+
+/**
  * ⚠ TEST-ONLY as of ROADMAP 2.211. Complete caller manifest at this tip
  * (`rg -a` over the whole repo excluding `node_modules`): this definition, one
  * prose mention in `lens-selector.ts`, and three spec files
@@ -1852,10 +1894,22 @@ export function buildLensSurface(
     return null;
   }
 
+  // T3 — same backstop stance again. The lens exists only to carry this
+  // sentence, so an uncomposable offer drops the SURFACE rather than shipping a
+  // card whose body opens on a tail with no antecedent.
+  const statedDissentOffer = buildStatedDissentOffer(selection);
+  if (selection.lens === 'stated_dissent_review' && statedDissentOffer === null) {
+    return null;
+  }
+
   // The turn's ONE action pair, whichever lens produced it. `judgementOffer`
   // first for the same reason `body`/`target_refs` read it first below: the two
   // offer kinds are mutually exclusive by lens, so the order is a tie-break that
   // can never fire, not a precedence rule.
+  // T3 carries no action pair, so it is deliberately absent from this chain:
+  // adding `statedDissentOffer?.actionLabel` would read as though it might one
+  // day supply one, and a later slice adding a PROBE prompt must revisit the
+  // routing gates rather than inherit a silent hook.
   const actionLabel = judgementOffer?.actionLabel ?? offer?.actionLabel;
   const actionPrompt = judgementOffer?.actionPrompt ?? offer?.actionPrompt;
 
@@ -1885,24 +1939,34 @@ export function buildLensSurface(
     coaching_kind: 'strengthen' as const,
     title: truncate(selection.title, TITLE_MAX),
     body: truncate(
-      judgementOffer?.body ?? offer?.body ?? groundedSensitivity?.grounded?.body ?? selection.body,
+      judgementOffer?.body ??
+        statedDissentOffer?.body ??
+        offer?.body ??
+        groundedSensitivity?.grounded?.body ??
+        selection.body,
       BODY_MAX,
     ),
     source: 'deterministic_signal' as const,
-    target_refs: (judgementOffer?.targetRefs ?? offer?.targetRefs ?? []) as readonly TargetRef[],
+    target_refs: (judgementOffer?.targetRefs ??
+      statedDissentOffer?.targetRefs ??
+      offer?.targetRefs ??
+      []) as readonly TargetRef[],
     priority_rank: 15,
     // Wave-2 ask 1 (0.19.0) + 1.120 residual (0.21.0): producer-owned guidance
     // signals for `strengthen` (category could_fix, signal_code STRENGTHEN_ITEM)
     // — except on the fragile-edge offer (detector class: result fragility) and
-    // the two judgement lenses (detector classes: the user's own override / the
-    // validation pipeline's contested verdict — see `guidance-signals.ts`).
+    // the three judgement lenses (detector classes: the user's own override /
+    // the validation pipeline's contested verdict / the user's own stated
+    // objection — see `guidance-signals.ts`).
     ...(selection.lens === 'override_stress_test'
       ? overrideStressTestSignals()
       : selection.lens === 'disagreement_resolution'
         ? disagreementResolutionSignals()
-        : offer !== null
-          ? fragileEdgeOfferSignals()
-          : guidanceSignalsForCoachingKind('strengthen')),
+        : selection.lens === 'stated_dissent_review'
+          ? statedDissentReviewSignals()
+          : offer !== null
+            ? fragileEdgeOfferSignals()
+            : guidanceSignalsForCoachingKind('strengthen')),
     // ROADMAP 2.989 — the ACTION. ⚠ NO `action_intent`, and that is derived,
     // not forgotten. `ActionIntentLiteral` is a CLOSED 15-value schema enum with
     // no edge-mutation member; its nearest value, `edit_factor`, would state a
@@ -2218,10 +2282,16 @@ export function buildLensCompanionBlocks(
     // 2.690 §B.5 names the P-003 companion reuse as a candidate for a LATER
     // slice — with honest copy — and that is a reviewed addition here, not a
     // default.
+    //
+    // T3 (`stated_dissent_review`) declares no companion either, and for a
+    // sharper reason than its siblings: a structured exercise block would be
+    // the product taking a turn at the objection, and the whole proposition of
+    // that card is that the objection is the user's to answer.
     case 'sensitivity_flip_risk':
     case 'evpi_evidence_priority':
     case 'override_stress_test':
     case 'disagreement_resolution':
+    case 'stated_dissent_review':
     case 'fragile_edge_resolution':
     case 'what_if_counterfactual':
       return [];
