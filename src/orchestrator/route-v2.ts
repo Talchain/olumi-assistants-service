@@ -324,6 +324,10 @@ import {
   withReadinessApplyControl,
 } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
 import { prepareValueBatchOffer } from '../orchestrator-v5/handlers/readiness-value-batch-flow.js';
+import {
+  buildValueBatchReviewBlock,
+  composeValueBatchReviewText,
+} from '../orchestrator-v5/handlers/readiness-value-batch.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -3401,6 +3405,10 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
        * array would have been the hand-maintained mirror the guard exists to stop.
        */
       let valueBatchOffer: Awaited<ReturnType<typeof prepareValueBatchOffer>> | null = null;
+      // Hoisted out of the try: the review surface below needs the SAME hash the
+      // offer was built against, so the block's `graph_hash_at_generation` names
+      // the model the user is looking at rather than one re-derived later.
+      let valueBatchGraphHash: string | null = null;
       if (
         readinessOffer === null
         && readiness.assessment
@@ -3412,6 +3420,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             persistedGraph as GraphStateIngress,
           );
           if (graphHash !== null) {
+            valueBatchGraphHash = graphHash;
             valueBatchOffer = await prepareValueBatchOffer({
               assessment: readiness.assessment,
               graph: persistedGraph,
@@ -3449,12 +3458,71 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         );
       }
 
+      /**
+       * ⭐⭐⭐ THE NUMBERS REACH THE USER HERE, ON THE TURN THAT OFFERS THE CHIP.
+       *
+       * THE DEFECT THIS CLOSES, measured at the bytes on this branch's own first
+       * head: the chip applied N model-authored values to the user's model in one
+       * click and the user saw NONE of them first. `valueBatchOffer.proposal` was
+       * carried into the pending action's `inline_patch` and read by nothing on
+       * the way out — this file consumed `.kind` and `.offer` only, the readiness
+       * response was composed 63 lines ABOVE the estimator call, the chip had no
+       * `detail` and `params: {}`, and `OlumiResponseSchema` is `.strict()` with
+       * no pending/inline_patch key, so NO CLIENT COULD HAVE RENDERED IT however
+       * it was written. Three separate sites told the user they had reviewed
+       * them. That is the product's own ruling — humans remain the authors and
+       * the decision-makers — inverted.
+       *
+       * ⚠ IT RUNS ON `no_writable` TOO, and that is not tidiness. The module
+       * refuses at compose time to accept a silent decline
+       * (`declined_without_reason`) precisely so the reasons can be shown; a
+       * branch that surfaced only the writable set would delete the one thing a
+       * user can act on in the state where the model estimated nothing. There is
+       * still no chip there, because there is still nothing to approve.
+       *
+       * ⛔ AND IT IS ORDERED BEFORE THE APPLY CONTROL DELIBERATELY. `applyOffer`
+       * below reads `valueBatchReviewShown`, so the chip cannot exist on a turn
+       * whose values were not rendered. The previous version of this feature
+       * asserted that coupling in a comment; this one cannot compile without it.
+       */
+      let valueBatchReviewShown = false;
+      if (
+        valueBatchOffer
+        && (valueBatchOffer.kind === 'offer' || valueBatchOffer.kind === 'no_writable')
+        && valueBatchGraphHash !== null
+      ) {
+        const reviewText = composeValueBatchReviewText(valueBatchOffer.proposal);
+        // Fail closed on an empty compose: a chip whose values did not render is
+        // exactly the state this block exists to make impossible.
+        if (reviewText.trim().length > 0) {
+          const reviewBlock = buildValueBatchReviewBlock({
+            proposal: valueBatchOffer.proposal,
+            currentGraphHash: valueBatchGraphHash,
+            createdAtIso: new Date().toISOString(),
+          });
+          readinessResponse = {
+            ...readinessResponse,
+            assistant_text: `${readinessResponse.assistant_text}\n\n${reviewText}`,
+            // The typed mark is ADDITIVE to the numbers, never a substitute for
+            // them: `CoachingBlockSchema.body` caps at 300 characters, so a
+            // ten-cell batch cannot live there. A null block (its own schema
+            // refused it) loses the mark and keeps every number.
+            ...(reviewBlock !== null
+              ? { blocks: [...readinessResponse.blocks, reviewBlock] as typeof readinessResponse.blocks }
+              : {}),
+          };
+          valueBatchReviewShown = true;
+        }
+      }
+
       /** Whichever apply control this turn earned. At most one is ever offered. */
       let applyOffer:
         | { readonly chip: { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string }; readonly pending: PendingAction }
         | null =
         readinessOffer
-        ?? (valueBatchOffer && valueBatchOffer.kind === 'offer' ? valueBatchOffer.offer : null);
+        ?? (valueBatchOffer && valueBatchOffer.kind === 'offer' && valueBatchReviewShown
+          ? valueBatchOffer.offer
+          : null);
 
       if (applyOffer) {
         readinessResponse = {

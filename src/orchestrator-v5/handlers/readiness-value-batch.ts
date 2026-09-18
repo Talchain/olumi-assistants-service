@@ -131,7 +131,15 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 
+import {
+  CoachingBlockSchema,
+  type CoachingBlock,
+  type TargetRef,
+} from '@talchain/schemas/boundary';
+
 import { GraphV3, type GraphV3T } from '../../schemas/cee-v3.js';
+import { deterministicBlockId } from '../compose/block-id.js';
+import { guidanceSignalsForCoachingKind } from '../compose/guidance-signals.js';
 import type { PatchOperation } from '../../orchestrator/types.js';
 import {
   assessCanonicalAnalysisReadiness,
@@ -163,6 +171,16 @@ export const READINESS_VALUE_BATCH_PROPOSAL_VERSION = 'readiness_value_batch_v1'
  * life, not merely in the turn that wrote it.
  */
 export const VALUE_BATCH_INTERVENTION_SOURCE = 'cee_hypothesis' as const;
+
+/**
+ * The coaching kind the review card rides.
+ *
+ * ⭐ AN ESTIMATE THE PRODUCT MADE ABOUT THE USER'S MODEL IS AN ASSUMPTION, and
+ * `assumption_check` is the existing member of `CoachingBlock['coaching_kind']`
+ * whose whole job is to put one in front of the user. No new kind is minted —
+ * one would be a `@talchain/schemas` change, which this lane ships none of.
+ */
+export const VALUE_BATCH_REVIEW_COACHING_KIND = 'assumption_check' as const;
 
 /**
  * The 0–1 model-unit scale every option effect value lives on.
@@ -470,6 +488,233 @@ export function writableCells(
   );
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * ⭐⭐⭐ THE REVIEW SURFACE — the half that makes "you reviewed them" true.
+ *
+ * The user is being asked to write N model-authored numbers into their own
+ * model in one click. The product's ruling is that HUMANS REMAIN THE AUTHORS
+ * AND THE DECISION-MAKERS, so the numbers have to be ON SCREEN before the
+ * click, not merely inside the pending action the click resumes.
+ *
+ * ⚠ WHY `assistant_text` CARRIES THE NUMBERS AND THE BLOCK DOES NOT.
+ * `CoachingBlockSchema.body` is `z.string().min(1).max(300)` (vendored
+ * `@talchain/schemas` 0.55.0, `boundary/blocks.js:485` `PHASE3_BODY_MAX = 300`).
+ * The witnessed harm is TEN cells; ten lines with their reasoning do not fit in
+ * 300 characters, and a body that truncates would drop cells SILENTLY — the
+ * same defect one layer over. `OlumiResponse.assistant_text` is a bare
+ * `z.string()` with no bound, it is the assistant's message itself, and it is
+ * rendered on every turn with no pacing cap and no adapter in the way. So the
+ * NUMBERS go there, complete, and the typed block carries the machine-authored
+ * MARK and the entity identities. Neither restates the other, so they cannot
+ * drift apart (trap 12).
+ *
+ * ⛔ NO CONTRACT WIDENING. `OlumiResponseSchema` is `.strict()`; `coaching` is
+ * an existing member of its `blocks` discriminated union
+ * (`boundary/blocks.js:1185`) and `assistant_text` an existing key. Nothing new
+ * is minted at the wire.
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * The 0–1 model unit rendered the way the estate has ALREADY ruled these
+ * values must be rendered.
+ *
+ * ⚠ PERCENTAGES, NEVER RAW DECIMALS, and this is not a style choice made here:
+ *   - `RAW_DECIMAL_RE` (`compose/forbidden-user-facing-phrases.ts:395`,
+ *     `/(?:^|[\s(=,])(?:0\.\d|\.\d)/`) bans a leading-decimal probability from
+ *     user-facing prose, and the Phase-3 prose guard DROPS a block that carries
+ *     one. A body reading "0.4" would delete the card that carries the mark.
+ *   - `formatEffectSlotReask` (`tools/handlers/d1-shared/format-confirmation.ts`)
+ *     already renders THIS EXACT cell type — an option's effect on a factor —
+ *     as `${Math.round(v * 100)}%` "of the top", on the ratified ground that a
+ *     strategic user must never be asked to understand the internal normalised
+ *     coefficient scale.
+ *
+ * ⚠ AND IT IS LOSSLESS, DELIBERATELY, WHERE THAT SIBLING ROUNDS. The sibling is
+ * re-asking for a value, so a rounded reading is the thing being offered. Here
+ * the number displayed is the number that will be WRITTEN, and display must
+ * equal execute (`compose/format-factor-value.ts` states the same rule for the
+ * flip proposal). `0.405` therefore renders `40.5%`, not `41%`. `toPrecision(12)`
+ * removes the binary-float tail (`0.07 * 100 === 7.000000000000001`) without
+ * discarding a digit the model actually chose.
+ *
+ * The output cannot trip `RAW_DECIMAL_RE`: the domain is [0, 1], so the
+ * percentage is in [0, 100] and any decimal point is preceded by a digit, never
+ * by a line start, space, `(`, `=` or `,`.
+ */
+export function formatModelUnitPercent(value: number): string {
+  return `${Number((value * 100).toPrecision(12))}%`;
+}
+
+/** How the user sees one cell: which option, which factor, which number. */
+function cellAddress(cell: ValueBatchProposedCell): string {
+  return `"${cell.option_label ?? cell.option_id}" on "${cell.factor_label ?? cell.factor_id}"`;
+}
+
+/**
+ * One reviewable line per proposed value. Exported so the route-level suite can
+ * bind an assertion to a NAMED CELL rather than to a number another cell could
+ * also carry — a value predicate is satisfiable by the wrong object (trap 19).
+ */
+export function renderValueBatchProposedLine(
+  cell: ValueBatchProposedCell & { readonly value: number },
+): string {
+  const reason = cell.reasoning !== undefined && cell.reasoning.trim().length > 0
+    ? ` Why: ${cell.reasoning.trim()}`
+    : '';
+  return `${cellAddress(cell)}: ${formatModelUnitPercent(cell.value)} of the top.${reason}`;
+}
+
+/** One line per cell the model would not estimate, carrying its stated reason. */
+export function renderValueBatchDeclinedLine(cell: ValueBatchProposedCell): string {
+  return `${cellAddress(cell)}: not estimated. Why not: ${cell.declined_reason ?? 'no reason was given'}`;
+}
+
+/**
+ * ⭐ THE WHOLE PROPOSAL, AS THE USER READS IT, BEFORE ANY APPROVAL EXISTS.
+ *
+ * Covers all three populations the module already separates and which the
+ * pre-fix wiring dropped together: the values that would be WRITTEN, the cells
+ * the model DECLINED (with the reason `buildValueBatchProposal` refuses to let
+ * it omit), and the `unsettable` gaps this batch cannot touch at all. Showing
+ * the writable set alone would tell the user the plan covers everything open
+ * when it does not.
+ *
+ * ⛔ NO CHOICE DIRECTIVE, NO RECOMMENDATION NOUN. `applyEgressForbiddenPhraseGuard`
+ * replaces the WHOLE assistant_text on a hit, so the copy states what the
+ * product would do and hands the decision back; it never advises a pick.
+ */
+export function composeValueBatchReviewText(proposal: ValueBatchProposal): string {
+  const writable = writableCells(proposal);
+  const declined = proposal.cells.filter((c) => c.value === null);
+  const parts: string[] = [];
+
+  if (writable.length > 0) {
+    parts.push(
+      `Here ${writable.length === 1 ? 'is the number' : `are the ${writable.length} numbers`} I would write. `
+      + `I chose ${writable.length === 1 ? 'it' : 'them'}, you did not: `
+      + `${writable.length === 1 ? 'it is' : 'each is'} my estimate from your brief and the model. `
+      // ⚠ THE SEMANTICS ARE THE PRODUCER'S, QUOTED BACK. The estimator prompt
+      // (`readiness-value-estimator.ts`) asks for "the level the factor reaches
+      // WHEN THAT OPTION IS TAKEN ... 0 means zero, 1 means its top", and
+      // `formatEffectSlotReask` renders the same cell "X% of the top". Calling
+      // it the strength of the option's effect would be a different quantity
+      // under the same digits.
+      + `Each one is the level that factor reaches if you take that option, `
+      + `where 100% is the factor's top. Nothing is written until you approve.`,
+    );
+    parts.push(writable.map(renderValueBatchProposedLine).join('\n'));
+  }
+
+  if (declined.length > 0) {
+    parts.push(
+      `${declined.length === 1 ? 'One value' : `${declined.length} values`} I could not estimate defensibly, `
+      + `so ${declined.length === 1 ? 'it stays' : 'they stay'} open for you:`,
+    );
+    parts.push(declined.map(renderValueBatchDeclinedLine).join('\n'));
+  }
+
+  if (proposal.unsettable.length > 0) {
+    const n = proposal.unsettable.length;
+    parts.push(
+      `${n === 1 ? 'One further gap is' : `${n} further gaps are`} outside this set entirely, `
+      + `because the model does not yet say which factor ${n === 1 ? 'it affects' : 'they affect'}: `
+      + `${proposal.unsettable.map((u) => `"${u.option_label ?? u.option_id}"`).join(', ')}.`,
+    );
+  }
+
+  return parts.join('\n\n');
+}
+
+/**
+ * The typed, machine-readable MARK on the turn: these numbers are the product's,
+ * and here are the entities they would change.
+ *
+ * ⭐ WHY A `coaching` BLOCK, DERIVED AT THE BYTES RATHER THAN CHOSEN BY TASTE.
+ * The claim "the UI renders this" was verified end to end against
+ * `Talchain/DecisionGuideAI` `staging` (c4c6f508):
+ *   `responseParser.ts:161` puts `'coaching'` in `PHASE3_TOLERATED_BLOCK_TYPES`
+ *   → `:460` lifts it out of `blocks[]` → `:842` stashes it under
+ *   `PHASE3_SIDECAR_BLOCKS_KEY` → `extractPhase3FromV5Response.ts:613` collects
+ *   it (called unconditionally per V5 turn at `useConversation.ts:4858`) →
+ *   `useConversation.ts:5158` `composePhase3BridgedBlocks` → `:1745`
+ *   `adaptTypedCoachingBlock` → `InlineBlocks.tsx:805` renders
+ *   `<V5CoachingBlock>` → `V5CoachingBlock.tsx:353` renders `body` verbatim at
+ *   `data-testid="v5-coaching-body"` and `:422` renders the `target_refs` pills.
+ * The UI pins the SAME vendored 0.55.0 tarball, so the shape this builds is the
+ * shape that adapter reads.
+ *
+ * ⚠ `coaching_kind: 'assumption_check'` is not decoration. These ARE the
+ * product's assumptions about the user's model, offered to be checked before
+ * they are adopted, and the signal/category/priority come from the estate's one
+ * authority (`guidanceSignalsForCoachingKind`) rather than being hand-picked
+ * here — a hand-picked triple is the mirror that drifts.
+ *
+ * ⛔ NO `action_intent` / `action_label` / `action_prompt`. The approval already
+ * has an affordance (the chip), and the on-card action pill is display-only on
+ * the live UI; a second, inert one would be an affordance that does nothing.
+ *
+ * Returns `null` when the composed block fails its own schema — fail closed, and
+ * the caller keeps the numbers in `assistant_text` either way.
+ */
+export function buildValueBatchReviewBlock(input: {
+  readonly proposal: ValueBatchProposal;
+  readonly currentGraphHash: string;
+  readonly createdAtIso: string;
+}): CoachingBlock | null {
+  const writable = writableCells(input.proposal);
+  const declined = input.proposal.cells.length - writable.length;
+  // Identity, not prose: `target_refs` is a STRUCTURED field, so the egress
+  // entity-id scrub leaves it alone (`compose/output-safety.ts`, the `coaching`
+  // case names it untouched) and the ids survive to the client verbatim. This
+  // is what binds each proposed value to the exact option and factor it would
+  // change, rather than to a label another entity could share.
+  const refs = new Map<string, TargetRef>();
+  for (const cell of input.proposal.cells) {
+    if (!refs.has(cell.option_id)) {
+      refs.set(cell.option_id, {
+        id: cell.option_id,
+        label: cell.option_label ?? cell.option_id,
+        kind: 'option',
+      });
+    }
+    if (!refs.has(cell.factor_id)) {
+      refs.set(cell.factor_id, {
+        id: cell.factor_id,
+        label: cell.factor_label ?? cell.factor_id,
+        kind: 'factor',
+      });
+    }
+  }
+  const signal_id = `coach:value_batch_review:${input.currentGraphHash}`;
+  const candidate = {
+    block_id: deterministicBlockId(signal_id),
+    signal_id,
+    created_at: input.createdAtIso,
+    source_handler: READINESS_VALUE_BATCH_HANDLER_ID,
+    graph_hash_at_generation: input.currentGraphHash,
+    freshness: 'fresh' as const,
+    type: 'coaching' as const,
+    coaching_kind: VALUE_BATCH_REVIEW_COACHING_KIND,
+    title: 'Estimates I made, for you to check',
+    // ⚠ BOUNDED BY CONSTRUCTION, not by truncation: every part is a fixed
+    // sentence plus two small integers, so this cannot approach the 300-char
+    // cap and cannot silently lose a cell. The cells themselves are in
+    // `assistant_text`, which has no cap.
+    body:
+      `${writable.length === 1 ? 'One estimate is' : `${writable.length} estimates are`} waiting for your check`
+      + (declined > 0
+        ? `, and ${declined} ${declined === 1 ? 'value' : 'values'} I could not estimate`
+        : '')
+      + `. Every number here is mine, not yours. Nothing is written to your model until you approve.`,
+    source: 'deterministic_signal' as const,
+    target_refs: [...refs.values()],
+    priority_rank: 1,
+    ...guidanceSignalsForCoachingKind(VALUE_BATCH_REVIEW_COACHING_KIND),
+  };
+  const parsed = CoachingBlockSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
 /**
  * ⭐ ONE APPROVAL FOR THE WHOLE SET — the affordance the witnessed turn could
  * not offer.
@@ -480,11 +725,28 @@ export function writableCells(
  * stated; never a value the PRODUCT chose**, because a number on a chip reads
  * as a recommendation and puts a fabricated intervention one click away.
  *
- * This chip carries NO NUMBER. The estimates and their reasoning are shown in
- * the reviewed proposal, in full, and the chip approves what the user has
- * already read. That is the reviewed path the rule protects, not the one-click
- * bypass it forbids — and it stays on the safe side of the pinned guard by
- * carrying no digit at all.
+ * This chip carries NO NUMBER. The estimates and their reasoning are rendered
+ * on the SAME TURN by `composeValueBatchReviewText` (into `assistant_text`) and
+ * marked machine-authored by `buildValueBatchReviewBlock` (a typed `coaching`
+ * block), and the chip approves what the user has already read. That is the
+ * reviewed path the rule protects, not the one-click bypass it forbids — and it
+ * stays on the safe side of the pinned guard by carrying no digit at all.
+ *
+ * ⚠⚠ THIS SENTENCE WAS FALSE FOR THE WHOLE OF THIS MODULE'S FIRST LIFE, AND
+ * THAT IS WHY IT NOW NAMES THE TWO FUNCTIONS RATHER THAN A "REVIEWED PROPOSAL".
+ * `proposal` rode into the pending action's `inline_patch` and was read by
+ * NOTHING on the way out: `route-v2.ts` consumed `valueBatchOffer.kind` and
+ * `.offer` only, the readiness response was composed BEFORE the estimator ran,
+ * the chip carried no `detail` and `params: {}`, and `OlumiResponseSchema` is
+ * `.strict()` with no pending/inline_patch key — so no client could have
+ * rendered it however it was written. Six machine-chosen numbers sat one click
+ * away and three separate sites said the user had reviewed them.
+ *
+ * ⭐ THE COUPLING IS NOW STRUCTURAL, NOT REMEMBERED. `route-v2.ts` takes the
+ * value-batch apply control ONLY on a turn where the review text was appended
+ * to `assistant_text`; there is no branch that emits the chip without it. A
+ * comment asserting visibility is what failed last time — the caller's
+ * `valueBatchReviewShown` flag is what replaces it.
  */
 export function buildValueBatchOffer(input: {
   readonly proposal: ValueBatchProposal;
