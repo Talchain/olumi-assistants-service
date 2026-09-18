@@ -188,6 +188,13 @@ const TIER_BY_LENS: Readonly<Record<LensId, InterventionTier>> = Object.freeze({
   // outranks — 2.690 §B.3).
   override_stress_test: 'resolve_disagreement',
   disagreement_resolution: 'resolve_disagreement',
+  // T3 — the tier's THIRD member and the only one whose disagreement is a
+  // HUMAN's. T1 is a human overriding an estimate; T2 is the validation
+  // pipeline disagreeing with itself. This is a person saying, in their own
+  // words, that a finding is wrong — the same KIND of issue (something the
+  // team has not settled), so the same tier, and last within it by ladder
+  // order so it displaces neither sibling.
+  stated_dissent_review: 'resolve_disagreement',
   // ⛔ `resolve_uncertainty` HAS NO MEMBER, DELIBERATELY — see the tier's own
   // note on {@link InterventionTier}. It is not an empty slot waiting to be
   // filled; it is a slot held open by a live science ban.
