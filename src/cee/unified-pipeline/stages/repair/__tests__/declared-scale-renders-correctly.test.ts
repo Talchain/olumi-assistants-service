@@ -53,7 +53,7 @@ function statedFactor(opts: { value: number; unit: string; declared_scale?: stri
 function rendered(opts: { value: number; unit: string; declared_scale?: string }): unknown {
   const graph = statedFactor(opts);
   handleUnreachableFactors(graph, "edge_type" as never);
-  const v3 = transformGraphToV3(graph) as unknown as {
+  const v3 = transformGraphToV3(graph as never) as unknown as {
     graph?: { nodes?: Array<Record<string, unknown>> };
     nodes?: Array<Record<string, unknown>>;
   };
