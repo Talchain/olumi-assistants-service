@@ -1623,6 +1623,47 @@ export const STATED_OBJECTIONS_INSTRUCTION = [
   '- The judgement is the user\u2019s. Do not rule on who is right.',
   '- Never restate a stated objection as if it were established fact about the world, and never carry one across to a different finding or a different decision than the one it names.',
   '- Reason only over the objections in this block. Never infer that a finding is uncontested because it is absent here \u2014 this block records what was said, not everything the user thinks.',
+  // ⛔⛔ THE CURRENCY CLAUSE. Added 18 Sep 2026 on an independent review
+  // finding, and it is the reason the sentence above ("the current, standing
+  // position") is safe to keep.
+  //
+  // Each objection carries `analysis_id` — the run it was written against.
+  // That stamp is projected into the prompt and IS NEVER COMPARED TO ANYTHING,
+  // because the model-facing pack has no referent for it:
+  // `DisplaySafeAnalysis` carries no run id and no finding ids, and
+  // `projectModelFacingContextPack` destructures `analysis_state` OUT — which
+  // is the only place `graph_hash_at_run` / `current_graph_hash` live. So the
+  // id is an opaque token, and without this clause the instruction asserted a
+  // currency the pack cannot support.
+  //
+  // The reachable harm: a user objects to a finding on run A, edits the model,
+  // re-runs to run B where that finding no longer exists — and the objection
+  // is still inside the 20-turn `prior_facts` window, so it is projected
+  // unchanged beside run B's analysis. The model then reasons from, and
+  // acknowledges, an objection to a finding the current analysis does not
+  // make. Presenting a run-A claim as the user's position on run B is a claim
+  // the user never made.
+  //
+  // ⭐ BOTH PRODUCERS ALREADY SAY THIS IN WRITING, which is why the consumer
+  // owes it: the deployed UI's `dissentStore.ts` header — "A dissent written
+  // against one analysis, shown beside a later one with no caveat, is a claim
+  // the user never made... Consumers compare it and caveat" — and schemas
+  // 0.55.0 `FindingDissentEvent.analysis_id`.
+  //
+  // ⛔ IT IS A CAVEAT, NEVER A GATE. The wire contract is explicit: "It is a
+  // RECORD STAMP, never a stale gate: CEE must not refuse a dissent because
+  // the run has since been superseded." So the fact is still projected in
+  // full and the user's words still reach the model — what changes is only
+  // that the model may not ASSERT the objection is about the current run.
+  //
+  // ⚠ THIS IS THE WEAKER OF THE TWO FIXES THE REVIEW OFFERED, DELIBERATELY.
+  // The stronger one — projecting a currency verdict beside each objection
+  // from the canonical analysis state — is the right end state and is rowed.
+  // It needs the assembler to reach analysis state that the model-facing pack
+  // deliberately excludes, which is a real design question and not a clause.
+  // This closes the false assertion now without pretending to close the
+  // comparison.
+  '- Each objection was made against ONE earlier run of the analysis, and you cannot tell from this prompt whether that run is the one shown to you now. The model may have been edited and re-analysed since. So never state or imply that an objection is about the current analysis, and never present it as the user\u2019s view of a finding in front of you unless they have said so on this turn. Their words still stand as their words — what you do not know is which run they were aimed at. Where it matters to the answer, say so plainly and let the user confirm.',
 ].join('\n');
 
 export const READINESS_INSTRUCTION = [
