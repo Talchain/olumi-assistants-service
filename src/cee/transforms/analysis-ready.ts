@@ -92,6 +92,15 @@ export function transformOptionToAnalysisReady(
    * the real count.
    */
   connectedFactorCount = 0,
+  /**
+   * Whether this option is the status-quo baseline. Supplied by
+   * `buildAnalysisReadyPayload`, the only producer that sees every option and
+   * can therefore run `detectBaselineOptionIndex`. Defaults to `false` for the
+   * standalone single-option callers, matching
+   * `analysable-option-gate.ts::isBaselineOption`'s strict `=== true`: a
+   * MISSING verdict must exclude rather than hold.
+   */
+  isBaseline = false,
 ): OptionForAnalysisT {
   // Flatten interventions: Record<string, InterventionV3> -> Record<string, number>
   const interventions: Record<string, number> = {};
@@ -171,7 +180,8 @@ export function transformOptionToAnalysisReady(
     Object.keys(interventions).length,
     option.status,
     hasNonNumericRaw,
-    connectedFactorCount
+    connectedFactorCount,
+    isBaseline
   );
 
   const result: OptionForAnalysisT = {
@@ -708,14 +718,30 @@ export function buildAnalysisReadyPayload(
   //
   // `optionFactorAdj` already excludes repair-authored edges, so a lever the
   // product wired for itself never counts as a mapping the user made.
-  const analysisOptions = options.map((option) =>
-    transformOptionToAnalysisReady(option, (optionFactorAdj.get(option.id) ?? []).length),
-  );
-
   // === is_baseline detection (CEE-2) ===
   // Mark exactly one option as the status-quo baseline, based on LLM flag or
-  // label keyword matching. This is additive — no existing field is modified.
+  // label keyword matching.
+  //
+  // ⭐ THIS RUNS BEFORE THE MAP BELOW, AND THAT ORDERING IS THE FIX — the same
+  // shape as the adjacency hoist above it. `detectBaselineOptionIndex` used to
+  // be called immediately AFTER the map, so every option's status was decided
+  // by the one producer that holds the whole option set while the fact that one
+  // of them IS the status quo was still three lines away. The flag was in hand
+  // and arrived too late to be read: the baseline went out as
+  // `needs_user_mapping` ("choose which factor X changes and by how much") —
+  // a question with no answerable form for a status quo — while
+  // `analysable-option-gate.ts` read the very same flag and HELD the option as
+  // analysable. Two authorities, one object, opposite answers in one turn.
   const baselineIdx = detectBaselineOptionIndex(options);
+
+  const analysisOptions = options.map((option, index) =>
+    transformOptionToAnalysisReady(
+      option,
+      (optionFactorAdj.get(option.id) ?? []).length,
+      index === baselineIdx,
+    ),
+  );
+
   if (baselineIdx !== null) {
     analysisOptions[baselineIdx].is_baseline = true;
   }
@@ -980,8 +1006,27 @@ export function buildAnalysisReadyPayload(
 
   // Determine status based on transformed options (Raw+Encoded pattern)
   // Priority: needs_user_mapping > needs_encoding > ready
+  // ⭐ THE HELD BASELINE IS EXEMPT FROM THE EMPTINESS LIMB — AND THIS IS NOT THE
+  // EDIT THE ⛔ NOTE ON `optionsNeedingMapping` BELOW BANS.
+  //
+  // That note protects the loose limb against being narrowed to a STATUS test,
+  // because the connected-but-numberless class must keep holding `payloadStatus`
+  // still while its `interventions` are provably `{}`. The limb stays loose here
+  // for every one of those options. What is carved out is exactly one option,
+  // by the same strict `is_baseline === true` predicate
+  // `analysable-option-gate.ts::isBaselineOption` uses to HOLD it for the run —
+  // an option whose emptiness is a complete statement rather than a missing one.
+  //
+  // ⚠ WITHOUT THIS, FIXING ONLY THE PER-OPTION STATUS MAKES THINGS WORSE, NOT
+  // BETTER: every option reports `ready`, `appendSemanticIssues` mints nothing,
+  // and the payload still says `needs_user_mapping` — a model blocked with ZERO
+  // blockers, the exact shape recorded at `compose/analysis-state-v1.ts`. The
+  // user would lose the (wrong) explanation and keep the (wrong) block.
+  const isHeldBaseline = (o: OptionForAnalysisT): boolean => o.is_baseline === true;
   const hasIncompleteOptions = analysisOptions.some(
-    (o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0
+    (o) =>
+      o.status === "needs_user_mapping"
+      || (Object.keys(o.interventions).length === 0 && !isHeldBaseline(o))
   );
   const hasEncodingNeeded = analysisOptions.some(
     (o) => o.status === "needs_encoding"
@@ -1002,7 +1047,11 @@ export function buildAnalysisReadyPayload(
   // This ensures the payload passes validation (needs_user_mapping requires user_questions)
   if (hasIncompleteOptions && uniqueQuestions.length === 0) {
     const incompleteOptionLabels = analysisOptions
-      .filter((o) => o.status === "needs_user_mapping" || Object.keys(o.interventions).length === 0)
+      .filter(
+        (o) =>
+          o.status === "needs_user_mapping"
+          || (Object.keys(o.interventions).length === 0 && !isHeldBaseline(o)),
+      )
       .map((o) => o.label)
       .slice(0, 3); // Limit to first 3 for readability
 

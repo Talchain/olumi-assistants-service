@@ -35,9 +35,22 @@
  *
  * THE DISCRIMINATOR IS REAL DATA, NOT A CONSTRUCTION. Draw 5's `e405d56a` is
  * connected by TWO edges that both carry `origin: "repair"` — the product's own
- * status-quo wiring. It must STAY `needs_user_mapping`, because there is no
- * representation to choose for a lever nobody stated. A fix that counted every
- * edge would flip it and this suite would RED.
+ * status-quo wiring. There is no representation to choose for a lever nobody
+ * stated, so an option in that position must NOT be asked for a value. A fix
+ * that counted every edge would flip it and this suite would RED.
+ *
+ * ⚠⚠ AMENDED 18 Sep 2026 (the held-baseline lane) — THE RULING ABOVE IS INTACT,
+ * ITS EXEMPLARS MOVED. Three of this file's captured options carry
+ * `is_baseline: true` ON THE CAPTURE — draw-4 `e5dc21d6`, draw-5 `e405d56a`,
+ * draw-9 `cbf30a46` — and a declared status quo is now `ready`: `interventions:
+ * {}` on a baseline is a COMPLETE statement ("hold every factor at its observed
+ * value"), which is the specification `analysable-option-gate.ts` already HELD
+ * and SUBMITTED it on. Asking such an option for a mapping, or for an effect-
+ * scale representation, is the same unanswerable question in two spellings.
+ * So each arm below that used a baseline as its exemplar has been RE-POINTED at
+ * a NON-baseline option from the same captures, and the repair-edge ruling is
+ * re-proved on a derived non-baseline control. Nothing in
+ * `observed_analysis_ready` is edited — it is the historic record (trap 14b).
  */
 
 import { readFileSync } from "node:fs";
@@ -116,6 +129,18 @@ function optionsFromGraph(graph: GraphV3T): OptionV3T[] {
     });
 }
 
+/**
+ * Whether the CAPTURE declares this option the status quo. Read from the graph
+ * itself, never asserted from memory, so every baseline premise below is pinned
+ * to the record.
+ */
+function isDeclaredBaseline(draw: Draw, optionId: string): boolean {
+  const node = (draw.draft_graph.nodes as NodeV3T[]).find(
+    (n) => (n as unknown as { id: string }).id === optionId,
+  ) as unknown as { is_baseline?: boolean } | undefined;
+  return node?.is_baseline === true;
+}
+
 function goalNodeId(graph: GraphV3T): string {
   const goal = (graph.nodes as NodeV3T[]).find((node) => node.kind === "goal");
   if (!goal) throw new Error("captured graph carries no goal node");
@@ -184,26 +209,46 @@ describe("connected-but-numberless options ask for the VALUE, not the mapping", 
   it.each([
     ["draw-9", "4abad64d"],
     ["draw-9", "c94b4086"],
-    ["draw-9", "cbf30a46"],
     ["draw-9", "e755ec33"],
     ["draw-5", "4abad64d"],
     ["draw-5", "e755ec33"],
-    ["draw-4", "e5dc21d6"],
   ])("%s option %s is needs_encoding", (drawKey, optionId) => {
+    // PRECONDITION, PINNED IN-TEST: none of these is the declared baseline, or
+    // this block would be measuring the baseline rule instead of the
+    // connected-but-numberless one.
+    expect(isDeclaredBaseline(DRAWS[drawKey], optionId)).toBe(false);
     expect(draftPathStatusById(DRAWS[drawKey]).get(optionId)).toBe("needs_encoding");
   });
 
+  // ⭐ RE-POINTED ARMS. `draw-9 cbf30a46` and `draw-4 e5dc21d6` used to sit in
+  // the list above. Both carry `is_baseline: true` on the capture, and a
+  // declared status quo needs no effect value at all — not a mapping, and not a
+  // representation. Bound by identity, and the baseline premise is asserted from
+  // the capture so it cannot rot silently.
+  it.each([
+    ["draw-9", "cbf30a46"],
+    ["draw-4", "e5dc21d6"],
+    ["draw-5", "e405d56a"],
+  ])("%s option %s is a DECLARED BASELINE and is ready", (drawKey, optionId) => {
+    expect(isDeclaredBaseline(DRAWS[drawKey], optionId)).toBe(true);
+    expect(draftPathStatusById(DRAWS[drawKey]).get(optionId)).toBe("ready");
+  });
+
   it("the reason names the connection rather than claiming nothing was extracted", () => {
+    // Re-pointed from `cbf30a46` (the declared baseline) to `c94b4086`, which is
+    // connected-but-numberless and is NOT a baseline — the class this assertion
+    // is about.
     const graph = DRAW_9.draft_graph;
+    expect(isDeclaredBaseline(DRAW_9, "c94b4086")).toBe(false);
     const payload = buildAnalysisReadyPayload(optionsFromGraph(graph), goalNodeId(graph), graph);
-    const option = payload.options.find((o) => o.id === "cbf30a46");
+    const option = payload.options.find((o) => o.id === "c94b4086");
     expect(option?.status).toBe("needs_encoding");
     expect(option?.status_reason).toMatch(/awaiting effect value/i);
   });
 });
 
 describe("BOUNDARIES", () => {
-  it("REPAIR-AUTHORED EDGES ARE NOT A MAPPING — draw-5 e405d56a stays needs_user_mapping", () => {
+  it("REPAIR-AUTHORED EDGES ARE NOT A MAPPING — the ruling, re-proved on a NON-baseline", () => {
     // Both of this option's edges carry `origin: "repair"`. Asserted here from
     // the capture itself so the premise of the case cannot rot silently.
     const graph = DRAW_5.draft_graph;
@@ -214,7 +259,30 @@ describe("BOUNDARIES", () => {
     expect(edges.length).toBeGreaterThan(0);
     expect(edges.every((e) => e.origin === "repair")).toBe(true);
 
-    expect(draftPathStatusById(DRAW_5).get("e405d56a")).toBe("needs_user_mapping");
+    // ⚠ ON THE CAPTURE this option is the DECLARED baseline, so its verdict is
+    // `ready` and it says nothing either way about repair edges — which is why
+    // the ruling is re-proved below on the same option with the baseline
+    // declaration and idiom removed. Pinned in BOTH directions so neither rule
+    // can quietly absorb the other.
+    expect(isDeclaredBaseline(DRAW_5, "e405d56a")).toBe(true);
+    expect(draftPathStatusById(DRAW_5).get("e405d56a")).toBe("ready");
+
+    const nonBaseline = JSON.parse(JSON.stringify(graph)) as GraphV3T;
+    const node = (nonBaseline.nodes as NodeV3T[]).find(
+      (n) => (n as unknown as { id: string }).id === "e405d56a",
+    ) as unknown as { is_baseline?: boolean; label: string };
+    delete node.is_baseline;
+    node.label = "Plan Alpha"; // carries no baseline idiom
+    const payload = buildAnalysisReadyPayload(
+      optionsFromGraph(nonBaseline),
+      goalNodeId(nonBaseline),
+      nonBaseline,
+    );
+    const rebuilt = new Map(payload.options.map((o) => [o.id, o.status]));
+    expect(payload.options.find((o) => o.id === "e405d56a")?.is_baseline).not.toBe(true);
+    expect(rebuilt.get("e405d56a")).toBe("needs_user_mapping");
+    // The OTHER options are untouched — this is a per-option rule, not a switch.
+    expect(rebuilt.get("4abad64d")).toBe("needs_encoding");
   });
 
   it("NO CONNECTED FACTOR AT ALL is genuinely needs_user_mapping", () => {
@@ -222,10 +290,14 @@ describe("BOUNDARIES", () => {
     // control, and labelled as one. Every OTHER option is untouched and must
     // keep its corrected verdict, so this also proves the rule is per-option
     // and not a whole-payload switch.
+    // Re-pointed from `cbf30a46` (the declared baseline) to `c94b4086`, which is
+    // not one — a baseline with no connections is `ready`, and would therefore
+    // have made this control vacuous.
     const graph = DRAW_9.draft_graph;
+    expect(isDeclaredBaseline(DRAW_9, "c94b4086")).toBe(false);
     const stripped = {
       ...graph,
-      edges: (graph.edges as Array<{ from: string }>).filter((e) => e.from !== "cbf30a46"),
+      edges: (graph.edges as Array<{ from: string }>).filter((e) => e.from !== "c94b4086"),
     } as unknown as GraphV3T;
     const payload = buildAnalysisReadyPayload(
       optionsFromGraph(graph),
@@ -233,8 +305,8 @@ describe("BOUNDARIES", () => {
       stripped,
     );
     const byId = new Map(payload.options.map((o) => [o.id, o.status]));
-    expect(byId.get("cbf30a46")).toBe("needs_user_mapping");
-    expect(byId.get("c94b4086")).toBe("needs_encoding");
+    expect(byId.get("c94b4086")).toBe("needs_user_mapping");
+    expect(byId.get("4abad64d")).toBe("needs_encoding");
   });
 
   it("PARTIALLY CONFIGURED — one value set of two connected factors stays ready", () => {
@@ -265,13 +337,17 @@ describe("THE USER-FACING COPY — the semantic-issue branch, reached uncovered"
   // still counts as a mapping (the edge is the product's established link), but
   // the blocker loop skips non-controllable factors — so the option is
   // `needs_encoding` with no covering blocker. Derived from the real draw-9
-  // graph by re-categorising exactly the factors `cbf30a46` targets.
+  // graph by re-categorising exactly the factors `c94b4086` targets.
+  // ⚠ RE-POINTED from `cbf30a46` to `c94b4086` (18 Sep 2026): `cbf30a46` is the
+  // capture's DECLARED baseline and is now `ready`, so it can no longer reach
+  // the semantic copy branch at all. `c94b4086` is connected-but-numberless and
+  // is not a baseline — the class this block exists to cover.
   function draw9WithCbfTargetsExternal(): GraphV3T {
     const graph = JSON.parse(JSON.stringify(DRAW_9.draft_graph)) as GraphV3T;
     const kind = new Map((graph.nodes as NodeV3T[]).map((n) => [n.id, n.kind]));
     const targets = new Set(
       (graph.edges as Array<{ from: string; to: string }>)
-        .filter((e) => e.from === "cbf30a46" && kind.get(e.to) === "factor")
+        .filter((e) => e.from === "c94b4086" && kind.get(e.to) === "factor")
         .map((e) => e.to),
     );
     expect(targets.size).toBeGreaterThan(0);
@@ -290,20 +366,20 @@ describe("THE USER-FACING COPY — the semantic-issue branch, reached uncovered"
     // assertions below would be testing the suppression path instead and would
     // still pass for the wrong reason.
     expect(
-      issues.some((i) => i.code === "MISSING_OPTION_VALUE" && i.option_id === "cbf30a46"),
+      issues.some((i) => i.code === "MISSING_OPTION_VALUE" && i.option_id === "c94b4086"),
     ).toBe(false);
-    expect(assessment.analysisReady?.options.find((o) => o.option_id === "cbf30a46")?.status)
+    expect(assessment.analysisReady?.options.find((o) => o.option_id === "c94b4086")?.status)
       .toBe("needs_encoding");
 
-    const issue = issues.find((i) => i.option_id === "cbf30a46" && i.code === "OPTION_NEEDS_ENCODING");
+    const issue = issues.find((i) => i.option_id === "c94b4086" && i.code === "OPTION_NEEDS_ENCODING");
     expect(issue).toBeDefined();
     expect(issue!.category).toBe("option_values");
     expect(issue!.message).toMatch(/should be represented on the effect scale/i);
 
     // And NOT the question this PR exists to stop asking.
-    expect(issues.some((i) => i.option_id === "cbf30a46" && i.code === "OPTION_NEEDS_MAPPING"))
+    expect(issues.some((i) => i.option_id === "c94b4086" && i.code === "OPTION_NEEDS_MAPPING"))
       .toBe(false);
-    expect(issues.every((i) => !(i.option_id === "cbf30a46" && /which factor/i.test(i.message ?? ""))))
+    expect(issues.every((i) => !(i.option_id === "c94b4086" && /which factor/i.test(i.message ?? ""))))
       .toBe(true);
   });
 
