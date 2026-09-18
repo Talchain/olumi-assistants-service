@@ -50,6 +50,7 @@ import { GraphV3 } from '../../../schemas/cee-v3.js';
 import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCap,
+  resolveGoalThresholdCapWithProvenance,
 } from '../../../utils/goal-threshold-cap.js';
 import {
   extractIncreaseByDelta,
@@ -1216,7 +1217,7 @@ export function createAddConstraintHandler(): HandlerFn {
         if (stampGoalThreshold) {
           const goalNode = clone.nodes.find((n) => n.id === targetId);
           if (goalNode) {
-            const cap = resolveGoalThresholdCap(
+            const resolvedCap = resolveGoalThresholdCapWithProvenance(
               goalNode.goal_threshold_cap,
               params.value,
               newConstraint.unit,
@@ -1238,8 +1239,14 @@ export function createAddConstraintHandler(): HandlerFn {
             } else {
               delete goalNode.goal_threshold_unit;
             }
-            if (cap !== null) {
+            if (resolvedCap !== null) {
+              const cap = resolvedCap.cap;
               goalNode.goal_threshold_cap = cap;
+              // WHICH RULE produced that denominator, minted in the same block
+              // as the cap so the two cannot diverge. On
+              // `target_derived_headroom` the cap is `raw * 1.25`, which makes
+              // the line below the constant 0.8 for every target.
+              goalNode.goal_threshold_cap_provenance = resolvedCap.provenance;
               goalNode.goal_threshold = params.value / cap; // model units (0–1)
               // ROADMAP 2.273 — the chat-path twin of the draft-path baseline
               // stamp (cee/factor-extraction/enricher.ts). Same shared

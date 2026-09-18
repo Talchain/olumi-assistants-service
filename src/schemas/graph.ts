@@ -25,6 +25,7 @@
  */
 import { z } from "zod";
 import { GoalThresholdFrame } from "@talchain/schemas";
+import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
 
 /**
  * HOW A GRAPH DATUM WAS OBTAINED — the evidence kind stamped on a node or edge.
@@ -347,10 +348,42 @@ export const Node = z.object({
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().nullable().optional(),
   /**
+   * WHICH RULE PRODUCED `goal_threshold_cap` — see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE` (utils/goal-threshold-cap.ts) for the full
+   * account, including the arithmetic that makes this load-bearing.
+   *
+   * The short version: on `target_derived_headroom` the denominator is
+   * `raw * 1.25`, so `goal_threshold = raw / cap` is the CONSTANT 0.8 for every
+   * target — the same number for a GBP 20,000 goal and a GBP 20,000,000 one.
+   * The other two rules take their denominator from outside the target and do
+   * carry the user's goal. A consumer cannot fail closed on a denominator it
+   * cannot see, which is why this travels beside the cap rather than being
+   * re-derived (a second derivation would disagree with the cap the graph was
+   * actually scored against).
+   *
+   * ⚠ MUST DESCRIBE THE CAP CURRENTLY ON THE NODE. Any site that rewrites
+   * `goal_threshold_cap` rewrites this in the same statement, and any site that
+   * clears the cap clears this too — a provenance describing a number that has
+   * since moved is worse than none, because it reads as attested.
+   *
+   * ABSENCE MEANS UNATTESTED. Never defaulted: a defaulted provenance is a
+   * manufactured attestation, the same fabrication class `goal_threshold_frame`
+   * refuses. CEE mints it; no model authors it (it is in
+   * `CEE_MINTED_GOAL_FIELDS`).
+   */
+  goal_threshold_cap_provenance: GoalThresholdCapProvenanceSchema.optional(),
+  /**
    * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
    * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`. Typed here so
    * the draft-path mint site is contextually typed rather than relying on
    * `.passthrough()` to smuggle an unknown key across.
+   *
+   * ⚠ A DIFFERENT QUESTION FROM `goal_threshold_cap_provenance` ABOVE, and the
+   * two must not be collapsed. The frame answers "is this number a LEVEL or a
+   * CHANGE FROM BASELINE?"; the provenance answers "where did the DENOMINATOR
+   * come from?". A threshold can be an honest `level` and still be normalised
+   * against a denominator nobody supplied — which is exactly the live case.
+   * Two questions, two fields (CLAUDE.md trap 21).
    */
   goal_threshold_frame: GoalThresholdFrame.optional(),
   /**

@@ -339,6 +339,16 @@ export function transformNodeToV3(
     ...(node.goal_threshold_raw != null && { goal_threshold_raw: node.goal_threshold_raw }),
     ...(node.goal_threshold_unit != null && { goal_threshold_unit: node.goal_threshold_unit }),
     ...(node.goal_threshold_cap != null && { goal_threshold_cap: node.goal_threshold_cap }),
+    // The cap's PROVENANCE rides across with the cap, for the same reason the
+    // frame does below: this transform rebuilds the node field-by-field, so an
+    // unnamed key is dropped here silently under a green suite. Carried only
+    // when the cap itself is present — a provenance without the denominator it
+    // describes is a claim about nothing, and would leave a consumer unable to
+    // tell "no cap" from "a cap produced by this rule".
+    ...(node.goal_threshold_cap != null &&
+      node.goal_threshold_cap_provenance != null && {
+        goal_threshold_cap_provenance: node.goal_threshold_cap_provenance,
+      }),
     // ROADMAP 2.258 — the frame rides across the V1→V3 transform with its
     // threshold. This copy is REQUIRED, not decorative: the transform rebuilds
     // the node field-by-field, so a `goal_threshold_frame` minted on the V1

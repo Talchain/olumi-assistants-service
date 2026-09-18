@@ -563,6 +563,12 @@ describe('C7 — semantic qualifiers survive on BOTH projection arms', () => {
         goal_threshold_raw: 80,
         goal_threshold_unit: '%',
         goal_threshold_cap: 100,
+        // WHICH RULE produced that cap. `80%` takes the metric's own 0-100
+        // scale, so the denominator is independent of the target and the 0.8
+        // above is a real reading — unlike a `target_derived_headroom` cap,
+        // where the ratio is 0.8 for every target by construction. The model
+        // reviewing this decision cannot judge the threshold without it.
+        goal_threshold_cap_provenance: 'metric_scale',
         // ⛔ THE FIELD MY FIRST FIXTURE OMITTED, exactly as the code did. A
         // corpus written from the same head as the list cannot see the list is
         // short (trap 12d).
@@ -665,7 +671,7 @@ describe('C7 — semantic qualifiers survive on BOTH projection arms', () => {
     for (const field of declared) {
       expect(carried, `${field} is declared by NodeV3 and must reach the model`).toContain(field);
     }
-    expect(declared.length, 'and the contract really does declare all five').toBe(5);
+    expect(declared.length, 'and the contract really does declare all six').toBe(6);
   });
 
   it.each([
