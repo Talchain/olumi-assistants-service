@@ -407,7 +407,58 @@ export function composeToolCallResponse(input: ComposeToolCallInput): OlumiRespo
     suggested_actions: [...(input.suggested_actions ?? [])],
     insights: [],
     stage_indicator: input.stage,
+    ...analysisParticipationWithheldFrom(input.handlerFacts),
   };
+}
+
+/**
+ * Lift the participation guard's withheld counts from THIS turn's run_analysis
+ * fact onto the wire envelope, or emit nothing.
+ *
+ * ⭐ WHY IT IS READ FROM THE FACT AND NOT RE-DERIVED. The guard runs inside
+ * `run_analysis`, and the only thing that survives from that handler to this
+ * composer is the fact. Reading it here means the typed counts, the user-facing
+ * sentence in `assistant_text`, and the `analysis_result` block are all
+ * describing the SAME run — a second derivation over a different input is how
+ * one response contradicts itself (CLAUDE.md trap 12), and it is the same
+ * argument `attachRunDelta` makes for reading `priorFacts` rather than
+ * re-deriving.
+ *
+ * ⛔ THE OMIT PATH IS THE DEFAULT AND IT IS NOT A DEGRADED STATE. No
+ * run_analysis fact on this turn ⇒ no key, which the contract models exactly:
+ * *"absent means NO participation attestation was made by this turn ... It NEVER
+ * means 'nothing was withheld', it is never defaulted to {0, 0}"*. Nothing here
+ * converts an absent fact into a zero: a manufactured attestation would tell the
+ * user their model was complete on a turn that never assessed it.
+ *
+ * ⚠ NO `?? 0` ANYWHERE ON THIS PATH, for that reason. A fact written before
+ * schemas 0.56.0 has no counts, and "this fact predates the field" is a
+ * different claim from "the guard withheld nothing" — so a pre-0.56.0 fact
+ * yields NO KEY, not `{0, 0}`.
+ *
+ * ⚠ TOP-LEVEL, NOT ON THE BLOCK. `AnalysisResultBlockSchema` is `.strict()` and
+ * the UI strict-validates `analysis_result` (it is in that parser's
+ * `LEGACY_SCHEMA_KNOWN_BLOCK_TYPES`), so an unknown key inside the block is a
+ * whole-turn `schema_mismatch` for any consumer still on 0.55.0. Unknown
+ * TOP-LEVEL keys go to that parser's `__additive__` sidecar instead, so this
+ * placement is inert — not fatal — at every intermediate deploy state. See the
+ * field's own comment in `@talchain/schemas` `boundary/olumi-response.ts`.
+ *
+ * Takes the FIRST run_analysis fact: a turn composes at most one, and
+ * `buildBlocksFromFacts` reads the same one for the `analysis_result` block.
+ */
+function analysisParticipationWithheldFrom(
+  facts: readonly HandlerFact[] | undefined,
+): Pick<OlumiResponse, 'analysis_participation_withheld'> | Record<string, never> {
+  if (facts === undefined) return {};
+  for (const fact of facts) {
+    if (fact.fact_type !== 'run_analysis') continue;
+    const withheld = fact.result.analysis_participation_withheld;
+    // Absent on any fact persisted before schemas 0.56.0. Fail closed.
+    if (withheld === undefined) return {};
+    return { analysis_participation_withheld: withheld };
+  }
+  return {};
 }
 
 /**

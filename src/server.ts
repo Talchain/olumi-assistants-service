@@ -974,11 +974,22 @@ app.get("/healthz", async (_request, reply) => {
     // DECLARATION; the loaded module is the FACT, and they diverge exactly
     // when it matters — a stale `node_modules`, a hoisted duplicate, a
     // vendored tarball re-cut under the same version string. The divergence
-    // is live TODAY: the published 0.55.0 tarball carries
-    // `CONTRACT_MANIFEST_SHA = 088fb46a…` while olumi-schemas `main`, also
-    // calling itself 0.55.0, carries `4d3b0995…`. Two byte-sets, one version
-    // string — which is exactly why the two digests are published beside the
-    // version and why a pin-derived value would be worse than useless here.
+    // is real: the published 0.55.0 tarball carries
+    // `CONTRACT_MANIFEST_SHA = 088fb46a…` while olumi-schemas `main`, whose
+    // package.json also reads 0.55.0, carries `4d3b0995…`.
+    //
+    // ⚠ CORRECTED 18 Sep, and the correction matters because the original
+    // reading would have sent someone hunting a publish defect that never
+    // happened. That was NOT "two byte-sets, one version string". `main` was
+    // simply TWO COMMITS AHEAD of tag `v0.55.0` (#59 and #60, both declared
+    // "additive, unversioned"), and #60 rewrote the adoption manifest. It could
+    // never have become two published byte-sets either: `publish.yml` skips a
+    // version that already exists in the registry, so those bytes could not
+    // ship as 0.55.0. The 0.56.0 bump is what carries them.
+    //
+    // The CONCLUSION is unchanged and is why this field exists: a pin is a
+    // DECLARATION and the loaded module is the FACT, they diverge exactly when
+    // it matters, and a pin-derived value would be worse than useless here.
     //
     // ⚠ NOT NESTED, DELIBERATELY. The four keys and their names are fixed by
     // the contract (`@talchain/schemas` `HEALTH_MANIFEST_FIELDS`, shipped

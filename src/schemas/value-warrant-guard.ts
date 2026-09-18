@@ -490,6 +490,53 @@ export function deadVocabulary(
  * watch go up.
  */
 export const WARRANT_DECISIONS: readonly Decision[] = [
+
+  // ── FAMILY: counts of named discrete things ───────────────────────────────
+  // Added 19 Sep 2026. THE GUARD CAUGHT THESE ITSELF, on the very next PR to
+  // add value-bearing boundary fields — the corpus REDded with
+  // "expected 36 to be 34" within the hour of the guard landing. That is the
+  // mechanism doing exactly what it was built for: a new value cannot enter the
+  // boundary without someone answering the question.
+  {
+    id: "unwarranted:cee.OlumiResponse::analysis_participation_withheld.excluded_node_count",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — no warrant is owed, and the reason generalises to a CLASS. " +
+      "A count of named discrete things carries its own interpretation: THE " +
+      "FIELD NAME IS THE UNIT. `excluded_node_count: 2` means two nodes, and " +
+      "there is no frame, scale or convention under which it could mean " +
+      "anything else — it cannot be read as a ratio, a percentage or a " +
+      "magnitude. Contrast the instance this guard exists for: `goal_threshold` " +
+      "was a NUMBER IN [0,1] whose meaning depended entirely on which rule " +
+      "produced its denominator, and no reader could recover that from the " +
+      "value. Here the denominator question does not arise, because nothing " +
+      "was divided.\n\n" +
+      "⚠ THE BOUNDS ARE NOT THE ARGUMENT. `.int().min(0).finite().safe()` is " +
+      "not why this is accepted — declared bounds are deliberately NOT a " +
+      "warrant in this guard, precisely because `goal_threshold` lived inside " +
+      "its declared bounds the whole time it was uninterpretable. The argument " +
+      "is that the field NAMES WHAT IS COUNTED.\n\n" +
+      "The absence question is settled separately and correctly: the whole " +
+      "`analysis_participation_withheld` object is `.optional()`, and absence " +
+      "means NO ATTESTATION WAS MADE — never 'nothing was withheld'. It is " +
+      "never defaulted to {0, 0}, which would state a falsehood with total " +
+      "confidence.",
+  },
+  {
+    id: "unwarranted:cee.OlumiResponse::analysis_participation_withheld.pruned_edge_count",
+    status: "ACCEPTED",
+    decision:
+      "ACCEPTED — same class and the same argument as its sibling " +
+      "`excluded_node_count`: a count of named discrete things, where the " +
+      "field name is the unit.\n\n" +
+      "⭐ NAMED APART FROM ITS SIBLING ON PURPOSE, and that distinction is the " +
+      "point of the field rather than a nicety. The user MARKED the nodes; the " +
+      "edges FOLLOWED as a consequence of the exclusion. Collapsing the two " +
+      "into one total would tell a user they removed connections they never " +
+      "touched — which is the specific harm the disclosure exists to prevent, " +
+      "since an analysis on a reduced model is internally consistent and " +
+      "therefore undetectable by reading carefully.",
+  },
   // ── FAMILY: edge strength (mean, std) — the estate's second measured instance
   {
     id: "unwarranted:contract.EdgeV3Schema::strength.std",
@@ -679,17 +726,53 @@ export const WARRANT_DECISIONS: readonly Decision[] = [
     status: "OPEN",
     decision:
       "OPEN — the contract's own `observed_state`, which is a DIFFERENT object " +
-      "from CEE's: it carries `declared_scale` and `elicited_from` (which CEE's " +
-      "does not declare) and lacks `cap`, `raw_value`, `stated_role` and " +
-      "`extractionType` (which CEE's has). Three numbers, one unit, same " +
-      "ambiguity. Settle alongside the CEE half, not separately — a warrant " +
-      "added to one side of a twin changes nothing.",
+      "from CEE's: it carries `declared_scale` and `elicited_from`, which CEE's " +
+      "does not declare, and lacks `stated_role` and `extractionType`, which " +
+      "CEE's has. Settle alongside the CEE half, not separately — a warrant " +
+      "added to one side of a twin changes nothing. " +
+      "⚠ CORRECTED at the @talchain/schemas 0.56.0 re-vendor: this decision " +
+      "read 'THREE numbers' and listed `cap` and `raw_value` among the fields " +
+      "the contract LACKS. Both are now DECLARED on it (schemas #59/#60, the " +
+      "two additive-unversioned commits 0.56.0 carries), so the count is FIVE " +
+      "and the two new contract-side rows below are this row's own twins. A " +
+      "decision whose reasoning has gone stale is worse than an open one, " +
+      "because it reads as adjudicated.",
   },
   {
     id: "scope-ambiguous:contract.NodeV3Schema::observed_state.baseline",
     status: "OPEN",
     decision:
       "OPEN — same object. Settle with " +
+      "scope-ambiguous:contract.NodeV3Schema::observed_state.value.",
+  },
+  {
+    id: "scope-ambiguous:contract.NodeV3Schema::observed_state.cap",
+    status: "OPEN",
+    decision:
+      "OPEN — NEW ON THE CONTRACT SURFACE at the 0.56.0 re-vendor (schemas " +
+      "#60, declared additive and unversioned on main after v0.55.0 was " +
+      "tagged). It is the exact contract-side twin of " +
+      "scope-ambiguous:cee.NodeV3::observed_state.cap, which this ledger " +
+      "already calls the one where the ambiguity is most likely to bite: a cap " +
+      "is a DENOMINATOR, and the whole `goal_threshold` defect was a " +
+      "denominator nobody could see. ⛔ The re-vendor did NOT create the " +
+      "question — it made the CONTRACT able to express it, which is the half " +
+      "that decides what a consumer can act on. Settle with " +
+      "scope-ambiguous:contract.NodeV3Schema::observed_state.value, and with " +
+      "the CEE half in the same decision — a warrant added to one side of a " +
+      "twin changes nothing.",
+  },
+  {
+    id: "scope-ambiguous:contract.NodeV3Schema::observed_state.raw_value",
+    status: "OPEN",
+    decision:
+      "OPEN — NEW ON THE CONTRACT SURFACE at the 0.56.0 re-vendor (schemas " +
+      "#59/#60), the twin of scope-ambiguous:cee.NodeV3::observed_state.raw_value. " +
+      "⭐ The contract's own description is the evidence this row exists for: " +
+      "`raw_value` is the level 'in the units `unit` names' while `value` is the " +
+      "same level divided by `cap`. So the contract now SAYS OUT LOUD that one " +
+      "level-scoped `unit` frames two of these five numbers differently, and " +
+      "still does not say which one it attaches to. Settle with " +
       "scope-ambiguous:contract.NodeV3Schema::observed_state.value.",
   },
   {

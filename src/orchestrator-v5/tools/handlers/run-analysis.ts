@@ -2115,6 +2115,46 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
           projectClaimSafety(constraintVerdict),
           intakeReconciliation,
         ),
+        // ⭐ THE TYPED HALF OF THE REDUCED-MODEL DISCLOSURE (schemas 0.56.0).
+        //
+        // `participationDisclosure` above is the SENTENCE, and it is what
+        // reaches the user. This is the same two numbers for a MACHINE, and the
+        // reason it exists is that #1602 could only offer consumers the
+        // sentence's GRAMMAR — a regex — which the UI lane refused:
+        //
+        //     "A regex binding fails silently and open. If you change the
+        //      sentence, my match returns nothing, the disclosure vanishes from
+        //      my surface, and nothing goes red anywhere ... So the failure mode
+        //      of the binding is identical to the failure mode it is meant to
+        //      close."
+        //
+        // ⛔ ONE COMPUTATION, TWO SURFACES. Both numbers are read off
+        // `participation` — the guard's own return value — on the SAME line of
+        // reasoning as the sentence four dozen lines above, and NEITHER is
+        // re-derived from graph shape here or anywhere downstream. Two
+        // derivations of one fact drift, and the drift is invisible because both
+        // readings look plausible (trap 12). `analysis-participation-typed-field
+        // .test.ts` pins that the sentence and this field CANNOT DISAGREE: same
+        // counts, and the sentence appears exactly when
+        // `excluded_node_count > 0`.
+        //
+        // ⚠ EMITTED UNCONDITIONALLY ON THE HONOURED PATH, INCLUDING {0, 0} —
+        // and that is the difference between this and the sentence. The sentence
+        // is silent at zero because "an absent disclosure and a disclosure of
+        // absence are different claims" for a READER. For a CONSUMER the
+        // opposite holds: a present {0, 0} is the positive attestation "the
+        // guard ran on this analysis and withheld nothing", which absence cannot
+        // express. The contract states exactly that, and a consumer that cannot
+        // find this key fails closed rather than assuming zero. Defaulting it
+        // downstream would tell every user of an un-upgraded CEE that their
+        // model was complete.
+        //
+        // The refusal path (`participation.refusals.length > 0`) never reaches
+        // here — it throws above — so this is the honoured path only.
+        analysis_participation_withheld: {
+          excluded_node_count: participation.excludedNodeIds.length,
+          pruned_edge_count: participation.prunedEdgeCount,
+        },
       },
     };
 
