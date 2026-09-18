@@ -15,12 +15,45 @@
  *      carry in schema-v3.ts without this line fails to compile."
  *
  * ⛔ **THAT DEFENCE DOES NOT HOLD, AND EDGE `id` IS THE PROOF.** `V1Edge`
- * DECLARES `id?: string` (`schema-v2.ts:157`) and `transformEdgeToV3` drops it
- * anyway. The typecheck only bites in one direction: it stops you CARRYING a
+ * DECLARES `id?: string` (`schema-v2.ts:157`) and `transformEdgeToV3` does not
+ * carry it. The typecheck only bites in one direction: it stops you CARRYING a
  * field the input type does not declare. It cannot notice a declared field you
  * FAIL to carry, because the output is a fresh literal, the input field is
- * optional, and nothing relates the two. **Measured consequence: 2 of 242,731
- * live edges carry an id.**
+ * optional, and nothing relates the two.
+ *
+ * ⚠⚠ **`id` PROVES THE MECHANISM, NOT A DEFECT — AND THE EARLIER FRAMING OF
+ * THIS FILE IS WITHDRAWN.** It called the absence a silent loss and quoted a
+ * live-edge count (*"2 of 242,731"*) as the consequence. **Withdrawn on both
+ * counts**: the figure did not reproduce at a wider re-run scope, and — the
+ * half that actually matters — **a count cannot settle this question at all.**
+ * The absence is RATIFIED; the owning authority is
+ * `orchestrator-v5/compose/edge-address.ts`, quoted at
+ * `EDGE_NOT_CARRIED_BY_DESIGN` below. What this file proves is narrower and
+ * still worth having: **the compiler cannot see a declared field you fail to
+ * carry.** Whether a given absence is a DEFECT is a second question this guard
+ * poses and never answers.
+ *
+ * ── ⛔⛔ THE INTERPRETATION RULE: A DROP AND A STRIP ARE DIFFERENT FAILURES ───
+ * "Absent from the V3 output" has more than one cause, and they take different
+ * fixes. Two of them, both live in this repo:
+ *
+ *   **DROP**  — the TRANSFORM never named the field, so the value dies in the
+ *               enumerated rebuild. This file's subject; fixable here.
+ *   **STRIP** — the CONTRACT does not declare the field, so a value the
+ *               transform DOES emit is removed at validation. `EdgeV3`
+ *               (`schemas/cee-v3.ts`) is a bare `z.object`, closing with
+ *               *"declared fields only — unknown fields stripped with
+ *               warning"*, and both the persistence commit and the egress
+ *               boundary parse through it.
+ *
+ * ⛔ **A FIELD CAN BE BOTH, AND FIXING ONLY THE DROP SHIPS A DARK CHANGE.**
+ * Edge `id` is precisely that: not carried by `transformEdgeToV3` AND not
+ * declared on `EdgeV3`. A one-line carry would therefore change nothing a
+ * consumer can see. So the right words for it are **STRIPPED BY CONTRACT**, not
+ * **DROPPED BY TRANSFORM** — and neither of those is **DEFECT**.
+ *
+ * ⭐ Read every entry below as *"absent, and here is why"*, never as *"lost"*.
+ * This file measures absence; it does not classify it.
  *
  * ── ⛔⛔ AND WHY THE FIXTURE IS DERIVED FROM THE INTERFACE, NOT TYPED OUT ─────
  * The first version of this file hand-wrote the fixtures and claimed they were
@@ -65,8 +98,8 @@
  * This file measures `transformNodeToV3` and `transformEdgeToV3` ONLY. It is not
  * a claim about the graph-level transform: an option node's `data.interventions`
  * is genuinely absent from `transformNodeToV3`'s output and is assembled instead
- * by `transformGraphToV3` (`schema-v3.ts:1463`). That is recorded below as a
- * graph-level carrier, not as a silent drop.
+ * by `transformGraphToV3` (`schema-v3.ts:1532-1533`, read back onto the node at
+ * `:1591`). That is recorded below as a graph-level carrier, not as a drop.
  */
 
 import { readFileSync } from 'node:fs';
@@ -147,6 +180,44 @@ const FULL_V1_EDGE: Required<V1Edge> = {
   edge_type: 'directed',
 };
 
+/**
+ * ⛔⛔ THE LEGACY-ONLY EDGE — because `FULL_V1_EDGE` CANNOT prove three of the
+ * six edge reshapes below, and read alone it says it can.
+ *
+ * `FULL_V1_EDGE` populates BOTH spellings of three values (`weight` +
+ * `strength_mean`, `belief` + `belief_exists`, `provenance` +
+ * `provenance_source`), and in each pair the V4/structured name WINS the `??`.
+ * So `EDGE_RESHAPED`'s `arrived` assertion for `weight`, `belief` and
+ * `provenance_source` is satisfied by **the sibling's value**: delete those
+ * legacy fallbacks outright and every assertion stays green. That is trap 19 —
+ * an assertion bound by a value predicate a DIFFERENT object satisfies — and it
+ * makes "the value arrived" untrue of exactly the three entries the docblock
+ * promises are measured.
+ *
+ * This fixture sets ONLY the legacy names, so each carrier is bound by
+ * IDENTITY: the value that arrives can only have come from the legacy field,
+ * because nothing else in the record could have produced it. The magnitudes
+ * differ from `FULL_V1_EDGE`'s deliberately, so a fixture mix-up cannot pass.
+ *
+ * ⭐ `provenance_source` is the one that matters: `transformEdgeToV3` calls it
+ * the *"flat enum from Anthropic structured outputs"*, i.e. precisely the shape
+ * that arrives WITHOUT a structured `provenance`. Its display value here
+ * (`from_brief`) is one the structured sibling in `FULL_V1_EDGE` cannot
+ * produce, so the two probes cannot be confused for one another.
+ *
+ * ⚠ SCOPE: this is a second, narrow probe and is deliberately NOT `Required<>`
+ * and NOT covered by the fixture-coverage guard. Completeness is
+ * `FULL_V1_EDGE`'s job; this one's job is discrimination.
+ */
+const LEGACY_ONLY_V1_EDGE: V1Edge = {
+  from: 'fac_a',
+  to: 'goal_b',
+  weight: 0.42,
+  belief: 0.61,
+  provenance_source: 'brief_extraction',
+  effect_direction: 'positive',
+};
+
 const FACTOR_DATA: V1FactorData = {
   value: 0.3,
   baseline: 0.2,
@@ -203,6 +274,14 @@ interface Reshape {
   readonly arrived: (out: Out) => void;
 }
 
+/**
+ * ⚠ THREE OF THESE SIX ARE NOT PROVED HERE. `weight`, `belief` and
+ * `provenance_source` have a sibling in `FULL_V1_EDGE` that wins the `??`, so
+ * their `arrived` assertions read the SIBLING's value and survive the legacy
+ * carrier being deleted. They are bound by identity in the `LEGACY_ONLY_V1_EDGE`
+ * test instead — see that fixture's docblock. Do not read this map as evidence
+ * for those three on its own.
+ */
 const EDGE_RESHAPED: Readonly<Record<string, Reshape>> = {
   weight: {
     to: 'strength.mean (legacy name; strength_mean wins when both are present)',
@@ -231,16 +310,41 @@ const EDGE_RESHAPED: Readonly<Record<string, Reshape>> = {
 };
 
 /**
- * ⛔ GENUINELY LOST — no V3 carrier at all. Being fixed by Core at the time of
- * writing (one line in `transformEdgeToV3`, plus an OPTIONAL declaration on
- * `EdgeV3Schema`, which is `.passthrough()` so the value flows today).
+ * ⭐⭐ ABSENT BY DESIGN — not a drop, and NOT A DEFECT. **Do not "fix" it.**
  *
- * ⭐ WHEN THAT LANDS THIS TEST GOES RED, AND THAT IS CORRECT — the pin is a
- * statement about the transform's current behaviour, so a fix must update it
- * rather than pass silently. Move `id` out of this set; do not widen the
- * assertion.
+ * **The owning authority is `orchestrator-v5/compose/edge-address.ts`**, which
+ * states it twice in its own words: *"EDGES ARE ADDRESSED BY `(from, to)`,
+ * NEVER BY AN ID … an edge's only identity in the canonical graph is its
+ * endpoint pair"*, and a client-local id (`"reactflow__edge-…"`) is *"never the
+ * lookup key"*. That docblock runs the contrast control in the same breath —
+ * `NodeV3Schema` DOES declare `id` — and concludes **"this is a property of
+ * edges, not a gap in the package."** The node/edge asymmetry is a decision.
+ *
+ * ⛔ AND THE "FIX" WAS MEASURED AND REFUSED — both sizes of it fail, differently,
+ * which is the drop-vs-strip distinction in the docblock landing on the one
+ * field that has both:
+ *   - **One line** (carry `id` in `transformEdgeToV3`) is **DARK.** `EdgeV3`
+ *     (`schemas/cee-v3.ts`) is a bare `z.object` declaring no `id`, so the value
+ *     is STRIPPED at validation — and both the persistence commit and the egress
+ *     boundary parse through it.
+ *   - **Two lines** (carry it AND declare it) is a **P1.**
+ *     `orchestrator-v5/compose/phase3-blocks.ts` reads `e.id` as `explicitId`
+ *     and lets it WIN over `composeEdgeIdentity(from, to)` — *"A
+ *     producer-supplied id still wins."* Every edge-targeted review card would
+ *     be repointed onto producer-local tokens that `parseEdgeAddress`
+ *     deliberately rejects, and **no existing spec REDs.**
+ *
+ * ⭐ SO WHAT DOES A RED HERE MEAN? **Not "the fix landed".** It means something
+ * started carrying `id` on the edge output — i.e. the design above was
+ * REVERSED. That is a decision to take deliberately, with `edge-address.ts` and
+ * `phase3-blocks.ts` open. **Do not silence it by moving `id` out of this set,
+ * and do not widen the assertion.**
+ *
+ * ⚠ `id` is also this file's edge-level positive control (the test below). If
+ * the design ever is reversed, that control needs a replacement: an empty set
+ * here leaves the edge limb with no absence left to prove the probe can see one.
  */
-const EDGE_KNOWN_DROPPED: ReadonlySet<string> = new Set(['id']);
+const EDGE_NOT_CARRIED_BY_DESIGN: ReadonlySet<string> = new Set(['id']);
 
 /** Per-kind explanations for `transformNodeToV3`. The node transform branches on
  * `kind`, so a single fixture certifies a single limb and nothing else. */
@@ -309,8 +413,9 @@ const NODE_CASES: readonly NodeCase[] = [
     reshaped: { body: BODY_TO_DESCRIPTION },
     // ⚠ `data` on an option carries the interventions, and `transformNodeToV3`
     // has NO carrier for it: the option's interventions are assembled by
-    // `transformGraphToV3` (schema-v3.ts:1463) instead. Pinned as dropped BY
-    // THIS FUNCTION, with the graph-level carrier named — scoped, not excused.
+    // `transformGraphToV3` (schema-v3.ts:1532-1533, read back onto the node at
+    // :1591) instead. Pinned as absent FROM THIS FUNCTION, with the graph-level
+    // carrier named — scoped, not excused.
     knownDropped: new Set(['data', 'goal_baseline', 'goal_baseline_raw']),
   },
 ];
@@ -339,13 +444,17 @@ function assertLossIsExactlyExplained(
       'does not name and nothing else will tell you.',
   ).toEqual([]);
 
-  // The mirror: an explanation for a field that is NO LONGER lost means this
-  // pin is lying about the transform. Fix the pin; do not widen the assertion.
+  // The mirror: an explanation for a field that is NO LONGER absent means this
+  // pin is lying about the transform. ⚠ It does NOT follow that the right
+  // remedy is to delete the pin — a set pinned BY DESIGN reds here because the
+  // DESIGN was reversed, which is a decision, not a stale entry. Read the set's
+  // own docblock; do not widen the assertion either way.
   const staleDropClaims = [...knownDropped].filter((k) => !lost.has(k)).sort();
   expect(
     staleDropClaims,
-    `${label}: a field pinned as dropped now survives the transform — the fix ` +
-      'landed and this pin is stale. Remove it from the known-dropped set.',
+    `${label}: a field pinned as dropped now survives the transform — this pin ` +
+      'is stale, OR the absence was pinned BY DESIGN and that design has been ' +
+      "reversed. Read the pinned set's own docblock before editing it.",
   ).toEqual([]);
 
   const staleReshapeClaims = Object.keys(reshaped).filter((k) => !lost.has(k)).sort();
@@ -413,7 +522,7 @@ describe('V3 transform — it carries what it is given, or the loss is pinned', 
       FULL_V1_EDGE as unknown as Record<string, unknown>,
       edge as unknown as Out,
       EDGE_RESHAPED,
-      EDGE_KNOWN_DROPPED,
+      EDGE_NOT_CARRIED_BY_DESIGN,
     );
   });
 
@@ -428,6 +537,27 @@ describe('V3 transform — it carries what it is given, or the loss is pinned', 
     // the probe discriminates rather than reading every field as absent.
     expect(out.from).toBe('fac_a');
     expect(out.origin).toBe('ai');
+  });
+
+  it('EDGE: the LEGACY carriers are bound by identity, not by a sibling that wins the `??`', () => {
+    // `FULL_V1_EDGE` sets both spellings, so deleting `?? edge.weight`,
+    // `?? edge.belief` or the `provenance_source` fallback leaves every
+    // assertion above green. Here the legacy name is the ONLY possible source
+    // of each value, so deleting its carrier must RED.
+    const { edge } = transformEdgeToV3(LEGACY_ONLY_V1_EDGE, 0, []);
+    const out = edge as unknown as Out;
+
+    // Precondition, pinned in-test: the V4/structured siblings really are
+    // absent, so the assertions below cannot be satisfied by anything else
+    // (trap 13b — a discriminator must pin its own precondition).
+    expect(LEGACY_ONLY_V1_EDGE.strength_mean).toBeUndefined();
+    expect(LEGACY_ONLY_V1_EDGE.belief_exists).toBeUndefined();
+    expect(LEGACY_ONLY_V1_EDGE.provenance).toBeUndefined();
+
+    expect((out.strength as Out | undefined)?.mean).toBe(0.42);
+    expect(out.exists_probability).toBe(0.61);
+    expect((out.provenance as Out | undefined)?.source).toBe('brief_extraction');
+    expect(out.provenance_display).toBe('from_brief');
   });
 
   for (const nodeCase of NODE_CASES) {
