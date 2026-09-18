@@ -562,6 +562,67 @@ describe("D — the producer's declared_scale is never overwritten by this stage
    * three-way precedence has collapsed back into "this stage always wins",
    * which is the defect the whole change removes.
    */
+  /**
+   * ⭐⭐ THE [0,1] GATE INSIDE `normalisationEvidenceScale` IS LOAD-BEARING, AND
+   * NOTHING ELSE PINS IT.
+   *
+   * Raised by the #1577 reviewer (`github-ed`) as a latent hole, and it is real —
+   * but the exposure is SHARPER than the attack that found it, which is why this
+   * is a test rather than a comment.
+   *
+   * The reviewer checked whether evidence demoting a `ratio` declaration could
+   * invert a display 100x, and correctly refuted it: `display-value.ts:295-305`
+   * gives `unit_interval` and `ratio` the SAME x100 multiplier and they differ
+   * only in admissible domain. ⚠ **But `raw_count` is x1.** So the promotion
+   * `raw_count -> unit_interval` — which is exactly what the evidence rung does,
+   * and exactly what the `f_rescaled` case above exercises — IS a x1 -> x100
+   * change in what the user sees.
+   *
+   * That promotion is CORRECT while the gate holds: `cap` present means
+   * `value = raw_value / cap`, so the value really is a normalised proportion and
+   * x100 really is right. The gate is what guarantees evidence only ever fires on
+   * a number that already looks normalised. **Widen that domain and a raw 115
+   * with a cap becomes `unit_interval` and renders as "11500%"** — and today
+   * nothing would go red.
+   *
+   * A documented limit whose enabling condition can lapse silently is trap 12b.
+   * This is the guard that stops it lapsing.
+   */
+  it("refuses to read evidence from a value OUTSIDE the unit interval, so it cannot promote a raw magnitude", () => {
+    // `cap` and a differing `raw_value` are both present — every evidence limb
+    // would fire — but the value is 115, outside [0,1]. The gate must refuse,
+    // leaving the producer's declaration standing.
+    const graph = statedFactor({
+      id: "f_raw_outside",
+      value: 115,
+      unit: "%",
+      raw_value: 115,
+      cap: 100,
+      declared_scale: "raw_count",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_raw_outside").declared_scale).toBe("raw_count");
+  });
+
+  /**
+   * THE OPPOSITE-DIRECTION TWIN, and it is what stops the guard above being
+   * satisfied by disabling the evidence rung altogether. The SAME evidence
+   * inputs, with the value INSIDE the unit interval, must still promote.
+   * One test proves the gate refuses; the pair proves it refuses only outside.
+   */
+  it("still reads evidence from the same inputs once the value is inside the unit interval", () => {
+    const graph = statedFactor({
+      id: "f_raw_inside",
+      value: 0.5,
+      unit: "%",
+      raw_value: 50,
+      cap: 100,
+      declared_scale: "raw_count",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_raw_inside").declared_scale).toBe("unit_interval");
+  });
+
   it("keeps the declaration above the magnitude guess when there is no evidence", () => {
     const graph = statedFactor({
       id: "f_no_evidence",
