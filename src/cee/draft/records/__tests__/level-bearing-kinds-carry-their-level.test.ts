@@ -40,6 +40,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { projectRecordsToGraph, type ProjectedNode } from "../projector.js";
+import { transformGraphToV3 } from "../../../transforms/schema-v3.js";
 
 /** Bind by the projector's own minted id via kind+label — never by value (trap 19). */
 function nodeByLabel(nodes: readonly ProjectedNode[], label: string): ProjectedNode | undefined {
@@ -115,5 +116,37 @@ describe("a level-bearing claim reaches its node, whatever kind it is", () => {
     const factor = nodeByLabel(graph.nodes as readonly ProjectedNode[], "Support Response Time");
     expect((factor as { observed_state?: { value?: number; raw_value?: number } }).observed_state)
       .toEqual({ value: 0.42, raw_value: 0.42, declared_scale: "unit_interval" });
+  });
+});
+
+/* ===========================================================================
+ * THE HOP AFTER — a carrier that stops one hop short is the same defect one
+ * level down, and TRACING IS NOT EXECUTING.
+ *
+ * `schema-v3.ts`'s `data`-present limb builds `observed_state` from `node.data`
+ * and is not kind-gated, so the widening above SHOULD survive the V3 transform.
+ * Reading that is not evidence: this estate's named failure is a chain that is
+ * correct at every hop read individually and broken end to end. So the chain is
+ * EXECUTED here rather than argued.
+ *
+ * This is the hop ISL actually reads — its `CONSTRAINT_NOT_CONVERTIBLE` refusal
+ * names `observed_state` on the constraint TARGET, which is a risk or outcome
+ * node — so a green result here is the one that matters to the user.
+ * ========================================================================= */
+describe("the level survives the V3 transform, executed rather than traced", () => {
+  it.each([
+    { label: "Pro Subscriber Churn Rate", kind: "risk", value: 0.04 },
+    { label: "Net Revenue Retention", kind: "outcome", value: 0.88 },
+    { label: "Support Response Time", kind: "factor", value: 0.42 },
+  ])("$kind — $label still carries its level on the V3 graph", ({ label, kind, value }) => {
+    const { graph } = projectRecordsToGraph(RECORDS as never, "keep monthly churn under 4%");
+    const v3 = transformGraphToV3(graph as never);
+    const nodes = (v3 as { graph?: { nodes?: Array<Record<string, unknown>> } }).graph?.nodes
+      ?? (v3 as { nodes?: Array<Record<string, unknown>> }).nodes
+      ?? [];
+    const node = nodes.find((n) => n.label === label);
+    expect(node, `no V3 node labelled "${label}" (V3 keys: ${Object.keys(v3 as object).join(",")})`).toBeDefined();
+    expect(node!.kind).toBe(kind);
+    expect((node!.observed_state as { value?: number } | undefined)?.value).toBe(value);
   });
 });
