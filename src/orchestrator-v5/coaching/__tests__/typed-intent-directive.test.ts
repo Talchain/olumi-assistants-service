@@ -29,6 +29,7 @@ import type { MessageTurnPayload } from '@talchain/schemas/boundary';
 import {
   ROUTED_COACHING_INTENTS,
   buildCoachingMethodDirective,
+  literalProtocolSteps,
   resolveApplicableProtocol,
   resolveCoachingIntent,
 } from '../typed-intent-directive.js';
@@ -468,5 +469,80 @@ describe('buildCoachingMethodDirective', () => {
       expect(directive).toContain('Ground every claim');
       expect(directive).toContain('Never present an invented number');
     }
+  });
+});
+
+/**
+ * ⭐⭐ THE AUTHORED EXERCISE QUESTIONS REACH THE COACH.
+ *
+ * `steps` had ONE non-test reader repo-wide before this — `dsk/linter.ts`,
+ * asserting only that the array is non-empty. Six published protocols carry 22
+ * authored questions and the service read none of them.
+ *
+ * The two assertions that matter here are a PAIR, and neither shows anything
+ * alone (CLAUDE.md trap 19 / 13b):
+ *
+ *   INCLUSION — a placeholder-free step IS put to the coach. Without this the
+ *     filter could exclude everything and every leak assertion below would pass
+ *     by emitting nothing at all.
+ *   EXCLUSION — a placeholder-bearing step from the SAME protocol is NOT. This
+ *     is what proves the filter discriminates rather than merely being quiet.
+ *
+ * The strings are quoted from `data/dsk/v1.json` deliberately: binding by
+ * IDENTITY to the authored text, never by a shape predicate that a paraphrase
+ * or a different step could satisfy.
+ */
+describe('literalProtocolSteps — the published questions, minus the bound ones', () => {
+  it('INCLUSION: DSK-P-004 contributes its placeholder-free steps', () => {
+    const p = resolveApplicableProtocol('elicit_options', 'frame');
+    expect(p, 'bundle did not resolve — every assertion in this block is vacuous').not.toBeNull();
+    const steps = literalProtocolSteps(p!);
+    expect(steps.length, 'no step survived the filter — the channel is shipping nothing').toBeGreaterThan(0);
+    expect(steps.some(s => s.startsWith('Are there alternatives that aren'))).toBe(true);
+  });
+
+  it('EXCLUSION: the SAME protocol’s placeholder step is withheld', () => {
+    const p = resolveApplicableProtocol('elicit_options', 'frame');
+    const steps = literalProtocolSteps(p!);
+    // DSK-P-004 step 1 opens "You're currently comparing [N options]".
+    expect(steps.some(s => s.includes('[N options]'))).toBe(false);
+    expect(
+      steps.length,
+      'the filter kept every step — it is not discriminating, and a bound ' +
+        'placeholder would reach the model',
+    ).toBeLessThan((p!.steps ?? []).length);
+  });
+
+  it('NO DIRECTIVE, FOR ANY ROUTED INTENT AT ANY STAGE, CARRIES BRACKET SYNTAX', () => {
+    // The leak guard. Four of the six graph-bound placeholders name the LEADING
+    // OPTION; resolving them anywhere would route a leader designation past
+    // both claim-safety rails (see the module docblock). This asserts the
+    // weaker, checkable property: no bracket ever reaches the model here.
+    for (const intent of ROUTED_COACHING_INTENTS) {
+      for (const stage of ['strategise', 'frame', 'ideate', 'evaluate', 'act', 'improve', 'decide', 'analyse', 'review']) {
+        const { directive } = buildCoachingMethodDirective(intent, stage);
+        expect(
+          /\[[^\]]*\]/.test(directive),
+          `${intent} at stage ${stage} emitted bracket syntax into the coach's ` +
+            'context. If a placeholder resolver was added, it MUST conjoin ' +
+            '`mayNameLeadingOption` and `analysisReadyPermitsLeaderNaming` first.',
+        ).toBe(false);
+      }
+    }
+  });
+
+  it('the directive carries the published question verbatim, not a paraphrase', () => {
+    const { directive } = buildCoachingMethodDirective('elicit_options', 'frame');
+    expect(directive).toContain('The protocol asks these, in order.');
+    expect(directive).toContain('Are there alternatives that aren');
+  });
+
+  it('a protocol-less intent gains no step section at all', () => {
+    // `challenge_frame` is absent from INTENT_PROTOCOL_ID on purpose. Binding
+    // the absence here stops the step block leaking onto intents that cite no
+    // science — which would read as provenance the product does not have.
+    const { directive, dskProtocolId } = buildCoachingMethodDirective('challenge_frame', 'frame');
+    expect(dskProtocolId).toBeNull();
+    expect(directive).not.toContain('The protocol asks these');
   });
 });

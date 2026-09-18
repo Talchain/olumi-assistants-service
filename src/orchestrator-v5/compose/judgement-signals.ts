@@ -41,6 +41,38 @@
  *    ANY verdict adjudicates; the join is the fire-once (an adjudication fact
  *    removes the edge from the set — structurally spent, replay-safe).
  *
+ * 3. `statedDissentUnanswered` (T3): `finding_dissent` facts — a human's
+ *    STATED objection to a finding, in their own words (schemas 0.55.0) —
+ *    NEWER than the latest claim-bearing `run_analysis` fact. Same
+ *    fire-once-by-fact-ordering as T1, for the same reason: the first analysis
+ *    after the objection is the one it stands against, and the turn after that
+ *    it is structurally spent. No ledger, replay-safe.
+ *
+ *    ⭐ WHY THIS IS A SIGNAL AND NOT A CHANGE. Until this class existed a user
+ *    could disagree, type why, watch the words reach the server — and nothing
+ *    downstream read them. `context/recent-changes.ts` skips the fact
+ *    deliberately and correctly (a dissent changes no graph state), and that
+ *    skip is the whole reason nothing else could see it: the ONE projection
+ *    every coaching path reads answers "what changed in the MODEL?", and this
+ *    is not an answer to that question. It is an answer to a different one —
+ *    *what has a human contested that nothing has answered?* — so it gets its
+ *    own class here rather than a widened `recent_changes` (trap 21: two
+ *    questions under one name is what this estate pays for).
+ *
+ *    ⚠ AND THE CONSEQUENCE IS DELIBERATELY NOT AN ADJUSTMENT. Nothing in this
+ *    module or its consumers moves a number because a human objected. The
+ *    objection becomes VISIBLE and stays OPEN; absorbing it into the model
+ *    would remove the disagreement from view, which is the opposite of what a
+ *    shared reasoning record is for.
+ *
+ *    ⚠ NO GRAPH IS NEEDED FOR T3, and that is why the label gate below moved.
+ *    T1/T2 name an EDGE and are unnameable without the persisted graph's
+ *    labels; T3's subject is a finding whose id is an opaque, UI-namespaced
+ *    string (`strengthen:flip:edge_9` — derived at the UI bytes, not a closed
+ *    set CEE may respell), so the only honest naming material is the user's
+ *    OWN words, which ride on the fact. A missing/malformed graph must
+ *    therefore drop T1 and T2 and MUST NOT drop T3.
+ *
  * ── FAIL-CLOSED READS (2.690 I-B6) ──────────────────────────────────────────
  * Every read is defensive: an absent/malformed graph, a node with no label, an
  * edge with no endpoints ⇒ the SIGNAL is dropped, never defaulted. A dropped
@@ -83,14 +115,32 @@ export interface ContestedUnadjudicatedSignal extends JudgementEdgeRef {
   readonly maxDivergence: number | null;
 }
 
+/**
+ * T3 — a human's stated objection to a finding that no later analysis has
+ * stood against yet.
+ *
+ * `statement` is the user's reason VERBATIM, exactly as the contract persisted
+ * it: never trimmed, collapsed or normalised HERE. A consumer that renders it
+ * inside a sentence may quote it (see `coaching/stated-dissent-offer-text.ts`,
+ * which names that question apart), but the record this carries is the record.
+ */
+export interface StatedDissentSignal {
+  readonly findingId: string;
+  readonly analysisId: string;
+  readonly statement: string;
+}
+
 export interface JudgementSignals {
   readonly overriddenUnanswered: readonly OverriddenAdjudicationSignal[];
   readonly contestedUnadjudicated: readonly ContestedUnadjudicatedSignal[];
+  /** T3 — newest-first, one entry per (finding, analysis) address. */
+  readonly statedDissentUnanswered: readonly StatedDissentSignal[];
 }
 
 const EMPTY_SIGNALS: JudgementSignals = Object.freeze({
   overriddenUnanswered: Object.freeze([]),
   contestedUnadjudicated: Object.freeze([]),
+  statedDissentUnanswered: Object.freeze([]),
 });
 
 function readRecord(value: unknown): Record<string, unknown> | null {
@@ -131,8 +181,22 @@ function buildNodeLabelLookup(graph: Record<string, unknown> | null): ReadonlyMa
  * silently invisible to grep; caught by a NUL sweep with a positive control
  * and replaced with this helper.)
  */
+function pairKey(first: string, second: string): string {
+  return JSON.stringify([first, second]);
+}
+
+/** The (from,to) edge join. */
 function edgeKey(fromId: string, toId: string): string {
-  return JSON.stringify([fromId, toId]);
+  return pairKey(fromId, toId);
+}
+
+/**
+ * The (finding,analysis) dissent join — named apart from {@link edgeKey}
+ * because it addresses a different kind of thing, and a shared spelling would
+ * invite a future reader to join the two sets (they are not joinable).
+ */
+function dissentKey(findingId: string, analysisId: string): string {
+  return pairKey(findingId, analysisId);
 }
 
 /** Canonical (from,to) tie-break used by both signal classes. */
@@ -162,7 +226,25 @@ export function deriveJudgementSignals(
 ): JudgementSignals {
   const graph = readRecord(persistedGraph);
   const labels = buildNodeLabelLookup(graph);
-  if (labels.size === 0) return EMPTY_SIGNALS;
+
+  // ── The latest claim-bearing analysis. ONE read, shared by T1 and T3: both
+  // are "a human judgement no analysis has stood against yet", so two
+  // derivations of the same reference point is the twins shape (trap 12).
+  const latestAnalysis = selectClaimBearingRunAnalysisFact(priorFacts);
+  const latestAnalysisIndex = latestAnalysis?.index ?? Number.POSITIVE_INFINITY;
+
+  // ── T3 FIRST, AND DELIBERATELY ABOVE THE LABEL GATE. T1/T2 are unnameable
+  // without the persisted graph; T3 is named by the user's own words, which
+  // ride on the fact. Deriving it below the gate would make a concurrent-writer
+  // hash miss silently swallow a human's stated objection — the exact
+  // fail-closed-on-the-wrong-input class trap 16 names.
+  const statedDissentUnanswered = deriveStatedDissent(priorFacts, latestAnalysisIndex);
+
+  if (labels.size === 0) {
+    return statedDissentUnanswered.length === 0
+      ? EMPTY_SIGNALS
+      : { ...EMPTY_SIGNALS, statedDissentUnanswered };
+  }
 
   const resolveRef = (fromId: string, toId: string): JudgementEdgeRef | null => {
     const fromLabel = labels.get(fromId);
@@ -188,8 +270,6 @@ export function deriveJudgementSignals(
   // ── T1: overridden AND newer (smaller index) than the latest claim-bearing
   // analysis. No prior analysis ⇒ every override is unanswered (the first
   // analysis after it is the one that answers it — 2.690 §B.4).
-  const latestAnalysis = selectClaimBearingRunAnalysisFact(priorFacts);
-  const latestAnalysisIndex = latestAnalysis?.index ?? Number.POSITIVE_INFINITY;
   const overriddenSeen = new Set<string>();
   const overriddenUnanswered: OverriddenAdjudicationSignal[] = [];
   for (const adj of adjudications) {
@@ -237,8 +317,63 @@ export function deriveJudgementSignals(
   // value ordering (e-value join, then max_divergence) over this.
   contestedUnadjudicated.sort(compareEdgeIdentity);
 
-  if (overriddenUnanswered.length === 0 && contestedUnadjudicated.length === 0) {
+  if (
+    overriddenUnanswered.length === 0 &&
+    contestedUnadjudicated.length === 0 &&
+    statedDissentUnanswered.length === 0
+  ) {
     return EMPTY_SIGNALS;
   }
-  return { overriddenUnanswered, contestedUnadjudicated };
+  return { overriddenUnanswered, contestedUnadjudicated, statedDissentUnanswered };
+}
+
+/**
+ * T3 — the stated-dissent bag.
+ *
+ * `latestAnalysisIndex` is the index of the latest claim-bearing `run_analysis`
+ * fact in the SAME newest-first array (`Number.POSITIVE_INFINITY` when there is
+ * none, so every dissent counts as unanswered — the first analysis after it is
+ * the one it stands against).
+ *
+ * ⚠ ORDERING AUTHORITY IS ARRAY POSITION, identical to T1 and for the identical
+ * reason: `buildJudgementFact` mints no timestamp on a judgement receipt, so
+ * `computed_at` cannot order these against an analysis fact.
+ *
+ * ⚠ DEDUPE IS BY BOTH IDS, NEVER BY `finding_id` ALONE. Finding ids are fixed
+ * literals the UI repeats across decisions and runs (derived at the UI bytes:
+ * `StrengthenTheReasoning` sends `rec.id`, and its own copy guard records that
+ * "recommendation ids are fixed literals repeated in every decision"), so a
+ * bare-id key would let one run's objection stand in for another's. The
+ * contract makes `analysis_id` the OTHER HALF of the address for exactly this
+ * reason, and this join honours that rather than re-reading it as context.
+ *
+ * Fail-closed on every read: a malformed result, a blank statement or a missing
+ * id drops the signal rather than defaulting it.
+ */
+function deriveStatedDissent(
+  priorFacts: readonly HandlerFact[],
+  latestAnalysisIndex: number,
+): readonly StatedDissentSignal[] {
+  const seen = new Set<string>();
+  const out: StatedDissentSignal[] = [];
+  for (let i = 0; i < priorFacts.length; i += 1) {
+    if (i >= latestAnalysisIndex) break; // answered — structurally spent
+    const fact = priorFacts[i]!;
+    if (fact.fact_type !== 'finding_dissent') continue;
+    const result = readRecord((fact as { result?: unknown }).result);
+    if (result === null) continue;
+    const findingId = nonEmptyString(result.finding_id);
+    const analysisId = nonEmptyString(result.analysis_id);
+    const statement = nonEmptyString(result.statement);
+    if (findingId === null || analysisId === null || statement === null) continue;
+    // The contract already refuses a whitespace-only statement at the wire;
+    // this asks the same question of the PERSISTED value rather than trusting
+    // it, because a fact row outlives the schema version that wrote it.
+    if (statement.trim().length === 0) continue;
+    const key = dissentKey(findingId, analysisId);
+    if (seen.has(key)) continue; // newest per address (array order = newest-first)
+    seen.add(key);
+    out.push({ findingId, analysisId, statement });
+  }
+  return out;
 }

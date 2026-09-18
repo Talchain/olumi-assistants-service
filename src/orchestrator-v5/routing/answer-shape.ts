@@ -44,6 +44,113 @@ import { z } from 'zod';
 export const ANSWER_SHAPE_MAX_BULLETS = 3;
 
 /**
+ * ⭐ THE COLLAPSE FLOOR — how long an answer must be before CEE is entitled to
+ * tell the UI to hide most of it.
+ *
+ * ── THE DEFECT THIS EXISTS TO CLOSE ──────────────────────────────────────
+ * MEASURED ON THE LIVE WIRE, 14 Sep 2026, CEE staging `78515b95`. A real
+ * pre-mortem turn:
+ *
+ *     assistant_text          1,372 chars   <- the whole answer, three scenarios
+ *     _answer_shape.headline    138 chars   <- ONE sentence
+ *     _answer_shape.bullets     874 chars
+ *     _answer_shape.detail      360 chars
+ *
+ * The founder saw 138 characters and a "Show more". His words: useful output
+ * "is being hidden". That is the opposite of what a reasoning tool is for —
+ * the user cannot think with material the product is sitting on.
+ *
+ * ── WHY A FLOOR AND NOT AN OFF SWITCH ────────────────────────────────────
+ * The sidecar is a WIRE DIRECTIVE. `MessageBubble.tsx` reads it as
+ * `showStructuredAnswer = !isUser && !isStreaming && Boolean(message.answerShape)`
+ * and then renders `<AnswerBody>` — headline + <=3 bullets + a Show-more —
+ * INSTEAD of the free-text body. So whenever CEE attaches the sidecar, CEE,
+ * not the UI, has decided to collapse.
+ *
+ * But the UI ALREADY HAS a disclosure rule of its own, and it is a better one:
+ *
+ *     DecisionGuideAI `src/canvas/conversation/MessageBubble.tsx`
+ *     CLAMP_CHAR_THRESHOLD = 3000
+ *     MIN_HIDDEN_CHARS     = 150
+ *     findNaturalTruncation(text) returns null when text.length <= 3000, AND
+ *       also when no cut point would hide at least MIN_HIDDEN_CHARS.
+ *
+ * DERIVED, NOT INHERITED: read at the DEPLOYED staging bundle's own commit —
+ * `https://staging--olumi.netlify.app/version.json` returned
+ * `3b7e5d4c050caa75ad4506866109ce76567ac506` on 18 Sep 2026, and the source at
+ * that exact SHA carries the lines quoted above. This is not a repo read
+ * generalised to the deployment; it is the deployment's own commit.
+ *
+ * ⭐⭐ AND THE FLOOR IS 3,150, NOT 3,000 — FOUND BY EXECUTING THAT FUNCTION,
+ * NOT BY READING IT. Extracted from the deployed source at `3b7e5d4c` and run:
+ *
+ *     1372 -> null          (renders WHOLE)
+ *     2999 -> null          (renders WHOLE)
+ *     3000 -> null          (renders WHOLE)
+ *     3001 -> null          (renders WHOLE)   <- reading the code says otherwise
+ *     3500 -> truncated to 2987, hiding 513
+ *
+ * The second condition is why. Truncation needs a cut point `c <= 3000` that
+ * hides `len - c >= 150`; the largest available `c` is 3000, so NO input
+ * shorter than 3,150 can be truncated at all. A floor of 3,000 would therefore
+ * have left a ~150-character band where CEE collapses an answer the UI would
+ * have shown whole — the exact defect this constant exists to close, surviving
+ * inside its own fix at one twentieth the size.
+ *
+ * It is expressed as the SUM of the two UI constants rather than as the literal
+ * 3150, so the derivation is visible and a future reader can re-check it
+ * against the deployed pair instead of trusting a number.
+ *
+ * So below the floor the UI renders the answer WHOLE of its own accord.
+ * Every sidecar CEE attaches below that floor replaces "the user reads all of
+ * it" with "the user reads one sentence". Above it the UI would clamp anyway,
+ * and the structured headline/bullets/detail view is the better of the two
+ * clamps — that is where progressive disclosure earns its place, and it is
+ * kept.
+ *
+ * ⚠ THIS IS A DELIBERATE CROSS-SERVICE COUPLING, and the drift is benign in
+ * BOTH directions — stated rather than argued away (CLAUDE.md trap 12: a
+ * hand-maintained mirror must be shown to fail safe, since CEE cannot import a
+ * UI constant):
+ *   - EITHER UI constant moves DOWN: answers between the two are clamped by the
+ *     UI's own truncation instead of by the sidecar. Still far more visible text
+ *     than a 138-char headline. No lie, no hidden substance.
+ *   - EITHER moves UP: answers between the two render whole. That is the
+ *     direction this change is FOR.
+ * There is no drift that returns the measured defect. That is why a mirrored
+ * constant is acceptable here and a fail-loud guard is not required.
+ *
+ * ⛔ NOT TOUCHED: `AnswerShapeSchema`, and the tool property that makes the
+ * MODEL write headline-first. That authoring constraint is what stops a wall of
+ * prose arriving in the first place and it is doing useful work. Only the WIRE
+ * DIRECTIVE — "hide everything after sentence one" — is now conditional.
+ */
+/** DecisionGuideAI `MessageBubble.tsx` — `CLAMP_CHAR_THRESHOLD`, deployed `3b7e5d4c`. */
+const UI_CLAMP_CHAR_THRESHOLD = 3000;
+/** DecisionGuideAI `MessageBubble.tsx` — `MIN_HIDDEN_CHARS`, deployed `3b7e5d4c`. */
+const UI_MIN_HIDDEN_CHARS = 150;
+/**
+ * The shortest answer the deployed UI is capable of truncating. Below this it
+ * renders whole whatever CEE does, so a collapse directive can only subtract.
+ */
+export const ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS =
+  UI_CLAMP_CHAR_THRESHOLD + UI_MIN_HIDDEN_CHARS;
+
+/**
+ * True when the answer the user is about to receive is long enough that the
+ * deployed UI would clamp it anyway, so directing it to collapse costs the
+ * user nothing they could otherwise have read.
+ *
+ * ⚠ CALL THIS WITH THE TEXT THE USER ACTUALLY RECEIVES — i.e.
+ * `deriveAnswerTextFromShape(shape)`, the value `assistant_text` will hold on
+ * the wire — never with a pre-reflow draft. The UI's clamp measures the
+ * rendered string, so anything else answers a different question.
+ */
+export function warrantsProgressiveDisclosure(finalAssistantText: string): boolean {
+  return finalAssistantText.length > ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS;
+}
+
+/**
  * "Exactly one sentence" — pragmatic, decimal-safe check.
  *
  * An INTERNAL sentence boundary is a terminator run (`.` `!` `?`, optionally

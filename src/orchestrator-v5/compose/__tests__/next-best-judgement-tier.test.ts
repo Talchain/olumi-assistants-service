@@ -472,7 +472,11 @@ describe('§4 judgementSignals omitted ⇒ selection byte-identical (both captur
         });
         const withEmpty = selectLens(makeFact(clone(capture)), {
           previousAnalysisLens: prev,
-          judgementSignals: { overriddenUnanswered: [], contestedUnadjudicated: [] },
+          judgementSignals: {
+            overriddenUnanswered: [],
+            contestedUnadjudicated: [],
+            statedDissentUnanswered: [],
+          },
         });
         expect(withEmpty).toStrictEqual(without);
       }
@@ -675,9 +679,14 @@ describe('§8 what is deliberately NOT built, pinned so growth is loud', () => {
     ];
     const signals = signalsFor(factsWithRangeEdit, GRAPH_ONE_CONTESTED);
     // The derivation exposes NO range-edit signal class at all…
+    // ⚠ `statedDissentUnanswered` joined this list when `finding_dissent` gained
+    // a consequence. `prior_range_edit` and `feedback` still have none — which
+    // is what this assertion is about, and it stays a CLOSED key set so the
+    // next receipt to gain one cannot arrive silently.
     expect(Object.keys(signals).sort()).toStrictEqual([
       'contestedUnadjudicated',
       'overriddenUnanswered',
+      'statedDissentUnanswered',
     ]);
     // …and the selection over a sparse enrichment is identical to the
     // no-range-edit case (T2 wins on the graph either way).
@@ -700,11 +709,26 @@ describe('§8 what is deliberately NOT built, pinned so growth is loud', () => {
     expect(withOverride).not.toStrictEqual(withoutEdit);
   });
 
-  it('the built member set of resolve_disagreement is EXACTLY {override_stress_test, disagreement_resolution}', () => {
+  it('the built member set of resolve_disagreement is EXACTLY {override_stress_test, disagreement_resolution, stated_dissent_review}', () => {
+    // ⚠ THIS PIN FIRED, AND IT WAS RIGHT TO. The tier gained a THIRD member
+    // when `finding_dissent` got a consequence — a human's stated objection to
+    // a finding, which is the same KIND of issue (something the team has not
+    // settled) and therefore the same tier. The set is RE-STATED rather than
+    // loosened: growth stays loud, and the next member still has to come here
+    // and say what it is.
+    //
+    // ⚠ AND THE ORDER-SAFETY PROPERTY IS PINNED SEPARATELY, because a tier
+    // member list says nothing about who wins: `stated-dissent-lens.test.ts`
+    // §2 asserts T1 still takes the slot when both fire, so the new member
+    // displaces neither sibling.
     const members = ALL_LENS_IDS.filter(
       (l) => tierForCandidate(l) === 'resolve_disagreement',
     ).sort();
-    expect(members).toStrictEqual(['disagreement_resolution', 'override_stress_test']);
+    expect(members).toStrictEqual([
+      'disagreement_resolution',
+      'override_stress_test',
+      'stated_dissent_review',
+    ]);
   });
 });
 
@@ -713,7 +737,11 @@ describe('§8 what is deliberately NOT built, pinned so growth is loud', () => {
 // ============================================================================
 
 describe('§10 the derivation fails closed on every malformed input', () => {
-  const EMPTY = { overriddenUnanswered: [], contestedUnadjudicated: [] };
+  const EMPTY = {
+    overriddenUnanswered: [],
+    contestedUnadjudicated: [],
+    statedDissentUnanswered: [],
+  };
 
   it('absent / null / non-object graph ⇒ empty bag', () => {
     expect(deriveJudgementSignals([], undefined)).toStrictEqual(EMPTY);
