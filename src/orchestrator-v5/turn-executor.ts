@@ -296,6 +296,28 @@ import {
   readReadinessRepairResume,
   type ReadinessRepairResumeRead,
 } from './handlers/readiness-repair-proposal.js';
+import { executeValueBatch } from './handlers/readiness-value-batch.js';
+import {
+  readValueBatchResume,
+  type ValueBatchResumeRead,
+} from './handlers/readiness-value-batch-resume.js';
+import { buildGenericEditGraphHandlerFact } from './handlers/edit-graph-fact-builder.js';
+
+/**
+ * ⭐ THE TWO SENTENCES A DECLINED VALUE BATCH IS ALLOWED TO SAY.
+ *
+ * Both open by stating that NOTHING was applied, because that is the fact the
+ * user needs first and the one a vague apology hides. Neither offers a retry
+ * the product cannot honour, and neither implies the user authored a number:
+ * the estimates are the product's, the approval was the user's, and the copy
+ * keeps those apart.
+ */
+const VALUE_BATCH_NOT_APPLIED_MOVED =
+  'I did not apply the estimated values. The model has changed since I put them '
+  + 'together, so they are no longer the set you reviewed.';
+const VALUE_BATCH_NOT_APPLIED_WHOLE =
+  'I did not apply the estimated values. I could not apply all of them safely, and '
+  + 'writing only part of the set would leave the model in a state you never reviewed.';
 import { composeReadinessIntakeResponse } from './routing/readiness-intake.js';
 import { describeHeldOperationsSubject } from './handlers/edit-graph-referee-gate.js';
 import { isProposedChangeActionType } from './types/proposed-change.js';
@@ -3817,6 +3839,318 @@ export async function runTurnExecutor(
         }
         return finalizeRun();
       };
+      /**
+       * ⭐⭐ THE VALUE BATCH'S ONLY DEGRADE — disclosure, and ZERO graph writes.
+       *
+       * Every non-executed outcome lands here. It commits a CONVERSATION turn
+       * (so the user is told what happened and the dead chip is consumed) and
+       * deliberately passes NO `graph`, so `commitTurn` writes none.
+       *
+       * ⛔ WHY THERE IS NO PARTIAL PATH, AND WHY IT IS NOT A CONVENIENCE.
+       * A batch is approved AS A SET: the user read N estimates together and
+       * pressed one control. Writing the subset that still matched would put
+       * numbers in the model that were never reviewed in the combination that
+       * now exists — strictly worse than the one-at-a-time loop this replaces,
+       * because there the user sees each value as it lands. `executeValueBatch`
+       * is structurally atomic; this closure is the reason that atomicity
+       * survives the trip through the executor.
+       *
+       * ⚠ IT DOES NOT REGENERATE THE OFFER, and that is deliberate rather than
+       * an omission. The sibling `regenerateReadinessRepair` can rebuild its
+       * chip because `buildReadinessRepairOffer` is pure. Rebuilding a value
+       * batch needs the ESTIMATOR — a model call — and a decline is not the
+       * place to spend one silently. `composeReadinessIntakeResponse` still
+       * carries the current open issues and its own answer chips, so the user
+       * is left with a live route rather than a dead control.
+       */
+      const declineValueBatch = async (
+        priorPending: PendingAction,
+        baseGraph: unknown,
+        pathTag: string,
+        lead: string,
+      ): Promise<TurnExecutorRunResult> => {
+        const current = composeReadinessIntakeResponse(baseGraph, context.stage);
+        const recoveryResponse = {
+          ...current.response,
+          assistant_text: `${lead} ${current.response.assistant_text}`,
+        };
+        sonnetTextForLog = recoveryResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        try {
+          const committed = await commitTurn(recoveryResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [],
+            pending_actions: [],
+            consumedPendingRefs: [priorPending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+          analysisReadyForTurn = current.assessment?.analysisReady;
+        } catch (error) {
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: pathTag,
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure while declining a value batch',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
+
+      /**
+       * ⭐⭐ THE CHIP CLICK THE VALUE BATCH NEVER HAD.
+       *
+       * The producer, the composition, the resume reader and the atomic writer
+       * all existed and were all tested. Nothing handled the CLICK, so the one
+       * chip this feature offers fell through to the generic
+       * `apply_proposed_change` synthesis — which does not know this handler id,
+       * resolves it `invalid`, and DECLINES the action the user just approved.
+       * This closure is that missing seam, mirroring the readiness-repair
+       * sibling above hop for hop.
+       *
+       * ⚠ THE STALENESS CHECK IS NOT REDUNDANT WITH `executeValueBatch`'s
+       * membership re-derivation, and it is worth saying why both stay.
+       * They answer DIFFERENT QUESTIONS (trap 21). The hash asks *"is this the
+       * model the user was looking at when they read the estimates?"*; the
+       * membership re-derivation asks *"is this still the exact set of gaps the
+       * proposal covers?"*. A graph can move in ways that leave the gap set
+       * identical — an edited label, a changed edge strength — and the user
+       * would then be approving numbers they read against a different model.
+       * Aligning the two, or dropping either, is the wrong fix.
+       */
+      const commitValueBatchResume = async (
+        batchPending: PendingAction,
+        read: ValueBatchResumeRead,
+      ): Promise<TurnExecutorRunResult> => {
+        const baseGraph = context.persistedGraph ?? graphStateForTurn ?? null;
+        if (read.kind !== 'ok') {
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            'value_batch_invalid_payload',
+            VALUE_BATCH_NOT_APPLIED_WHOLE,
+          );
+        }
+        let baseHash: string | null = null;
+        try {
+          baseHash = computeAnalysisAffectingGraphHash(
+            baseGraph as GraphStateIngress | null | undefined,
+          );
+        } catch {
+          baseHash = null;
+        }
+        if (
+          baseHash === null
+          || !batchPending.preconditions.graph_hash
+          || batchPending.preconditions.graph_hash !== baseHash
+        ) {
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            'value_batch_stale',
+            VALUE_BATCH_NOT_APPLIED_MOVED,
+          );
+        }
+
+        // The single writer. It re-derives membership from the CURRENT graph and
+        // refuses on `membership_moved`; nothing here pre-empts or bypasses that.
+        const outcome = executeValueBatch({
+          proposal: read.proposal,
+          currentGraph: baseGraph,
+        });
+        if (outcome.status !== 'executed') {
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: batchPending.id,
+              reason: outcome.reason,
+            },
+            'Value batch confirmation declined; zero graph writes',
+          );
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            `value_batch_${outcome.reason}`,
+            outcome.reason === 'membership_moved'
+              ? VALUE_BATCH_NOT_APPLIED_MOVED
+              : VALUE_BATCH_NOT_APPLIED_WHOLE,
+          );
+        }
+
+        const preParsedForFact = GraphV3.safeParse(baseGraph);
+        const batchFact = preParsedForFact.success
+          ? buildGenericEditGraphHandlerFact({
+              editResult: {
+                blocks: [],
+                assistantText: null,
+                latencyMs: 0,
+                appliedGraph: outcome.appliedGraph,
+                wasRejected: false,
+                operations: [...outcome.operations],
+              },
+              preEditGraph: preParsedForFact.data,
+              hasExistingAnalysis:
+                freshness?.freshness === 'fresh' || freshness?.freshness === 'stale',
+            })
+          : null;
+        if (!batchFact) {
+          // No receipt, no write. A graph change the turn cannot account for is
+          // exactly the state this feature exists to avoid.
+          return declineValueBatch(
+            batchPending,
+            baseGraph,
+            'value_batch_fact_unavailable',
+            VALUE_BATCH_NOT_APPLIED_WHOLE,
+          );
+        }
+
+        const written = outcome.writtenCells.length;
+        const declined = read.proposal.cells.length - written;
+        const unsettable = read.proposal.unsettable.length;
+        const remaining = outcome.assessmentAfter.blockingIssues.length;
+        const appliedResponse = composeAnswer({
+          answerKind: 'functional',
+          assistant_text:
+            `Confirmed — I applied ${written} estimated ${written === 1 ? 'value' : 'values'} in one action. `
+            + `${written === 1 ? 'It is' : 'Each is'} marked as an AI estimate you reviewed, not as a figure you stated, `
+            + `so that difference stays visible for the rest of this model's life. `
+            + (declined > 0
+              ? `${declined} ${declined === 1 ? 'value' : 'values'} I could not estimate defensibly, so ${declined === 1 ? 'it was' : 'they were'} left open for you. `
+              : '')
+            + (unsettable > 0
+              ? `${unsettable} further ${unsettable === 1 ? 'gap needs' : 'gaps need'} you to say which factor is affected before anything can be estimated for ${unsettable === 1 ? 'it' : 'them'}. `
+              : '')
+            + (remaining > 0
+              ? `${remaining} ${remaining === 1 ? 'item still needs' : 'items still need'} your judgement.`
+              : 'The model now passes the readiness check.'),
+          stage: context.stage,
+          suggested_actions: [],
+        });
+        sonnetTextForLog = appliedResponse.assistant_text;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'execute';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient');
+        stagesCompleted.push('compose');
+        const previousEffectiveGraphForBatch = effectiveTurnGraph;
+        const previousMutationObservationForBatch = handlerEmittedMutatedGraph;
+        effectiveTurnGraph = outcome.appliedGraph;
+        handlerEmittedMutatedGraph = true;
+        try {
+          const committed = await commitTurn(appliedResponse, {
+            scenario_id: context.session_id,
+            turn_id: context.request_id,
+            turn_class: 'direct_answer',
+            handler_id: null,
+            request_hash: computeRequestHash(payload),
+            llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt,
+            handler_facts: [batchFact],
+            graph: outcome.appliedGraph,
+            consumedPendingRefs: [batchPending.chip_id],
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          const readback = assessCanonicalAnalysisReadiness(committed.persistedGraph);
+          analysisReadyForTurn = readback.analysisReady;
+          const readbackParsed = GraphV3.safeParse(committed.persistedGraph);
+          response = {
+            ...committed.response,
+            draft_graph: buildAppliedGraphWireField(
+              readbackParsed.success ? readbackParsed.data : outcome.appliedGraph,
+            ),
+          };
+          let postApplyHash: string | null = null;
+          try {
+            postApplyHash = computeAnalysisAffectingGraphHash(
+              committed.persistedGraph as GraphStateIngress | null | undefined,
+            );
+          } catch {
+            postApplyHash = null;
+          }
+          // Same canonical-state reuse as the readiness-repair sibling: one
+          // record for wire, Run admission and diagnostics.
+          currentAnalysisGraphHashForTurn = postApplyHash;
+          canonicalReadinessGraphForRun = committed.persistedGraph;
+          nonExecuteCanonicalMemo = undefined;
+          canonicalStateForRun = canonicalStateForNonExecute()!;
+          freshness = {
+            freshness: canonicalStateForRun.freshness,
+            reason: canonicalStateForRun.freshness_reason,
+            selected_fact_index: canonicalStateForRun.selected_fact_index,
+            computed_at: canonicalStateForRun.computed_at,
+            graph_hash_at_run: canonicalStateForRun.graph_hash_at_run,
+            current_graph_hash: canonicalStateForRun.current_graph_hash,
+          };
+          try {
+            emit(TelemetryEvents.PendingActionConsumed, {
+              request_id: requestId,
+              scenario_id: context.session_id,
+              pending_action_id: batchPending.id,
+              kind: batchPending.action.kind,
+              chip_id: batchPending.chip_id,
+              llm_calls_used: 0,
+              duration_ms: Date.now() - startedAt,
+            });
+          } catch (telemetryError) {
+            log.warn(
+              {
+                request_id: requestId,
+                scenario_id: context.session_id,
+                err: serialiseError(telemetryError),
+              },
+              'Value batch committed; pending-consumed telemetry failed',
+            );
+          }
+        } catch (error) {
+          effectiveTurnGraph = previousEffectiveGraphForBatch;
+          handlerEmittedMutatedGraph = previousMutationObservationForBatch;
+          log.error(
+            {
+              event: 'v5.state_commit_failed',
+              request_id: requestId,
+              session_id: context.session_id,
+              path: 'value_batch_apply',
+              err: serialiseError(error),
+            },
+            'V5 TurnExecutor commit failure on value batch apply',
+          );
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse(
+            'STATE_COMMIT_FAILED',
+            context.stage,
+            { phase: 'commit' },
+            recoveryCtx(),
+          );
+        }
+        return finalizeRun();
+      };
+
       // Lane 34 — GM held-execute resume (propose → hold → confirm →
       // apply). Reached ONLY from the pending_action branch below when the
       // matched pending is a GM held one AND CEE_GRAPH_MANAGEMENT_MODE is
@@ -4450,6 +4784,14 @@ export async function runTurnExecutor(
           if (readinessRepairRead.kind !== 'not_readiness_repair') {
             return commitReadinessRepairResume(pending, readinessRepairRead);
           }
+          // The value batch's chip click. `not_value_batch` falls through to
+          // every existing path untouched — that discrimination is the whole
+          // safety property of adding a branch here, and it is pinned by
+          // `readiness-value-batch-route-level.test.ts`.
+          const valueBatchRead = readValueBatchResume(pending);
+          if (valueBatchRead.kind !== 'not_value_batch') {
+            return commitValueBatchResume(pending, valueBatchRead);
+          }
           // Lane 34 — GM held-execute wiring. A GM held pending
           // (inline_patch.handler_id = 'graph_management_held_v1') is
           // recognised BEFORE the generic synthesis. Live mode executes
@@ -4870,6 +5212,13 @@ export async function runTurnExecutor(
             if (ordinalReadinessRepair.kind !== 'not_readiness_repair') {
               return commitReadinessRepairResume(ordinal.pending, ordinalReadinessRepair);
             }
+            // Same parity as the sibling above: a batch the user picked by
+            // ORDINAL must reach the batch writer, not the generic synthesis
+            // that would decline the action they explicitly chose.
+            const ordinalValueBatch = readValueBatchResume(ordinal.pending);
+            if (ordinalValueBatch.kind !== 'not_value_batch') {
+              return commitValueBatchResume(ordinal.pending, ordinalValueBatch);
+            }
             if (
               ordinalGmRead.kind !== 'not_gm_held' &&
               config.features.graphManagementMode === 'live'
@@ -5263,6 +5612,14 @@ export async function runTurnExecutor(
             const labelReadinessRepair = readReadinessRepairResume(labelPick.pending);
             if (labelReadinessRepair.kind !== 'not_readiness_repair') {
               return commitReadinessRepairResume(labelPick.pending, labelReadinessRepair);
+            }
+            // The batch chip carries NAMED public copy ("Apply all 3
+            // estimates"), so a chip click replaying that message lands HERE
+            // rather than in the bare-confirm branch. Without this the feature
+            // is unreachable by its own affordance.
+            const labelValueBatch = readValueBatchResume(labelPick.pending);
+            if (labelValueBatch.kind !== 'not_value_batch') {
+              return commitValueBatchResume(labelPick.pending, labelValueBatch);
             }
             if (
               labelGmRead.kind !== 'not_gm_held' &&
