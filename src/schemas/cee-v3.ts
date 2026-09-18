@@ -258,6 +258,61 @@ export const NodeV3 = z.object({
    * e.g. { "0": "Developers", "1": "Tech Lead" } for "Team Structure (0=Developers, 1=Tech Lead)".
    * Node-level field (not in observed_state) — describes label encoding, not observed state. */
   encoding_map: z.record(z.string(), z.string()).optional(),
+  /**
+   * COLLAB Track A — whether this node participates in the CALCULATION.
+   *
+   * `'retained_excluded'` — the node is kept in the model with its wording,
+   * identity and authorship intact, is still visible to coaching, and is
+   * DELIBERATELY EXCLUDED from the analysis. `'included'` is ordinary
+   * participation.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
+   * `scale_frame` carries above, and for the same measured reason: this
+   * `NodeV3` is a plain `z.object` (see the closing comment at the end of the
+   * object), so an undeclared root is SILENTLY DELETED by `GraphV3.safeParse`
+   * with no error anywhere. `@talchain/schemas`' own `NodeV3Schema` is
+   * `.passthrough()` and would have kept it — declaring it THERE alone changes
+   * nothing here. Two same-named `NodeV3`s; this is the one that strips.
+   *
+   * ⛔ ABSENCE IS NOT A CLAIM, AND CONSUMERS MUST NOT INFER ONE.
+   * Absent ⇒ treat as included FOR COMPUTATION ONLY: 182,015 existing nodes
+   * carry no field and must not be dropped from anyone's analysis. But absence
+   * and inclusion are therefore INDISTINGUISHABLE, so a surface MUST render an
+   * exclusion claim ONLY on an explicit `'retained_excluded'` — never from
+   * absence, never from a negation, and never from an unrecognised value.
+   * An unknown value is NOT an exclusion claim: render nothing. A wrong
+   * exclusion claim about a node CEE never stamped is worse than a missing one.
+   * (Agreed with the Canvas lane, 18 Sep, as the binding display contract.)
+   *
+   * WHY AN ENUM AND NOT A BOOLEAN: the state is named, so a third state later
+   * does not need a second flag. `waived_by_exclusion` became unable to answer
+   * the adjacent question for exactly that reason.
+   *
+   * ⚠ NAME THE THREE APART — they share the English phrase and they are NOT
+   * this field. Do not "reconcile" them; that reconciliation is what cost this
+   * estate the leader-claim seam:
+   *   · `GroundedUnresolved = 'none' | 'not_in_model' | 'could_not_check'`
+   *     (UI `canvas/conversation/groundedSelection.ts`) — whether a selection
+   *     the USER REFERENCED exists in the graph. Its own docblock insists
+   *     `not_in_model` ("we read the graph and it isn't there") and
+   *     `could_not_check` ("we couldn't read") must not collapse.
+   *   · `in_model` as a COUNT in a quantities tally `{total, in_model,
+   *     prose_only, absent}` (UI `adapters/cee/notModelled.ts`) — whether a
+   *     number from the brief reached the model.
+   *   · THIS field — whether a node that IS in the model participates in the
+   *     CALCULATION. Neither of the others is about participation.
+   *
+   * PROMOTION IS A SINGLE FIELD FLIP on the existing node — never
+   * create-and-delete. Paul's ruling requires promotion "without duplication or
+   * loss", and any design that mints a second node fails it however clean it
+   * looks.
+   *
+   * NOT AI-EDITABLE, and deny-by-default already enforces it: the root is
+   * absent from `aiEditableFieldRoots('node')`, so `field-safety.ts` refuses any
+   * `update_node` op naming it — the same posture as `scale_frame` and
+   * `goal_threshold_frame`. CEE mints it; no model authors it.
+   */
+  analysis_participation: z.enum(['included', 'retained_excluded']).optional(),
   /** Prior distribution data for external factors (set by LLM or synthesised by unreachable-factors repair).
    *  ISL needs prior ranges to run Monte Carlo sampling on external factors. */
   prior: z.object({ distribution: z.string(), range_min: z.number(), range_max: z.number() }).passthrough().optional(),
