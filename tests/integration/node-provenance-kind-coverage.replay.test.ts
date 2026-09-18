@@ -562,6 +562,25 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    *     second, STRUCTURAL reason and deliberately not relied on as the first
    *     — the semantic answer is the one that survives the loop's scope
    *     widening.
+   *
+   * ── DECISION RECORDED, 18 Sep: `goal_threshold_cap_provenance` ───────────
+   * WHICH RULE produced `goal_threshold_cap` — `metric_scale`, `inherited`, or
+   * `target_derived_headroom` (see `GOAL_THRESHOLD_CAP_PROVENANCE`,
+   * utils/goal-threshold-cap.ts).
+   * The guard's question, answered explicitly:
+   *   · NOT value-bearing, and this is a claim about MEANING, not type. It is
+   *     an enum naming the METHOD that produced a denominator — a statement
+   *     about how a number was obtained, never a quantity about the world. It
+   *     is the exact sibling case of `goal_threshold_frame` and `scale_frame`,
+   *     both recorded above as not value-bearing while the NUMBERS beside them
+   *     (`goal_threshold`, `goal_threshold_raw`) are. A provenance asserts no
+   *     magnitude, so it cannot be the "already asserts a number" signal
+   *     `carriesValue` exists to detect, and it must NOT join it.
+   *   · ⚠ AND THE STRUCTURAL SECOND REASON IS DELIBERATELY NOT OFFERED HERE.
+   *     This field is written on GOAL nodes and the loop walks OPTION nodes,
+   *     so it cannot reach the check today — but that is a fact about the
+   *     loop's current scope, and the semantic answer above is the one that
+   *     stays true if the scope ever widens. Recorded in that order on purpose.
    */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
@@ -582,6 +601,7 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
       "factor_type",
       "goal_threshold",
       "goal_threshold_cap",
+      "goal_threshold_cap_provenance",
       "goal_threshold_frame",
       "goal_threshold_raw",
       "goal_threshold_unit",

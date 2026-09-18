@@ -90,7 +90,7 @@ import {
 // (`utils/goal-threshold-cap.ts:20-26`). The records projector is a THIRD
 // registration path; minting its own cap arithmetic here would recreate exactly
 // the divergence that module was extracted to end (trap 12).
-import { resolveGoalThresholdCap, CEE_GOAL_THRESHOLD_FRAME } from "../../../utils/goal-threshold-cap.js";
+import { resolveGoalThresholdCapWithProvenance, CEE_GOAL_THRESHOLD_FRAME, type GoalThresholdCapProvenance } from "../../../utils/goal-threshold-cap.js";
 import type { DraftRecordValueScale } from "./grammar.js";
 import { boundNodeLabel } from "./label-bound.js";
 import { isNameShapedLabel } from "./claim-label-shape.js";
@@ -942,6 +942,11 @@ export interface ProjectedNode {
   goal_threshold_unit?: string;
   goal_threshold_cap?: number;
   /**
+   * Which rule produced `goal_threshold_cap` — derived from the resolver's own
+   * union, never restated, for the same reason the frame below is.
+   */
+  goal_threshold_cap_provenance?: GoalThresholdCapProvenance;
+  /**
    * Typed FROM the constant rather than as the literal `"level"`, so the field
    * cannot drift from `GoalThresholdFrame` if a later contract release widens or
    * renames the enum (trap 12 — a hand-written literal here would be a mirror of
@@ -1560,11 +1565,16 @@ function applyStatedGoalTarget(
   value: number,
   unit: string | undefined,
 ): void {
-  const cap = resolveGoalThresholdCap(undefined, value, unit, undefined);
+  const resolved = resolveGoalThresholdCapWithProvenance(undefined, value, unit, undefined);
   node.goal_threshold_raw = value;
   if (unit !== undefined) node.goal_threshold_unit = unit;
-  if (cap !== null) {
+  if (resolved !== null) {
+    const cap = resolved.cap;
     node.goal_threshold_cap = cap;
+    // Minted in the SAME statement as the cap it describes, so the two can
+    // never diverge (a provenance describing a cap that has since moved reads
+    // as attested and is worse than none).
+    node.goal_threshold_cap_provenance = resolved.provenance;
     node.goal_threshold = value / cap;
     // A CODE CONSTANT, never derived from model output — `'level'` is true by
     // construction of the `raw / cap` arithmetic one line above.

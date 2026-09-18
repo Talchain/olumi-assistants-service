@@ -30,7 +30,8 @@ import { synthesiseDisplayValue } from "./display-value.js";
 import { unitPinnedScaleFrame } from "../draft/records/unit-scale-class.js";
 import {
   CEE_GOAL_THRESHOLD_FRAME,
-  resolveGoalThresholdCap,
+  resolveGoalThresholdCapWithProvenance,
+  type GoalThresholdCapProvenance,
 } from "../../utils/goal-threshold-cap.js";
 import {
   deriveGoalTargetFromLabel,
@@ -1515,8 +1516,9 @@ export function applyGoalTargetRedirect(
   let normalizedValue = factor.value;
   let rawValue: number | undefined;
   let cap: number | undefined;
+  let capProvenance: GoalThresholdCapProvenance | undefined;
 
-  const resolvedCap = resolveGoalThresholdCap(
+  const resolvedCapWithProvenance = resolveGoalThresholdCapWithProvenance(
     currentGoalNode.goal_threshold_cap,
     rawForResolver,
     factor.unit,
@@ -1535,18 +1537,22 @@ export function applyGoalTargetRedirect(
 
   let normalizedBaseline: number | undefined;
 
-  if (resolvedCap !== null) {
-    cap = resolvedCap;
+  if (resolvedCapWithProvenance !== null) {
+    cap = resolvedCapWithProvenance.cap;
+    // Captured from the SAME resolution as the cap, never re-derived — a second
+    // resolution can disagree with the cap the graph was actually scored
+    // against (the cap doctrine is order-dependent).
+    capProvenance = resolvedCapWithProvenance.provenance;
     rawValue = rawForResolver;
-    normalizedValue = rawForResolver / resolvedCap;
-    // THE SHARED DENOMINATOR. Divided by the very same `resolvedCap` on
+    normalizedValue = rawForResolver / cap;
+    // THE SHARED DENOMINATOR. Divided by the very same `cap` on
     // the same branch, so threshold and baseline cannot drift onto
     // different scales — ISL's `threshold − baseline + intercept` is
     // only meaningful when both operands were scored against one cap,
     // and a mismatch there yields a confident WRONG probability rather
     // than an error.
     normalizedBaseline =
-      rawBaseline === undefined ? undefined : rawBaseline / resolvedCap;
+      rawBaseline === undefined ? undefined : rawBaseline / cap;
   } else {
     rawValue = rawForResolver;
     // No sound denominator exists, so the target itself is registered
@@ -1564,6 +1570,14 @@ export function applyGoalTargetRedirect(
     goal_threshold_raw: rawValue,
     goal_threshold_unit: factor.unit ?? "count",
     goal_threshold_cap: cap,
+    // WHICH RULE produced that denominator. Carried from the same resolution,
+    // and only when a cap exists for it to describe. On
+    // `target_derived_headroom` the cap is `raw * 1.25`, which makes
+    // `goal_threshold` the constant 0.8 for every target — a consumer cannot
+    // fail closed on a denominator it cannot see.
+    ...(capProvenance !== undefined && {
+      goal_threshold_cap_provenance: capProvenance,
+    }),
     // ROADMAP 2.258 — attest the FRAME beside the number. A CODE
     // CONSTANT: the arithmetic three lines up is `raw / cap`, an
     // absolute LEVEL on the metric's own scale, so `'level'` is true
