@@ -162,6 +162,13 @@ import {
 // `detectWithheldConsent` above answers the NEGATIVE half and stands down on a
 // read request, which is how the walk's unrequested constraint write happened.
 // See the two gates below: the STEP 2 demotion, and the commit-closure strip.
+// ⭐ The quote-mask the ordinary-text authority term needs. Bound to the
+// model's OWN node labels: of 1,564 mutating turns, three carried a
+// deliberative frame and TWO were false positives from a node labelled
+// "What should we do?" matching inside its own quoted mention. Projected from
+// `context.persistedGraph` — the server-side read, never request-supplied
+// graph_state, which is null on every live turn.
+import { projectModelNodeLabels } from './routing/ordinary-text-authority.js';
 import {
   detectMutationWarrant,
   buildMutationWarrantDemotionText,
@@ -292,6 +299,7 @@ import {
 } from './handlers/gm-held-execute.js';
 import {
   buildReadinessRepairOffer,
+  withReadinessApplyControl,
   executeReadinessRepair,
   readReadinessRepairResume,
   type ReadinessRepairResumeRead,
@@ -1319,6 +1327,10 @@ export async function runTurnExecutor(
       // LAYER 2 reads the commit's own `consumedPendingRefs` instead, which is
       // the same fact recorded on the meta by every consuming site.
       isConfirmResume: false,
+      // Term D's quote-mask. A degraded graph read yields `[]`, which masks
+      // nothing and therefore withholds MORE rather than less — the same
+      // fail-safe direction this gate declares above.
+      modelNodeLabels: projectModelNodeLabels(context.persistedGraph),
     },
     GRAPH_MUTATING_HANDLER_IDS,
   );
@@ -3594,15 +3606,13 @@ export async function runTurnExecutor(
                 assistant_text:
                   `The earlier repair plan is no longer valid, so I regenerated it against the model as it stands now. ` +
                   recoveryResponse.assistant_text,
-                suggested_actions: [
-                  ...recoveryResponse.suggested_actions,
-                  {
-                    id: offer.chip.id,
-                    label: offer.chip.label,
-                    message: offer.chip.message,
-                    ...(offer.chip.detail ? { detail: offer.chip.detail } : {}),
-                  },
-                ],
+                // Same seam as the route-level arm: the composer's row is
+                // already at its cap, so an append would leave the regenerated
+                // apply control unrenderable.
+                suggested_actions: withReadinessApplyControl(
+                  recoveryResponse.suggested_actions,
+                  offer.chip,
+                ) as typeof recoveryResponse.suggested_actions,
               };
             } else {
               recoveryResponse = {
@@ -10867,6 +10877,8 @@ export async function runTurnExecutor(
           turnSource: payload.source,
           chipActionType: payload.chip?.action_type,
           isConfirmResume: consumedPendingAction !== null,
+          // Same mask, same source, same fail-safe as the ingress derivation.
+          modelNodeLabels: projectModelNodeLabels(context.persistedGraph),
         },
         GRAPH_MUTATING_HANDLER_IDS,
       );

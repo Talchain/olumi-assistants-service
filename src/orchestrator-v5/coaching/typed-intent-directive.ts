@@ -438,6 +438,51 @@ export interface CoachingDirective {
   readonly dskProtocolId: string | null;
 }
 
+
+/**
+ * Bracket syntax in an authored protocol step. Deliberately broad — ANY
+ * `[...]` — because the question is "was this written to be filled in", and a
+ * narrow pattern listing today's six placeholders is the mirror this predicate
+ * exists to avoid.
+ */
+const STEP_PLACEHOLDER_RE = /\[[^\]]*\]/;
+
+/**
+ * The protocol's authored steps that are SAFE TO PUT TO A USER AS WRITTEN.
+ *
+ * A step is excluded iff it contains bracket syntax. Two unrelated kinds of
+ * step carry it and both must stay out of the model's context:
+ *
+ *   - GRAPH-BOUND slots — `[winning option]`, `[dominant factor]`,
+ *     `[win probability]`, `[runner-up option]`, `[N options]`,
+ *     `[chosen option]`. Unresolved they leak authoring syntax; RESOLVED, four
+ *     of the six would name the leading option, which is exactly what the two
+ *     claim-safety rails withhold (see this module's docblock).
+ *   - USER-COMPLETED TEMPLATES — DSK-P-006's if-then forms
+ *     (`'When [situation/trigger], I will [action]'`). The brackets are correct
+ *     THERE, as a form for the user to fill, but the coach relaying a blank
+ *     template as a question reads as a bug.
+ *
+ * ⛔ DERIVED, NEVER LISTED. The predicate is over the STRING, so a step
+ * authored tomorrow with a new placeholder is excluded without anyone editing
+ * this file. Naming the six placeholders in a constant here would be a mirror
+ * of `data/dsk/v1.json` that drifts silently (CLAUDE.md trap 12) — the whole
+ * reason the bundle is the authority.
+ *
+ * ⚠ FAIL-CLOSED ON SHAPE. `steps` is `string[]` in the type but the bundle is
+ * data: a non-string or blank member is dropped rather than interpolated as
+ * `undefined`, because a malformed bundle must degrade to FEWER questions, not
+ * to a broken sentence in a user-facing exercise.
+ */
+export function literalProtocolSteps(protocol: DSKProtocol): readonly string[] {
+  return (protocol.steps ?? []).filter(
+    (step): step is string =>
+      typeof step === 'string' &&
+      step.trim().length > 0 &&
+      !STEP_PLACEHOLDER_RE.test(step),
+  );
+}
+
 /**
  * Build the method directive for a routed coaching intent.
  *
@@ -447,10 +492,35 @@ export interface CoachingDirective {
  *
  * When a protocol applies, its PUBLISHED TITLE and EXPECTED OUTPUTS are read
  * from the bundle and named to the coach — derived, never restated here, so
- * this file cannot drift from the science it cites (trap 12). The protocol's
- * `steps` are deliberately NOT interpolated: they carry authoring placeholders
- * (`[winning option]`, `[dominant factor]`) that would leak bracket syntax into
- * the model's context.
+ * this file cannot drift from the science it cites (trap 12).
+ *
+ * ⭐⭐ AND ITS AUTHORED STEPS NOW REACH THE COACH, MINUS THE BOUND ONES.
+ * The previous note here said `steps` are "deliberately NOT interpolated"
+ * because they carry authoring placeholders (`[winning option]`,
+ * `[dominant factor]`). That reason is real but it is a FORMATTING objection to
+ * SOME steps, and it was suppressing all of them: measured against
+ * `data/dsk/v1.json`, the six protocols carry 22 steps of which ELEVEN carry no
+ * placeholder at all. Those eleven are the published exercise questions,
+ * peer-reviewed and citation-backed, and nothing in the service read them —
+ * `steps` had exactly ONE non-test reader repo-wide, `dsk/linter.ts`, which
+ * only asserts the array is non-empty. The science was authored and
+ * disconnected.
+ *
+ * ⛔ THE FILTER IS DERIVED, NOT A LIST, AND THAT IS THE LOAD-BEARING PART
+ * (trap 12). {@link literalProtocolSteps} excludes any step containing bracket
+ * syntax, so a NEWLY-AUTHORED placeholder is excluded automatically on the day
+ * it lands. A hand-kept allowlist of "safe steps" would read green while the
+ * bundle moved underneath it — which is the defect class this estate pays for
+ * most often.
+ *
+ * ⚠ AND THE BOUND STEPS ARE NOT MERELY UNTIDY — FOUR OF THEM ARE THE LEADER
+ * CLAIM. `[winning option]` (x4), `[win probability]`, `[runner-up option]` and
+ * `[chosen option]` name the very thing `mayNameLeadingOption` and
+ * `analysisReadyPermitsLeaderNaming` exist to withhold. Resolving them would
+ * pipe a leader designation into the coach's context through a channel neither
+ * rail watches — CLAUDE.md trap 21, re-opened through a new door. Any future
+ * work that resolves placeholders MUST conjoin those two verdicts; excluding
+ * them here is what makes this change safe to ship without touching either.
  */
 export function buildCoachingMethodDirective(
   intent: RoutedCoachingIntent,
@@ -473,6 +543,18 @@ export function buildCoachingMethodDirective(
       '',
       `This is the published "${protocol.title}" protocol. Produce what it expects: ${outputs.join('; ')}.`,
     );
+    const steps = literalProtocolSteps(protocol);
+    if (steps.length > 0) {
+      lines.push(
+        '',
+        // "as written" is the point. These are the authored exercise questions
+        // from the published protocol; a paraphrase is what the model would
+        // produce anyway, and is precisely what citing the protocol is meant to
+        // replace.
+        'The protocol asks these, in order. Put them to the user as written rather than paraphrasing them:',
+        ...steps.map(step => `- ${step}`),
+      );
+    }
   }
 
   lines.push(

@@ -1,6 +1,70 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import { GoalThresholdFrame } from '@talchain/schemas';
+
+/**
+ * ⭐⭐⭐ WHICH RULE PRODUCED THE DENOMINATOR — and why that is a scientific fact
+ * about the number, not bookkeeping.
+ *
+ * Every CEE mint computes `goal_threshold = raw / cap`. The three rules below
+ * differ in ONE way that decides whether the result means anything:
+ *
+ *   · `metric_scale` and `inherited` take a denominator from OUTSIDE this
+ *     target — the metric's own 0-100 scale, or a cap an earlier registration
+ *     established. Different targets therefore give different thresholds
+ *     (4% -> 0.04, 96% -> 0.96), and the number carries the user's goal.
+ *
+ *   · `target_derived_headroom` takes the denominator FROM THE TARGET ITSELF
+ *     (`raw * 1.25`). Compose that with `raw / cap` and the target cancels:
+ *
+ *         raw / (raw * 1.25) === 0.8      for EVERY raw > 0
+ *
+ *     So on this rule `goal_threshold` is the CONSTANT 0.8 — the same number
+ *     for "reach GBP 20,000 MRR" and "reach GBP 20,000,000 MRR" — and ISL
+ *     scores `P(sample >= 0.8)` in both cases. The user's figure survives only
+ *     in `goal_threshold_raw`. The normalised value is a constant of the rule,
+ *     not a measurement of the goal. Pinned by execution in
+ *     `__tests__/goal-threshold-cap-provenance.test.ts`.
+ *
+ * THIS IS NOT A BUG IN THE ARITHMETIC. A headroom cap is a defensible way to
+ * place a target on a 0-1 scale when nothing better exists, and it is the rule
+ * of last resort by design. The defect is that nothing on the wire DISTINGUISHED
+ * the three, so a consumer could not fail closed on a denominator no user ever
+ * supplied — it received `0.8` and could not tell an attested normalisation from
+ * an artefact of the fallback. Disclosure, not suppression: the honest target
+ * display (`goal_threshold_raw` + `goal_threshold_unit`) is untouched by this
+ * and remains available whatever the provenance says.
+ *
+ * ⚠ NAMED FOR THE RULE'S OWN INPUT, never for the reader. `target_derived_`
+ * states where the number came from, which is the only claim this site can
+ * honestly make; it says nothing about whether the user would endorse it.
+ *
+ * ⚠ ABSENCE MEANS UNATTESTED AND MUST NEVER BE DEFAULTED. A defaulted
+ * provenance is a manufactured attestation — the same fabrication class
+ * `goal_threshold_frame` and `value_frame` exist to refuse.
+ */
+export const GOAL_THRESHOLD_CAP_PROVENANCE = [
+  /** Rule 2 — a percentage normalises against its own 0-100 scale. */
+  'metric_scale',
+  /** Rule 1 — a compatible, strictly larger cap an earlier registration set. */
+  'inherited',
+  /** Rule 3 — `raw * 1.25`, derived from the target, so the threshold is 0.8. */
+  'target_derived_headroom',
+] as const;
+
+export type GoalThresholdCapProvenance =
+  (typeof GOAL_THRESHOLD_CAP_PROVENANCE)[number];
+
+/** Derived from the constant above so the two can never disagree (trap 12). */
+export const GoalThresholdCapProvenanceSchema = z.enum(
+  GOAL_THRESHOLD_CAP_PROVENANCE,
+);
+
+/** A resolved denominator and the rule that produced it, minted together. */
+export interface ResolvedGoalThresholdCap {
+  readonly cap: number;
+  readonly provenance: GoalThresholdCapProvenance;
+}
 
 /**
  * Shared goal-threshold cap-resolution doctrine (ROADMAP 1.18,
@@ -82,16 +146,18 @@ import { GoalThresholdFrame } from '@talchain/schemas';
  * → 0.0015, a 100x regression) — never route a pre-divided '%' value
  * through this function without reconstructing the percent number first.
  */
-export function resolveGoalThresholdCap(
+export function resolveGoalThresholdCapWithProvenance(
   existingCap: unknown,
   raw: number,
   unit: string | undefined,
   existingUnit: unknown,
-): number | null {
+): ResolvedGoalThresholdCap | null {
   // '%' targets ALWAYS normalise against 100 (review hardening,
   // 2026-07-07): an inherited absolute cap from a previous registration
   // must not distort a percentage re-registration.
-  if (unit === '%' && raw > 0 && raw <= 100) return 100;
+  if (unit === '%' && raw > 0 && raw <= 100) {
+    return { cap: 100, provenance: 'metric_scale' };
+  }
   // An existing cap is only reusable when the units are compatible — a
   // cap minted for one unit is meaningless for another.
   const unitsCompatible =
@@ -109,10 +175,34 @@ export function resolveGoalThresholdCap(
     // headroom instead of honouring a degenerate inherited/LLM-drafted cap.
     existingCap > raw
   ) {
-    return existingCap;
+    return { cap: existingCap, provenance: 'inherited' };
   }
-  if (raw > 0) return raw * 1.25;
+  if (raw > 0) return { cap: raw * 1.25, provenance: 'target_derived_headroom' };
   return null;
+}
+
+/**
+ * The denominator alone, for the four call sites that only need the number.
+ *
+ * ⚠ A PROJECTION, NOT A SECOND COPY. The rules live exactly once, above. Two
+ * implementations of this doctrine would drift and the drift would read as
+ * green — the hand-maintained-mirror defect this estate pays for most (CLAUDE.md
+ * trap 12). Parity across every branch, including the null one, is asserted by
+ * execution in `__tests__/goal-threshold-cap-provenance.test.ts`.
+ *
+ * Behaviour is byte-identical to before this function was split: same rules,
+ * same order, same constants, same `null`.
+ */
+export function resolveGoalThresholdCap(
+  existingCap: unknown,
+  raw: number,
+  unit: string | undefined,
+  existingUnit: unknown,
+): number | null {
+  return (
+    resolveGoalThresholdCapWithProvenance(existingCap, raw, unit, existingUnit)
+      ?.cap ?? null
+  );
 }
 
 

@@ -527,6 +527,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ROADMAP 3.1 — Decision Records commit-seam capture hook
         // (unconditional since #539 deleted CEE_DECISION_RECORD_CAPTURE)
         V5DecisionRecordCaptured: "v5.decision_records.record_captured",
+        // ROADMAP 2.1229 — brief + analysis-provenance commit-seam hook, the
+        // writer the share path had been missing since the direct
+        // browser→PLoT /v2/run path was retired.
+        V5BriefProvenanceStored: "v5.brief_provenance.stored",
         V5CoachingStateLifecycleDerived: "v5.coaching_state.lifecycle_derived",
         V5CoachingSignalFired: "v5.coaching.signal_fired",
         V5CoachingOutputPostcheck: "v5.coaching.output_postcheck",
@@ -541,6 +545,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // shape no longer matched the FINAL assistant_text at finalise /
         // route egress (lengths + seam only).
         V5AnswerShapeDroppedStale: "v5.answer_shape.dropped_stale",
+        // THE COLLAPSE FLOOR (18 Sep 2026) — the egress reached a shapeable
+        // answer and DECLINED to attach the collapse directive, because the
+        // answer is short enough that the deployed UI renders it whole anyway.
+        // Announced rather than silent: `emitted` and `declined_below_floor`
+        // are the TWO outcomes of a REACHED egress, and neither means the
+        // dispatch path was never reached.
+        V5AnswerShapeDeclinedBelowFloor: "v5.answer_shape.declined_below_floor",
         V5DecisionReviewDegraded: "v5.decision_review_degraded",
         // Neuro-symbolic B1 (ROADMAP 1.77) — decomposition outcome (log-only).
         V5DecisionReviewDecomposed: "v5.decision_review.decomposed",
@@ -768,6 +779,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         V5RoutingForcedPillOutcome: "v5.routing.forced_pill_outcome",
         V5AnalysisElectionGate: "v5.routing.analysis_election_gate",
         V5RunAnalysisInterceptGuard: "v5.run_analysis.intercept_guard",
+        V5RunAnalysisParticipationGuard: "v5.run_analysis.participation_guard",
         V5RunAnalysisImperativePreRoute: "v5.run_analysis.imperative_pre_route",
         V5RunAnalysisTargetRepair: "v5.run_analysis.target_repair",
         V5RunAnalysisOptionsScaffolded: "v5.run_analysis.options_scaffolded",
@@ -814,7 +826,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
       // about what a USER received on a turn, which outlives any one
       // orchestrator generation, and a refusal must stay greppable across one.
       const validPrefixes =
-        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|context_integrity|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline|turn)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$|jsonb_column_degraded$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_text|candidate_mutation|capability|claim_cage|claim_safety|collab|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|typed_coaching_intent_route|typed_coaching_intent_unrouted|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|selection|session|structural_edit_tool|summary)(\.|$))/;
+        /^(assist\.(draft|clarifier|critique|suggest_options|explain_diff|auth|llm|share|sse|cost_calculation)\.|cee\.(draft_graph|explain_graph|evidence_helper|bias_check|options|option|sensitivity_coach|team_perspectives|preflight|clarification|clarifier|compute|decision_review|verification|graph|graph_readiness|elicit_belief|utility_weight|risk_tolerance|edge_function|edge_direction|edge|narrate_conditions|explain_policy|elicit_preferences|elicit_preferences_answer|explain_tradeoff|factor_extraction|factor|schema_v2|schema_v3|isl_synthesis|ask|review|analysis_ready|goal_generation|boundary|config|context_integrity|stage2|post_enrich|auto_baseline_dedup|options_identical|unified_pipeline|turn)\.|cee\.brief_signals$|cee\.intervention_extraction$|cee\.goal_generation$|orchestrator\.(turn|intent|tool|plot|idempotency|commentary|system_event|diagnostics_preamble_stripped|xml_parse_fallback)\b|llm\.(normalization\.|repair_prompt\.|call$|json_extraction\.required$)|isl\.config\.|prompt\.(store_error|store\.(cache\.|background_refresh$|jsonb_column_degraded$)|loader|compiled|hash_mismatch|experiment|staging|activation\.|test\.|version\.|rollback\.|approval\.)|admin\.(prompt|experiment|auth|ip)\.|boundary\.|downstream\.call$|turn_executor\.|cqe\.|session\.read_degraded$|v4\.pms_fallback_used$|deterministic\.(pms_fallback_used|banned_term_detected)$|streaming\.generator_preflight_failure$|edit_graph\.(no_operations|bare_single_op_wrapped)$|v6\.dual_draft\.|v5\.(answer_shape|brief_provenance|brief_text|candidate_mutation|capability|claim_cage|claim_safety|collab|ui_directive|model_versions|decision_records|coaching|coaching_state|decision_review|decision_review_degraded|decision_context|deterministic_value_update|context_budget|context_truncation|context_pack|continuation|enrichment|edit_graph|graph_persist|handler_invocation|prompt_cache|recovery_response|recovery_chip_served|response|validator_outcome|explanation|mutation_language_guard|structural_success_claim_swapped|structural_success_claim_candidate_miss|unexpected_explanation_payload|prompt_resolved|prompt_resolution_policy|analysis_freshness|graph_cas|turn_fence|plot_response|probability_out_of_range|draft_narration|post_analysis|pending_action|pending_actions|recent_changes|state_query_guard|headline|chips|clarify_v2|egress|explicit_generate_received|draft_offer|frame_stage_no_brief_guard|fresh_analysis_followup_guard|process_meta_intake_guard|readiness_intake|typed_chip_mutation_route|typed_coaching_intent_route|typed_coaching_intent_unrouted|add_option_transaction|phase3|post_analysis_advice_gate|post_analysis_label_intercept|post_draft_coaching|proposal_continuation|routing|routing_bounded_fallback|run_analysis|turn_executor|context_readiness|no_analysis_guard|stale_rerun_guard|run_comparison_gate|proposed_change|selection|session|structural_edit_tool|summary)(\.|$))/;
 
       for (const event of allEvents) {
         expect(event).toMatch(validPrefixes);
@@ -1710,6 +1722,24 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // Track S 0.13c-1 — run_analysis intercept guard summary (diagnostic-only,
         // no Datadog metric; redacted corrected_count + node IDs).
         TelemetryEvents.V5RunAnalysisInterceptGuard,
+        // COLLAB Track A — run_analysis participation guard summary
+        // (diagnostic-only, no Datadog metric; redacted excluded/pruned counts
+        // + node IDs, never a label and never a value — the excluded node's
+        // number is exactly what the user kept OUT of the calculation).
+        //
+        // NO MAPPING YET, DELIBERATELY, and the reason is not "later": nothing
+        // can set `analysis_participation` today (the write needs a new
+        // `SystemEventKind` in the shared contract), so a dashboard series
+        // added now would be a flat zero of unknown meaning — indistinguishable
+        // from a broken emit. The mapping to add once the UI write half ships
+        // is a RATIO, not a count: honoured exclusions over honoured + refused,
+        // because a bare count of exclusions tracks how much people are USING
+        // the feature rather than whether it WORKS. The refusal reasons
+        // (`goal_node` / `option_intervention_target` / `submitted_option`)
+        // want a separate series split by reason — a rising one means the UI is
+        // offering the gesture where CEE refuses it, which is a product defect,
+        // not a usage signal, and folding it into the ratio hides it.
+        TelemetryEvents.V5RunAnalysisParticipationGuard,
         // ROADMAP 2.229 fix 4 — deterministic imperative re-run pre-route.
         // Diagnostic-only; the structured log is the operational signal (it is
         // the only way a DECLINE is visible at all).
@@ -1765,6 +1795,10 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         TelemetryEvents.V5AnswerShapeEmitted,
         // Same family — stale-sidecar drop signal; diagnostic-only.
         TelemetryEvents.V5AnswerShapeDroppedStale,
+        // Same family — collapse-floor decline; diagnostic-only. Structured
+        // logs are the operational signal (they carry the dispatch path, so a
+        // dispatch family going dark is visible as an event that STOPS).
+        TelemetryEvents.V5AnswerShapeDeclinedBelowFloor,
         // Repair-tax fix (2026-07-22) — first-pass coercion drift alarm.
         // Diagnostic-only structured logs (reason tag + drop count, no user
         // text); the operational signal is the log-based rate, no Datadog
@@ -1847,6 +1881,19 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // fence firing more often is not an improvement, since the same change
         // that raises it would raise the 500s it replaced.
         TelemetryEvents.V5DraftGoalNeverStatedAsk,
+        // ROADMAP 2.1229 (2026-09-18) — content-free disclosure of the
+        // brief + analysis-provenance write at the commit seam (correlation
+        // ids, a closed-enum status, a closed-enum skip reason). No Datadog
+        // mapping until a dashboard consumes it. The mapping to add when one
+        // does is a RATIO, not a count: `ok` over (`ok` + `not_stored` +
+        // `error`), because a bare count of `ok` rises and falls with
+        // analysis TRAFFIC rather than with the health of the write — it
+        // would look identical on a busy day with a broken writer and a
+        // quiet day with a working one. The `skipped` status belongs in a
+        // SEPARATE series split by `skip_reason`: it means the fact carried
+        // an incomplete envelope, which is a producer question, not a
+        // writer-health one, and folding the two hides whichever is smaller.
+        TelemetryEvents.V5BriefProvenanceStored,
       ];
 
       for (const event of allEvents) {
@@ -2270,6 +2317,7 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.coaching.run_delta_outcome",
         "v5.answer_shape.emitted",
         "v5.answer_shape.dropped_stale",
+        "v5.answer_shape.declined_below_floor",
         "v5.decision_review.contract_violation",
         "v5.decision_review.prose_fact_violation",
         "v5.decision_review.failed",
@@ -2375,6 +2423,8 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         // ROADMAP 3.1 — Decision Records commit-seam capture hook
         // (unconditional since #539 deleted CEE_DECISION_RECORD_CAPTURE)
         "v5.decision_records.record_captured",
+        // ROADMAP 2.1229 — brief + analysis-provenance commit-seam hook
+        "v5.brief_provenance.stored",
         // CI hygiene baseline (Tranche B) — register inherited live emit() sites
         "edit_graph.no_operations",
         "streaming.generator_preflight_failure",
@@ -2452,6 +2502,13 @@ describe("Telemetry Events (Frozen Enum - M3)", () => {
         "v5.run_analysis.imperative_pre_route",
         "v5.run_analysis.target_repair",
         "v5.run_analysis.intercept_guard",
+        // COLLAB Track A — the participation guard's summary at the analysis
+        // boundary. Deliberate frozen-registry addition per the registry
+        // discipline: purely ADDITIVE (no existing name renamed or removed, so
+        // no dashboard series ends), diagnostic-only, and listed in
+        // `debugOnlyEvents` above with the mapping to add once a dashboard can
+        // meaningfully consume it.
+        "v5.run_analysis.participation_guard",
         "v5.run_analysis.options_scaffolded",
         "v5.run_analysis.constraint_unevaluated",
         "v5.run_analysis.constraint_identity_unresolved",
