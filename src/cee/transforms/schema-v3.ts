@@ -137,6 +137,88 @@ const LABEL_BOUND_PROVENANCE_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * ⭐⭐ NODE KINDS WHOSE `observed_state` MAY BE RENDERED AS A HUMAN-READABLE
+ * `display_value` WHEN THE MODEL DID NOT AUTHOR ONE.
+ *
+ * ── WHAT THIS IS NOT ─────────────────────────────────────────────────────────
+ * This set does NOT decide whether a non-factor node may CARRY a value. It
+ * never did, and a brief that reached this lane said it did — the correction is
+ * recorded here because the false version is the more plausible one and will be
+ * re-derived otherwise.
+ *
+ * `observed_state` is built at `:364` from `isFactorData(node.data) &&
+ * node.data.value !== undefined`, and `isFactorData` is `!('interventions' in
+ * data)` (`schema-v2.ts:85`) — it reads the DATA SHAPE, never `kind`. The
+ * LLM-authored `display_value` passthrough (`:633`) is gated the same way. So a
+ * risk or an outcome carrying `data.value` ALREADY reaches the wire with its
+ * number, its `observed_state.source`, its `extractionType` and its
+ * `provenance`. Measured by execution, not read
+ * (`__tests__/ai-value-non-factor-kinds.test.ts`, three kinds, green at the
+ * pristine tip before this change existed).
+ *
+ * The one genuinely kind-gated limb was the SYNTHESIS FALLBACK below, and its
+ * effect was narrower and stranger than "the value is dropped": the number
+ * arrived and the sentence a human reads did not. A risk shipped
+ * `observed_state.value: 0.3` with no `display_value` at all — a quantity the
+ * canvas holds and cannot render as words.
+ *
+ * ── WHY IT WAS SCOPED TO `factor`: NO DOWNSTREAM REASON WAS EVER STATED ──────
+ * The gate entered at `8cc0f15c` ("synthesise display_value for all factor
+ * categories and improve unit fallback", 11 Apr 2026), whose own message frames
+ * the work as widening from `external` factors to *all factor CATEGORIES*
+ * (external / observable / controllable). `kind === "factor"` was the ambient
+ * scope of a change about categories, not a ruling about kinds. No comment, no
+ * commit and no consumer states a reason a non-factor `display_value` would
+ * break anything — and the two node-level consumers are scoped by lookup rather
+ * than by kind (`analysis-ready.ts:467,587` resolve a FACTOR node by id;
+ * `label-value-divergence.ts:371` is a divergence GUARD, which widening feeds
+ * more nodes, not fewer).
+ *
+ * ── WHY `goal` IS EXCLUDED, DELIBERATELY (trap 21: one field, two questions) ──
+ * A goal's `observed_state` is NOT this node's own measured quantity. It is
+ * built by the goal limb at `:315` from `goal_baseline`, and that limb's own
+ * doctrine says `value` and `baseline` carry the same number because they are
+ * "the goal metric's current observed level" serving a change-from-baseline
+ * frame. A goal also already owns a separate target/threshold display surface
+ * (`goal_threshold_raw`/`goal_threshold_unit`). Synthesising a bare
+ * `display_value` there would put a BASELINE string on the one node kind whose
+ * user-facing number is a TARGET, and the two are indistinguishable once
+ * rendered. That is the "a value that reaches the screen misread is worse than
+ * one that never arrives" harm, so the goal limb is left exactly as it was and
+ * is rowed rather than widened here.
+ *
+ * `option` is excluded because OptionData carries `interventions`, so
+ * `isFactorData` is false and no `observed_state` is built from it — the option
+ * value surface is the intervention's own `display_value` (`cee-v3.ts:559`).
+ *
+ * ⚠ THIS SET IS A HAND-WRITTEN LIST, WHICH IS TRAP 12. It is therefore pinned
+ * by a completeness guard that asserts every member of the canonical
+ * `NodeKindV3` enum is EXPLICITLY included or excluded here — so adding a kind
+ * to the contract REDs this file rather than silently defaulting it to "no
+ * display value". The exclusions are named so the guard has something to check.
+ */
+const DISPLAY_VALUE_SYNTHESIS_KINDS: ReadonlySet<string> = new Set([
+  "factor",
+  "risk",
+  "outcome",
+  "decision",
+  "action",
+]);
+
+/**
+ * Kinds deliberately withheld from `DISPLAY_VALUE_SYNTHESIS_KINDS`, each for a
+ * reason stated in that constant's doc. Exported for the completeness guard,
+ * which asserts the two sets partition `NodeKindV3` exactly.
+ */
+export const DISPLAY_VALUE_SYNTHESIS_EXCLUDED_KINDS: ReadonlySet<string> = new Set([
+  "goal",
+  "option",
+]);
+
+/** Exported for the completeness guard only. */
+export const DISPLAY_VALUE_SYNTHESIS_INCLUDED_KINDS = DISPLAY_VALUE_SYNTHESIS_KINDS;
+
+/**
  * Resolve an option's baseline flag from its two accepted V1 carriers.
  *
  * The terminal response and the staged graph both consume this function. The
@@ -635,13 +717,33 @@ export function transformNodeToV3(
     v3Node.display_value = dataDisplayValue;
   }
 
-  // Synthesise display_value for factors that lack an LLM-provided value.
+  // Synthesise display_value for quantified nodes that lack an LLM-provided one.
   //
-  // Path A (external factors): use prior range via synthesiseRangeDisplayValue.
-  // Path B (controllable/observable factors): use observed_state fields via
-  //   synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
-  if (v3Node.display_value === undefined && v3Node.kind === "factor") {
-    if ((node as any).category === "external" && v3Node.prior) {
+  // Path A (external FACTORS only): use prior range via synthesiseRangeDisplayValue.
+  //   Its `kind === "factor"` test is kept EXPLICIT rather than inferred from
+  //   `category`: `V1Node.category` is declared without a kind restriction, so
+  //   "only factors are external" is a convention of the producer, not a
+  //   guarantee of the type. Widening Path A would push non-factor nodes through
+  //   the external-factor scale machinery (`declared_scale` is stamped only on
+  //   factors by `repair/unreachable-factors.ts`), which nothing here tests and
+  //   this row does not need. Unchanged behaviour, stated rather than assumed.
+  // Path B (any kind in DISPLAY_VALUE_SYNTHESIS_KINDS): use observed_state fields
+  //   via synthesiseDisplayValue. E.g. value=6, unit="developers" → "6 developers".
+  //   Widened from `kind === "factor"` — see DISPLAY_VALUE_SYNTHESIS_KINDS for
+  //   what the old gate did and did NOT do, and why `goal` stays out.
+  //
+  // ⛔ AUTHORSHIP IS NOT TOUCHED HERE, AND THAT IS LOAD-BEARING. This block only
+  // renders a string from numbers `observed_state` already carries. The fields
+  // that say WHOSE value it is — `observed_state.source`
+  // (`cee_inference` | `brief_extraction`), `observed_state.extractionType`, and
+  // the node's `provenance` — are computed below at `:761+` from the SAME
+  // `extractionType` for every kind, and the 2.972 withdrawal that demotes an
+  // unearned `from_brief` runs after this and reads `observed_state`, not
+  // `display_value`. So a widened value arrives carrying the same authorship
+  // stamp a factor's would, and an AI-proposed number on a risk reaches the user
+  // as the AI's (`provenance: "ai_inferred"`), never as their own.
+  if (v3Node.display_value === undefined && DISPLAY_VALUE_SYNTHESIS_KINDS.has(v3Node.kind)) {
+    if (v3Node.kind === "factor" && (node as any).category === "external" && v3Node.prior) {
       // Path A: external factor — synthesise from prior range
       const priorUnit = anyNode.unit ?? (isFactorData(node.data) ? (node.data as any).unit : undefined);
       // ⭐ THE SCALE IS DECLARED BY A PRODUCER, NOT SNIFFED BY THIS CONSUMER.
