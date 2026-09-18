@@ -40,6 +40,8 @@ import {
   READINESS_PRODUCING_EXIT_PATHS,
   MIN_NODES,
   MIN_OPTIONS,
+  carriesCompletedAnalysis,
+  statedAnalysisRefusal,
 } from "../../../scripts/ci/staging-journey-smoke.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -1436,5 +1438,66 @@ describe("the .d.mts type mirror cannot silently fall behind the .mjs", () => {
     const exported = mjsExports();
     const phantom = dtsDeclares().filter((n) => !exported.includes(n));
     expect(phantom, `declared in ${DTS} but NOT exported from ${MJS}: ${phantom.join(", ")}`).toEqual([]);
+  });
+});
+
+/**
+ * ⭐⭐ TURN 3 — THE ANALYSE LEG. Added 18 Sep 2026.
+ *
+ * Until this turn existed the gate drove TWO turns and NEITHER asked for an
+ * analysis. Every run therefore reported no successful run-analysis fact, and
+ * that was read estate-wide as the analyse leg being broken — when nobody had
+ * ever asked it to run. **An absent request and a failed response produce the
+ * same silence in the log**, which is why this went unnoticed for so long.
+ */
+describe("staging journey smoke — the analyse leg", () => {
+  const ANALYSIS_BLOCK = { type: "analysis_result", summary: "…" };
+
+  it("the witness is the RESULT — readiness must NOT satisfy it", () => {
+    // ⛔ THE VACUITY CASE, and the reason this helper exists rather than reusing
+    // `founder-fixture-harness`'s `carriesAnalysisResult`. That one is a
+    // DISJUNCTION whose second limb is `analysis_ready.status === 'ready' &&
+    // options.length > 0` — which TURN 2 OF THIS JOURNEY ALREADY SATISFIES.
+    // Reusing it would give a turn-3 assertion that passes with no analysis
+    // having happened: a guard that cannot fail.
+    const readyButUnanalysed = {
+      analysis_ready: { status: "ready", options: [{ option_id: "a" }, { option_id: "b" }] },
+      blocks: [{ type: "coaching" }],
+    };
+    expect(carriesCompletedAnalysis(readyButUnanalysed)).toBe(false);
+    // POSITIVE CONTROL on the same probe — without it the assertion above would
+    // pass identically if the helper simply always returned false.
+    expect(carriesCompletedAnalysis({ blocks: [ANALYSIS_BLOCK] })).toBe(true);
+  });
+
+  it("reads the wire discriminant `type`, never `block_type`", () => {
+    // `payload-scan.ts`'s header records that `block_type` reads zero on every
+    // real turn. A helper keyed on it would report ABSENT forever.
+    expect(carriesCompletedAnalysis({ blocks: [{ block_type: "analysis_result" }] })).toBe(false);
+    expect(carriesCompletedAnalysis({ blocks: [ANALYSIS_BLOCK] })).toBe(true);
+  });
+
+  it("SILENCE is the failure, a stated refusal is not", () => {
+    // ⭐ This is what stops turn 3 becoming a broken alarm (trap 7). A model
+    // drafted in two turns may legitimately not be analysable; a gate that REDs
+    // on a truthful refusal is a red everyone learns to ignore — which is how
+    // the two earlier smoke workflows died.
+    expect(statedAnalysisRefusal({ analysis_ready: { status: "blocked", issues: [{ code: "X" }] } }))
+      .toContain("analysis_ready.status=blocked");
+    expect(statedAnalysisRefusal({ blocks: [{ type: "error", code: "UPSTREAM" }] })).toContain("UPSTREAM");
+    // …and the silent case, which MUST read null so the CLI fails.
+    expect(statedAnalysisRefusal({ analysis_ready: { status: "ready", options: [] }, blocks: [] })).toBeNull();
+    expect(statedAnalysisRefusal({})).toBeNull();
+  });
+
+  it("CALL-SITE PIN: the CLI actually drives turn 3 and declares it", () => {
+    // Same technique and same reason as the turn-2 call-site pin above: the
+    // helpers could be perfect and nothing would call them.
+    const src = readFileSync(resolve(REPO_ROOT, "scripts/ci/staging-journey-smoke.mjs"), "utf8");
+    expect(src).toContain('message: "Run analysis."');
+    expect(src).toContain('{ label: "turn 3", body: t3.body, requestedAnalysis: true }');
+    expect(src).toContain("carriesCompletedAnalysis(t3.body)");
+    // …and the vacuous disjunction must never be the CLI's witness.
+    expect(src).not.toContain("carriesAnalysisResult(");
   });
 });

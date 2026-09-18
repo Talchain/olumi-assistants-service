@@ -1117,17 +1117,114 @@ async function main() {
   // inferred from the reply under test. If a future turn is added that DOES
   // request one, it declares `requestedAnalysis: true` and is skipped; there is
   // no heuristic to get wrong.
+  log(`\n### Turn 3 — analyse (the leg no run has ever exercised)`);
+  // ⭐⭐ WHY THIS TURN EXISTS. Until now this gate drove TWO turns and neither
+  // asked for an analysis — the comment below used to say so and then stop.
+  // The consequence was invisible and estate-wide: every run reported no
+  // successful run-analysis fact, and that was read as the analyse leg being
+  // broken when in truth NOBODY HAD EVER ASKED IT TO RUN. An absent request and
+  // a failed response produce the same silence in the log.
+  //
+  // `"Run analysis."` is the founder fixture's own turn-2 message, verbatim
+  // (`tools/founder-fixture-harness/script.ts`) — the same words a real user's
+  // first analyse click sends, rather than a phrasing invented here.
+  const t3 = await postTurn(
+    base,
+    origin,
+    {
+      kind: "message",
+      turn_id: uuid(),
+      scenario_id: scenarioId,
+      stage: "frame",
+      turn_class: "propose",
+      source: "composer",
+      message: "Run analysis.",
+    },
+    turnTimeout,
+  );
+  const d3 = extractDiagnostics(t3.body);
+  log(
+    `  HTTP ${t3.status} in ${(t3.ms / 1000).toFixed(1)}s | exit_path=${d3.exit_path} | ` +
+      `build_sha=${d3.build_sha} | ${graphLine(t3.body)}`,
+  );
+  log(`    readiness: ${readinessDiagnosis(t3.body)}`);
+  const analysed = carriesCompletedAnalysis(t3.body);
+  const refusal = statedAnalysisRefusal(t3.body);
+  log(`    analysis_result block: ${analysed ? "PRESENT" : "absent"}`);
+  log(`    stated refusal: ${refusal ?? "none"}`);
+  failures.push(...assertProxyDelivered(t3.body, "turn 3"));
+  if (t3.status !== 200) failures.push(`turn 3: HTTP ${t3.status} (expected 200)`);
+  // SILENCE IS THE FAILURE, not refusal. See `statedAnalysisRefusal`.
+  if (!analysed && refusal === null) {
+    failures.push(
+      "turn 3: asked for an analysis and the product returned NEITHER a completed " +
+        "analysis_result block NOR a stated reason for declining. A turn that " +
+        "answers an explicit request with silence is the defect this turn was added to catch.",
+    );
+  }
+
+  // Turn 3 DECLARES `requestedAnalysis: true` — the extension contract this
+  // check's own docstring specified, so the unrequested-refusal arm stands down
+  // for it rather than reading a legitimate analysis as an unrequested one.
   failures.push(
     ...assertNoUnrequestedAnalysisRefusal([
       { label: "turn 1", body: t1.body, requestedAnalysis: false },
       { label: "turn 2", body: t2.body, requestedAnalysis: false },
+      { label: "turn 3", body: t3.body, requestedAnalysis: true },
     ]),
   );
 
   report(failures, [
     { label: "turn 1", d: d1, body: t1.body },
     { label: "turn 2", d: d2, body: t2.body },
+    { label: "turn 3", d: d3, body: t3.body },
   ]);
+}
+
+/**
+ * ⭐⭐ TURN 3's WITNESS — "an analysis RAN and reached the user", and NOTHING WEAKER.
+ *
+ * ⛔ DELIBERATELY NARROWER THAN `tools/founder-fixture-harness/admission.ts`'s
+ * `carriesAnalysisResult`, AND THE DIFFERENCE IS THE WHOLE POINT. That helper
+ * is a DISJUNCTION: an `analysis_result` block OR
+ * `analysis_ready.status === 'ready' && options.length > 0`. Its second limb is
+ * READINESS — "an analysis COULD run" — and **turn 2 of this very journey
+ * already satisfies it** (the draft returns `analysis_ready` ready, with
+ * options). Reusing it here would give a turn-3 assertion that passes without
+ * an analysis ever having happened: a guard that cannot fail, which is the
+ * exact theatre this gate exists to catch.
+ *
+ * Two questions under one name (CLAUDE.md trap 21). This reads the completed
+ * RESULT only.
+ *
+ * ⚠ `type`, never `block_type` — the wire discriminant is `type`, and
+ * `tools/founder-fixture-harness/payload-scan.ts`'s header records that
+ * `block_type` reads zero on every real turn.
+ */
+export function carriesCompletedAnalysis(body) {
+  const blocks = Array.isArray(body?.blocks) ? body.blocks : [];
+  return blocks.some((b) => b && typeof b === "object" && b.type === "analysis_result");
+}
+
+/**
+ * Did the product STATE a reason for not analysing?
+ *
+ * ⭐ THIS IS WHAT STOPS THE NEW TURN BECOMING A BROKEN ALARM (trap 7). A model
+ * drafted in two turns may legitimately not be analysable, and a gate that REDs
+ * on a truthful refusal is a red everyone learns to ignore — which is how the
+ * two earlier smoke workflows died. So the failure condition is SILENCE, not
+ * refusal: the product must return either a result or a stated reason.
+ */
+export function statedAnalysisRefusal(body) {
+  const a = body?.analysis_ready;
+  if (a && typeof a === "object" && a.status && a.status !== "ready") {
+    const n = Array.isArray(a.issues) ? a.issues.length : 0;
+    return `analysis_ready.status=${a.status} with ${n} stated issue(s)`;
+  }
+  const blocks = Array.isArray(body?.blocks) ? body.blocks : [];
+  const err = blocks.find((b) => b && typeof b === "object" && b.type === "error");
+  if (err) return `error block: ${String(err.code ?? err.message ?? "unspecified")}`;
+  return null;
 }
 
 function report(failures, turns) {
