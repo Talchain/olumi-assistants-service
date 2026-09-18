@@ -347,22 +347,37 @@ function createGraphCasRpcMode(
  *     always has an app mode), i.e. byte-identical to the old caller gate.
  *   - `assertGraphCasCapabilityValid` — the BOOT-REJECT (called from
  *     `validateConfig()` at startup, never on lazy config access): rejects the
- *     foot-gun combo `RPC=enforce` + `MODE=off`. Staging runs `MODE=observe` +
- *     `RPC=enforce`, which PASSES.
+ *     foot-gun combo `RPC=enforce` + `MODE=off`. Any VALID combination passes;
+ *     which one staging actually runs is not stated here on purpose — see the
+ *     `/healthz` note below.
  *
- * ⚠ THAT LAST SENTENCE IS PROSE, NOT EVIDENCE, AND IT IS CONTRADICTED. The
- *   header of `routes/assist.v1.scenario-graph-register.ts` describes "the
- *   deployed `CEE_V5_GRAPH_CAS_RPC=shadow` posture". One of the two is stale
- *   and nothing here can tell you which: the deployed posture is set in the
- *   Render dashboard, is not derivable from this file, and is currently
- *   UNOBSERVABLE FROM ANY CLIENT by construction. Both sentences are kept, each
- *   pointing at the other, so the next reader does not pick one at random —
- *   which is what a lone confident sentence invites. Do not derive posture from
- *   either (CLAUDE.md trap 18: env posture never comes from prose or YAML);
- *   derive it from the deployment, and treat any behaviour that depends on it
- *   as needing to be correct under BOTH. Exposing the resolved capability on
- *   `/healthz` is rowed separately — a protection nobody outside can witness is
- *   one nobody can rely on.
+ * ⚠ THAT LAST SENTENCE IS PROSE, NOT EVIDENCE — and for a month it was
+ *   CONTRADICTED by another sentence in this same tree. The header of
+ *   `routes/assist.v1.scenario-graph-register.ts` described "the deployed
+ *   `CEE_V5_GRAPH_CAS_RPC=shadow` posture". One was stale, nothing here could
+ *   say which, and both were deliberately kept pointing at each other so the
+ *   next reader would not pick one at random.
+ *
+ * ⭐ RESOLVED 18 Sep 2026 — NOT BY PICKING ONE, BUT BY MAKING THE DEPLOYMENT
+ *   ANSWER FOR ITSELF. `/healthz` now publishes the RESOLVED capability, so
+ *   the question is one command and never a claim in a file:
+ *
+ *       curl -s https://cee-staging.onrender.com/healthz | jq .graph_cas
+ *       # { "app_mode": …, "rpc_mode": …, "enforcing": …,
+ *       #   "requires_expected_hash": … }
+ *
+ * ⛔ SO DO NOT ADD A SENTENCE HERE STATING THE POSTURE. Writing one is what
+ *   created the contradiction, and a third prose claim would recreate it.
+ *   Neither old sentence was replaced by a corrected one — both were replaced
+ *   by a COMMAND. (CLAUDE.md trap 12: derive, never mirror. Trap 18: env
+ *   posture never comes from prose or YAML — and this file was the proof.)
+ *
+ *   The cost of not having it was real and was paid by a different lane: on
+ *   18 Sep the Canvas lane held a built UI PR because it could not learn
+ *   whether `edge_strength_edit` would be refused on the deployed service.
+ *   Shipping blind would have given users a control that silently never
+ *   reached the model. A protection nobody outside can witness is one nobody
+ *   can rely on.
  */
 export interface GraphCasCapability {
   readonly appMode: "off" | "observe" | "enforce";

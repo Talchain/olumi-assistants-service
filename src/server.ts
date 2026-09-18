@@ -904,6 +904,43 @@ app.get("/healthz", async (_request, reply) => {
     prompts_ready,
     critical_prompts_pms,
     prompt_environment: promptEnvironment.environment,
+    // ⭐ THE RESOLVED GRAPH-CAS CAPABILITY, PUBLISHED BECAUSE A PROTECTION
+    // NOBODY OUTSIDE CAN WITNESS IS ONE NOBODY CAN RELY ON.
+    //
+    // `src/config/index.ts` rowed this and stated the problem exactly: the
+    // deployed posture is set in the Render dashboard, is not derivable from
+    // any file, and was "UNOBSERVABLE FROM ANY CLIENT by construction". Two
+    // prose claims in the tree contradict each other about it — one says
+    // staging runs MODE=observe + RPC=enforce, the header of
+    // `routes/assist.v1.scenario-graph-register.ts` says RPC=shadow — and
+    // NOTHING IN THE REPOSITORY COULD SETTLE WHICH. Both were deliberately
+    // left in place pointing at each other so no reader picked one at random.
+    //
+    // A real cost, paid on 18 Sep 2026: the Canvas lane held a built UI PR
+    // because it could not learn whether `edge_strength_edit` would be
+    // refused with `reader_only_refusal` on the deployed service. Shipping it
+    // blind would have given users a control that silently never reached the
+    // model. That question is now one curl, for every workstream, for good.
+    //
+    // ⚠ PUBLISHED AS THE RESOLVED CAPABILITY, NOT THE RAW ENV VARS. The two
+    // switches are coupled — RPC=enforce with MODE=off is boot-rejected as
+    // enforcement theatre (no caller derives an expected hash, so the RPC
+    // receives a NULL expected and the update falls through to
+    // unconditional). Publishing the resolved object means a reader cannot
+    // reconstruct that invalid combination from what they see here, and
+    // `enforcing` answers the only question a caller actually has.
+    //
+    // Non-secret by construction: an enum posture, never a key, a host or a
+    // magnitude. It sits beside `build`, `version` and `prompt_environment`,
+    // which are published on the same public probe for the same reason.
+    graph_cas: {
+      app_mode: config.features.graphCas.appMode,
+      rpc_mode: config.features.graphCas.rpcMode,
+      // The one field a caller needs: is an atomic compare-and-set actually
+      // enforced on a graph write, or is it observing/shadowing?
+      enforcing: config.features.graphCas.rpcEnforce,
+      requires_expected_hash: config.features.graphCas.requiresExpectedHash,
+    },
   };
 });
 

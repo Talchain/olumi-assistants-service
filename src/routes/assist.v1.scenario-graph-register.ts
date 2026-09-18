@@ -102,14 +102,22 @@
  *   it becomes a real guard, and this route is written so that promotion needs
  *   no change here.
  *
- *   ⚠ THE POSTURE NAMED HERE IS PROSE AND IS CONTRADICTED. This sentence used
- *   to assert "the deployed `CEE_V5_GRAPH_CAS_RPC=shadow` posture"; the
- *   `resolveGraphCasCapability` doc in `config/index.ts` asserts staging runs
- *   `MODE=observe` + `RPC=enforce`. One is stale and neither is evidence — the
- *   deployed value lives in the Render dashboard and is unobservable from any
- *   client today. The claim is left as a conditional above rather than a
- *   statement of fact, and both sites now point at each other. Behaviour here
- *   must be correct under BOTH postures.
+ *   ⭐ THE POSTURE IS NOW OBSERVABLE — DERIVE IT, DO NOT READ IT HERE.
+ *   This sentence used to assert "the deployed `CEE_V5_GRAPH_CAS_RPC=shadow`
+ *   posture" while `resolveGraphCasCapability` in `config/index.ts` asserted
+ *   staging runs `MODE=observe` + `RPC=enforce`. One was stale, neither was
+ *   evidence, and the deployed value — living only in the Render dashboard —
+ *   was unobservable from any client. Both sites were left pointing at each
+ *   other so no reader picked one at random.
+ *
+ *   Since 18 Sep 2026 `/healthz` publishes the resolved capability:
+ *
+ *       curl -s https://cee-staging.onrender.com/healthz | jq .graph_cas
+ *
+ *   ⛔ Do not restore a posture claim to this header. Behaviour here must
+ *   still be correct under BOTH postures — that requirement never depended on
+ *   knowing which one is deployed, which is exactly why the two prose claims
+ *   were able to disagree for a month without anything failing.
  *
  * ── WHAT THIS ROUTE DOES NOT DO ────────────────────────────────────────────
  * · It does not run an LLM, compose a response, or touch the referee.
