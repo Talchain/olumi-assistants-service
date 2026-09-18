@@ -547,18 +547,38 @@ export const DECISIONS: readonly Decision[] = [
       "Two names for optional node prose, one on each half of the same wire.",
   },
   // ── orphans ───────────────────────────────────────────────────────────────
-  {
-    id: "orphan:analysis_participation",
-    status: "ACCEPTED",
-    decision:
-      "PASSTHROUGH BY DESIGN, and the zero is the evidence that it is. CEE " +
-      "declares `analysis_participation` for one reason: cee.NodeV3 strips " +
-      "undeclared keys, so without the declaration the UI's value would be " +
-      "deleted in transit. No CEE code writes or reads it — correct, and pinned " +
-      "by schemas/__tests__/analysis-participation-survives-parse.test.ts. " +
-      "Recorded so the NEXT zero has to be argued rather than pattern-matched " +
-      "onto this one.",
-  },
+  //
+  // `orphan:analysis_participation` WAS RECORDED HERE AND IS NOW DELETED,
+  // BECAUSE ITS FINDING NO LONGER REPRODUCES. 18 Sep 2026.
+  //
+  // The record read: "PASSTHROUGH BY DESIGN... No CEE code writes or reads it
+  // — correct, and pinned by analysis-participation-survives-parse.test.ts."
+  // That was true when written and stopped being true when #1588 landed
+  // `run-analysis-participation-guard.ts`, which READS
+  // `node.analysis_participation` and withholds a `'retained_excluded'` node
+  // and its incident edges from the graph CEE sends PLoT. The field has a
+  // consumer, so it is not an orphan, so the finding is gone.
+  //
+  // ⭐ THE GUARD CAUGHT THIS, NOT A HUMAN, AND IT CAUGHT IT AGAINST THE
+  // ORCHESTRATOR WHO MERGED #1588. It failed the very next PR to run with
+  // "1 recorded decision(s) no longer reproduce — delete them", which is
+  // exactly the behaviour a recorded decision needs: a justification kept
+  // after the thing it justified has gone is the false label this estate pays
+  // for most often (CLAUDE.md trap 14 — an honest label overwritten by a
+  // stale one, here by simply outliving its subject).
+  //
+  // ⛔ DELETED RATHER THAN REWRITTEN, DELIBERATELY. The tempting move is to
+  // edit the sentence to say "now has one reader" and keep the entry — but a
+  // decision records an adjudicated FINDING, and there is no finding left to
+  // adjudicate. Keeping an entry whose finding is absent is how this list
+  // becomes a hand-maintained mirror of a derivation (trap 12), which is the
+  // thing the derivation replaced. If `analysis_participation` ever loses its
+  // consumer again, the detector will raise a fresh orphan and the next reader
+  // will have to argue it on its own evidence rather than inherit this one —
+  // which is precisely what the deleted record said it wanted.
+  //
+  // The parse-survival test it cited is unaffected and still pins the strip
+  // behaviour that made the declaration necessary in the first place.
 ];
 
 // ============================================================================
