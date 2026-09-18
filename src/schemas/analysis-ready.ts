@@ -138,6 +138,18 @@ export type OptionForAnalysisT = z.infer<typeof OptionForAnalysis>;
  * Identifies why an option-factor pair can't produce an intervention magnitude.
  */
 export const AnalysisBlockerType = z.enum(["missing_value", "ambiguous_value", "missing_connection", "constraint_dropped"]);
+/**
+ * The published blocker vocabulary as a TYPE.
+ *
+ * Exported so consumers can key an EXHAUSTIVE map off it instead of restating
+ * the members. `analysis-ready-helper.ts` — the estate's single named readiness
+ * authority — held a four-case `switch` over these values whose `default`
+ * returned `null`, i.e. a hand-maintained copy of this enum whose drift silently
+ * DROPPED blockers on three live surfaces. A `satisfies Record<AnalysisBlockerTypeT, …>`
+ * turns that drift into a compile error, so adding a member here now REDs the
+ * mapper until it is handled.
+ */
+export type AnalysisBlockerTypeT = z.infer<typeof AnalysisBlockerType>;
 
 /**
  * Suggested action to resolve a blocker.
