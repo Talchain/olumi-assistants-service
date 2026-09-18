@@ -1934,6 +1934,18 @@ export const TelemetryEvents = {
   //   - prior_facts_count / run_analysis_facts_count: number | null — STRUCTURAL
   //     counts. They separate "no facts in scope" from "facts, but not enough
   //     run_analysis ones" without naming a single one of them.
+  //   - wire_reason_carried: boolean | null — did the USER-FACING half ship?
+  //     `null` on every exit that puts no reason on the wire BY DESIGN (the
+  //     `emitted` case, and the caller's own three skips — see
+  //     `attachRunDeltaAbsenceReason` for why those stay operator-only).
+  //     `true`/`false` only on `refused`. ⚠ `false` IS THE ONE TO ALERT ON: the
+  //     reason exists and a user could have been told it, but the exit carried
+  //     no `analysis_ready` carrier to put it in. The carrier is CONDITIONAL
+  //     because the strict boundary leaves no declared top-level home, so a
+  //     conditional channel that reported nothing when it missed would be a
+  //     new silent-loss seam of exactly the shape this event was built to end.
+  //     A non-zero rate here is a finding about the CARRIER, not about the
+  //     producer — the refusal itself was correct.
   //
   // ⛔ REDACTION: reason code and counts ONLY. No label, quote or id — entity ids
   // in this estate are slug renderings of the user's own labels
