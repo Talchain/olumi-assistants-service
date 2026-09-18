@@ -1356,6 +1356,26 @@ export function buildUserMessage(contextPack: ContextPack, message: string): str
   if (contextPack.factor_values !== undefined) {
     parts.push('', FACTOR_VALUES_INSTRUCTION);
   }
+  // STANDING OBJECTIONS — CODE-OWNED, appended by the SAME condition that puts
+  // `stated_objections` on the pack. Absent key → no section → no instruction →
+  // byte-identity with pre-change prompts for every scenario in which the user
+  // has not objected to anything.
+  //
+  // ⚠ PLACED AFTER the contiguous GRAPH_CONTEXT + DISPLAY_GRAPH +
+  // RECENT_CHANGES span on purpose — `route-with-tool-use.focus.spec.ts`
+  // locates that span as one marker and a block inserted inside it makes its
+  // historical golden unsubtractable. Same reason MARGIN_MEANING_INSTRUCTION
+  // sits where it does.
+  //
+  // ⚠ THIS BLOCK IS HALF THE CHANGE AND THE PACK FIELD IS THE OTHER HALF, the
+  // failure `GOAL_TARGET_INSTRUCTION` and `FACTOR_VALUES_INSTRUCTION` both
+  // name: the served V5 system prompt is an operator-managed PMS row, so a
+  // field added to the pack with no code-owned sanction is a field the model
+  // has never been told how to read — which is exactly how `model_health`
+  // governed nothing for months.
+  if (contextPack.stated_objections !== undefined) {
+    parts.push('', STATED_OBJECTIONS_INSTRUCTION);
+  }
   // RUN-OVER-RUN CONSEQUENCE — ALWAYS RENDERED, like GRAPH_CONTEXT_INSTRUCTION
   // and RECENT_CHANGES_INSTRUCTION above and for the identical reason: this
   // block's load-bearing rule governs the turn where `run_delta` is ABSENT, and
@@ -1556,6 +1576,96 @@ function isWholeModelSingleFactorBuildQuestion(message: string): boolean {
  * Paul's standing rule is why the second clause exists: always leave the user a
  * useful next route, never an honest dead end.
  */
+/**
+ * ⭐⭐ STANDING OBJECTIONS — the user's own stated disagreement, and the only
+ * instruction block in this file whose purpose is to make the model do LESS
+ * answering, not more.
+ *
+ * WHAT IT GOVERNS. `stated_objections` carries a human's reason, verbatim, for
+ * not accepting a finding this product produced. Before schemas 0.55.0 those
+ * words reached `localStorage` and stopped; before this block they reached a
+ * fact row and stopped. The risk now is not that they are lost — it is that
+ * the model does the WRONG thing with them, and there are two wrong things,
+ * pulling in opposite directions:
+ *
+ *   1. CAPITULATION — treat the objection as a correction, quietly drop the
+ *      finding, and agree. That destroys the disagreement instead of using it,
+ *      and it tells the user their own assertion has been accepted as evidence
+ *      when nothing was measured. It is also a false claim about state: a
+ *      dissent writes NO graph state and moves no `graph_hash`
+ *      (`system-events/dispatch.ts` classifies it `'fact_and_commit'`, never
+ *      `'mutating'`), so a model that speaks as though the model changed is
+ *      describing a change that did not happen.
+ *   2. RE-ASSERTION — repeat the finding unchanged, as though the objection
+ *      had not been made. That is the behaviour this whole seam exists to end.
+ *
+ * ⭐ THE PRODUCT'S POSITION, AND WHY IT IS NEITHER: the humans are the authors
+ * and the decision-makers, and a disagreement between a person and a model is
+ * the most useful thing on the table — it is the point at which the reasoning
+ * can actually be improved. So the licensed move is to make the disagreement
+ * EXPLICIT AND TESTABLE: name what the finding rests on, name what would have
+ * to be true for the user's objection to hold, and hand the judgement back.
+ * That is a reasoning-enhancement act, not an answering act.
+ *
+ * ⚠ AND IT IS A STATED POSITION, NEVER EVIDENCE ABOUT THE WORLD. "The user
+ * says the supplier contract is fixed" is a fact about what the user believes.
+ * Promoting it to "the supplier contract is fixed" would fabricate a
+ * measurement out of an assertion — the same class of error as naming a leader
+ * the verdict withheld.
+ */
+export const STATED_OBJECTIONS_INSTRUCTION = [
+  '## Stated objections (the user\u2019s own words \u2014 authoritative about them, not about the world)',
+  'The `stated_objections` block above lists findings this user has told us they do not accept, each with the reason they typed. These are the user\u2019s words, recorded verbatim. Treat them as the current, standing position of the person you are talking to.',
+  '- Do NOT quietly drop, soften or reverse a finding because it has been objected to. An objection is a claim, not a measurement, and nothing has been recomputed. Agreeing on the strength of it would hand the user back their own assertion dressed as a result.',
+  '- Do NOT repeat the objected-to finding as though the objection had not been made. If the objection is relevant to what the user just asked, acknowledge it in their terms before you go on.',
+  '- An objection changes NOTHING in the model. No value moved, no link changed, no analysis re-ran. Never say or imply that the model or the numbers have been updated because of one, and never treat one as an instruction to edit the model \u2014 if a change to the model would settle it, offer that as the next step and let the user decide.',
+  '- The useful move is to make the disagreement testable: say briefly what the finding rests on, and what would have to be true for the user\u2019s objection to hold instead. Where the two can be told apart by something the user knows or could check, say what that is. Where they cannot be told apart from what is on the record, say that plainly \u2014 an honest open disagreement is a better outcome than a resolved one you invented.',
+  '- The judgement is the user\u2019s. Do not rule on who is right.',
+  '- Never restate a stated objection as if it were established fact about the world, and never carry one across to a different finding or a different decision than the one it names.',
+  '- Reason only over the objections in this block. Never infer that a finding is uncontested because it is absent here \u2014 this block records what was said, not everything the user thinks.',
+  // ⛔⛔ THE CURRENCY CLAUSE. Added 18 Sep 2026 on an independent review
+  // finding, and it is the reason the sentence above ("the current, standing
+  // position") is safe to keep.
+  //
+  // Each objection carries `analysis_id` — the run it was written against.
+  // That stamp is projected into the prompt and IS NEVER COMPARED TO ANYTHING,
+  // because the model-facing pack has no referent for it:
+  // `DisplaySafeAnalysis` carries no run id and no finding ids, and
+  // `projectModelFacingContextPack` destructures `analysis_state` OUT — which
+  // is the only place `graph_hash_at_run` / `current_graph_hash` live. So the
+  // id is an opaque token, and without this clause the instruction asserted a
+  // currency the pack cannot support.
+  //
+  // The reachable harm: a user objects to a finding on run A, edits the model,
+  // re-runs to run B where that finding no longer exists — and the objection
+  // is still inside the 20-turn `prior_facts` window, so it is projected
+  // unchanged beside run B's analysis. The model then reasons from, and
+  // acknowledges, an objection to a finding the current analysis does not
+  // make. Presenting a run-A claim as the user's position on run B is a claim
+  // the user never made.
+  //
+  // ⭐ BOTH PRODUCERS ALREADY SAY THIS IN WRITING, which is why the consumer
+  // owes it: the deployed UI's `dissentStore.ts` header — "A dissent written
+  // against one analysis, shown beside a later one with no caveat, is a claim
+  // the user never made... Consumers compare it and caveat" — and schemas
+  // 0.55.0 `FindingDissentEvent.analysis_id`.
+  //
+  // ⛔ IT IS A CAVEAT, NEVER A GATE. The wire contract is explicit: "It is a
+  // RECORD STAMP, never a stale gate: CEE must not refuse a dissent because
+  // the run has since been superseded." So the fact is still projected in
+  // full and the user's words still reach the model — what changes is only
+  // that the model may not ASSERT the objection is about the current run.
+  //
+  // ⚠ THIS IS THE WEAKER OF THE TWO FIXES THE REVIEW OFFERED, DELIBERATELY.
+  // The stronger one — projecting a currency verdict beside each objection
+  // from the canonical analysis state — is the right end state and is rowed.
+  // It needs the assembler to reach analysis state that the model-facing pack
+  // deliberately excludes, which is a real design question and not a clause.
+  // This closes the false assertion now without pretending to close the
+  // comparison.
+  '- Each objection was made against ONE earlier run of the analysis, and you cannot tell from this prompt whether that run is the one shown to you now. The model may have been edited and re-analysed since. So never state or imply that an objection is about the current analysis, and never present it as the user\u2019s view of a finding in front of you unless they have said so on this turn. Their words still stand as their words — what you do not know is which run they were aimed at. Where it matters to the answer, say so plainly and let the user confirm.',
+].join('\n');
+
 export const READINESS_INSTRUCTION = [
   '## Readiness (deterministic — authoritative)',
   'The `readiness` block above is the system’s verified answer to "can this model be analysed yet?". Treat it as the source of truth and express it in plain language; do not restate its field names or contradict it.',

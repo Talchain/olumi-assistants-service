@@ -133,6 +133,8 @@ export type ContextSource =
   | 'graph_authority'
   | 'claim_safety'
   | 'recent_changes'
+  /** The user's own stated disagreements (`finding_dissent` judgement receipts). */
+  | 'stated_objections'
   | 'coaching_cache'
   | 'coaching_context'
   /** The canonical `analysis_ready` payload — status + `readiness_issues[]`. */
@@ -373,6 +375,12 @@ const COACH_CONVERSE: ContextPolicy = {
     { name: 'conversation', source: 'conversation_window', projection: 'projectConversation (8 turns with summary coverage; fetched hot window when summary absent/zero); whole-pack ceiling trim (enforceContextPackCeiling — oldest-first turn-pairs, floor CONTEXT_PACK_CEILING_MIN_RETAINED_TURNS, re-stamped window + notice, disclosed)', char_budget: T_ROUTING_CONVERSATION, enforcement: 'enforced_by_total', cut_rank: ceilingCutRank('conversation'), model_facing: true },
     { name: 'recent_changes', source: 'recent_changes', projection: 'recent-changes summary (recent-changes.ts authority)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     { name: 'recent_changes_status', source: 'recent_changes', projection: 'scenario-wide mutation-history reconciliation (complete | capped | degraded)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true, always_expected: true },
+    // The user's OWN stated disagreements. Sourced from `priorFacts`, NOT from
+    // the recent-changes read — that read filters judgement receipts out by
+    // construction. Key ABSENT when nothing was objected to (never `[]`):
+    // there is no completeness authority here, so an empty list would be an
+    // unearned "the user has objected to nothing" claim.
+    { name: 'stated_objections', source: 'stated_objections', projection: 'projectStatedObjections (newest-wins per finding, capped at STATED_OBJECTIONS_CAP; statements VERBATIM, never truncated)', char_budget: null, enforcement: 'telemetry_only', cut_rank: null, model_facing: true },
     // Knowledge-over-time (P6): the decision-records read slice, serialised among
     // the hard state (buildUserMessage keeps it in `...rest`, ABOVE the appended
     // conversation_summary → facts beat summary). ENFORCED: projectDecisionRecords

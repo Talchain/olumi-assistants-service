@@ -111,6 +111,10 @@ import {
 } from './context-pack-schema.js';
 import { projectRecentChanges, type RecentMutation } from './recent-changes.js';
 import {
+  projectStatedObjections,
+  type StatedObjection,
+} from './stated-objections.js';
+import {
   readRecentMutationHistoryFromPriorFacts,
   type RecentChangesHistoryStatus,
 } from './reconcile-recent-mutation-facts.js';
@@ -706,6 +710,19 @@ export interface ContextPack {
    * authoritative no-changes state; an empty degraded list means unknown.
    */
   readonly recent_changes_status: RecentChangesHistoryStatus;
+  /**
+   * ⭐ THE USER'S STANDING OBJECTIONS — what they have said they do not
+   * accept, and why, in their own words.
+   *
+   * ABSENT (key missing, never `[]`) when this turn's facts carry no
+   * `finding_dissent` receipt. The distinction is load-bearing for the same
+   * reason it is on `readiness`: there is no completeness authority behind
+   * this field, so an empty array would be an unearned "the user has objected
+   * to nothing" claim. Absence means UNKNOWN.
+   *
+   * See {@link projectStatedObjections} for the supersession rule and the cap.
+   */
+  readonly stated_objections?: readonly StatedObjection[];
   /**
    * Coaching state assembled from prior turns. draft_coaching is populated
    * from the draft-graph sidecar (logs/v5-draft-graph-coaching.jsonl) keyed
@@ -1867,6 +1884,14 @@ export function assembleContextPackWithSummary(
     // `__tests__/constraint-evaluability-wire.route-level.test.ts` red.
     input.notCheckableConstraintIds,
   );
+  // ⭐ STANDING OBJECTIONS — projected from `input.priorFacts`, NOT from
+  // `recentMutationFacts`. The two sources are different on purpose: the
+  // durable recent-changes read is filtered by `MUTATION_RECEIPT_FACT_TYPES`
+  // (reconcile-recent-mutation-facts.ts:297,343), which deliberately drops
+  // every judgement receipt — so reading objections from it would return a
+  // structural zero forever, and the zero would look exactly like "the user
+  // never objected". `priorFacts` is the turn window's UNFILTERED fact list.
+  const statedObjections = projectStatedObjections(input.priorFacts);
   const effectiveRecentChangesStatus: RecentChangesHistoryStatus =
     recentChangesStatus !== 'degraded' &&
     projectedRecentChanges.length !== recentMutationFacts.length
@@ -2086,6 +2111,16 @@ export function assembleContextPackWithSummary(
       : {}),
     recent_changes: projectedRecentChanges,
     recent_changes_status: effectiveRecentChangesStatus,
+    // STANDING OBJECTIONS — placed with the HARD STRUCTURED STATE, beside the
+    // change history and above the conversation summary, so the model reads a
+    // stated disagreement as part of the record rather than as conversational
+    // colour it may let the transcript overwrite.
+    //
+    // Conditional spread: the key is ABSENT when the user has objected to
+    // nothing this turn window, never `stated_objections: []`. A no-objection
+    // scenario therefore serialises byte-identically to pre-change packs and
+    // `buildUserMessage` appends no section.
+    ...(statedObjections.length > 0 ? { stated_objections: statedObjections } : {}),
     // Knowledge-over-time (P6): the decision-records read slice. Placed with the
     // hard structured state (above the rolling summary, which buildUserMessage
     // re-appends LAST) so durable prior DECISIONS beat the summary. Conditional
