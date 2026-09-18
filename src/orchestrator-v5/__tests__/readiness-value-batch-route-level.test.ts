@@ -313,6 +313,47 @@ describe('value batch chip click — one approval, one commit', () => {
 });
 
 describe('value batch chip click — the discrimination', () => {
+  /**
+   * ⭐⭐ THE MUTANT THAT SURVIVED, AND WHY THE OBVIOUS TEST COULD NOT SEE IT.
+   *
+   * Removing the `kind !== 'not_value_batch'` guard left the readiness-repair
+   * case below GREEN — because the repair check runs FIRST and returns before
+   * the mutated line is ever reached. The sibling test pins ORDERING, not the
+   * guard: it was passing for a reason that had nothing to do with what it
+   * claimed to prove (trap 19 — bound to an object that never reaches the
+   * predicate).
+   *
+   * What reaches the guard with `not_value_batch` is a pending that is neither:
+   * a foreign handler id, which must fall through to the GENERIC synthesis. The
+   * two paths say different things, so the response text discriminates them.
+   */
+  it('⭐ a FOREIGN handler id is not captured: it reaches the generic synthesis, not the batch path', async () => {
+    const action = BATCH_PENDING.action;
+    if (action.kind !== 'apply_proposed_change') throw new Error('fixture');
+    pendingActionsForRead = [{
+      ...BATCH_PENDING,
+      action: {
+        ...action,
+        inline_patch: {
+          ...(action.inline_patch as Dict),
+          handler_id: 'some_unrelated_handler_v1',
+        },
+      },
+    }];
+    const result = await runTurnExecutor(payload(), 'req-value-batch-foreign', {
+      routingAdapter: throwingRoutingAdapter(),
+    });
+    const text = result.response.assistant_text;
+    // NEGATIVE: the batch path's own decline copy must NOT appear. This is the
+    // assertion the surviving mutant flips.
+    expect(text).not.toMatch(/estimated values/i);
+    // POSITIVE, so the negative above cannot pass by the turn having failed
+    // entirely: the generic synthesis' own decline is what the user gets.
+    expect(text).toMatch(/no longer valid/i);
+    expect(appendCalls).toHaveLength(1);
+    expect(appendCalls[0]!.graph).toBeUndefined();
+  });
+
   it('⭐ not_value_batch FALLS THROUGH: a readiness-repair pending still applies its own repair', async () => {
     graphForRead = REPAIR_GRAPH;
     pendingActionsForRead = [REPAIR_OFFER.pending];
