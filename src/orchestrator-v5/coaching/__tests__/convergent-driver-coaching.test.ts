@@ -68,6 +68,39 @@ function edge(
   };
 }
 
+
+/**
+ * ⛔⛔ THE CLASS THE ORIGINAL CORPUS COULD NOT EXPRESS.
+ *
+ * `edge()` above takes a stated sign and cannot set `edge_type`, so every
+ * fixture in this file carried a real direction — and the suite therefore
+ * passed while the defect it now pins was live. A corpus that omits a value
+ * class the contract admits cannot certify the code over that class
+ * (CLAUDE.md trap 13d); this helper exists to add the class, not to add a case.
+ *
+ * These are the drafter's OWN sentinel parameters, copied from the live prompt
+ * rather than invented: `defaults-v187.ts:198` — *"Sentinel parameters: mean=0,
+ * std=0.01, exists_probability=1.0, effect_direction: "positive". Exempt from
+ * normal parameter rules."* and `defaults-v19.ts:409` — *"`effect_direction`
+ * rule does not apply: `strength.mean=0` has no sign, so effect_direction is a
+ * placeholder."*
+ *
+ * ⭐ NOTE WHAT THE SENTINEL DEFEATS: `exists_probability: 1.0` walks past the
+ * zero-existence guard, and `effect_direction: 'positive'` is consulted BEFORE
+ * the zero-mean guard — so every existing protection in `edgeSign` reads this
+ * edge as a confident `+1`. Only `edge_type` distinguishes it.
+ */
+function bidirectedSentinelEdge(from: string, to: string) {
+  return {
+    from,
+    to,
+    edge_type: 'bidirected' as const,
+    strength: { mean: 0, std: 0.01 },
+    exists_probability: 1.0,
+    effect_direction: 'positive' as const,
+  };
+}
+
 function graphOf(nodes: unknown[], edges: unknown[]): GraphV3T {
   return { nodes, edges } as unknown as GraphV3T;
 }
@@ -302,5 +335,229 @@ describe('the constant this rung displaces', () => {
     expect(FIXED_GENERIC).toBe(
       `${FIXED_GENERIC_BULLET.replace('Assumption to check: whether ', 'One assumption worth checking is whether ')}.`,
     );
+  });
+
+});
+
+
+/**
+ * ⭐⭐ THE CLASSES THE ORIGINAL CORPUS COULD NOT EXPRESS.
+ *
+ * An independent review found two blocking defects that every one of the nine
+ * original tests passed over, for one structural reason: the `edge()` helper
+ * could not set `edge_type`, and no fixture contained an indirect path. **A
+ * corpus that omits a value class the contract admits cannot certify the code
+ * over that class** — so a full green suite was evidence about the fixtures,
+ * not about the code.
+ *
+ * Every case below has an OPPOSITE-DIRECTION TWIN. A filter can fail in two
+ * ways — too narrow (the defect) and too wide (silencing true findings) — and
+ * a corpus that watches one door cannot tell them apart.
+ */
+describe('convergent-driver coaching — review findings F1–F4', () => {
+
+  // ══ F1 — BIDIRECTED EDGES ═════════════════════════════════════════════════
+
+  it('F1 — a BIDIRECTED sentinel must not establish a direction, and cannot invent an opposition', () => {
+    // f2 ↔ f1 is the drafter's declared way of saying "unmeasured common cause,
+    // I assert NO direction". f3 → f1 is a genuine negative edge. Before the
+    // fix the placeholder read as +1 and the product served, as the FIRST thing
+    // the user reads: "Price Risk and Feature Quality both drive Pro Plan Churn
+    // Rate, in opposite directions" — asking the person to adjudicate a
+    // conflict invented from a schema placeholder, about which the model says
+    // the opposite.
+    const withBidirected = graphOf(
+      [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, F_PRICE_RISK, F_FEATURE],
+      [
+        edge('o1', 'f2', 'positive'),
+        bidirectedSentinelEdge('f2', 'f1'),
+        edge('f3', 'f1', 'negative'),
+        edge('f1', 'g1', 'negative'),
+      ],
+    );
+    const result = buildPostDraftNarrative({ graph: withBidirected, analysisReady: NON_READY });
+
+    expect(result.text).not.toMatch(/in opposite directions/i);
+    expect(result.text).not.toMatch(/which of them dominates/i);
+    // Silence here is not a loss: the existing chain still ships its content.
+    expect(result.text).toContain(FIXED_GENERIC_BULLET);
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+  });
+
+  it('F1 CONTRAST CONTROL — the SAME graph with a DIRECTED edge does serve the line', () => {
+    // The twin of the case above, differing in ONE field. Without it the
+    // assertion there could be satisfied by a fixture that never qualified at
+    // all — an absence proved by a broken probe rather than by the fix.
+    const withDirected = graphOf(
+      [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, F_PRICE_RISK, F_FEATURE],
+      [
+        edge('o1', 'f2', 'positive'),
+        edge('f2', 'f1', 'positive'),
+        edge('f3', 'f1', 'negative'),
+        edge('f1', 'g1', 'negative'),
+      ],
+    );
+    const result = buildPostDraftNarrative({ graph: withDirected, analysisReady: NON_READY });
+
+    expect(result.text).toMatch(/in opposite directions/i);
+    expect(result.telemetry.assumption_source).toBe('convergent_drivers');
+  });
+
+  it('F1 — a bidirected edge does not SUPPRESS a direction its directed twin establishes', () => {
+    // The opposite error to the one fixed: over-filtering. A real f2→f1 edge
+    // beside a bidirected f2↔f1 must still count. The bidirected one is
+    // ignored, not treated as a contradiction that nulls the source.
+    const both = graphOf(
+      [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, F_PRICE_RISK, F_FEATURE],
+      [
+        edge('f2', 'f1', 'positive'),
+        bidirectedSentinelEdge('f2', 'f1'),
+        edge('f3', 'f1', 'negative'),
+        edge('f1', 'g1', 'negative'),
+      ],
+    );
+    const result = buildPostDraftNarrative({ graph: both, analysisReady: NON_READY });
+
+    expect(result.text).toMatch(/in opposite directions/i);
+    expect(result.telemetry.assumption_source).toBe('convergent_drivers');
+  });
+
+  // ══ F2 — A DIRECT EDGE ESTABLISHES; AN INDIRECT PATH MAY ONLY VETO ════════
+
+  it('F2 — an indirect path that CONTRADICTS the direct edge vetoes the claim', () => {
+    // f2→f1 positive (direct), but f2→f9→f1 composes negative. The model does
+    // not settle which way f2 moves f1, so f2 may not be named as one half of
+    // an opposition. This is `factorDirectionOnGoal`'s own ruling, which this
+    // line's docblock claimed to follow while the code did not.
+    const F_SUPPORT = { id: 'f9', kind: 'factor' as const, label: 'Support Load' };
+    const contradictory = graphOf(
+      [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, F_PRICE_RISK, F_FEATURE, F_SUPPORT],
+      [
+        edge('f2', 'f1', 'positive'),
+        edge('f2', 'f9', 'positive'),
+        edge('f9', 'f1', 'negative'),
+        edge('f3', 'f1', 'negative'),
+        edge('f1', 'g1', 'negative'),
+      ],
+    );
+    const result = buildPostDraftNarrative({ graph: contradictory, analysisReady: NON_READY });
+
+    expect(result.text).not.toMatch(/in opposite directions/i);
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+  });
+
+  it('F2 CONTRAST CONTROL — an indirect path that AGREES does not veto', () => {
+    // Same three-node shape, one sign flipped so the composed path agrees with
+    // the direct edge. Without this twin the veto could be over-wide — vetoing
+    // whenever any indirect path exists — and the test above could not tell.
+    const F_SUPPORT = { id: 'f9', kind: 'factor' as const, label: 'Support Load' };
+    const agreeing = graphOf(
+      [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, F_PRICE_RISK, F_FEATURE, F_SUPPORT],
+      [
+        edge('f2', 'f1', 'positive'),
+        edge('f2', 'f9', 'positive'),
+        edge('f9', 'f1', 'positive'),
+        edge('f3', 'f1', 'negative'),
+        edge('f1', 'g1', 'negative'),
+      ],
+    );
+    const result = buildPostDraftNarrative({ graph: agreeing, analysisReady: NON_READY });
+
+    expect(result.text).toMatch(/in opposite directions/i);
+    expect(result.telemetry.assumption_source).toBe('convergent_drivers');
+  });
+
+  it('F2 — a TRUNCATED walk is not permission: a chain past the depth cap vetoes too', () => {
+    // ⛔ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED. Disabling the veto's
+    // DISAGREEMENT limb REDed the case above; disabling its TRUNCATION limb did
+    // not, because no fixture here had a chain deep enough to truncate. A
+    // surviving mutant is a claim about the corpus, not about the code — so
+    // the case the corpus was missing is added rather than the mutant excused.
+    //
+    // `MAX_PATH_DEPTH` is 8. A ten-hop chain off f2 that never reaches the
+    // target makes `scanIndirectPaths` stop short, and "nothing contradictory
+    // was FOUND" is not "nothing contradictory EXISTS". This is the identical
+    // correction `factorDirectionOnGoal` already carries in its own header.
+    const chainNodes = Array.from({ length: 10 }, (_, i) => ({
+      id: `c${i}`,
+      kind: 'factor' as const,
+      label: `Chain Factor ${i}`,
+    }));
+    const chainEdges = Array.from({ length: 9 }, (_, i) => edge(`c${i}`, `c${i + 1}`, 'positive'));
+    const deep = graphOf(
+      [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, F_PRICE_RISK, F_FEATURE, ...chainNodes],
+      [
+        edge('f2', 'f1', 'positive'),
+        edge('f2', 'c0', 'positive'),
+        ...chainEdges,
+        edge('f3', 'f1', 'negative'),
+        edge('f1', 'g1', 'negative'),
+      ],
+    );
+    const result = buildPostDraftNarrative({ graph: deep, analysisReady: NON_READY });
+
+    expect(result.text).not.toMatch(/in opposite directions/i);
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+  });
+
+  // ══ F4 — `action` is a lever the person chooses, not a driver ══════════════
+
+  it('F4 — an `action` node is excluded as a driver, exactly as `option` and `decision` are', () => {
+    const A_DISCOUNT = { id: 'a1', kind: 'action' as const, label: 'Offer a retention discount' };
+    const withAction = graphOf(
+      [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, A_DISCOUNT, F_FEATURE],
+      [
+        edge('a1', 'f1', 'positive'),
+        edge('f3', 'f1', 'negative'),
+        edge('f1', 'g1', 'negative'),
+      ],
+    );
+    const result = buildPostDraftNarrative({ graph: withAction, analysisReady: NON_READY });
+
+    expect(result.text).not.toMatch(/in opposite directions/i);
+    expect(result.text).not.toContain('Offer a retention discount');
+    expect(result.telemetry.assumption_source).toBe('deterministic_fallback');
+  });
+
+  // ══ F3 — THE WORD COST, MEASURED RATHER THAN ASSERTED ═════════════════════
+
+  it('F3 — the line COSTS the word ladder, and this pins the size of that cost', () => {
+    // The docblock on `convergentDriverText` used to claim this change "costs
+    // the ladder nothing". It is false: the ladder meters countWords, not
+    // bullets. This test does not assert the claim — it MEASURES the delta, so
+    // the cost is a number in the record rather than a sentence nobody checked,
+    // and so a future edit that makes the line materially longer REDs here.
+    //
+    // ⛔ THIS DOES NOT CLOSE F3. The behavioural fix — a fourth weighing-block
+    // variant carrying the shorter assumption, tried before each rung sheds a
+    // bullet — is named in the docblock and deliberately left as its own unit.
+    const withLine = buildPostDraftNarrative({
+      graph: CONVERGENT_GRAPH,
+      analysisReady: NON_READY,
+    }).text;
+    const withConstant = buildPostDraftNarrative({
+      graph: graphOf(
+        [GOAL, OPT_RAISE, OPT_HOLD, F_CHURN, F_PRICE_RISK, F_FEATURE],
+        [
+          edge('o1', 'f2', 'positive'),
+          edge('f2', 'f1', 'positive'),
+          edge('f3', 'f1', 'positive'), // same direction — the line stays silent
+          edge('f1', 'g1', 'negative'),
+        ],
+      ),
+      analysisReady: NON_READY,
+    }).text;
+
+    const words = (t: string) => t.trim().split(/\s+/).filter(Boolean).length;
+    const delta = words(withLine) - words(withConstant);
+
+    // Non-vacuity: the two arms really do differ in which assumption shipped.
+    expect(withLine).toMatch(/in opposite directions/i);
+    expect(withConstant).toContain(FIXED_GENERIC_BULLET);
+
+    // The cost is real and positive — the refuted claim was that it is zero.
+    expect(delta).toBeGreaterThan(0);
+    // And bounded, so a future rewrite cannot quietly make it much worse.
+    expect(delta).toBeLessThanOrEqual(15);
   });
 });

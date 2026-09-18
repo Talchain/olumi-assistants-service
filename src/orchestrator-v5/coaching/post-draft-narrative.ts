@@ -89,6 +89,7 @@ import {
 } from './copy-quality-gate.js';
 import { buildReadinessNextStep } from './readiness-recovery.js';
 import { elideLabelAtWordBoundary } from '../../utils/label-elision.js';
+import { isDirectedEdge, type EdgeTypeT } from '../../schemas/graph.js';
 
 /**
  * RC4 proportionate remedies: run a candidate through
@@ -379,6 +380,26 @@ interface EdgeLite {
    *   edge license a trade-off claim.
    */
   readonly exists_probability?: number;
+  /**
+   * ⛔⛔ READ, AND THE OMISSION WAS A LIVE DEFECT. The drafter mints
+   * `edge_type: "bidirected"` to say *"unmeasured common cause, I am asserting
+   * NO direction"*, and pins sentinel parameters beside it:
+   * `mean=0, std=0.01, exists_probability=1.0, effect_direction: "positive"`
+   * (`defaults-v187.ts:191,198`; `defaults-v19.ts:409` states it outright —
+   * *"effect_direction is a placeholder"*).
+   *
+   * `edgeSign` consults `effect_direction` BEFORE the zero-mean guard, and
+   * `exists_probability` is 1.0, so a bidirected sentinel reads as a confident
+   * `+1`. Without this field the convergent-driver scan could not tell that
+   * apart from a real positive edge and would serve, as the first thing the
+   * user reads, a conflict it invented from a schema placeholder.
+   *
+   * `schemas/graph.ts:597-622` is the estate's single directed-edge policy
+   * point and nine consumers already filter on it; `unreachable-factors.ts`
+   * records this exact omission as a defect fixed once before. The field is
+   * declared here so that policy can be IMPORTED rather than re-derived.
+   */
+  readonly edge_type?: EdgeTypeT;
 }
 
 interface NodeLite {
@@ -752,15 +773,41 @@ export function buildPostDraftNarrative(input: BuildPostDraftNarrativeInput): Po
   const opposingPair = findOpposingFactorPair(nodes, edges, goalId);
   const tradeOffBullet = buildTradeOffBullet(factors, risks, opposingPair);
   /**
-   * ⭐ COMPUTED ONCE, FOR BOTH BRANCHES BELOW, AND IT COSTS THE LADDER NOTHING.
+   * ⭐ COMPUTED ONCE, FOR BOTH BRANCHES BELOW.
    *
    * This line REPLACES the assumption slot's content rather than adding a
-   * bullet beside it, so the weighing section keeps its bullet count and the
-   * word-budget ladder sheds exactly what it shed before. That is deliberate:
-   * `assembleSectionedNarrative` records two measured cases where charging new
-   * words to the budget silently shed coaching the product had already
-   * committed to delivering, and "a fix that surfaces the question by
-   * silencing the coaching is a trade, not a fix".
+   * bullet beside it, so the weighing section keeps its BULLET COUNT.
+   *
+   * ⛔⛔ AND THE SENTENCE THAT USED TO STAND HERE — *"it costs the ladder
+   * nothing"* — WAS FALSE, so it is quoted rather than deleted (CLAUDE.md trap
+   * 14). `assembleSectionedNarrative` meters `countWords(text) <= MAX_WORDS`
+   * (140). It sheds on WORDS, not on bullets. This line renders ~23 words where
+   * the constant it replaces renders ~13, so it charges roughly +10 words to
+   * every rung at which the assumption bullet survives — and a rung can be
+   * tripped by ten words.
+   *
+   * ⚠ WHAT IS AND IS NOT ESTABLISHED, stated precisely. Reachable: on a READY
+   * turn `pickAssumption` reads `strengthenItems[0]` only while
+   * `pickAdditionalChecks` iterates, so a gate-rejected `[0]` with a later
+   * acceptable item yields BOTH a `convergent_drivers` assumption AND a
+   * `Worth a look:` bullet — the rung-1→2 boundary where +10 words sheds the
+   * extra check. On a NON-READY turn the same pressure reaches rung 3b. What is
+   * NOT established is how often real drafts sit within ten words of a rung
+   * boundary; the fixtures in this file's suite sit far below 140, which is
+   * exactly why no test observed this.
+   *
+   * ⛔ THIS IS NOT CLOSED, and it is a trade the file forbids one screen
+   * further down: *"a fix that surfaces the question by silencing the coaching
+   * is a trade, not a fix"*. The smallest enabling change, named so the next
+   * lane does not re-derive it: `assembleSectionedNarrative` already takes
+   * three weighing-block variants (`weighingBlock`, `weighingBlockCore`,
+   * `weighingBlockDirectionOnly`) and ladders over them. A FOURTH variant built
+   * with the SHORTER assumption, tried at each rung before that rung sheds a
+   * bullet, keeps the coaching and spends the question only out of genuine
+   * headroom. That is a contained change to the assembly signature and its
+   * caller, and it is deliberately NOT made here: it is a second reviewable
+   * unit, and bundling it would put an assembly-ladder change inside a
+   * coaching-content PR.
    */
   const convergentDriverText = buildConvergentDriverLine(nodes, edges, goalId, opposingPair);
   const mayServeFreeformCoaching = analysisReady?.status === 'ready';
@@ -1598,7 +1645,19 @@ interface ConvergentDrivers {
 }
 
 /** Node kinds that may never count as a driver — see refusal (1) above. */
-const NON_DRIVER_KINDS: ReadonlySet<string> = new Set(['option', 'decision']);
+/**
+ * Kinds that may not be named as a DRIVER of a factor.
+ *
+ * ⚠ `action` IS INCLUDED THOUGH ITS REACHABILITY IS NOT ESTABLISHED — and that
+ * is the honest state of it, not a claim. `NodeKindV3` admits `action`, and the
+ * exclusion rationale for `option`/`decision` applies to it verbatim: it is a
+ * lever the person CHOOSES, not a quantity their model moves, so asking which of
+ * two levers "dominates" is a different question from the one this line asks.
+ * A sweep of `defaults-v187.ts` found no `action` emission, so this may be
+ * unreachable today — it is closed on cost, since a drafter that starts
+ * emitting the kind would otherwise reopen it silently.
+ */
+const NON_DRIVER_KINDS: ReadonlySet<string> = new Set(['option', 'decision', 'action']);
 
 function findConvergingOpposedDrivers(
   nodes: readonly NodeLite[],
@@ -1623,6 +1682,23 @@ function findConvergingOpposedDrivers(
     const signBySource = new Map<string, 1 | -1 | null>();
     for (const e of edges) {
       if (e?.to !== target.id) continue;
+      // ⛔ F1 — A BIDIRECTED EDGE ASSERTS NO DIRECTION, SO IT MAY NOT ESTABLISH
+      // ONE HERE. Its `effect_direction` is a declared placeholder beside a
+      // zero mean and `exists_probability: 1.0`, which `edgeSign` reads as a
+      // confident sign. See the note on `EdgeLite.edge_type`.
+      //
+      // ⭐ THE POLICY IS IMPORTED, NOT RESTATED. `isDirectedEdge` is the
+      // estate's single directed-edge policy point; writing
+      // `e.edge_type !== 'bidirected'` inline here would be a tenth private
+      // copy of a rule that has already drifted once.
+      //
+      // ⚠ SCOPED DELIBERATELY TO THIS LOOP. `edgeSign` itself is NOT changed:
+      // `scanIndirectPaths` uses it, where a bidirected edge can currently only
+      // VETO a claim (fail-safe silence). Making `edgeSign` null on bidirected
+      // would REMOVE those vetoes and make that path less safe — a wider fix
+      // that is strictly worse. This is the one place in the composer where a
+      // bidirected placeholder would make the product ASSERT.
+      if (!isDirectedEdge(e)) continue;
       // Named `sourceId`, not `from`: a const called `from` initialised from
       // `e?.from` is TS7022 (implicit any, self-referential initializer) under
       // the build config, which `tsc -p tsconfig.build.json` catches and the
@@ -1639,6 +1715,42 @@ function findConvergingOpposedDrivers(
       const seen = signBySource.get(sourceId);
       if (seen === undefined) signBySource.set(sourceId, sign);
       else if (seen !== sign) signBySource.set(sourceId, null);
+    }
+
+    // ⛔⛔ F2 — A DIRECT EDGE ESTABLISHES; AN INDIRECT PATH MAY ONLY VETO.
+    //
+    // This is `factorDirectionOnGoal`'s own ruling (see its header), and the
+    // docblock on this line CLAIMED to follow it while the code did not: the
+    // scan above reads `e.to === target.id` and nothing else, so a model that
+    // contradicts itself one level in was reported as settled.
+    //
+    // The recorded counterexample, now closed: `f2→f1 +`, `f2→f9 +`,
+    // `f9→f1 −`, `f3→f1 −`. The direct edge says f2 raises f1; the composed
+    // path says it lowers it. The model does not settle which way f2 moves f1,
+    // so f2 may not be named as one half of an opposition.
+    //
+    // ⚠ A TRUNCATED WALK IS NOT PERMISSION. `scanIndirectPaths` reports when
+    // it stopped short of the depth cap; "nothing contradictory was FOUND"
+    // is not "nothing contradictory EXISTS", and the same distinction is what
+    // `factorDirectionOnGoal` was corrected for.
+    //
+    // ⚠ One known, accepted asymmetry, stated rather than left to be found: a
+    // bidirected edge can still take part in `scanIndirectPaths` and therefore
+    // still VETO here. That direction is silence, never a false claim, and the
+    // alternative — changing `edgeSign` — would remove vetoes elsewhere.
+    for (const [sourceId, settled] of signBySource) {
+      if (settled === null) continue;
+      const scan = scanIndirectPaths(sourceId, target.id, edges);
+      if (scan.truncated) {
+        signBySource.set(sourceId, null);
+        continue;
+      }
+      for (const indirect of scan.signs) {
+        if (indirect !== settled) {
+          signBySource.set(sourceId, null);
+          break;
+        }
+      }
     }
 
     let raises: string | null = null;
