@@ -318,6 +318,8 @@ import {
 } from '../orchestrator-v5/routing/process-meta-intake.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
 import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import { prepareValueBatchOffer } from '../orchestrator-v5/handlers/readiness-value-batch-flow.js';
+import { chatWithAnthropic } from '../adapters/llm/anthropic.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -3298,16 +3300,107 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           readinessOffer = null;
         }
       }
-      if (readinessOffer) {
+      /**
+       * ⭐ THE SECOND APPLY CONTROL, AND IT ANSWERS A DIFFERENT QUESTION FROM THE
+       * FIRST (trap 21 — named apart, deliberately, not collapsed).
+       *
+       *   `readiness_multi_repair_v1` — "can these blockers be CANONICALISED
+       *      without guessing?" It is value-preserving by construction and its
+       *      module states it never guesses a missing scalar.
+       *   `readiness_value_batch_v1` — "can the missing VALUES be estimated and
+       *      reviewed in one action?" It proposes numbers the model authored,
+       *      every one marked as an AI estimate and none applied unreviewed.
+       *
+       * So the batch is tried ONLY when the repair path found nothing to
+       * canonicalise: where a value-preserving fix exists it is strictly better
+       * than an estimate, and offering both would ask the user to choose between
+       * two controls that sound alike.
+       *
+       * ⚠ THE MODEL CALL SITS BEHIND THE FLOOR CHECK, NOT IN FRONT OF IT.
+       * `prepareValueBatchOffer` returns `below_floor` without calling anything
+       * when fewer than two cells are open — a single missing value is already
+       * served by the per-cell chip, which asks a precise question the user can
+       * answer in a sentence. The witnessed harm is TEN values and ten
+       * round-trips, and the cost should be proportional to that.
+       */
+      let valueBatchOffer: Awaited<ReturnType<typeof prepareValueBatchOffer>> | null = null;
+      if (
+        readinessOffer === null
+        && readiness.assessment
+        && readinessPendingReadOk
+        && persistedGraph !== null
+      ) {
+        try {
+          const graphHash = computeAnalysisAffectingGraphHash(
+            persistedGraph as GraphStateIngress,
+          );
+          if (graphHash !== null) {
+            valueBatchOffer = await prepareValueBatchOffer(
+              {
+                assessment: readiness.assessment,
+                graph: persistedGraph,
+                currentGraphHash: graphHash,
+                scenarioId: ingress.scenario_id,
+                brief: ingress.message,
+              },
+              async ({ system, userMessage, outputSchema }) => {
+                const res = await chatWithAnthropic({
+                  system,
+                  userMessage,
+                  temperature: 0.1,
+                  maxTokens: 2048,
+                  requestId,
+                  outputSchema,
+                });
+                return { content: res.content };
+              },
+            );
+          }
+        } catch (err) {
+          // Fail CLOSED to the existing route: the per-cell chip and the typed
+          // issue list are still there, so the user is never worse off than
+          // before this control existed.
+          valueBatchOffer = null;
+          log.warn(
+            {
+              request_id: requestId,
+              scenario_id: ingress.scenario_id,
+              err: err instanceof Error ? { name: err.name, message: err.message } : { message: String(err) },
+            },
+            'S2-L1 readiness arm — value batch unavailable; readiness remains available without it',
+          );
+        }
+      }
+      if (valueBatchOffer && valueBatchOffer.kind !== 'offer') {
+        // Recorded by NAME rather than collapsed to a null: `below_floor` and
+        // `estimator_failed` are different facts and only one of them is a defect.
+        log.info(
+          {
+            request_id: requestId,
+            scenario_id: ingress.scenario_id,
+            outcome: valueBatchOffer.kind,
+          },
+          'S2-L1 readiness arm — no value batch offered',
+        );
+      }
+
+      /** Whichever apply control this turn earned. At most one is ever offered. */
+      let applyOffer:
+        | { readonly chip: { readonly id: string; readonly label: string; readonly message: string; readonly detail?: string }; readonly pending: PendingAction }
+        | null =
+        readinessOffer
+        ?? (valueBatchOffer && valueBatchOffer.kind === 'offer' ? valueBatchOffer.offer : null);
+
+      if (applyOffer) {
         readinessResponse = {
           ...readinessResponse,
           suggested_actions: [
             ...readinessResponse.suggested_actions,
             {
-              id: readinessOffer.chip.id,
-              label: readinessOffer.chip.label,
-              message: readinessOffer.chip.message,
-              ...(readinessOffer.chip.detail ? { detail: readinessOffer.chip.detail } : {}),
+              id: applyOffer.chip.id,
+              label: applyOffer.chip.label,
+              message: applyOffer.chip.message,
+              ...(applyOffer.chip.detail ? { detail: applyOffer.chip.detail } : {}),
             },
           ],
         };
@@ -3321,7 +3414,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
             llm_calls_used: 0,
             duration_ms: Date.now() - routeStartedAt,
             handler_facts: [],
-            pending_actions: [readinessOffer.pending],
+            pending_actions: [applyOffer.pending],
             priorPendingActions: readinessPriorPendings,
             coaching_state: null,
             userMessage: ingress.message,
@@ -3331,7 +3424,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
           // A review control without a durable pending would be a dead control.
           // Keep the complete issue explanation, but remove the apply action.
           readinessResponse = readiness.response;
-          readinessOffer = null;
+          applyOffer = null;
           log.warn(
             {
               request_id: requestId,

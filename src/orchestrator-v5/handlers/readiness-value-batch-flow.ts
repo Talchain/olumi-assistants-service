@@ -38,6 +38,23 @@ import {
 
 type CanonicalReadinessAssessment = Parameters<typeof selectValueBatchMembership>[0];
 
+/**
+ * ⭐ THE BATCH IS FOR THE LOOP, NOT FOR ONE CELL — and this gate is what keeps a
+ * paid model call proportional to the harm.
+ *
+ * The witnessed harm is TEN values and ten round-trips. At one open cell the
+ * product already has a better, cheaper affordance: the per-cell chip
+ * (`chip_prompt_repair_effect_value`), which asks a precise question the user
+ * can answer in a sentence — witnessed working on staging 18 Sep, where "Set it
+ * to 85%" cleared readiness in one turn. Spending a model call to propose a
+ * single estimate would add cost and latency to a path that is already good.
+ *
+ * ⚠ IT IS A FLOOR ON *SETTABLE* CELLS, NOT ON BLOCKERS. `unsettable` gaps (the
+ * factor is unknown) cannot be estimated at all, so counting them would trigger
+ * a call that has nothing to propose.
+ */
+export const VALUE_BATCH_MIN_CELLS = 2;
+
 export type PrepareValueBatchOutcome =
   /** An offer the caller can attach to `suggested_actions`. */
   | {
@@ -48,6 +65,11 @@ export type PrepareValueBatchOutcome =
     }
   /** Nothing to ask about. Not a failure. */
   | { readonly kind: 'no_cells' }
+  /**
+   * One open cell: below the batch floor. NOT a failure and NOT an error — the
+   * per-cell chip serves this better, so the caller leaves it alone.
+   */
+  | { readonly kind: 'below_floor'; readonly cellCount: number }
   /**
    * The model declined every cell, or every estimate was unusable. The proposal
    * is CARRIED so the caller can still tell the user what was refused and why —
@@ -121,6 +143,10 @@ export async function prepareValueBatchOffer(
 ): Promise<PrepareValueBatchOutcome> {
   const membership = selectValueBatchMembership(input.assessment);
   if (membership.cells.length === 0) return { kind: 'no_cells' };
+  // Checked BEFORE the model call, so a below-floor turn costs nothing.
+  if (membership.cells.length < VALUE_BATCH_MIN_CELLS) {
+    return { kind: 'below_floor', cellCount: membership.cells.length };
+  }
 
   const factorIds = new Set(membership.cells.map((c) => c.factor_id));
   const estimated = await estimateValueBatch(
