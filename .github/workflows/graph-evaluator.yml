@@ -18,8 +18,9 @@ name: Graph Evaluator
 # job. This file is that Phase 2 wiring.
 #
 # What was failing in the dark: `tests/governed-draft-graph.test.ts` pins the
-# exact serving prompt composition, and it currently fails on thirteen source
-# hashes. The pin exists, the pin is correct, the pin is failing, and nobody
+# exact serving prompt composition, and it currently reports THIRTEEN problems:
+# 9 source-hash mismatches, 2 content-hash drifts and 2 governance-artefact
+# drifts. The pin exists, the pin is correct, the pin is failing, and nobody
 # could see it.
 #
 # ADVISORY, DELIBERATELY. Branch protection on `staging` requires exactly one
@@ -35,10 +36,28 @@ name: Graph Evaluator
 #     summary line, a collect shrink against the files on disk); or
 #   - the failing set DRIFTS from scripts/ci/graph-evaluator-known-red.json,
 #     in either direction.
-# So a FOURTEENTH drifted prompt hash REDs this job the day it lands, while
-# the thirteen already recorded stay advisory. As entries are fixed, that
-# file shrinks; when it is empty, delete the two `continue-on-error` lines
-# below and promote this job to a required check.
+#
+# WHAT THE RATCHET ACTUALLY DETECTS - stated precisely, because an earlier
+# version of this comment overclaimed it. The recorded unit is the SET of
+# failing test FILES and the failed-TEST COUNT within each file. So it REDs
+# on: a newly failing file, a file that stops failing, a changed failed-test
+# count inside a file, a drop below the passing-test floor, a collect shrink,
+# or a vacuous run - every one of which a blanket `continue-on-error` would
+# leave silent.
+#
+# KNOWN BLIND SPOT: it CANNOT see a change in the number of problems inside a
+# single already-failing assertion. All thirteen problems above live in ONE
+# `it`, failing on one `expect(result.problems).toEqual([])`. A FOURTEENTH
+# drifted hash APPENDS to that array - the failed-test count stays 1, `passed`
+# stays at the floor, `Test Files` stays 18. Every signal the guard computes
+# is unchanged, so it would exit 0 with the same warning. Closing that needs
+# the tool to emit a machine-readable result the guard reads; scraping the
+# count out of vitest output is not robust (vitest prints `[ ...(13) ]` only
+# past its truncation threshold). Recorded in the `$comment` of
+# scripts/ci/graph-evaluator-known-red.json.
+#
+# As entries are fixed, that file shrinks; when it is empty, delete the two
+# `continue-on-error` lines below and promote this job to a required check.
 
 on:
   push:

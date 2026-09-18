@@ -9,8 +9,9 @@
  * collecting it from the root configs throws ERR_MODULE_NOT_FOUND on its
  * tool-local imports. That exclusion is CORRECT and stays. What was missing is
  * the other half the configs' own comments promised: a dedicated job. So the
- * tool's prompt-composition pin — currently FAILING on thirteen source
- * hashes — has been failing where nobody could see it.
+ * tool's prompt-composition pin — currently reporting thirteen problems
+ * (9 source-hash mismatches, 2 content-hash drifts, 2 governance-artefact
+ * drifts) — has been failing where nobody could see it.
  *
  * The lesson that shaped this file: **a test job that silently collects zero
  * tests is worse than no job.** vitest exits 0 on "No test files found"; a
@@ -36,14 +37,29 @@
  *
  *   C. KNOWN-RED RATCHET — `scripts/ci/graph-evaluator-known-red.json` records
  *      the currently-failing files and counts EXACTLY, and fails in BOTH
- *      directions: a NEW failure REDs at once (this is how a fourteenth
- *      drifted prompt hash becomes loud), and a FIXED one REDs until its entry
- *      is removed, so the list can only shrink toward empty. When it is empty,
- *      drop `continue-on-error` from the two content steps in
+ *      directions: a NEW failing file — or a changed failed-TEST count within
+ *      a file — REDs at once, and a FIXED one REDs until its entry is removed,
+ *      so the list can only shrink toward empty. When it is empty, drop
+ *      `continue-on-error` from the two content steps in
  *      `.github/workflows/graph-evaluator.yml` and the job can be promoted to
- *      a required check. A blanket `continue-on-error` with no ratchet would
- *      have left every FUTURE drift exactly as silent as the thirteen hashes
- *      that prompted this work.
+ *      a required check.
+ *
+ *      ITS GRANULARITY, STATED HONESTLY. An earlier version of this docblock
+ *      said "this is how a fourteenth drifted prompt hash becomes loud". That
+ *      is FALSE, and it is the claim the whole advisory-not-blanket argument
+ *      was resting on. The recorded unit is the failed-TEST count per FILE
+ *      (`"tests/governed-draft-graph.test.ts": 1`). All thirteen problems live
+ *      in ONE `it`, failing on one `expect(result.problems).toEqual([])`; a
+ *      fourteenth APPENDS to that array, so the failed-test count stays 1,
+ *      `passed` stays at the floor and `Test Files` stays 18 — every signal
+ *      computed below is unchanged and this guard exits 0.
+ *
+ *      What the ratchet DOES make loud, and a blanket `continue-on-error`
+ *      would not: a newly failing FILE, a file that stops failing, a changed
+ *      per-file count, a lost test, a collect shrink, a vacuous run. Making
+ *      problem-COUNT observable needs the tool to emit a machine-readable
+ *      result this guard reads — scraping it from vitest output is not robust,
+ *      because vitest prints `[ …(13) ]` only past its truncation threshold.
  *
  * No dependencies, no network; reads only committed state plus the two logs.
  */
@@ -261,7 +277,10 @@ const observedBlock = {
   $comment:
     "SHRINK-ONLY RATCHET, measured in CI (never locally - the tool's governed suite depends on the repo-root install). " +
     "Every entry is a KNOWN failure that predates this CI job; the job is advisory only while this file is non-empty. " +
-    "Fails in BOTH directions: a new failure REDs at once, a fixed one REDs until its entry is removed. " +
+    "Fails in BOTH directions: a new failing FILE, or a changed failed-TEST count within a file, REDs at once; a fixed one REDs until its entry is removed. " +
+    "KNOWN BLIND SPOT - the recorded unit is the failed-TEST count per FILE, so this ratchet CANNOT see a change in the number of problems inside a single already-failing assertion. " +
+    "All thirteen tests/governed-draft-graph.test.ts problems (9 source-hash mismatches, 2 content-hash drifts, 2 governance-artefact drifts) live in one `it` failing on one `expect(result.problems).toEqual([])`; a fourteenth would append to that array and leave every signal here unchanged. " +
+    "Closing that needs the tool to emit a machine-readable result this guard reads, not a parse of vitest output. " +
     "When both maps are empty, drop `continue-on-error` from .github/workflows/graph-evaluator.yml and promote the job to a required check.",
   measuredAt: process.env.GITHUB_SHA ?? "UNRECORDED",
   measuredAtNote:
