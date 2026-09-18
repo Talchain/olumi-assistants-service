@@ -24,6 +24,7 @@ import type { ResolvedContext, SupportedDomain } from "../../context/index.js";
 import { resolveContext } from "../../context/index.js";
 import { extractFactorsLLM } from "./llm-extractor.js";
 import { mergeFactors, type MergeResult } from "./merge.js";
+import { statedLevelExceedsTarget } from "./goal-baseline-admissibility.js";
 import {
   AMOUNT_DIGITS,
   isMagnitudeShapedSuffix,
@@ -1894,10 +1895,17 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
     //
     // ⚠ ROADMAP 2.371(d) — AND IT RUNS AFTER THE COMPARABILITY CHECK ABOVE, SO
     // BOTH OPERANDS BELOW ARE ON ONE SCALE BY CONSTRUCTION.
+    //
+    // ⚠ ROADMAP 2.1160 — THE PREDICATE MOVED, THE RULE DID NOT. `target <
+    // level` now lives in `goal-baseline-admissibility.ts` so the DRAFT path's
+    // writer can consult this same rule instead of re-deriving it: it was
+    // stamping the decreasing pairs this branch refuses (trap 22b, measured on
+    // staging 2026-09-10). Behaviour here is byte-identical — same operands,
+    // same comparison, same refusal, same span.
     if (toResolved.raw !== 0 || fromRaw !== 0) {
       const target = normaliseTargetValue(toResolved);
       const level = from.isPercent ? fromRaw / 100 : fromRaw;
-      if (target < level) {
+      if (statedLevelExceedsTarget(target, level)) {
         return refuseGoalPair(
           "direction_unsupported",
           { target: String(target), baseline: String(level) },
