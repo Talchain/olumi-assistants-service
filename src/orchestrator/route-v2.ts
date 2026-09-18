@@ -317,7 +317,10 @@ import {
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
-import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import {
+  buildReadinessRepairOffer,
+  withReadinessApplyControl,
+} from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -3301,15 +3304,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (readinessOffer) {
         readinessResponse = {
           ...readinessResponse,
-          suggested_actions: [
-            ...readinessResponse.suggested_actions,
-            {
-              id: readinessOffer.chip.id,
-              label: readinessOffer.chip.label,
-              message: readinessOffer.chip.message,
-              ...(readinessOffer.chip.detail ? { detail: readinessOffer.chip.detail } : {}),
-            },
-          ],
+          // The composer already filled this row to its cap. Appending here put
+          // the apply control at index 3 of 4 and the client rendered the first
+          // three, so the control never reached the user. `withReadinessApplyControl`
+          // makes room instead of overflowing.
+          suggested_actions: withReadinessApplyControl(
+            readinessResponse.suggested_actions,
+            readinessOffer.chip,
+          ) as typeof readinessResponse.suggested_actions,
         };
         try {
           const committed = await commitDirectAnswer(readinessResponse, {

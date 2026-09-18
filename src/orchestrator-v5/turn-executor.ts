@@ -292,6 +292,7 @@ import {
 } from './handlers/gm-held-execute.js';
 import {
   buildReadinessRepairOffer,
+  withReadinessApplyControl,
   executeReadinessRepair,
   readReadinessRepairResume,
   type ReadinessRepairResumeRead,
@@ -3572,15 +3573,13 @@ export async function runTurnExecutor(
                 assistant_text:
                   `The earlier repair plan is no longer valid, so I regenerated it against the model as it stands now. ` +
                   recoveryResponse.assistant_text,
-                suggested_actions: [
-                  ...recoveryResponse.suggested_actions,
-                  {
-                    id: offer.chip.id,
-                    label: offer.chip.label,
-                    message: offer.chip.message,
-                    ...(offer.chip.detail ? { detail: offer.chip.detail } : {}),
-                  },
-                ],
+                // Same seam as the route-level arm: the composer's row is
+                // already at its cap, so an append would leave the regenerated
+                // apply control unrenderable.
+                suggested_actions: withReadinessApplyControl(
+                  recoveryResponse.suggested_actions,
+                  offer.chip,
+                ) as typeof recoveryResponse.suggested_actions,
               };
             } else {
               recoveryResponse = {
