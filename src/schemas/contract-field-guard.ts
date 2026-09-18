@@ -71,7 +71,13 @@ export type DetectorName =
   | "case-twin"
   | "convention-outlier"
   | "synonym"
-  | "orphan";
+  | "orphan"
+  // Emitted by the SIBLING guard (`value-warrant-guard.ts`), which reuses this
+  // module's `Finding` / `Decision` / `adjudicate` rather than building a second
+  // adjudication framework beside it. No detector in THIS file emits either, so
+  // its own findings and ledger are unchanged by their presence.
+  | "unwarranted-value"
+  | "scope-ambiguous-warrant";
 
 export interface Finding {
   readonly detector: DetectorName;

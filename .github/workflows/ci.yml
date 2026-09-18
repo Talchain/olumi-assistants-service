@@ -132,6 +132,40 @@ jobs:
         # the required test subset below. Derivation cannot notice its own
         # universe going short (trap 12d); both halves ship.
         run: npx tsx scripts/ci/contract-field-guard.ts
+      - name: Value warrant guard (numbers crossing the boundary with no warrant)
+        # DERIVED from the same six schemas, but walked into NESTED objects and
+        # ARRAY ELEMENTS, which the check above (top-level keys only) cannot
+        # reach. For every numeric field it asks one question: does anything on
+        # the wire make this number interpretable or REFUSABLE — a *_frame, a
+        # *_provenance, a unit, a source, a scale? `goal_threshold` normalising
+        # to the constant 0.8 on the headroom rule, and a constant 0.15
+        # substituted for an absent `strength.std`, are the two measured
+        # instances; both are in this enumeration, one FIXED and one OPEN.
+        #
+        # ⚠ IT REPORTS, IT DOES NOT PRESCRIBE. 26 of 34 sites are findings and
+        # MOST ARE RECORDED `OPEN` — nobody has answered them. An OPEN entry is
+        # the question written down, not an exemption. Getting the question
+        # right matters more than getting to zero, and ⛔ declaring a field
+        # purely to turn a row green manufactures an attestation, which is worse
+        # than none.
+        #
+        # Fails in THREE directions: a finding with no recorded decision, a
+        # recorded decision that no longer reproduces, and a warrant-vocabulary
+        # token whose witness field has left the schemas.
+        #
+        # ⛔ WHAT IT CANNOT SEE is in the module header and is load-bearing:
+        # non-numeric value classes, anything at RUNTIME, z.any()/z.record()/
+        # z.union() members (`analysis_ready` is entirely out of universe), the
+        # ADEQUACY of a warrant it finds, every surface not reached from the
+        # six roots, and — named because the guard's own name invites the
+        # assumption — PREDICATE/ACCESSOR MISUSE, which is a different class
+        # with no schema footprint and is deliberately not covered here.
+        # Of the four measured instances of this defect class it
+        # reaches TWO; the other two are declarations with no producer, which is
+        # the check above's territory. The hand-written half —
+        # src/schemas/__tests__/value-warrant-guard.corpus.test.ts — runs in the
+        # required test subset below and carries that scorecard as assertions.
+        run: npx tsx scripts/ci/value-warrant-guard.ts
       - name: Prompt regression gate (orchestrator-eval)
         # REQUIRED, hermetic check. `pnpm eval:orchestrator:test`
         # (vitest run tools/orchestrator-eval) is the durable regression gate for

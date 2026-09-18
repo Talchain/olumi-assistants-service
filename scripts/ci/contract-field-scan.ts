@@ -37,6 +37,22 @@ export const DECLARATION_FILE = join(SRC_DIR, "schemas", "cee-v3.ts");
  */
 export const GUARD_MODULE = join(SRC_DIR, "schemas", "contract-field-guard.ts");
 
+/**
+ * ⭐ THE SIBLING GUARD'S MODULE, EXCLUDED FOR THE SAME MEASURED REASON.
+ *
+ * `src/schemas/value-warrant-guard.ts` records decisions about value-bearing
+ * fields, in prose that necessarily NAMES them, as string literals the comment
+ * stripper deliberately keeps. Every such name is an occurrence, so without
+ * this exclusion that ledger could silently suppress an ORPHAN finding here —
+ * the identical mechanism that made this file's own exclusion necessary.
+ *
+ * ⚠ SCOPE, STATED EXACTLY: measured at the tip this was added, the guard
+ * reports TEN findings and NONE of them is an `orphan`, so this exclusion
+ * changes nothing today. It is here so the hole cannot open silently later,
+ * which is the only moment it would ever matter.
+ */
+export const WARRANT_GUARD_MODULE = join(SRC_DIR, "schemas", "value-warrant-guard.ts");
+
 function isScannable(path: string): boolean {
   if (!path.endsWith(".ts")) return false;
   if (path.endsWith(".test.ts") || path.endsWith(".spec.ts") || path.endsWith(".d.ts")) return false;
@@ -96,7 +112,7 @@ export function scanSourceTokens(files: readonly string[] = walkSource()): ScanR
   const hit = scanCache.get(key);
   if (hit) return hit;
 
-  const excluded = [DECLARATION_FILE, GUARD_MODULE];
+  const excluded = [DECLARATION_FILE, GUARD_MODULE, WARRANT_GUARD_MODULE];
   const counted = files.filter((f) => !excluded.includes(f));
   const occurrences = new Map<string, number>();
   const ident = /[A-Za-z_$][A-Za-z0-9_$]*/g;
