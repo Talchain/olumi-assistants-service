@@ -78,6 +78,24 @@ import {
 // chip's copy and the prefix route-v2's configure gate matches. Derived, never
 // a second spelling (trap 12).
 import { buildConfigureOptionChip } from '../configure-option-chip-text.js';
+// ⭐⭐ ORDINARY-TEXT AUTHORITY (the increment this file's `grep -c warrant = 0`
+// named). This lane had NO affirmative authority of any kind: it asked whether
+// the user's words DESCRIBED a change and never whether they AUTHORISED one, so
+// "Should we rename this?" renamed the node and confirmed it. The verdict is
+// resolved ONCE in `routing/ordinary-text-authority.ts` — from the estate's
+// already-ratified deliberation classifier over a message quote-masked by THIS
+// graph's own node labels — and consumed here and in `hasMutationWarrantSignal`.
+// `hasStrongerThanTextWarrant` is the SAME precedence the V5 warrant applies, as
+// a value, so this lane cannot second-guess a typed chip or a confirmed answer.
+import {
+  buildMutationWarrantDemotionText,
+  hasStrongerThanTextWarrant,
+} from '../routing/mutation-warrant.js';
+import {
+  projectModelNodeLabels,
+  resolveOrdinaryTextAuthority,
+} from '../routing/ordinary-text-authority.js';
+import { GRAPH_MUTATING_HANDLER_IDS } from '../routing/mutation-consent.js';
 // ⭐⭐ ROADMAP 2.1266 — the WRITE PATH the guard above exists because we lacked.
 // `option-intervention-write-guard.ts` withholds a wrong-entity write; this
 // composes the RIGHT one deterministically, so the product's own advised
@@ -3665,10 +3683,71 @@ export async function dispatchEditGraph(
   const recordedAnswerNotLanded = recordedAnswer !== null && successfulAppliedMutation
     && readCommittedOptionEffect(editResult.appliedGraph, recordedAnswer.pair.optionId,
       recordedAnswer.pair.factorId) !== Number(recordedAnswer.valueText);
+  /**
+   * ⭐⭐ ORDINARY-TEXT AUTHORITY — "did the user ASK for this, or ask what I
+   * THINK?" — the question this lane never asked.
+   *
+   * MEASURED AT PRISTINE `f19d1a92`, through this dispatcher: the message
+   * **"Should we rename this?"** returned an applied graph, `commitDirectAnswer`
+   * received it, and the reply confirmed the rename. `grep -c warrant` over this
+   * file read **0** (in-file contrast control `scope_unresolved`: 3), and
+   * `route-v2.ts` imports only the two NEGATIVE warrant helpers — so the V5
+   * mutation warrant, which exists precisely to stop this, never reached here.
+   * The same person on the V5 typed-handler path got a chip; on this path the
+   * model changed under them.
+   *
+   * ⚠ RESOLVED, NOT RE-DERIVED. `resolveOrdinaryTextAuthority` is the single
+   * authority; `hasMutationWarrantSignal` consumes the identical verdict. Two
+   * lists standing for one concept is this estate's dominant defect, and it is
+   * literally what produced this seam: `classifyUnappliedEditFrame` has been
+   * imported by `orchestrator/tools/edit-graph.ts` for months and was consulted
+   * ONLY to word a reply in the no-op branch. The capability was misplaced, not
+   * missing.
+   *
+   * ⚠ QUOTE-MASKED BY THIS GRAPH'S OWN LABELS, and that is load-bearing rather
+   * than tidy: of 1,564 mutating turns, three carry a deliberative frame and TWO
+   * are FALSE POSITIVES, because a user's graph holds a node labelled
+   * `"What should we do?"` and the frame pattern matches inside the quoted
+   * label. Quote-masked the true number is ONE, and that one is the harm.
+   *
+   * ⚠ SUBORDINATE TO THE TWO STRONGER SOURCES, by the warrant's OWN precedence
+   * helper rather than by a second ordering written here. A typed mutation chip
+   * IS the instruction, and a recorded answer (or the repair-leg instruction
+   * override, which the route sets only after the whole-message claim anchor
+   * matched) resumes a question the PRODUCT asked. Neither may be second-guessed
+   * by reading the text again.
+   *
+   * ⚠ WHY IT IS COMPUTED HERE, one line above the gate: identical reason to the
+   * option-intervention verdict above it. `effectiveAppliedMutation` is this
+   * dispatcher's SINGLE gate for persist, edit fact, `analysis_ready` and the
+   * returned graph, so withholding THROUGH it means the write, the receipt fact,
+   * the wire graph and the readiness stamp cannot disagree, and no new per-signal
+   * wiring can be forgotten.
+   */
+  const editTurnCarriesStrongerWarrant = hasStrongerThanTextWarrant(
+    {
+      turnSource: payload.source,
+      chipActionType: payload.chip?.action_type,
+      isConfirmResume:
+        recordedAnswer !== null || params.editInstructionOverride !== undefined,
+    },
+    GRAPH_MUTATING_HANDLER_IDS,
+  );
+  const ordinaryTextAuthorityWithheld =
+    !editTurnCarriesStrongerWarrant &&
+    resolveOrdinaryTextAuthority({
+      // The USER's own bytes, never `editInstruction` — that may be the
+      // repair-leg synthesised instruction, and authority is a fact about what
+      // the person typed (trap 14b: the record is not ours to rewrite).
+      message: payload.message,
+      modelNodeLabels: projectModelNodeLabels(parsedGraph),
+    }) === 'withheld_deliberation';
+
   // Structural honesty: every downstream success effect (persist, edit fact,
   // analysis_ready, returned graph) gates on the EFFECTIVE predicate so a
   // live-blocked verdict — or a part-accounting substitution block, or a
-  // withheld wrong-entity write — can never surface an applied-mutation signal.
+  // withheld wrong-entity write, or a turn that asked for a VIEW rather than an
+  // edit — can never surface an applied-mutation signal.
   const effectiveAppliedMutation =
     successfulAppliedMutation &&
     !gmBlockedApply &&
@@ -3679,7 +3758,10 @@ export async function dispatchEditGraph(
     // persists exactly as the measured buy turn did.
     !optionScopeUnresolved &&
     !optionOwnValueWithheld &&
-    !recordedAnswerNotLanded;
+    !recordedAnswerNotLanded &&
+    // A turn that asked what we THINK never authorised a write, so it may not
+    // surface an applied-mutation signal either.
+    !ordinaryTextAuthorityWithheld;
 
   // ⭐⭐ THE HEADLINE MAY NOT OUTRUN THE GATE. Measured on deployed `a3b0548d`,
   // wire-level, FRESH. One turn shipped BOTH of these:
@@ -3727,10 +3809,69 @@ export async function dispatchEditGraph(
         option_intervention_write_withheld: optionInterventionWriteWithheld,
         option_own_value_withheld: optionOwnValueWithheld,
         recorded_answer_not_landed: recordedAnswerNotLanded,
+        ordinary_text_authority_withheld: ordinaryTextAuthorityWithheld,
       },
       'edit_graph: withdrew an applied-changes headline for a turn that persisted nothing',
     );
     response = { ...response, assistant_text: EGRESS_FORBIDDEN_PHRASE_FALLBACK_TEXT };
+  }
+
+  // ⭐⭐ THE HALF THE USER SEES — and it must say what happened FIRST.
+  //
+  // The write is already withheld by the gate above. This replaces whatever the
+  // edit LLM narrated (a rename receipt, on the measured turn) with the
+  // product's OWN demotion copy. Composed by `buildMutationWarrantDemotionText`,
+  // the single authority for this sentence — NOT re-spelled here (trap 12), and
+  // not composed by the model, because on the witnessed turn the model narrated
+  // an "Applied" receipt for a change nobody asked for and a string built from a
+  // template cannot narrate.
+  //
+  // It opens "Nothing has been changed.", which is TRUE BY CONSTRUCTION at this
+  // point, and it OFFERS rather than refusing — the same shape the V5 lane uses,
+  // so the two paths now answer a user's question the same way. Per INV-3 it
+  // asserts nothing about what the user did or did not ask for: this gate WILL
+  // keep missing a real instruction sometimes (see KNOWN_DROPPED), and a reply
+  // that also asserted the user never spoke would turn every residual miss into
+  // an insult.
+  //
+  // ⚠ NOT a `suggested_actions` change. Emitting a chip here would need a
+  // synthesised instruction naming a change only the edit LLM's prose describes,
+  // and that is the fabricated-write class this whole gate exists to prevent.
+  // "Say the word and I will make it" is an affordance the next turn can honour
+  // through the ordinary path, which is the estate's own ratified idiom
+  // (the calibration confirm chip replays a MESSAGE, not a blanket exemption).
+  //
+  // ⭐⭐ `&& successfulAppliedMutation` IS LOAD-BEARING, AND A GUARD FOUND IT.
+  // Without it this branch fired on turns where the handler applied NOTHING and
+  // there was therefore nothing false to withdraw — and it CLOBBERED an
+  // authoritative reply. MEASURED, not reasoned: `edit-graph-dispatch-early-emit
+  // -authoritative.test.ts` went red on the pre-LLM intercept path, and an
+  // instrumented run printed `successfulAppliedMutation: false,
+  // effectiveAppliedMutation: false` — i.e. that turn was ALREADY a no-op at
+  // pristine, my conjunct changed nothing about its write, and the only thing
+  // this branch did was replace a correct Stage-1 coaching reply with a demotion
+  // notice about a change nobody proposed. The guard was working; the decision it
+  // demanded is recorded here rather than silenced by re-pinning the test.
+  //
+  // So it binds by IDENTITY to the thing it withdraws (CLAUDE.md trap 19): a
+  // write the handler REALLY produced and this gate is REALLY withholding —
+  // exactly the discipline the headline gate above already follows.
+  if (ordinaryTextAuthorityWithheld && successfulAppliedMutation) {
+    log.warn(
+      {
+        event: 'v5.edit_graph.ordinary_text_authority_withheld',
+        request_id: requestId,
+        scenario_id: payload.scenario_id,
+        // Counts and flags only — never the user's prose in telemetry.
+        graph_node_count: parsedGraph.nodes.length,
+        handler_applied_a_graph: editResult.appliedGraph != null,
+      },
+      'edit_graph: the turn asked for a view rather than an edit — write withheld, offering',
+    );
+    response = {
+      ...response,
+      assistant_text: buildMutationWarrantDemotionText('that change to your model', null),
+    };
   }
 
   if (optionInterventionWriteWithheld) {
