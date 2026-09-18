@@ -501,6 +501,10 @@ describe("D — the producer's declared_scale is never overwritten by this stage
       declared_scale: "raw_count",
     });
     handleUnreachableFactors(graph, "edge_type" as any);
+    // The declaration WINS here — and the warn still fires, because this stage's
+    // guess disagreeing with it is the signal that `declaredScaleOf` should be
+    // retired. A condition that only reported a CHANGED answer would be silent.
+    expect(factorNode(graph, "f_disagree").declared_scale).toBe("raw_count");
     const hits = warn.mock.calls.filter(
       (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_disagreement",
     );
@@ -508,8 +512,65 @@ describe("D — the producer's declared_scale is never overwritten by this stage
     expect(hits[0][0]).toMatchObject({
       node_id: "f_disagree",
       declared: "raw_count",
+      effective: "raw_count",
       inferred: "ratio",
+      basis: "declaration",
     });
+  });
+
+  /**
+   * ⭐⭐ THE THIRD RUNG, and the reason the first revision of this guard was
+   * WRONG: a declaration made at stage 2 must NOT beat a fact about the number
+   * as it stands at stage 4.
+   *
+   * `stages/enrich.ts` runs at stage 3 and rebuilds `node.data`, so a
+   * `declared_scale` the draft producer stamped can describe a number that has
+   * since been re-scaled. `cap` present means `value = raw_value / cap` — the
+   * number IS a proportion now, whatever the model meant when it wrote it, and
+   * every downstream consumer reads the number rather than the model's intent.
+   *
+   * The fixture forces the conflict: `cap` present (evidence says
+   * `unit_interval`) with a producer declaration of `raw_count`.
+   */
+  it("lets NORMALISATION EVIDENCE outrank the producer's declaration, and says so", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
+    const graph = statedFactor({
+      id: "f_rescaled",
+      value: 0.25,
+      unit: "£",
+      raw_value: 50_000,
+      cap: 200_000,
+      declared_scale: "raw_count",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_rescaled").declared_scale).toBe("unit_interval");
+    const hits = warn.mock.calls.filter(
+      (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_disagreement",
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0][0]).toMatchObject({
+      node_id: "f_rescaled",
+      declared: "raw_count",
+      effective: "unit_interval",
+      basis: "evidence",
+    });
+  });
+
+  /**
+   * THE OPPOSITE-DIRECTION TWIN of the rung above. Without evidence present,
+   * the declaration must still win over the magnitude guess — otherwise the
+   * three-way precedence has collapsed back into "this stage always wins",
+   * which is the defect the whole change removes.
+   */
+  it("keeps the declaration above the magnitude guess when there is no evidence", () => {
+    const graph = statedFactor({
+      id: "f_no_evidence",
+      value: 1.12,
+      unit: "%",
+      declared_scale: "raw_count",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_no_evidence").declared_scale).toBe("raw_count");
   });
 
   /**

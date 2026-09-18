@@ -381,6 +381,51 @@ function declaredScaleOf(
   return undefined;
 }
 
+/**
+ * ⭐⭐ THE NORMALISATION-EVIDENCE LIMBS OF {@link declaredScaleOf}, ALONE — and
+ * they are a different KIND of answer from the rest of that function.
+ *
+ * `declaredScaleOf` mixes two things its own comments already name apart:
+ *   · MAGNITUDE GUESSES — `unit === "%" && value > 1 -> ratio`, and `unit ===
+ *     "%"` within [0,1]. These are inferences about what a number probably
+ *     means, and they are what the draft producer's `value_scale` declaration
+ *     exists to replace.
+ *   · NORMALISATION EVIDENCE — a `cap`, or a `raw_value` that DIFFERS from the
+ *     value. In that function's own words: *"a producer-side FACT that this
+ *     value is a proportion … The relationship between value and raw_value is
+ *     different evidence, and it is the evidence this producer actually holds."*
+ *
+ * ⚠ WHY THE DIFFERENCE DECIDES PRECEDENCE, AND WHY GETTING IT WRONG IS SUBTLE.
+ * `stages/enrich.ts` runs at pipeline stage 3 and REBUILDS `node.data`;
+ * this repair stage is stage 4 (`unified-pipeline/index.ts:1032` then `:1079`).
+ * So by the time we read a `declared_scale` the draft producer stamped, the
+ * NUMBER IT DESCRIBED MAY HAVE BEEN RE-SCALED UNDERNEATH IT. The declaration
+ * says what the MODEL meant; the evidence says what the number IS, here, now —
+ * and every downstream consumer reads the number, not the model's intent.
+ *
+ * So the precedence is three-way, not two:
+ *   evidence  >  the producer's declaration  >  a magnitude guess
+ *
+ * The first revision of this guard had only two rungs and let a stale
+ * declaration beat a fact. Trap 21 one level in: "what the model meant" and
+ * "what this number is" are two questions, and the fix is to rank them, not to
+ * reconcile them.
+ */
+function normalisationEvidenceScale(
+  value: number,
+  cap: number | undefined,
+  rawValue: number | undefined,
+): "unit_interval" | undefined {
+  if (!Number.isFinite(value)) return undefined;
+  // Same domain gate as `declaredScaleOf` — outside [0,1] the evidence limbs do
+  // not apply there either, and a second spelling of that bound would be a
+  // mirror waiting to drift.
+  if (!(value >= 0 && value <= 1)) return undefined;
+  if (cap !== undefined) return "unit_interval";
+  if (rawValue !== undefined && rawValue !== value) return "unit_interval";
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -609,6 +654,13 @@ export function handleUnreachableFactors(
         data.cap,
         data.raw_value,
       );
+      // The FACT about this number as it stands at stage 4, which outranks a
+      // declaration made at stage 2 about a number stage 3 may have re-scaled.
+      const evidenceScale = normalisationEvidenceScale(
+        originalValue ?? NaN,
+        data.cap,
+        data.raw_value,
+      );
       // ⚠ THE PRODUCER'S VOCABULARY IS THREE-VALUED AND THIS STAGE'S IS TWO.
       // `declaredScaleOf` returns `unit_interval | ratio | undefined` — it can
       // NEVER return `raw_count` (0 occurrences in this file; contrast control:
@@ -631,25 +683,50 @@ export function handleUnreachableFactors(
       // telemetry payloads repo-wide. A non-zero rate here is the signal that
       // `declaredScaleOf` must be RETIRED, not tuned — which is the deletion this
       // guard is deliberately deferring.
+      // ⭐ THREE-WAY PRECEDENCE — see {@link normalisationEvidenceScale}.
+      const effectiveScale = evidenceScale ?? producerScale ?? inferredScale;
+      // ⚠ WARN ON EITHER DISAGREEMENT, NOT ONLY ON THE ONE THAT CHANGES THE
+      // ANSWER. Two different facts are worth knowing and they are not the same
+      // event:
+      //   · the declaration LOST to normalisation evidence — stage 3 re-scaled
+      //     a number stage 2 had declared;
+      //   · the declaration WON over this stage's magnitude guess — which means
+      //     `declaredScaleOf` would have been wrong here, and is the signal that
+      //     it should be retired rather than tuned.
+      // A condition keyed only on `effective !== declared` sees the first and is
+      // blind to the second, which is the more common and the more actionable.
       if (
         producerScale !== undefined &&
-        inferredScale !== undefined &&
-        producerScale !== inferredScale
+        ((effectiveScale !== producerScale) ||
+          (inferredScale !== undefined && inferredScale !== producerScale))
       ) {
         log.warn(
           {
             event: "cee.repair.declared_scale_disagreement",
             node_id: node.id,
             declared: producerScale,
+            effective: effectiveScale,
             inferred: inferredScale,
+            // WHICH authority won, so a reader never has to infer it from the
+            // values. `evidence` means the enricher re-scaled a number the model
+            // had already declared — a producer-vs-pipeline conflict, and the
+            // more serious of the two. `declaration` means the producer won and
+            // this stage's guess was overruled.
+            basis:
+              evidenceScale !== undefined
+                ? "evidence"
+                : effectiveScale === producerScale
+                  ? "declaration"
+                  : "magnitude_inference",
           },
-          "[repair] the draft producer's declared_scale disagrees with this stage's " +
-            "magnitude inference; the DECLARATION wins. A standing non-zero rate here means " +
-            "declaredScaleOf must be retired, not tuned.",
+          "[repair] the draft producer's declared_scale is not the effective one. " +
+            "basis=evidence means stage 3 re-scaled a number stage 2 had declared; " +
+            "basis=magnitude_inference means this stage's guess was preferred, which it " +
+            "should never be — a standing non-zero rate on either is a defect, not noise.",
         );
       }
-      if (producerScale === undefined && inferredScale !== undefined) {
-        (node as any).declared_scale = inferredScale;
+      if (effectiveScale !== undefined && producerScale !== effectiveScale) {
+        (node as any).declared_scale = effectiveScale;
       }
       // THE EFFECTIVE DECLARATION — the producer's where it spoke, this stage's
       // inference otherwise. Read below by `withholdUnit`, which suppresses the
@@ -658,7 +735,7 @@ export function handleUnreachableFactors(
       // declares `ratio` needs the same suppression, and reading the stale
       // inference here would have withheld on one authority while stamping the
       // other.
-      const scale = producerScale ?? inferredScale;
+      const scale = effectiveScale;
 
       // ⚠ THE UNIT IS WITHHELD ON RATIO SCALE, DELIBERATELY, AND IT IS RECORDED.
       //
