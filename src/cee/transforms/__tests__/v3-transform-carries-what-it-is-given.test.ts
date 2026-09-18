@@ -255,6 +255,13 @@ function fullV1Node(kind: string, data: V1FactorData | V1OptionData): Required<V
     goal_threshold_raw: 80,
     goal_threshold_unit: '%',
     goal_threshold_cap: 100,
+    // Carried under its own name (schema-v3.ts:348-351), so it needs no
+    // reshape entry and no pinned-absence entry — adding either would RED the
+    // stale-claim assertions. `metric_scale` is the rule this fixture's own
+    // numbers describe: a percentage normalising against its 0-100 scale
+    // (80 / 100 = 0.8). The carry is conditional on `goal_threshold_cap`
+    // being present too, which the line above satisfies.
+    goal_threshold_cap_provenance: 'metric_scale',
     goal_threshold_frame: 'level',
     goal_baseline: 0.5,
     goal_baseline_raw: 50,
