@@ -337,6 +337,14 @@ that way: there is nothing to fill in and no count to satisfy. A \`risk\` that
 names a POSSIBILITY rather than a measure — "our tech lead leaves", "the vendor
 misses the deadline" — has no level today, so leave \`value\` out; only a risk
 that IS a measured quantity carries one.
+A LIKELIHOOD IS NOT A LEVEL. If the only number you can give for a risk is how
+LIKELY it is to happen — "a 30% chance the vendor misses the deadline", "we think
+there is a one-in-five chance of this" — leave \`value\` out. \`value\` is the level
+a measured quantity SITS AT, never the chance of an event occurring. The test is
+what the number answers: "how big is it right now" is a level and belongs in
+\`value\`; "how likely is it" is not, whatever unit it wears. A percentage can be
+either — a churn rate of 4% is a measure and carries a level; a 4% chance of
+losing the contract is not and carries none.
 
 Keep the user's stated requirements intact. Do not relax a deadline, budget or
 other limit without their invitation, or claim a proposal meets it when that is

@@ -734,9 +734,35 @@ const SUPERSEDED_V19_INSTRUCTION_BYTES = 18083;
  * Re-pointing this literal would let those findings read as findings about v20 —
  * the version written to remove their cause.
  */
+/**
+ * ⚠ RE-PINNED WITHIN v20, BEFORE v20 EVER SHIPPED — so no measurement is being
+ * re-attributed. The first v20 bytes (`2d54395e…` / 18749) were never served and
+ * never measured against: the PR carrying them was still open when the carve-out
+ * defect below was found, so there is no finding anywhere that belongs to them.
+ * That is the ONLY condition under which re-pointing a version literal is honest,
+ * and it is why the superseded values below are kept rather than replaced.
+ *
+ * WHAT CHANGED AND WHY: the possibility-vs-measure carve-out had a blind spot.
+ * Its examples were all UNNUMBERED possibilities ("our tech lead leaves"), so it
+ * never addressed a possibility carrying a LIKELIHOOD — while the positive
+ * guidance invites a value whenever the level is "sayable on a scale", and a 30%
+ * chance is sayable. Measured by Core on the live corpus, negative control 0:
+ * of the 135 risk nodes carrying any `observed_state`, **58 (43%) carry a
+ * probability-shaped unit**. v20.1 adds the discriminating TEST rather than more
+ * examples, because more examples would share the same blind spot.
+ *
+ * ⚠ NOT YET VALIDATED AGAINST A MODEL. Whether the test discriminates FOR A
+ * MODEL cannot be settled by reading it (CLAUDE.md trap 22c — this is the second
+ * attempt at this predicate from the same head that got it wrong first). It is
+ * shipped anyway because it is strictly better than the wording it replaces and
+ * because **only 135 of 28,055 risks carry any value today**, so the population
+ * being wrong about is small and growing — the cheapest moment to be wrong.
+ * The corpus run is rowed with an explicit trigger: when Paul lifts the testing
+ * pause.
+ */
 const PREREGISTERED_V20_INSTRUCTION_SHA256 =
-  "2d54395ec46d84c2db8523552e0d2553e0947e119090a7c98d9b53918e014d2f";
-const PREREGISTERED_V20_INSTRUCTION_BYTES = 18749;
+  "f32383ada3257feb0664cb8e242027b9bf9962f551329b6bcab6627d81a015a6";
+const PREREGISTERED_V20_INSTRUCTION_BYTES = 19357;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
