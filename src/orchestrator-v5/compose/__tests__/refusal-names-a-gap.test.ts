@@ -77,25 +77,47 @@ const DRAWS = JSON.parse(
 ) as Record<string, { draft_graph: GraphV3T }>;
 
 /** The mute-refusal option, by identity. Both constants are the capture's. */
-const MUTE_OPTION_ID = 'e405d56a';
-const MUTE_OPTION_LABEL = 'Status Quo: Hold current strategy';
+const MUTE_OPTION_ID = '4abad64d';
+const MUTE_OPTION_LABEL =
+  'double down on enterprise sales (higher margins but longer cycles and more headcount)';
+/** The capture's declared status quo — kept so the model has two options. */
+const BASELINE_OPTION_ID = 'e405d56a';
 
 /**
- * Draw-5 restricted to the one option the capture graded `needs_user_mapping`.
- * The option, its label and its (empty) interventions are all the capture's;
- * the restriction removes the OTHER options, whose factor-level blockers are
- * what stop the whole draw from showing the mute case.
+ * Draw-5 restricted to a NON-baseline option the capture graded
+ * `needs_user_mapping`, plus the declared status quo. Every label, id and
+ * (empty) intervention map is the capture's; the restriction removes the OTHER
+ * options, whose factor-level blockers are what stop the whole draw from
+ * showing the mute case, and it drops the mute option's own option→factor edges
+ * so nothing else claims it.
+ *
+ * ⚠⚠ RE-POINTED 18 Sep 2026 (the held-baseline lane), AND THE FILE'S SUBJECT IS
+ * UNCHANGED. This suite is about the COMPOSER: an assessor that authors a
+ * `readiness_issues` sentence and a composer that used to drop it. Its original
+ * exemplar was `e405d56a` "Status Quo: Hold current strategy", which carries
+ * `is_baseline: true` ON THE CAPTURE — and that option is now `ready`, because a
+ * declared status quo is held at its factors' observed values and has no mapping
+ * to supply. (It is also why the previous one-option graph now refuses with
+ * "The model has fewer than two options." — a TRUE and answerable sentence in
+ * place of an unanswerable one.) The mute shape it needs — `blockers` EMPTY and
+ * exactly one option-scoped naming issue — is reproduced here on a non-baseline
+ * option from the same capture, asserted in the precondition below.
  */
 function mutedReadinessPayload() {
   const graph = JSON.parse(JSON.stringify(DRAWS['draw-5'].draft_graph)) as GraphV3T;
   const keptNodes = (graph.nodes as NodeV3T[]).filter(
-    (n) => n.kind !== 'option' || (n as unknown as { id: string }).id === MUTE_OPTION_ID,
+    (n) =>
+      n.kind !== 'option'
+      || [MUTE_OPTION_ID, BASELINE_OPTION_ID].includes((n as unknown as { id: string }).id),
   );
   const keptIds = new Set(keptNodes.map((n) => (n as unknown as { id: string }).id));
+  const kindById = new Map(
+    (keptNodes as NodeV3T[]).map((n) => [(n as unknown as { id: string }).id, n.kind] as const),
+  );
   graph.nodes = keptNodes as never;
-  graph.edges = (graph.edges as unknown as Array<{ from: string; to: string }>).filter(
-    (e) => keptIds.has(e.from) && keptIds.has(e.to),
-  ) as never;
+  graph.edges = (graph.edges as unknown as Array<{ from: string; to: string }>)
+    .filter((e) => keptIds.has(e.from) && keptIds.has(e.to))
+    .filter((e) => !(e.from === MUTE_OPTION_ID && kindById.get(e.to) === 'factor')) as never;
   return assessCanonicalAnalysisReadiness(graph).analysisReady;
 }
 
@@ -129,6 +151,13 @@ describe('PRECONDITION — the capture reproduces the staging row', () => {
   it('the assessor states NO blockers and DOES state a naming issue', () => {
     const readiness = mutedReadinessPayload();
     expect(readiness?.blockers ?? []).toHaveLength(0);
+
+    // PRECONDITION, PINNED IN-TEST: the mute option must NOT be the declared
+    // baseline, or it would be `ready` and author no naming issue at all —
+    // every assertion below would then be vacuous rather than failing.
+    const mute = (readiness?.options ?? []).find((o) => o.option_id === MUTE_OPTION_ID);
+    expect((mute as unknown as { is_baseline?: boolean } | undefined)?.is_baseline).not.toBe(true);
+    expect(mute?.status).toBe('needs_user_mapping');
 
     const naming = (readiness?.readiness_issues ?? []).filter(
       (i) => i.option_id === MUTE_OPTION_ID,

@@ -98,13 +98,24 @@ describe("analysis_ready built-event counters partition the option set", () => {
     },
   );
 
-  it("draw-9 — every option is needs_encoding, so the mapping counter reads zero", () => {
+  it("draw-9 — every NON-BASELINE option is needs_encoding, so the mapping counter reads zero", () => {
     // The measured double-count: this read 4 on 4 options that were ALSO all
     // counted as needing encoding. Bound by identity to the statuses, not to a
     // bare number, so it cannot pass on a coincidence.
+    //
+    // ⚠ AMENDED (held-baseline lane, 18 Sep 2026): draw-9's `cbf30a46`
+    // "Status Quo: Hold current strategy mix" carries `is_baseline: true` on
+    // the capture and now reports `ready` — a baseline is held at its factors'
+    // observed values, so it needs no effect value in EITHER spelling. The
+    // counter claim this test exists for is unchanged; the arms are now named
+    // per option so the partition stays legible.
     const { payload, counters } = buildAndCapture("draw-9");
-    expect(payload.options.every((o) => o.status === "needs_encoding")).toBe(true);
-    expect(counters.optionsNeedingEncoding).toBe(payload.options.length);
+    const byId = new Map(payload.options.map((o) => [o.id, o.status]));
+    expect(byId.get("cbf30a46")).toBe("ready");
+    for (const id of ["4abad64d", "c94b4086", "e755ec33"]) {
+      expect(byId.get(id)).toBe("needs_encoding");
+    }
+    expect(counters.optionsNeedingEncoding).toBe(payload.options.length - 1);
     expect(counters.optionsNeedingMapping).toBe(0);
   });
 
