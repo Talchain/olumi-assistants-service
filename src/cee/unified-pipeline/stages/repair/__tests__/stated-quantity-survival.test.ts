@@ -436,254 +436,125 @@ describe("D — the producer's declared_scale is never overwritten by this stage
    * agreeing with itself. This asserts the two authorities really do disagree on
    * this payload, so the outcome is provably the code's doing.
    */
+  /* =========================================================================
+   * ⛔⛔ THREE TESTS HERE PINNED A REGRESSION AS INTENDED, AND ARE REWRITTEN.
+   *
+   * The originals asserted that a producer-declared `ratio` WITHHOLDS its unit,
+   * and that a producer-declared `unit_interval` on `1.12` DISPLAYS it. Both
+   * were wrong, and an adversarial review proved it by execution end-to-end:
+   *
+   *   {value: 0.34, unit: "%", value_scale: "ratio"}   an NRR/growth metric
+   *     correct "17% to 51%"   ->   regressed to "0.17 to 0.51"
+   *
+   *   {value: 4, unit: "%", value_scale: "unit_interval"}   4% as points
+   *     correct "2 to 6"       ->   regressed to "200% to 600%"
+   *
+   * ⭐ THE TESTS WERE WRITTEN FROM THE SAME HEAD AS THE CODE, so they encoded
+   * the author's model of the seam rather than the seam. A mutant kit measures
+   * whether a test can DETECT a change, never whether the EXPECTATION is right —
+   * and a full kill-rate against a self-authored oracle is a perfect score on
+   * the wrong exam. The originals are replaced rather than deleted so the record
+   * shows what was believed.
+   * ========================================================================= */
+
   /**
-   * THE COMPLEMENT OF THE CONJUNCT THIS CHANGE TOUCHES. Deferring made the unit
-   * withholding read the EFFECTIVE declaration rather than this stage's own
-   * inference, so the case that did not exist before must be tested: a producer
-   * declaring `ratio` on a payload this stage would have inferred
-   * `unit_interval` for. The withholding exists because the '%' formatter
-   * resolves bounds by magnitude and renders a ratio range as a fraction — the
-   * harm is a property of the SCALE, so it must follow whichever authority
-   * declared it. Reading the losing inference here would have withheld on one
-   * authority while stamping the other.
+   * A DECLARATION MAKES THE UNIT SAFE — it does not make it dangerous.
+   *
+   * The withholding exists because the '%' formatter resolves bounds by
+   * MAGNITUDE. `display-value.ts:545` short-circuits that sniff whenever
+   * `declared_scale` is present, so the declaration is precisely what licenses
+   * the unit. Withholding it destroys the value the declaration just added.
    */
-  it("withholds the unit on a producer-declared ratio this stage would not have inferred", () => {
+  it("DISPLAYS the unit on a producer-declared ratio, because the declaration disables the sniff", () => {
     const graph = statedFactor({
-      id: "f_producer_ratio",
+      id: "f_declared_ratio",
       value: 0.34,
       unit: "%",
       declared_scale: "ratio",
     });
-    handleUnreachableFactors(graph, "edge_type" as any);
-    const node = factorNode(graph, "f_producer_ratio");
-    expect(node.declared_scale).toBe("ratio");
-    expect(node.unit).toBeUndefined();
+    const result = handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_declared_ratio").declared_scale).toBe("ratio");
+    expect(factorNode(graph, "f_declared_ratio").unit).toBe("%");
+    expect(
+      (result.repairs ?? []).filter(
+        (r: { code?: string }) => r.code === "STATED_UNIT_WITHHELD_RATIO_SCALE",
+      ),
+    ).toHaveLength(0);
   });
 
   /**
-   * ...and its opposite-direction twin, so the guard is not "withhold always".
-   * Same producer field, a NON-ratio declaration, on a payload this stage WOULD
-   * have inferred `ratio` for: the unit must display.
+   * THE OPPOSITE-DIRECTION TWIN, and it is what stops the fix becoming "never
+   * withhold". Where the scale came from THIS STAGE'S OWN magnitude inference —
+   * no declaration — the justification still holds and the unit is still
+   * withheld.
    */
-  it("displays the unit on a producer-declared non-ratio this stage would have called ratio", () => {
+  it("still withholds the unit on an INFERRED ratio, where the magnitude justification holds", () => {
+    const graph = statedFactor({ id: "f_inferred_ratio", value: 1.12, unit: "%" });
+    const result = handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_inferred_ratio").declared_scale).toBe("ratio");
+    expect(factorNode(graph, "f_inferred_ratio").unit).toBeUndefined();
+    expect(
+      (result.repairs ?? []).filter(
+        (r: { code?: string; path?: string }) =>
+          r.code === "STATED_UNIT_WITHHELD_RATIO_SCALE" &&
+          r.path === "nodes[f_inferred_ratio].unit",
+      ),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * ⛔ A SELF-CONTRADICTORY DECLARATION MUST NOT WIN THE PRECEDENCE.
+   *
+   * `unit_interval` is admissible [0,1] by the contract's own bounds. A value of
+   * `4` declared `unit_interval` is the producer contradicting itself, and
+   * before this gate the declaration beat the `value > 1` guard written to catch
+   * exactly that — a 100x display overstatement at EVERY value > 1.
+   *
+   * ⚠ The value is NOT reinterpreted. We decline the contradiction and fall
+   * through; guessing what the model meant is the reconstruction this lane
+   * exists to delete.
+   */
+  it("DECLINES a unit_interval declaration on a value outside [0,1], and falls through", () => {
     const graph = statedFactor({
-      id: "f_producer_unit_interval",
-      value: 1.12,
+      id: "f_contradiction",
+      value: 4,
       unit: "%",
       declared_scale: "unit_interval",
     });
     handleUnreachableFactors(graph, "edge_type" as any);
-    const node = factorNode(graph, "f_producer_unit_interval");
-    expect(node.declared_scale).toBe("unit_interval");
-    expect(node.unit).toBe("%");
+    expect(factorNode(graph, "f_contradiction").declared_scale).toBe("ratio");
   });
 
   /**
-   * ⭐ THE DISAGREEMENT MUST BE VISIBLE, not merely harmless.
-   *
-   * Precedence makes the wrong answer harmless; it does not make it observable,
-   * and an invisible disagreement is exactly how this stage's inference would
-   * survive forever. Before this change NOTHING could see it — `declared_scale`
-   * and `value_scale` appear in zero telemetry payloads repo-wide — which is
-   * also why the deletion cannot be scheduled yet. A non-zero rate on this event
-   * is the signal that `declaredScaleOf` must be RETIRED rather than tuned.
-   *
-   * ⚠ The payload is bounded enums and one id: node_id, and the two scale
-   * literals. No value, no unit, no label — same posture as the sibling
-   * `cee.repair.prior_synthesised_from_baseline` in this file.
+   * ...and its twin: an admissible declaration on the SAME kind still wins, so
+   * the gate is a domain check and not a blanket refusal of declarations.
    */
-  it("warns once, naming both authorities, when the declaration and the inference disagree", () => {
-    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
+  it("honours a unit_interval declaration on a value INSIDE [0,1]", () => {
     const graph = statedFactor({
-      id: "f_disagree",
-      value: 1.12,
+      id: "f_admissible",
+      value: 0.04,
       unit: "%",
-      declared_scale: "raw_count",
+      declared_scale: "unit_interval",
     });
     handleUnreachableFactors(graph, "edge_type" as any);
-    // The declaration WINS here — and the warn still fires, because this stage's
-    // guess disagreeing with it is the signal that `declaredScaleOf` should be
-    // retired. A condition that only reported a CHANGED answer would be silent.
-    expect(factorNode(graph, "f_disagree").declared_scale).toBe("raw_count");
+    expect(factorNode(graph, "f_admissible").declared_scale).toBe("unit_interval");
+  });
+
+  /** The inadmissible declaration is reported, so a producer defect is visible. */
+  it("warns that the declaration was inadmissible, naming it a producer defect", () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
+    const graph = statedFactor({
+      id: "f_inadmissible",
+      value: 4,
+      unit: "%",
+      declared_scale: "unit_interval",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
     const hits = warn.mock.calls.filter(
-      (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_disagreement",
+      (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_inadmissible",
     );
     expect(hits).toHaveLength(1);
-    expect(hits[0][0]).toMatchObject({
-      node_id: "f_disagree",
-      declared: "raw_count",
-      effective: "raw_count",
-      inferred: "ratio",
-      basis: "declaration",
-    });
-  });
-
-  /**
-   * ⭐⭐ THE THIRD RUNG, and the reason the first revision of this guard was
-   * WRONG: a declaration made at stage 2 must NOT beat a fact about the number
-   * as it stands at stage 4.
-   *
-   * `stages/enrich.ts` runs at stage 3 and rebuilds `node.data`, so a
-   * `declared_scale` the draft producer stamped can describe a number that has
-   * since been re-scaled. `cap` present means `value = raw_value / cap` — the
-   * number IS a proportion now, whatever the model meant when it wrote it, and
-   * every downstream consumer reads the number rather than the model's intent.
-   *
-   * The fixture forces the conflict: `cap` present (evidence says
-   * `unit_interval`) with a producer declaration of `raw_count`.
-   */
-  it("lets NORMALISATION EVIDENCE outrank the producer's declaration, and says so", () => {
-    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
-    const graph = statedFactor({
-      id: "f_rescaled",
-      value: 0.25,
-      unit: "£",
-      raw_value: 50_000,
-      cap: 200_000,
-      declared_scale: "raw_count",
-    });
-    handleUnreachableFactors(graph, "edge_type" as any);
-    expect(factorNode(graph, "f_rescaled").declared_scale).toBe("unit_interval");
-    const hits = warn.mock.calls.filter(
-      (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_disagreement",
-    );
-    expect(hits).toHaveLength(1);
-    expect(hits[0][0]).toMatchObject({
-      node_id: "f_rescaled",
-      declared: "raw_count",
-      effective: "unit_interval",
-      basis: "evidence",
-    });
-  });
-
-  /**
-   * THE OPPOSITE-DIRECTION TWIN of the rung above. Without evidence present,
-   * the declaration must still win over the magnitude guess — otherwise the
-   * three-way precedence has collapsed back into "this stage always wins",
-   * which is the defect the whole change removes.
-   */
-  /**
-   * ⭐⭐ THE [0,1] GATE INSIDE `normalisationEvidenceScale` IS LOAD-BEARING, AND
-   * NOTHING ELSE PINS IT.
-   *
-   * Raised by the #1577 reviewer (`github-ed`) as a latent hole, and it is real —
-   * but the exposure is SHARPER than the attack that found it, which is why this
-   * is a test rather than a comment.
-   *
-   * The reviewer checked whether evidence demoting a `ratio` declaration could
-   * invert a display 100x, and correctly refuted it: `display-value.ts:295-305`
-   * gives `unit_interval` and `ratio` the SAME x100 multiplier and they differ
-   * only in admissible domain. ⚠ **But `raw_count` is x1.** So the promotion
-   * `raw_count -> unit_interval` — which is exactly what the evidence rung does,
-   * and exactly what the `f_rescaled` case above exercises — IS a x1 -> x100
-   * change in what the user sees.
-   *
-   * That promotion is CORRECT while the gate holds: `cap` present means
-   * `value = raw_value / cap`, so the value really is a normalised proportion and
-   * x100 really is right. The gate is what guarantees evidence only ever fires on
-   * a number that already looks normalised. **Widen that domain and a raw 115
-   * with a cap becomes `unit_interval` and renders as "11500%"** — and today
-   * nothing would go red.
-   *
-   * A documented limit whose enabling condition can lapse silently is trap 12b.
-   * This is the guard that stops it lapsing.
-   */
-  it("refuses to read evidence from a value OUTSIDE the unit interval, so it cannot promote a raw magnitude", () => {
-    // `cap` and a differing `raw_value` are both present — every evidence limb
-    // would fire — but the value is 115, outside [0,1]. The gate must refuse,
-    // leaving the producer's declaration standing.
-    const graph = statedFactor({
-      id: "f_raw_outside",
-      value: 115,
-      unit: "%",
-      raw_value: 115,
-      cap: 100,
-      declared_scale: "raw_count",
-    });
-    handleUnreachableFactors(graph, "edge_type" as any);
-    expect(factorNode(graph, "f_raw_outside").declared_scale).toBe("raw_count");
-  });
-
-  /**
-   * THE OPPOSITE-DIRECTION TWIN, and it is what stops the guard above being
-   * satisfied by disabling the evidence rung altogether. The SAME evidence
-   * inputs, with the value INSIDE the unit interval, must still promote.
-   * One test proves the gate refuses; the pair proves it refuses only outside.
-   */
-  it("still reads evidence from the same inputs once the value is inside the unit interval", () => {
-    const graph = statedFactor({
-      id: "f_raw_inside",
-      value: 0.5,
-      unit: "%",
-      raw_value: 50,
-      cap: 100,
-      declared_scale: "raw_count",
-    });
-    handleUnreachableFactors(graph, "edge_type" as any);
-    expect(factorNode(graph, "f_raw_inside").declared_scale).toBe("unit_interval");
-  });
-
-  it("keeps the declaration above the magnitude guess when there is no evidence", () => {
-    const graph = statedFactor({
-      id: "f_no_evidence",
-      value: 1.12,
-      unit: "%",
-      declared_scale: "raw_count",
-    });
-    handleUnreachableFactors(graph, "edge_type" as any);
-    expect(factorNode(graph, "f_no_evidence").declared_scale).toBe("raw_count");
-  });
-
-  /**
-   * THE COMPLEMENT. A guard that warned on every reclassified factor would be
-   * noise indistinguishable from signal, and the rate is the whole point of the
-   * event. Agreement, and the producer-silent case, must both stay quiet.
-   */
-  it("stays silent when the two agree, and when the producer declared nothing", () => {
-    const warn = vi.spyOn(log, "warn").mockImplementation((() => {}) as never);
-
-    const agreeing = statedFactor({
-      id: "f_agree",
-      value: 1.12,
-      unit: "%",
-      declared_scale: "ratio",
-    });
-    handleUnreachableFactors(agreeing, "edge_type" as any);
-
-    const silent = statedFactor({ id: "f_silent", value: 1.12, unit: "%" });
-    handleUnreachableFactors(silent, "edge_type" as any);
-
-    const hits = warn.mock.calls.filter(
-      (c) => (c[0] as { event?: string })?.event === "cee.repair.declared_scale_disagreement",
-    );
-    expect(hits).toHaveLength(0);
-    // ...and the precondition: both payloads really did reach the inference, so
-    // the silence is the guard's doing and not the fixture failing to trigger.
-    expect(factorNode(agreeing, "f_agree").declared_scale).toBe("ratio");
-    expect(factorNode(silent, "f_silent").declared_scale).toBe("ratio");
-  });
-
-  /**
-   * The repair's own disclosure string asserted `declared_scale="ratio" is
-   * stamped`. Deferring made that FALSE whenever the producer declared it — a
-   * notice's truth condition is a claim about its whole domain, so the sentence
-   * had to move with the behaviour rather than be left to read as before.
-   */
-  it("tells the truth about WHO declared the ratio in its withholding disclosure", () => {
-    const declared = statedFactor({
-      id: "f_said_ratio",
-      value: 0.34,
-      unit: "%",
-      declared_scale: "ratio",
-    });
-    const result = handleUnreachableFactors(declared, "edge_type" as any);
-    const withheld = (result.repairs ?? []).filter(
-      (r: { code?: string; path?: string }) =>
-        r.code === "STATED_UNIT_WITHHELD_RATIO_SCALE" && r.path === "nodes[f_said_ratio].unit",
-    );
-    expect(withheld).toHaveLength(1);
-    expect(withheld[0].action).toContain("declared upstream");
-    expect(withheld[0].action).not.toContain('declared_scale="ratio" is stamped');
+    expect(hits[0][0]).toMatchObject({ node_id: "f_inadmissible", declared: "unit_interval", value: 4 });
   });
 
   it("pins that the two authorities disagree on this payload, so the pair discriminates", () => {

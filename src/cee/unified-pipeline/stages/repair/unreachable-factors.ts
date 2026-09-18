@@ -683,8 +683,58 @@ export function handleUnreachableFactors(
       // telemetry payloads repo-wide. A non-zero rate here is the signal that
       // `declaredScaleOf` must be RETIRED, not tuned — which is the deletion this
       // guard is deliberately deferring.
+      // ⛔⛔ A DECLARATION ONLY WINS IF THE VALUE IS ADMISSIBLE UNDER IT.
+      //
+      // MY OWN REGRESSION, shipped in the previous commit and caught by an
+      // adversarial review, PROVEN BY EXECUTION in both directions:
+      //
+      //   {value: 4, unit: "%", value_scale: "unit_interval"}
+      //     BASE rendered "2 to 6"   ->   HEAD rendered "200% to 600%"
+      //
+      // I gave the declaration precedence with NO admissible-domain check, so a
+      // SELF-CONTRADICTORY declaration beat the `value > 1` guard that exists to
+      // catch it. It fires at EVERY value > 1, not at exotic inputs — and the
+      // draft prompt itself manufactures the contradiction: `instruction.ts:279`
+      // says *"Under `unit: '%'` alone, `4` and `0.04` are both well formed"*
+      // while pairing `unit_interval` with "a share or a bounded percentage". A
+      // model reasoning "churn is a bounded percentage -> unit_interval" and
+      // writing `4` produces exactly this, and nothing between the projector and
+      // this stage cross-validates the pair.
+      //
+      // THE BOUNDS ARE THE CONTRACT'S, NOT MINE (`DECLARED_SCALE_BOUNDS`,
+      // @talchain/schemas): `unit_interval` [0,1] · `ratio` [0,+inf) ·
+      // `raw_count` [0,+inf). A declaration whose own value falls outside its
+      // declared domain is not a declaration this stage can honour — it is a
+      // producer contradicting itself, and the honest response is to fall
+      // through to the evidence/inference rungs rather than to believe it.
+      //
+      // ⚠ WHY THIS IS A GATE AND NOT A CORRECTION. We do NOT reinterpret the
+      // number (a `unit_interval` declaration on `4` is not silently read as
+      // `ratio`); we only decline to let the contradiction win the precedence.
+      // Guessing what the model meant is the reconstruction this whole lane
+      // exists to delete.
+      const producerScaleAdmissible =
+        producerScale !== undefined &&
+        Number.isFinite(originalValue ?? NaN) &&
+        (producerScale === "unit_interval"
+          ? (originalValue as number) >= 0 && (originalValue as number) <= 1
+          : (originalValue as number) >= 0);
+      if (producerScale !== undefined && !producerScaleAdmissible) {
+        log.warn(
+          {
+            event: "cee.repair.declared_scale_inadmissible",
+            node_id: node.id,
+            declared: producerScale,
+            value: originalValue,
+          },
+          "[repair] the draft producer declared a scale its own value is not admissible under; " +
+            "the declaration is DECLINED rather than reinterpreted, and the value falls through to " +
+            "evidence/inference. A non-zero rate here is a PRODUCER defect, not a repair one.",
+        );
+      }
       // ⭐ THREE-WAY PRECEDENCE — see {@link normalisationEvidenceScale}.
-      const effectiveScale = evidenceScale ?? producerScale ?? inferredScale;
+      const effectiveScale =
+        evidenceScale ?? (producerScaleAdmissible ? producerScale : undefined) ?? inferredScale;
       // ⚠ WARN ON EITHER DISAGREEMENT, NOT ONLY ON THE ONE THAT CHANGES THE
       // ANSWER. Two different facts are worth knowing and they are not the same
       // event:
@@ -780,7 +830,43 @@ export function handleUnreachableFactors(
       // two branches read as independent conditions when they are in fact the
       // two halves of one decision. Nested, the shape says what it does: a
       // stated unit either displays or is withheld-and-recorded.
-      const withholdUnit = scale === "ratio";
+      // ⛔ THE SECOND HALF OF THE SAME REGRESSION, opposite direction, also
+      // proven by execution: a CORRECTLY declared `ratio` inside [0,1] — an NRR
+      // or growth metric at 34%, which `instruction.ts:275` explicitly tells the
+      // model to encode as `ratio` — had its unit withheld here, so
+      //
+      //   {value: 0.34, unit: "%", value_scale: "ratio"}
+      //     BASE rendered "17% to 51%"   ->   HEAD rendered "0.17 to 0.51"
+      //
+      // The user stated a percentage and the card showed bare decimals, which is
+      // the harm this file's own comments name.
+      //
+      // ⚠ AND THE WITHHOLDING'S RECORDED JUSTIFICATION IS VOID ONCE A
+      // DECLARATION EXISTS. It says the '%' formatter "resolves bounds by
+      // MAGNITUDE and would render this range as a fraction". That is true of
+      // the sniff — and `display-value.ts:545` SHORT-CIRCUITS the sniff when
+      // `declared_scale` is present (`percentMultiplierFromDeclaredScale`).
+      // Verified by execution with a contrast control: the genuinely undecidable
+      // straddle [0.5, 1.5] returns `undefined` with no declaration (the sniff
+      // correctly declining) and "50% to 150%" WITH a `ratio` declaration. So
+      // the declaration is precisely what makes the unit SAFE to display, and
+      // withholding it destroys the value the declaration just added.
+      //
+      // Withhold only where the scale came from this stage's own magnitude
+      // inference, which is the case the justification was written for.
+      // ⚠⚠ KEYED ON THE ADMISSIBLE DECLARATION, NOT THE RAW ONE. My first attempt
+      // at this fix wrote `producerScale === undefined`, which let a DECLINED
+      // declaration suppress the withholding and so reintroduced the 100x
+      // overstatement it was written to remove: `{value: 4, unit: "%",
+      // value_scale: "unit_interval"}` fell through to an inferred `ratio`, and
+      // then displayed the unit anyway -> "200% to 600%". The unit tests all
+      // passed, because they assert whether `unit` is present and not what the
+      // user READS. Only an end-to-end render caught it.
+      //
+      // The rule the justification actually supports: withhold whenever the
+      // `ratio` came from THIS STAGE'S MAGNITUDE INFERENCE — which includes the
+      // case where a declaration existed and was declined as inadmissible.
+      const withholdUnit = scale === "ratio" && !producerScaleAdmissible;
       if (data.unit !== undefined) {
         if (!withholdUnit) {
           (node as any).unit = data.unit;
