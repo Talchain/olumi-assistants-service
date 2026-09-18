@@ -4035,7 +4035,7 @@ export async function runTurnExecutor(
         const appliedResponse = composeAnswer({
           answerKind: 'functional',
           assistant_text:
-            `Confirmed — I applied ${written} estimated ${written === 1 ? 'value' : 'values'} in one action. `
+            `Confirmed. I applied ${written} estimated ${written === 1 ? 'value' : 'values'} in one action. `
             + `${written === 1 ? 'It is' : 'Each is'} marked as an AI estimate you reviewed, not as a figure you stated, `
             + `so that difference stays visible for the rest of this model's life. `
             + (declined > 0
