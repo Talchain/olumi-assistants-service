@@ -30,7 +30,25 @@
  *
  * ## What this file is NOT
  *
- * It is not a guard on a consumer, because **there is no consumer**. Derived
+ * ⚠⚠ UPDATED — **THE CONSUMER NOW EXISTS**, and this file is what made it safe
+ * to build. `compose/phase3-blocks.ts`'s `buildFramingCheckCoachingBlock` reads
+ * `framing_check` and emits the FRAME coaching card; the three forks recorded
+ * below were re-derived at the 0.55.0 pin and two of them had already
+ * dissolved (a draft-time sibling took `coaching_kind: 'strengthen'`, and the
+ * card offers a chat turn rather than a reframe the product cannot accept).
+ * The third — no DSK claim grounds goal-vs-outcome framing — is still true and
+ * the card carries no badge because of it.
+ *
+ * ⭐ AND THE CONSUMER DOES NOT READ `addresses_goal` AT ALL, for the reason
+ * this file documents: the polarity is contradicted by the producer's own
+ * historic worked example, so a gate keyed on it could invert. The consumer
+ * gates on the PRESENCE OF PROSE instead. This suite therefore still earns its
+ * place — it keeps the field honest at source for any future reader — but no
+ * shipped consumer depends on the boolean, which is the strongest form of the
+ * protection it was written to provide.
+ *
+ * Original text follows, superseded in its "no consumer" clause only; its
+ * sweep and its reasoning about polarity stand. Derived
  * 17 Aug 2026 at CEE `2ceb65f9` / UI `81b5c966`, contrast-controlled in the
  * same sweep: `\.framing_check` reaches 3 files in CEE `src/**` (the
  * `composeFragments` passthrough, the `performShapeCheck` warning, and the

@@ -1983,30 +1983,45 @@ function computeDecisionReviewInputDensity(
  *  - output_has_pre_mortem: optional sub-object; presence drives whether the
  *    corresponding card considers emission (`compose/phase3-blocks.ts:2417`
  *    review card, `:2631` exercise companion).
- *  - output_has_framing_check: ⚠ optional sub-object with NO CONSUMER. This
- *    line previously read "presence drives whether the corresponding card
- *    considers emission" for BOTH keys. True of `pre_mortem`; FALSE of
- *    `framing_check` — there is no framing card anywhere, and this counter is
- *    the field's ONLY reader in the estate. Derived 17 Aug 2026 at CEE
- *    `2ceb65f9` / UI `81b5c966`: `\.framing_check` reaches 3 files in CEE
- *    `src/**` (the `composeFragments` passthrough at
- *    `cee/decision-review/decompose.ts:441-442`, the shape warning at
- *    `cee/decision-review/shape-check.ts:435`, and this counter), zero of them
- *    a block builder; contrast `\.pre_mortem` in the same sweep = 9 files
- *    including the two builders named above. In the UI the key appears in two
- *    COMMENTS and no code (`components/results/StressTestSection.tsx:23`,
- *    `components/results/utils/stressTestTemplates.ts:9`) and is absent from
- *    both `V0_30_PROJECTED_KEYS` and `V0_30_ENRICHER_OWNED_KEYS`
- *    (`v5/decisionReviewAdapter.ts:139-166`), so it is dropped at that
- *    adapter. A telemetry docstring asserting a consumer that does not exist
- *    is how a whole capability stays invisible — this counter measures the
- *    producer, and nothing downstream acts on it. Building the consumer is
- *    forked on three items outside a build lane's authority: no `coaching_kind`
- *    / `card_kind` / `exercise_kind` member admits a framing block at the
- *    `@talchain/schemas` 0.46.0 pin (all three enums are `.strict()`); no
- *    `data/dsk/v1.json` claim grounds goal-vs-outcome framing (DSK-B-007 is
- *    option-set size, Nutt 2004); and no route accepts a goal reframe, so
- *    `suggested_reframe` cannot be offered without breaching P8.
+ *  - output_has_framing_check: presence drives whether the framing coaching
+ *    card considers emission (`compose/phase3-blocks.ts`,
+ *    `buildFramingCheckCoachingBlock`), exactly as `output_has_pre_mortem`
+ *    does for its two cards.
+ *
+ *    ⚠⚠ THIS ENTRY SAID "NO CONSUMER" FROM 17 Aug 2026 UNTIL THE FRAME CARD
+ *    SHIPPED, AND ITS THREE RECORDED BLOCKERS ARE NOW DISSOLVED. Left in place,
+ *    corrected rather than deleted, because a session that re-derives a
+ *    dissolved blocker pays for it twice. The original text read: "optional
+ *    sub-object with NO CONSUMER … Building the consumer is forked on three
+ *    items outside a build lane's authority: no `coaching_kind` / `card_kind` /
+ *    `exercise_kind` member admits a framing block at the `@talchain/schemas`
+ *    0.46.0 pin (all three enums are `.strict()`); no `data/dsk/v1.json` claim
+ *    grounds goal-vs-outcome framing (DSK-B-007 is option-set size, Nutt 2004);
+ *    and no route accepts a goal reframe, so `suggested_reframe` cannot be
+ *    offered without breaching P8."
+ *
+ *    The sweep was sound and the three forks were real AT THE 0.46.0 PIN. What
+ *    changed, re-derived at the 0.55.0 pin this repo vendors:
+ *      1. SUPERSEDED. `handlers/draft-framing-blocks.ts` shipped the DRAFT-time
+ *         FRAME card on the EXISTING `coaching_kind: 'strengthen'`, recording
+ *         why `orientation` is the wrong reuse. No enum member was ever needed,
+ *         so the frame card crosses no repo and bumps no contract.
+ *      2. STILL TRUE, re-censused over all 27 bundle objects with a contrast
+ *         control (12 mention framing or goals; none grounds goal-vs-outcome
+ *         framing). The card therefore carries NO `dsk_claim_provenance`, and
+ *         that absence is permanent until the bundle gains such a claim.
+ *      3. TRUE OF THE ACTION IT IMAGINED, which is not the one shipped. The
+ *         card offers no reframe-accepting affordance; its chip dispatches an
+ *         ordinary chat turn (`start_guided_chat`), which CEE answers.
+ *
+ *    ⭐ THE DURABLE LESSON, because it cost this field a year of invisibility:
+ *    a blocker recorded against a PIN is a claim with an EXPIRY DATE, and
+ *    nothing in the estate expires it. Three careful sentences kept a built
+ *    capability dark long after two of the three had stopped being true — and
+ *    the one that stayed true (2) was never the blocking one, because an
+ *    optional field's absence was always the honest shape. Re-derive a recorded
+ *    fork before inheriting it; name the pin it was derived at when you write
+ *    one.
  */
 interface OutputDensity {
   readonly output_narrative_summary_length: number;
