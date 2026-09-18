@@ -79,6 +79,14 @@ describe('egress wire-surface pin (@talchain/schemas 0.13.0)', () => {
   it('pins the top-level OlumiResponseSchema surface (strict)', () => {
     const top = unwrapToObject(OlumiResponseSchema)
     expect(Object.keys(top.shape).sort()).toEqual([
+      // 0.56.0-new: the participation guard's withheld counts (nodes + edges).
+      // TOP-LEVEL, not inside the strict `analysis_result` block — the UI
+      // strict-validates that block type, so a key there is a whole-turn
+      // schema_mismatch for any consumer still on 0.55.0, whereas an unknown
+      // TOP-LEVEL key goes to that parser's `__additive__` sidecar. Updated,
+      // never loosened: this pin is what makes a wire-surface addition a
+      // deliberate act.
+      'analysis_participation_withheld',
       'analysis_ready',
       // 0.46.0-new: ONE composed analysis-state verdict per turn — the seven-branch
       // `run_state` (including the new `refused`), readiness, leader_claim,
