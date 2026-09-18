@@ -834,7 +834,7 @@ export function blockerIssue(
         ...common,
         code: 'MISSING_OPTION_CONNECTION',
         category: 'option_mapping',
-        message: producerMessage ?? `Choose the missing connection${suffix}.`,
+        message: `Choose the missing connection${suffix}.`,
       };
     case 'constraint_dropped':
       return {
