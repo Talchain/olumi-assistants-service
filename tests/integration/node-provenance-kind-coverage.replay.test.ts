@@ -565,6 +565,15 @@ describe("row 2.1205 — F2: `intercept` is value-bearing, and the field list is
    */
   it("the NodeV3 key set is unchanged — a new field forces a value-bearing decision", () => {
     expect(Object.keys(NodeV3.shape).sort()).toEqual([
+      // COLLAB Track A, 18 Sep. THE VALUE-BEARING DECISION THIS GUARD DEMANDS,
+      // recorded rather than the list merely re-pinned: `analysis_participation`
+      // is NOT value-bearing and must NOT join `carriesValue`. It answers
+      // "does this node take part in the calculation", never "what number does
+      // it carry" — a node is excluded with its value fully intact, which is the
+      // whole point of `'retained_excluded'`. Treating it as value-bearing would
+      // make an excluded node look valueless and reintroduce, one layer down,
+      // the exact false claim the field exists to prevent.
+      "analysis_participation",
       "category",
       "description",
       "display_value",
