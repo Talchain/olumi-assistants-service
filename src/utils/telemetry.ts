@@ -1535,6 +1535,28 @@ export const TelemetryEvents = {
   // happy-path count. Still content-free: booleans + closed enums.
   V5DecisionRecordCaptured: "v5.decision_records.record_captured",
 
+  // ROADMAP 2.1229 — brief + analysis-provenance forwarded to `scenarios`
+  // from the commit seam, so the share path has something to share. Emitted
+  // once per successful (non-noop) run_analysis commit, from the
+  // fire-and-forget hook. `status` is a closed enum:
+  //   ok          — a scenario row was updated;
+  //   not_stored  — the RPC returned false: it wrote NOTHING (no matching
+  //                 scenario, or a null reached it). Distinct from `ok`
+  //                 deliberately — a silent no-write must never read as a
+  //                 success, which is the defect class this lane removes;
+  //   skipped     — the fact carried an incomplete envelope (`skip_reason`
+  //                 names the first missing member: no_brief |
+  //                 no_graph_hash | no_seed | no_response_hash). All-or-
+  //                 nothing is a CONSUMER requirement: `create_shared_brief`
+  //                 dereferences three provenance keys into three NOT NULL
+  //                 columns after a single null check, so a partial envelope
+  //                 becomes a 23502 at share time;
+  //   error       — store construction or the RPC threw.
+  // Content-free: correlation ids + closed enums ONLY. Never the brief text,
+  // the seed or either hash. Non-blocking contract: capture/emit failures log
+  // and NEVER affect the turn result.
+  V5BriefProvenanceStored: "v5.brief_provenance.stored",
+
   // V5 Coaching State Spine — Stage 2B-2. Emitted once per turn after the internal coaching
   // LIFECYCLE is derived (prior pre-dispatch snapshot vs current pre-dispatch coaching_state
   // + per-source evaluability). Same privacy contract as the other coaching events: STANDARD
