@@ -347,15 +347,35 @@ describe('F6 egress — the builder and its invariant tail cannot drift apart', 
    * not, recognition would fail SILENTLY and in the worst direction: the layer
    * would stop seeing the composers' disclosure and append a second one.
    */
-  it.each([1, 2, 4])('every %i-count permutation ends with the tail', (count) => {
+  it.each([1, 2, 4])('every %i-factor permutation ends with the tail', (count) => {
     const signal: DefaultedAssumptionsSignal = {
       count,
+      factorCount: count,
       named: ['Market Conditions', 'Wholesale Flour Price', 'Demand'].slice(0, Math.min(count, 3)),
     };
 
     expect(buildDefaultedAssumptionsDisclosure(signal).endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(
       true,
     );
+  });
+
+  /**
+   * ⭐ THE PERMUTATIONS ABOVE ARE ALL FACTOR-BEARING, SO THEY CANNOT SEE THE
+   * TAIL DROPPING OFF THE TWO BRANCHES ADDED WHEN ENGINE-LEVEL CODES STOPPED
+   * BEING COUNTED AS FACTORS. Recognition is what keeps the disclosure to
+   * EXACTLY ONE; a branch whose sentence ends differently would be appended to
+   * a second time, silently, on exactly the payload shape staging serves today.
+   */
+  it.each([
+    ['engine-level codes only', { count: 2, factorCount: 0, named: [] }],
+    ['mixed factor + codes', { count: 3, factorCount: 1, named: ['Market Conditions'] }],
+  ] as const)('the %s branch ends with the tail too', (_name, signal) => {
+    const text = buildDefaultedAssumptionsDisclosure(signal);
+    expect(text.endsWith(DEFAULTED_DISCLOSURE_TAIL)).toBe(true);
+    // …and the egress layer RECOGNISES it, so it is never doubled.
+    const out = applyDefaultedValueEgress(`Launch leads with a probability of 61%. ${text}`, signal);
+    expect(out.disclosureAdded).toBe(false);
+    expect(occurrences(out.text, DEFAULTED_DISCLOSURE_TAIL)).toBe(1);
   });
 });
 
@@ -582,7 +602,7 @@ describe('F6 egress — the disclosure’s append point', () => {
  * then buried that question under boilerplate.
  */
 describe('defaulted-value disclosure — placement and number agreement', () => {
-  const ONE: DefaultedAssumptionsSignal = { count: 1, named: [] } as DefaultedAssumptionsSignal;
+  const ONE: DefaultedAssumptionsSignal = { count: 1, factorCount: 1, named: [] };
 
   const ENDS_ON_QUESTION =
     'The analysis currently favours Option A, with a probability of 82%.\n\n'
@@ -625,7 +645,7 @@ describe('defaulted-value disclosure — placement and number agreement', () => 
   it('agrees with itself in number at count 1 and count N', () => {
     const singular = buildDefaultedAssumptionsDisclosure(ONE);
     const plural = buildDefaultedAssumptionsDisclosure(
-      { count: 3, named: [] } as DefaultedAssumptionsSignal,
+      { count: 3, factorCount: 3, named: [] },
     );
     // The observed defect: "one of the factors … which HAS no value set …
     // until THOSE VALUES are set" — an anaphoric plural with a singular

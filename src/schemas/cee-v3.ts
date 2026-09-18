@@ -16,6 +16,7 @@ import { z } from "zod";
 import type { ValidationMetadata } from "../cee/validation-pipeline/types.js";
 import { GoalConstraintSchema } from "./assist.js";
 import { CausalClaimsArraySchema } from "./causal-claims.js";
+import { GoalThresholdCapProvenanceSchema } from "../utils/goal-threshold-cap.js";
 import { ValidationWarningSchema as SharedValidationWarningSchema, CIL_WARNING_CODES, GoalThresholdFrame, OBSERVED_STATE_SOURCE_LITERALS } from "@talchain/schemas";
 import { CAUSAL_CLAIMS_WARNING_CODES } from "./causal-claims.js";
 import { CANONICAL_ID_REGEX } from "../cee/utils/id-normalizer.js";
@@ -209,6 +210,27 @@ export const NodeV3 = z.object({
   goal_threshold_unit: z.string().optional(),
   /** Normalisation denominator (e.g., 1000 for "800/1000 = 0.8") */
   goal_threshold_cap: z.number().optional(),
+  /**
+   * WHICH RULE PRODUCED `goal_threshold_cap` — see
+   * `GOAL_THRESHOLD_CAP_PROVENANCE` (utils/goal-threshold-cap.ts).
+   *
+   * On `target_derived_headroom` the denominator is `raw * 1.25`, so
+   * `goal_threshold = raw / cap` is the CONSTANT 0.8 for every target and
+   * carries no information about the goal; the other two rules take their
+   * denominator from outside the target and do. A consumer cannot fail closed
+   * on a denominator it cannot see.
+   *
+   * ⚠ THIS DECLARATION IS LOAD-BEARING, NOT DOCUMENTATION — the same warning
+   * `goal_threshold_frame` carries below. `NodeV3` is a plain `z.object`
+   * ("declared fields only — unknown fields stripped"), so an undeclared
+   * provenance is SILENTLY DELETED by `GraphV3.safeParse` on the run path and
+   * the stamp would reach nothing, with no error anywhere. Proven by a positive
+   * control in `__tests__/goal-threshold-cap-provenance-wire-survival.test.ts`.
+   *
+   * ABSENCE MEANS UNATTESTED — never defaulted. CEE mints it; no model authors
+   * it (`CEE_MINTED_GOAL_FIELDS`).
+   */
+  goal_threshold_cap_provenance: GoalThresholdCapProvenanceSchema.optional(),
   /**
    * The FRAME `goal_threshold` is stated in (ROADMAP 2.258, schemas 0.31.0).
    * Always `'level'` from CEE — see `CEE_GOAL_THRESHOLD_FRAME`.

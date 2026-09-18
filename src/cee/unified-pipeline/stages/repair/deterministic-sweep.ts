@@ -512,12 +512,13 @@ function fixControllableMissingData(
     //   1. ABSENT re-raises the ERROR this repair exists to close —
     //      `graph-validator.ts:848` is `if (!data?.uncertainty_drivers)`,
     //      severity "error".
-    //   2. ABSENT IS REFILLED WITH A DIFFERENT PLACEHOLDER. This sweep is
-    //      substep 1 of Stage 4; late-STRP is substep 6 and runs
-    //      `fillControllableData: true`, whose rule 5 is
-    //      `if (!data.uncertainty_drivers) data.uncertainty_drivers =
-    //      ["Estimation uncertainty"]` (`structural-reconciliation.ts:260`).
-    //      Omitting the key hands the consumer a NEW sentence to mis-parse.
+    //   2. ⚠ RETIRED, BY FIXING THE PRODUCER IT DESCRIBED. This limb read:
+    //      omitting the key hands the consumer a NEW sentence, because
+    //      late-STRP's rule 5 wrote `["Estimation uncertainty"]`. Both
+    //      late-STRP sites now write `[]` (`structural-reconciliation.ts`
+    //      rules 1 and 5), so that is no longer true. Kept visible because a
+    //      reader inheriting the old sentence would act on it; limb 1 carries
+    //      the remedy ALONE and is unaffected.
     //   3. `[]` IS TRUTHY, so it passes both guards untouched and reaches the
     //      wire. It raises only `EMPTY_UNCERTAINTY_DRIVERS`, severity "warn" —
     //      a code the validator ALREADY defines, i.e. this codebase had already

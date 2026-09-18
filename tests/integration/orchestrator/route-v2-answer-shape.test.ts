@@ -64,10 +64,26 @@ const { deriveAnswerTextFromShape } = await import(
 );
 
 const SCENARIO_ID = '88888888-8888-4888-8888-888888888888';
+/**
+ * THE COLLAPSE FLOOR (18 Sep 2026) — why this fixture is long.
+ *
+ * `_answer_shape` is a WIRE DIRECTIVE telling the UI to collapse the answer,
+ * and CEE now issues it only when the answer exceeds
+ * `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 — the deployed UI's own
+ * `CLAMP_CHAR_THRESHOLD`, below which it renders the answer whole anyway).
+ * This file's subject is the strip → validate → re-attach MECHANIC, not the
+ * floor, so its fixture is padded past the floor and every assertion below
+ * about that mechanic is unchanged. The floor itself is pinned, in both
+ * directions, in `route-v2-answer-shape-collapse-floor.test.ts`.
+ *
+ * The pad is prose on ONE line with no blank line in it, so it lands wholly in
+ * `detail` and cannot perturb the headline or the bullet extraction.
+ */
+const FLOOR_PAD = ` ${'Every figure here is read straight from your own model. '.repeat(60).trim()}`;
 const ANSWER_SHAPE = {
   headline: 'Focus on retention before pricing.',
   bullets: ['Churn dominates your graph.'],
-  detail: 'The churn to revenue causal link is the strongest in the model.',
+  detail: `The churn to revenue causal link is the strongest in the model.${FLOOR_PAD}`,
 };
 
 function mkRunResult(opts: {

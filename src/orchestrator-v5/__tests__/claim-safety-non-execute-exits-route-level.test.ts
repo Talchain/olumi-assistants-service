@@ -372,6 +372,7 @@ function converseTextOnly(text: string) {
 const { ceeOrchestratorRouteV2, EDIT_GRAPH_RECOVERY_TEXT } = await import(
   '../../orchestrator/route-v2.js'
 );
+const { synthesiseAnswerShapeFromText } = await import('../routing/answer-shape.js');
 
 async function postTurn(
   app: FastifyInstance,
@@ -1105,7 +1106,27 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
   describe('the CHIP-CLICK ok exit — the second model-text exit, and the _answer_shape pin', () => {
     const CHIP_RECEIPT = 'Analysis complete.';
     const CHIP_LEADER_SENTENCE = `${LEADER_LABEL} leads at 72% on this run.`;
-    const CHIP_ANSWER = `${CHIP_RECEIPT} ${CHIP_LEADER_SENTENCE} The gap is not stable across the runs.`;
+    /**
+     * ⚠ LONG ON PURPOSE (THE COLLAPSE FLOOR, 18 Sep 2026), AND THE REASON IS
+     * THIS DESCRIBE'S OWN INSTRUMENT.
+     *
+     * `_answer_shape` is a WIRE DIRECTIVE to collapse the answer, and CEE now
+     * issues it only above `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 — the
+     * deployed UI's own `CLAMP_CHAR_THRESHOLD`). The pin below asserts the
+     * sidecar is ABSENT whenever the claim-safety gate edited the answer, and
+     * the INSTRUMENT case above it exists to prove that absence is not vacuous.
+     *
+     * At the original length BOTH would have read "absent" for the floor's
+     * reason rather than the gate's — the positive control would have gone
+     * quietly dead and the pin with it (trap 13). Padding past the floor keeps
+     * the two causes separable: permitted ⇒ long ⇒ sidecar present; edited ⇒
+     * still long ⇒ sidecar absent, and absent BECAUSE THE GATE DROPPED IT.
+     *
+     * The pad is additive prose on one line; every content assertion in this
+     * describe is `toContain` and is unaffected.
+     */
+    const CHIP_FLOOR_PAD = ` ${'Every figure here is read straight from the run you just completed. '.repeat(46).trim()}`;
+    const CHIP_ANSWER = `${CHIP_RECEIPT} ${CHIP_LEADER_SENTENCE} The gap is not stable across the runs.${CHIP_FLOOR_PAD}`;
 
     function mockChipOk(opts: { mayName: boolean; text: string; analysisReady?: unknown }): void {
       dispatchDeterministicChipClickMock.mockResolvedValue({
@@ -1229,14 +1250,32 @@ describe('G-CEE-1 — claim safety on the NON-EXECUTE / EDIT exits', () => {
         expect(body.assistant_text).toContain(
           "Your model doesn't yet capture technical debt or a launch deadline",
         );
+        // ⚠ THE CAPTURE IS NOT PADDED, AND THAT IS DELIBERATE. This fixture is
+        // a REAL RESPONSE recorded on 2026-09-07 — evidence, not a fixture to
+        // keep current (CLAUDE.md trap 14b). It is ~1,200 characters, i.e.
+        // below the collapse floor, so NEITHER arm ships `_answer_shape` any
+        // more and the presence/absence pair can no longer discriminate.
+        //
+        // The coherence claim is preserved by asserting it on the shape that
+        // WOULD have shipped, built with the same function the egress uses:
+        // licensed ⇒ the designation survives into it; withheld ⇒ it does not
+        // appear on ANY surface, the sidecar included. That is the property
+        // this case was written to protect, and it is now checked at a length
+        // where the sidecar is legitimately withheld.
+        const wouldShip = synthesiseAnswerShapeFromText(body.assistant_text as string);
+        expect(body).not.toHaveProperty('_answer_shape');
+        expect(
+          wouldShip,
+          'the captured answer must be shapeable, or the assertions below are vacuous',
+        ).not.toBeNull();
         if (licensed) {
           expect(body.assistant_text).toContain("The lead's current advantage");
-          expect(body._answer_shape).toBeDefined();
+          expect(JSON.stringify(wouldShip)).toContain("The lead's current advantage");
         } else {
           expect(body.assistant_text).not.toContain("The lead's current advantage");
           expect(body.assistant_text).not.toContain('The analysis shows which option leads');
           expect(body.assistant_text).not.toContain("the leading option's edge");
-          expect(body._answer_shape).toBeUndefined();
+          expect(JSON.stringify(wouldShip)).not.toContain("The lead's current advantage");
         }
       },
     );

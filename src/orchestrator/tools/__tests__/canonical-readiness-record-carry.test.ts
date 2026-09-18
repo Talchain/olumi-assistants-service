@@ -416,6 +416,14 @@ const TRIO_KEYS = Object.keys(
     goal_threshold_raw: 1,
     goal_threshold_unit: "GBP",
     goal_threshold_cap: 10,
+    // ⚠ THE PROBE HAS TO OFFER EVERY KEY, or the derivation is only as complete
+    // as this literal. `pickGoalThresholdTrio` is by-presence, so a key absent
+    // from the INPUT can never appear in the OUTPUT — and the derived list then
+    // goes short with no red anywhere, which is the same failure the header
+    // above describes, one level in. Adding a key to the picker means adding it
+    // here (CLAUDE.md trap 12d: a probe sharing the code's blind spot cannot see
+    // the code's gap).
+    goal_threshold_cap_provenance: "target_derived_headroom",
   } as any),
 );
 

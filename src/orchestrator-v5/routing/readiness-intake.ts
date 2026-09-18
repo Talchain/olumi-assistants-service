@@ -53,7 +53,15 @@ import {
  * composer's own prose may have promised — so the cap is enforced HERE, where
  * the promise is written, rather than left to the client to truncate.
  */
-const MAX_RENDERED_CHIPS = 3;
+export const READINESS_MAX_RENDERED_CHIPS = 3;
+
+/**
+ * ⚠ The cap is EXPORTED because it is not this module's private business: any
+ * site that ADDS an affordance to this composer's row is bound by it too. It
+ * was private, and both readiness apply-control sites appended past it — see
+ * `readiness-apply-control-survives-render-cap.test.ts` for the measurement.
+ */
+const MAX_RENDERED_CHIPS = READINESS_MAX_RENDERED_CHIPS;
 
 /**
  * ⭐ THE RUN AFFORDANCE THE LOOP OWNS.

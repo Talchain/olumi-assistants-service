@@ -28,8 +28,12 @@
  * literal, on every controllable factor in the corpus. Contrast controls in
  * the same sweep (trap 13e): `factor_type` 102, `observed_state` 106,
  * `label` 660, so the probe was not blind; and `"Estimation uncertainty"` —
- * the OTHER placeholder in this codebase, written by late-STRP — occurs ZERO
- * times, which is what identifies THIS repair as the writer.
+ * then the OTHER placeholder in this codebase, written by late-STRP — occurs
+ * ZERO times, which is what identifies THIS repair as the writer. ⚠ That zero
+ * is a measurement of the corpus, NOT a claim that late-STRP could not write
+ * it: its rule 1 fires only on a factor whose DECLARED category was wrong, a
+ * shape this corpus happens not to contain. Both late-STRP sites have since
+ * been changed to write `[]`.
  *
  * ── WHY `[]` AND NOT AN ABSENT KEY ─────────────────────────────────────────
  * Both remedies read equally honest; only one survives the pipeline. Pinned as
@@ -40,13 +44,12 @@
  *      `if (!data?.uncertainty_drivers) missing.push(...)` → severity
  *      `"error"`. Removing the key leaves standing the very violation this
  *      repair exists to close.
- *   2. ABSENT IS REFILLED WITH A DIFFERENT PLACEHOLDER. The sweep is substep 1
- *      of Stage 4; late-STRP is substep 6 and runs `fillControllableData:
- *      true`, whose rule 5 is `if (!data.uncertainty_drivers)
- *      data.uncertainty_drivers = ["Estimation uncertainty"]`
- *      (`structural-reconciliation.ts:260`). Omitting the key would hand the
- *      consumer a DIFFERENT sentence to mis-parse — the same defect in a new
- *      spelling, which is exactly the move this change must not make.
+ *   2. ⚠ RETIRED, BY FIXING THE PRODUCER IT DESCRIBED — kept because a reader
+ *      inheriting the old sentence would act on it. This limb read: omitting
+ *      the key hands the consumer a DIFFERENT sentence, because late-STRP's
+ *      rule 5 wrote `["Estimation uncertainty"]`. Both late-STRP sites now
+ *      write `[]` (`structural-reconciliation.ts` rules 1 and 5), so that is no
+ *      longer true. Limb 1 carries the remedy ALONE and is unaffected.
  *   3. `[]` IS TRUTHY, so it passes both guards untouched and reaches the wire.
  *      It raises only `EMPTY_UNCERTAINTY_DRIVERS`, severity `"warn"` — a code
  *      the validator already defines, i.e. this codebase had already named
@@ -188,10 +191,28 @@ describe("uncertainty_drivers — an empty list, never a sentence saying the lis
     expect(readsAsNoEvidence(nodeById(afterStrp, "fac_target").data?.uncertainty_drivers)).toBe(true);
   });
 
-  it("DISCRIMINATING CONTROL — an ABSENT key is refilled with a DIFFERENT placeholder", () => {
-    // ⭐ This is why the remedy is `[]` and not an omitted key, proven by
-    // execution rather than argued. The case is constructed to be the exact
-    // state omission would leave behind.
+  it("DISCRIMINATING CONTROL — an ABSENT key is still refilled, and the refill is now NONE too", () => {
+    // ⭐⭐ THIS CASE FIRED ON THE LATE-STRP FIX, AND THE FIRING IS RECORDED HERE
+    // RATHER THAN SILENCED.
+    //
+    // It used to assert that an omitted key came back as
+    // `["Estimation uncertainty"]` — late-STRP's own placeholder — and that was
+    // limb 2 of this file's "why `[]` and not an absent key" argument. The
+    // late-STRP sites have since been changed to write `[]` as well
+    // (`structural-reconciliation.ts` rules 1 and 5), because that sentence
+    // REACHED THE READER: the UI's whole-string filter does not contain it, so
+    // unlike "Not provided" it rendered as genuine evidence.
+    //
+    // ⭐ THE DECISION THIS DEMANDED, stated rather than assumed: the remedy is
+    // UNCHANGED, because limb 1 carries it alone. An absent key still re-raises
+    // the ERROR at `graph-validator.ts:848` (`if (!data?.uncertainty_drivers)`,
+    // severity "error"), which the case below pins. Only limb 2 has been
+    // retired — by fixing the producer it described, which is the right
+    // direction for a supporting reason to disappear.
+    //
+    // The case keeps its discriminating power: it still proves the refill FIRES
+    // on an absent key (so it cannot decay into a guard that passes because
+    // nothing ran), and now pins that what the refill writes is not a sentence.
     const graph = optionConnectedGraph({
       value: 0.5,
       extractionType: "inferred",
@@ -200,19 +221,29 @@ describe("uncertainty_drivers — an empty list, never a sentence saying the lis
     });
     expect(nodeById(graph, "fac_target").data.uncertainty_drivers).toBeUndefined();
 
-    const { graph: afterStrp } = reconcileStructuralTruth(graph as GraphT, {
+    const { graph: afterStrp, mutations } = reconcileStructuralTruth(graph as GraphT, {
       fillControllableData: true,
       requestId: "test-no-evidence-reported-as-none",
     }) as any;
 
-    // A second placeholder sentence, and the consumer would read it as
-    // evidence exactly as it read "Not provided".
-    expect(nodeById(afterStrp, "fac_target").data.uncertainty_drivers).toEqual([
-      "Estimation uncertainty",
-    ]);
+    // PRECONDITION, pinned in-test (trap 13b): the refill actually ran on THIS
+    // node. Without this the assertion below would also pass if late-STRP had
+    // simply stopped touching the field.
+    expect(
+      (mutations as Array<{ rule: string; node_id: string; field: string }>).some(
+        (m) =>
+          m.rule === "controllable_data_completeness" &&
+          m.node_id === "fac_target" &&
+          m.field === "data.uncertainty_drivers",
+      ),
+    ).toBe(true);
+
+    // ⭐ And what it writes is NONE, not a second sentence for the consumer to
+    // mis-parse.
+    expect(nodeById(afterStrp, "fac_target").data.uncertainty_drivers).toEqual([]);
     expect(
       readsAsNoEvidence(nodeById(afterStrp, "fac_target").data.uncertainty_drivers),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("REAL DRIVERS ARE UNTOUCHED — including ones containing placeholder WORDS", async () => {

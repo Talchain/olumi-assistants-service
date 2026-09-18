@@ -36,8 +36,53 @@
  * test.ts`, which loads the captured envelope VERBATIM and refuses to construct
  * an enrichment object at all.
  *
- * Each entry carries a `factor_label`, a `source` (`"value_defaulted"`) and a
- * user-facing `note`.
+ * ═══════════════════════════════════════════════════════════════════════════
+ * ⚠ TWO ENTRY SHAPES, AND ONLY ONE OF THEM NAMES A FACTOR
+ *
+ * The sentence that used to sit here read: "Each entry carries a
+ * `factor_label`, a `source` (`"value_defaulted"`) and a user-facing `note`."
+ * That is true of ONE of the two shapes the producer emits, and the other one
+ * is the shape every live capture since 10 Aug 2026 actually carries — so the
+ * premise was inverted against reality. Replaced rather than deleted
+ * (CLAUDE.md trap 14). Read verbatim off dated captures:
+ *
+ *   FACTOR-LEVEL   { factor_label: 'Market Conditions',
+ *                    source: 'value_defaulted', note: 'No starting value…' }
+ *                  — `__tests__/fixtures/dsk-walk/session-a.enrichment.json`
+ *
+ *   ENGINE-LEVEL   { factor_label: null, code: 'ROOT_NODE_DEFAULT_VALUE',
+ *                    source: 'default_disclosure',
+ *                    note: "No observed value provided for root node
+ *                           '099f7ecf'; defaulted to 0.0…" }
+ *                  — `compose/__tests__/fixtures/analysis-result-live-
+ *                    2026-09-03.json`, `cee/decision-review/__tests__/fixtures/
+ *                    live-decision-review-2026-09-03.json`,
+ *                    `compose/__tests__/fixtures/c2-context-response-
+ *                    20260907T203538Z.json`
+ *
+ * ⭐ AN ENGINE-LEVEL ENTRY NAMES NO FACTOR. It discloses that the ENGINE
+ * substituted a value for a node it could not read — identified by a raw node
+ * id, which is not a factor and is not showable. Counting one as a factor is
+ * how the product came to tell people "2 of the factors in your model have no
+ * value set" when neither entry was a factor (the sentence is preserved in the
+ * `c2-context-response` capture). A tool whose job is to help someone reason
+ * about their own model must not miscount that model back at them.
+ *
+ * ⚠ THE TWO SHAPES ARE TWO QUESTIONS (CLAUDE.md trap 21) AND THE FIX NAMES
+ * THEM APART RATHER THAN RECONCILING THEM: `count` answers "how many defaults
+ * did the engine disclose?" (the evidence that suppresses a stability claim);
+ * `factorCount` answers "how many of them can we truthfully call a factor in
+ * your model?" (the only number the sentence may spend). They were one field,
+ * and one field spent on two questions is exactly this estate's dominant
+ * defect. Do NOT re-merge them, and do NOT remap an engine code into a
+ * factor-shaped claim — where nothing nameable arrived, the sentence says so
+ * and asserts no count at all.
+ *
+ * ⚠ SEPARATE, OWNED ELSEWHERE: the reason only engine-level codes survive
+ * today is the `factor_sensitivity[].value_defaulted` regression of 10 Aug
+ * 2026, which is an ISL/PLoT restore. This module makes the count and the noun
+ * truthful given WHATEVER arrives; it does not, and must not, manufacture the
+ * factor-level entries back.
  *
  * The cost of that was measured on the deployed build. With
  * `analysis_ready.options[].status = needs_encoding` on the same payload, an
@@ -103,13 +148,31 @@ export const MAX_NAMED_DEFAULTED_FACTORS = 3;
 /**
  * The engine's defaulted-value verdict for one analysis.
  *
- * `count` is the UNCAPPED number of defaulted assumptions; `named` is the
- * capped, egress-safe label list. `count > named.length` is the signal to the
- * copy builder that it must not present the list as exhaustive.
+ * THREE NUMBERS, THREE QUESTIONS, DELIBERATELY NOT COLLAPSED:
+ *
+ *   `count`        how many defaults the engine DISCLOSED — the EVIDENCE that
+ *                  its results rest on substituted inputs. Every gate in this
+ *                  feature reads this one, and it counts engine-level codes,
+ *                  because a code is still evidence.
+ *   `factorCount`  how many of those disclosures ATTRIBUTE the default to a
+ *                  factor in the user's model. The ONLY number the sentence
+ *                  may spend. `factorCount <= count`, and it is 0 on every
+ *                  payload that carries engine-level codes alone.
+ *   `named.length` how many of those factors we can SHOW, capped at
+ *                  {@link MAX_NAMED_DEFAULTED_FACTORS}. `factorCount >
+ *                  named.length` is the builder's signal not to present the
+ *                  list as exhaustive.
+ *
+ * ⚠ `count` IS NOT A COUNT OF FACTORS. It was spent as one, and that is the
+ * defect this shape exists to make unrepeatable — pinned by
+ * `__tests__/defaulted-code-is-not-a-factor.test.ts`, which asserts the
+ * sentence is INVARIANT to `count`.
  */
 export interface DefaultedAssumptionsSignal {
   /** Uncapped number of `defaulted_assumptions` entries on the analysis. */
   readonly count: number;
+  /** Uncapped number of those entries that name a factor. Never > `count`. */
+  readonly factorCount: number;
   /** Up to {@link MAX_NAMED_DEFAULTED_FACTORS} sanitised factor labels. */
   readonly named: readonly string[];
 }
@@ -130,10 +193,27 @@ function asObject(value: unknown): Record<string, unknown> | null {
  * `z.record`, so its shape is NOT enforced by the contract). Every entry is
  * therefore read defensively.
  *
- * ⭐ COUNTED BY ENTRY, NAMED BY LABEL. An entry with no usable label still
- * COUNTS — it is evidence that a value was defaulted, which is the claim the
- * suppression rests on. Dropping it from the count because we cannot name it
- * would let an unnameable label silently restore a stability assertion.
+ * ⭐ COUNTED BY ENTRY, ATTRIBUTED BY LABEL, NAMED BY SANITISED LABEL — three
+ * separate readings of the same entry, and each one is load-bearing:
+ *
+ *   EVIDENCE (`count`) — every object entry counts, including an engine-level
+ *   code. It is evidence that a value was defaulted, which is the claim the
+ *   stability suppression rests on. Dropping one from the evidence count would
+ *   let a code silently restore a confidence assertion over guessed inputs —
+ *   the mirror harm, and strictly the worse of the two (trap 22b).
+ *
+ *   ATTRIBUTION (`factorCount`) — an entry names a factor iff it carries a
+ *   non-blank `factor_label` STRING. Derived from the entry itself, never from
+ *   a list of known engine codes: a hand-kept code vocabulary is the mirror
+ *   this estate keeps paying for (trap 12), and it would mis-classify the
+ *   first code nobody has met yet. `factor_label: null` ⇒ names no factor,
+ *   whatever the `source` or `code` says.
+ *
+ *   DISPLAY (`named`) — the stricter {@link sanitiseLabel} guard, which also
+ *   rejects raw ids and UUIDs. An id-shaped label still ATTRIBUTES the default
+ *   to a factor (the engine identified one) while being unshowable, so such an
+ *   entry raises `factorCount` and not `named` — and the sentence truthfully
+ *   says "one of the factors in your model" without inventing a name.
  */
 export function readDefaultedAssumptions(
   defaultedValue: unknown,
@@ -142,20 +222,23 @@ export function readDefaultedAssumptions(
 
   const named: string[] = [];
   let count = 0;
+  let factorCount = 0;
   for (const raw of defaultedValue) {
     const entry = asObject(raw);
     if (entry === null) continue;
     count += 1;
-    if (named.length >= MAX_NAMED_DEFAULTED_FACTORS) continue;
     const label = entry['factor_label'];
-    if (typeof label !== 'string') continue;
+    // NAMES NO FACTOR — an engine-level disclosure. Evidence, never a factor.
+    if (typeof label !== 'string' || label.trim().length === 0) continue;
+    factorCount += 1;
+    if (named.length >= MAX_NAMED_DEFAULTED_FACTORS) continue;
     const clean = sanitiseLabel(label, '');
     if (clean === null || clean.length === 0) continue;
     named.push(clean);
   }
 
   if (count === 0) return null;
-  return { count, named: Object.freeze(named) };
+  return { count, factorCount, named: Object.freeze(named) };
 }
 
 /**
@@ -248,21 +331,64 @@ export function pickLatestDefaultedAssumptions(
 export const DEFAULTED_DISCLOSURE_TAIL =
   'so the comparison is illustrative until real values are set.';
 
+/**
+ * The clause for defaults the engine disclosed WITHOUT attributing them to a
+ * factor.
+ *
+ * ⛔ IT DELIBERATELY ASSERTS NO COUNT AND NO NAME. An engine-level code carries
+ * a raw node id, not a factor; turning it into "one of the factors in your
+ * model" would be the fabrication this whole module exists to prevent, one
+ * level down. Where nothing nameable arrived, the honest sentence says exactly
+ * that — the absence IS the disclosure, and the user's next move (open the
+ * model and look) is the same either way.
+ *
+ * ⚠ NUMBER AGREEMENT, for the same reason {@link DEFAULTED_DISCLOSURE_TAIL}
+ * says `real values`: `defaults` here is a GENERIC plural with no antecedent,
+ * so it reads correctly over one unattributed disclosure and over five, and no
+ * count has to be smuggled in to make the grammar work.
+ */
+const UNATTRIBUTED_DEFAULTS_CLAUSE = 'used defaults it did not attribute to a named factor';
+
+/**
+ * ⚠ EVERY NUMBER IN THIS SENTENCE COMES FROM `factorCount`. `count` is read
+ * here ONCE, and only as a BOOLEAN — "is there an unattributed remainder?" —
+ * never as a quantity in the copy. Spending it as a quantity is precisely the
+ * defect that shipped "2 of the factors in your model" over two engine-level
+ * codes that named no factor at all.
+ *
+ * Pinned by `__tests__/defaulted-code-is-not-a-factor.test.ts`: raising `count`
+ * while holding `factorCount` fixed may add the remainder clause and may NEVER
+ * change the number of factors claimed.
+ */
 export function buildDefaultedAssumptionsDisclosure(
   signal: DefaultedAssumptionsSignal,
 ): string {
-  const { count, named } = signal;
+  const { count, factorCount, named } = signal;
+  /** Engine-level disclosures riding alongside — a boolean, never a quantity. */
+  const hasUnattributed = count > factorCount;
+
+  // NOTHING NAMEABLE ARRIVED — engine-level disclosures only.
+  if (factorCount <= 0) {
+    return `The analysis ${UNATTRIBUTED_DEFAULTS_CLAUSE}, ${DEFAULTED_DISCLOSURE_TAIL}`;
+  }
+
   const subject =
-    named.length > 0 && count === named.length
+    named.length > 0 && factorCount === named.length
       ? named.length === 1
         ? `'${named[0]}'`
         : `${named.slice(0, -1).map((l) => `'${l}'`).join(', ')} and '${named[named.length - 1]}'`
-      : count === 1
+      : factorCount === 1
         ? 'one of the factors in your model'
-        : `${Math.min(count, 99)} of the factors in your model`;
-  const verb = count === 1 ? 'has' : 'have';
+        : `${Math.min(factorCount, 99)} of the factors in your model`;
+  const verb = factorCount === 1 ? 'has' : 'have';
+  // MIXED — real factors AND unattributed engine-level defaults. Naming only
+  // the factors would present a half-list as a complete one, which is the same
+  // under-disclosure MAX_NAMED_DEFAULTED_FACTORS exists to avoid; inflating the
+  // factor count to cover both is the defect this function was repaired for.
+  // So: count what is a factor, and disclose the rest as what it is.
+  const remainder = hasUnattributed ? ` and also ${UNATTRIBUTED_DEFAULTS_CLAUSE},` : '';
   return (
-    `The analysis used a default value for ${subject}, which ${verb} no value set, `
+    `The analysis used a default value for ${subject}, which ${verb} no value set,${remainder} `
     + DEFAULTED_DISCLOSURE_TAIL
   );
 }

@@ -167,6 +167,8 @@ import {
   classifyAnswerShape,
   deriveAnswerTextFromShape,
   synthesiseAnswerShapeFromText,
+  warrantsProgressiveDisclosure,
+  ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
 } from '../orchestrator-v5/routing/answer-shape.js';
 import type { GraphV3T } from './types.js';
 import { GraphV3 } from '../schemas/cee-v3.js';
@@ -317,7 +319,10 @@ import {
   composeProcessMetaIntakeResponse,
 } from '../orchestrator-v5/routing/process-meta-intake.js';
 import { composeReadinessIntakeResponse } from '../orchestrator-v5/routing/readiness-intake.js';
-import { buildReadinessRepairOffer } from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
+import {
+  buildReadinessRepairOffer,
+  withReadinessApplyControl,
+} from '../orchestrator-v5/handlers/readiness-repair-proposal.js';
 import { shouldSuppressEditDispatchForValueUpdate } from './routing/value-update-gate.js';
 import {
   EDIT_GRAPH_NEGATIVE_REGEX,
@@ -1485,7 +1490,44 @@ async function sendFinalised200(
   // its own, which is exactly why the wire gate DROPS `_answer_shape` whenever
   // it edits the answer rather than relying on this comparison to notice.
   // Neither guard is now the last word alone; read them together.
-  if (egress.ok && !analysisAuthorityUnavailable && ctx.answerShape) {
+  //
+  // ⭐ THE COLLAPSE FLOOR (added 18 Sep 2026). The sidecar is a WIRE DIRECTIVE
+  // to collapse: `MessageBubble.tsx` renders `<AnswerBody>` INSTEAD of the
+  // free-text body whenever it arrives. Below the floor the deployed UI would
+  // have shown the answer WHOLE, so attaching it there replaces "the user reads
+  // all of it" with "the user reads one sentence" — the measured founder
+  // defect. `warrantsProgressiveDisclosure` is applied to `derivedText`, the
+  // exact string `assistant_text` carries on the wire, because that is what the
+  // UI's own clamp measures. Rationale, the deployed-bundle derivation and the
+  // drift analysis: `answer-shape.ts` → ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS.
+  //
+  // Note the ORDER: the floor is checked BEFORE the fail-closed tie
+  // verification below, never instead of it. Declining to collapse ships
+  // `wireBody` untouched — the executor already set `assistant_text` to this
+  // same derived text, so nothing is lost and no new text/shape pair is minted.
+  const shapeDerivedText = ctx.answerShape ? deriveAnswerTextFromShape(ctx.answerShape) : '';
+  if (
+    egress.ok &&
+    !analysisAuthorityUnavailable &&
+    ctx.answerShape &&
+    !warrantsProgressiveDisclosure(shapeDerivedText)
+  ) {
+    // Announced, never silent — see V5AnswerShapeDeclinedBelowFloor. This is
+    // the positive witness that the egress DID reach a shapeable answer here.
+    emit(TelemetryEvents.V5AnswerShapeDeclinedBelowFloor, {
+      request_id: requestId,
+      exit_path: exitPath,
+      dispatch_path: 'route_egress_model_shape',
+      final_text_length: shapeDerivedText.length,
+      floor_chars: ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+    });
+  }
+  if (
+    egress.ok &&
+    !analysisAuthorityUnavailable &&
+    ctx.answerShape &&
+    warrantsProgressiveDisclosure(shapeDerivedText)
+  ) {
     const augmented: OlumiResponseWithDebugFields = {
       ...wireBody,
       _answer_shape: ctx.answerShape,
@@ -1494,7 +1536,7 @@ async function sendFinalised200(
       sanitiseOlumiResponseForEgress(augmented, { graph: ctx.graph, requestId, exitPath, userMessage: ctx.userMessage, mayNameLeadingOption: ctx.mayNameLeadingOption }),
       finaliserContext,
     );
-    const derivedText = deriveAnswerTextFromShape(ctx.answerShape);
+    const derivedText = shapeDerivedText;
     const finalText =
       typeof withShape.assistant_text === 'string' ? withShape.assistant_text : '';
     if (finalText === derivedText) {
@@ -1564,7 +1606,33 @@ async function sendFinalised200(
     wireBody.assistant_text.trim().length > 0
   ) {
     const synth = synthesiseAnswerShapeFromText(wireBody.assistant_text);
-    if (synth !== null) {
+    // ⭐ THE COLLAPSE FLOOR (18 Sep 2026) — see
+    // ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS in `answer-shape.ts` for the measured
+    // defect, the deployed-bundle derivation of 3,000 and why the cross-service
+    // drift is benign in both directions.
+    //
+    // Declining here leaves `wireBody` COMPLETELY untouched — no sidecar AND no
+    // blank-line reflow — so a short answer ships exactly as its author composed
+    // it. The reflow is part of the disclosure treatment, not a free readability
+    // win, and applying half a treatment is how a text/shape pair drifts apart.
+    //
+    // ⚠ The floor is checked on `derived`, NOT on `wireBody.assistant_text`.
+    // They differ: derivation re-joins headline/bullets/detail with `\n\n`. The
+    // UI's clamp measures the RENDERED string, so the derived text is the only
+    // one that answers the same question the UI is asking.
+    if (synth !== null && !warrantsProgressiveDisclosure(deriveAnswerTextFromShape(synth))) {
+      // Announced, never silent — see V5AnswerShapeDeclinedBelowFloor. The
+      // answer WAS shapeable and the egress DID run: this event is what stops
+      // a future silent dispatch-path miss reading as "short answer".
+      emit(TelemetryEvents.V5AnswerShapeDeclinedBelowFloor, {
+        request_id: requestId,
+        exit_path: exitPath,
+        dispatch_path: 'route_egress_synthesised',
+        final_text_length: wireBody.assistant_text.length,
+        floor_chars: ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS,
+      });
+    }
+    if (synth !== null && warrantsProgressiveDisclosure(deriveAnswerTextFromShape(synth))) {
       const derived = deriveAnswerTextFromShape(synth);
       const augmented: OlumiResponseWithDebugFields = {
         ...wireBody,
@@ -3301,15 +3369,14 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       if (readinessOffer) {
         readinessResponse = {
           ...readinessResponse,
-          suggested_actions: [
-            ...readinessResponse.suggested_actions,
-            {
-              id: readinessOffer.chip.id,
-              label: readinessOffer.chip.label,
-              message: readinessOffer.chip.message,
-              ...(readinessOffer.chip.detail ? { detail: readinessOffer.chip.detail } : {}),
-            },
-          ],
+          // The composer already filled this row to its cap. Appending here put
+          // the apply control at index 3 of 4 and the client rendered the first
+          // three, so the control never reached the user. `withReadinessApplyControl`
+          // makes room instead of overflowing.
+          suggested_actions: withReadinessApplyControl(
+            readinessResponse.suggested_actions,
+            readinessOffer.chip,
+          ) as typeof readinessResponse.suggested_actions,
         };
         try {
           const committed = await commitDirectAnswer(readinessResponse, {

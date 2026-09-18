@@ -27,6 +27,7 @@ import type { PendingAction } from '../session/pending-action.js';
 import { PENDING_ACTION_DEFAULT_WALL_TTL_MS } from '../session/pending-action.js';
 import { GM_HELD_PENDING_TURN_TTL } from './edit-graph-referee-gate.js';
 import { stableStringify } from '../../orchestrator/context/stable-stringify.js';
+import { READINESS_MAX_RENDERED_CHIPS } from '../routing/readiness-intake.js';
 
 export const READINESS_REPAIR_HANDLER_ID = 'readiness_multi_repair_v1';
 
@@ -97,6 +98,53 @@ export function buildReadinessRepairOffer(input: {
       ...(detail.length > label.length ? { detail } : {}),
     },
   };
+}
+
+/** The wire shape of one `suggested_actions` entry, as far as this module needs it. */
+interface SuggestedActionLike {
+  readonly id: string;
+  readonly label: string;
+  readonly message: string;
+  readonly detail?: string;
+}
+
+/**
+ * Add the apply control to a composed chip row WITHOUT pushing it past the
+ * client's render cap.
+ *
+ * ─── Why this exists (measured 2026-09-18) ─────────────────────────────────
+ * `readiness-intake.ts` fills its row to `READINESS_MAX_RENDERED_CHIPS`
+ * precisely because the client slices there. Both apply-control sites then did
+ * `[...response.suggested_actions, applyChip]`, landing the control at index 3
+ * of 4 — and the client rendered the first three. CEE minted the offer,
+ * committed a durable pending for it, and the user could never press it.
+ *
+ * The control goes LAST so the answer chips keep the order the composer's prose
+ * assumes, and the OVERFLOW is taken from the answer chips rather than from the
+ * control: one click on the apply control resolves every canonicalisable
+ * carrier at once, where an answer chip resolves one blocker and asks the user
+ * to type. That is the same ordering principle `readiness-intake.ts` already
+ * applies when it puts the run affordance first — the highest-value action the
+ * user can take now is the one that must survive.
+ *
+ * ⭐ ONE function for both call sites, deliberately: two sites applying the same
+ * cap by hand is the mirror this estate keeps paying for, and the cap is
+ * imported from the module that OWNS it rather than restated here.
+ */
+export function withReadinessApplyControl(
+  actions: readonly SuggestedActionLike[],
+  chip: ReadinessRepairChip,
+): readonly SuggestedActionLike[] {
+  const applyAction: SuggestedActionLike = {
+    id: chip.id,
+    label: chip.label,
+    message: chip.message,
+    ...(chip.detail ? { detail: chip.detail } : {}),
+  };
+  // `Math.max(0, …)` so a cap of 0 or 1 can never produce a negative slice,
+  // which `Array.prototype.slice` would read as "from the end".
+  const room = Math.max(0, READINESS_MAX_RENDERED_CHIPS - 1);
+  return [...actions.slice(0, room), applyAction];
 }
 
 type Dict = Record<string, unknown>;

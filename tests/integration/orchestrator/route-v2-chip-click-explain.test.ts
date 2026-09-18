@@ -255,6 +255,38 @@ vi.mock('../../../src/config/index.js', async (importOriginal) => {
 });
 
 const { ceeOrchestratorRouteV2 } = await import('../../../src/orchestrator/route-v2.js');
+const { setTestSink } = await import('../../../src/utils/telemetry.js');
+const { synthesiseAnswerShapeFromText } = await import(
+  '../../../src/orchestrator-v5/routing/answer-shape.js'
+);
+
+/**
+ * THE COLLAPSE FLOOR (18 Sep 2026) — why the auto-shape assertions below bind
+ * to TELEMETRY rather than to `_answer_shape`.
+ *
+ * `_answer_shape` is a WIRE DIRECTIVE to collapse the answer to its headline.
+ * CEE now issues it only above `ANSWER_SHAPE_COLLAPSE_FLOOR_CHARS` (3,000 —
+ * the deployed UI's own `CLAMP_CHAR_THRESHOLD`, below which the free-text body
+ * renders whole regardless).
+ *
+ * ⛔ PADDING THE FIXTURE DOES NOT WORK HERE, AND FINDING THAT OUT IS THE
+ * USEFUL PART. On this graph the claim-safety wire gate REPLACES the coach
+ * answer wholesale — the served text is the 267-character withheld-leader
+ * message, not `COACH_ANSWER` at all. Any length this fixture declares is
+ * discarded before egress, so a padded fixture would have been a fiction that
+ * happened to make the assertion pass.
+ *
+ * What these two cases are actually about is REACHABILITY: that a chip-click
+ * dispatch reaches the egress shaping path (#618's egress inversion). Below the
+ * floor an absent sidecar would mean BOTH "correctly short" AND "this dispatch
+ * family went dark" — one absence, two meanings. So the decline is announced,
+ * and the assertion binds to `v5.answer_shape.declined_below_floor` by dispatch
+ * path: a genuinely dark path emits nothing and REDs these cases.
+ */
+const emitted: Array<{ event: string; fields: Record<string, unknown> }> = [];
+function declinesBelowFloor() {
+  return emitted.filter((e) => e.event === 'v5.answer_shape.declined_below_floor');
+}
 
 const SCENARIO_ID = '33333333-3333-4333-8333-333333333333';
 
@@ -268,10 +300,15 @@ describe('POST /orchestrate/v2/turn — Phase 2b chip-click explanation dispatch
   });
 
   afterAll(async () => {
+    setTestSink(null);
     await app.close();
   });
 
   beforeEach(() => {
+    emitted.length = 0;
+    setTestSink((event: string, fields: Record<string, unknown>) => {
+      emitted.push({ event, fields });
+    });
     routeWithToolUseSpy.mockClear();
     llmAdapterChatSpy.mockClear();
     llmAdapterChatWithToolsSpy.mockClear();
@@ -349,10 +386,17 @@ describe('POST /orchestrate/v2/turn — Phase 2b chip-click explanation dispatch
 
     const body = JSON.parse(res.body);
     expect(body.assistant_text.length).toBeGreaterThan(0);
-    // F1 synergy (#618 egress inversion): the substantive coach answer auto-shapes.
-    expect(body._answer_shape).toBeDefined();
-    expect(body._answer_shape.headline).toBeTruthy();
-    expect(body._answer_shape.detail).toBeTruthy();
+    // F1 synergy (#618 egress inversion): the substantive coach answer REACHES
+    // the egress shaping path. Below the collapse floor it correctly ships
+    // whole, so the reachability claim binds to the announced decline.
+    expect(declinesBelowFloor().map((d) => d.fields.dispatch_path)).toContain(
+      'route_egress_synthesised',
+    );
+    const shape = synthesiseAnswerShapeFromText(body.assistant_text);
+    expect(shape, 'the served answer must be shapeable, or the claim above is vacuous').not.toBeNull();
+    expect(shape!.headline).toBeTruthy();
+    expect(shape!.detail).toBeTruthy();
+    expect(body).not.toHaveProperty('_answer_shape');
   });
 
   it("chip_click + action_type='what_would_flip' → routes through the coach with a FORCED intent and auto-shapes", async () => {
@@ -387,7 +431,11 @@ describe('POST /orchestrate/v2/turn — Phase 2b chip-click explanation dispatch
     expect(explainResultsHandlerMock).not.toHaveBeenCalled();
 
     const body = JSON.parse(res.body);
-    expect(body._answer_shape).toBeDefined();
+    expect(declinesBelowFloor().map((d) => d.fields.dispatch_path)).toContain(
+      'route_egress_synthesised',
+    );
+    expect(synthesiseAnswerShapeFromText(body.assistant_text)).not.toBeNull();
+    expect(body).not.toHaveProperty('_answer_shape');
   });
 
   it("chip_click + action_type='set_factor_value' (NOT whitelisted) → does NOT use the deterministic dispatcher", async () => {

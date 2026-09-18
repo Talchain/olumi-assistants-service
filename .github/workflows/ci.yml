@@ -111,6 +111,27 @@ jobs:
         # this job; it only blocks MERGE once `staging` branch protection
         # requires the `CI / Lint, TypeCheck, Unit Tests` status check.
         run: bash scripts/check-forbidden-boundary-patterns.sh
+      - name: Contract field guard (node/graph twins + dead fields)
+        # DERIVED from the schemas themselves: the shared package's
+        # NodeV3Schema/EdgeV3Schema against CEE's own NodeV3/EdgeV3/
+        # ObservedStateV3/CEEGraphResponseV3. Fails when a field the contract
+        # declares is silently stripped at CEE's egress, when two surfaces or two
+        # spellings name one concept, or when a declared field has no writer and
+        # no reader anywhere in CEE source.
+        #
+        # It fails in BOTH directions: a new finding with no recorded decision is
+        # red, and a recorded decision that no longer reproduces is red. So the
+        # ledger cannot silently go short and cannot silently rot. When it fires,
+        # RECORD THE DECISION it demands in DECISIONS
+        # (src/schemas/contract-field-guard.ts) — do not re-pin a list, and do not
+        # declare a field purely to turn it green, which is how a twin is born.
+        #
+        # The hand-written half — the eight twins this estate already paid for,
+        # fed to the detectors to prove they are found — is
+        # src/schemas/__tests__/contract-field-guard.corpus.test.ts, which runs in
+        # the required test subset below. Derivation cannot notice its own
+        # universe going short (trap 12d); both halves ship.
+        run: npx tsx scripts/ci/contract-field-guard.ts
       - name: Prompt regression gate (orchestrator-eval)
         # REQUIRED, hermetic check. `pnpm eval:orchestrator:test`
         # (vitest run tools/orchestrator-eval) is the durable regression gate for
