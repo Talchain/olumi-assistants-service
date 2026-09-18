@@ -72,6 +72,13 @@ function statedFactor(opts: {
   unit?: string;
   raw_value?: number;
   cap?: number;
+  /**
+   * A declaration the PRODUCER already stamped, node-level — the same carrier
+   * `projector.ts:939` writes and `transforms/schema-v3.ts:660` reads. Present
+   * so a test can distinguish "this stage filled a gap" from "this stage
+   * overwrote the producer".
+   */
+  declared_scale?: string;
 }): GraphT {
   return {
     nodes: [
@@ -82,6 +89,7 @@ function statedFactor(opts: {
         id: opts.id,
         kind: "factor",
         label: "Stated Factor",
+        ...(opts.declared_scale !== undefined && { declared_scale: opts.declared_scale }),
         data: {
           value: opts.value,
           ...(opts.unit !== undefined && { unit: opts.unit }),
@@ -357,5 +365,118 @@ describe("C — declared_scale is stamped, never inferred by a consumer", () => 
     const graph = statedFactor({ id: "f_unknown", value: 0.4 });
     handleUnreachableFactors(graph, "edge_type" as any);
     expect(factorNode(graph, "f_unknown").declared_scale).toBeUndefined();
+  });
+});
+
+/* ===========================================================================
+ * D — THE PRODUCER'S DECLARATION OUTRANKS THIS STAGE'S INFERENCE.
+ *
+ * ⭐ WHY THIS EXISTS. #1562 made the DRAFT PRODUCER stamp `declared_scale` from
+ * the model's own `value_scale`. This stage has stamped its own since before
+ * that, by MAGNITUDE INFERENCE (`declaredScaleOf`), onto the SAME node-level
+ * carrier — and unconditionally, so it overwrites. Two reconstructions of one
+ * fact, free to disagree, is the exact defect this lane exists to remove, and
+ * shipping the producer's half without this guard created its tenth instance.
+ *
+ * ⚠ AND THE INFERENCE IS KNOWN-WEAK, IN THIS FILE'S OWN WORDS (`:337`): a bare
+ * `value > 1` test "cannot tell `1.15` on ratio scale from `115` on raw scale",
+ * measured at "A 100x OVER-statement". So when the two disagree, the one that
+ * must win is not in doubt.
+ *
+ * ⚠ WHY DEFER RATHER THAN DELETE. The lane's fix class is "make the producer
+ * STATE it, then DELETE the downstream inference" — and the deletion is the
+ * second half. It is NOT safe yet: how often the model actually emits
+ * `value_scale` under grammar v10 is UNMEASURED (both banked v202 draws predate
+ * #1562 and carry `declared_scale` on 0 of 15 and 0 of 12 nodes). Deleting now
+ * would remove a reconstruction with nothing proven to replace it. Deferring
+ * removes the DISAGREEMENT immediately and costs nothing in either world: where
+ * the producer speaks it wins, where it is silent this stage still fills.
+ * Delete the fallback once producer coverage is measured, not before.
+ * ========================================================================= */
+describe("D — the producer's declared_scale is never overwritten by this stage", () => {
+  /**
+   * RED-FIRST, and the FIRST HALF OF A DISCRIMINATING PAIR. The values are
+   * chosen so the two authorities genuinely disagree: `value: 1.12, unit: '%'`
+   * is exactly the row case C pins as inferring `ratio`, so a stage that
+   * overwrites produces `ratio` and a stage that defers produces `raw_count`.
+   * A fixture where they happened to agree would pass either way and prove
+   * nothing.
+   */
+  it("keeps the producer's declaration when this stage would infer a different one", () => {
+    const graph = statedFactor({
+      id: "f_producer_said",
+      value: 1.12,
+      unit: "%",
+      declared_scale: "raw_count",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_producer_said").declared_scale).toBe("raw_count");
+  });
+
+  /**
+   * THE SECOND HALF OF THE PAIR, and it is what stops the guard being written as
+   * "disable the write". Same inputs, NO producer declaration: this stage must
+   * still stamp. One biting mutant proves sensitivity to something; the pair
+   * proves sensitivity to the named object.
+   */
+  it("still stamps its own inference where the producer declared nothing", () => {
+    const graph = statedFactor({ id: "f_producer_silent", value: 1.12, unit: "%" });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    expect(factorNode(graph, "f_producer_silent").declared_scale).toBe("ratio");
+  });
+
+  /**
+   * THE PRECONDITION, PINNED IN-TEST. Without this the pair above could both
+   * pass on a fixture where `declaredScaleOf` returns undefined — a guard
+   * agreeing with itself. This asserts the two authorities really do disagree on
+   * this payload, so the outcome is provably the code's doing.
+   */
+  /**
+   * THE COMPLEMENT OF THE CONJUNCT THIS CHANGE TOUCHES. Deferring made the unit
+   * withholding read the EFFECTIVE declaration rather than this stage's own
+   * inference, so the case that did not exist before must be tested: a producer
+   * declaring `ratio` on a payload this stage would have inferred
+   * `unit_interval` for. The withholding exists because the '%' formatter
+   * resolves bounds by magnitude and renders a ratio range as a fraction — the
+   * harm is a property of the SCALE, so it must follow whichever authority
+   * declared it. Reading the losing inference here would have withheld on one
+   * authority while stamping the other.
+   */
+  it("withholds the unit on a producer-declared ratio this stage would not have inferred", () => {
+    const graph = statedFactor({
+      id: "f_producer_ratio",
+      value: 0.34,
+      unit: "%",
+      declared_scale: "ratio",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    const node = factorNode(graph, "f_producer_ratio");
+    expect(node.declared_scale).toBe("ratio");
+    expect(node.unit).toBeUndefined();
+  });
+
+  /**
+   * ...and its opposite-direction twin, so the guard is not "withhold always".
+   * Same producer field, a NON-ratio declaration, on a payload this stage WOULD
+   * have inferred `ratio` for: the unit must display.
+   */
+  it("displays the unit on a producer-declared non-ratio this stage would have called ratio", () => {
+    const graph = statedFactor({
+      id: "f_producer_unit_interval",
+      value: 1.12,
+      unit: "%",
+      declared_scale: "unit_interval",
+    });
+    handleUnreachableFactors(graph, "edge_type" as any);
+    const node = factorNode(graph, "f_producer_unit_interval");
+    expect(node.declared_scale).toBe("unit_interval");
+    expect(node.unit).toBe("%");
+  });
+
+  it("pins that the two authorities disagree on this payload, so the pair discriminates", () => {
+    const inferred = statedFactor({ id: "f_probe", value: 1.12, unit: "%" });
+    handleUnreachableFactors(inferred, "edge_type" as any);
+    expect(factorNode(inferred, "f_probe").declared_scale).toBe("ratio");
+    expect(factorNode(inferred, "f_probe").declared_scale).not.toBe("raw_count");
   });
 });

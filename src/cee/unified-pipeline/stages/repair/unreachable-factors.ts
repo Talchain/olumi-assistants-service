@@ -577,10 +577,53 @@ export function handleUnreachableFactors(
         (node as any).cap = data.cap;
       }
 
-      const scale = declaredScaleOf(originalValue ?? NaN, data.unit, data.cap, data.raw_value);
-      if (scale !== undefined) {
-        (node as any).declared_scale = scale;
+      // ⭐⭐ THE PRODUCER'S DECLARATION OUTRANKS THIS INFERENCE, AND THIS GUARD IS
+      // WHY BOTH MAY COEXIST.
+      //
+      // Since #1562 the DRAFT PRODUCER stamps `declared_scale` from the model's
+      // own `value_scale` (`draft/records/projector.ts:939`) — onto THIS SAME
+      // node-level carrier. Without the check below this stage overwrote it, so
+      // one fact had two reconstructions free to disagree, which is the defect
+      // class the producer-side stamp was shipped to remove. Shipping that half
+      // without this guard created its next instance rather than closing it.
+      //
+      // ⚠ AND WHEN THEY DISAGREE, WHICH ONE IS RIGHT IS NOT IN DOUBT — this
+      // file says so at `:337`: a bare `value > 1` test "cannot tell `1.15` on
+      // ratio scale from `115` on raw scale", measured at a 100x OVER-statement.
+      // An inference from magnitude cannot beat a declaration from the party
+      // that knows.
+      //
+      // ⚠ DEFER, NOT DELETE, AND DELIBERATELY SO. The fix class is "make the
+      // producer STATE it, then DELETE the downstream inference", and the
+      // deletion is the second half — but it is NOT safe yet: how often the
+      // model actually emits `value_scale` under grammar v10 is UNMEASURED.
+      // Deleting today would remove a reconstruction with nothing proven to
+      // replace it. This costs nothing in either world — where the producer
+      // speaks it wins, where it is silent this stage still fills — and the
+      // fallback should be deleted once producer coverage is measured, not
+      // before. `__tests__/stated-quantity-survival.test.ts` §D pins both
+      // directions so neither half can move silently.
+      const inferredScale = declaredScaleOf(
+        originalValue ?? NaN,
+        data.unit,
+        data.cap,
+        data.raw_value,
+      );
+      const producerScale = (node as any).declared_scale as
+        | "unit_interval"
+        | "ratio"
+        | undefined;
+      if (producerScale === undefined && inferredScale !== undefined) {
+        (node as any).declared_scale = inferredScale;
       }
+      // THE EFFECTIVE DECLARATION — the producer's where it spoke, this stage's
+      // inference otherwise. Read below by `withholdUnit`, which suppresses the
+      // rendering on ratio scale. It must follow the declaration that is
+      // actually ON the node, not the inference that lost to it: a producer that
+      // declares `ratio` needs the same suppression, and reading the stale
+      // inference here would have withheld on one authority while stamping the
+      // other.
+      const scale = producerScale ?? inferredScale;
 
       // ⚠ THE UNIT IS WITHHELD ON RATIO SCALE, DELIBERATELY, AND IT IS RECORDED.
       //
