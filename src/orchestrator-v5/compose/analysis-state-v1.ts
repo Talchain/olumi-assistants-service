@@ -109,10 +109,30 @@
  *
  *      **BOTH CLAUSES ARE NOW FALSE.** Swept at UI `staging` 13b8676d
  *      (2026-08-26), contrast control in the same run:
- *        - `canvas/state/analysisStateSelector.ts:671` reads
- *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`
- *          — THE STEP-7 CONJUNCT THIS NOTE SAID MUST NOT BE BUILT UNTIL THE
- *          QUESTION WAS SETTLED. It was built. The question was not settled.
+ *        - ⚠⚠ **THE CONSUMER NAMED HERE HAS MOVED — RE-POINTED 2026-09-18, and
+ *          the old text is corrected rather than deleted (trap 14).** It read:
+ *          *"`canvas/state/analysisStateSelector.ts:671` reads
+ *          `wire.leader_claim.permitted && run_state.kind === 'complete_current'`"*.
+ *          Re-swept at UI `staging` **af4370a0**: that file still EXISTS and
+ *          contains **ZERO** occurrences of `permitted` (contrast control in the
+ *          same run: `leader_claim` is read in 15 non-test UI files, so the probe
+ *          is sighted). **The live read is
+ *          `lib/coherence/crossSurfaceCoherence.ts` →
+ *          `producerWithholdsLeaderClaim`**, reached from
+ *          `canvas/hydrate/applyScenarioAnalysisRead.ts` (import, then
+ *          `'leader_claim_withheld'`). Its body is `state?.leader_claim
+ *          ?.permitted === false` — so the substance of the finding STANDS: the
+ *          step-7 conjunct was built, the question was not settled, and the
+ *          consumer still reads `permitted` as a permission.
+ *
+ *          ⭐ THE DURABLE REFERENCE IS THE SYMBOL, NOT THE LINE, for the same
+ *          reason the sibling bullet below already gives about `:863`/`:872`:
+ *          these are UI-repo coordinates this CEE module cannot verify at build
+ *          time, so they rot silently. A stale pointer reads as CONSIDERED and
+ *          sends the next session to the wrong file — which is how CLAUDE.md's
+ *          readiness-authority line sat wrong from 19 Aug to 18 Sep. Cite
+ *          `producerWithholdsLeaderClaim` by name; re-derive the line if you
+ *          need one.
  *        - `lib/coherence/crossSurfaceCoherence.ts` (the EMISSION site; the
  *          nearby `:863` cited in the first draft of this note is the GUARD,
  *          not the emission — a review measured the emission at `:872`. Both
