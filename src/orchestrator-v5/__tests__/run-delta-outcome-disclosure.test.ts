@@ -45,6 +45,10 @@ import { deriveAnalysisFreshness } from '../context/freshness.js';
 import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 import type { GraphStateIngress } from '../boundary/request-extensions.js';
 import { setTestSink, TelemetryEvents } from '../../utils/telemetry.js';
+import {
+  synthesiseFreshnessOnlyAnalysisReady,
+  type AnalysisReadyPayload,
+} from '../compose/analysis-ready-emit.js';
 import { PRESENT_PAIR, REFUSED_PAIR } from '../context/__tests__/run-delta-fixtures.js';
 
 const SCENARIO_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -126,18 +130,32 @@ function response(run: HandlerFact | null): OlumiResponse {
  * Finalise with the identity gate BOUND, so the producer is actually reached.
  * `newest` is both the block's subject and the freshness selection at its own
  * hash — the construction `c2-analysis-interpretation-composition` uses.
+ *
+ * `analysisReady` is threaded only by the wire-carrier suite below: the
+ * telemetry suite above deliberately runs WITHOUT it, which is what makes the
+ * no-carrier arm's contrast meaningful rather than a restatement.
  */
-function finalise(priorFacts: readonly HandlerFact[] | undefined, newest: HandlerFact | null) {
+function finalise(
+  priorFacts: readonly HandlerFact[] | undefined,
+  newest: HandlerFact | null,
+  analysisReady?: AnalysisReadyPayload,
+) {
   const hash = (newest as unknown as { result?: { graph_hash_at_run?: string } })?.result
     ?.graph_hash_at_run;
   return finaliseV5Response(response(newest), {
     scenarioId: SCENARIO_ID,
     ...(priorFacts === undefined ? {} : { priorFacts }),
     mayNameLeadingOption: true,
+    ...(analysisReady === undefined ? {} : { analysisReady }),
     ...(newest === null
       ? {}
       : { freshness: deriveAnalysisFreshness([newest as RunAnalysisHandlerFact], hash!) }),
   });
+}
+
+/** Read the wire key without asserting the carrier exists — the arms differ on that. */
+function wireReason(body: OlumiResponse): unknown {
+  return body.analysis_ready?.run_delta_absence_reason;
 }
 
 describe('run_delta outcome disclosure', () => {
@@ -281,5 +299,143 @@ describe('run_delta outcome disclosure', () => {
     const serialised = JSON.stringify(got[0]);
     expect(serialised).not.toContain(SECRET);
     expect(serialised).not.toContain('acme');
+  });
+});
+
+/**
+ * ⭐ THE WIRE HALF. The suite above proves the reason reaches an OPERATOR. It
+ * does not reach the PERSON, and the person is the one looking at an empty
+ * comparison panel. Five distinct refusals still arrive at the client as one
+ * silence, so the panel — built, mounted, and correctly rendering nothing —
+ * has no honest sentence available to it.
+ *
+ * ⚠ THE CARRIER IS FORCED, AND IT IS NOT A STYLISTIC CHOICE. Measured at the
+ * PINNED contract (`@talchain/schemas` 0.55.0, executed, both controls green):
+ * `OlumiResponseSchema` is `.strict()`, so an undeclared TOP-LEVEL sibling of
+ * `run_delta` is rejected `unrecognized_keys` and would take the whole reply to
+ * the egress fallback. `analysis_ready` is `.passthrough()` — at the boundary
+ * AND at CEE's own `schemas/analysis-ready.ts` — and `validateEgress` returns
+ * the CALLER'S OBJECT rather than `parsed.data`, so an undeclared key inside it
+ * survives intact. Same mechanic as `may_run` and `blocked_reason`, whose
+ * precedent is written up in `routing/readiness-intake.ts`.
+ *
+ * ⚠ SCOPE, EXACTLY: the FIVE producer refusals only. The caller's own three
+ * (`prior_facts_absent`, `run_identity_unconfirmed`, `run_identity_conflict`)
+ * stay telemetry-only, and NOT for tidiness — `prior_facts_absent` fires on
+ * every turn that ran no analysis at all, which is most of them, and the two
+ * identity members already reach the client as
+ * `analysis_state.leader_claim.withheld_reason`. Putting either on this key
+ * would be a second spelling of a fact the wire already carries.
+ */
+describe('run_delta absence reason reaches the client', () => {
+  const CARRIER = synthesiseFreshnessOnlyAnalysisReady();
+
+  it('carries insufficient_runs — the refusal 88.5% of scenarios legitimately earn', () => {
+    const only = BOUND_SINGLE[0]!;
+
+    const finalised = finalise(BOUND_SINGLE, only, CARRIER);
+
+    // PRECONDITION, PINNED IN-TEST (trap 13b): the carrier really is present on
+    // this body. Without this the assertion below could pass vacuously the day
+    // the stamp moves, and `undefined === undefined` would read as agreement.
+    expect(finalised.analysis_ready).toBeDefined();
+    expect(wireReason(finalised)).toBe('insufficient_runs');
+    // The wire and the log must not be able to disagree about one turn.
+    expect(outcomeEvents()[0]!.reason).toBe('insufficient_runs');
+  });
+
+  it('carries echoes_incomplete — a DIFFERENT reason, so the five are not one silence', () => {
+    const newest = BOUND_PAIR[0]!;
+    const pair = [newest, withoutSeedEcho(BOUND_PAIR[1]!)];
+
+    const finalised = finalise(pair, newest, CARRIER);
+
+    expect(finalised.analysis_ready).toBeDefined();
+    // Bound by the IDENTITY of the reason. A collapse to one string, or to a
+    // bare boolean "refused", fails HERE and passes the test above — which is
+    // the whole point of running both.
+    expect(wireReason(finalised)).toBe('echoes_incomplete');
+    expect(wireReason(finalised)).not.toBe('insufficient_runs');
+  });
+
+  it('stamps NOTHING when the delta was emitted — absence of a reason is the honest state', () => {
+    const finalised = finalise(BOUND_PAIR, BOUND_PAIR[0]!, CARRIER);
+
+    expect('run_delta' in finalised).toBe(true);
+    expect(finalised.analysis_ready).toBeDefined();
+    expect(wireReason(finalised)).toBeUndefined();
+  });
+
+  it('stamps NOTHING for the caller-owned skips — they are not producer refusals', () => {
+    const finalised = finalise(undefined, BOUND_PAIR[0]!, CARRIER);
+
+    expect(outcomeEvents()[0]!.reason).toBe('prior_facts_absent');
+    expect(finalised.analysis_ready).toBeDefined();
+    expect(wireReason(finalised)).toBeUndefined();
+  });
+
+  it('never FABRICATES a carrier, and discloses the loss instead of swallowing it', () => {
+    // No `analysisReady` in ctx — the exit genuinely built no readiness payload.
+    // `analysis_ready`'s three members are REQUIRED at the boundary, so minting
+    // one to hold a reason would invent a readiness claim to carry an honesty
+    // fix. Refuse, and make the refusal countable.
+    const finalised = finalise(BOUND_SINGLE, BOUND_SINGLE[0]!, undefined);
+
+    expect(finalised.analysis_ready).toBeUndefined();
+    const got = outcomeEvents();
+    expect(got[0]!.reason).toBe('insufficient_runs');
+    expect(got[0]!.wire_reason_carried).toBe(false);
+  });
+
+  it('records wire_reason_carried=true when it DID carry — the two arms discriminate', () => {
+    finalise(BOUND_SINGLE, BOUND_SINGLE[0]!, CARRIER);
+
+    expect(outcomeEvents()[0]!.wire_reason_carried).toBe(true);
+  });
+
+  it('WIRE SURVIVAL: the reason survives the egress chokepoint AND the strict wire schema', () => {
+    const finalised = finalise(BOUND_SINGLE, BOUND_SINGLE[0]!, CARRIER);
+    expect(wireReason(finalised)).toBe('insufficient_runs');
+
+    // Hop 1 — the real V5 egress chokepoint every 200-OK exit funnels through.
+    const egressed = sanitiseOlumiResponseForEgress(finalised, {
+      graph: null,
+      requestId: 'req-absence-reason',
+      exitPath: 'turn_executor_finalise',
+      userMessage: 'anything',
+      mayNameLeadingOption: true,
+    } as unknown as Parameters<typeof sanitiseOlumiResponseForEgress>[1]);
+    expect(wireReason(egressed)).toBe('insufficient_runs');
+
+    // Hop 2 — the strict wire schema DGAI parses against. This is the claim the
+    // carrier choice rests on, and it is EXECUTED rather than reasoned about.
+    const parsed = OlumiResponseSchema.parse(egressed);
+    expect(parsed.analysis_ready?.run_delta_absence_reason).toBe('insufficient_runs');
+
+    // CONTRAST CONTROL. The parent IS strict, so the parse genuinely
+    // discriminates: the SAME key one level up THROWS. Without this, "it
+    // survived" would be equally consistent with a parser that accepts anything
+    // — and it is the exact experiment that decided the carrier.
+    expect(() =>
+      OlumiResponseSchema.parse({ ...egressed, run_delta_absence_reason: 'insufficient_runs' }),
+    ).toThrow();
+  });
+
+  it('LEAK GUARD: the wire key carries a reason CODE and nothing else', () => {
+    const SECRET = 'acme_q4_redundancy_programme';
+    const leaky = structuredClone(BOUND_SINGLE[0]!) as unknown as {
+      result: { enrichment: { results: Array<Record<string, unknown>> } };
+    };
+    leaky.result.enrichment.results = [{ option_id: `opt_${SECRET}`, option_label: SECRET }];
+
+    const finalised = finalise(
+      [leaky as unknown as HandlerFact],
+      leaky as unknown as HandlerFact,
+      CARRIER,
+    );
+
+    // POSITIVE CONTROL — the token really was in the input.
+    expect(JSON.stringify(leaky)).toContain(SECRET);
+    expect(JSON.stringify(wireReason(finalised) ?? '')).not.toContain(SECRET);
   });
 });

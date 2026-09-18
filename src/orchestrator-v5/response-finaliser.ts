@@ -652,6 +652,10 @@ function attachRunDelta(
     outcome: 'emitted' | 'refused' | 'skipped',
     reason: RunDeltaDisclosureReason | null,
     out: T,
+    // null on every exit that puts no reason on the wire by design — see
+    // `attachRunDeltaAbsenceReason`. Only `false` means "there WAS a user-facing
+    // reason and it did not travel", which is the state worth counting.
+    wireReasonCarried: boolean | null = null,
   ): T => {
     // ⛔ AN OBSERVABILITY PATH MUST NOT BE ABLE TO BREAK THE THING IT OBSERVES.
     // Before this change `attachRunDelta` could not fail a response; it now
@@ -677,6 +681,11 @@ function attachRunDelta(
         // is user content, not structure.
         prior_facts_count: priorFactsCount,
         run_analysis_facts_count: runAnalysisFactsCount,
+        // Did the user-facing half actually ship? The carrier is CONDITIONAL
+        // (see `attachRunDeltaAbsenceReason`), and a conditional carrier that
+        // reports nothing when it misses is a silent-loss channel — the exact
+        // shape this event was built to end.
+        wire_reason_carried: wireReasonCarried,
       });
     } catch {
       // Deliberately swallowed. The response is the product; the log line is not.
@@ -706,8 +715,77 @@ function attachRunDelta(
   // The producer's own union, passed through. This caller mints no taxonomy for
   // the five: re-spelling them here would be a second list free to drift from
   // the one the producer actually returns.
-  if (built.kind !== 'ok') return disclose('refused', built.reason, response);
+  if (built.kind !== 'ok') {
+    const stamped = attachRunDeltaAbsenceReason(response, built.reason);
+    return disclose('refused', built.reason, stamped.body, stamped.carried);
+  }
   return disclose('emitted', null, { ...response, run_delta: built.delta });
+}
+
+/**
+ * Put the producer's refusal reason where a PERSON can be told it.
+ *
+ * ⛔ THE DEFECT THIS CLOSES, and it is the other half of the one above. The
+ * disclosure added on 15 Sep reaches an OPERATOR. The person looking at an
+ * empty comparison panel is told nothing at all — five distinct refusals arrive
+ * at the client as one silence, so the panel is built, mounted, and correctly
+ * renders NOTHING, because no honest sentence exists without the reason.
+ * `insufficient_runs` alone accounts for the overwhelming majority — a wire
+ * measurement taken outside this lane over three days found `run_delta` present
+ * in 0 of 915 `run_analysis` facts (contrast control `decision_brief` 915/915),
+ * and only 11.5% of scenarios ever reaching a second run (1,103 of 9,598). "You
+ * have only run this once, so there is nothing to compare" is a TRUE sentence
+ * we are currently withholding.
+ *
+ * ⚠ THE CARRIER IS FORCED BY THE CONTRACT, NOT CHOSEN FOR TIDINESS, and
+ * anyone editing this should know why before moving it. Measured by EXECUTING
+ * the pinned `@talchain/schemas` 0.55.0, both controls green:
+ *   · `OlumiResponseSchema` is `.strict()`. An undeclared TOP-LEVEL sibling of
+ *     `run_delta` — the natural home — fails `safeParse` with
+ *     `unrecognized_keys`, which takes the whole reply down the egress
+ *     degradation path. That home needs a schemas RELEASE, not a CEE change.
+ *   · `analysis_ready` is `.passthrough()`, at the boundary AND at CEE's own
+ *     `schemas/analysis-ready.ts`, so an undeclared key inside it crosses
+ *     INTACT. `validateEgress` returns the CALLER'S OBJECT rather than
+ *     `parsed.data`, so it is a gate and not a transform, and nothing strips it.
+ * This is the same mechanic `may_run` and `blocked_reason` already ride; the
+ * precedent and its derivation are written up in `routing/readiness-intake.ts`.
+ * The key is named `run_delta_absence_reason` in full so it can never be
+ * mistaken for a readiness field by a reader who arrives at it cold.
+ *
+ * ⚠ THE MIGRATION IS NAMED IN THIS PR'S BODY AND IS NOT YET A REGISTER ROW —
+ * stated plainly so nobody inherits a scheduler that does not exist. When the
+ * contract carries a declared top-level sibling of `run_delta`, this moves
+ * there and the passthrough key retires. Until then a CEE-only change is the
+ * ONLY way the sentence reaches a user, and a user-facing gap does not wait on
+ * a release train.
+ *
+ * ⛔ NEVER FABRICATE THE CARRIER. `analysis_ready`'s `status` / `options` /
+ * `goal_node_id` are REQUIRED at the boundary, so synthesising one to hold a
+ * reason would invent a readiness claim in order to ship an honesty fix. On a
+ * carrier-less exit this returns the body untouched and reports
+ * `carried: false`, so the loss is countable rather than silent.
+ *
+ * ⚠ SCOPE: the FIVE PRODUCER refusals only. The caller's own three are
+ * deliberately excluded — `prior_facts_absent` fires on every turn that ran no
+ * analysis at all (most of them), and the two identity members already reach
+ * the client as `analysis_state.leader_claim.withheld_reason`. Putting either
+ * here would be a second spelling of a fact the wire already carries, which is
+ * how two authorities under one name get born (CLAUDE.md trap 21).
+ */
+function attachRunDeltaAbsenceReason(
+  response: OlumiResponse,
+  reason: RunDeltaRefusal,
+): { readonly body: OlumiResponse; readonly carried: boolean } {
+  const carrier = response.analysis_ready;
+  if (carrier === undefined) return { body: response, carried: false };
+  return {
+    body: {
+      ...response,
+      analysis_ready: { ...carrier, run_delta_absence_reason: reason },
+    },
+    carried: true,
+  };
 }
 
 function stripCeeTrace(response: OlumiResponse): OlumiResponse {
