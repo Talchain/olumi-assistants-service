@@ -113,7 +113,7 @@
  *
  * Then, having entered, the residual is POST-CHECKED and escalated stepwise —
  * because removing the vocabulary unit is exactly what leaves a distributed
- * claim's naming half behind. See {@link projectField}.
+ * claim's naming half behind. See {@link projectLeadingOptionProse}.
  *
  * ⚠ THE COST OF ESCALATION, PRICED RATHER THAN HIDDEN. On a field that both
  * names an option AND asserts a leader, escalation removes the NAME-BEARING
@@ -194,18 +194,16 @@ import { log, emit, TelemetryEvents } from '../../utils/telemetry.js';
 import type { OlumiResponse } from '@talchain/schemas/boundary';
 import {
   textAssertsLeadingOption,
-  textAssertsImplicitLeadingOption,
-  textAssertsOnlyImplicitLeadingOptions,
-  optionLabelPattern,
   textNamesLeadingOption,
   // The BLOCK-SURFACE readers. Imported, never copied: a private list here would
   // drift from the alarm and the first symptom would be a leak this gate is
   // reported to have closed (CLAUDE.md trap #12).
   keyDesignatesLeadingOption,
-  assertedLeaderNamesItsOwnSubject,
   BLOCK_PROSE_FIELDS,
 } from './leading-option-egress-guard.js';
-import { replaceAssertingUnits, splitIntoRedactableUnits } from './redactable-units.js';
+import { replaceAssertingUnits } from './redactable-units.js';
+import { projectLeadingOptionProse } from './leading-option-prose-projection.js';
+export { textNamesAnOption } from './leading-option-prose-projection.js';
 import {
   analysisReadyPermitsLeaderNaming,
   permittedAnalysisModeFromAnalysisReady,
@@ -371,11 +369,6 @@ export function optionRosterFromAnalysisReady(analysisReady: unknown): readonly 
  * option IS named — only the matcher was brittle. Normalising every internal
  * whitespace run to `\s+` matches a label however the prose happened to wrap.
  */
-export function textNamesAnOption(value: string, roster: readonly string[]): boolean {
-  if (typeof value !== 'string' || value.length === 0 || roster.length === 0) return false;
-  return roster.some((label) => optionLabelPattern(label).test(value));
-}
-
 /**
  * ⚠ WHY THIS IS AN EXACT TOKEN SEQUENCE AND NOT A FUZZY / PARTIAL MATCH — an
  * ARCHITECT CALL, recorded so the next reader does not "fix" it into the defect
@@ -660,7 +653,7 @@ function projectBlocksForWithheldClaim(
       for (const field of BLOCK_PROSE_FIELDS) {
         const value = source[field];
         if (typeof value !== 'string') continue;
-        const result = projectField(value, roster);
+        const result = projectLeadingOptionProse(value, roster, WIRE_WITHHELD_LEADER_REPLACEMENT);
         if (result === null) continue;
         escalate(result.mode);
         write(field, result.text);
@@ -720,107 +713,6 @@ function projectBlocksForWithheldClaim(
  * cost-function doctrine, and `assertEnforcerIsNarrowerThanAlarm` now pins
  * narrow ⊆ wide, so nothing designating can hide in the gap.
  */
-function projectField(
-  value: string,
-  roster: readonly string[],
-): { text: string; mode: WireEnforcementMode } | null {
-  if (typeof value !== 'string' || value.length === 0) return null;
-  const context = { optionLabels: roster };
-  const asserts = (text: string): boolean => textAssertsLeadingOption(text, context);
-  // (1) A CLAIM IS PRESENT — field level, so a straddling match still counts.
-  if (!asserts(value)) return null;
-  // A designation can be exact-name or an explicitly asserted implicit lead.
-  // This is prose classification, not fuzzy matching of the scenario roster.
-  const namesOption = textNamesAnOption(value, roster);
-  if (!namesOption && !textAssertsImplicitLeadingOption(value, context)) return null;
-  // An explicit implicit designation is complete locally. A neighbouring
-  // option explanation is not its missing naming half. Keep the existing
-  // escalation for other/distributed claims, including mixed fields.
-  //
-  // ⭐⭐ AND A SELF-NAMING ASSERTION IS COMPLETE LOCALLY FOR THE SAME REASON.
-  //
-  // Escalation exists for the DISTRIBUTED claim — "Hire X is strong. It leads
-  // at 54%." — where the asserting unit borrows its naming half from a
-  // neighbour, so removing the assertion alone leaves the designation standing.
-  // It was firing for self-contained claims too, and that cost real coaching:
-  // on a captured answer, "Hire X leads in 54% of simulations against Y" was
-  // correctly removed and then TWO independently non-asserting conditional
-  // paragraphs were deleted with it, purely for naming the options they
-  // discuss. 709 -> 393 characters, mode `surgical_escalated`. The same
-  // paragraphs WITHOUT the unsafe neighbour survive byte-for-byte, which is
-  // what proves this is collateral rather than a classifier that rejects
-  // conditional prose.
-  //
-  // The discriminator is whether any assertion is missing its own name. If
-  // every asserting unit names the option it designates, surgery is complete
-  // and nothing elsewhere is that claim's other half. If one does not, it
-  // borrowed the name from another unit and the name-bearing units must go too.
-  //
-  // ⚠ NOT A RELAXATION OF WHAT MAY BE CLAIMED. Every asserting unit is still
-  //   removed, by the same predicate, and a distributed claim still loses both
-  //   halves. This narrows only WHICH NON-ASSERTING units are collateral.
-  //
-  // ⭐⭐ AND "NAMES AN OPTION" IS NOT "NAMES ITS OWN SUBJECT" — the first cut of
-  //   this discriminator asked the wider question and reopened the very leak
-  //   the escalation exists for. Reproduced by the independent reviewer at
-  //   `7b54f07c`:
-  //
-  //     "Hire a Hands-on Technical Lead is strong. It leads in 54% of
-  //      simulations against Two Developers."
-  //
-  //   The asserting unit names a roster option — the COMPARATOR — while its own
-  //   subject is the anaphoric "It", borrowed from the sentence before. Under
-  //   `textNamesAnOption` it read as self-contained, so no escalation ran and
-  //   the withheld answer shipped as "Hire a Hands-on Technical Lead is strong.
-  //   No single option can be put forward yet." — still designating the leader
-  //   it may not name. A comparator mention is not a subject.
-  //
-  //   `assertedLeaderNamesItsOwnSubject` asks the narrower question, and asks it
-  //   with the binding the guard already performs: a claim's subject is the
-  //   option reference that reaches its predicate through the grammatical
-  //   prelude. No comparison-word list, no new policy, no new runtime model —
-  //   the same classifier, one question sharper. Withholding is unchanged in
-  //   both directions it must be: a self-contained comparative ("Hire X leads
-  //   in 54% against Y") still names its subject and still keeps neighbouring
-  //   conditional paragraphs, and an anaphoric claim still loses both halves.
-  const units = splitIntoRedactableUnits(value).filter((unit) => !/^\s+$/.test(unit));
-  const someAssertionBorrowsItsName = units.some(
-    (unit) => asserts(unit) && !assertedLeaderNamesItsOwnSubject(unit, context),
-  );
-  const needsNameEscalation =
-    namesOption &&
-    !textAssertsOnlyImplicitLeadingOptions(value, context) &&
-    someAssertionBorrowsItsName;
-
-  const isClean = (candidate: string): boolean =>
-    !asserts(candidate) &&
-    (!needsNameEscalation || !textNamesAnOption(candidate, roster));
-
-  const surgical = replaceAssertingUnits(
-    value,
-    asserts,
-    WIRE_WITHHELD_LEADER_REPLACEMENT,
-  );
-  if (isClean(surgical)) return { text: surgical, mode: 'surgical' };
-
-  // ⚠ ESCALATION RUNS FROM THE ORIGINAL VALUE, NOT FROM `surgical`. Running it
-  // over the surgical output leaves the replacement sentence sitting in the text
-  // as ORDINARY PROSE — it neither asserts nor names, so the collapse logic
-  // cannot see it as a replacement, and a name-bearing neighbour that is
-  // replaced next lands the SAME sentence twice in a row ("No single option can
-  // be put forward yet. No single option can be put forward yet."). Re-deriving
-  // from the original makes the two removals one contiguous run, which is
-  // exactly what the collapse rule is for.
-  const escalated = replaceAssertingUnits(
-    value,
-    (unit) => asserts(unit) || textNamesAnOption(unit, roster),
-    WIRE_WITHHELD_LEADER_REPLACEMENT,
-  );
-  if (isClean(escalated)) return { text: escalated, mode: 'surgical_escalated' };
-
-  return { text: WIRE_WITHHELD_LEADER_REPLACEMENT, mode: 'whole_field' };
-}
-
 /**
  * ⭐⭐ THE QUALIFICATION THE QUALIFIED POPULATION MUST CARRY — output, not advice.
  *
@@ -1080,7 +972,7 @@ export function enforceLeadingOptionClaimsAtWire(
     let projectedLength = 0;
     let next = response;
 
-    const answer = projectField(response.assistant_text, roster);
+    const answer = projectLeadingOptionProse(response.assistant_text, roster, WIRE_WITHHELD_LEADER_REPLACEMENT);
     if (answer !== null) {
       originalLength += response.assistant_text.length;
       projectedLength += answer.text.length;
@@ -1091,7 +983,7 @@ export function enforceLeadingOptionClaimsAtWire(
 
     const framing = response.framing_question;
     if (typeof framing === 'string') {
-      const projected = projectField(framing, roster);
+      const projected = projectLeadingOptionProse(framing, roster, WIRE_WITHHELD_LEADER_REPLACEMENT);
       if (projected !== null) {
         originalLength += framing.length;
         projectedLength += projected.text.length;
