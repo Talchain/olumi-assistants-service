@@ -894,6 +894,64 @@ export interface BuildCoachingDegradeOptions {
    * the unchanged no-hold behaviour.
    */
   readonly liveHold?: HeldOfferForDegrade;
+  /**
+   * WHICH boundary the output crossed, so the degrade can say what it held
+   * back instead of holding back everything.
+   *
+   * Read for exactly one decision — see {@link CLAIM_PERMISSION_NOTE}. It is
+   * never narrated, never mapped to copy for any other member, and a member
+   * this builder does not recognise leaves the bytes unchanged. Omit for the
+   * unchanged copy.
+   */
+  readonly violation?: CoachingViolation;
+}
+
+/**
+ * ⭐⭐⭐ WHAT WAS HELD BACK, AND WHAT IS STILL ON OFFER.
+ *
+ * ── THE WITNESS. Deployed staging 19 Sep 2026, scenario `7cb3cd1c`, 18:49:58Z,
+ * trace `a01280f1`. The person typed "What would you advise?", waited 12.2
+ * seconds while the model composed a real answer, and received the stale
+ * caveat and the re-run offer as the ENTIRE turn. Render carries the reason:
+ * `v5.coaching.output_postcheck`, violation
+ * `confident_advice_under_unsafe_state`, freshness `stale`, `blocked: false`.
+ *
+ * ── THE RULE THAT FIRED IS CORRECT AND IS NOT TOUCHED. It bars exactly one
+ * thing — confident DIRECTIONAL advice toward an option — while a result
+ * cannot be treated as current, and it exempts recovery guidance by design.
+ * `blocked: false` says the result exists and is usable; it is only out of
+ * date. The model was rightly stopped from saying "go with X".
+ *
+ * ── WHAT WAS WRONG WAS THE DEGRADE. One barred claim class became total
+ * silence, so the reasoning and the assumptions — which rest on nothing
+ * current, and which the very same rule still permits — died alongside the one
+ * sentence that was unsafe. The person was told neither what had been withheld
+ * nor that anything else remained, and did not ask again.
+ *
+ * ── SCOPE, DELIBERATELY NARROW. Emitted only for the violation that earns it,
+ * and only where the sentence is TRUE: a result that exists but whose currency
+ * is in doubt (stale, or unconfirmed). A blocked or absent analysis has no
+ * figures being held back, so claiming otherwise would be a fresh false
+ * statement — the controls pin both directions.
+ *
+ * British English; carries no value, unit, hash, option label or freshness
+ * claim, and states no figure.
+ */
+export const CLAIM_PERMISSION_NOTE =
+  ' I\u2019ve held back from pointing you to one option over another, because ' +
+  'that would rest on a result I can\u2019t treat as current. Ask me about the ' +
+  'reasoning or the assumptions behind it and I\u2019ll answer from what\u2019s ' +
+  'in the model.';
+
+/**
+ * The one violation whose reason the degrade may state.
+ *
+ * A function rather than an inline comparison so the narrowness is visible at
+ * the call site and a widening has to be written down here, next to the
+ * sentence whose truth conditions it would be widening.
+ */
+function statesWhatWasHeldBack(violation: CoachingViolation | undefined): boolean {
+  return violation === 'confident_advice_under_unsafe_state';
 }
 
 /**
@@ -1128,9 +1186,15 @@ export function buildCoachingDegradeResponse(
     // freshness so a blocked-and-stale fact does not claim "the model changed".
     assistant_text = buildAnalysisDegradedTemplate();
   } else if (pack.freshness === 'stale') {
-    assistant_text = buildAnalysisStaleTemplate();
+    // APPENDED, never prepended: `explain-results` and the golden-path
+    // contract both anchor on this caveat OPENING the turn.
+    assistant_text =
+      buildAnalysisStaleTemplate()
+      + (statesWhatWasHeldBack(opts.violation) ? CLAIM_PERMISSION_NOTE : '');
   } else if (pack.freshness === 'unknown') {
-    assistant_text = buildAnalysisUnconfirmedTemplate();
+    assistant_text =
+      buildAnalysisUnconfirmedTemplate()
+      + (statesWhatWasHeldBack(opts.violation) ? CLAIM_PERMISSION_NOTE : '');
   } else {
     // Fact present + fresh but trust-downgraded (e.g. ready-with-actionable-
     // blockers) → honest "no usable result".

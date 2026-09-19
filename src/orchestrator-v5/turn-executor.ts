@@ -2232,6 +2232,12 @@ export async function runTurnExecutor(
       // a parser. Witness: the risk chip at 18:59:05 on 19 Sep returned the
       // unsubjected sentence and the person never asked again.
       question: payload.message,
+      // The boundary that was actually crossed — the same value emitted to
+      // telemetry immediately above — so the degrade can hold back the one
+      // barred claim instead of every kind of help. Witness: trace `a01280f1`
+      // at 18:49:58 on 19 Sep, where "What would you advise?" earned a 12.2s
+      // answer that was replaced in full by the caveat and the re-run offer.
+      ...(verdict.violation !== undefined ? { violation: verdict.violation } : {}),
     });
     return {
       assistant_text: degrade.assistant_text,
