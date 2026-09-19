@@ -812,6 +812,7 @@ function resolveTrailingMetric(
 /** The named refusal reasons for a goal (target, baseline) pair. */
 type GoalPairRefusalReason =
   | "mixed_percent_pair"
+  | "scale_ellipsis_unreadable"
   | "currency_mismatch"
   | "metric_noun_mismatch"
   | "currency_vs_metric_noun"
@@ -1542,6 +1543,96 @@ function resolveAmount(
 }
 
 /**
+ * ⭐⭐ THE TARGET AND THE BASELINE ARE READ ON ONE SCALE, OR THERE IS NO PAIR.
+ *
+ * ── THE DEFECT THIS CLOSES, MEASURED IN THE STAGING DATABASE ───────────────
+ * `resolveAmount` resolves ONE captured amount: its own digits times its own
+ * magnitude suffix. `resolveOneGoalMatch` called it twice, independently, so
+ * "grow ARR from 8 to 11 million within 12 months" — where English elides the
+ * shared "million" from the first number — produced a target of 11,000,000
+ * beside a baseline of 8. The persisted goal node then carried
+ * `goal_threshold_raw 11,000,000`, `goal_threshold_cap 13,750,000` and
+ * `observed_state.baseline 5.8181…e-7` (8 ÷ the cap). ISL computes
+ * `P(level ≥ T)` from `level = B + (option − status_quo)`, so `B = 5.8e-7`
+ * against `T = 0.8` is a STRUCTURAL ZERO — arithmetically impossible, not
+ * unlikely — and it reaches the user as a confident number.
+ *
+ * ⚠ THE NORMALISATION DOWNSTREAM IS CORRECT AND IS NOT TOUCHED. `enricher.ts`
+ * already divides BOTH numbers by the SAME cap on the same branch (`:1547`,
+ * `:1554`), which is what makes `P(level_norm ≥ 0.8) ≡ P(level_raw ≥ raw)` —
+ * the user's own target, re-entering through the baseline. The two numbers
+ * were simply put on different scales BEFORE that division. Fixing the cap
+ * rule would break a correct mechanism; the scale disagreement is the defect.
+ *
+ * ── THE READING IS DELEGATED, NOT RE-DERIVED (trap 12, trap 22) ────────────
+ * `utils/amount-range.ts` already owns "does a single trailing magnitude scope
+ * both of these amounts?" — `resolveAmountRange`'s elliptical branch, with its
+ * ordering precondition and its rival-reading test, a corpus, and pinned
+ * tests. Its from-to sibling `resolveAmountPairBothOrNeither` refuses a
+ * one-sided magnitude outright. The goal pair-former consulted NEITHER. This
+ * function makes that EXISTING rule reach this path; it does not write a
+ * second predicate over natural language, because a corpus drawn from this
+ * lane's own head cannot see the class this lane did not imagine.
+ *
+ * ── THE THREE ANSWERS, NAMED APART (trap 21) ───────────────────────────────
+ *   · magnitude on BOTH sides, or NEITHER → the two amounts are already on one
+ *     scale by construction. Nothing to reconcile; byte-identical output.
+ *   · magnitude on the TARGET only → the shared-suffix ellipsis decides, and
+ *     it may distribute ("from 8 to 11 million" → 8,000,000), read the lower
+ *     bound literally ("from 800,000 to 1.1 million" → 800,000, because the
+ *     bare digits do not ascend), or refuse where a rival reading also ascends
+ *     ("from 500 to 2 million" — £500 and £500k are both coherent).
+ *   · magnitude on the BASELINE only → no reading exists. Shared-suffix
+ *     ellipsis reads BACKWARDS from the end of a coordinate structure, never
+ *     forwards, so "from 8 million to 11" is refused rather than guessed.
+ *
+ * ⛔ NOTHING IS CLAMPED, FLOORED OR RESCALED TO LOOK PLAUSIBLE. A refusal
+ * withholds the baseline, ISL refuses with `missing_goal_baseline` and the
+ * user is asked — the path 338 of 409 persisted headroom goals already take,
+ * and already take correctly. A fabricated baseline would be worse than the
+ * zero it replaced.
+ *
+ * ⚠ THE WORDS BRANCH IS OUT OF SCOPE, DELIBERATELY. `amountPattern`'s cardinal
+ * branch spells its scale inside the phrase ("two hundred thousand") and
+ * captures no `*Mult` group at all, so the digit-and-suffix rule above cannot
+ * speak about it — and a match where one side is words would otherwise present
+ * as "no magnitude" with no digits to read, turning every mixed words/digits
+ * pair into a refusal. It is returned untouched and the residual is pinned in
+ * both directions by `goal-pair-shared-magnitude.test.ts`.
+ */
+type GoalPairScale =
+  /** Both sides already agree about scale — read them exactly as before. */
+  | { readonly kind: "agreed" }
+  /** One trailing magnitude scopes both amounts; these are the raw values. */
+  | { readonly kind: "shared"; readonly from: number; readonly to: number }
+  /** No reading of the elided magnitude is available. Refuse the pair. */
+  | { readonly kind: "unreadable"; readonly magnitudeSide: "target" | "baseline" };
+
+function reconcileGoalPairScale(groups: Record<string, string | undefined>): GoalPairScale {
+  // A cardinal-words amount on either side: out of the digit-and-suffix rule's
+  // domain (see the note above). Left exactly as it was.
+  if (groups.fromWords !== undefined || groups.toWords !== undefined) {
+    return { kind: "agreed" };
+  }
+  const fromMagnitude = groups.fromMult;
+  const toMagnitude = groups.toMult;
+  const hasFromMagnitude = fromMagnitude !== undefined && fromMagnitude !== "";
+  const hasToMagnitude = toMagnitude !== undefined && toMagnitude !== "";
+  if (hasFromMagnitude === hasToMagnitude) return { kind: "agreed" };
+
+  const resolved = resolveAmountRange({
+    minDigits: groups.from,
+    minMagnitude: fromMagnitude,
+    maxDigits: groups.to,
+    maxMagnitude: toMagnitude,
+  });
+  if (resolved === null) {
+    return { kind: "unreadable", magnitudeSide: hasToMagnitude ? "target" : "baseline" };
+  }
+  return { kind: "shared", from: resolved.min, to: resolved.max };
+}
+
+/**
  * A resolved target in this file's normalised convention ('%' pre-divided into
  * a 0-1 fraction). ONE spelling, read by the formed pair and by the refusal
  * alike, so the number a refusal reports can never drift from the number the
@@ -1739,6 +1830,41 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
       return refuseGoalPair("mixed_percent_pair", {}, normaliseTargetValue(to), span);
     }
 
+    // ⭐⭐ ONE SCALE FOR BOTH AMOUNTS — see `reconcileGoalPairScale`. It runs
+    // HERE, beside the mixed-percent refusal and BEFORE the direction check
+    // below, for exactly the reason ROADMAP 2.371(d) gave for moving that one:
+    // COMPARABILITY IS A PRECONDITION OF COMPARISON. "from 8 to 11 million"
+    // passes the direction check (11,000,000 > 8) and then mints a baseline six
+    // orders of magnitude under its own target, so the direction rule cannot
+    // see this class at all; and "from 8 million to 11" is caught by direction
+    // today for the WRONG REASON — nothing about that sentence states a
+    // decrease. A reason that names the wrong rule teaches the next reader the
+    // wrong thing.
+    //
+    // ⚠ It also runs before the currency and metric-noun refusals, so a brief
+    // that is BOTH scale-unreadable and cross-currency now reports the scale
+    // reason. Both are refusals, no pair forms either way, and no corpus string
+    // in this repo is both (whole-repo sweep: 222,882 quoted literals under
+    // `src/` and `tests/`, 82 form a pair, NONE of them elliptical).
+    const scale = reconcileGoalPairScale(groups);
+    if (scale.kind === "unreadable") {
+      return refuseGoalPair(
+        "scale_ellipsis_unreadable",
+        { magnitude_side: scale.magnitudeSide },
+        normaliseTargetValue(to),
+        span,
+      );
+    }
+    // The target is invariant under distribution (`resolveAmountRange` computes
+    // its upper bound as `maxDigits × multiplier`, which is what `resolveAmount`
+    // already returned), but it is carried through rather than assumed so the
+    // two readings cannot drift apart unnoticed.
+    const fromRaw = scale.kind === "shared" ? scale.from : from.raw;
+    const toResolved = {
+      raw: scale.kind === "shared" ? scale.to : to.raw,
+      isPercent: to.isPercent,
+    } as const;
+
     // ⚠ ROADMAP 2.353 (review A2) — A DECREASE IS REFUSED, NOT MINTED, AND THE
     // REASON IS THE SEAM RATHER THAN THE SENTENCE.
     //
@@ -1768,14 +1894,14 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
     //
     // ⚠ ROADMAP 2.371(d) — AND IT RUNS AFTER THE COMPARABILITY CHECK ABOVE, SO
     // BOTH OPERANDS BELOW ARE ON ONE SCALE BY CONSTRUCTION.
-    if (to.raw !== 0 || from.raw !== 0) {
-      const target = to.isPercent ? to.raw / 100 : to.raw;
-      const level = from.isPercent ? from.raw / 100 : from.raw;
+    if (toResolved.raw !== 0 || fromRaw !== 0) {
+      const target = normaliseTargetValue(toResolved);
+      const level = from.isPercent ? fromRaw / 100 : fromRaw;
       if (target < level) {
         return refuseGoalPair(
           "direction_unsupported",
           { target: String(target), baseline: String(level) },
-          normaliseTargetValue(to),
+          normaliseTargetValue(toResolved),
           span,
         );
       }
@@ -1797,7 +1923,7 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
       return refuseGoalPair(
         "currency_mismatch",
         { target_currency: toCurrency, baseline_currency: fromCurrency },
-        normaliseTargetValue(to),
+        normaliseTargetValue(toResolved),
         span,
       );
     }
@@ -1816,7 +1942,7 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
         return refuseGoalPair(
           "metric_noun_mismatch",
           { target_metric: toMetric.noun, baseline_metric: fromMetric.noun },
-          normaliseTargetValue(to),
+          normaliseTargetValue(toResolved),
           span,
         );
       }
@@ -1827,14 +1953,14 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
       return refuseGoalPair(
         "currency_vs_metric_noun",
         { target_currency: toCurrency, baseline_metric: fromMetric.noun },
-        normaliseTargetValue(to),
+        normaliseTargetValue(toResolved),
         span,
       );
     } else if (fromCurrency && !toCurrency && toMetric.noun) {
       return refuseGoalPair(
         "currency_vs_metric_noun",
         { baseline_currency: fromCurrency, target_metric: toMetric.noun },
-        normaliseTargetValue(to),
+        normaliseTargetValue(toResolved),
         span,
       );
     }
@@ -1865,8 +1991,8 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
       kind: "pair",
       span,
       pair: {
-        value: isPercent ? to.raw / 100 : to.raw,
-        baseline: isPercent ? from.raw / 100 : from.raw,
+        value: isPercent ? toResolved.raw / 100 : toResolved.raw,
+        baseline: isPercent ? fromRaw / 100 : fromRaw,
         unit: isPercent
           ? "%"
           : (to.currency ?? from.currency ?? toMetric.currency ?? fromMetric.currency),
