@@ -27,7 +27,11 @@ import type { CorrectionCollector } from "../corrections.js";
 import { formatEdgeId } from "../corrections.js";
 import { DEFAULT_EXISTS_PROBABILITY } from "@talchain/schemas";
 import { synthesiseDisplayValue } from "./display-value.js";
-import { unitPinnedScaleFrame } from "../draft/records/unit-scale-class.js";
+import {
+  classifyUnitScaleClass,
+  unitPinnedScaleFrame,
+} from "../draft/records/unit-scale-class.js";
+import { sameUnit } from "../../utils/currency-alphabet.js";
 import {
   CEE_GOAL_THRESHOLD_FRAME,
   resolveGoalThresholdCapWithProvenance,
@@ -732,6 +736,51 @@ export function creditUserTypedFigures(
   }
   if (extracted.length === 0) return 0;
 
+/**
+ * ⭐⭐⭐ DOES THE NODE HOLD THE SAME QUANTITY THE USER WROTE?
+ *
+ * ── THE DEFECT THIS CLOSES. Every other limb of the crediting pass can be
+ * satisfied by a NAKED NUMBER: the span is real, the label matches, the tokens
+ * sit in the sentence, and the identity test compares `factor.value === level`.
+ * None of them reads a unit. So a node labelled "Churn Rate" holding
+ * `{ value: 0.04, unit: "£" }` earns the same credit from the brief sentence
+ * *"Our monthly churn rate is 4%."* — and the projection then keeps that frame
+ * while stamping the figure as the person's own. They wrote a percentage. The
+ * node says four pence. Identical naked numbers are not identical quantities.
+ *
+ * ── WHY THIS IS NOT COSMETIC. A credited figure counts toward
+ * `material_parameters_user_stated` in the analysis-admission census, so a
+ * false credit can lift a run across the admission floor and license
+ * comparative material on evidence the person never supplied.
+ *
+ * ── WHAT COUNTS AS CORRESPONDENCE, AND WHY IT IS BORROWED, NOT WRITTEN HERE.
+ * Two existing authorities answer this and a third copy of unit vocabulary is
+ * the hand-maintained mirror this estate keeps paying for:
+ *   · {@link sameUnit} normalises currency spellings to their code and compares
+ *     — and is explicitly NOT a conversion, so a genuine currency difference
+ *     still compares unequal;
+ *   · {@link classifyUnitScaleClass} answers the percent-family question, so
+ *     `"%"` and `"percent"` correspond while `"%"` and `"pp"` do not, because
+ *     percentage points are a different frame rather than a spelling of one.
+ *
+ * ── FAILS CLOSED. A unit missing on either side is NOT correspondence, so the
+ * node keeps the provenance it already had. That is deliberate: this pass only
+ * ever corrects upward, and declining to upgrade is a gap, while upgrading on
+ * an unestablished frame is a false attribution. The cost is a real credit
+ * withheld when a producer omits a unit; the alternative is crediting the
+ * person with a quantity they did not write.
+ */
+function unitsCorrespond(
+  nodeUnit: string | undefined,
+  figureUnit: string | undefined,
+): boolean {
+  if (typeof nodeUnit !== "string" || nodeUnit.trim().length === 0) return false;
+  if (typeof figureUnit !== "string" || figureUnit.trim().length === 0) return false;
+  if (sameUnit(nodeUnit, figureUnit)) return true;
+  const nodeClass = classifyUnitScaleClass(nodeUnit);
+  return nodeClass !== "unknown" && nodeClass === classifyUnitScaleClass(figureUnit);
+}
+
   let credited = 0;
 
   for (let nodeIndex = 0; nodeIndex < graph.nodes.length; nodeIndex++) {
@@ -790,7 +839,14 @@ export function creditUserTypedFigures(
       // churn factor — see `labelIsNamedInFigureSentence`.
       if (!labelIsNamedInFigureSentence(node.label, factor, brief)) return false;
       // (7) …and the level must BE that figure. Identity, not resemblance.
-      return factor.value === level;
+      if (factor.value !== level) return false;
+      // (7b) …IN THE SAME FRAME. Identity of the number is not identity of the
+      // quantity — see `unitsCorrespond`. Missing or conflicting units retain
+      // the provenance the node already had; nothing here changes a value.
+      return unitsCorrespond(
+        (data as { unit?: unknown }).unit as string | undefined,
+        factor.unit,
+      );
     });
 
     if (earners.length !== 1) {

@@ -128,6 +128,78 @@ describe("the figures the user typed are credited to the user", () => {
     expect(graph.nodes).toHaveLength(6);
   });
 
+  /**
+   * ⭐⭐⭐ IDENTICAL NAKED NUMBERS ARE NOT IDENTICAL QUANTITIES.
+   *
+   * Every other limb of this pass can be satisfied without ever reading a
+   * unit: the span is the person's own bytes, the label matches, the tokens
+   * sit in the figure's sentence, and the identity test compares the number.
+   * So a node labelled "Monthly Churn Rate" holding `0.04` in POUNDS earned
+   * the same credit from *"Our churn rate is 4% monthly"* — and the projection
+   * kept that frame while stamping the figure as the person's own. They wrote
+   * a percentage; the node said four pence.
+   *
+   * This is not a badge defect. A credited figure counts toward
+   * `material_parameters_user_stated` in the admission census, so the false
+   * credit could lift a run over the admission floor on evidence that was
+   * never supplied.
+   *
+   * ⚠ THE TWIN IS THE WHOLE POINT (trap 22b). The positive above and the case
+   * below differ in ONE field. Without the twin, a pass that ignores units
+   * scores identically to one that checks them.
+   */
+  it("⭐ THE CONFLICTING-UNIT TWIN: the same figure in the wrong frame is NOT the person's", () => {
+    const graph = graphOf([
+      // Byte-identical to the credited positive except for the unit.
+      factor("ab78e513", "Monthly Churn Rate", 0.04, "£"),
+      factor("50555008", "Trial-to-Paid Conversion Rate", 0.12, "%"),
+    ]);
+
+    const credited = creditUserTypedFigures(graph, CAPTURED_BRIEF);
+
+    // The percentage node still earns it — the correction is a frame test, not
+    // a retreat from crediting.
+    expect(publishedSource(byId(graph, "50555008"))).toBe("brief_extraction");
+    // The pounds node does not.
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+    expect(credited).toBe(1);
+    // And nothing was rewritten to make that true.
+    expect(byId(graph, "ab78e513").data).toMatchObject({ value: 0.04, unit: "£" });
+  });
+
+  it("a unit missing on the node is not correspondence — it retains what it had", () => {
+    // Fails CLOSED. Declining to upgrade is a gap; upgrading on an
+    // unestablished frame is a false attribution, and only one of those two
+    // puts a number in the admission census that the person never wrote.
+    const graph = graphOf([
+      {
+        id: "ab78e513",
+        kind: "factor",
+        label: "Monthly Churn Rate",
+        category: "observable",
+        data: { value: 0.04, extractionType: "inferred" },
+      } as NodeT,
+    ]);
+
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
+  it("a percent SPELLING still corresponds — the frame test is not a string test", () => {
+    // `classifyUnitScaleClass` is the authority, so "percent" and "%" are one
+    // frame. If this ever REDs, the fix is that authority, not a second unit
+    // vocabulary here.
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "percent")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(1);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("brief_extraction");
+  });
+
+  it("percentage POINTS are a different frame, not a spelling of percent", () => {
+    const graph = graphOf([factor("ab78e513", "Monthly Churn Rate", 0.04, "pp")]);
+    expect(creditUserTypedFigures(graph, CAPTURED_BRIEF)).toBe(0);
+    expect(publishedSource(byId(graph, "ab78e513"))).toBe("cee_inference");
+  });
+
   it("credits a value the brief states for a DIFFERENT entity to NOBODY", () => {
     // ⭐ THE CASE THE REAL TEXT FOUND. `inferLabel` labels the competitor's
     // `£5m` "Churn Rate" — its window reaches back into the previous bullet —
