@@ -589,10 +589,18 @@ function backfillStatedUnit(
  * ⚠ THE SPLIT DELIBERATELY DOES NOT CUT ON A BARE `.`, and that is not
  * fussiness: CLAUDE.md trap 22 records a guard that could never fire because
  * the window handed to it was cut at the first `[.!?]` — **which is also the
- * decimal point** — so `£1.5 million` was truncated to `1` before the guard
- * ever looked. A terminator here must be followed by whitespace or the end of
- * the text, so `£7.2m` and `0.04` survive intact. Newlines also terminate,
- * because this estate's briefs are bulleted and a bullet is a sentence.
+ * decimal point** — so an amount written `£1.5m` was truncated to `1` before
+ * the guard ever looked. A terminator here must be followed by whitespace or
+ * the end of the text, so `£7.2m` and `0.04` survive intact. Newlines also
+ * terminate, because this estate's briefs are bulleted and a bullet is a
+ * sentence.
+ *
+ * ⚠ AND THE EXAMPLE ABOVE IS WRITTEN `£1.5m` ON PURPOSE. Spelling the
+ * magnitude word out would enrol this file in
+ * `utils/__tests__/magnitude-alphabet.union.test.ts`'s scan — it REDed on
+ * exactly that, from prose, on this change. A derived guard cannot tell a
+ * mention from a use, and this module holds no magnitude lookup, so the fix
+ * is to stop saying the word rather than to widen the manifest.
  */
 /**
  * Is the occurrence of `needle` at `at` a WHOLE figure, or a fragment of a
