@@ -238,6 +238,81 @@ describe("the figures the user typed are credited to the user", () => {
     }
   });
 
+  it("⛔ NEVER CREDITS A NUMBER WE CALCULATED — a range's midpoint is ours, not the user's", () => {
+    // MEASURED, not imagined. Executing this repo's own `extractFactors` on
+    // this exact sentence at this head returns
+    //   { label: "Churn Rate", value: 0.04, matchedText: "3% to 5%",
+    //     extractionType: "range" }
+    // and the digit `4` appears NOWHERE in the brief — 0.04 is
+    // `rangePointEstimate`'s (3% + 5%) / 2. Every other limb passes: the span
+    // is the user's own bytes, the labels match, all three label tokens are in
+    // that sentence, and the node's level IS 0.04. Without limb (3a) this
+    // pass tells the user that a number this service computed is one they
+    // typed — the exact thing the provenance ruling forbids.
+    const brief = "Our monthly churn rate runs 3% to 5% depending on the cohort.";
+    const graph = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+
+    // THE DISCRIMINATING TWIN: the same label and the same level, written by
+    // the user as a single figure rather than derived from a range. Without
+    // this, the refusal above could be any other limb failing on this brief
+    // (trap 13b) rather than the range rule.
+    const stated = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+    expect(creditUserTypedFigures(stated, "Our monthly churn rate is 4%.")).toBe(1);
+    expect(publishedSource(byId(stated, "x"))).toBe("brief_extraction");
+  });
+
+  it("⛔ BINDS THE FIGURE TO ITS OWN SENTENCE — a bare \"4%\" is not the \"14%\" in the line above", () => {
+    // ⭐ A LIE, MEASURED BY RUNNING BOTH ARMS, not imagined. The subject gate
+    // `labelIsNamedInFigureSentence` reads whichever sentence
+    // `briefSentenceContaining` returns, and that helper used to return the
+    // FIRST sentence whose text CONTAINED the figure. `"4%"` is a substring of
+    // `"14%"`, so the tooling figure below bound to the CHURN line — which of
+    // course names churn — and the gate this pass's docblock calls "the limb
+    // that closes this pass's one measured hole" waved it through.
+    //
+    // The label comes from the product, not from this test: `inferLabel`
+    // really does label the second bullet's `4%` "Churn Rate", reaching back
+    // into the previous bullet — the same behaviour that labelled a
+    // competitor's £5m "Churn Rate" on the captured brief.
+    //
+    // Executed at this head, pre-fix arm vs post-fix arm:
+    //   pre-fix : credited = 1, the churn factor stamped `brief_extraction`
+    //   post-fix: credited = 0, the churn factor left `cee_inference`
+    // So before the fix the product told the user that 4% of revenue spent on
+    // TOOLING was their stated CHURN RATE.
+    const brief = ["* Industry churn rate sits at 14% annually", "* We spend 4% on tooling"].join("\n");
+    const graph = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+
+    // THE DISCRIMINATING TWIN, and it is the one that matters here: the SAME
+    // brief and the SAME label, at the level the user really did write on the
+    // churn line. It is credited in BOTH arms. Without it, the refusal above
+    // would be equally consistent with a fix that simply stopped crediting
+    // anything on this brief (trap 13b).
+    const genuine = graphOf([factor("x", "Churn Rate", 0.14, "%")]);
+    expect(creditUserTypedFigures(genuine, brief)).toBe(1);
+    expect(publishedSource(byId(genuine, "x"))).toBe("brief_extraction");
+  });
+
+  it("a figure's own sentence is found even when a longer number sits before it", () => {
+    // The boundary rule must skip a fragment occurrence WITHOUT losing the
+    // real one. Measured regression while writing it: a first cut treated any
+    // adjacent `,` as continuing a number, so `"… is 12%, which we believe …"`
+    // resolved to nothing and the captured 12% silently stopped being
+    // credited — the headline pin above went from 2 to 1. A separator only
+    // continues a number when digits sit on both sides of it.
+    const brief = "Trial conversion across the market is 12% typically. Our conversion rate is 2%.";
+    const graph = graphOf([factor("x", "Conversion Rate", 0.02, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(1);
+    expect(publishedSource(byId(graph, "x"))).toBe("brief_extraction");
+  });
+
   it("does not let a decimal point end a sentence", () => {
     // CLAUDE.md trap 22: a guard was once handed a window cut at the first
     // `[.!?]` — which is also the decimal point — so `£1.5 million` became `1`

@@ -594,13 +594,63 @@ function backfillStatedUnit(
  * the text, so `£7.2m` and `0.04` survive intact. Newlines also terminate,
  * because this estate's briefs are bulleted and a bullet is a sentence.
  */
+/**
+ * Is the occurrence of `needle` at `at` a WHOLE figure, or a fragment of a
+ * longer one?
+ *
+ * ⚠ THIS IS NOT DEFENSIVENESS — IT IS THE DEFECT A REVIEW MEASURED IN THIS
+ * FILE. `"4%"` is a substring of `"14%"`, `"2%"` of `"12%"`, `"£2m"` of
+ * `"£12m"`. Resolved by plain `.includes`, the figure `4%` in
+ * *"Gross margin sits at 14% today. Churn is 4% per month."* binds to the
+ * MARGIN sentence — so `labelIsNamedInFigureSentence`, which this file's own
+ * docblock calls "the limb that closes this pass's one measured hole", was
+ * being asked its question about a sentence the figure was never written in.
+ * A character adjacent to the needle that could continue a number means the
+ * match is inside a larger one.
+ */
+function isWholeFigureOccurrence(haystack: string, needle: string, at: number): boolean {
+  const isDigit = (c: string | undefined): boolean => c !== undefined && c >= "0" && c <= "9";
+  // A separator CONTINUES a number only when digits sit on both sides of it —
+  // `12,500` and `1.5`. The comma in `"… is 12%, which we believe …"` does not,
+  // and an earlier cut of this rule refused that occurrence and silently
+  // dropped the capture's own 12%. Measured, not reasoned: the headline pin in
+  // this file's spec went 2 credits to 1.
+  const separatorInsideNumber = (sepAt: number, digitAt: number): boolean =>
+    (haystack[sepAt] === "." || haystack[sepAt] === ",") && isDigit(haystack[digitAt]);
+  // Only a needle that BEGINS with a digit can be the tail of a longer number,
+  // and only one that ENDS with a digit can be its head. `12%` cannot be
+  // extended rightwards by anything, so nothing to its right is asked about.
+  if (/^[0-9]/.test(needle)) {
+    if (isDigit(haystack[at - 1])) return false;
+    if (separatorInsideNumber(at - 1, at - 2)) return false;
+  }
+  if (/[0-9]$/.test(needle)) {
+    const end = at + needle.length;
+    if (isDigit(haystack[end])) return false;
+    if (separatorInsideNumber(end, end + 1)) return false;
+  }
+  return true;
+}
+
 function briefSentenceContaining(brief: string, matchedText: string): string | undefined {
   const needle = canonicaliseSpan(matchedText);
   if (needle.length === 0) return undefined;
+  // ⚠ AMBIGUITY REFUSES, the same rule this pass already applies to earners.
+  // A figure written in two sentences names no single sentence, so there is no
+  // subject evidence to read and nothing is credited. Under-claiming is the
+  // chosen direction throughout this module: the cost is a badge, never a
+  // value.
+  const hits: string[] = [];
   for (const sentence of brief.split(/(?<=[.!?])\s+|[\n\r]+/)) {
-    if (canonicaliseSpan(sentence).includes(needle)) return sentence;
+    const canonical = canonicaliseSpan(sentence);
+    for (let at = canonical.indexOf(needle); at !== -1; at = canonical.indexOf(needle, at + 1)) {
+      if (isWholeFigureOccurrence(canonical, needle, at)) {
+        hits.push(sentence);
+        break;
+      }
+    }
   }
-  return undefined;
+  return hits.length === 1 ? hits[0] : undefined;
 }
 
 /** The content tokens of a label: lowercase, alphanumeric, two characters or more. */
@@ -696,6 +746,31 @@ export function creditUserTypedFigures(
       const matched = canonicaliseSpan(factor.matchedText ?? "");
       if (matched.length === 0) return false;
       if (!canonicalBrief.includes(matched)) return false;
+      // (3a) ⛔ AND IT MUST BE A NUMBER THE USER WROTE, NOT ONE THIS SERVICE
+      // CALCULATED FROM WHAT THEY WROTE. A range extraction carries the user's
+      // genuine span alongside a value that is `rangePointEstimate`'s MIDPOINT
+      // (`utils/amount-range.ts`, `(min + max) / 2`). Measured by executing
+      // `extractFactors` at this head: *"Our monthly churn rate runs 3% to 5%
+      // depending on the cohort."* yields `{ value: 0.04, matchedText: "3% to
+      // 5%", extractionType: "range" }` — and the digit `4` appears NOWHERE in
+      // that brief. Every other limb passes on such a factor (the span is
+      // real, the label matches, the tokens are in the sentence, and a node
+      // sitting at 0.04 satisfies the identity test), so without this line the
+      // pass credits OUR OWN ARITHMETIC to the user. Accepting a value this
+      // service derived does not make its origin a user measurement.
+      //
+      // ⚠ SCOPE, STATED: this reads the factor's OWN shape — its range bounds
+      // and its declared type — rather than a list of the loops that mint
+      // midpoints, because such a list is a hand-maintained mirror. It still
+      // fails OPEN for a future derivation that sets neither marker; that is
+      // the known limit of this limb and not a claim about all derived values.
+      if (
+        factor.extractionType === "range" ||
+        factor.rangeMin !== undefined ||
+        factor.rangeMax !== undefined
+      ) {
+        return false;
+      }
       // (4) …naming THIS subject, by the module's own two selection rules.
       if (!node.label || !labelsMatch(node.label, factor.label)) return false;
       if (hasUnboundQuantityLabel(node, factor)) return false;
