@@ -6,7 +6,7 @@
  */
 
 import type { StageContext } from "../types.js";
-import { enrichGraphWithFactorsAsync } from "../../factor-extraction/enricher.js";
+import { enrichGraphWithFactorsAsync, creditUserTypedFigures } from "../../factor-extraction/enricher.js";
 import { detectCycles } from "../../../utils/graphGuards.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../../../orchestrator/index.js";
 import { simpleRepair, countEdgePatternViolations } from "../../../services/repair.js";
@@ -36,6 +36,25 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
   });
   ctx.enrichmentResult = enrichmentResult;
   const enrichedGraph = enrichmentResult.graph;
+
+  // ── Step 1b: credit the figures the user typed ──────────────────────────
+  // ⭐ OUTSIDE the call above, and that placement is the point. The enricher
+  // returns EARLY when every option's interventions are complete, and a graph
+  // whose values are complete is exactly a graph whose values may still be
+  // credited to the wrong author. Measured on capture `d9c4066c`: the user's
+  // own "12%" and "4%" reached the graph stamped `inferred`, which
+  // `schema-v3.ts:458` publishes as `cee_inference` — so the product told them
+  // every estimate was machine-authored, about two numbers they had typed.
+  // This corrects provenance ONLY; it never touches a value. See
+  // `creditUserTypedFigures` for the positional derivation and for the
+  // analysis-admission consequence, which is real and is named there.
+  const figuresCredited = creditUserTypedFigures(enrichedGraph, ctx.effectiveBrief, ctx.collector);
+  if (figuresCredited > 0) {
+    log.info(
+      { event: "cee.enrich.figures_credited_to_user", request_id: ctx.requestId, count: figuresCredited },
+      `${figuresCredited} factor(s) carry a figure the user typed and no longer report it as machine-authored`,
+    );
+  }
 
   // ROADMAP 2.281 — carry the mint ATTESTATION forward to Stage 4b. The sweep's
   // "possibly model-inferred" heuristic cannot tell a model's invention from a

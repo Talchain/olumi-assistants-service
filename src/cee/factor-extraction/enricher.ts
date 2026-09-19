@@ -464,6 +464,288 @@ function backfillStatedUnit(
 }
 
 /**
+ * ⭐⭐⭐ THE USER TYPED THIS NUMBER, SO WE MUST NOT REPORT IT AS OUR OWN GUESS.
+ *
+ * ── THE DEFECT, MEASURED AT THE BYTES (capture `d9c4066c`, 19 Sep 2026)
+ * The user wrote *"conversion rate from trial to paid is 12%"* and *"Our churn
+ * rate is 4% monthly"*. Both reached the graph as factors carrying **exactly**
+ * those figures — `{value: 0.12, unit: "%"}` and `{value: 0.04, unit: "%"}` —
+ * and both carried `extractionType: "inferred"`. `schema-v3.ts:458` maps that
+ * to `observed_state.source: "cee_inference"`, and the product then tells the
+ * user, on every analysis, that *every estimate behind them is machine-authored
+ * and unconfirmed*. **That sentence is false for the two numbers they typed
+ * themselves**, and `brief_extraction` appeared on 0 of the capture's 6 valued
+ * factors.
+ *
+ * ── ⚠ WHERE THE STAMP COMES FROM, DERIVED RATHER THAN ASSUMED
+ * Not from this module and not from the record projector. `schema-v3.ts:458`'s
+ * default for an ABSENT `extractionType` is `brief_extraction`, so a declined
+ * brief-claim cannot produce `cee_inference`; and `provenance-display.ts:117`
+ * records that a literal search for a written `cee_inference` finds no writer.
+ * The only way to that stamp is `data.extractionType === "inferred"`, which the
+ * MODEL writes because the served prompt teaches it
+ * (`defaults-v187.ts:407`, "Inferred: no value stated → extractionType:
+ * 'inferred'"). The model transcribed the user's figures correctly and then
+ * labelled them as its own inference. The enhance branch above could not
+ * correct that, because it runs only when the node has NO value
+ * (`hasFactorData`), and these nodes had one.
+ *
+ * ── WHY POSITIONAL, AND NOT A MAGNITUDE COMPARISON
+ * The obvious repair — ask whether this value is "stated in the brief" — is a
+ * measured dead end. `isAmountStatedInBrief` scans a whole text for a
+ * magnitude, and teaching it percent↔fraction equivalence re-opens a
+ * deliberately-closed fabrication: B3's *"up to £7.2m a year if attach were
+ * 100%"* would certify a binary lever set to 1 (`stated-amounts.ts:61-63`).
+ * Nor can the model's `unit` discriminate: it is a free string on a
+ * `.passthrough()` object and the false-positive record carries none.
+ *
+ * This takes the route this module already ratified instead
+ * (`enhanceWriteIsSpanContained`): **the figure must be a literal span of the
+ * user's own bytes, and it must lie inside this node's own sentence.** Offsets
+ * are scale-blind, so no scale frame can defeat them. Measured on the real
+ * spans: `soleStatedQuantityInSpan` and this gate both refuse *"up to £7.2m a
+ * year if attach were 100%"* POSITIONALLY — it carries two quantities and the
+ * span test never reaches a value at all.
+ *
+ * ── THE CONJUNCTION, AND WHAT EACH LIMB IS FOR
+ *   1. the node's own level is a finite number      — the thing being described;
+ *   2. it is stamped `inferred`                     — we only ever correct a
+ *      machine-authored claim UPWARD; `explicit`, `range` and `observed` are
+ *      never touched, so this cannot withdraw an existing claim;
+ *   3. `matchedText` is a literal span of the brief — the figure is the user's
+ *      BYTES, not the model's opinion (and `extractFactors` sets it from the
+ *      regex match's own `m[0]`, so the span exists by construction);
+ *   4. `enhanceWriteIsSpanContained`                — the ratified subject gate:
+ *      on a stated node the figure must sit inside that node's own sentence;
+ *   5. the extractor's value EQUALS the node's level exactly — binding by
+ *      IDENTITY, never by a predicate another figure could satisfy (trap 19).
+ *      This is what stops the brief's competitor `£5m` — which `inferLabel`
+ *      really does label "Churn Rate" on this very brief — from crediting the
+ *      churn factor: 5000000 ≠ 0.04. It also means this can only ever fire
+ *      where the two sides ALREADY agree on the scale convention, so it cannot
+ *      import a scale-frame error.
+ * Limb 3's precondition is asserted, not assumed: a `matchedText` the brief
+ * does not contain is not a position, and returns false.
+ *
+ * ── ⚠⚠ THE CONSEQUENCE THIS MUST NOT BE SILENT ABOUT
+ * `brief_extraction` classifies as user-stated in the analysis-admission
+ * census, and `analysis-admission.ts:900/935` turn
+ * `material_parameters_user_stated > 0` into `semanticSufficient`, which
+ * `deriveMode` turns into `comparative_leader` — **the licence to name a
+ * leading option.** So crossing the material-parameters floor is exactly what
+ * this changes, and a wrong stamp here would not merely mislabel provenance: it
+ * would let the product name a winner off a number nobody confirmed. On the
+ * captured graph this stamps **2 of the 6 valued factors** (Trial-to-Paid
+ * Conversion Rate and Monthly Churn Rate) and leaves the other 4 untouched —
+ * their model-normalised levels (0, 0.4, 0.4, 0.5) match no figure the user
+ * wrote. Whether those two are MATERIAL depends on the run's topology, so the
+ * floor may be crossed; that is said plainly rather than left to be discovered.
+ * The defence is that limb 5 admits only a number our own reader took out of
+ * the user's own bytes, in this node's own sentence.
+ *
+ * ── WHY A STANDALONE PASS, AND NOT A LIMB OF THE ENRICHMENT LOOP
+ * Measured, after trying the loop first — it failed on BOTH captured factors
+ * for two independent reasons, and each is a property of enrichment that this
+ * question does not share:
+ *   · `enrichGraphWithFactorsAsync` returns EARLY when every option's
+ *     interventions are complete ("the FACTOR side is genuinely complete"), and
+ *     the capture is exactly that shape, so the loop never ran at all. Note the
+ *     precedent already inside that early exit: ROADMAP 2.281 had to carve the
+ *     goal-target mint out of it for the same reason — the exit is scoped to
+ *     "does this graph need VALUES?", and it was silently swallowing a
+ *     different question. This is a third.
+ *   · `selectEnhanceTarget` picks ONE candidate per extracted figure and gives
+ *     up, so the brief's `12%` consumed the only seat that `4%` could have used
+ *     and the churn factor was never offered its own figure.
+ * Neither applies to a provenance correction: it writes one key per node, two
+ * nodes cannot contend for it, and a graph whose values are complete is exactly
+ * a graph whose values may still be miscredited.
+ *
+ * ── AMBIGUITY REFUSES (trap 22f)
+ * A node is credited only when EXACTLY ONE extracted figure earns it. Two
+ * candidates is a question, not a fact, and this writes nothing rather than
+ * pick. On the measured brief that rule does real work: `4%` is extracted twice
+ * — once as `Churn Rate` and once under `inferLabel`'s fallback label `Rate` —
+ * and `hasUnboundQuantityLabel` (reused, not re-derived) discards the fallback,
+ * leaving exactly one.
+ *
+ * ── WHAT IT DELIBERATELY DOES NOT DO
+ * It writes ONE key. It never mints, rescales, re-labels or alters a value, a
+ * unit, a cap or a baseline — where correspondence cannot be proven it writes
+ * nothing at all, and the node keeps today's behaviour exactly.
+ */
+/**
+ * The brief sentence a figure was written in, or `undefined`.
+ *
+ * ⚠ THE SPLIT DELIBERATELY DOES NOT CUT ON A BARE `.`, and that is not
+ * fussiness: CLAUDE.md trap 22 records a guard that could never fire because
+ * the window handed to it was cut at the first `[.!?]` — **which is also the
+ * decimal point** — so `£1.5 million` was truncated to `1` before the guard
+ * ever looked. A terminator here must be followed by whitespace or the end of
+ * the text, so `£7.2m` and `0.04` survive intact. Newlines also terminate,
+ * because this estate's briefs are bulleted and a bullet is a sentence.
+ */
+function briefSentenceContaining(brief: string, matchedText: string): string | undefined {
+  const needle = canonicaliseSpan(matchedText);
+  if (needle.length === 0) return undefined;
+  for (const sentence of brief.split(/(?<=[.!?])\s+|[\n\r]+/)) {
+    if (canonicaliseSpan(sentence).includes(needle)) return sentence;
+  }
+  return undefined;
+}
+
+/** The content tokens of a label: lowercase, alphanumeric, two characters or more. */
+function labelTokens(label: string): readonly string[] {
+  return label
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
+}
+
+/**
+ * ⭐⭐⭐ DID THE USER NAME THIS FACTOR IN THE SENTENCE WHERE THEY WROTE THIS
+ * FIGURE? — the mirror of `enhanceWriteIsSpanContained`, and the limb that
+ * closes this pass's one measured hole.
+ *
+ * That gate asks whether the FIGURE lies inside the NODE's own sentence. It can
+ * only ask that of a node that HAS a sentence — a stated item with a
+ * `source_quote`. A model-drafted factor has none, so the gate returns `true`
+ * vacuously and the subject binding falls back entirely to `labelsMatch` over
+ * `inferLabel`'s guess. **Measured on this very brief, that is not good
+ * enough:** `inferLabel` labels the competitor's `£5m` — *"A competitor just
+ * raised £5m and is hiring aggressively"* — **"Churn Rate"**, because its
+ * window reaches back into the previous bullet. A first cut of this pass
+ * therefore credited a churn factor carrying 5,000,000 as the user's own
+ * figure: the exact £8.5m-class harm `enhanceWriteIsSpanContained` exists to
+ * stop, arriving through the one door that gate cannot watch.
+ *
+ * So where the node has no span of its own, the FIGURE's span supplies one, and
+ * the question is turned round: every content token of the node's label must
+ * appear in the sentence the user wrote the figure in. It is the same
+ * positional evidence read from the other end, it needs no value and no scale,
+ * and it is asked of EVERY node rather than only the span-less ones — one rule,
+ * no branch on node shape, and no vacuous arm left for the next figure to walk
+ * through.
+ *
+ * ⚠ IT UNDER-CLAIMS, AND THAT IS THE CHOSEN DIRECTION. A user who names a
+ * factor in one sentence and gives its number in the next is refused. Nothing
+ * is lost but a badge; the value, unit and label are untouched, and the failure
+ * is toward telling the user we guessed when in fact they told us — the safe
+ * half of the pair (trap 22b).
+ */
+function labelIsNamedInFigureSentence(
+  nodeLabel: string,
+  factor: ExtractedFactor,
+  brief: string,
+): boolean {
+  const sentence = briefSentenceContaining(brief, factor.matchedText ?? "");
+  if (sentence === undefined) return false;
+  const haystack = new Set(labelTokens(sentence));
+  const tokens = labelTokens(nodeLabel);
+  if (tokens.length === 0) return false;
+  return tokens.every((t) => haystack.has(t));
+}
+
+export function creditUserTypedFigures(
+  graph: GraphT,
+  brief: string,
+  collector?: CorrectionCollector,
+): number {
+  if (typeof brief !== "string" || brief.trim().length === 0) return 0;
+
+  const canonicalBrief = canonicaliseSpan(brief);
+  let extracted: readonly ExtractedFactor[];
+  try {
+    // Regex-only by construction — this is `extractFactors`, never the
+    // orchestrated variant, so the pass makes no provider call and cannot make
+    // a graph's provenance depend on a model's availability.
+    extracted = extractFactors(brief);
+  } catch {
+    return 0;
+  }
+  if (extracted.length === 0) return 0;
+
+  let credited = 0;
+
+  for (let nodeIndex = 0; nodeIndex < graph.nodes.length; nodeIndex++) {
+    const node = graph.nodes[nodeIndex];
+    if (node.kind !== "factor") continue;
+
+    const data = node.data;
+    if (!isFactorData(data)) continue;
+
+    // (1) The node must carry a level for a figure to BE.
+    const level = data.value;
+    if (typeof level !== "number" || !Number.isFinite(level)) continue;
+
+    // (2) Correct upward only. A node that already claims the brief, a range or
+    // an observation is left exactly as it is — this can never WITHDRAW a claim.
+    if (data.extractionType !== "inferred") continue;
+
+    const earners = extracted.filter((factor) => {
+      // (3) The figure must be a literal span of the user's own bytes.
+      const matched = canonicaliseSpan(factor.matchedText ?? "");
+      if (matched.length === 0) return false;
+      if (!canonicalBrief.includes(matched)) return false;
+      // (4) …naming THIS subject, by the module's own two selection rules.
+      if (!node.label || !labelsMatch(node.label, factor.label)) return false;
+      if (hasUnboundQuantityLabel(node, factor)) return false;
+      // (5) …written inside THIS node's own sentence, where the node has one…
+      if (!enhanceWriteIsSpanContained(node, factor, brief)) return false;
+      // (6) …and, whether or not it has one, named by the user in the sentence
+      // the figure itself was written in. This is the limb that stops
+      // `inferLabel`'s cross-bullet guess crediting the competitor's £5m to a
+      // churn factor — see `labelIsNamedInFigureSentence`.
+      if (!labelIsNamedInFigureSentence(node.label, factor, brief)) return false;
+      // (7) …and the level must BE that figure. Identity, not resemblance.
+      return factor.value === level;
+    });
+
+    if (earners.length !== 1) {
+      if (earners.length > 1) {
+        log.info(
+          {
+            event: "cee.factor_enrichment.figure_credit_ambiguous",
+            nodeId: node.id,
+            candidates: earners.map((f) => f.matchedText),
+          },
+          `Refusing to credit "${node.id}": ${earners.length} figures in the brief could be this level`,
+        );
+      }
+      continue;
+    }
+
+    const earner = earners[0]!;
+    const nextData: FactorDataT = { ...data, extractionType: "explicit" };
+    graph.nodes[nodeIndex] = { ...node, data: nextData };
+    credited++;
+
+    log.info(
+      {
+        event: "cee.factor_enrichment.figure_credited_to_user",
+        nodeId: node.id,
+        matchedText: earner.matchedText,
+        value: level,
+      },
+      `"${earner.matchedText}" is the user's own figure, so "${node.id}" no longer reports it as machine-authored`,
+    );
+
+    if (collector) {
+      collector.addByStage(
+        11, // Stage 11: Factor Enrichment
+        "node_modified",
+        { node_id: node.id, kind: "factor" },
+        `Credited a figure the user typed in the brief`,
+        data,
+        nextData,
+      );
+    }
+  }
+
+  return credited;
+}
+
+/**
  * Check if two labels refer to the same concept
  */
 function labelsMatch(label1: string, label2: string): boolean {
