@@ -2226,6 +2226,12 @@ export async function runTurnExecutor(
         : {}),
       ...(sourceBoundRecovery !== undefined ? { sourceBoundRecovery } : {}),
       ...(holdForDegrade !== undefined ? { liveHold: holdForDegrade } : {}),
+      // The person's own words, so a withheld answer can still name what it
+      // was asked about. Read ONLY for that; `resolveDegradeSubject` is a
+      // containment test over labels already on `readinessNodes` above, never
+      // a parser. Witness: the risk chip at 18:59:05 on 19 Sep returned the
+      // unsubjected sentence and the person never asked again.
+      question: payload.message,
     });
     return {
       assistant_text: degrade.assistant_text,

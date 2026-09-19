@@ -879,6 +879,12 @@ export interface BuildCoachingDegradeOptions {
   /** Direct, source-bound analytical recovery composed from current facts. */
   readonly sourceBoundRecovery?: string;
   /**
+   * The person's own words for this turn, used ONLY to name back the subject
+   * they asked about when the neutral copy fires. Never parsed for intent,
+   * never quoted. Omit for the unchanged copy.
+   */
+  readonly question?: string;
+  /**
    * F-HELD fix 3b — when a live confirmation-expecting hold exists, the
    * state-unsafe degrade restates the held offer + its confirm chip instead
    * of the #298 trust template + rerun chip. Wire capture 13c is the RED
@@ -993,6 +999,64 @@ export const NEUTRAL_DEGRADE_TEXT =
   'Please ask me what you’d like to inspect or change next.';
 
 /**
+ * ⭐⭐⭐ THE SAME WITHHOLD, NAMING WHAT IT WAS ASKED ABOUT.
+ *
+ * ── THE WITNESS. Deployed staging 19 Sep 2026, scenario `26b908ee`, 18:59:05.
+ * The person clicked "How likely is this?" on the risk **Dilution and Control
+ * Risk**, waited 12.7s, and got {@link NEUTRAL_DEGRADE_TEXT} and nothing else.
+ * They never asked about that risk again. From their seat the product had not
+ * declined — it had shown no sign of having read the question.
+ *
+ * ⚠ THE WITHHOLD IS UNCHANGED AND IS NOT THE DEFECT. An always-on post-check
+ * fired on a FRESH analysis, and this arm exists precisely so a healthy
+ * analysis is not misdescribed as stale. What was wrong is that the SUBJECT
+ * was dropped, so a refusal about one risk reads identically to a refusal
+ * about nothing.
+ *
+ * ⛔ THE BAN IS PRESERVED EXACTLY AS WRITTEN. This copy still carries no value,
+ * unit, hash, OPTION LABEL or freshness claim. An option label is banned BY
+ * NAME because naming a leading option injects the residue the egress alarm
+ * measures — so {@link resolveDegradeSubject} refuses every `option` node, and
+ * refuses on ambiguity rather than guessing.
+ */
+const subjectBoundDegradeText = (subject: string): string =>
+  `Something in my answer about “${subject}” was not safe to show as-is. ` +
+  'Please ask me what you’d like to inspect or change next.';
+
+/**
+ * The ONE entity the question names, or `undefined`.
+ *
+ * ⚠ IT IS A CONTAINMENT TEST OVER LABELS THE GRAPH ALREADY CARRIES, not a
+ * parser and not an intent classifier — the module docstring bans a
+ * natural-language predicate at this seam and that ban stands. It reads only
+ * `readinessNodes`, which the executor already passes.
+ *
+ * ⛔ OPTIONS ARE EXCLUDED BY KIND, and ambiguity refuses. Two matches is a
+ * question, not a fact; one option match is the one thing this copy may never
+ * say. Both fall back to the unchanged sentence, so the failure direction is
+ * "says less", never "says something it may not".
+ */
+function resolveDegradeSubject(
+  question: string | undefined,
+  nodes: readonly ReadinessRecoveryNode[] | undefined,
+): string | undefined {
+  if (typeof question !== 'string' || question.trim().length === 0) return undefined;
+  if (nodes === undefined || nodes.length === 0) return undefined;
+  const haystack = question.toLowerCase();
+  const named: string[] = [];
+  for (const node of nodes) {
+    const label = typeof node.label === 'string' ? node.label.trim() : '';
+    if (label.length < 3) continue;
+    if (!haystack.includes(label.toLowerCase())) continue;
+    // An option named in the question ends the resolution outright — it must
+    // not be named, and it must not be stepped over to reach a sibling either.
+    if (node.kind === 'option') return undefined;
+    if (!named.includes(label)) named.push(label);
+  }
+  return named.length === 1 ? named[0] : undefined;
+}
+
+/**
  * Deterministic degrade-to-safe response for a fired post-check. State-aware:
  *   - state UNSAFE → a #298 trust template (so the explanation path, this
  *     post-check and the harness speak ONE trust language) + the existing
@@ -1017,7 +1081,13 @@ export function buildCoachingDegradeResponse(
     if (opts.sourceBoundRecovery?.trim()) {
       return { assistant_text: opts.sourceBoundRecovery, suggested_actions: [] };
     }
-    return { assistant_text: NEUTRAL_DEGRADE_TEXT, suggested_actions: [] };
+    // A real answer outranks naming the subject; naming the subject outranks
+    // saying nothing about it. See `subjectBoundDegradeText`.
+    const subject = resolveDegradeSubject(opts.question, opts.readinessNodes);
+    return {
+      assistant_text: subject === undefined ? NEUTRAL_DEGRADE_TEXT : subjectBoundDegradeText(subject),
+      suggested_actions: [],
+    };
   }
   // F-HELD fix 3b — a live hold outranks every state-unsafe trust template.
   // Rationale: each of those templates ships the rerun chip, which mints the
