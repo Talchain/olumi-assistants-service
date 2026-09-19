@@ -116,13 +116,23 @@ function gatedFragmentText(candidate: string): string | null {
 export const MAX_WORDS = 140;
 const MAX_LABEL_CHARS = 40;
 const MAX_GOAL_CHARS = 80;
-const MAX_NAMED_OPTIONS = 4;
+/**
+ * How many options the inventory NAMES before it summarises the rest.
+ *
+ * ⭐ EXPORTED ON THE SAME TERMS AS {@link MAX_WORDS}, AND FOR A SHARPER
+ * REASON: it is what BOUNDS the attribution marker's cost against the word
+ * budget. At most this many bullets are named, so at most this many can carry
+ * {@link CEE_PROPOSED_MARKER} — which is why that cost is CAPPED and is NOT
+ * monotone in the option count (past this cap only `MAX_LISTED_WHEN_OVER` are
+ * named, so the cost FALLS). A guard that mirrors `4` cannot see the cap move.
+ */
+export const MAX_NAMED_OPTIONS = 4;
 /**
  * Appended to an option the product proposed, so the user can tell our
  * suggestion from their own. Appended AFTER elision, so it is never the part
  * that gets truncated. See {@link collectOptions} for when it is earned.
  */
-const CEE_PROPOSED_MARKER = ' — my suggestion';
+export const CEE_PROPOSED_MARKER = ' — my suggestion';
 const MAX_LISTED_WHEN_OVER = 3;
 
 /**
@@ -2367,7 +2377,15 @@ function extractFirstSentence(text: string): string | null {
   return candidate.length > 0 ? candidate : null;
 }
 
-function countWords(text: string): number {
+/**
+ * The ladder's own unit of account.
+ *
+ * ⭐ EXPORTED SO A GUARD COUNTS IN THE UNIT THE BUDGET IS SPENT IN. A test
+ * that re-implements this — or that measures CHARACTERS against a budget
+ * denominated in WORDS — can bless the very regression it was written to
+ * catch, because it agrees with itself rather than with the assembler.
+ */
+export function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
