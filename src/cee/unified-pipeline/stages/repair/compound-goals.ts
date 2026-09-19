@@ -338,6 +338,9 @@ export function runCompoundGoals(ctx: StageContext): void {
   // here — see `unbindableAsks`.
   let unbindable: ExtractedGoalConstraint[] = [];
   let regexConstraints: any[] = [];
+  // Internal producer occurrence identity survives wire projection in a
+  // sideband only; goal_constraints remains the one executable representation.
+  const sourceAmountSpans = new Map<object, NonNullable<ExtractedGoalConstraint['sourceAmountSpan']>>();
   if (compoundGoalResult.constraints.length > 0) {
     const remapResult = remapConstraintTargets(
       compoundGoalResult.constraints,
@@ -349,6 +352,10 @@ export function runCompoundGoals(ctx: StageContext): void {
     if (remapResult.constraints.length > 0) {
       const normalised = normaliseConstraintUnits(remapResult.constraints);
       regexConstraints = toGoalConstraints(normalised);
+      regexConstraints.forEach((row, index) => {
+        const span = normalised[index]?.sourceAmountSpan;
+        if (span) sourceAmountSpans.set(row, span);
+      });
     }
     // ⚠ DEFENSIVE, AND THE ABSENT VALUE IS THE SAFE ONE. `unbindable` is new on
     // `RemapResult`, and this stage is reached with a MOCKED
@@ -464,14 +471,22 @@ export function runCompoundGoals(ctx: StageContext): void {
   // (ROADMAP 2.932).
   for (const c of llmConstraints) {
     const key = dedupeKey(c);
-    merged.set(key, mergeWithProtectedFrame(merged.get(key), c));
+    const deterministic = merged.get(key);
+    const row = mergeWithProtectedFrame(deterministic, c);
+    // Preserve occurrence identity only when this existing merge retained the
+    // deterministic quantity and its exact quote. A different model reading
+    // must not borrow the deterministic row's amount position.
+    const span = deterministic && sourceAmountSpans.get(deterministic);
+    if (span && row.source_quote === deterministic.source_quote
+      && sameRecordConstraintEvidence(deterministic, row)) sourceAmountSpans.set(row, span);
+    merged.set(key, row);
   }
 
   // A uniquely located complete records quote owns its quantity's source span,
   // even if semantic compilation refuses it. Remove competing guesses before
   // adding admitted candidates; a named refusal cannot execute via a fallback.
   for (const [key, row] of merged) {
-    if (recordOwnsConstraintSource(recordDispositions, row, ctx.effectiveBrief)) merged.delete(key);
+    if (recordOwnsConstraintSource(recordDispositions, row, ctx.effectiveBrief, sourceAmountSpans.get(row))) merged.delete(key);
   }
 
   // The same attested statement has one target: the model's typed reference
@@ -509,7 +524,12 @@ export function runCompoundGoals(ctx: StageContext): void {
   // row for this quantity and a gate then suppressed it, that suppression is a
   // decision — minting a replacement would defeat it. "Covered" therefore means
   // "a producer spoke for this number", not "a row survived".
+  // Preserve legacy producers' coverage contract. Records speak only for their
+  // located evidence, whether admitted or refused; lending their number to the
+  // old coverage API would suppress a different statement with the same value.
+  const recordRows = new Set(validatedRecords.map((d) => d.canonical_constraint));
   const producerValues = [...merged.values()]
+    .filter((row) => !recordRows.has(row))
     .map((c: any) => (typeof c?.value === "number" ? c.value : NaN))
     .filter((v) => Number.isFinite(v));
   const provenUncovered = findProvenUncoveredBounds(ctx.effectiveBrief, producerValues, preparedBrief)

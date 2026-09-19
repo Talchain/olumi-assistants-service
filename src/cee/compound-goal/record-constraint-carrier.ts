@@ -210,7 +210,20 @@ export function recordOwnsConstraintSource(
   dispositions: readonly RecordConstraintDisposition[],
   row: { source_quote?: unknown },
   brief: string,
+  sourceAmountSpan?: ExtractedGoalConstraint['sourceAmountSpan'],
 ): boolean {
+  if (sourceAmountSpan) {
+    const { start, end } = sourceAmountSpan;
+    if (Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= brief.length) {
+      // The producer's offsets refer to the exact extractor input. Convert the
+      // captured occurrence, not its numeric value, to the records coordinate
+      // space. Ending the prefix at the amount avoids trim() moving its start
+      // backwards across whitespace before the capture.
+      const amount = textKey(brief.slice(start, end));
+      const normalizedEnd = textKey(brief.slice(0, end)).length;
+      if (amount) return ownedSpan(dispositions, normalizedEnd - amount.length, normalizedEnd);
+    }
+  }
   if (typeof row.source_quote !== 'string') return false;
   const quote = textKey(row.source_quote);
   const quantity = soleStatedQuantityInSpan(quote);

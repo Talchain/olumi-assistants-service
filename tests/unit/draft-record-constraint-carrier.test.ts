@@ -196,19 +196,55 @@ describe('records declaration → existing compound-goals authority', () => {
     })]);
   });
 
-  it('stage source ownership does not suppress a construction-minted limit with the same number elsewhere', () => {
+  it.each([false, true])('stage source ownership does not suppress a construction-minted limit with the same number elsewhere (record admitted: %s)', (admitted) => {
     const f = fixture();
     const ctx = context(f);
     const independent = 'Do not let revenue drop below 4%.';
     expect(extractCompoundGoals(independent, { includeProxies: false }).constraints).toEqual([]);
     ctx.effectiveBrief += ` ${independent}`;
     ctx.graph.nodes.push({ id: 'fac_revenue', kind: 'factor', label: 'Revenue' });
-    ctx.recordConstraintCandidates[0].constraint.unit = '£';
+    if (!admitted) ctx.recordConstraintCandidates[0].constraint.unit = '£';
     runCompoundGoals(ctx);
-    expect(ctx.recordConstraintDispositions[0].reason).toBe('record_constraint_unit_unproven');
-    expect(ctx.goalConstraints).toEqual([expect.objectContaining({
+    expect(ctx.recordConstraintDispositions[0].reason).toBe(admitted ? 'record_constraint_admitted' : 'record_constraint_unit_unproven');
+    expect(ctx.goalConstraints).toHaveLength(admitted ? 2 : 1);
+    expect(ctx.goalConstraints).toContainEqual(expect.objectContaining({
       node_id: 'fac_revenue', operator: '>=', value: 0.04, unit: 'fraction', value_frame: 'level',
-    })]);
+    }));
+    if (admitted) expect(ctx.goalConstraints).toContainEqual(expect.objectContaining({
+      node_id: f.candidate.constraint.node_id, operator: '<=', value: 0.04, unit: 'fraction', value_frame: 'level',
+    }));
+  });
+
+  it.each([40000, 20000])('stage source ownership retains the actual noun amount occurrence in a multi-quantity quote (first amount: %s)', (firstValue) => {
+    const f = fixture('a $20,000 budget for hiring', 20000, '$');
+    const ctx = context(f);
+    const first = firstValue === 40000 ? '$40,000' : '$20,000';
+    // Prefix whitespace changes normalized offsets; the producer offsets remain
+    // in the exact raw input. Equal quantities also cannot identify an occurrence.
+    ctx.effectiveBrief = ` \tWe have a ${first} budget for travel and \n  a $20,000 budget for hiring. Keep acquisition cost under £250.`;
+    const target = ctx.graph.nodes.find((n: any) => n.id === f.candidate.constraint.node_id);
+    target.label = 'Budget';
+    target.data = { unit: '£' };
+    ctx.graph.nodes.push({ id: 'fac_acquisition_cost', kind: 'factor', label: 'Acquisition cost' });
+    const legacy = structuredClone(ctx);
+    legacy.recordConstraintCandidates = [];
+    runCompoundGoals(legacy);
+    const budget = legacy.goalConstraints.find((row: any) => row.node_id === target.id);
+    expect(budget).toMatchObject({ value: 20000, unit: '$', value_frame: 'level' });
+    expect(budget.source_quote).toContain(`${first} budget for travel`);
+    expect(budget.source_quote).toContain('$20,000 budget for hiring');
+    expect(budget).not.toHaveProperty('sourceAmountSpan');
+
+    runCompoundGoals(ctx);
+    expect(ctx.recordConstraintDispositions[0].reason).toBe('record_constraint_target_unit_mismatch');
+    expect(ctx.goalConstraints).toHaveLength(firstValue === 20000 ? 2 : 1);
+    expect(ctx.goalConstraints).toContainEqual(expect.objectContaining({
+      node_id: 'fac_acquisition_cost', value: 250, unit: '£', value_frame: 'level',
+    }));
+    // The existing extractor selects the stricter second amount, but retains
+    // the first occurrence on an equal-value tie. Only the second is owned by
+    // this records quote: preserving the first is the discriminating positive.
+    if (firstValue === 20000) expect(ctx.goalConstraints).toContainEqual(budget);
   });
 
   it('does not choose between competing explicit targets for one statement', () => {
