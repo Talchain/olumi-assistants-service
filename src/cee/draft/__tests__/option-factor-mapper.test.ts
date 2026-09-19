@@ -133,10 +133,11 @@ describe("what it does with the answer", () => {
         }),
       ),
     );
-    expect(out).toMatchObject({ status: "ok" });
-    expect((out as { mappings: Array<{ option_id: string }> }).mappings.map((m) => m.option_id)).toEqual([
-      "opt_two_devs",
-    ]);
+    // Narrow through the discriminant rather than casting: a cast would make the
+    // assertion pass on a shape the union does not actually admit.
+    expect(out.status).toBe("ok");
+    if (out.status !== "ok") throw new Error("unreachable — pinned by the assertion above");
+    expect(out.mappings.map((m) => m.option_id)).toEqual(["opt_two_devs"]);
   });
 
   it("carries an explicit refusal through as a refusal", async () => {
