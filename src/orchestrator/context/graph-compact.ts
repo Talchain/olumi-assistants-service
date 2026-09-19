@@ -12,7 +12,7 @@
  */
 
 import type { GraphV3T } from "../../schemas/cee-v3.js";
-import { recoverScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
+import { resolveScaleFrame } from "../../orchestrator-v5/tools/handlers/d1-shared/scale-frame.js";
 import { qualitativeBand } from '../../cee/factor-extraction/display-value.js';
 import { DEFAULT_EXISTS_PROBABILITY } from "./constants.js";
 import { isLegalStructuralEdge } from "../../cee/utils/structural-edge-classifier.js";
@@ -460,14 +460,54 @@ function buildInterventionSummary(
       // assembles the model's context. It is total and fail-closed — a pair
       // that is absent, non-numeric, non-positive, or not `raw > value` yields
       // `undefined` and the honest clause below survives unchanged.
+      // ⭐ `resolveScaleFrame`, NOT `recoverScaleFrame` — CORRECTED after an
+      // independent seat found the premise wrong at the tip. `scale-frame.ts`
+      // names `resolveScaleFrame` as "THE ONE OWNER of 'what frame is this
+      // factor on?' — stored first, pair second, nothing third", and records
+      // that calling `recoverScaleFrame` DIRECTLY is exactly how two earlier
+      // readers went blind to a persisted `scale_frame`. This was very nearly
+      // the fifth.
+      //
+      // It fixes two measured defects at once:
+      //   · FAIL-OPEN — the owner REFUSES a stored frame the pair contradicts
+      //     (pinned: storedFrame 500_000 beside {0.5, 50_000} yields undefined).
+      //     Reading the pair alone computed 0.59 x 100000 and stated it, so the
+      //     context spoke confidently about the one node class the owner
+      //     deliberately refuses to speak about.
+      //   · MISSED BEST CASE — `projector.ts` writes `scale_frame` on every
+      //     framed factor but writes the PAIR only when a baseline exists. A
+      //     factor with option interventions and NO stated baseline — the exact
+      //     subject of this change — therefore carries a stored frame and no
+      //     pair, and the pair-only read silently did nothing for it.
       const pair = framePairs?.get(factorId);
-      const frame = pair ? recoverScaleFrame(pair) : undefined;
-      if (frame !== undefined && Number.isFinite(entry)) {
+      const frame = pair ? resolveScaleFrame(pair) : undefined;
+      // ⛔⛔ AND `entry` MUST BE IN THE UNIT INTERVAL. Without this the frame is
+      // applied to a number that was never on the factor's normalised scale: a
+      // framed pair beside an intervention of `59` emitted "Pro Plan Price=5900
+      // £" — a £59 lever described as £5,900, WITH THE HONEST HEDGE REMOVED.
+      //
+      // ⭐ The rule is this file's own, stated two lines below about a weaker
+      // claim: "Outside [0,1] no band is claimed at all … a label outside its
+      // domain would be exactly the unwarranted promotion this comment exists
+      // to prevent." A MAGNITUDE outside that domain is a strictly stronger
+      // promotion than the BAND the same function already refuses there.
+      //
+      // ⚠ NOT REDUNDANT WITH THE FRAME CHECK, and the estate's other consumer
+      // of this derivation carries the identical pair with a comment saying so
+      // (`plot-intervention-scale.ts:325-330`). Out-of-unit interventions are a
+      // RATIFIED class — a user working in their own raw scale — not a
+      // curiosity, and `compactGraph` describes the PERSISTED graph, upstream
+      // of every scale reconciliation, so it sees them unreconciled.
+      if (frame !== undefined && Number.isFinite(entry) && entry >= 0 && entry <= 1) {
         const native = entry * frame;
         // Rounded to the pair's own precision rather than printed raw: the
         // multiplication reintroduces float dirt (0.59 * 100 = 58.99999…) and a
         // context line reading "£58.99999999999999" would be a new defect.
-        const rounded = Math.round(native * 1e6) / 1e6;
+        // ⚠ `Math.round(native * 1e6) / 1e6` loses precision once
+        // `native x 1e6 > 2^53` (frame >= ~1e10). `toPrecision(12)` is bounded
+        // by the VALUE rather than by a fixed multiplier, so a raw-count frame
+        // cannot overflow it. Non-blocking finding from the review, taken.
+        const rounded = Number(native.toPrecision(12));
         const unit = typeof (pair as { unit?: unknown }).unit === 'string'
           ? ((pair as { unit?: string }).unit as string).trim()
           : '';
@@ -739,8 +779,17 @@ export function compactGraph(graph: GraphV3T): GraphV3Compact {
     labelMap.set(node.id, node.label ?? node.id);
     // The frame pair, beside the label, from the SAME loop — so a node can
     // never appear in one map and not the other.
+    // ⚠ `scale_frame` travels WITH the pair, because the owner reads both and
+    // a factor can carry one without the other — that asymmetry is exactly the
+    // missed-best-case defect above.
     const os = (node as { observed_state?: Record<string, unknown> }).observed_state;
-    if (os && typeof os === 'object') framePairs.set(node.id, os);
+    const storedFrame = (node as { scale_frame?: unknown }).scale_frame;
+    if ((os && typeof os === 'object') || storedFrame !== undefined) {
+      framePairs.set(node.id, {
+        ...(os && typeof os === 'object' ? os : {}),
+        ...(storedFrame !== undefined ? { storedFrame } : {}),
+      });
+    }
     kindMap.set(node.id, node.kind);
     knownNodeIds.add(node.id);
   }
