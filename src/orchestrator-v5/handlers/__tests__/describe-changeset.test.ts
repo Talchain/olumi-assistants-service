@@ -69,6 +69,44 @@ const F7_BATCH = [
   },
 ];
 
+describe('consented fixed-outcome removal copy', () => {
+  const graph = {
+    nodes: [
+      { id: 'funding', kind: 'factor', label: 'Capital Raised' },
+      { id: 'capacity', kind: 'factor', label: 'Founder Capacity' },
+      { id: 'hybrid', kind: 'option', label: 'Hybrid Syndicate', interventions: {
+        funding: { value: 0.575, source: 'cee_hypothesis' },
+        capacity: { value: 0.4, source: 'user_specified' },
+      } },
+    ],
+    edges: [{ from: 'hybrid', to: 'funding' }],
+  };
+  const change = { op: 'update_node', path: 'hybrid', value: { interventions: {
+    capacity: { value: 0.4, source: 'user_specified' },
+  } } };
+  const removal = { op: 'remove_edge', path: 'hybrid::funding' };
+
+  it('names the change of meaning on the offer and receipt without inventing an outcome', () => {
+    const subject = describeHeldOperationsSubject([change, removal], graph)!;
+    expect(subject).toContain("stop fixing 'Capital Raised' under 'Hybrid Syndicate'");
+    for (const text of [buildGmHeldAssistantText(subject, 2), buildGmHeldAppliedReceipt([subject])]) {
+      expect(text).toContain("stop fixing 'Capital Raised' under 'Hybrid Syndicate'");
+      expect(text).not.toContain('0.575');
+      expect(findForbiddenPhraseHit(text)).toBeNull();
+    }
+    expect(isValueUpdatePhrasing(buildGmHeldPublicCopy(subject).message)).toBe(false);
+  });
+
+  it('does not claim a released outcome from map absence without its paired link removal', () => {
+    expect(describeHeldOperationsSubject([change], graph)).not.toContain('stop fixing');
+  });
+
+  it('does not hide a changed sibling behind removal-only copy', () => {
+    const mixed = { ...change, value: { interventions: { capacity: { value: 0.9, source: 'user_specified' } } } };
+    expect(describeHeldOperationsSubject([mixed, removal], graph)).not.toContain('stop fixing');
+  });
+});
+
 describe('describeChangeset — every operation is named, never a count', () => {
   it('names EVERY operation in the F7 multi-op batch (the defect pin)', () => {
     const described = describeChangeset(F7_BATCH, GRAPH);

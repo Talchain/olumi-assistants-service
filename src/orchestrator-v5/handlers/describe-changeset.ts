@@ -50,6 +50,7 @@
  *     the generic swept copy if a hostile label sneaks a forbidden token in.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import { formatFactorValue } from '../compose/format-factor-value.js';
 import { parseEdgeTargetPath } from '../graph-management/adapters/edit-graph-producer.js';
 import { SAFETY_FORBIDDEN_TOKENS } from '../compose/proposed-change.js';
@@ -239,6 +240,7 @@ function describeOp(
   op: ChangesetOpLike,
   graph: unknown,
   batchAdds: ReadonlyMap<string, ResolvedNode>,
+  operations: readonly ChangesetOpLike[],
 ): string {
   switch (op.op) {
     case 'add_node': {
@@ -261,6 +263,26 @@ function describeOp(
     case 'update_node': {
       const v = asRecord(op.value);
       const node = resolveNode(op.path, graph, batchAdds);
+      // A whole-map removal changes what is calculated, not just the option's
+      // display. Name that meaning in the consent offer and applied receipt.
+      if (node.kind === 'option' && node.label !== null && Object.keys(v).length === 1 &&
+          v.interventions !== null && typeof v.interventions === 'object' && !Array.isArray(v.interventions)) {
+        const nodes = asRecord(graph).nodes;
+        const matches = Array.isArray(nodes) ? nodes.filter((entry) => asRecord(entry).id === op.path) : [];
+        const previous = matches.length === 1 ? asRecord(asRecord(matches[0]).interventions) : {};
+        const next = asRecord(v.interventions);
+        const removed = Object.keys(previous).filter((id) => !Object.hasOwn(next, id));
+        if (removed.length > 0 && removed.every((id) => operations.some((other) => {
+          const edge = other.op === 'remove_edge' ? parseEdgeTargetPath(other.path) : null;
+          return edge?.from === op.path && edge.to === id;
+        })) && Object.entries(next).every(([id, value]) =>
+          Object.hasOwn(previous, id) && isDeepStrictEqual(previous[id], value))) {
+          const labels = removed.map((id) => resolveNode(id, graph, batchAdds).label);
+          if (labels.every((label) => label !== null)) {
+            return `stop fixing ${joinItems(labels.map((label) => `'${label}'`))} under '${node.label}'`;
+          }
+        }
+      }
       // Rename: the update carries a new label.
       if (typeof v.label === 'string' && v.label.trim().length > 0) {
         const newLabel = clampLabel(v.label);
@@ -363,7 +385,7 @@ export function describeChangeset(
       });
     }
   }
-  const items = operations.map((op) => describeOp(op, currentGraph, batchAdds));
+  const items = operations.map((op) => describeOp(op, currentGraph, batchAdds, operations));
   return { items, subject: joinItems(items) };
 }
 
