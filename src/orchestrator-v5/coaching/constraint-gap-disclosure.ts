@@ -63,7 +63,9 @@
 
 import { sanitiseLabel } from '../context/enrichment-graph-labels.js';
 import {
+  RUN_AGAIN_CLOSER,
   UNMEASURED_TARGET_LEAD_IN,
+  unmeasuredTargetRepairAsk,
   unmeasuredTargetRepairStep,
 } from './constraint-gap-copy.js';
 import { passesAssistantTextContentDefences } from './assistant-text-defences.js';
@@ -250,6 +252,63 @@ const ALL_VOICES = [...STATE_VOICES, 'out_of_scope', 'unmeasured_target'] as con
  */
 const UNEVALUATED_REPAIR_STEP =
   ' Tell me the limit you meant in your own words and I will record it; this one stays on the model. Then run the analysis again.';
+
+/**
+ * ⭐⭐ THE SAME VOICE, WHERE THE STEP ABOVE IS **PROVED** INERT.
+ *
+ * ── THE DEFECT, MEASURED ──────────────────────────────────────────────────
+ * Paul's 19 Sep session (scenario `34678f42`, build `c5e1060`). He received
+ * {@link UNEVALUATED_REPAIR_STEP} about *"Keep revenue retention rate at or
+ * above 110%"* and DID IT — restated the limit in his own words. The next turn
+ * measured: `graph_hash` UNCHANGED, ZERO `graph_patch` blocks, win
+ * probabilities BYTE-IDENTICAL, the same warning repeated.
+ *
+ * ── WHY NO RESTATEMENT COULD HAVE WORKED ──────────────────────────────────
+ * The limit's target was the GOAL node, with five incoming edges. PLoT's
+ * `resolveConstraintSampleFrameAnchor` returns `null` for any node carrying a
+ * directed incoming edge, BEFORE it ever reads `observed_state` — so the
+ * target has no measured starting point and nothing said about the LIMIT can
+ * give it one. `plot-lite-service` #364 shipped that service's half of this
+ * sentence on 18 Sep (*"it is calculated from its inputs, so it has no
+ * measured starting point of its own to anchor to"*); this is its CEE twin, so
+ * the two services stop disagreeing about what the user should do.
+ *
+ * ── WHY THE STEP ABOVE IS KEPT EVERYWHERE ELSE ────────────────────────────
+ * ⚠ Suppressing it wholesale would be the failure mode, not the fix. Its own
+ * docstring was written for a case where restatement genuinely lands: a floor
+ * minted with an INVERTED operator from *"churn could rise above 3%"*. On an
+ * anchorable target that user action still repairs the row. So this arm is
+ * spoken ONLY on proof, and the unproved default is the sentence above
+ * (`constraint-target-alternative.ts`
+ * {@link collectUnanchoredConstraintTargetIds} reads the refusal side of a
+ * predicate documented SUFFICIENT-NEVER-COMPLETE, which is the side that
+ * carries a proof).
+ *
+ * ── WHAT IT SAYS, CLAUSE BY CLAUSE ────────────────────────────────────────
+ *   - the CAUSE, in the product's register and as a claim about OUR model
+ *     rather than about a third-party engine the user cannot reach;
+ *   - that restating the limit cannot supply what is missing — the precise
+ *     thing the session disproved, said before the user spends a turn on it;
+ *   - the REPAIR, which is not new copy: it is
+ *     {@link unmeasuredTargetRepairAsk}, the ratified ask the sibling voice
+ *     already speaks, because *"name the part of your model this applies to"*
+ *     is exactly the move that can land here. One set of words for one fact
+ *     (CLAUDE.md trap 12), imported rather than respelled.
+ *   - and it still DISCLOSES THE RESIDUAL — "this one stays on the model" —
+ *     because there is no conversational remove/replace (ROADMAP 2.659) and a
+ *     repair that cannot touch the defective row must say the row remains.
+ *
+ * ⚠ NO EM DASH, and no vocabulary the egress content defences ban; the
+ * build-time survival probe in {@link buildVoice} turns a breach of either
+ * into a loud failure rather than a silent revert to the locked template.
+ */
+function unanchoredTargetRepairStep(total: number): string {
+  const cause =
+    total === 1
+      ? ' The part of your model it points at is worked out from other parts, so it has no measured starting point of its own, and restating the limit cannot give it one.'
+      : ' The parts of your model they point at are worked out from other parts, so they have no measured starting point of their own, and restating the limits cannot give them one.';
+  return `${cause}${unmeasuredTargetRepairAsk(total)}${RUN_AGAIN_CLOSER}`;
+}
 
 /**
  * The repair step for the IDENTITY_UNRESOLVED voice. Deliberately NOT the
@@ -485,8 +544,12 @@ function consequenceSentence(voice: DisclosureVoice, total: number): string {
     : ' So it cannot be confirmed whether they were checked, and they cannot be counted as part of the comparison.';
 }
 
-function repairStep(voice: DisclosureVoice, total: number): string {
-  if (voice === 'unevaluated') return UNEVALUATED_REPAIR_STEP;
+function repairStep(voice: DisclosureVoice, total: number, unanchored = false): string {
+  if (voice === 'unevaluated') {
+    // The ONLY place the arm is chosen. `unanchored` is false unless a caller
+    // PROVED it, so every existing call site keeps today's sentence.
+    return unanchored ? unanchoredTargetRepairStep(total) : UNEVALUATED_REPAIR_STEP;
+  }
   if (voice === 'out_of_scope') return outOfScopeCloser(total);
   if (voice === 'unmeasured_target') return unmeasuredTargetRepairStep(total);
   return unresolvedRepairStep(total);
@@ -563,8 +626,9 @@ function composeDisclosure(
   total: number,
   named: readonly string[],
   quote = '',
+  unanchored = false,
 ): string {
-  return ` ${subjectSentence(voice, total, named)}${quote}${consequenceSentence(voice, total)}${repairStep(voice, total)}`;
+  return ` ${subjectSentence(voice, total, named)}${quote}${consequenceSentence(voice, total)}${repairStep(voice, total, unanchored)}`;
 }
 
 /**
@@ -599,6 +663,7 @@ function composeDisclosure(
 export function buildConstraintDisclosure(
   verdict: ConstraintVerdict,
   brief?: string | null,
+  unanchoredConstraintIds?: ReadonlySet<string>,
 ): string {
   // STATE VOICE FIRST, OUT-OF-SCOPE SECOND, and both may be present.
   //
@@ -609,7 +674,24 @@ export function buildConstraintDisclosure(
   // admits exactly one gap-disclosure slot — so composing them the other way
   // round would fail the grammar and silently revert the whole summary to the
   // locked template, which is the #703 failure this module exists to prevent.
-  const stateVoice = buildConstraintDisclosureFromState(verdict.state, verdict.constraints, brief);
+  // ⭐ THE ARM, DECIDED ONCE, AND ONLY ON PROOF OF **EVERY** NAMED LIMIT.
+  //
+  // A mixed turn — one limit on a derived target, one on a repairable row —
+  // keeps today's sentence. The unanchored arm says "restating the limit
+  // cannot give it one", which would be FALSE of the repairable sibling, and a
+  // disclosure that names several limits speaks about all of them at once. So
+  // the arm is taken only when the claim holds for the whole set; `every` over
+  // an EMPTY set cannot reach here because `buildVoice` returns '' for one.
+  const unanchoredArm =
+    unanchoredConstraintIds !== undefined &&
+    verdict.constraints.length > 0 &&
+    verdict.constraints.every((c) => unanchoredConstraintIds.has(c.constraint_id));
+  const stateVoice = buildConstraintDisclosureFromState(
+    verdict.state,
+    verdict.constraints,
+    brief,
+    unanchoredArm,
+  );
   const outOfScope = buildVoice('out_of_scope', verdict.outOfScopeConstraints, brief);
   const unmeasured = buildVoice(
     'unmeasured_target',
@@ -662,11 +744,19 @@ export function buildConstraintDisclosureFromState(
   state: ConstraintVerdictState,
   constraints: readonly RatifiedConstraint[],
   brief?: string | null,
+  /**
+   * PROVED-unanchored, for the `unevaluated` voice's repair arm only. Absent
+   * is the UNPROVED default and yields today's sentence byte for byte — which
+   * is what the read-back caller (`compose/withheld-reason-tail.ts`) gets,
+   * because that turn holds a persisted state and no graph to prove anything
+   * from. A caller who cannot look does not get to assert.
+   */
+  unanchored = false,
 ): string {
   switch (state) {
     case 'unevaluated':
     case 'identity_unresolved':
-      return buildVoice(state, constraints, brief);
+      return buildVoice(state, constraints, brief, unanchored);
     case 'not_applicable':
     case 'evaluated_feasible':
       // Nothing happened to the user's conditions that needs saying.
@@ -685,6 +775,7 @@ function buildVoice(
   voice: DisclosureVoice,
   constraints: readonly RatifiedConstraint[],
   brief?: string | null,
+  unanchored = false,
 ): string {
   if (constraints.length === 0) return '';
 
@@ -711,12 +802,12 @@ function buildVoice(
   // gives up exactly one thing.
   const quote = quoteSentence(constraints, brief);
   if (quote.length > 0) {
-    const quotedForm = composeDisclosure(voice, constraints.length, named, quote);
+    const quotedForm = composeDisclosure(voice, constraints.length, named, quote, unanchored);
     if (survivesEgress(quotedForm)) return quotedForm;
   }
-  const labelled = composeDisclosure(voice, constraints.length, named);
+  const labelled = composeDisclosure(voice, constraints.length, named, '', unanchored);
   if (named.length > 0 && !survivesEgress(labelled)) {
-    return composeDisclosure(voice, constraints.length, []);
+    return composeDisclosure(voice, constraints.length, [], '', unanchored);
   }
   return labelled;
 }
@@ -770,7 +861,12 @@ const UNEVALUATED_RE_SRC =
   QUOTE_SLOT +
   // Both consequence variants ("it" / "them"), derived from the builder.
   `(?:${escapeForRegex(consequenceSentence('unevaluated', 1))}|${escapeForRegex(consequenceSentence('unevaluated', 2))})` +
-  escapeForRegex(UNEVALUATED_REPAIR_STEP);
+  // BOTH repair arms, each escaped from the very constant the builder emits.
+  // The unanchored arm is singular/plural-aware, so both spellings are admitted
+  // — a hand-written `(?:…)` here would be the mirror this file bans.
+  `(?:${escapeForRegex(UNEVALUATED_REPAIR_STEP)}` +
+  `|${escapeForRegex(unanchoredTargetRepairStep(1))}` +
+  `|${escapeForRegex(unanchoredTargetRepairStep(2))})`;
 
 /** Grammar branch for the IDENTITY_UNRESOLVED voice. */
 const UNRESOLVED_RE_SRC =
@@ -883,14 +979,19 @@ function worstCaseFor(voice: DisclosureVoice): number {
   // whole summary to the locked template with no error anywhere (which is the
   // failure this derivation exists to prevent).
   const worstQuote = `${QUOTE_LEAD_IN}${quoted('x'.repeat(CONSTRAINT_GAP_QUOTE_MAX_CHARS))}.`;
-  return composeDisclosure(
-    voice,
-    999,
-    Array.from({ length: MAX_NAMED_CONSTRAINTS }, () =>
-      'x'.repeat(CONSTRAINT_GAP_LABEL_MAX_CHARS),
+  const labels = Array.from({ length: MAX_NAMED_CONSTRAINTS }, () =>
+    'x'.repeat(CONSTRAINT_GAP_LABEL_MAX_CHARS),
+  );
+  const quote = voice === 'out_of_scope' || voice === 'unmeasured_target' ? '' : worstQuote;
+  // ⚠ OVER BOTH REPAIR ARMS. The `unevaluated` voice now has two, and the
+  // unanchored one is LONGER; budgeting only the arm that happens to be the
+  // default would under-count by the whole difference and silently revert the
+  // summary to the locked template the first time the other arm speaks.
+  return Math.max(
+    ...[false, true].map((unanchored) =>
+      composeDisclosure(voice, 999, labels, quote, unanchored).length,
     ),
-    voice === 'out_of_scope' || voice === 'unmeasured_target' ? '' : worstQuote,
-  ).length;
+  );
 }
 
 /**

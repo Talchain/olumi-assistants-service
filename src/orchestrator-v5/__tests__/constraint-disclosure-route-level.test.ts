@@ -2077,7 +2077,23 @@ describe('2.349 R2 — gap 5 at the serialised HTTP boundary', () => {
     const block = body.blocks.find((b: any) => b.type === 'analysis_result');
     expect(block.leading_option_id).toBeNull();
     expect(turn.assistantText).toContain('could not be checked');
-    expect(turn.assistantText).toContain('Tell me the limit you meant');
+    // ⚠ REBOUND, NOT RELAXED. This assertion used to name the repair sentence
+    // `Tell me the limit you meant`, as a proxy for "the unevaluated voice
+    // spoke". It is no longer a stable proxy: this file's goal node
+    // `goal_growth` carries a directed incoming edge (`fac_capacity ->
+    // goal_growth`) and a `goal_threshold` with no baseline, so PLoT's anchor
+    // resolution refuses it and the disclosure now takes its UNANCHORED repair
+    // arm. That is the same judgement THIS FILE already makes 50 lines above,
+    // where the identical sentence is called *"untruth #3 — a repair step that
+    // can never change the outcome"* for the out-of-scope class.
+    //
+    // So it binds instead to the part that identifies the VOICE and cannot
+    // move with the arm — the consequence sentence — plus the invariant the
+    // test is actually about: a repair the user can act on is still offered.
+    expect(turn.assistantText).toContain(
+      'We could not line it up with anything this analysis measures',
+    );
+    expect(turn.assistantText).toContain('and I will record it');
   });
 
   it('MIXED: a second, genuinely unscored constraint still withholds AND both are disclosed', async () => {
