@@ -33,7 +33,8 @@ export interface DraftLineageReceipt {
     bindings: DraftRecordsSidecar['bindings'];
     refusals: readonly unknown[];
     constraints: RecordProjection['goalConstraints'];
-    constraint_carriage: 'diagnostic_only_not_forwarded_to_pipeline';
+    constraint_carriage: 'diagnostic_only_not_forwarded_to_pipeline' | 'forwarded_as_unvalidated_record_candidates';
+    constraint_candidates?: RecordProjection['constraintCandidates'];
   };
 }
 

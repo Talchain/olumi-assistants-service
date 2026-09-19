@@ -485,10 +485,13 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
  * SHRINKS (one is migrated without recording it). A gap recorded in the suite is
  * honest; a gap invisible to it is how this class reopens.
  */
+// The combined carrier and native-intervention changes retain 46 sites across 25 files.
 const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/direction-gate.ts": 3,
   "cee/compound-goal/extractor.ts": 1,
   "cee/compound-goal/node-generator.ts": 1,
+  // Scalar-percent refusal for the extractor's unresolved 100%+ label/value convention.
+  "cee/compound-goal/record-constraint-carrier.ts": 1,
   "cee/decision-review/shape-check.ts": 1,
   "cee/draft/records/projector.ts": 1,
   "cee/factor-extraction/display-value.ts": 7,

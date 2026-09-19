@@ -20,6 +20,7 @@ export interface StoredDraftLineage {
     /** Hash of this entry's parsedJson, not the canonical analysis graph hash. */
     snapshot_sha256: string;
     goal_constraints: unknown;
+    record_constraint_dispositions?: unknown;
     canonical_save: 'not_witnessed_here';
   };
 }
@@ -27,6 +28,7 @@ export interface StoredDraftLineage {
 interface DraftLineageStorageInput {
   receipt: DraftLineageReceipt;
   goalConstraints: unknown;
+  recordConstraintDispositions?: unknown;
 }
 
 /** Default TTL: 1 hour */
@@ -210,6 +212,9 @@ export function storeLLMOutput(
           boundary: 'post_repair_package_before_v3_and_persistence' as const,
           snapshot_sha256: createHash('sha256').update(JSON.stringify(parsedJson) ?? 'null').digest('hex'),
           goal_constraints: structuredClone(options.draftLineage.goalConstraints ?? null),
+          ...(options.draftLineage.recordConstraintDispositions ? {
+            record_constraint_dispositions: structuredClone(options.draftLineage.recordConstraintDispositions),
+          } : {}),
           canonical_save: 'not_witnessed_here' as const,
         },
       },

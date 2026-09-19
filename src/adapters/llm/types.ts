@@ -10,6 +10,7 @@ import type { DocPreview } from "../../services/docProcessing.js";
 import type { CorrectionCollector } from "../../cee/corrections.js";
 import type { ObservabilityCollector } from "../../cee/observability/index.js";
 import type { SystemPromptMeta } from "./prompt-loader.js";
+import type { RecordConstraintCandidate } from "../../cee/draft/records/projector.js";
 import type { DraftLineageReceipt } from "../../cee/draft/records/lineage.js";
 import type { BuiltDraftAttachment } from "./draft-attachment.js";
 
@@ -85,6 +86,8 @@ export interface DraftGraphResult {
   /** Goal constraints emitted by the LLM (from structured outputs).
    *  Merged with regex-extracted constraints in Stage 4 compound-goals. */
   goal_constraints?: Array<Record<string, unknown>>;
+  /** Records declarations, validated separately before becoming goal constraints. */
+  record_constraint_candidates?: readonly RecordConstraintCandidate[];
   /** v0.11.0 schema amendment: LLM coaching block, validated against the
    *  canonical CoachingSchema after the legacy ingress normaliser converts
    *  v192b array shapes to canonical objects. Required at the LLM boundary;

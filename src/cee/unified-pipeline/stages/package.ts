@@ -1164,6 +1164,7 @@ export async function runStagePackage(ctx: StageContext): Promise<void> {
         draftLineage: {
           receipt: ctx.llmMeta.raw_draft_lineage,
           goalConstraints: ctx.goalConstraints,
+          recordConstraintDispositions: ctx.recordConstraintDispositions,
         },
       } : {}),
     });

@@ -847,6 +847,17 @@ export interface DroppedRecordRef {
   readonly strength_signature?: string;
 }
 
+/** A bound declaration, not yet an executable constraint. Minted at reference resolution. */
+export interface RecordConstraintCandidate {
+  readonly stated_index: number;
+  readonly carrier_node_id: string;
+  readonly target_ref: { readonly namespace: "stated_items" | "claims"; readonly index: number };
+  /** Full evidence, before the public constraint's quote length bound. */
+  readonly source_quote: string;
+  readonly declared_direction: string;
+  readonly constraint: GoalConstraintT;
+}
+
 export interface RecordProjection {
   /** GraphV3, ready for the parse stage's post-LLM seam. */
   readonly graph: ProjectedGraph;
@@ -858,41 +869,10 @@ export interface RecordProjection {
    * that vanished without trace.
    */
   readonly dropped: readonly DroppedRecordRef[];
-  /**
-   * ⭐⭐ THE LIMITS THE MODEL BOUND TO A NODE ITSELF.
-   *
-   * A stated `constraint` that names what it limits (`applies_to_stated` /
-   * `applies_to_claim`) and survives every safety gate becomes a row here,
-   * carrying the TARGET's node id.
-   *
-   * ⛔⛔ THIS FIELD HAS NO CONSUMER YET, AND SAYING SO IS THE POINT. An earlier
-   * version of this comment said the row "reaches `ctx.llmGoalConstraints` and
-   * is merged by the EXISTING `runCompoundGoals` machinery". THAT IS FALSE at
-   * this tip and was falsified by sweeping for it: the live draft path copies
-   * only `.graph` (`adapters/llm/anthropic.ts`,
-   * `rawJson = { ...activeProjection.graph }`), and this field is read by NO
-   * non-test file outside this one. Contrast control in the same sweep: the
-   * sibling `.dropped` is read by 12. `ctx.goalConstraints` in
-   * `unified-pipeline` IS real and IS widely read — it is a DIFFERENT FIELD
-   * THAT HAPPENS TO SHARE THE NAME, and nothing joins the two. Believing the
-   * two were one channel is what made removing the user's constraint node look
-   * safe (trap 21).
-   *
-   * ⭐ So this field is the ARTEFACT the carrier lane needs, produced and
-   * proven, and nothing more. It changes no user-visible byte, which is
-   * precisely why nothing may be taken away on the strength of it.
-   *
-   * ⭐ WHY THIS CANNOT NAME A NODE THAT DOES NOT EXIST. The id is the one the
-   * projector MINTED for the target in this same pass, so the merge's
-   * `existingNodeIds.has(node_id)` filter is satisfied by construction. That is
-   * the whole reason the reference is an integer index into the record set
-   * rather than a name to be matched: string matching is what dropped the
-   * user's limit in the first place.
-   *
-   * EMPTY on every record set that does not use the new fields, which is what
-   * makes the change strictly additive.
-   */
+  /** Raw projected limits; their values/frames are not compilation authority. */
   readonly goalConstraints: readonly GoalConstraintT[];
+  /** Origin-bearing declarations carried separately to the compound-goals compiler. */
+  readonly constraintCandidates: readonly RecordConstraintCandidate[];
 }
 
 // ── GraphV3 output shapes (structural mirrors of `schemas/graph.ts`) ─────────
@@ -2467,6 +2447,7 @@ function projectOnce(
   /** Bindings that actually produced a row — the only carriers a withdrawal could be licensed by. */
   const boundCarriers: StatedConstraintBinding[] = [];
   const goalConstraints: GoalConstraintT[] = [];
+  const constraintCandidates: RecordConstraintCandidate[] = [];
   /** edge id → the model's stated option→factor intervention level (`sets_to`). */
   const setsToByEdgeId = new Map<string, number>();
   /**
@@ -3567,21 +3548,11 @@ function projectOnce(
 
     // ── BOUND ──────────────────────────────────────────────────────────────
     //
-    // ⚠⚠ `value_frame` IS DELIBERATELY NOT STAMPED, AND THAT COSTS SOMETHING.
-    // The contract is explicit that the field is never defaulted, because "a
-    // defaulted frame is a manufactured attestation" and only a producer that
-    // knows its own minting arithmetic may stamp it. This projector does not:
-    // the grammar's `constraint` has `direction` and `value` and no way to say
-    // whether the number is a LEVEL to stay under or a DELTA to stay within, so
-    // a stamped "level" would be a guess on exactly the axis a wrong answer
-    // makes a 100x error. The honest consequence, stated rather than glossed:
-    // an unframed row leaves ISL's `constraint_analysis` withheld with
-    // `CONSTRAINT_FRAME_UNSPECIFIED` unless a frame-bearing producer speaks for
-    // the same node+operator — in which case `mergeWithProtectedFrame` carries
-    // that deterministic frame onto this row, which is the collaboration that
-    // merge was built for. Earning the frame outright needs a new grammar field
-    // and its own measurement; it is NOT a line to add here.
-    goalConstraints.push({
+    // This raw declaration has no frame. The separate origin-bearing carrier
+    // reaches compound-goals, which must prove the declared quote/quantity and
+    // carry arithmetic/frame from the existing deterministic extractor. A
+    // typed target reference alone does not attest those semantics.
+    const projectedConstraint: GoalConstraintT = {
       constraint_id: generateConstraintId(target.id, binding.operator),
       node_id: target.id,
       operator: binding.operator,
@@ -3594,64 +3565,26 @@ function projectOnce(
       // Not `inferred` — nothing here was guessed; the alternative to a stated
       // reference was a refusal, not an inference.
       provenance: "explicit",
+    };
+    goalConstraints.push(projectedConstraint);
+    constraintCandidates.push({
+      stated_index: binding.statedIndex,
+      carrier_node_id: binding.nodeId,
+      target_ref: binding.appliesToStated !== undefined
+        ? { namespace: "stated_items", index: binding.appliesToStated }
+        : { namespace: "claims", index: binding.appliesToClaim! },
+      source_quote: binding.quote,
+      declared_direction: records.stated_items[binding.statedIndex]!.direction!,
+      constraint: projectedConstraint,
     });
     // The carrier this bind would license a later lane to withdraw. Tracked so
     // the postcondition below can police that withdrawal — see pass 2d.
     boundCarriers.push(binding);
 
-    // ⛔⛔ THE STANDALONE CONSTRAINT NODE IS *NOT* WITHDRAWN, AND THAT IS THE
-    // WHOLE ORDERING CONSTRAINT OF THIS CHANGE.
-    //
-    // ⚠⚠ WHAT WAS HERE BEFORE, AND WHY IT WAS DESTRUCTIVE — MEASURED, NOT
-    // ARGUED. This block used to splice the constraint node out of `nodes` and
-    // repoint the stated index, on the stated ground that "the limit now lives
-    // ON the quantity it bounds". IT DOES NOT. The row above is written to
-    // `RecordProjection.goalConstraints`, a SIBLING of `.graph` — and the live
-    // draft path copies ONLY `.graph` (`adapters/llm/anthropic.ts`,
-    // `rawJson = { ...activeProjection.graph }`). Contrast-controlled sweep of
-    // the same tree: the sibling `.dropped` is read by 12 non-test files;
-    // `RecordProjection.goalConstraints` is read by NONE outside this file.
-    // (`ctx.goalConstraints` in `unified-pipeline` is a DIFFERENTLY-SCOPED FIELD
-    // OF THE SAME NAME with many readers, and nothing joins the two — conflating
-    // them is exactly what made the removal look safe. Trap 21: two names, two
-    // questions.)
-    //
-    // A/B on this projector, two arms differing in ONE key, the constraint
-    // LINKED to the goal so the connectivity prune is not the variable:
-    //   without the field → 3 nodes, incl. `constraint` "keeping monthly churn
-    //                        under 4%" carrying `observed_state.value 4`,
-    //                        `unit "%"`, `operator "<="`
-    //   with    the field → 2 nodes. THAT NODE IS GONE. `dropped` EMPTY.
-    //                        `graph.goal_constraints` undefined.
-    // The user's own stated limit left the product with nothing disclosed — the
-    // precise silent loss this change exists to end, manufactured by the change
-    // itself.
-    //
-    // ⛔ THE RULE, and it is an ORDERING rule rather than a better splice:
-    // A NODE CARRYING A USER-STATED LIMIT MAY ONLY BE REMOVED ONCE THAT LIMIT IS
-    // DEMONSTRABLY CARRIED SOMEWHERE A CONSUMER READS. Until then, KEEP THE NODE.
-    //
-    // So the row is still MINTED above — the grammar, the reference resolution
-    // and every safety gate are exactly as designed, and the artefact the
-    // carrier lane needs exists — but nothing is taken away. The change is
-    // therefore genuinely additive: the graph a user receives is byte-identical
-    // to the one they receive today, which is what "inert until the carrier
-    // lands" has to MEAN. Pinned, not asserted, by a same-run byte comparison in
-    // `__tests__/constraint-applies-to-binding.test.ts` ("NO SILENT LOSS — a
-    // SUCCESSFUL bind leaves the graph byte-identical to the same records with
-    // no reference").
-    //
-    // ⭐ WHEN THE CARRIER LANDS (`goalConstraints` carried across
-    // `anthropic.ts` alongside `.graph`, reaching `ctx.goalConstraints`), the
-    // removal becomes correct — AND IT MUST ARRIVE WITH A DISCLOSURE. That is
-    // not left to a comment anyone must remember: the invariant test
-    // "NO SILENT LOSS INVARIANT — every bound limit is on the graph as a node,
-    // or is disclosed" is written against the RULE rather than against today's
-    // code, so re-enabling a splice without disclosing REDs it.
-    //
-    // No repoint is needed while the node stays: a `causal_link` into this
-    // constraint still resolves onto the constraint itself, exactly as it does
-    // today, so no good reference is turned into a dropped one.
+    // Keep the standalone constraint node. A semantic candidate can still be
+    // refused downstream; successful compilation does not license deleting the
+    // user's visible wording or its graph relationships here.
+
   }
 
   const kindAtLinkTime = new Map(nodes.map((n) => [n.id, n.kind as string]));
@@ -4773,6 +4706,7 @@ function projectOnce(
     optionClaimIndexById,
     // Reconciled against the final node set — see pass 2c.
     goalConstraints: boundLimits,
+    constraintCandidates: constraintCandidates.filter((c) => survivingNodeIds.has(c.constraint.node_id)),
     graph: {
       version: "1",
       // The frozen default (`schemas/graph.ts` `default_seed: 17`). A projector
@@ -5071,13 +5005,14 @@ export function projectRecordsToGraph(
     repairStatedOptionTargets(projection);
   }
   // The internal binding is not part of the contract: consumers get the same
-  // three fields they always did.
+  // graph/provenance/disclosures and the explicitly declared constraint carriers.
   return boundEveryNodeLabel(
     discloseNodesNamedWithASentence({
       graph: projection.graph,
       provenance: projection.provenance,
       dropped: projection.dropped,
       goalConstraints: projection.goalConstraints,
+      constraintCandidates: projection.constraintCandidates,
     }),
   );
 }

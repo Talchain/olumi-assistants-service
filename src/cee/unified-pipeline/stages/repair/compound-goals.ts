@@ -34,6 +34,12 @@ import { MINTABLE_TARGET_KINDS } from "../../../compound-goal/mintable-target-ki
 import { buildBoundDisplayName } from "../../../compound-goal/constraint-display-name.js";
 import { deriveStatedTargetBaselinePercent } from "../../../factor-extraction/stated-level.js";
 import { log } from "../../../../utils/telemetry.js";
+import {
+  compileRecordConstraint, sameRecordConstraintEvidence, recordConstraintDisclosure,
+  recordOwnsConstraintSource, recordOwnsConstruction,
+  type RecordConstraintDisposition,
+} from '../../../compound-goal/record-constraint-carrier.js';
+
 
 /**
  * ROADMAP 2.349 (ROOT HALF) — a deadline is not a hard constraint, and
@@ -363,6 +369,24 @@ export function runCompoundGoals(ctx: StageContext): void {
     }, `Regex extracted ${regexConstraints.length} constraint(s)`);
   }
 
+  // Records carry an explicit target reference, but no attested value/frame.
+  // Compile those independently; never lend legacy LLM precedence to raw rows.
+  const recordDispositions = (ctx.recordConstraintCandidates ?? []).map((candidate) =>
+    compileRecordConstraint(candidate, ctx.effectiveBrief, graphNodes),
+  );
+  const initiallyValidated = recordDispositions.filter((d) => d.reason === 'record_constraint_validated');
+  for (const disposition of initiallyValidated) {
+    const row = disposition.canonical_constraint!;
+    if (initiallyValidated.some((other) => other !== disposition && (
+      (sameRecordConstraintEvidence(row, other.canonical_constraint!)
+        && row.node_id !== other.canonical_constraint!.node_id)
+      || (row.node_id === other.canonical_constraint!.node_id
+        && row.operator === other.canonical_constraint!.operator
+        && !sameRecordConstraintEvidence(row, other.canonical_constraint!))
+    ))) disposition.reason = 'record_constraint_binding_conflict';
+  }
+  const validatedRecords = recordDispositions.filter((d) => d.reason === 'record_constraint_validated');
+
   // ── LLM-emitted constraints ─────────────────────────────────────────
   // LLM constraints have richer metadata (source_quote, confidence,
   // provenance) and take precedence when both sources produce a
@@ -423,7 +447,8 @@ export function runCompoundGoals(ctx: StageContext): void {
   //
   // The empty case is now handled at the two sites that need it (the merge and
   // the emission log), and the detector runs unconditionally below.
-  const bothProducersEmpty = llmConstraints.length === 0 && regexConstraints.length === 0;
+  const bothProducersEmpty = llmConstraints.length === 0 && regexConstraints.length === 0
+    && validatedRecords.length === 0;
 
   const merged = new Map<string, any>();
   const dedupeKey = (c: any) => `${c.node_id}::${c.operator ?? ""}`;
@@ -440,6 +465,30 @@ export function runCompoundGoals(ctx: StageContext): void {
   for (const c of llmConstraints) {
     const key = dedupeKey(c);
     merged.set(key, mergeWithProtectedFrame(merged.get(key), c));
+  }
+
+  // A uniquely located complete records quote owns its quantity's source span,
+  // even if semantic compilation refuses it. Remove competing guesses before
+  // adding admitted candidates; a named refusal cannot execute via a fallback.
+  for (const [key, row] of merged) {
+    if (recordOwnsConstraintSource(recordDispositions, row, ctx.effectiveBrief)) merged.delete(key);
+  }
+
+  // The same attested statement has one target: the model's typed reference
+  // replaces only a regex guess about that exact quantity/evidence. No label
+  // matching or graph-node withdrawal happens here. Competing statements stay
+  // a named refusal rather than last-writer-wins.
+  for (const disposition of validatedRecords) {
+    const row = disposition.canonical_constraint!;
+    const existing = merged.get(dedupeKey(row));
+    if (existing && !sameRecordConstraintEvidence(row, existing)) {
+      disposition.reason = 'record_constraint_binding_conflict';
+      continue;
+    }
+    for (const [key, other] of merged) {
+      if (regexConstraints.includes(other) && sameRecordConstraintEvidence(row, other)) merged.delete(key);
+    }
+    merged.set(dedupeKey(row), row);
   }
 
   // ROADMAP 2.1051 (limb 2) — MINT FROM THE CONSTRUCTION VERDICT.
@@ -463,7 +512,8 @@ export function runCompoundGoals(ctx: StageContext): void {
   const producerValues = [...merged.values()]
     .map((c: any) => (typeof c?.value === "number" ? c.value : NaN))
     .filter((v) => Number.isFinite(v));
-  const provenUncovered = findProvenUncoveredBounds(ctx.effectiveBrief, producerValues, preparedBrief);
+  const provenUncovered = findProvenUncoveredBounds(ctx.effectiveBrief, producerValues, preparedBrief)
+    .filter((bound) => !recordOwnsConstruction(recordDispositions, bound, ctx.effectiveBrief));
   const mintedFromConstruction: any[] = [];
   if (provenUncovered.length > 0) {
     const measurable = graphNodes.filter((n) => MINTABLE_TARGET_KINDS.has(String(n.kind)));
@@ -537,6 +587,47 @@ export function runCompoundGoals(ctx: StageContext): void {
     unresolved: directionUnresolved,
     nonLimit: directionNonLimit,
   } = partitionUnprovenDirection(notRiskFramed as any[], ctx.effectiveBrief, nodeLabels, preparedBrief);
+
+  // Close each records declaration at this existing authority boundary. The
+  // receipt distinguishes semantic compilation from final gate admission.
+  const dispositionRow = (d: RecordConstraintDisposition, row: unknown): boolean =>
+    !!row && typeof row === 'object' && !!d.canonical_constraint
+    && (row as { node_id?: unknown }).node_id === d.canonical_constraint.node_id
+    && sameRecordConstraintEvidence(d.canonical_constraint, row as Record<string, unknown>);
+  for (const disposition of recordDispositions) {
+    if (disposition.reason !== 'record_constraint_validated') continue;
+    if (binding.some((row) => dispositionRow(disposition, row))) {
+      disposition.reason = 'record_constraint_admitted';
+    } else if (temporal.some((row) => dispositionRow(disposition, row))) {
+      disposition.reason = 'record_constraint_temporal_nonbinding';
+    } else if (inverted.some((entry) => dispositionRow(disposition, entry.constraint))) {
+      disposition.reason = 'record_constraint_risk_nonbinding';
+    } else if (directionNonLimit.some((entry) => dispositionRow(disposition, entry.constraint))) {
+      disposition.reason = 'record_constraint_non_limit';
+    } else if (directionUnresolved.some((entry) => dispositionRow(disposition, entry.constraint))) {
+      disposition.reason = 'record_constraint_direction_unproven';
+    } else {
+      disposition.reason = 'record_constraint_binding_conflict';
+    }
+  }
+  if (recordDispositions.length > 0) {
+    ctx.recordConstraintDispositions = recordDispositions;
+    const refused = recordDispositions.filter((d) => d.reason !== 'record_constraint_admitted');
+    if (refused.length > 0) {
+      ctx.recordDisclosures = [
+        ...(Array.isArray(ctx.recordDisclosures) ? ctx.recordDisclosures : []),
+        ...refused.map(recordConstraintDisclosure),
+      ];
+    }
+    log.info({
+      event: 'cee.compound_goal.records_compiled', request_id: ctx.requestId,
+      candidate_count: recordDispositions.length,
+      admitted_count: recordDispositions.length - refused.length,
+      dispositions: recordDispositions.map((d) => ({
+        stated_index: d.candidate.stated_index, node_id: d.candidate.constraint.node_id, reason: d.reason,
+      })),
+    }, 'Records constraints compiled through existing constraint gates');
+  }
 
   // The unmatched-negation detector — the DROPPED-bound half of the same defect.
   // Runs even when both producers emitted nothing (see the note at the merge).
@@ -734,6 +825,7 @@ export function runCompoundGoals(ctx: StageContext): void {
     constraint_count: ctx.goalConstraints.length,
     from_regex: regexConstraints.length,
     from_llm: llmConstraints.length,
+    from_records: recordDispositions.filter((d) => d.reason === 'record_constraint_admitted').length,
     temporal_withheld: temporal.length,
     risk_inversion_withheld: inverted.length,
     direction_unresolved_withheld: directionUnresolved.length,

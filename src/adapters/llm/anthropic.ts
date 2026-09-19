@@ -2287,7 +2287,8 @@ export async function draftGraphWithAnthropic(
         bindings: recordsSidecar.bindings,
         refusals: recordDisclosures,
         constraints: activeProjection.goalConstraints,
-        constraint_carriage: 'diagnostic_only_not_forwarded_to_pipeline',
+        constraint_carriage: 'forwarded_as_unvalidated_record_candidates',
+        constraint_candidates: activeProjection.constraintCandidates,
       },
     });
     log.info({
@@ -2660,6 +2661,9 @@ export async function draftGraphWithAnthropic(
       // are the ones describing the graph they actually receive.
       ...(recordDisclosures.length > 0
         ? { record_disclosures: recordDisclosures }
+        : {}),
+      ...(activeProjection.constraintCandidates.length > 0
+        ? { record_constraint_candidates: structuredClone(activeProjection.constraintCandidates) }
         : {}),
       // Goal constraints passthrough: LLM-emitted constraints have richer metadata
       // (source_quote, confidence, provenance) than the regex extractor.
@@ -4658,6 +4662,8 @@ export class AnthropicAdapter implements LLMAdapter {
       ...((result as any).record_disclosures
         ? { record_disclosures: (result as any).record_disclosures }
         : {}),
+      ...(result.record_constraint_candidates
+        ? { record_constraint_candidates: result.record_constraint_candidates } : {}),
       ...(result.debug ? { debug: result.debug } : {}),
       ...(result.meta ? { meta: result.meta } : {}),
     };
