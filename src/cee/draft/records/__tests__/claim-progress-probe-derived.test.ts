@@ -270,7 +270,13 @@ const HISTORIC_V9_GRAMMAR_SHA256 =
  * able to tell which grammar produced them.
  */
 const PINNED_GRAMMAR_SHA256 =
-  "d4f4201dd7422ce5c3f41fe1c1046dc9a101eb9b60c0b304451f330a2bb27dbe";
+  // ⚠ RE-PINNED with v20.2 (`likelihood`). This hash is over
+  // `JSON.stringify(buildDraftRecordsSchema())` — the BUILT OBJECT the adapter
+  // attaches, not the file — so it moves when a FIELD is added and cannot move
+  // for a comment. That is what makes it the strongest of the three pins, and
+  // it is why adding a grammar field moves it while the instruction pins move
+  // independently: 1451 -> 1482 bytes.
+  "bfbbe10037f2d52e603c6b3f0389adc61f62febce3f48748fb035a5ede2835a5";
 
 describe("the claim-progress probe is derived from the grammar", () => {
   it("hashes to the PRE-REGISTERED v10 grammar the provider receives", () => {

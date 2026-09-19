@@ -1085,7 +1085,11 @@ describe("the draft records instruction is the measured artefact", () => {
       // v20 — the current-level ask reaching `risk` and `outcome`, and the
       // possibility-vs-measure carve-out that keeps it from being an invention
       // licence. The whole of the +666 bytes.
-      "5725ccb7ee993820b3a9c44009272732c0119bc8604a6c254bbb6409fa4c14d6",
+      // ⚠ RE-PINNED with v20.2: the likelihood destination, the scale convention
+      // ([0,1] never a percentage, odds and frequencies excluded, a
+      // probability-DIMENSIONED measure is a `value`), and the cue-free
+      // exemplars. All shape-half; the connect half is unchanged.
+      "f64d91fbcb2535387b33138de3e8d57455d049ed9698d1790bcaad90baecb3d3",
     );
     // ⚠ RE-PINNED with v20.2. The three pins are ARITHMETICALLY RELATED and the
     // relationship is the check: SHAPE + 1 (the joining newline) + CONNECT must
