@@ -53,6 +53,7 @@ import {
   projectClaimSafety,
 } from '../../../orchestrator/context/constraint-feasibility.js';
 import { buildConstraintDisclosure } from '../../coaching/constraint-gap-disclosure.js';
+import { collectUnanchoredConstraintTargetIds } from './d1-shared/constraint-target-alternative.js';
 import { decideOptionCostAsk } from '../../coaching/decide-option-cost-ask.js';
 // ROADMAP 2.579 — the intake axis: did the graph keep every option the brief
 // spelled out? Derived here, at the point of the claim, from the two pieces of
@@ -1908,9 +1909,39 @@ export function createRunAnalysisHandler(deps: RunAnalysisHandlerDeps): HandlerF
     // an unchecked quote could state the opposite of the limit beside it. Same
     // `snapshot.briefText` the intake reconciliation above reads; absent ⇒ the
     // quote stands down and the labelled disclosure ships unchanged.
+    // ⭐ THE REPAIR ARM — COPY ONLY, AND DELIBERATELY NOT A FOURTH VERDICT
+    // ARGUMENT. Measured on Paul's 19 Sep session (`34678f42`): he was told to
+    // restate his limit in his own words, did exactly that, and the next turn
+    // returned an UNCHANGED `graph_hash`, ZERO `graph_patch` blocks and
+    // BYTE-IDENTICAL win probabilities. The target was the goal node with five
+    // incoming edges, and PLoT's anchor resolution returns `null` for any node
+    // with a directed incoming edge before it ever reads `observed_state` — so
+    // no restatement of the LIMIT could ever have moved it. `plot-lite-service`
+    // #364 shipped that service's half of the same sentence on 18 Sep.
+    //
+    // ⚠⚠ THIS IS NOT THE REVERTED #1225 PREDICATE, AND THE DIFFERENCE IS
+    // STRUCTURAL, NOT A PROMISE. That one was passed to
+    // `deriveConstraintVerdict` and partitioned constraints out at STEP 0b,
+    // which moved `may_name_leading_option` and silently un-fixed trust-spine
+    // board #1. This set is passed to the DISCLOSURE BUILDER, which has no way
+    // to reach the verdict: the call above is already made, `constraintVerdict`
+    // is frozen by the time this runs, and the only thing downstream of this
+    // argument is which repair SENTENCE is printed. Worst case here is a less
+    // useful true sentence; it cannot name a leader.
+    //
+    // It also reads a DIFFERENT question: #1225 asked "does this node record
+    // any number" (false for every derived node, which is why it inverted);
+    // this asks "can PLoT anchor a sample frame on it", the estate's single
+    // mirror of that service's own rule, consumed on its REFUSAL side — the
+    // side its docblock says carries a proof.
+    const unanchoredConstraintIds = collectUnanchoredConstraintTargetIds(
+      snapshot.goal_constraints ?? snapshot.rawPersistedGraph ?? snapshot.graph,
+      snapshot.rawPersistedGraph ?? snapshot.graph,
+    );
     const constraintGapDisclosure = buildConstraintDisclosure(
       constraintVerdict,
       snapshot.briefText,
+      unanchoredConstraintIds,
     );
     // GO(A) — the ask that makes the disclosure above ACTIONABLE.
     //
