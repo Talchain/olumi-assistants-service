@@ -257,7 +257,7 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
-import { resolveExplicitConstraintEdit } from '../orchestrator-v5/routing/explicit-constraint-edit.js';
+import { mayContainExplicitConstraintEdit, resolveExplicitConstraintEdit } from '../orchestrator-v5/routing/explicit-constraint-edit.js';
 import {
   hasExplicitNoModelChangeIntent,
   hasConstraintMutationSignal,
@@ -5741,7 +5741,8 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
     let explicitConstraintEditDetected = false;
-    if (!modelChangeRefused && (positiveEditRegexHit || hasConstraintMutationSignal(ingress.message))) {
+    if (!modelChangeRefused && (positiveEditRegexHit || hasConstraintMutationSignal(ingress.message)) &&
+        mayContainExplicitConstraintEdit(ingress.message)) {
       try {
         const graphForConstraint = GraphV3.safeParse(await loadPersistedGraphOnce());
         if (graphForConstraint.success) {
