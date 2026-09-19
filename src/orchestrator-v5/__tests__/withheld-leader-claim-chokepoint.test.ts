@@ -587,6 +587,21 @@ describe('claim safety at the finalizeRun CHOKEPOINT — exits that bypass the i
 
   for (const exit of BYPASSING_EXITS) {
     describe(`the ${exit.name} exit`, () => {
+      it('retains independent value advice on the wire and in saved conversation', async () => {
+        const advice = 'Measure available staff hours before setting Capacity; keep the unmeasured uplift uncertain.';
+        routeWithToolUseMock.mockResolvedValue(exit.routingResult(`${LEAK_TEXT} ${advice}`));
+        const { status, body } = await postTurn(app, NEUTRAL_MESSAGE);
+        expect(status).toBe(200);
+        expect(routeWithToolUseMock).toHaveBeenCalledTimes(1);
+        expect(permissionOnTheWire(body)).toBe(false);
+        const finalText = String(body.assistant_text ?? '');
+        expect(finalText.replace(/\s+/g, ' ')).toContain(advice);
+        expect(finalText).not.toContain(LEADER_LABEL);
+        expect(finalText).not.toContain('72%');
+        expect(textAssertsLeadingOption(finalText)).toBe(false);
+        expect(committedAssistantMessages).toEqual([finalText]);
+      });
+
       it('BRANCH DISCRIMINATOR: the turn reaches the EXECUTOR, and the IN-FLOW gate does NOT run', async () => {
         routeWithToolUseMock.mockResolvedValue(exit.routingResult(LEAK_TEXT));
         await postTurn(app, NEUTRAL_MESSAGE);
