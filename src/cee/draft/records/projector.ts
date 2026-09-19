@@ -266,8 +266,8 @@ export interface RecordProvenance {
   readonly basis?: readonly string[];
   /**
    * ⭐⭐ THE STATED FIGURES THIS CLAIM IS BASED ON — the SUBJECT IDENTITY that
-   * survives the conversion, present iff `ai_inferred` and iff the basis names
-   * at least one `figure`.
+   * survives conversion. Present on claims based on figures, and on a stated
+   * non-current figure itself so its quantity survives without an observation.
    *
    * `basis` above names the stated items by their MINTED IDS, and a stated
    * `figure` is minted and then pruned (`unconnected_to_goal`), so those ids
@@ -293,6 +293,7 @@ export interface RecordProvenance {
     readonly value: number;
     readonly unit?: string;
     readonly source_quote?: string;
+    readonly role?: DraftRecordRole;
   }[];
   /**
    * Present iff `ai_inferred`. TRUE when `basis` is empty — pure invention,
@@ -729,6 +730,8 @@ export interface DroppedRecordRef {
      * a value that already holds.
      */
     | "stated_target_value_dropped"
+    /** A contextual figure or limit is retained without claiming a current reading. */
+    | "stated_figure_not_current_value"
     /**
      * ⭐ ROOT 2(c). Two or more parallel `causal_link` claims set the SAME
      * option→factor pair to DIFFERENT levels. One was chosen canonically; the
@@ -1521,12 +1524,15 @@ export function statedMagnitudeOf(node: ProjectedNode): { value?: number; unit?:
     | null
     | undefined;
   const data = node.data as { unit?: unknown } | null | undefined;
+  const statedFigure = node.provenance.basis_figures?.find(
+    f => f.source_quote === node.provenance?.source_quote,
+  );
 
-  const candidates = [observed?.raw_value, observed?.metadata?.original_value];
+  const candidates = [observed?.raw_value, observed?.metadata?.original_value, statedFigure?.value];
   const raw = candidates.find((c) => typeof c === "number" && Number.isFinite(c));
   if (typeof raw !== "number") return {};
 
-  const unit = [data?.unit, observed?.metadata?.unit].find(
+  const unit = [data?.unit, observed?.metadata?.unit, statedFigure?.unit].find(
     (u) => typeof u === "string" && u.length > 0,
   );
   return {
@@ -2814,6 +2820,29 @@ function projectOnce(
           appliesToClaim: item.applies_to_claim,
         });
       }
+    } else if (kind === "factor" && typeof item.value === "number" && item.role !== undefined && item.role !== "baseline") {
+      // A target, limit or contextual figure is not a current measurement. Keep its declared role
+      // and unit for downstream enrichment, and its quantity in the existing
+      // unresolved-target disclosure below. Only a bound goal/constraint may
+      // turn it into an executable threshold.
+      node.data = { role: item.role, ...(item.unit ? { unit: item.unit } : {}) };
+      // Use the existing quantity-provenance carrier for the figure itself as
+      // well as claims based on it. Enrichment must retain this refusal when
+      // considering an unbased sibling with a similar label.
+      node.provenance = {
+        ...prov,
+        basis_figures: [{ value: item.value, role: item.role, source_quote: quote,
+          ...(item.unit ? { unit: item.unit } : {}) }],
+      };
+      provenance[id] = node.provenance;
+      if (item.role !== "target") {
+        dropped.push({
+          claim_index: -1, claim_kind: STATED_ITEM_DROP_KIND,
+          label: quote, node_id: id, value: item.value,
+          ...(item.unit ? { unit: item.unit } : {}),
+          reason: "stated_figure_not_current_value",
+        });
+      }
     } else if (kind === "factor" && typeof item.value === "number") {
       node.data = {
         value: item.value,
@@ -3005,72 +3034,26 @@ function projectOnce(
     if (kind === "option" && typeof item.is_baseline === "boolean") {
       node.is_baseline = item.is_baseline;
     }
-    // ⚠ `role` DOES NOT SET A CATEGORY — `target`/`baseline` describe what the
-    // user was doing with the number; `controllable`/`observable`/`external`
-    // describe the node's position in the causal structure. They are two
-    // different questions, and answering one with the other is how a `figure` an
-    // option acts on ends up labelled `observable` and its edge rejected.
-    //
-    // ⭐⭐ ROOT 2(b) — BUT "NOT A CATEGORY" IS NOT "NOT ANYTHING", AND THAT SLIP
-    // IS THE DEFECT. The reasoning above is sound and it was used to justify
-    // reading `role` NOWHERE AT ALL. The grammar admits it, the seam carries it,
-    // and the projector dropped it on the floor: `role:"target"` and
-    // `role:"baseline"` produced BYTE-IDENTICAL projections, so a target the
-    // user asked us to reach became just another observed value — no threshold,
-    // no warning, and `analysis_ready` reporting ready over the top of it.
-    //
-    // A target and a current reading are opposite claims about the same number.
-    // Carrying the distinction costs nothing and makes the two projections
-    // differ; DISCLOSING it is what stops the silence.
-    // ⚠ ONLY ONTO AN EXISTING `data`, AND THIS IS NOT A STYLE CHOICE — the first
-    // version of this line wrote `{ ...(node.data ?? {}), role }`, which MINTS a
-    // `data` object on a node that had none. `NodeData` is a UNION whose branches
-    // are keyed on a required field each (`interventions` / `operator` / `value`),
-    // so `{ role }` alone matches NOTHING and the consumer rejects the whole
-    // draft — caught by `projector-consumer-contract`'s C-BUILD-1, which is
-    // exactly the assertion that suite exists to make. A node with no data keeps
-    // no data; the `target` disclosure below is what stops that being silent.
+    // Carry the declared numeric role independently of causal category. Factor
+    // data may omit a value under the existing explicit-unknown schema.
     if (item.role !== undefined && node.data !== undefined) {
       node.data = { ...node.data, role: item.role };
     }
-    // ⭐⭐ WHEN A STATED TARGET'S NUMBER FAILED TO BECOME A THRESHOLD.
-    //
-    // ⚠⚠ THIS CONDITION HAS BEEN WRONG IN BOTH DIRECTIONS, AND THE SECOND TIME
-    // IS THE INSTRUCTIVE ONE. It first fired on EVERY `role:"target"`, including
-    // a bare `goal` with no number, which put a standing notice on ordinary
-    // correct briefs. I then narrowed it with `&& kind !== "goal"` — and an
-    // adversarial review showed I had narrowed it to fit TWO ARRAY-LENGTH
-    // ASSERTIONS in fixtures that happened to contain a valueless goal target,
-    // not because the domain said so. Worse, `projectOnce` has a value branch for
-    // `constraint` and for `factor` and **NONE FOR `goal`** — so a stated numeric
-    // goal target ("cut churn to 8%", value 8) lands with no data, no
-    // observed_state and no threshold, and the narrowing removed the ONE notice
-    // that would have named it. I carved out the case that needed it most.
-    //
-    // ⭐ SO THE PREDICATE IS NOW DERIVED FROM THE NODE'S ACTUAL STATE, not from a
-    // list of kinds: fire when a target's NUMBER exists and did not end up
-    // expressed as a threshold. A valueless target has no number to lose and
-    // raises nothing; a `constraint` target that got its operator IS a threshold
-    // and raises nothing. Neither a kind list nor a test's array length decides
-    // it — the question "was this number represented?" is asked of the node.
+    // Retain the existing unresolved-target channel, including the original
+    // quantity when a figure is deliberately withheld from current values.
     const targetValueUnrepresented =
       item.role === "target" &&
       typeof item.value === "number" &&
       (node.data as { operator?: string } | undefined)?.operator === undefined;
     if (targetValueUnrepresented) {
-      // ⚠ TWO OUTCOMES, TWO NAMES (trap 21). They are different facts about the
-      // user's number and a single reason would blur them:
-      //  • the number reached the graph but as an OBSERVED value — modelled as
-      //    something that already HOLDS rather than something to REACH;
-      //  • the number reached the graph NOWHERE AT ALL (the `goal` case), which
-      //    is the strictly worse member of the same family.
-      const valueLandedSomewhere = node.observed_state !== undefined;
+      const targetIsRetainedAsFigure = kind === "factor";
       dropped.push({
         claim_index: -1,
         claim_kind: STATED_ITEM_DROP_KIND,
         label: quote,
         node_id: id,
-        reason: valueLandedSomewhere
+        ...(targetIsRetainedAsFigure ? { value: item.value, ...(item.unit ? { unit: item.unit } : {}) } : {}),
+        reason: targetIsRetainedAsFigure
           ? "stated_target_not_represented_as_threshold"
           : "stated_target_value_dropped",
       });
@@ -3292,6 +3275,7 @@ function projectOnce(
       )
       .map((item) => ({
         value: item.value as number,
+        ...(item.role !== undefined ? { role: item.role } : {}),
         ...(typeof item.unit === "string" && item.unit.length > 0 ? { unit: item.unit } : {}),
         ...(typeof item.source_quote === "string" && item.source_quote.length > 0
           ? { source_quote: item.source_quote }

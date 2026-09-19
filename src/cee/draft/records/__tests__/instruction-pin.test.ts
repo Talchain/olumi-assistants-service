@@ -773,6 +773,23 @@ const PREREGISTERED_V21_INSTRUCTION_BYTES = 19215;
 const PREREGISTERED_V21_SHAPE_SHA256 =
   "cc4b8e5864ca62e32065ac26fc60adcb4ac490c36e8f463daa6c58bdc2427c3d";
 const PREREGISTERED_V21_SHAPE_BYTES = 14334;
+
+// v22 authored-meaning correction, 2026-09-19. Unmeasured on model output.
+// Existing record kinds retain necessary versus optional goals, conditional
+// consequences and separate numeric roles. The connect half keeps ordinal
+// evidence distinct from a defensible numeric estimate. Pins identify source
+// bytes only; they do not establish generation quality or saved-model fidelity.
+// v21 above remains immutable. These values are read from literal source bytes
+// without importing or executing the instruction.
+const PREREGISTERED_V22_INSTRUCTION_SHA256 =
+  "9313d1ee7ce6a726338513e9fc7d20ef145047f2c216c69b87bbb8d84fdb7537";
+const PREREGISTERED_V22_INSTRUCTION_BYTES = 21107;
+const PREREGISTERED_V22_SHAPE_SHA256 =
+  "8fc0646a79586581a0c8faeb7ad54f627a76bfd63807db784ba511fc33c96d7d";
+const PREREGISTERED_V22_SHAPE_BYTES = 15992;
+const PREREGISTERED_V22_CONNECT_SHA256 =
+  "1e2ba3c6992c9525f268d8621b2c37f9f9aac687f1edb0e3867360fba4e8274e";
+const PREREGISTERED_V22_CONNECT_BYTES = 5115;
 /**
  * SUPERSEDED — v18's bytes, the value ask, AND THE ARTEFACT EVERY 17 Sep
  * MEASUREMENT WAS TAKEN UNDER: both live v202 draws, Paul's manual test, and the
@@ -846,11 +863,20 @@ const SUPERSEDED_V12_INSTRUCTION_SHA256 =
 const SUPERSEDED_V12_INSTRUCTION_BYTES = 12280;
 
 describe("the draft records instruction is the registered artefact", () => {
-  it("hashes to the UNRUN v21 source registration at the pinned byte length", () => {
-    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V21_INSTRUCTION_SHA256);
+  it("hashes to the unmeasured v22 source registration at the pinned byte length", () => {
+    expect(draftRecordsInstructionHash()).toBe(PREREGISTERED_V22_INSTRUCTION_SHA256);
     expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).toBe(
-      PREREGISTERED_V21_INSTRUCTION_BYTES,
+      PREREGISTERED_V22_INSTRUCTION_BYTES,
     );
+  });
+
+  it("keeps v21 identifiable separately from the authored-meaning correction", () => {
+    expect(draftRecordsInstructionHash()).not.toBe(PREREGISTERED_V21_INSTRUCTION_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V21_INSTRUCTION_BYTES);
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      PREREGISTERED_V21_SHAPE_SHA256,
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(PREREGISTERED_V21_SHAPE_BYTES);
   });
 
   it("keeps v20 identifiable separately from the unmeasured correction", () => {
@@ -1100,17 +1126,17 @@ describe("the draft records instruction is the registered artefact", () => {
     // to v18 (asserted in the next test). The edit is legible as "the model must
     // say which convention its number is in" without reading a diff.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).toBe(
-      // v21 source-only correction; the connect half is unchanged. UNRUN.
-      PREREGISTERED_V21_SHAPE_SHA256,
+      // v22 changes both halves; model generation remains unmeasured.
+      PREREGISTERED_V22_SHAPE_SHA256,
     );
-    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V21_SHAPE_BYTES);
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V22_SHAPE_BYTES);
     expect(
       Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8") +
         1 +
         Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8") -
         1,
       "the three pins no longer add up — one of them was updated without the others",
-    ).toBe(PREREGISTERED_V21_INSTRUCTION_BYTES);
+    ).toBe(PREREGISTERED_V22_INSTRUCTION_BYTES);
     // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
     // beside the live one exactly as every entry below it is. Asserted DISTINCT
     // for a DIFFERENT reason from those, and the difference is worth stating:
@@ -1121,7 +1147,7 @@ describe("the draft records instruction is the registered artefact", () => {
     //
     // Derived, not copied: `instruction.ts` at `16efa439` (the v20.0 commit)
     // hashes its shape half to exactly this value at exactly 13,868 bytes, and
-    // its connect half to 4,881 — unchanged then and now.
+    // its connect half to 4,881 — unchanged through v21.
     expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
       "5725ccb7ee993820b3a9c44009272732c0119bc8604a6c254bbb6409fa4c14d6",
     );
@@ -1210,7 +1236,7 @@ describe("the draft records instruction is the registered artefact", () => {
     );
   });
 
-  it("pins the v5 CONNECT half independently, so the half that changed is legible", () => {
+  it("pins the CONNECT half independently, so the half that changed is legible", () => {
     // v4 changes the connect half too: "chain the option the USER named" replaces
     // v3's "an option_refinement IS an option needing its own chain". That v3
     // sentence closed one direction of a defect and opened its mirror — the model
@@ -1230,11 +1256,14 @@ describe("the draft records instruction is the registered artefact", () => {
     // replaced was false at `f18d941b`.
     expect(
       createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
-      // v17 — the own-chain rule and the ceiling-not-quota clarification. The
-      // FIRST change to the connect half since v13, so a diff here is legible as
-      // exactly that rather than as drift.
-    ).toBe("8418e5e048d3f9ea0c8d0ee61914c5c5b8c2a54a2e601a2958284f73749b1c64");
-    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(4881);
+    ).toBe(PREREGISTERED_V22_CONNECT_SHA256);
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).toBe(PREREGISTERED_V22_CONNECT_BYTES);
+    // v18-v21's connect half remains separately identifiable. v22 adds the
+    // ordinal-evidence guard without changing the option or connectivity rules.
+    expect(
+      createHash("sha256").update(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8").digest("hex"),
+    ).not.toBe("8418e5e048d3f9ea0c8d0ee61914c5c5b8c2a54a2e601a2958284f73749b1c64");
+    expect(Buffer.byteLength(DRAFT_RECORDS_CONNECT_INSTRUCTION, "utf8")).not.toBe(4881);
     // HISTORIC — the v6/v7/v8/v9 connect half, asserted DISTINCT. Every draw in
     // the 1-of-23 measurement was served these bytes.
     expect(

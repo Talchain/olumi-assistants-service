@@ -54,6 +54,7 @@ const PRODUCER_REASONS = [
   "constraint_target_unit_mismatch",
   "stated_target_not_represented_as_threshold",
   "stated_target_value_dropped",
+      "stated_figure_not_current_value",
   "parallel_intervention_conflict",
   "parallel_causal_link_conflict",
   "claim_label_not_a_name",
