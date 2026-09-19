@@ -281,6 +281,8 @@ export interface HandlerInvocation {
     /** User-stated limit, scoped after the independent mutation warrant. */
     readonly limitChange?: import('../routing/baseline-answer-mutation.js').BaselineLimitChange;
   };
+  /** Existing server-side proposal frame, relayed only after exact confirmed-tuple matching. */
+  readonly confirmedConstraintValueFrame?: import('@talchain/schemas').GoalThresholdFrameType;
   /**
    * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
    *

@@ -27,6 +27,9 @@
  */
 
 import type { HandlerFact, V5ActionType } from '@talchain/schemas/orchestrator';
+import { GoalThresholdFrame, type GoalThresholdFrameType } from '@talchain/schemas';
+import { sameUnit } from '../../utils/currency-alphabet.js';
+import { valuesMatch } from '../../utils/reduction-framing.js';
 
 import type { PendingAction } from '../session/pending-action.js';
 import type { HandlerFactWithTurn } from '../types/handler-fact.js';
@@ -88,6 +91,37 @@ function readInlinePatch(pending: PendingAction): InlinePatchShape | null {
   const ip = pending.action.inline_patch;
   if (!ip || typeof ip !== 'object' || Array.isArray(ip)) return null;
   return ip as InlinePatchShape;
+}
+
+/** Relay the original frame only for the exact server-side proposal being confirmed. */
+export function readConfirmedConstraintValueFrame(
+  pending: PendingAction | null | undefined,
+  action: ProposalAction,
+): GoalThresholdFrameType | undefined {
+  if (!pending || pending.action.kind !== 'apply_proposed_change' || action.handler_id !== 'add_constraint') {
+    return undefined;
+  }
+  const inline = pending.action.inline_patch;
+  if (!inline || inline.handler_id !== 'add_constraint' ||
+      !Array.isArray(inline.target_entity_ids) || inline.target_entity_ids.length !== 1 ||
+      inline.target_entity_ids[0] !== action.entity.id || !isPlainObject(inline.params)) {
+    return undefined;
+  }
+  const frame = GoalThresholdFrame.safeParse(inline.constraint_value_frame);
+  if (!frame.success) return undefined;
+  const parameter = (name: string) => action.parameters.find((p) => p.name === name)?.value;
+  const value = parameter('value');
+  if (typeof value !== 'number' || !Number.isFinite(value) ||
+      typeof inline.params.value !== 'number' || !Number.isFinite(inline.params.value) ||
+      !valuesMatch(value, inline.params.value) ||
+      parameter('constraint_type') !== inline.params.constraint_type) return undefined;
+  const unit = parameter('unit');
+  const storedUnit = inline.params.unit;
+  if (unit !== storedUnit &&
+      !(typeof unit === 'string' && typeof storedUnit === 'string' && sameUnit(unit, storedUnit))) {
+    return undefined;
+  }
+  return frame.data;
 }
 
 function isHandlerId(value: unknown): value is V5ActionType {

@@ -286,6 +286,7 @@ import {
 import {
   buildApplyProposedChangeProposal,
   decideProposedChangeSynthesis,
+  readConfirmedConstraintValueFrame,
   PROPOSAL_ALREADY_APPLIED_RESPONSE,
   PROPOSAL_SUPERSEDED_RESPONSE,
 } from './routing/proposed-change-synthesis.js';
@@ -11158,7 +11159,7 @@ export async function runTurnExecutor(
           offerTargetKindNodes,
         );
 
-        const demotion = buildWarrantDemotion(action, existingConstraints);
+        const demotion = buildWarrantDemotion(action, existingConstraints, payload.message);
         const graphHashForProposal =
           currentAnalysisGraphHashForTurn ?? freshness?.current_graph_hash ?? null;
 
@@ -11522,6 +11523,7 @@ export async function runTurnExecutor(
           signal: turnAbort.signal,
           orientationText: routingResult.orientationText,
           proposal: action,
+          confirmedConstraintValueFrame: readConfirmedConstraintValueFrame(consumedPendingAction, action),
           // ⭐ BASELINE-ANSWER AUTHORITY — threaded ONLY when this turn is a
           // reply to a live baseline question that named its own subject. The
           // handler preserves the existing limit unless this also carries a

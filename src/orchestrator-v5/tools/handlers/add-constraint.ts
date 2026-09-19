@@ -631,7 +631,7 @@ export function createAddConstraintHandler(): HandlerFn {
         invocation.payload.message,
         operator,
         params.value,
-      ) ?? requestedLimitChange?.value_frame;
+      ) ?? invocation.confirmedConstraintValueFrame ?? requestedLimitChange?.value_frame;
 
       // Idempotency: match an existing constraint by (node_id, operator).
       // If found, update value/label/unit in place. If not, append a

@@ -650,6 +650,16 @@ const THIRD_PARTY_POSSESSION_RE =
   /\b([\w-]+)\s+(?:has|have|had)\s+(?:a|an|the|its|their|his|her)?\s*$/i;
 const FIRST_PERSON_SUBJECT = new Set(["we", "i", "our", "ours", "us", "my", "mine"]);
 
+function isDirectRestrictedFirstPersonPossession(head: string, sentence: string): boolean {
+  const directHead = head.trim();
+  // Keep the original sentence boundary: a colon or quote must not turn an
+  // embedded first-person statement into the user's own possession.
+  if (!sentence.trimStart().startsWith(directHead)) return false;
+  // "Only" restricts the available amount; "actually" asserts the correction.
+  // Other modifiers may express uncertainty or frequency, so remain unsupported.
+  return /^(?:i|we)\s+(?:actually\s+)?only\s+have(?:\s+(?:a|an|the))?$/i.test(directHead);
+}
+
 /**
  * "…said THEIR budget of £2m…" — the limit is explicitly somebody else's.
  *
@@ -1417,7 +1427,8 @@ function extractNounFormConstraints(
       if (SOFT_INTENT_RE.test(sentence)) continue;
       // S5 — somebody else's. "Our main competitor has a budget of £2m."
       const possession = THIRD_PARTY_POSSESSION_RE.exec(head);
-      if (possession && !FIRST_PERSON_SUBJECT.has(possession[1].toLowerCase())) continue;
+      if (possession && !FIRST_PERSON_SUBJECT.has(possession[1].toLowerCase()) &&
+          !isDirectRestrictedFirstPersonPossession(head, sentence)) continue;
       // S6 — explicitly theirs. "…said their budget of £2m was typical."
       if (THIRD_PERSON_POSSESSIVE_RE.test(head)) continue;
 

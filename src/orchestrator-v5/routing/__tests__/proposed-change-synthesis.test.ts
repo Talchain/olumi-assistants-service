@@ -20,6 +20,7 @@ import {
   PROPOSAL_SUPERSEDED_RESPONSE,
   buildApplyProposedChangeProposal,
   decideProposedChangeSynthesis,
+  readConfirmedConstraintValueFrame,
 } from '../proposed-change-synthesis.js';
 import type { PendingAction } from '../../session/pending-action.js';
 import type { HandlerFactWithTurn } from '../../types/handler-fact.js';
@@ -43,6 +44,47 @@ function fwt(
 
 const POST_EMIT_TS = '2026-05-07T12:00:30.000Z';
 const PRE_EMIT_TS = '2026-05-06T12:00:00.000Z';
+
+describe('confirmed constraint frame stays bound to the offered tuple', () => {
+  function fixture() {
+    const pending = pa({ inlinePatch: {
+      handler_id: 'add_constraint', target_entity_ids: ['cost'],
+      params: { constraint_type: 'at_most', value: 40000, unit: '$' },
+      constraint_value_frame: 'level',
+    } });
+    const action = buildApplyProposedChangeProposal(
+      pending, { id: 'cost', kind: 'option', label: 'Annual Assistant Cost' },
+      () => ({ id: 'cost', kind: 'node', label: 'Annual Assistant Cost' }),
+    );
+    return { pending, action };
+  }
+
+  it('relays the existing frame of the exact confirmed proposal', () => {
+    const { pending, action } = fixture();
+    expect(readConfirmedConstraintValueFrame(pending, action)).toBe('level');
+    expect(readConfirmedConstraintValueFrame(undefined, action)).toBeUndefined();
+  });
+
+  it.each([
+    ['value', 30000], ['unit', '£'], ['constraint_type', 'at_least'],
+  ])('does not reuse frame authority after changing %s', (name, value) => {
+    const { pending, action } = fixture();
+    const changed = { ...action, parameters: action.parameters.map((p) => p.name === name ? { ...p, value } : p) };
+    expect(readConfirmedConstraintValueFrame(pending, changed)).toBeUndefined();
+  });
+
+  it('refuses a changed target, handler, or invalid persisted frame', () => {
+    const { pending, action } = fixture();
+    expect(readConfirmedConstraintValueFrame(pending, { ...action, entity: { ...action.entity, id: 'other' } })).toBeUndefined();
+    expect(readConfirmedConstraintValueFrame(pending, { ...action, handler_id: 'set_factor_value' })).toBeUndefined();
+    const invalid = pa({ inlinePatch: {
+      handler_id: 'add_constraint', target_entity_ids: ['cost'],
+      params: { constraint_type: 'at_most', value: 40000, unit: '$' },
+      constraint_value_frame: 'invented',
+    } });
+    expect(readConfirmedConstraintValueFrame(invalid, action)).toBeUndefined();
+  });
+});
 
 function pa(overrides: {
   inlinePatch?: Record<string, unknown> | null;

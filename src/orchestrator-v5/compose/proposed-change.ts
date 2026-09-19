@@ -165,6 +165,7 @@ export interface ProposalIdInputs {
    * ids — without this field they would silently collide.
    */
   readonly target_entity_ids: readonly string[];
+  readonly constraint_value_frame?: ProposedChange['constraint_value_frame'];
 }
 
 /**
@@ -181,6 +182,8 @@ export function computeProposalId(inputs: ProposalIdInputs): string {
     params: inputs.params,
     graph_hash: inputs.graph_hash,
     target_entity_ids: sortedTargets,
+    ...(inputs.constraint_value_frame !== undefined
+      ? { constraint_value_frame: inputs.constraint_value_frame } : {}),
   });
   const digest = createHash('sha256')
     .update(canonical, 'utf8')
@@ -252,6 +255,7 @@ export function emitProposedChange(
     params: proposal.params,
     graph_hash: ctx.graph_hash,
     target_entity_ids: proposal.target_entity_ids ?? [],
+    constraint_value_frame: proposal.constraint_value_frame,
   });
 
   const chip: SuggestedAction = {
@@ -276,6 +280,8 @@ export function emitProposedChange(
         handler_id: actionType,
         params: proposal.params,
         target_entity_ids: proposal.target_entity_ids ?? [],
+        ...(proposal.constraint_value_frame !== undefined
+          ? { constraint_value_frame: proposal.constraint_value_frame } : {}),
       },
       // Persist the user-facing label and message so the ambiguous-
       // clarification path can render numbered options with the
