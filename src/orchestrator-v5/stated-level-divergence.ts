@@ -220,15 +220,24 @@ function opChangesModelledValue(value: unknown): boolean {
  * literal, is treated as possibly the person's and the module STAYS SILENT.
  * Fail-closed, in the direction that cannot manufacture a false disclosure.
  *
- * ⭐ AND THAT DIRECTION IS LOAD-BEARING, NOT MERELY CAUTIOUS. `user_override`
- * is NOT single-meaning: `cee/transforms/provenance-display.ts:220-242` records
- * that `stampUserEditProvenance` applies it to EVERY value-writing update_node
- * op reaching either edit seam, INCLUDING model-authored ones. So the literal
- * cannot certify that a human acknowledged the number. Testing for the
- * machine-authored set instead means a forged `user_override` costs this module
- * a SILENCE (a missed disclosure) rather than a FALSE CLAIM about whose number
- * it is. A miss is recoverable; telling someone their contribution did not
- * land when it did is not.
+ * ⭐ AND THAT DIRECTION IS LOAD-BEARING, NOT MERELY CAUTIOUS. The user-authored
+ * source token is NOT single-meaning: `cee/transforms/provenance-display.ts:220-242`
+ * records that `stampUserEditProvenance` applies it to EVERY value-writing
+ * update_node op reaching either edit seam, INCLUDING model-authored ones. So
+ * it cannot certify that a human acknowledged the number. Testing for the
+ * machine-authored set instead means a forged user-authored stamp costs this
+ * module a SILENCE (a missed disclosure) rather than a FALSE CLAIM about whose
+ * number it is. A miss is recoverable; telling someone their contribution did
+ * not land when it did is not.
+ *
+ * ⛔ AND THE USER-AUTHORED LITERALS ARE DELIBERATELY NOT SPELLED ANYWHERE IN
+ * THIS FILE, INCLUDING IN PROSE. `no-brief-derived-user-override.writers.test.ts`
+ * derives its reviewed-writer manifest from those tokens appearing anywhere in
+ * `src/` — a COMMENT is enough — so naming one would enrol this
+ * disclosure-only module in the set of files permitted to claim a value is the
+ * user's own. `compose/parameter-user-phrasing.ts` records the same incident
+ * and the same remedy: stop saying the word, never widen the manifest. This
+ * file said it once and CI caught it; the fix is above.
  */
 const MACHINE_AUTHORED_VALUE_SOURCES: ReadonlySet<string> = new Set([
   'cee_inference',
