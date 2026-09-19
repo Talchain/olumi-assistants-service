@@ -1106,6 +1106,21 @@ describe("the draft records instruction is the measured artefact", () => {
         1,
       "the three pins no longer add up — one of them was updated without the others",
     ).toBe(PREREGISTERED_V20_INSTRUCTION_BYTES);
+    // WITHDRAWN — v20.0's shape half, the value this pin USED to name, kept
+    // beside the live one exactly as every entry below it is. Asserted DISTINCT
+    // for a DIFFERENT reason from those, and the difference is worth stating:
+    // NOTHING WAS EVER SERVED UNDER IT, so there are no draws to keep
+    // attributable. It is here so the shape half cannot silently revert to
+    // v20.0's text — the state this pin spent four commits describing while the
+    // artefact had already moved past it.
+    //
+    // Derived, not copied: `instruction.ts` at `16efa439` (the v20.0 commit)
+    // hashes its shape half to exactly this value at exactly 13,868 bytes, and
+    // its connect half to 4,881 — unchanged then and now.
+    expect(createHash("sha256").update(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8").digest("hex")).not.toBe(
+      "5725ccb7ee993820b3a9c44009272732c0119bc8604a6c254bbb6409fa4c14d6",
+    );
+    expect(Buffer.byteLength(DRAFT_RECORDS_SHAPE_INSTRUCTION, "utf8")).not.toBe(13868);
     // SUPERSEDED — v19's shape half, the bytes #1562 shipped and the bytes every
     // measurement taken after 2026-09-17T23:39Z belongs to.
     //

@@ -269,6 +269,36 @@ const HISTORIC_V9_GRAMMAR_SHA256 =
  * draws that measured the churn defect above, and a reader of those logs must be
  * able to tell which grammar produced them.
  */
+const HISTORIC_V10_GRAMMAR_SHA256 =
+  "d4f4201dd7422ce5c3f41fe1c1046dc9a101eb9b60c0b304451f330a2bb27dbe";
+
+/**
+ * ⭐⭐ v11 — THE `likelihood` DESTINATION (instruction v20.2). ONE optional
+ * `{ type: "number" }` on the claim item, and nothing else.
+ *
+ * ⚠ THE SUPERSEDED VALUE IS KEPT ABOVE, AND ASSERTED DISTINCT BELOW, for the
+ * reason every value above it is kept: every draft emitted between the
+ * `value_scale` widening and this one carries `grammar_sha256:d4f4201d…`,
+ * including every draw behind the measured risk 0/3 and outcome 0/2 this change
+ * exists to move, and a reader of those logs must be able to tell which grammar
+ * produced them. `d4f4201d…` is also the value `staging` serves until this
+ * lands.
+ *
+ * ⛔ THE PIN MOVED BECAUSE THE ARTEFACT MOVED BY DESIGN, and that was DERIVED
+ * rather than read off a diff — re-pinning to "whatever it is now" would launder
+ * an accident into a registration. THE DISCRIMINATING CONTROL, run at this tip:
+ * delete ONLY the `likelihood` property from the built schema and re-hash. It
+ * reproduces `d4f4201dd7422ce5c3f41fe1c1046dc9a101eb9b60c0b304451f330a2bb27dbe`
+ * EXACTLY — the constant above. So the grammar moved for exactly one reason and
+ * carries exactly one new field; a second, unnoticed change would have left that
+ * control disagreeing with the value staging serves.
+ *
+ * ⚠ COST, MEASURED on both arms via `measureDraftRecordsSchemaBudget()`, not
+ * estimated: +31 serialised bytes (1451 -> 1482, against 3400) and +1 optional
+ * parameter (20 -> 21, against Anthropic's 24). NO new object schema (3,
+ * unchanged) and NO union (0, unchanged). The headroom is now THREE optional
+ * parameters — the next field is a decision, not a habit.
+ */
 const PINNED_GRAMMAR_SHA256 =
   // ⚠ RE-PINNED with v20.2 (`likelihood`). This hash is over
   // `JSON.stringify(buildDraftRecordsSchema())` — the BUILT OBJECT the adapter
@@ -279,7 +309,7 @@ const PINNED_GRAMMAR_SHA256 =
   "bfbbe10037f2d52e603c6b3f0389adc61f62febce3f48748fb035a5ede2835a5";
 
 describe("the claim-progress probe is derived from the grammar", () => {
-  it("hashes to the PRE-REGISTERED v10 grammar the provider receives", () => {
+  it("hashes to the PRE-REGISTERED v11 grammar the provider receives", () => {
     expect(draftRecordsGrammarHash()).toBe(PINNED_GRAMMAR_SHA256);
   });
 
@@ -293,6 +323,11 @@ describe("the claim-progress probe is derived from the grammar", () => {
     // the x137.5 churn carry emitted `c7132480…`, and that evidence must stay
     // attributable to the grammar that produced it.
     expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V9_GRAMMAR_SHA256);
+    // v10 kept distinct for the same reason, and it is the value `staging`
+    // serves: every draft taken before the `likelihood` destination emitted
+    // `d4f4201d…`, including every draw behind the measured risk 0/3 and
+    // outcome 0/2 this change exists to move.
+    expect(draftRecordsGrammarHash()).not.toBe(HISTORIC_V10_GRAMMAR_SHA256);
   });
 
   it("is DISTINCT from the historic v6 grammar, so #1287's capture stays attributable", () => {
