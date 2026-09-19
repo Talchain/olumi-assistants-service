@@ -122,6 +122,10 @@ describe('explicit subject-first bound syntax', () => {
     'Keep non-renewal rate from rising above 3%.',
     'Keep nonessential spend from rising above £50k.',
     'Keep gross margin from falling below 78%.',
+    'Keep cash runway from shrinking below 250000.',
+    'Keep marketing spend from ballooning above 2000000.',
+    'Keep marketing spend from creeping up above 2000000.',
+    'Keep marketing spend from going above 2000000.',
   ])('leaves prevention direction to the existing construction authority: %s', (input) => {
     expect(extract(input)).toEqual([]);
     expect(extractCompoundGoals(input).unboundConstraintFrames).toEqual([]);
@@ -130,6 +134,8 @@ describe('explicit subject-first bound syntax', () => {
   it.each([
     ['Keep Revenue from Subscriptions above £2m.', 'Revenue from Subscriptions'],
     ['Keep "Revenue from rising" above £2m.', 'Revenue from rising'],
+    ['Keep "Revenue from shrinking" above £2m.', 'Revenue from shrinking'],
+    ['Keep "Revenue from ballooning" above £2m.', 'Revenue from ballooning'],
   ])('preserves legitimate metric names containing from: %s', (input, targetName) => {
     expect(extract(input)).toEqual([expect.objectContaining({ targetName, operator: '>=', value: 2000000 })]);
   });
