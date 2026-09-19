@@ -493,6 +493,11 @@ export function transformNodeToV3(
       baseline: node.data.baseline,
       unit: node.data.unit,
       source,
+      // The records producer declares the stored value's scale. This is not a
+      // user baseline or authority for constraint value_frame / level conversion.
+      ...((node as { declared_scale?: unknown }).declared_scale !== undefined && {
+        declared_scale: (node as { declared_scale?: unknown }).declared_scale,
+      }),
       // Pass through factor metadata fields
       ...(node.data.raw_value !== undefined && { raw_value: node.data.raw_value }),
       ...(derivedRawValue !== undefined && { raw_value: derivedRawValue }),

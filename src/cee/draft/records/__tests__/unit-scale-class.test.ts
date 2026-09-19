@@ -471,9 +471,12 @@ describe("deriveFactorScaleFrame — the single consumer, behaviour pinned", () 
  * consumes parseValue/normaliseConstraintUnits, whose values are already divided
  * by 100. Its exact unit check must not admit period-bearing percentage units
  * through the broader display-scale classifier and then discard their period.
- * The baseline-question consumer adds one further site (43 across 22 files).
- * It requires a declared unit interval and corroborated raw/value pair; a broad
- * display-unit match cannot substitute for that exact storage declaration.
+ * The paired drafting release registers two more sites (44 across 23 files).
+ * Its projector derives a percentage display magnitude only from an exact '%'
+ * and an explicit unit_interval/ratio declaration. The constraint consumer
+ * admits only a bounded unit_interval pair whose raw/calculation values agree,
+ * with no existing baseline/cap. These storage checks must not be broadened to
+ * the display classifier's vocabulary or used to infer baseline authority.
  *
  * The set is pinned so it REDs if it GROWS (a new bare equality is added) or
  * SHRINKS (one is migrated without recording it). A gap recorded in the suite is
@@ -484,6 +487,7 @@ const KNOWN_INLINE_PERCENT_EQUALITY_SITES: Readonly<Record<string, number>> = {
   "cee/compound-goal/extractor.ts": 1,
   "cee/compound-goal/node-generator.ts": 1,
   "cee/decision-review/shape-check.ts": 1,
+  "cee/draft/records/projector.ts": 1,
   "cee/factor-extraction/display-value.ts": 7,
   "cee/factor-extraction/enricher.ts": 3,
   "cee/factor-extraction/index.ts": 4,

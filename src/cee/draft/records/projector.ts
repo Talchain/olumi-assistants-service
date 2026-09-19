@@ -1140,6 +1140,17 @@ const CLAIM_KIND_TO_NODE_KIND: Readonly<Record<string, ProjectedNode["kind"] | n
 };
 
 /**
+ * Quantitative claims may describe factors, risks or outcomes. Carrying an
+ * inferred current value does not attest a user baseline, establish a constraint
+ * frame, or make that quantity convertible by downstream analysis.
+ */
+const LEVEL_BEARING_CLAIM_NODE_KINDS: ReadonlySet<ProjectedNode["kind"]> = new Set([
+  "factor",
+  "risk",
+  "outcome",
+]);
+
+/**
  * ⭐⭐ THE UNRESCUABLE EDGE SHAPES — the only edges this projector refuses.
  *
  * ── WHY THE PROJECTOR CHECKS EDGE SHAPE AT ALL ─────────────────────────────
@@ -3325,7 +3336,7 @@ function projectOnce(
     if (nodeKind === "option" && typeof claim.is_baseline === "boolean") {
       node.is_baseline = claim.is_baseline;
     }
-    if (nodeKind === "factor") {
+    if (LEVEL_BEARING_CLAIM_NODE_KINDS.has(nodeKind)) {
       // ⚠ THE MODEL'S DECLARED `category` IS DELIBERATELY NOT PROPAGATED.
       //
       // Derived at the consumer's bytes, and measured live before this line was
@@ -3351,89 +3362,30 @@ function projectOnce(
       // keeps the field: removing it is a wire change for no gain, and an
       // unread optional property costs one slot, not a rejection.)
       if (typeof claim.value === "number") {
-        // ⭐⭐ THE HONESTY HALF, SHIPPED IN THE SAME CHANGE AS THE ASK — exactly
-        // as v10 did when it stopped telling the model to withhold `sets_to`.
-        //
-        // ⚠⚠ MEASURED ON THE RAW RECORD SETS, before any projection or
-        // representation: across five banked live captures, 33 quantity claims
-        // and `value` set on ZERO of them, while `sets_to` was set on 28 causal
-        // links. The model puts a number on a LINK and never on a NODE — it
-        // says how much an option MOVES a factor and never what the factor IS.
-        // v10's docblock explains why, about its own mirror image of this:
-        // "THE MODEL WAS NOT FAILING TO COMPLY; IT WAS COMPLYING."
-        //
-        // ⛔ SO THE ASK CANNOT SHIP ALONE. Until now a claim `value` carried NO
-        // provenance at all, which leaves exactly two bad outcomes once the
-        // model starts supplying one: our estimate is displayed as the user's
-        // fact, or it is displayed as nobody's and does not count where a
-        // user-stated parameter is what unlocks a comparison.
-        //
-        // ⭐ EARNED THE SAME WAY `bindDirectStatedMagnitude` earns it for a
-        // `sets_to`: the stamp is `explicit` ONLY when the number the model
-        // asserted equals a figure it CITED — i.e. the user gave that number for
-        // that quantity. Anything else sets nothing and falls to the safe
-        // `ai_inferred`, which is what the header calls the projector's
-        // node-level provenance honesty.
-        //
-        // ⚠ AND NOTE WHAT DECIDES WHAT. The MODEL supplies the number; `basis`
-        // decides only ATTRIBUTION. Reading a magnitude OUT of `basis` is the
-        // fabrication refuted and pinned in
-        // `claim-carries-its-cited-figure.test.ts` — it put "Current Subscriber
-        // Count = £20,000" on a graph, because `basis` means built on, not equal
-        // to. This reads the same array for a different question.
-        // ⛔⛔ NO ATTRIBUTION IS EARNED HERE, AND THE ATTEMPT WAS REFUTED BY
-        // INDEPENDENT REVIEW BEFORE IT SHIPPED.
-        //
-        // The first version of this block stamped `extractionType: "explicit"`
-        // and borrowed the cited figure's unit whenever `claim.value` EQUALLED a
-        // figure in `basis`. The reviewer's exact reproductions:
-        //   · "Current Subscriber Count" stamped explicit at 49 £/month from a
-        //     citation of a £49 PRICE — same number, DIFFERENT SUBJECT;
-        //   · a CURRENT level of 59 stamped explicit from a quote proposing 59 —
-        //     same number, DIFFERENT ROLE.
-        //
-        // Numeric equality plus a citation proves neither. Earning
-        // `brief_extraction` needs subject, quantity, unit AND the
-        // current/proposed/target/limit role all to match, and `basis` carries
-        // none of that — it means "built on", exactly as the sibling refutation
-        // in `claim-carries-its-cited-figure.test.ts` established when the same
-        // field was misread as a magnitude. I closed that hole and opened its
-        // twin one level up, in ATTRIBUTION rather than in value.
-        //
-        // ⭐ SO THE VALUE IS RECORDED AND STAYS OURS. No `extractionType` means
-        // the safe `ai_inferred`, and no unit is borrowed from a figure whose
-        // subject was never established. That is honest, and it deliberately
-        // does NOT lift a user-authorship permission via an inferred value.
-        // Earning the attribution needs an attested subject relationship this
-        // record set does not carry; it is not a stamp to guess at.
-        // ⭐ THE DECLARED UNIT IS CARRIED, NOTHING IS INFERRED. `data.unit` is
-        // exactly what `nodeDeclaredUnit` reads, so declaring it here is what
-        // lets SAFETY 2 refuse a £ limit welded to a %-measured factor. The
-        // refuted earlier attempt BORROWED this from a cited figure; this takes
-        // only what the model said, and still earns no `extractionType`.
-        node.data = { value: claim.value, ...(claim.unit ? { unit: claim.unit } : {}) };
-        node.observed_state = { value: claim.value, raw_value: claim.value };
+        // Claim values remain Olumi estimates. A citation or matching number
+        // alone does not attest the subject, measurement or current-value role.
+        // raw_value is the display magnitude, not a second calculation value.
+        // Derive it only from the producer's declared convention, never size.
+        const rawValue = claim.unit === "%" &&
+          (claim.value_scale === "unit_interval" || claim.value_scale === "ratio")
+          ? claim.value * 100
+          : claim.value_scale === "raw_count" || claim.value_scale === "ratio"
+            ? claim.value
+            : undefined;
+        node.data = {
+          value: claim.value,
+          ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
+          extractionType: "inferred",
+          ...(claim.unit !== undefined ? { unit: claim.unit } : {}),
+        };
+        node.observed_state = {
+          value: claim.value,
+          ...(rawValue !== undefined ? { raw_value: rawValue } : {}),
+        };
+        // Keep units even though the legacy Core baseline/elicitation gate
+        // currently excludes %. Its consumer correction must accompany release;
+        // erasing the unit hides that mismatch and disables unit-mismatch checks.
       } else if (claim.unit !== undefined) {
-        // ⛔⛔ A UNIT WITHOUT A LEVEL, AND THIS IS THE COMMON CASE — the branch
-        // whose absence made grammar v9 nearly a no-op twenty minutes after it
-        // shipped.
-        //
-        // v9 added `unit` to the claim, and the write above carried it — but ONLY
-        // inside `typeof claim.value === "number"`. Measured on the banked
-        // records: **21 of 22 factor claims carry no value at all.** So in 21 of
-        // 22 cases the model could declare a unit and the projector would drop
-        // it, leaving `data` undefined and `nodeDeclaredUnit` returning
-        // undefined — exactly the state v9 existed to end.
-        //
-        // ⚠ MY OWN ADVERSARIAL REVIEW MISSED IT because every case I wrote set a
-        // value alongside the unit. That is the same one-door corpus that has
-        // cost this estate repeatedly: I tested unit-WITH-value and never
-        // unit-WITHOUT-value, which is the overwhelmingly common shape.
-        //
-        // Knowing what a quantity is MEASURED IN is useful even when nobody
-        // knows what it currently SITS AT: it is what lets a stated £ limit be
-        // refused against a %-measured factor, and refusing that weld does not
-        // require a level.
         node.data = { unit: claim.unit };
       }
 
@@ -4425,8 +4377,15 @@ function projectOnce(
         // read `raw_value` first, so this is what keeps "£50,000" true on
         // screen while the analysis computes on 0.5. Both carriers are written
         // because `schema-v3.ts` rebuilds factor observed_state FROM `data`.
-        factor.observed_state = { ...factor.observed_state, value: baseline / frame, raw_value: baseline };
-        factor.data = { ...(factor.data ?? {}), value: baseline / frame, raw_value: baseline };
+        const rawValue = factor.data?.raw_value ?? baseline;
+        factor.observed_state = { ...factor.observed_state, value: baseline / frame, raw_value: rawValue };
+        factor.data = { ...(factor.data ?? {}), value: baseline / frame, raw_value: rawValue };
+        // A declaration describes the stored value after this existing division.
+        // The divisor is a calculation frame, never an attested budget or cap.
+        if (factor.declared_scale !== undefined) {
+          factor.declared_scale = "unit_interval";
+          factor.observed_state.declared_scale = "unit_interval";
+        }
       }
       for (const opt of optionNodes3d) {
         const v = opt.data.interventions[factor.id];

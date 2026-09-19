@@ -1,4 +1,10 @@
 /**
+ * 19 Sep 2026: the independently reviewed producer correction acts on an
+ * explicit value_scale declaration. Keep the dated capture below immutable;
+ * assert current producer behaviour separately through the actual V3 transform.
+ * This does not close mixed-convention calculation or establish served evidence.
+ */
+/**
  * ⛔⛔ THE DISPLAY DECLARES ITS CONTRACT AND THE PRODUCER BREAKS IT — a 100×
  * disagreement between two consumers of the same byte, pinned end to end inside
  * ONE service so neither side has to be mirrored.
@@ -48,6 +54,7 @@
 import { describe, expect, it } from "vitest";
 
 import { synthesiseDisplayValue } from "../../../factor-extraction/display-value.js";
+import { transformGraphToV3 } from "../../../transforms/schema-v3.js";
 import type { DraftRecordSet } from "../grammar.js";
 import { projectRecordsToGraph } from "../projector.js";
 
@@ -120,12 +127,12 @@ const CAPTURED_OBSERVED_STATE_2026_09_17 = {
   factor_type: "other",
 } as const;
 
-describe("the percent producer/display contract (KNOWN GAP, measured live)", () => {
-  it("PINS THE PRODUCER: raw_value carries the FRACTION, not the user-unit number", () => {
+describe("the percent display contract: historical gap and current producer", () => {
+  it("the current declared producer carries raw 3 for a 3% calculation value", () => {
     const { os, data } = churnCarriers();
-    // ⛔ THE DEFECT. `normalise-factor-value.ts:13-14` says "raw_value is the
-    // user-unit number", which for 3% is `3`. The producer writes `0.03`.
-    expect(os.raw_value).toBe(0.03);
+    expect(os.value).toBe(0.03);
+    expect(os.raw_value).toBe(3);
+    expect(data.raw_value).toBe(3);
     // ⚠ AND NOTE WHICH CARRIER HOLDS THE UNIT AT THIS STAGE — it cost a round to
     // find and it is the kind of thing that makes a guard assert nothing. The
     // projector writes the unit to `data`, NOT to `observed_state`; the unit only
@@ -134,9 +141,21 @@ describe("the percent producer/display contract (KNOWN GAP, measured live)", () 
     // `undefined` and renders a plain number, which looks like agreement.
     expect(os.unit).toBeUndefined();
     expect(data.unit).toBe("%");
-    // ⭐ v10's declaration IS present on both carriers, which is what makes the
-    // fix possible without a magnitude sniff. It is not yet ACTED ON.
+    // The declaration describes the calculation value, not the display magnitude.
     expect(os.declared_scale).toBe("unit_interval");
+  });
+
+  it("the current producer reaches V3 as 3%, without changing the historical capture", () => {
+    const { graph } = projectRecordsToGraph(RECORDS);
+    const v3 = transformGraphToV3(graph as never);
+    const factors = v3.graph.nodes.filter((node) => node.kind === "factor");
+    expect(factors).toHaveLength(1);
+    expect(factors[0]!.observed_state).toMatchObject({
+      value: 0.03, raw_value: 3, unit: "%", declared_scale: "unit_interval", source: "cee_inference",
+    });
+    expect(factors[0]!.display_value).toBe("3%");
+    expect(factors[0]!.observed_state?.baseline).toBeUndefined();
+    expect(CAPTURED_OBSERVED_STATE_2026_09_17.raw_value).toBe(0.03);
   });
 
   it("PINS THE CONSUMER: the display is correct against its own stated contract", () => {
@@ -152,7 +171,7 @@ describe("the percent producer/display contract (KNOWN GAP, measured live)", () 
     expect(rendered).toBe("0.03%");
   });
 
-  it("⛔ THE DISAGREEMENT, STATED AS A NUMBER SO ANY FIX REDS IT", () => {
+  it("the immutable historical capture retains its measured 100x disagreement", () => {
     const os = CAPTURED_OBSERVED_STATE_2026_09_17;
     const cee = synthesiseDisplayValue({
       value: os.value,
@@ -164,7 +183,8 @@ describe("the percent producer/display contract (KNOWN GAP, measured live)", () 
     const uiRenderedInCapture = "3%";
     const ceeNumber = parseFloat(String(cee).replace("%", ""));
     const uiNumber = parseFloat(uiRenderedInCapture.replace("%", ""));
-    // ⭐ Exactly 100x, and it must become 1x under any correct producer fix.
+    // Exactly 100x in the dated capture. Current producer output is tested
+    // separately above; historical bytes are never changed to match a fix.
     expect(uiNumber / ceeNumber).toBeCloseTo(100, 6);
   });
 

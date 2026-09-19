@@ -550,6 +550,14 @@ export interface DraftInferenceClaim {
    */
   value_scale?: DraftRecordValueScale;
   /**
+   * Optional event probability, expressed as a decimal in [0,1]. Retained in
+   * draft records and diagnostic counts only; it has no saved-node destination
+   * or analytical consumer. Never substitutes for a measured current value or
+   * for the user's original probability statement. The number-only grammar does
+   * not enforce the semantic role or probability bounds.
+   */
+  likelihood?: number;
+  /**
    * `causal_link` FROM AN OPTION ONLY — the value the target factor takes if
    * that option is chosen, in the factor's own unit. Becomes an entry in the
    * option node's `OptionData.interventions` (`schemas/graph.ts:163`), which is
@@ -690,6 +698,10 @@ export function buildDraftClaimItemSchema(): Record<string, unknown> {
       // What convention `value`/`sets_to` are written in. See the interface
       // note: `unit` says what it is measured in, this says what it means.
       value_scale: { type: "string", enum: [...DRAFT_RECORD_VALUE_SCALES] },
+      // `risk` claims only — HOW LIKELY the thing is, never how big it is.
+      // See the interface note: this exists so a likelihood has a DESTINATION
+      // rather than being asked for as silence.
+      likelihood: { type: "number" },
       // Option→factor intervention level. See the interface note: named apart
       // from `strength` on purpose.
       sets_to: { type: "number" },
