@@ -7,10 +7,20 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock enricher
-vi.mock("../../src/cee/factor-extraction/enricher.js", () => ({
-  enrichGraphWithFactorsAsync: vi.fn(),
-}));
+// Mock enricher — SPREAD, NOT A HAND-LIST (parent CLAUDE.md trap 12).
+// This file drives Stage 3 directly, so every enricher export it fails to name
+// is one Stage 3 will call as `undefined`.
+vi.mock("../../src/cee/factor-extraction/enricher.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/cee/factor-extraction/enricher.js")>();
+  return {
+    ...actual,
+    enrichGraphWithFactorsAsync: vi.fn(),
+    // Named ONLY so the containment test at the bottom of this file can make it
+    // throw. Its default DELEGATES to the real implementation, so this line is
+    // not a hand-maintained copy of anything and cannot go stale.
+    creditUserTypedFigures: vi.fn(actual.creditUserTypedFigures),
+  };
+});
 
 // Mock graphGuards
 vi.mock("../../src/utils/graphGuards.js", () => ({
@@ -41,7 +51,7 @@ vi.mock("../../src/utils/telemetry.js", () => ({
 }));
 
 import { runStageEnrich } from "../../src/cee/unified-pipeline/stages/enrich.js";
-import { enrichGraphWithFactorsAsync } from "../../src/cee/factor-extraction/enricher.js";
+import { enrichGraphWithFactorsAsync, creditUserTypedFigures } from "../../src/cee/factor-extraction/enricher.js";
 import { detectCycles } from "../../src/utils/graphGuards.js";
 import { stabiliseGraph, ensureDagAndPrune } from "../../src/orchestrator/index.js";
 import { simpleRepair } from "../../src/services/repair.js";
@@ -257,5 +267,49 @@ describe("runStageEnrich", () => {
     await runStageEnrich(ctx);
 
     expect(ctx.graph).toBe(finalGraph);
+  });
+
+  // ⛔ THE CONTAINMENT. Crediting the user's typed figures rewrites WHO
+  // AUTHORED a number and never the number itself, so it must not be able to
+  // destroy the draft that number is in. Measured at this head before the
+  // containment existed: a throw inside this call propagated out of Stage 3 and
+  // the draft endpoint answered `CEE_GRAPH_INVALID` / HTTP 400 on a graph that
+  // was otherwise fine. Bound by IDENTITY — the named error event, and the
+  // graph still arriving — not by "the promise resolved".
+  it("⛔ a failure crediting the user's figures does NOT fail the draft", async () => {
+    const ctx = makeCtx();
+    const finalGraph = { nodes: [{ id: "g1" }], edges: [], version: "1.2" };
+    setupMocks({ stabiliseResult: finalGraph, repairResult: finalGraph });
+    (creditUserTypedFigures as any).mockImplementationOnce(() => {
+      throw new Error("credit blew up");
+    });
+
+    await runStageEnrich(ctx);
+
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "cee.enrich.credit_user_figures_failed",
+        error: "credit blew up",
+      }),
+      expect.any(String),
+    );
+    // The draft survives, with the provenance it already had.
+    expect(ctx.graph).toBe(finalGraph);
+  });
+
+  // The discriminating twin: with the SAME stage and the SAME fixture, a
+  // credit that does not throw must not emit the failure event. Without this,
+  // the test above would pass against a stage that logged the error
+  // unconditionally.
+  it("does NOT report a credit failure when crediting succeeds", async () => {
+    const ctx = makeCtx();
+    setupMocks();
+
+    await runStageEnrich(ctx);
+
+    expect(log.error).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event: "cee.enrich.credit_user_figures_failed" }),
+      expect.any(String),
+    );
   });
 });

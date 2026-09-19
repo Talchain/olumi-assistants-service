@@ -48,7 +48,30 @@ export async function runStageEnrich(ctx: StageContext): Promise<void> {
   // This corrects provenance ONLY; it never touches a value. See
   // `creditUserTypedFigures` for the positional derivation and for the
   // analysis-admission consequence, which is real and is named there.
-  const figuresCredited = creditUserTypedFigures(enrichedGraph, ctx.effectiveBrief, ctx.collector);
+  //
+  // ⚠ CONTAINED, and the containment was MEASURED, not assumed. This call sits
+  // inside Stage 3, and Stage 3 throwing answers the user's draft request with
+  // `CEE_GRAPH_INVALID` / HTTP 400 — witnessed at this head on
+  // `tests/integration/cee.draft-graph.coefficients.test.ts`, where the stage
+  // crashed and the endpoint returned 400 for a graph that was otherwise fine.
+  // A correction that only ever rewrites WHO AUTHORED a number must never be
+  // able to destroy the draft that number is in. On failure the draft survives
+  // with its pre-existing provenance — exactly the behaviour before this
+  // function existed — and the failure is emitted at error level rather than
+  // swallowed, so it is visible without being fatal.
+  let figuresCredited = 0;
+  try {
+    figuresCredited = creditUserTypedFigures(enrichedGraph, ctx.effectiveBrief, ctx.collector);
+  } catch (err) {
+    log.error(
+      {
+        event: "cee.enrich.credit_user_figures_failed",
+        request_id: ctx.requestId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "Could not credit the user's typed figures; the draft keeps its existing provenance",
+    );
+  }
   if (figuresCredited > 0) {
     log.info(
       { event: "cee.enrich.figures_credited_to_user", request_id: ctx.requestId, count: figuresCredited },
