@@ -681,3 +681,77 @@ describe('2.918 — the elliptical answer binds ONLY through the pending questio
     expect(second.assistant_text).toContain('Noted Churn rate is currently at 12%.');
   });
 });
+
+describe('declared draft percentages retain the baseline question', () => {
+  function draftedGraph(kind: 'risk' | 'outcome' = 'outcome') {
+    const graph = graphWithConstraintTargets();
+    const target = node(graph, 'o-churn-rate');
+    target.kind = kind;
+    target.observed_state = {
+      value: 0.30,
+      raw_value: 30,
+      unit: '%',
+      declared_scale: 'unit_interval',
+      source: 'cee_inference',
+      extractionType: 'inferred',
+      factor_type: 'probability',
+      uncertainty_drivers: ['Limited historical observations'],
+    };
+    return graph;
+  }
+
+  it.each(['risk', 'outcome'] as const)('%s estimate is retained without inventing a baseline, then a user answer is saved', async (kind) => {
+    const graph = draftedGraph(kind);
+    const estimate = { ...node(graph, 'o-churn-rate').observed_state! };
+    const first = await runTurn({
+      graph, message: 'Keep churn rate under 25%.',
+      targetId: 'o-churn-rate', value: 25, unit: '%',
+    });
+    const saved = first.mutated_graph as GraphV3T;
+    expect(node(saved, 'o-churn-rate').observed_state).toEqual(estimate);
+    expect(first.assistant_text).toContain(QUESTION_FOR_CHURN);
+    expect(first.__elicit_baseline).toMatchObject({ target_id: 'o-churn-rate', value: 25, unit: '%' });
+    const row = saved.goal_constraints!.find((c) => c.node_id === 'o-churn-rate')!;
+    expect(row).toMatchObject({ value: 25, operator: '<=', value_frame: 'level' });
+
+    const pending = {
+      ...elicitPending(),
+      action: { ...first.__elicit_baseline!, kind: 'elicit_target_baseline' },
+    } as PendingAction;
+    const second = await runTurn({
+      graph: saved, message: '40%', pendings: [pending],
+      targetId: 'o-churn-rate', value: 25, unit: '%',
+    });
+    const answered = second.mutated_graph as GraphV3T;
+    expect(node(answered, 'o-churn-rate').observed_state).toEqual({
+      ...estimate, value: 0.40, baseline: 0.40, raw_value: 0.40,
+      unit: 'fraction', cap: 1, source: 'brief_extraction', extractionType: 'explicit',
+    });
+    expect(answered.goal_constraints!.find((c) => c.node_id === 'o-churn-rate')).toEqual(row);
+    expect(second.__elicit_baseline).toBeUndefined();
+    expect(second.assistant_text).toContain('Noted Churn rate is currently at 40%.');
+  });
+
+  it.each([
+    ['undeclared scale', { declared_scale: undefined }],
+    ['ratio scale', { declared_scale: 'ratio' }],
+    ['ratio above 100%', { declared_scale: 'ratio', value: 1.25, raw_value: 125 }],
+    ['inconsistent raw magnitude', { raw_value: 3 }],
+    ['missing raw magnitude', { raw_value: undefined }],
+    ['native percentage value', { value: 30 }],
+    ['incompatible unit', { unit: '$' }],
+    ['existing scale cap', { cap: 100 }],
+    ['existing baseline', { baseline: 0.2 }],
+  ])('%s is not treated as the supported draft percentage cell', async (_label, change) => {
+    const graph = draftedGraph();
+    const target = node(graph, 'o-churn-rate');
+    target.observed_state = { ...target.observed_state!, ...change };
+    const before = { ...target.observed_state };
+    const outcome = await runTurn({
+      graph, message: 'Churn rate is 40% today. Keep churn rate under 25%.',
+      targetId: 'o-churn-rate', value: 25, unit: '%',
+    });
+    expect(node(outcome.mutated_graph as GraphV3T, 'o-churn-rate').observed_state).toEqual(before);
+    expect(outcome.__elicit_baseline).toBeUndefined();
+  });
+});
