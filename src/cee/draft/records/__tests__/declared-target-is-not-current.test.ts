@@ -47,10 +47,29 @@ function fixture(role: DraftRecordRole, claimBased = false, sibling = false, ind
   const node = projection.graph.nodes.find(n => n.kind === "factor")!;
   expect(node).toBeDefined();
   expect(LLMDraftResponse.safeParse(projection.graph).success).toBe(true);
-  return { projection, node, brief, quote };
+  return { projection, node, brief, quote, records };
 }
 
 describe("declared target remains distinct from a current measurement", () => {
+  it("discloses a contextual quantity once, according to its final retained or withdrawn disposition", () => {
+    const retained = fixture("context");
+    expect(retained.projection.dropped.filter(d => d.node_id === retained.node.id)).toEqual([
+      expect.objectContaining({ reason: "stated_figure_not_current_value", value: 80, unit: "£" }),
+    ]);
+    expect(transformNodeToV3(retained.node as never).observed_state).toBeUndefined();
+
+    const withdrawn = projectRecordsToGraph({ ...retained.records, claims: [] }, retained.brief);
+    expect(withdrawn.graph.nodes.some(n => n.id === retained.node.id)).toBe(false);
+    expect(withdrawn.dropped.filter(d => d.node_id === retained.node.id)).toEqual([
+      expect.objectContaining({ reason: "unconnected_to_goal", value: 80, unit: "£" }),
+    ]);
+    const wire = CEEGraphResponseV3.parse(transformResponseToV3({
+      graph: withdrawn.graph, record_disclosures: withdrawn.dropped,
+    } as never));
+    expect(wire.record_disclosures?.filter(d => d.label === retained.quote)).toEqual([
+      expect.objectContaining({ reason: "unconnected_to_goal", value: 80, unit: "£" }),
+    ]);
+  });
   it("withholds target observations through conversion and retains the unresolved quantity", () => {
     const { projection, node, quote } = fixture("target");
     expect(node.data).toEqual({ role: "target", unit: "£" });

@@ -3783,6 +3783,16 @@ function projectOnce(
     );
     if (unmodelled.length > 0) {
       const unmodelledIds = new Set(unmodelled.map((n) => n.id));
+      // The early role notice describes a retained figure. If its exact node
+      // is now withdrawn, the terminal disclosure below carries both the
+      // actual disposition and original quantity; emitting both contradicts
+      // the retained claim and double-counts that figure for consumers.
+      for (let i = dropped.length - 1; i >= 0; i--) {
+        if (dropped[i].reason === "stated_figure_not_current_value"
+          && dropped[i].node_id !== undefined && unmodelledIds.has(dropped[i].node_id!)) {
+          dropped.splice(i, 1);
+        }
+      }
       for (const node of unmodelled) {
         // Disclosed through the SAME channel as an unresolvable reference, so a
         // reader has one list to consult rather than two vocabularies for "the
