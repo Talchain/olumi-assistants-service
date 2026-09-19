@@ -206,6 +206,27 @@ describe("the figures the user typed are credited to the user", () => {
     expect((byId(graph, "o").data as { extractionType?: string }).extractionType).toBe("observed");
   });
 
+  it("refuses when TWO figures in the brief could be this level", () => {
+    // ⭐ THIS CASE EXISTS BECAUSE A MUTANT SURVIVED. Loosening the refusal from
+    // `!== 1` to `< 1` — i.e. "credit the first earner and stop asking" — left
+    // the whole suite green, so the branch was unpinned, and an unpinned branch
+    // is what a later tidy-up deletes without anything going red (trap 13b).
+    // Reached, not imagined: `extractFactors` reads this sentence as both
+    // `Rate` (inferLabel's fallback, which a node actually LABELLED "Rate"
+    // does not disqualify) and `Churn Rate`, at the same 0.04.
+    const brief = "Our churn rate is 4% and our refund rate is 4% across the same cohort.";
+    const graph = graphOf([factor("x", "Rate", 0.04, "%")]);
+
+    expect(creditUserTypedFigures(graph, brief)).toBe(0);
+    expect(publishedSource(byId(graph, "x"))).toBe("cee_inference");
+
+    // The discriminating twin: the SAME brief and the SAME level, with a label
+    // that only one figure earns. Without this, the refusal above could be some
+    // other limb quietly failing rather than the ambiguity rule (trap 13b).
+    const unambiguous = graphOf([factor("x", "Churn Rate", 0.04, "%")]);
+    expect(creditUserTypedFigures(unambiguous, brief)).toBe(1);
+  });
+
   it("writes nothing when there is no brief to read", () => {
     // "We had nothing to look in" is not "we looked and it is not there". Both
     // decline, and declining on an empty brief must not depend on the extractor
