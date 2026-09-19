@@ -267,8 +267,30 @@ function isDurativeOver(brief: string, matchIndex: number, matchText: string): b
 /** Extended value pattern fragment — captures numeric value with optional composite unit suffix */
 const _VAL = `${AMT}(?:\\s*(?:\\/\\s*(?:month|year|quarter|week|day|hr|hour))|\\s+(?:${WORD_UNIT_ALT}))?`;
 
+// Subject-first edit syntax. Capture the whole candidate, including an absent
+// or malformed subject, so looser patterns cannot turn its operator words into
+// a node name. Quoted labels may contain punctuation; bare labels stay within
+// their clause. This identifies syntax, not the speaker's authority to adopt it.
+const EDIT_BOUND_OPERATOR = String.raw`(?:at\s+or\s+(?:above|below)|at\s+(?:least|most)|above|below|under|over|to)`;
+const QUOTED_EDIT_SUBJECT = String.raw`(?:"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+')`;
+const EDIT_BOUND_SUBJECT = String.raw`(?:${QUOTED_EDIT_SUBJECT}|(?!\s*${QUOTED_EDIT_SUBJECT})(?:(?!\b(?:keep(?:ing)?|set)\b|\b${EDIT_BOUND_OPERATOR}\s+${_VAL})[^\r\n.!?;,:])*?)`;
+
+function explicitBoundTarget(raw: string | undefined): string | null {
+  const text = raw?.trim() ?? "";
+  const quoted = /^(?:"[^"\r\n]+"|“[^”\r\n]+”|'[^'\r\n]+')$/.test(text);
+  const name = (quoted ? text.slice(1, -1) : text).trim();
+  if (!name || /^(?:it|this|that|these|those|them|at|above|below|under|over)$/i.test(name)) return null;
+  if (!quoted && (
+    !/^[\p{L}\p{N}_][\p{L}\p{N}_'’-]*(?:[ \t]+[\p{L}\p{N}_][\p{L}\p{N}_'’-]*)*$/u.test(name)
+    || /\b(?:and|or)\b/i.test(name)
+  )) return null;
+  return name;
+}
+
 /** Upper bound constraint patterns (operator: <=) */
 const UPPER_BOUND_PATTERNS = [
+  new RegExp(String.raw`\bkeep(?:ing)?\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\b(?:at\s+or\s+below|at\s+most|under|below)\s+(?<amount>${_VAL})`, "gid"),
+  new RegExp(String.raw`\bset\s+(?:the\s+)?maximum\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\bto\s+(?<amount>${_VAL})`, "gid"),
   // "while keeping X under/below Y"
   new RegExp(String.raw`while\s+(?:keeping|maintaining)\s+(\w+(?:\s+\w+){0,3})\s+(?:under|below|at most)\s+(${AMT})`, "gi"),
   // "without exceeding Y"
@@ -416,6 +438,8 @@ const NEGATED_CEILING_PATTERNS = [
  * parallel `Set` of patterns could not (CLAUDE.md trap 12).
  */
 const LOWER_BOUND_PATTERNS: ReadonlyArray<{ re: RegExp; barePreposition?: true }> = [
+  { re: new RegExp(String.raw`\bkeep(?:ing)?\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\b(?:at\s+or\s+above|at\s+least|above)\s+(?<amount>${_VAL})`, "gid") },
+  { re: new RegExp(String.raw`\bset\s+(?:the\s+)?minimum\s+(?<target>${EDIT_BOUND_SUBJECT})\s*\bto\s+(?<amount>${_VAL})`, "gid") },
   // "while ensuring X stays above/at least Y"
   { re: new RegExp(String.raw`while\s+ensuring\s+(\w+(?:\s+\w+){0,3})\s+(?:stays?\s+)?(?:above|at least)\s+(${AMT})`, "gi") },
   // "maintain at least Y"
@@ -1182,7 +1206,8 @@ function extractNegatedCeilingConstraints(brief: string): {
 
 function extractUpperBoundConstraints(
   brief: string,
-  claimed: readonly Span[] = [],
+  claimed: Span[],
+  pass: "edit" | "legacy",
 ): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
@@ -1190,8 +1215,12 @@ function extractUpperBoundConstraints(
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      const editAmount = match.groups?.amount;
+      if ((editAmount !== undefined) !== (pass === "edit")) continue;
       // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
       if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
+
+      if (editAmount !== undefined) claimed.push([match.index, match.index + match[0].length]);
 
       // ── SUPPRESS RATHER THAN INVERT ────────────────────────────────────
       // A `below|under` reading whose clause is negated is a FLOOR wearing a
@@ -1208,7 +1237,7 @@ function extractUpperBoundConstraints(
       // Precedent: ROADMAP 2.653 drops rows whose operator is the inverse of
       // the sentence rather than repairing them.
       if (
-        /\b(?:below|under)\b/i.test(match[0]) &&
+        (editAmount !== undefined || /\b(?:below|under)\b/i.test(match[0])) &&
         NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0, claimed) + " " + match[0])
       ) {
         continue;
@@ -1217,7 +1246,12 @@ function extractUpperBoundConstraints(
       let targetName: string;
       let valueStr: string;
 
-      if (!match[2]) {
+      if (editAmount !== undefined) {
+        const explicitTarget = explicitBoundTarget(match.groups?.target);
+        if (explicitTarget === null) continue;
+        targetName = explicitTarget;
+        valueStr = editAmount;
+      } else if (!match[2]) {
         // Subject-optional pattern: only 1 capture group (value only)
         valueStr = match[1];
         targetName = "unspecified";
@@ -1245,7 +1279,10 @@ function extractUpperBoundConstraints(
         // ROADMAP 2.653 (I-B): plain words + the user's own number text, never
         // the internal direction word. See `constraint-display-name.ts`.
         label: buildBoundDisplayName(targetName, "<=", valueStr),
-        sourceQuote: match[0].slice(0, 200),
+        sourceQuote: editAmount !== undefined ? match[0] : match[0].slice(0, 200),
+        ...(match.indices?.groups?.amount ? { sourceAmountSpan: {
+          start: match.indices.groups.amount[0], end: match.indices.groups.amount[1],
+        } } : {}),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
         // Absolute LEVEL on the metric's own scale (the stated bound is the
@@ -1263,7 +1300,8 @@ function extractUpperBoundConstraints(
  */
 function extractLowerBoundConstraints(
   brief: string,
-  claimed: readonly Span[] = [],
+  claimed: Span[],
+  pass: "edit" | "legacy",
 ): ExtractedGoalConstraint[] {
   const constraints: ExtractedGoalConstraint[] = [];
 
@@ -1272,8 +1310,12 @@ function extractLowerBoundConstraints(
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(brief)) !== null) {
+      const editAmount = match.groups?.amount;
+      if ((editAmount !== undefined) !== (pass === "edit")) continue;
       // A negated floor already owns these words — see NEGATED_FLOOR_PATTERNS.
       if (overlapsClaimed(match.index ?? 0, match[0].length, claimed)) continue;
+
+      if (editAmount !== undefined) claimed.push([match.index, match.index + match[0].length]);
 
       // ── A TIME HORIZON IS NOT A FLOOR ──────────────────────────────────
       // "maximise engineering output over 12 months" states a DURATION. Read
@@ -1303,7 +1345,7 @@ function extractLowerBoundConstraints(
       // 22f records this predicate family oscillating for four rounds when the
       // fix in one direction was a new rule rather than a suppression.
       if (
-        /\b(?:above|over)\b/i.test(match[0]) &&
+        (editAmount !== undefined || /\b(?:above|over)\b/i.test(match[0])) &&
         NEGATION_OR_PREVENTION_LEAD.test(suppressionWindow(brief, match.index ?? 0, claimed) + " " + match[0])
       ) {
         continue;
@@ -1311,7 +1353,12 @@ function extractLowerBoundConstraints(
       let targetName: string;
       let valueStr: string;
 
-      if (!match[2]) {
+      if (editAmount !== undefined) {
+        const explicitTarget = explicitBoundTarget(match.groups?.target);
+        if (explicitTarget === null) continue;
+        targetName = explicitTarget;
+        valueStr = editAmount;
+      } else if (!match[2]) {
         // Subject-optional pattern: only 1 capture group (value only)
         valueStr = match[1];
         targetName = "unspecified";
@@ -1337,7 +1384,10 @@ function extractLowerBoundConstraints(
         // ROADMAP 2.653 (I-B): plain words + the user's own number text, never
         // the internal direction word. See `constraint-display-name.ts`.
         label: buildBoundDisplayName(targetName, ">=", valueStr),
-        sourceQuote: match[0].slice(0, 200),
+        sourceQuote: editAmount !== undefined ? match[0] : match[0].slice(0, 200),
+        ...(match.indices?.groups?.amount ? { sourceAmountSpan: {
+          start: match.indices.groups.amount[0], end: match.indices.groups.amount[1],
+        } } : {}),
         confidence: targetName === "unspecified" ? 0.6 : 0.85,
         provenance: "explicit",
         // Absolute LEVEL on the metric's own scale (the stated bound is the
@@ -2175,8 +2225,12 @@ export function extractCompoundGoals(
   const { constraints: negatedCeilings, claimed: ceilingClaimed } =
     extractNegatedCeilingConstraints(brief);
   const claimed: Span[] = [...floorClaimed, ...ceilingClaimed];
-  const upperBound = extractUpperBoundConstraints(brief, claimed);
-  const lowerBound = extractLowerBoundConstraints(brief, claimed);
+  // A complete edit owns its quoted subject before either direction's looser
+  // patterns can read an opposite-direction bound inside that subject.
+  const upperEdits = extractUpperBoundConstraints(brief, claimed, "edit");
+  const lowerEdits = extractLowerBoundConstraints(brief, claimed, "edit");
+  const upperBound = [...upperEdits, ...extractUpperBoundConstraints(brief, claimed, "legacy")];
+  const lowerBound = [...lowerEdits, ...extractLowerBoundConstraints(brief, claimed, "legacy")];
   // NOUN forms ("a £50,000 cap"). Runs AFTER the bound patterns and claims
   // nothing: where a verb form already read the same words, `deduplicateConstraints`
   // keeps the stricter row, and the verb form's higher confidence wins a tie.
