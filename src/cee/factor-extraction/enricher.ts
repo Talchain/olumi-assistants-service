@@ -527,21 +527,30 @@ function backfillStatedUnit(
  * Limb 3's precondition is asserted, not assumed: a `matchedText` the brief
  * does not contain is not a position, and returns false.
  *
- * ── ⚠⚠ THE CONSEQUENCE THIS MUST NOT BE SILENT ABOUT
+ * ── ⚠⚠ IT CROSSES THE ADMISSION FLOOR. MEASURED, NOT ESTIMATED.
  * `brief_extraction` classifies as user-stated in the analysis-admission
- * census, and `analysis-admission.ts:900/935` turn
- * `material_parameters_user_stated > 0` into `semanticSufficient`, which
- * `deriveMode` turns into `comparative_leader` — **the licence to name a
- * leading option.** So crossing the material-parameters floor is exactly what
- * this changes, and a wrong stamp here would not merely mislabel provenance: it
- * would let the product name a winner off a number nobody confirmed. On the
- * captured graph this stamps **2 of the 6 valued factors** (Trial-to-Paid
- * Conversion Rate and Monthly Churn Rate) and leaves the other 4 untouched —
- * their model-normalised levels (0, 0.4, 0.4, 0.5) match no figure the user
- * wrote. Whether those two are MATERIAL depends on the run's topology, so the
- * floor may be crossed; that is said plainly rather than left to be discovered.
- * The defence is that limb 5 admits only a number our own reader took out of
- * the user's own bytes, in this node's own sentence.
+ * census, `analysis-admission.ts:900/935` turn
+ * `material_parameters_user_stated > 0` into `semanticSufficient`, and
+ * `deriveMode` turns that into `comparative_leader` — **the licence to name a
+ * leading option.** Run against capture `d9c4066c`'s own nodes and its 39
+ * edges, through `censusConfidenceParameters`:
+ *
+ *     material_parameters_total        31  →  31   (unchanged)
+ *     material_parameters_user_stated   0  →   2
+ *     semanticQualitySufficient     false  →  true
+ *     semanticVerdictCause  all_machine_authored → material_user_stated
+ *
+ * So this does not merely relabel a badge: **it moves that run from
+ * `quantified_provisional` to `comparative_leader`.** It stamps 2 of the 6
+ * valued factors — Trial-to-Paid Conversion Rate and Monthly Churn Rate — and
+ * leaves the other 4 alone, their model-normalised levels (0, 0.4, 0.4, 0.5)
+ * matching no figure the user wrote. That is the correct direction *if* the
+ * stamps are true, and it is exactly why the conjunction above is narrow: a
+ * wrong stamp here would let the product name a winner off a number nobody
+ * confirmed. ⚠ Scope of that measurement, stated so it is not read wider: the
+ * debug bundle flattens node KINDS, so goal/decision/risk were re-derived from
+ * ids and labels to rebuild the topology. The direction and the flip are
+ * robust; the exact total of 31 is only as good as that reconstruction.
  *
  * ── WHY A STANDALONE PASS, AND NOT A LIMB OF THE ENRICHMENT LOOP
  * Measured, after trying the loop first — it failed on BOTH captured factors
