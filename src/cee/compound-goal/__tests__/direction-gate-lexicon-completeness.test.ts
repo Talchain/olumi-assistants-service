@@ -218,8 +218,9 @@ describe('ROADMAP 2.1051 — lexicon completeness (external vocabulary sweep)', 
     }
   });
 
-  it.each(['rising', 'ballooning', 'surging', 'spiking', 'escalating', 'swelling', 'creeping up'])
-  ('restores the already-proven ceiling for %s without a competing parser floor', (verb) => {
+  it.each([
+    'rising', 'ballooning', 'surging', 'spiking', 'escalating', 'swelling', 'creeping up',
+  ])('restores the already-proven ceiling for %s without a competing parser floor', (verb) => {
     expect(wireFor(`Keep marketing spend from ${verb} above 2000000.`))
       .toEqual([{ node_id: 'fac_marketing_spend', operator: '<=', value: 2000000 }]);
   });
