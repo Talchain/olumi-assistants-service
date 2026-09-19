@@ -487,7 +487,66 @@ export function createAddConstraintHandler(): HandlerFn {
         );
       }
 
-      const params = resolveParams(invocation);
+      const proposedParams = resolveParams(invocation);
+
+      /**
+       * An answer alone states a current level. An independent limitChange
+       * carries separate authority and is checked against the proposal below.
+       *
+       * A target carries TWO semantic quantities: its BASELINE (where it is
+       * now) and its SUCCESS CONSTRAINT (where the user needs it to get to).
+       * The warrant that admits an answer is scoped to (handler, target), and
+       * that is one scope too coarse: granting authority over the baseline
+       * conferred it on the limit. Measured — the offered answer "Churn rate is
+       * 30%" with a model proposal of 30 rewrote the user's own 10% limit to
+       * 30%, DROPPED its `value_frame: level`, and recorded NO baseline, while
+       * replying "Updated constraint: Churn rate must be at most 30%."
+       *
+       * Preserving the row is also what lets the baseline actually record: the
+       * frame is inherited only while this turn's value and unit are unchanged
+       * (see `inheritedValueFrame`), and the mint cell needs that frame. A turn
+       * that "updates" the limit to the answer's number destroys the very
+       * attestation the mint depends on — which is why the witnessed defect
+       * both corrupted the limit AND lost the baseline.
+       *
+       * This is the handler's existing OMISSION MEANS UNCHANGED doctrine — held
+       * already for `unit` (the gc-cdd6eb74 silent nullification) and for
+       * `value_frame` (2.877) — reaching the field those two left exposed. An
+       * EXPLICIT limit change on a compound turn must retain its own authority.
+       *
+       * Matched on the TARGET, not on the proposed operator: a model that
+       * mis-reads the answer may propose the other operator too, and appending
+       * a second row would be the same harm wearing a different shape.
+       */
+      const answersBaselineForThisTarget =
+        invocation.baselineAnswerAuthority?.targetId === targetId;
+      const requestedLimitChange = answersBaselineForThisTarget
+        ? invocation.baselineAnswerAuthority?.limitChange
+        : undefined;
+      if (requestedLimitChange !== undefined &&
+          (proposedParams.constraint_type !== requestedLimitChange.constraint_type ||
+            !valuesMatch(proposedParams.value, requestedLimitChange.value))) {
+        throw new D1HandlerError('PARAMETER_INVALID',
+          'The proposed limit does not match the independent instruction in the baseline answer.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE });
+      }
+      const constraintRowThisAnswerPreserves = answersBaselineForThisTarget && requestedLimitChange === undefined
+        ? graph.goal_constraints?.find((c) => c.node_id === targetId)
+        : undefined;
+
+      const params =
+        constraintRowThisAnswerPreserves !== undefined
+          ? {
+              ...proposedParams,
+              constraint_type: (constraintRowThisAnswerPreserves.operator === '<='
+                ? 'at_most'
+                : 'at_least') as typeof proposedParams.constraint_type,
+              value: constraintRowThisAnswerPreserves.value,
+              ...(constraintRowThisAnswerPreserves.unit !== undefined
+                ? { unit: constraintRowThisAnswerPreserves.unit }
+                : {}),
+            }
+          : proposedParams;
       const operator = TYPE_TO_OPERATOR[params.constraint_type];
 
       // ROADMAP 1.52 — goal-fit sign-inversion backstop. "reduce/decrease/
@@ -572,7 +631,7 @@ export function createAddConstraintHandler(): HandlerFn {
         invocation.payload.message,
         operator,
         params.value,
-      );
+      ) ?? requestedLimitChange?.value_frame;
 
       // Idempotency: match an existing constraint by (node_id, operator).
       // If found, update value/label/unit in place. If not, append a
@@ -683,6 +742,12 @@ export function createAddConstraintHandler(): HandlerFn {
               : targetNode.observed_state?.unit !== undefined
                 ? targetNode.observed_state.unit
                 : undefined;
+
+      if (requestedLimitChange !== undefined && resolvedUnit !== requestedLimitChange.unit) {
+        throw new D1HandlerError('PARAMETER_INVALID',
+          'The proposed limit units do not match the independent instruction in the baseline answer.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE });
+      }
 
       // ⛔ AND TWO UNITS THAT DISAGREE ARE REFUSED, NOT SILENTLY PICKED. An
       // explicit unit that contradicts the moved row's own is two different

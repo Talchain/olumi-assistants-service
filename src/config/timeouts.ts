@@ -852,6 +852,50 @@ export function getDraftLlmRetryBudgetMs(elapsedMs: number): number {
 }
 
 /**
+ * ⭐ STAGE 3b — the draft-seam option→factor mapping re-ask
+ * (`cee/draft/option-factor-mapper.ts`). A CEILING, not a target: the call is
+ * on the draft's critical path, so what this constant buys is a bound on the
+ * worst case rather than a window to spend.
+ *
+ * ── WHY IT IS SMALL, DERIVED FROM THIS FILE'S OWN LADDER ────────────────────
+ * The binding outer bound on a draft turn is the V5 turn abort, 115,000 ms
+ * (`orchestrator-v5/budgets.ts`, quoted in VALIDATION_PIPELINE_TIMEOUT_MS's
+ * derivation above), against a MEASURED median delivery of ~87 s. That leaves
+ * ~28 s of headroom for everything, and Pass 2's attach deadline already spends
+ * part of it. A blocking call on that path therefore has to be bounded in
+ * SECONDS, not tens of seconds.
+ *
+ * ── WHY 10 s IS ENOUGH FOR THE TASK ────────────────────────────────────────
+ * The request is a factor list and one to four option labels; the response is
+ * `OPTION_FACTOR_MAP_MAX_TOKENS` = 1024 output tokens of ids and one short
+ * sentence each. That is an order of magnitude below the 6,800–8,550-token
+ * drafts this file records at 40–81 s, so 10 s is generous for the shape rather
+ * than tight for it.
+ *
+ * ⚠ AND IT CANNOT COST THE TURN ANYTHING ON EXPIRY. The stage fails OPEN: a
+ * timeout leaves the graph byte-identical and the draft proceeds to the
+ * connectivity repair exactly as it does today. The worst case this constant
+ * bounds is added LATENCY, never a lost draft.
+ */
+export const OPTION_FACTOR_MAP_TIMEOUT_MS = clampTimeout(
+  parseTimeoutEnv("CEE_OPTION_FACTOR_MAP_TIMEOUT_MS", 10_000),
+);
+
+/**
+ * The smallest window worth funding this call into.
+ *
+ * ⚠ THE SAME SHAPE AS `MIN_DRAFT_RETRY_BUDGET_MS`, AND FOR THE SAME REASON: a
+ * call squeezed into a window it cannot finish in only burns provider spend on a
+ * result nothing will use. It is anchored at `MIN_TIMEOUT_MS` — the floor
+ * `clampTimeout` itself enforces, so a deployment that shortens the ceiling can
+ * never drive the gate below the smallest timeout this service will issue.
+ * Below it the stage skips and logs `outcome: "below_budget"` BY NAME, so a
+ * later session can tell "never reached" from "reached and refused" without
+ * re-deriving anything (the `S2-L1 readiness arm` lesson, one stage up).
+ */
+export const OPTION_FACTOR_MAP_MIN_BUDGET_MS = MIN_TIMEOUT_MS;
+
+/**
  * Attempt-1 draft max_tokens ceiling — an OPTIONAL upper safety cap.
  *
  * DEFAULT = the FULL affordable budget derived from the draft timeout, so

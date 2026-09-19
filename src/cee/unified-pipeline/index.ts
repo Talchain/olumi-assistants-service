@@ -46,6 +46,7 @@ import type { DraftGraphTimings } from "../../orchestrator-v5/telemetry/turn-tim
 import { runStageParse } from "./stages/parse.js";
 import { runStageNormalise } from "./stages/normalise.js";
 import { runStageEnrich } from "./stages/enrich.js";
+import { runStageOptionMappingRecovery } from "./stages/option-mapping-recovery.js";
 import { runStageRepair } from "./stages/repair/index.js";
 import { runStageCoachingPass } from "./stages/coaching-pass.js";
 import { runStagePackage } from "./stages/package.js";
@@ -1073,6 +1074,18 @@ async function runUnifiedPipelineAttempt(
     timings.enrich_ms = stageElapsed(t3);
     ctx.stageSnapshots.stage_3_enrich = captureStageSnapshot(ctx);
     ctx.planAnnotation = capturePlanAnnotation(ctx);
+
+    // Stage 3b: Option mapping recovery — ask the drafter which factors an
+    // option it left unmapped actually moves, BEFORE the connectivity repair
+    // reaches for the union of everyone else's targets.
+    //
+    // ⚠ NO try/catch HERE ON PURPOSE. The stage owns its own failure handling
+    // and is documented to fail OPEN — a second catch at this level would make
+    // the two disagree about what "skipped" means, and this file already
+    // carries one such pair (trap 21). It cannot throw; if it ever does, the
+    // draft SHOULD fail loudly rather than silently ship a graph half-mutated
+    // by a stage that promised not to mutate it.
+    await runStageOptionMappingRecovery(ctx);
 
     // Stage 4: Repair — Validation + goal merge + connectivity
     const t4 = stageStart();

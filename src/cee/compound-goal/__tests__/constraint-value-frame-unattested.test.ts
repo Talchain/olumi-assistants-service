@@ -85,6 +85,10 @@ const REGISTERED_STAMPERS = [
   // unattested row, so a minted-but-frameless constraint would take the
   // analysis down with it instead of merely arriving thin.
   'cee/unified-pipeline/stages/repair/compound-goals.ts',
+  // A separately warranted "set the limit to <absolute comparator/amount>"
+  // instruction: CQE supplies the percentage amount, the baseline question
+  // supplies the bound subject, and the handler checks the exact tuple.
+  'orchestrator-v5/routing/baseline-answer-mutation.ts',
 ] as const;
 
 /**

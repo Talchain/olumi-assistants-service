@@ -40,6 +40,7 @@ import {
   type GoalTargetCandidate,
   type GoalLabelTargetRefusal,
 } from "./goal-label-target.js";
+import { admitGoalBaseline } from "./goal-baseline-admissibility.js";
 
 /**
  * Type guard to check if node data is FactorData (not OptionData)
@@ -1551,8 +1552,58 @@ export function applyGoalTargetRedirect(
     // only meaningful when both operands were scored against one cap,
     // and a mismatch there yields a confident WRONG probability rather
     // than an error.
-    normalizedBaseline =
-      rawBaseline === undefined ? undefined : rawBaseline / cap;
+    //
+    // ⭐⭐ AND THE SHARED DENOMINATOR IS NOT THE WHOLE QUESTION (ROADMAP
+    // 2.1160). One cap makes the two numbers COMMENSURABLE; it does not
+    // make the pair EXPRESSIBLE. The chat path's twin writer takes its
+    // baseline from `extractGoalTargetWithBaseline`, which refuses a
+    // DECREASING pair by name (`index.ts:1771-1782`, ROADMAP 2.353 review
+    // A2) because `goal_threshold_frame` is the code constant 'level' and
+    // ISL asks `P(level >= threshold)` — a target below its stated current
+    // level inverts the question and returns a confident wrong answer. This
+    // route consulted no such rule, and stamped one: MEASURED on staging
+    // (`public.scenarios`, 2026-09-10 22:05:08Z) a goal carrying
+    // `goal_threshold_raw 2`, `cap 2.5` and a stated level of 14 shipped
+    // `observed_state.baseline 5.6` — five weeks AFTER the sibling refusal
+    // landed. Trap 22b: one harm closed on one route, left open on its
+    // neighbour, invisible to both routes' tests.
+    //
+    // The rule is IMPORTED, never restated — two derivations of one doctrine
+    // drift and the drift reads as green (trap 12).
+    //
+    // ⚠ ONLY THE BASELINE IS WITHHELD. `goal_threshold`, `_raw`, `_unit` and
+    // `_cap` are stamped below exactly as before, so the user's own figure
+    // still reaches the screen ("Target: £90" stays true). Without a
+    // baseline, `transforms/schema-v3.ts:405` builds no `observed_state`,
+    // ISL refuses with `missing_goal_baseline` and the ranking is withheld —
+    // the same honest refusal the `else` branch below already relies on.
+    if (rawBaseline === undefined) {
+      normalizedBaseline = undefined;
+    } else {
+      const admission = admitGoalBaseline({
+        rawTarget: rawForResolver,
+        rawBaseline,
+        cap,
+      });
+      if (admission.admitted) {
+        normalizedBaseline = admission.normalised;
+      } else {
+        normalizedBaseline = undefined;
+        log.info(
+          {
+            goalNodeId: currentGoalNode.id,
+            factor_label: factor.label,
+            factor_unit: factor.unit,
+            raw_target: rawForResolver,
+            raw_baseline: rawBaseline,
+            cap,
+            refusal: admission.reason,
+            event: "cee.factor_enrichment.goal_baseline_withheld",
+          },
+          `Withheld the stated current level on "${currentGoalNode.id}" (${admission.reason}) — the target is registered, the probability is not`,
+        );
+      }
+    }
   } else {
     rawValue = rawForResolver;
     // No sound denominator exists, so the target itself is registered
