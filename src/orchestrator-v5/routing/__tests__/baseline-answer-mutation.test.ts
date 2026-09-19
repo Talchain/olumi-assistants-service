@@ -22,6 +22,11 @@ describe('independent instruction on a baseline-answer turn', () => {
     });
   });
 
+  it.each([0, 100])('preserves the extractor percentage endpoint %s', (value) => {
+    expect(deriveBaselineLimitChange(`Churn rate is 30%. Keep churn under ${value}%.`, 'Churn rate', []))
+      .toEqual({ constraint_type: 'at_most', value, unit: '%', value_frame: 'level' });
+  });
+
   it.each([
     'Churn rate is 30%. Rename the pilot to Launch.',
     'Churn rate is 30%. Keep win rate under 25%.',
@@ -29,6 +34,10 @@ describe('independent instruction on a baseline-answer turn', () => {
     'Churn rate is 30%. Rename the pilot. Churn under 25%.',
     'Churn rate is 30%. Set the limit to at most 25% or 35%.',
     'Churn rate is 30%. Set the limit to at most £25.',
+    'Churn rate is 30%. Keep churn under 25%/month.',
+    'Churn rate is 30%. Keep churn under 25% per month.',
+    'Churn rate is 30%. Keep churn under 25 bps.',
+    'Churn rate is 30%. Keep churn under 0.25 ratio.',
     'Churn rate is 30%. Do not change the limit to at most 25%.',
   ])('does not turn a general warrant into authority over this limit: %s', (message) => {
     expect(deriveBaselineLimitChange(message, 'Churn rate', ['Win rate'])).toBeUndefined();
