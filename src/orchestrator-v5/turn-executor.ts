@@ -9705,9 +9705,20 @@ export async function runTurnExecutor(
       // Everything else — the option-node precondition, the registry
       // executability test, and the decline-with-a-reason telemetry — is the
       // pre-route's, read from the same helpers rather than re-implemented.
+      //
+      // ⚠ AND IT STANDS DOWN ON ANYTHING THE PRE-ROUTE ALREADY CONSIDERED.
+      // `looksLikeImperativeRunRequest` is a SUPERSET of the re-run predicate,
+      // so without this conjunct a re-run instruction on an option-less graph
+      // is declined twice and emits the pre-route's fall-through telemetry
+      // TWICE — caught by `turn-executor-imperative-rerun-preroute.integration`
+      // ("expected 2 to be 1"), which is the contract working. This seam
+      // exists only for the FIRST-RUN gap the pre-route cannot see; where the
+      // pre-route has already ruled, its ruling stands, whichever way it went.
+      // The two sites are now disjoint by construction rather than by luck.
       if (
         routingResult.type !== 'tool_call' &&
         looksLikeImperativeRunRequest(payload.message) &&
+        !looksLikeImperativeRerun(payload.message) &&
         !hasMutationSignal(payload.message)
       ) {
         const firstRunTargetEntity = resolveRunAnalysisTargetEntity(graphStateForTurn?.nodes);
