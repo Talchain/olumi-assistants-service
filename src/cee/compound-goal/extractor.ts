@@ -52,6 +52,8 @@ export interface ExtractedGoalConstraint {
   label: string;
   /** Source quote from brief */
   sourceQuote: string;
+  /** Internal amount-capture offsets [start, end) in the exact extractor input. Not a wire field. */
+  sourceAmountSpan?: { readonly start: number; readonly end: number };
   /** Extraction confidence */
   confidence: number;
   /** Provenance type */
@@ -525,13 +527,13 @@ const NOUN_FORM_PATTERNS: ReadonlyArray<{
   //     turn on it: "£50,000 capital investment", "£2m capacity", "£40,000
   //     budgeting", "£5m capital", "12 capital projects". Every one is a
   //     PREFIX of a limit noun inside a longer, entirely descriptive word.
-  { re: new RegExp(String.raw`(${AMT_CURRENCY})\s+(${LIMIT_NOUN})\b`, "gi"), amount: 1, noun: 2 },
+  { re: new RegExp(String.raw`(${AMT_CURRENCY})\s+(${LIMIT_NOUN})\b`, "gid"), amount: 1, noun: 2 },
 
   // N2  "a hard limit of £250,000" · "The budget of £120,000"
   {
     re: new RegExp(
       String.raw`\b(?:${LIMIT_ADJECTIVE}\s+)?(${LIMIT_NOUN})\s+of\s+(${AMT_CURRENCY})`,
-      "gi",
+      "gid",
     ),
     amount: 2,
     noun: 1,
@@ -541,7 +543,7 @@ const NOUN_FORM_PATTERNS: ReadonlyArray<{
   {
     re: new RegExp(
       String.raw`(?:\b([A-Za-z][\w-]{2,})\s+)?\b(${LIMIT_NOUN})(?:\s+constraints?)?\s*:\s*(${AMT_CURRENCY})`,
-      "gi",
+      "gid",
     ),
     amount: 3,
     noun: 2,
@@ -552,7 +554,7 @@ const NOUN_FORM_PATTERNS: ReadonlyArray<{
   {
     re: new RegExp(
       String.raw`\b(?:${LIMIT_ADJECTIVE}\s+)?(${LIMIT_NOUN})(?:\s+for\s+(?:this|it|the\s+[\w-]+))?\s+is\s+(${AMT_CURRENCY})`,
-      "gi",
+      "gid",
     ),
     amount: 2,
     noun: 1,
@@ -1423,6 +1425,7 @@ function extractNounFormConstraints(
 
       const valueStr = match[spec.amount];
       if (!valueStr) continue;
+      const amountSpan = match.indices?.[spec.amount];
       const noun = spec.noun ? match[spec.noun] : "budget";
       const targetName = resolveLimitTarget(noun, spec.qualifier ? match[spec.qualifier] : undefined);
 
@@ -1459,6 +1462,7 @@ function extractNounFormConstraints(
         //
         // `sentence` is already derived above for S2/S3/S4; no new derivation.
         sourceQuote: sentence.trim().slice(0, 200),
+        ...(amountSpan ? { sourceAmountSpan: { start: amountSpan[0], end: amountSpan[1] } } : {}),
         // Below the 0.85 the verb forms carry: the noun states the limit but
         // the commitment is read off the surrounding clause, which is a weaker
         // reading than a verb that states it outright.
