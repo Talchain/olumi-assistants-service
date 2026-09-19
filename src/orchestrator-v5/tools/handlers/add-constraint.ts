@@ -95,6 +95,11 @@ import {
   findConstraintTargetAlternative,
   formatConstraintTargetAlternative,
 } from './d1-shared/constraint-target-alternative.js';
+import {
+  classifyConstraintScaleDomain,
+  formatConstraintScaleDomainAlternative,
+  formatConstraintScaleDomainRefusal,
+} from './d1-shared/constraint-scale-domain.js';
 import { ADD_CONSTRAINT_USER_GUIDANCE } from './d1-shared/user-guidance.js';
 
 /**
@@ -1461,6 +1466,34 @@ export function createAddConstraintHandler(): HandlerFn {
       const admissibility =
         rawTargetNode === null ? null : classifyConstraintWriteAdmissibility(rawTargetNode);
 
+      // ⭐⭐ THE SECOND GATE, AND IT ASKS A DIFFERENT QUESTION FROM THE FIRST.
+      //
+      // `admissibility` asks "does the target record a level?". This asks "is
+      // the limit on a scale the target's domain can carry?" — and a target can
+      // pass the first and fail this one, which is the case that ships a
+      // CONFIDENT FALSE PASS rather than an honest gap:
+      //
+      //   PLoT `src/normalisation/constraint-filter.ts:158` (staging `d68d4ffb`)
+      //   warns `plot.constraint_out_of_domain` for a goal/outcome/risk target
+      //   with a threshold outside [0,1] — and FORWARDS IT ANYWAY (:147, "warn,
+      //   don't drop"). ISL then scores `P(score <= 200000)` against a score
+      //   normalised to [0,1], so the limit is satisfied by every option.
+      //
+      // Measured shape: Paul's "our budget is £200,000" landing on "Budget
+      // Overrun", `kind: risk`. Where that node records no level the first gate
+      // already speaks, so this one is asked only after it declines.
+      //
+      // ⚠ RAW NODE, for the same reason the first gate takes one: the V1 `data`
+      // cap carrier is undeclared on `NodeV3` and would be stripped by the parse.
+      const scaleDomain =
+        rawTargetNode === null
+          ? null
+          : classifyConstraintScaleDomain({
+              target: rawTargetNode,
+              value: params.value,
+              unit: newConstraint.unit ?? null,
+            });
+
       // The time span the row has no field for. Read off the label that will be
       // PERSISTED, because that is the only place it survives.
       const unevaluatedDurationSpan = findUnevaluatedDurationSpan({
@@ -1557,6 +1590,32 @@ export function createAddConstraintHandler(): HandlerFn {
             : formatConstraintTargetAlternative({
                 chosenLabel: targetNode.label,
                 alternative: alternativeForCorrection,
+              }),
+        );
+      } else if (scaleDomain !== null && newConstraint.unit !== undefined) {
+        // ⭐ NAME THE CAUSE, AND OFFER THE MOVE — through the SAME finder the
+        // measurability branch uses. A second candidate finder for one question
+        // is this estate's dominant defect; only the SENTENCE differs, because
+        // the cause differs ("has no figure" is false here — the figure is
+        // there and is the wrong kind of quantity).
+        alternativeForCorrection = findConstraintTargetAlternative({
+          chosenIsCheckable: false,
+          chosenNodeId: targetId,
+          constraintUnit: newConstraint.unit,
+          nodes: graph.nodes as never,
+          edges: graph.edges as never,
+          options: readSameTurnOptions(rawGraph) as never,
+        });
+        fragments.push(
+          alternativeForCorrection === null
+            ? formatConstraintScaleDomainRefusal({
+                targetLabel: targetNode.label,
+                unit: newConstraint.unit,
+              })
+            : formatConstraintScaleDomainAlternative({
+                chosenLabel: targetNode.label,
+                alternativeLabel: alternativeForCorrection.label,
+                unit: newConstraint.unit,
               }),
         );
       }
