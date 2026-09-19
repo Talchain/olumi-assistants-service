@@ -271,6 +271,23 @@ describe('DIRECTION 1 — an elliptical answer with two live claimants still bin
 });
 
 describe('the counterpart routes the transition must not have taken', () => {
+  it.each([false, true])('routes a compound instruction instead of replaying the old limit (competing: %s)', (competing) => {
+    const dispatch = resume('Churn rate is 30%. Set the limit to at most 25%.',
+      [baselinePending, ...(competing ? [effectPending] : [])]);
+    expect(dispatch).toMatchObject({
+      matched: false, skip_reason: 'subject_bound_answer', independentMutationWarrant: true,
+      pending: { id: baselinePending.id },
+      limitChange: { constraint_type: 'at_most', value: 25, unit: '%', value_frame: 'level' },
+    });
+  });
+
+  it('does not replay a stale baseline proposal on a compound turn', () => {
+    const dispatch = resume('Churn rate is 30%. Set the limit to at most 25%.', [{
+      ...baselinePending, preconditions: { graph_hash: 'older-graph' },
+    }]);
+    expect(dispatch).toEqual({ matched: false, skip_reason: 'graph_diverged' });
+  });
+
   for (const [spelling, competitor] of COMPETING_SPELLINGS) {
     it(`an explicit edit instruction still reaches the edit lane past a competing ${spelling}`, () => {
       const dispatch = resume("set the pilot's effect on cost to 0.3", [

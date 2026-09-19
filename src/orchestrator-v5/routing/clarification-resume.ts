@@ -65,6 +65,11 @@ import {
   classifyElicitedBaselineAnswer,
 } from '../../cee/factor-extraction/stated-level.js';
 import { resolveExistingRawValue } from '../tools/handlers/d1-shared/evaluate-factor-value-proposal.js';
+import {
+  deriveBaselineLimitChange,
+  hasBaselineIndependentMutationWarrant,
+  type BaselineLimitChange,
+} from './baseline-answer-mutation.js';
 
 /**
  * Same negative-gate regex `tryShortConfirmResume` and
@@ -889,6 +894,8 @@ export type BaselineElicitationResumeDispatch =
       readonly skip_reason: 'subject_bound_answer';
       readonly pending: ElicitTargetBaselinePending;
       readonly targetLabel: string;
+      readonly independentMutationWarrant?: true;
+      readonly limitChange?: BaselineLimitChange;
     }
   | {
       readonly matched: true;
@@ -987,6 +994,12 @@ export function tryBaselineElicitationResume(input: {
         skip_reason: 'subject_bound_answer',
         pending: collision.baseline,
         targetLabel: collisionLabel,
+        ...(hasBaselineIndependentMutationWarrant(input.message)
+          ? { independentMutationWarrant: true as const,
+              limitChange: deriveBaselineLimitChange(input.message, collisionLabel,
+                competingNodeLabels(input.graphNodes, collision.baseline.action.target_id)
+                  .filter((label): label is string => typeof label === 'string')) }
+          : {}),
       };
     }
     return {
@@ -1022,6 +1035,19 @@ export function tryBaselineElicitationResume(input: {
     // elicitation is additive, so an ignored question must leave the flow
     // exactly as it was before 2.918.
     return { matched: false, skip_reason: 'not_an_answer' };
+  }
+  // An answer plus a new instruction must reach normal validation/routing;
+  // replaying the pending here would substitute its old limit for the new one.
+  if (verdict.authority === 'subject' && hasBaselineIndependentMutationWarrant(input.message)) {
+    return {
+      matched: false,
+      skip_reason: 'subject_bound_answer',
+      pending,
+      targetLabel: liveLabel,
+      independentMutationWarrant: true,
+      limitChange: deriveBaselineLimitChange(input.message, liveLabel,
+        competingLabels.filter((label): label is string => typeof label === 'string')),
+    };
   }
   return { matched: true, pending, targetLabel: liveLabel };
 }

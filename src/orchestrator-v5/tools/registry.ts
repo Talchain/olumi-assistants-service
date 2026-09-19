@@ -272,16 +272,15 @@ export interface HandlerInvocation {
    * dropped, while no baseline was recorded at all. Same node and same handler
    * is NOT baseline-only authority.
    *
-   * So the answer states a CURRENT LEVEL and never a new limit: under this
-   * authority the existing constraint's operator, value, unit and frame are
-   * preserved exactly. That is the handler's own "omission means UNCHANGED"
-   * doctrine — already applied to unit (the gc-cdd6eb74 silent nullification)
-   * and to frame (2.877) — reaching the field those two left exposed.
-   *
-   * An EXPLICIT limit change is untouched: it carries its own mutation warrant,
-   * never arrives with this side band, and writes exactly as it does today.
+   * An answer alone preserves the existing limit. A compound turn may also
+   * carry a separately warranted, subject-bound limitChange; the handler must
+   * match its proposed tuple before saving the two quantities together.
    */
-  readonly baselineAnswerAuthority?: { readonly targetId: string };
+  readonly baselineAnswerAuthority?: {
+    readonly targetId: string;
+    /** User-stated limit, scoped after the independent mutation warrant. */
+    readonly limitChange?: import('../routing/baseline-answer-mutation.js').BaselineLimitChange;
+  };
   /**
    * Exact persisted edge identity for the strict `edge_strength_edit` adapter.
    *

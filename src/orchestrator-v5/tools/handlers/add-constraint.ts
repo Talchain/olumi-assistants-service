@@ -490,8 +490,8 @@ export function createAddConstraintHandler(): HandlerFn {
       const proposedParams = resolveParams(invocation);
 
       /**
-       * ⭐⭐ AN ANSWER TO THE BASELINE QUESTION STATES A CURRENT LEVEL, NEVER A
-       * NEW LIMIT — so this node's success constraint is UNCHANGED by it.
+       * An answer alone states a current level. An independent limitChange
+       * carries separate authority and is checked against the proposal below.
        *
        * A target carries TWO semantic quantities: its BASELINE (where it is
        * now) and its SUCCESS CONSTRAINT (where the user needs it to get to).
@@ -512,8 +512,7 @@ export function createAddConstraintHandler(): HandlerFn {
        * This is the handler's existing OMISSION MEANS UNCHANGED doctrine — held
        * already for `unit` (the gc-cdd6eb74 silent nullification) and for
        * `value_frame` (2.877) — reaching the field those two left exposed. An
-       * EXPLICIT limit change never arrives with this authority and is
-       * byte-unchanged.
+       * EXPLICIT limit change on a compound turn must retain its own authority.
        *
        * Matched on the TARGET, not on the proposed operator: a model that
        * mis-reads the answer may propose the other operator too, and appending
@@ -521,7 +520,18 @@ export function createAddConstraintHandler(): HandlerFn {
        */
       const answersBaselineForThisTarget =
         invocation.baselineAnswerAuthority?.targetId === targetId;
-      const constraintRowThisAnswerPreserves = answersBaselineForThisTarget
+      const requestedLimitChange = answersBaselineForThisTarget
+        ? invocation.baselineAnswerAuthority?.limitChange
+        : undefined;
+      if (requestedLimitChange !== undefined &&
+          (proposedParams.constraint_type !== requestedLimitChange.constraint_type ||
+            !valuesMatch(proposedParams.value, requestedLimitChange.value) ||
+            proposedParams.unit !== requestedLimitChange.unit)) {
+        throw new D1HandlerError('PARAMETER_INVALID',
+          'The proposed limit does not match the independent instruction in the baseline answer.',
+          { userGuidance: ADD_CONSTRAINT_USER_GUIDANCE });
+      }
+      const constraintRowThisAnswerPreserves = answersBaselineForThisTarget && requestedLimitChange === undefined
         ? graph.goal_constraints?.find((c) => c.node_id === targetId)
         : undefined;
 
@@ -622,7 +632,7 @@ export function createAddConstraintHandler(): HandlerFn {
         invocation.payload.message,
         operator,
         params.value,
-      );
+      ) ?? requestedLimitChange?.value_frame;
 
       // Idempotency: match an existing constraint by (node_id, operator).
       // If found, update value/label/unit in place. If not, append a

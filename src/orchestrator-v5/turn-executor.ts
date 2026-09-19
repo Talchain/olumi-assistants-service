@@ -1360,6 +1360,8 @@ export async function runTurnExecutor(
   let resolvedBaselineAnswerAuthority: {
     readonly targetId: string;
     readonly targetLabel: string;
+    readonly independentMutationWarrant?: true;
+    readonly limitChange?: import('./routing/baseline-answer-mutation.js').BaselineLimitChange;
   } | null = null;
 
   /**
@@ -6805,6 +6807,8 @@ export async function runTurnExecutor(
           resolvedBaselineAnswerAuthority = {
             targetId: baselineAnswer.pending.action.target_id,
             targetLabel: baselineAnswer.targetLabel,
+            independentMutationWarrant: baselineAnswer.independentMutationWarrant,
+            limitChange: baselineAnswer.limitChange,
           };
         } else if (baselineAnswer.skip_reason === 'competing_ask') {
           // ⭐⭐ TWO OF OUR OWN QUESTIONS ARE OPEN AND THIS ANSWERS BOTH SHAPES.
@@ -11094,6 +11098,13 @@ export async function runTurnExecutor(
         proposedHandlerId,
         typeof action.entity?.id === 'string' ? action.entity.id : null,
       );
+      // A general warrant does not widen the baseline answer's object/action.
+      // An independent non-constraint instruction still uses ordinary routing.
+      const ordinaryWarrantCoversProposal = warrantForTurn.granted &&
+        (resolvedBaselineAnswerAuthority === null ||
+          (resolvedBaselineAnswerAuthority.independentMutationWarrant === true &&
+            resolvedBaselineAnswerAuthority.limitChange === undefined &&
+            proposedHandlerId !== 'add_constraint'));
       if (warrantedByBaselineAnswer) {
         // Recorded for LAYER 2, which cannot re-derive the entity scope from
         // the commit meta. Only ever set on a proposal that passed the
@@ -11101,7 +11112,7 @@ export async function runTurnExecutor(
         baselineAnswerWarrantExercised = { handlerId: proposedHandlerId };
       }
       if (
-        !warrantForTurn.granted &&
+        !ordinaryWarrantCoversProposal &&
         !warrantedByBaselineAnswer &&
         warrantGateHandlerExecutable &&
         GRAPH_MUTATING_HANDLER_IDS.has(proposedHandlerId)
@@ -11513,15 +11524,13 @@ export async function runTurnExecutor(
           proposal: action,
           // ⭐ BASELINE-ANSWER AUTHORITY — threaded ONLY when this turn is a
           // reply to a live baseline question that named its own subject. The
-          // handler uses it to record the baseline WITHOUT touching the success
-          // constraint on the same node: one target carries two semantic
-          // quantities, and answering about one is not permission to rewrite
-          // the other. Absent on every ordinary edit, and absence changes
-          // nothing.
+          // handler preserves the existing limit unless this also carries a
+          // separately warranted limitChange matching the validated proposal.
           ...(resolvedBaselineAnswerAuthority !== null
             ? {
                 baselineAnswerAuthority: {
                   targetId: resolvedBaselineAnswerAuthority.targetId,
+                  limitChange: resolvedBaselineAnswerAuthority.limitChange,
                 },
               }
             : {}),

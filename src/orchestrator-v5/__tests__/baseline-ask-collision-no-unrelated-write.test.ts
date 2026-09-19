@@ -48,6 +48,7 @@ import type {
 } from '../../adapters/llm/types.js';
 import type { GraphV3T } from '../../schemas/cee-v3.js';
 import type { PendingAction } from '../session/pending-action.js';
+import { computeAnalysisAffectingGraphHash } from '../context/graph-hash.js';
 
 interface AppendWrite {
   graph?: unknown;
@@ -58,11 +59,13 @@ const appendCalls: AppendWrite[] = [];
 let persistedGraph: unknown = null;
 let servedGraph: unknown = null;
 let pendingActionsForRead: readonly PendingAction[] = [];
+let failGraphSave = false;
 
 vi.mock('../session/index.js', () => ({
   getSessionStore: () => ({
     append: async (write: AppendWrite) => {
       appendCalls.push(write);
+      if (failGraphSave && write.graph != null) throw new Error('simulated graph save failure');
       if (write.graph !== undefined && write.graph !== null) persistedGraph = write.graph;
       return { id: 'mock-row-id' };
     },
@@ -288,6 +291,7 @@ beforeEach(() => {
   persistedGraph = null;
   servedGraph = buildGraph();
   pendingActionsForRead = [];
+  failGraphSave = false;
   telemetry.length = 0;
   setTestSink((name: string) => {
     telemetry.push({ name });
@@ -577,6 +581,104 @@ function baselineOn(graph: unknown, nodeId: string): unknown {
   return (observedStateOf(graph, nodeId) as { baseline?: unknown } | undefined)?.baseline;
 }
 
+describe('compound baseline answer and independently requested limit', () => {
+  const compound = 'Churn rate is 30%. Set the limit to at most 25%.';
+
+  function prepare(competing: boolean): GraphV3T {
+    const graph = mintEligibleGraph();
+    servedGraph = graph;
+    const pending = baselinePending();
+    pendingActionsForRead = [{
+      ...pending,
+      action: { ...pending.action, constraint_type: 'at_most', value: 10, unit: '%' },
+      preconditions: { graph_hash: computeAnalysisAffectingGraphHash(graph as never)! },
+    } as PendingAction, ...(competing ? [effectPending()] : [])];
+    return graph;
+  }
+
+  it.each([false, true])('saves baseline and new limit atomically (competing ask: %s)', async (competing) => {
+    const graph = prepare(competing);
+    const adapter = proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 25);
+    const { response, telemetry: result } = await runTurnExecutor(payload(compound), 'req-compound', {
+      routingAdapter: adapter, graphState: graph,
+    });
+
+    expect(adapter.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(result.failure_type).toBeNull();
+    expect(graphWrites()).toHaveLength(1);
+    const saved = graphWrites()[0]!.graph;
+    expect(constraintsOn(saved, TARGET_ID)).toHaveLength(1);
+    expect(constraintsOn(saved, TARGET_ID)[0]).toMatchObject({
+      constraint_id: 'gc-1', node_id: TARGET_ID, operator: '<=', value: 25, unit: '%', value_frame: 'level',
+    });
+    expect(observedStateOf(saved, TARGET_ID)).toMatchObject({ baseline: 0.3, unit: 'fraction', cap: 1 });
+    expect(constraintsOn(saved, FACTOR_ID)).toHaveLength(0);
+    expect(response.assistant_text).toContain('25%');
+    expect(response.assistant_text).toContain('30%');
+    expect(response.assistant_text).not.toContain('10%');
+    expect(response.assistant_text.match(/Updated constraint/g)).toHaveLength(1);
+  });
+
+  it.each([false, true])('preserves the limit for an answer with its own lexical warrant (competing: %s)', async (competing) => {
+    const graph = prepare(competing);
+    await runTurnExecutor(payload('Churn rate is at 30%.'), 'req-answer-only', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 30), graphState: graph,
+    });
+    expect(graphWrites()).toHaveLength(1);
+    expect(constraintsOn(stateAfterTurn(), TARGET_ID)[0]).toMatchObject({ value: 10, value_frame: 'level' });
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBe(0.3);
+  });
+
+  it.each([false, true])('rejects a stale model proposal instead of restoring the old limit (competing: %s)', async (competing) => {
+    const graph = prepare(competing);
+    const { response } = await runTurnExecutor(payload(compound), 'req-stale-proposal', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 10), graphState: graph,
+    });
+    expect(graphWrites()).toHaveLength(0);
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBeUndefined();
+    expect(response.assistant_text).not.toContain('Updated constraint');
+  });
+
+  it('does not let a general warrant authorise a constraint on another target', async () => {
+    const graph = prepare(true);
+    await runTurnExecutor(payload(compound), 'req-compound-wrong-subject', {
+      routingAdapter: proposesConstraintOnNodeAdapter(FACTOR_ID, FACTOR_LABEL, 25), graphState: graph,
+    });
+    expect(graphWrites()).toHaveLength(0);
+    expect(warrantDemotionFired()).toBe(true);
+  });
+
+  it('an unrelated instruction does not authorise changing the baseline target limit', async () => {
+    const graph = prepare(true);
+    await runTurnExecutor(payload('Churn rate is 30%. Rename the pilot to Launch.'), 'req-unrelated-instruction', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 25), graphState: graph,
+    });
+    expect(constraintsOn(stateAfterTurn(), TARGET_ID)[0]).toMatchObject({ value: 10, value_frame: 'level' });
+  });
+
+  it('the independent limit instruction does not authorise a different mutating handler', async () => {
+    const graph = prepare(true);
+    await runTurnExecutor(payload(compound), 'req-compound-wrong-action', {
+      routingAdapter: writesOntoTheOtherFactorAdapter(), graphState: graph,
+    });
+    expect(graphWrites()).toHaveLength(0);
+    expect(warrantDemotionFired()).toBe(true);
+  });
+
+  it('does not report success or retain either change when the atomic save fails', async () => {
+    const graph = prepare(true);
+    failGraphSave = true;
+    const { response } = await runTurnExecutor(payload(compound), 'req-compound-save-failure', {
+      routingAdapter: proposesConstraintOnNodeAdapter(TARGET_ID, TARGET_LABEL, 25), graphState: graph,
+    });
+    expect(persistedGraph).toBeNull();
+    expect(constraintsOn(stateAfterTurn(), TARGET_ID)[0]).toMatchObject({ value: 10 });
+    expect(baselineOn(stateAfterTurn(), TARGET_ID)).toBeUndefined();
+    expect(response.assistant_text).not.toContain('Updated constraint');
+    expect(response.assistant_text).not.toContain('30%');
+  });
+});
+
 describe("the product's offered answer commits, and licenses nothing else", () => {
   /** Extracted from the copy the product emits, never transcribed. */
   const offered = (() => {
@@ -723,7 +825,7 @@ describe("the product's offered answer commits, and licenses nothing else", () =
  * identical graph, identical handler, entity, unit and proposal value 30 —
  * changing ONLY the message — and it must still write 30%.
  */
-describe('an answer states a current level, never a new limit', () => {
+describe('an answer alone states a current level, never a new limit', () => {
   const offered = (() => {
     const copy = formatBaselineAskCollision({
       targetLabel: TARGET_LABEL,

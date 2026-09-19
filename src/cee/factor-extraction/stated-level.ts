@@ -515,7 +515,7 @@ function labelWordSet(label: string): Set<string> {
  * subject would let "competitor churn rate" bind a "Churn rate" node —
  * someone else's number wearing the target's name.
  */
-function subjectBindsToLabel(subjectWords: readonly string[], label: string): boolean {
+export function subjectBindsToLabel(subjectWords: readonly string[], label: string): boolean {
   const labelWords = labelWordSet(label);
   if (labelWords.size === 0) return false;
   return subjectWords.every((w) => labelWords.has(singularise(w.toLowerCase())));
