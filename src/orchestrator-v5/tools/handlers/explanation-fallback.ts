@@ -796,6 +796,161 @@ export function composeWhatWouldFlipFallback(
 }
 
 /**
+ * The LEADER-FREE clause that {@link ATTESTED_NO_FLIP_SENTENCE} ends with.
+ *
+ * Declared so the withheld voice below can be DERIVED from the shared constant
+ * by slicing, rather than restated as a second sentence somebody has to keep in
+ * step (CLAUDE.md trap 12). This is the same anti-mirror shape
+ * `coaching/grounded-sensitivity-body.ts` uses: declare the span you expect to
+ * find, assert it is there, transform — so a copy edit fails LOUD at module
+ * load instead of silently producing a sentence nobody reviewed.
+ */
+const ATTESTED_NO_FLIP_LEADER_CLAUSE = ' that would change which option leads.';
+
+/**
+ * {@link ATTESTED_NO_FLIP_SENTENCE} with its leader clause removed.
+ *
+ * The shared constant reads *"Within the tested range, no single factor on its
+ * own reached a tipping point **that would change which option leads**."* — the
+ * emphasised clause trips the `which_option_leads` pattern in
+ * `compose/leading-option-egress-guard.ts`, so the sentence cannot be spoken on
+ * a withheld turn. What survives the slice is the part that is true regardless
+ * of whether we may name a leader: no single factor reached a tipping point.
+ *
+ * DERIVED, NOT COPIED. If the shared sentence is reworded so it no longer ends
+ * with that clause, the assertion below throws at module load rather than
+ * letting this voice drift away from the one it is supposed to mirror.
+ */
+export const ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE = ((): string => {
+  if (!ATTESTED_NO_FLIP_SENTENCE.endsWith(ATTESTED_NO_FLIP_LEADER_CLAUSE)) {
+    throw new Error(
+      'explanation-fallback: ATTESTED_NO_FLIP_SENTENCE no longer ends with ' +
+        `"${ATTESTED_NO_FLIP_LEADER_CLAUSE}", so the leader-free variant used on withheld ` +
+        'turns can no longer be derived from it. Re-derive the slice against the new wording ' +
+        '— do not hand-copy a second sentence, which is how the two voices drift apart.',
+    );
+  }
+  return `${ATTESTED_NO_FLIP_SENTENCE.slice(0, -ATTESTED_NO_FLIP_LEADER_CLAUSE.length)}.`;
+})();
+
+/**
+ * THE WITHHELD SENSITIVITY VOICE — what the run already computed about what
+ * could change the outcome, said WITHOUT naming or ranking any option.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE DEFECT THIS CLOSES, MEASURED ON TWO REAL SESSIONS.
+ *
+ * `olumi-debug-73d5c152-20260919` and `olumi-debug-6edb1cdb-20260917`: the user
+ * asks *"What could change the outcome of this analysis?"*, the turn is
+ * `turn_kind: what_would_flip`, `outcome: answered`, and the entire served reply
+ * is a CONSTRAINT NOTICE about an unrelated limit. Not one word about
+ * sensitivity. Both captures carry
+ * `_diagnostic_trace.claim_safety.withheld_projection_reason =
+ * "leader_claim_replaced"`; the contrast session
+ * (`olumi-debug-f51850fc-20260916`, which answers the question properly) carries
+ * NO such field and `may_name_leading_option = true`. So the cause is not a
+ * missing capability — it is that {@link composeWhatWouldFlipFallback}'s answer
+ * names a leader, and `compose/withheld-explanation-answer.ts` must therefore
+ * replace it WHOLESALE. The sensitivity content is collateral.
+ *
+ * ⚠ AND EVERY SENTENCE OF THE EXISTING VOICE REALLY DOES TRIP THE GATE — this
+ * was settled by running `textAssertsLeadingOption` over them, not by reading
+ * the pattern list. The opener (`performs_best` / `leads`), the flip-evidence
+ * sentences (`which_option_leads`), the attested-no-flip constant
+ * (`which_option_leads`) and even {@link formatSensitivityDirection}'s output
+ * (`the_lead` — it renders "…strengthens **the lead**") are all caught. That is
+ * why this is a separate VOICE rather than a filter over the existing one:
+ * there is no subset of those sentences that survives.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * ── ⭐ THE CLAIM BOUNDARY ───────────────────────────────────────────────────
+ * This composer RE-STATES what the run holds. It computes nothing, and it adds
+ * no proposition the permitted voice does not already make:
+ *   - **No option is named and no ranking is asserted.** In particular the
+ *     `concrete` branch deliberately OMITS the permitted voice's
+ *     *"If that happened, X would lead instead."* sentence, which is exactly
+ *     the claim the withheld verdict forbids.
+ *   - **No magnitude and no direction.** {@link formatSensitivityDirection} is
+ *     not called: its output asserts a lead. A factor label is a name.
+ *   - **No threshold value.** Same reason the permitted voice omits it — the
+ *     scale-safe number belongs to the flip-proposal chip.
+ *
+ * ── SILENCE RATHER THAN A HEDGE ─────────────────────────────────────────────
+ * Each rung is emitted only when the data for it is present, and `null` is
+ * returned when no rung qualifies. There is no "we could not determine…"
+ * sentence: a disclosure that asserts something the code has not established is
+ * worse than saying nothing, and the caller already ships an honest disclosure
+ * about the withheld verdict. An absent driver list costs the driver sentence
+ * and nothing else.
+ *
+ * @param projection  the same `AnalysisProjectionSummary` the permitted voice
+ *                    reads. `leading_option` is NOT required here — unlike
+ *                    {@link composeWhatWouldFlipFallback}, this voice never
+ *                    speaks about it.
+ * @param flipSummary the same `FlipSummary` the permitted voice reads, already
+ *                    filtered by `filterFlipSummaryEntries` at the call site so
+ *                    an option-pinned lever is never named as a thing to test.
+ * @returns the body, or `null` when the run proves nothing sayable.
+ */
+export function composeWithheldSensitivityBody(
+  projection: AnalysisProjectionSummary | null | undefined,
+  flipSummary: FlipSummary | null | undefined,
+): string | null {
+  const sentences: string[] = [];
+
+  // RUNG 1 — the drivers. Same selector and same materiality gate as the
+  // permitted voice (`nameableDrivers`, DGAI #341), so the two voices can never
+  // disagree about WHICH factors are nameable. Only the framing differs: the
+  // permitted voice follows each name with `formatSensitivityDirection`, which
+  // asserts a lead and is therefore dropped here rather than reworded.
+  const drivers = nameableDrivers(projection?.top_drivers ?? []).slice(0, 2);
+  if (drivers.length === 1) {
+    sentences.push(`Movement on ${formatDriver(drivers[0]!)} would shift this result the most.`);
+  } else if (drivers.length >= 2) {
+    sentences.push(
+      `Movement on ${formatDriver(drivers[0]!)} or ${formatDriver(drivers[1]!)} would shift this result the most.`,
+    );
+  }
+
+  // RUNG 2 — the flip evidence, the most direct answer to the question asked.
+  // Same ladder as the permitted voice, minus every clause that names or ranks
+  // an option. `'none'` and absent both yield nothing: no flip thresholds means
+  // no flip verdict to report, and the robustness-band heuristic the permitted
+  // voice falls back to speaks in terms of the lead.
+  const flip =
+    flipSummary !== null && flipSummary !== undefined && flipSummary.overall_status !== 'none'
+      ? flipSummary
+      : null;
+  if (flip !== null) {
+    if (flip.overall_status === 'no_practical_flip') {
+      sentences.push(ATTESTED_NO_FLIP_SENTENCE_LEADER_FREE);
+    } else if (flip.overall_status === 'insufficient_data') {
+      sentences.push('The analysis did not isolate a single-factor tipping point here.');
+    } else if (flip.overall_status === 'concrete') {
+      // Only entries with a finite threshold may be named as levers to test —
+      // the same filter the permitted voice applies. ⛔ The alternative-winner
+      // sentence that follows this one in the permitted voice is deliberately
+      // NOT reproduced: it names the option that would lead, which is precisely
+      // what the withheld verdict forbids.
+      const named = flip.entries
+        .filter((e) => typeof e.flip_value === 'number' && Number.isFinite(e.flip_value))
+        .slice(0, 2);
+      if (named.length === 1) {
+        sentences.push(
+          `${named[0]!.factor_label} is the most likely single factor to reach a tipping point, so it is the clearest one to test.`,
+        );
+      } else if (named.length >= 2) {
+        sentences.push(
+          `${named[0]!.factor_label} and ${named[1]!.factor_label} are the most likely single factors to reach a tipping point, so they are the clearest ones to test.`,
+        );
+      }
+    }
+  }
+
+  return sentences.length > 0 ? sentences.join(' ') : null;
+}
+
+/**
  * `explain_from_structure` fallback — no analysis required. Sonnet rarely
  * populates `answer_text` for generic structural prompts ("what factor
  * most influences my decision?"); this composer therefore acts as the
