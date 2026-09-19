@@ -257,8 +257,10 @@ import {
 import { normaliseBriefText } from '../orchestrator-v5/session/normalise-brief-text.js';
 import { normaliseReplayMessage } from '../orchestrator-v5/compose/looping-chip-guard.js';
 import { isAnalyticalQuestion } from '../orchestrator-v5/routing/analytical-question-guard.js';
+import { resolveExplicitConstraintEdit } from '../orchestrator-v5/routing/explicit-constraint-edit.js';
 import {
   hasExplicitNoModelChangeIntent,
+  hasConstraintMutationSignal,
   isBoundedNonMutationAnalyticalRequest,
 } from '../orchestrator-v5/routing/mutation-warrant.js';
 import {
@@ -2515,7 +2517,7 @@ function isPriorAnalysisFreshFromRequest(
 type ProposalConfirmResolution =
   | {
       readonly kind: 'suppress';
-      readonly outcome: 'suppressed_live' | 'suppressed_read_failed';
+      readonly outcome: 'suppressed_live' | 'suppressed_read_failed' | 'clarify_expired';
       readonly liveCount: number;
     }
   | {
@@ -2570,6 +2572,7 @@ async function resolveProposalConfirmAtRoute(
    * byte-identical.
    */
   replayMessage: string | null = null,
+  renewalChipId?: string | null,
 ): Promise<ProposalConfirmResolution> {
   let pendings: readonly PendingAction[];
   try {
@@ -2623,6 +2626,13 @@ async function resolveProposalConfirmAtRoute(
       expiredProposals.map((pa) => resolveProposalRenderCopy(pa.action)),
     );
     if (expiredMatches.length > 0) {
+      const selected = expiredMatches.length === 1 ? expiredProposals[expiredMatches[0]!] : undefined;
+      if (selected?.action.kind === 'apply_proposed_change' &&
+          selected.action.inline_patch?.handler_id === 'add_constraint' &&
+          renewalChipId !== null && (renewalChipId === undefined || selected.chip_id === renewalChipId)) {
+        // The executor may renew this offer, but cannot apply expired consent.
+        return { kind: 'suppress', outcome: 'clarify_expired', liveCount: 0 };
+      }
       return { kind: 'clarify', outcome: 'clarify_expired' };
     }
     return { kind: 'pass', outcome: 'replay_no_match' };
@@ -2645,6 +2655,11 @@ async function resolveProposalConfirmAtRoute(
   // (→ `clarify_expired`) rather than a misleading `suppressed_live`.
   const notExpired = proposals.filter((pa) => !isPendingActionExpired(pa, nowMs));
   if (notExpired.length === 0) {
+    if (pendings.length === 1 && proposals[0]?.action.kind === 'apply_proposed_change' &&
+        proposals[0].action.inline_patch?.handler_id === 'add_constraint' &&
+        renewalChipId !== null && (renewalChipId === undefined || proposals[0].chip_id === renewalChipId)) {
+      return { kind: 'suppress', outcome: 'clarify_expired', liveCount: 0 };
+    }
     return { kind: 'clarify', outcome: 'clarify_expired' };
   }
   const requestGraphHash =
@@ -2652,7 +2667,10 @@ async function resolveProposalConfirmAtRoute(
   const graphSafe =
     requestGraphHash == null
       ? notExpired
-      : notExpired.filter((pa) => pa.preconditions.graph_hash === requestGraphHash);
+      : notExpired.filter((pa) =>
+          // Typed constraints are validated against the executor's canonical graph.
+          (pa.action.kind === 'apply_proposed_change' && pa.action.inline_patch?.handler_id === 'add_constraint') ||
+          pa.preconditions.graph_hash === requestGraphHash);
   if (graphSafe.length === 0) {
     return { kind: 'clarify', outcome: 'clarify_hash_mismatch' };
   }
@@ -5722,6 +5740,17 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
       isAnalyticalQuestion(ingress.message) || boundedNonMutationAnalytical;
     const positiveEditRegexHit = EDIT_GRAPH_POSITIVE_REGEX.test(ingress.message);
     const negativeEditRegexHit = EDIT_GRAPH_NEGATIVE_REGEX.test(ingress.message);
+    let explicitConstraintEditDetected = false;
+    if (!modelChangeRefused && (positiveEditRegexHit || hasConstraintMutationSignal(ingress.message))) {
+      try {
+        const graphForConstraint = GraphV3.safeParse(await loadPersistedGraphOnce());
+        if (graphForConstraint.success) {
+          explicitConstraintEditDetected = resolveExplicitConstraintEdit(ingress.message, graphForConstraint.data).status !== 'unmatched';
+        }
+      } catch {
+        // The existing route owns the memoised read failure and its recovery.
+      }
+    }
     // Part-accounting conservation law (2026-07-20): the suppressor stands
     // DOWN for mixed value+structural messages so both halves reach the
     // edit_graph lane together — see shouldSuppressEditDispatchForValueUpdate.
@@ -5978,6 +6007,9 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         requestId,
         extensions.graphState ?? null,
         isConfirmationShaped ? null : ingress.message,
+        ingress.source === 'chip_click' || ingress.source === 'chip'
+          ? ingress.chip?.action_type === 'add_constraint' ? ingress.chip.id : null
+          : undefined,
       );
       emit(TelemetryEvents.V5EditGraphProposalConfirmResolved, {
         request_id: requestId,
@@ -6026,7 +6058,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
     // shared bounded classifier owns the turn, every legacy edit intercept
     // stands down; the normal router gets exactly one chance to answer it.
     const bypassEditHandling =
-      proposalConfirmSuppressed || stateQuerySuppressed || boundedNonMutationAnalytical || modelChangeRefused;
+      proposalConfirmSuppressed || explicitConstraintEditDetected || stateQuerySuppressed || boundedNonMutationAnalytical || modelChangeRefused;
 
     // ══════════════════════════════════════════════════════════════════════
     // ⭐⭐ ROADMAP 2.1353 — THE TWO EDIT-CLARIFY INTERCEPTS MUST REMEMBER ASKING.
@@ -6865,6 +6897,7 @@ export async function ceeOrchestratorRouteV2(app: FastifyInstance): Promise<void
         answeredAskClaim) &&
       !modelChangeRefused &&
       !proposalConfirmSuppressed &&
+      !explicitConstraintEditDetected &&
       // Edge-chip door (ROADMAP 1.187 / #30, HARD GATE before Lane U). A typed
       // mutation chip_click (source==='chip_click' with a defined, non-readiness
       // `action_type` — e.g. `adjust_edge_strength`/`set_factor_value`) whose

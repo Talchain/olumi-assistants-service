@@ -128,10 +128,10 @@ describe("opposite-direction twins — genuine bounds must still mint", () => {
     // name,                          brief,                          target,        value,  unit
     ["currency threshold with `over`", "revenue over £2m",            "fac_revenue", 2000000, "£"],
     ["currency threshold, verb lead",  "grow revenue over £2m this year", "fac_grow_revenue", 2000000, "£"],
-    ["percent floor with `above`",     "keep margin above 78%",       "fac_keep_margin", 0.78, "%"],
+    ["percent floor with `above`",     "keep margin above 78%",       "fac_margin", 0.78, "%"],
     // `above` has no durative reading in English — a temporal unit does not
     // make it one. This is the twin of every suppressed case above.
-    ["temporal floor with `above`",    "keep average tenure above 12 months", "fac_keep_average_tenure", 12, "months"],
+    ["temporal floor with `above`",    "keep average tenure above 12 months", "fac_average_tenure", 12, "months"],
     // `percent` is the one non-temporal member of the word-unit alphabet, and
     // this twin is what makes that classification load-bearing: widen the
     // durative complement class to the WHOLE alphabet and this floor vanishes.

@@ -312,6 +312,8 @@ import {
   type ValueBatchResumeRead,
 } from './handlers/readiness-value-batch-resume.js';
 import { buildGenericEditGraphHandlerFact } from './handlers/edit-graph-fact-builder.js';
+import { buildExpiredConstraintRenewal } from './routing/expired-constraint-renewal.js';
+import { resolveExplicitConstraintEdit } from './routing/explicit-constraint-edit.js';
 
 /**
  * ⭐ THE TWO SENTENCES A DECLINED VALUE BATCH IS ALLOWED TO SAY.
@@ -4758,6 +4760,58 @@ export async function runTurnExecutor(
         context.most_recent_pending_actions ?? [],
         options.chipClickResumeIntent,
       );
+      const constraintRenewal = buildExpiredConstraintRenewal({
+        message: resumerMessage,
+        pendingActions: payload.source !== 'chip_click' && payload.source !== 'chip'
+          ? pendingsForShortConfirm
+          : payload.chip?.action_type === 'add_constraint'
+            ? pendingsForShortConfirm.filter((pending) => pending.chip_id === payload.chip?.id)
+            : [],
+        scenarioId: context.session_id,
+        currentGraphHash: currentAnalysisGraphHashForTurn ?? freshness?.current_graph_hash,
+        graphNodes: (canonicalReadinessGraphForRun as GraphStateIngress | null)?.nodes ?? [],
+        existingConstraints: (canonicalReadinessGraphForRun as { goal_constraints?: PersistedConstraintRow[] } | null)?.goal_constraints ?? [],
+        priorFactsWithTurn: context.prior_facts_with_turn,
+        emittedAtIso: new Date().toISOString(),
+        registry: options.handlerRegistry ?? getDefaultRegistry(),
+      });
+      if (constraintRenewal.status === 'renewed' || constraintRenewal.matchedExpiredConstraint) {
+        const renewed = constraintRenewal.status === 'renewed' ? constraintRenewal : null;
+        const expiryText = renewed
+          ? `That offer expired, so nothing has changed. I can offer ${renewed.changeDescription} again. ` +
+            (renewed.constraintValueFrame === 'delta' ? 'This limit applies to a change from the baseline. ' : '') +
+            'Please confirm this renewed offer to save the limit.' +
+            (renewed.residualDisclosure ? ` ${renewed.residualDisclosure}` : '')
+          : 'That offer expired and I cannot safely renew it against the current model. ' +
+            'Nothing has changed. Please restate the limit and the quantity it applies to.';
+        const expiryResponse = composeAnswer({
+          answerKind: 'functional', assistant_text: expiryText, stage: context.stage,
+          suggested_actions: renewed ? [renewed.chip] : [],
+        });
+        sonnetTextForLog = expiryText;
+        resolvedTurnClass = 'direct_answer';
+        intentClass = 'converse';
+        responseTypeForObs = 'direct_answer';
+        llmCallsUsed = 0;
+        stagesCompleted.push('orient', 'compose');
+        try {
+          const committed = await commitTurn(expiryResponse, {
+            scenario_id: context.session_id, turn_id: context.request_id,
+            turn_class: 'direct_answer', handler_id: null,
+            request_hash: computeRequestHash(payload), llm_calls_used: 0,
+            duration_ms: Date.now() - startedAt, handler_facts: [],
+            ...(renewed ? { pending_actions: [renewed.pending] } : {}),
+          });
+          commitPerformed = committed.performed;
+          stagesCompleted.push('commit');
+          response = committed.response;
+        } catch (error) {
+          log.error({ request_id: requestId, err: serialiseError(error) }, 'Constraint renewal commit failed');
+          failureType = INTERNAL_TO_WIRE.STATE_COMMIT_FAILED;
+          response = buildFailureResponse('STATE_COMMIT_FAILED', context.stage, { phase: 'commit' }, recoveryCtx());
+        }
+        return finalizeRun();
+      }
       const shortConfirmDispatch = tryShortConfirmResume({
         message: resumerMessage,
         pendingActions: pendingsForShortConfirm,
@@ -6484,6 +6538,29 @@ export async function runTurnExecutor(
       // bag (or a non-executable handler) yields no proposal → routingResult
       // stays undefined → the turn falls through BENIGNLY to the existing
       // text/LLM path (the un-routed-intent fall-through contract, #634).
+      if (routingResult === undefined && payload.source !== 'chip_click' && payload.source !== 'chip') {
+        const constraintEdit = resolveExplicitConstraintEdit(payload.message, canonicalReadinessGraphForRun as GraphStateIngress | null);
+        if (constraintEdit.status === 'clarify') {
+          return commitProposedChangeRecovery('invalid', 'explicit_constraint_needs_clarification', {
+            assistantText: 'I have not changed the model. Please state one limit, the quantity it applies to, and its units so I can save it without changing the current value.',
+          });
+        }
+        if (constraintEdit.status === 'ready' &&
+            (options.validationRegistry ?? HANDLER_VALIDATION_REGISTRY).add_constraint !== undefined &&
+            resolveHandler(options.handlerRegistry ?? getDefaultRegistry(), 'add_constraint') !== null) {
+          routingResult = {
+            type: 'tool_call', proposal: { intent_class: 'execute', action: constraintEdit.proposal },
+            orientationText: '', rawResult: {
+              content: [], stop_reason: 'tool_use', usage: { input_tokens: 0, output_tokens: 0 },
+              model: 'deterministic-explicit-constraint', latencyMs: 0,
+            },
+            llmCallCount: 0, droppedActions: [],
+          };
+          llmCallsUsed = 0;
+          sonnetTextForLog = '';
+          stagesCompleted.push('orient');
+        }
+      }
       const typedChipActionType =
         payload.source === 'chip_click' || payload.source === 'chip'
           ? payload.chip?.action_type
@@ -9923,6 +10000,16 @@ export async function runTurnExecutor(
     // ==================================================================
     if (routingResult.type === 'tool_call' && routingResult.proposal.intent_class === 'execute') {
       let action = routingResult.proposal.action;
+      if (action.handler_id === 'add_constraint' && contextGraphSelection.status === 'canonical') {
+        // Renewal, binding, validation and the receipt must use one saved graph.
+        const constraintLookup = buildGraphLookup(canonicalReadinessGraphForRun as GraphStateIngress | null);
+        if (constraintLookup.kind === 'ok') {
+          graphLookupForValidate = constraintLookup.lookup;
+          graphLookupBuildReason = constraintLookup.kind;
+          graphLookupStatsForLog = constraintLookup.stats;
+          graphStateForTurn = canonicalReadinessGraphForRun as GraphStateIngress;
+        }
+      }
       const proposedHandlerId = action.handler_id as V5ActionType;
       resolutionStatus = action.entity.resolution_status;
       proposedHandlerIdForLog = action.handler_id;
