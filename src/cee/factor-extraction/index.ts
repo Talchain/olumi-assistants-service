@@ -812,6 +812,12 @@ function resolveTrailingMetric(
 /** The named refusal reasons for a goal (target, baseline) pair. */
 type GoalPairRefusalReason =
   | "mixed_percent_pair"
+  // One side of the pair carried a magnitude suffix and the other did not, so
+  // the two numbers are not readings of one quantity. Named apart from
+  // `mixed_percent_pair` because they are different disagreements: that one is
+  // about the UNIT, this one about the SCALE, and a reason that names the wrong
+  // rule teaches the next reader the wrong thing.
+  | "mixed_magnitude_pair"
   | "currency_mismatch"
   | "metric_noun_mismatch"
   | "currency_vs_metric_noun"
@@ -1518,7 +1524,31 @@ export const GOAL_BASELINE_PATTERN_SOURCES_FOR_DRIFT_GUARD: Readonly<Record<stri
 function resolveAmount(
   groups: Record<string, string | undefined>,
   prefix: string,
-): { readonly raw: number; readonly isPercent: boolean; readonly currency?: string } | null {
+): {
+  readonly raw: number;
+  readonly isPercent: boolean;
+  readonly currency?: string;
+  /**
+   * ⭐⭐ DID THIS SIDE CARRY A MAGNITUDE SUFFIX ("million", "k", "bn")?
+   *
+   * Carried because the multiplier was being APPLIED HERE AND THE FACT
+   * DISCARDED — the caller received two bare numbers and could no longer tell
+   * that one had a suffix and the other did not. That is the evidence the
+   * pair-level guard below needs, and it was computed one line away and thrown
+   * away.
+   *
+   * ⚠ A BOOLEAN, NOT THE MULTIPLIER. `resolveMagnitude(undefined)` is 1 and so
+   * is `resolveMagnitude("")`, so comparing multipliers cannot distinguish "no
+   * suffix" from "a suffix meaning one". The presence of the capture is the
+   * fact; its value is not.
+   */
+  readonly hasMagnitude: boolean;
+} | null {
+  // The words branch resolves a spelled-out amount whose magnitude is INSIDE
+  // the phrase ("two and a half million"), so the pair-level suffix question
+  // does not apply to it and it reports `false` rather than guessing.
+  const magnitudeCapture = groups[`${prefix}Mult`];
+  const hasMagnitude = magnitudeCapture !== undefined && magnitudeCapture !== '';
   // L67 — the words branch resolves through the ONE cardinal parser. A phrase
   // the parser cannot fold returns null and the whole match yields nothing:
   // fail closed, never a fragment ("two and a half million" must not become 2).
@@ -1530,14 +1560,16 @@ function resolveAmount(
       raw: parsed,
       isPercent: groups[`${prefix}Pct`] === '%',
       currency: groups[`${prefix}Cur`],
+      hasMagnitude: false,
     };
   }
   const parsed = parseAmountDigits(groups[prefix]);
   if (parsed === null) return null;
   return {
-    raw: parsed * resolveMagnitude(groups[`${prefix}Mult`]),
+    raw: parsed * resolveMagnitude(magnitudeCapture),
     isPercent: groups[`${prefix}Pct`] === '%',
     currency: groups[`${prefix}Cur`],
+    hasMagnitude,
   };
 }
 
@@ -1737,6 +1769,42 @@ function resolveOneGoalMatch(m: RegExpExecArray): GoalPairResolution | undefined
     // the wrong rule teaches the next reader the wrong thing.
     if (to.isPercent !== from.isPercent) {
       return refuseGoalPair("mixed_percent_pair", {}, normaliseTargetValue(to), span);
+    }
+
+    // ⭐⭐ BOTH OR NEITHER — one side carried a magnitude suffix and the other
+    // did not, so the pair is not two readings of one quantity.
+    //
+    // MEASURED LIVE (19 Sep, a real user brief): "grow ARR from 8 to 11 million
+    // within 12 months" produced `from.raw = 8` and `to.raw = 11,000,000` from
+    // ONE match — the suffix binds to the second amount only, and
+    // `resolveAmount` applied `resolveMagnitude(undefined) === 1` to the first
+    // without anything noticing. Downstream both were divided by the same cap
+    // (correctly — that guard works), giving threshold 0.8 beside a baseline of
+    // 5.8e-7: a STRUCTURAL ZERO probability, presented with full confidence.
+    // The baseline was wrong by roughly 1,000,000x.
+    //
+    // ⭐ THE RULE IS NOT NEW AND NOTHING IS INVENTED HERE. It is already this
+    // repo's doctrine at `utils/amount-range.ts:936` —
+    // `if (hasFromMag !== hasToMag) return null;` — and already wired into the
+    // from-to CHANGE pattern. The GOAL pair is the one pair-former that never
+    // called it. Measured contrast over this file's goal-pair span:
+    // `resolveAmountPairBothOrNeither` 0 hits, `resolveMagnitude` 1.
+    //
+    // ⚠ AND IT NEEDS NO CONSTANT, WHICH IS THE WHOLE POINT. The obvious guard
+    // is a ratio or order-of-magnitude threshold between the two numbers — a
+    // CHOSEN bound, and this lane has one predicate that oscillated four rounds
+    // on exactly that kind of arbitrary constant. `hasMagnitude` is a boolean
+    // read straight off the parse: the disagreement is a STRUCTURAL FACT, not a
+    // magnitude to be judged.
+    //
+    // ⚠ WHY REFUSE RATHER THAN DISTRIBUTE THE SUFFIX. Reading "from 8 to 11
+    // million" as 8 MILLION is the likely intent and is still a GUESS about
+    // what the user meant. A refused pair leaves ISL withholding honestly, which
+    // it already does for the 82.6% of goals carrying no baseline at all; a
+    // distributed suffix would put an invented number on the user's own goal.
+    // Suppress over guess — the same trade `mixed_percent_pair` above makes.
+    if (to.hasMagnitude !== from.hasMagnitude) {
+      return refuseGoalPair("mixed_magnitude_pair", {}, normaliseTargetValue(to), span);
     }
 
     // ⚠ ROADMAP 2.353 (review A2) — A DECREASE IS REFUSED, NOT MINTED, AND THE
