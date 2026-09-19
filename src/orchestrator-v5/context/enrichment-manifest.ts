@@ -222,6 +222,7 @@ export const ENRICHMENT_PRODUCER_MANIFEST: ReadonlySet<string> = new Set<string>
   'coaching_signal_id', // CEE-injected: coaching/coaching-signal-application.ts:150
   'coaching_signal_turn_id', // CEE-injected: coaching/coaching-signal-application.ts:151
   'coaching_signal_produced_at', // CEE-injected: coaching/coaching-signal-application.ts:152
+  'selected_lens', // CEE-injected: compose/selected-lens-record.ts (written in turn-executor.ts, post-compose)
   '_diagnostics', // CEE-injected (DEBUG only, CEE_TURN_DEBUG_ENABLED): coaching/decision-review-enricher.ts:345-348
   // ── Legacy V1 inbound-tolerance ───────────────────────────────────────────
   // Not emitted by the live PLoT /v2/run producer (RunResponseV3 has no
@@ -404,6 +405,8 @@ const R_VOI_NOT_COACH_NARRATED =
   'Value-of-information MAGNITUDES — transported to the UI (P0B_SAFE_TRANSPORT_ENRICHMENT_KEEP) for a deterministic ranking surface with NO magnitudes, and deliberately withheld from the analysis→LLM projection: the values are outcome-unit / percentage-point magnitudes, and narrating them in prose is the "worth X" / "by N pp" claim class the no-EVPI-display doctrine forbids. Adding a MAGNITUDE deriver is a doctrine ruling, not a wiring gap. See the block comment above for what changed for factor_evppi and what did not.';
 const R_COACHING_SIGNAL =
   'CEE-injected coaching-signal marker for the next turn coaching-cache reader (coaching-signal-application.ts) — routing metadata, not analysis content.';
+const R_SELECTED_LENS =
+  'CEE-injected record of the lens THIS analysis turn selected (compose/selected-lens-record.ts) — block-identity metadata for a later rebuild, not analysis content. The coach is narrated by the lens BLOCK on the turn that selects it; re-narrating the id would be a second voice for one decision.';
 const R_LEGACY_COMPACT =
   'Legacy V1 inbound-tolerance array — not emitted by the live /v2/run producer; consumed by the shared compactAnalysis projection (results[].factor_sensitivity / results[].robustness), not the row-#2 enrichment derivers.';
 
@@ -478,6 +481,7 @@ export const ENRICHMENT_ANALYSIS_LLM_SKIP: ReadonlyMap<string, string> = new Map
   ['coaching_signal_id', R_COACHING_SIGNAL],
   ['coaching_signal_turn_id', R_COACHING_SIGNAL],
   ['coaching_signal_produced_at', R_COACHING_SIGNAL],
+  ['selected_lens', R_SELECTED_LENS],
   ['_diagnostics', R_INTERNAL],
   ['results', R_LEGACY_COMPACT],
   // V7-C slice 1b — transported to the UI, never narrated by the coach.
