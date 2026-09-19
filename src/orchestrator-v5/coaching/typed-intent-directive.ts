@@ -518,9 +518,39 @@ export function literalProtocolSteps(protocol: DSKProtocol): readonly string[] {
  * `[chosen option]` name the very thing `mayNameLeadingOption` and
  * `analysisReadyPermitsLeaderNaming` exist to withhold. Resolving them would
  * pipe a leader designation into the coach's context through a channel neither
- * rail watches — CLAUDE.md trap 21, re-opened through a new door. Any future
- * work that resolves placeholders MUST conjoin those two verdicts; excluding
- * them here is what makes this change safe to ship without touching either.
+ * rail watches — CLAUDE.md trap 21, re-opened through a new door.
+ *
+ * ⛔⛔ AND THE CONJUNCTION IS THE FLOOR, NOT THE CEILING. THE ORIGINAL VERSION
+ * OF THIS NOTE SAID "MUST CONJOIN THOSE TWO VERDICTS" AND THAT IS NOT ENOUGH.
+ * Corrected 19 Sep after the Reasoning-panel lane showed why, and the old text
+ * is corrected rather than deleted (trap 14) because someone will otherwise
+ * re-derive the weaker rule.
+ *
+ * Paul ruled that the Reasoning panel must state NO CONCLUSION — *"we are a
+ * reasoning enhancement tool, not a generic AI and analysis answering tool"* —
+ * and the panel lane shipped it: the glance headline that named the leading
+ * option is DELETED (UI #1694, merged and serving, witnessed with
+ * `analysis-new-glance-headline` absent from a real post-run panel). The panel
+ * now names a leader ONLY inside the options comparison, with per-option
+ * provenance.
+ *
+ * ⇒ Resolving `[winning option]` would name a leader in COACHING PROSE
+ * IMMEDIATELY BESIDE a panel that has deliberately refused to name one. Two
+ * surfaces, one run, opposite answers — and a user will read the coach as the
+ * authority, because prose reads as a judgement while a comparison table reads
+ * as data.
+ *
+ * ⭐ SO THE QUESTION IS CAPABILITY, NOT PERMISSION. A conjunction answers *"may
+ * we say it on THIS TURN?"*. The panel ruling implies the stronger thing: *"the
+ * coach should not be in the business of saying it AT ALL."* Those are two
+ * different questions and only the first has a rail. **Before resolving any
+ * leader-bearing placeholder, settle the second with whoever owns the panel —
+ * `github-60` has offered to be the consumer-side check and can say what the
+ * panel will and will not display for a given payload.**
+ *
+ * Excluding them here is what makes this change safe to ship without touching
+ * either rail — and the exclusion, not the conjunction, is what is protecting
+ * the product today.
  */
 export function buildCoachingMethodDirective(
   intent: RoutedCoachingIntent,
