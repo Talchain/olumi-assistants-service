@@ -36,6 +36,7 @@ import {
   buildUserMessage,
 } from '../route-with-tool-use.js';
 import type { ContextPack } from '../../context/context-pack-assembler.js';
+import { TARGET_FIT_DEFINITION } from '../../format/format-analysis-for-context.js';
 
 const USER_MESSAGE = 'Which option looks strongest?';
 
@@ -147,5 +148,70 @@ describe('the simulation-share reading reaches the coach on both admission arms'
     // The qualification lines stay exactly where they were.
     expect(PROVISIONAL_FIGURES_INSTRUCTION).toContain('machine-authored');
     expect(PROVISIONAL_FIGURES_INSTRUCTION).toContain('No winner or contest framing');
+  });
+});
+
+/**
+ * ⭐⭐⭐ A DISPLAY OPTION CAN CARRY TWO PERCENTAGES, AND THEY MEAN DIFFERENT
+ * THINGS.
+ *
+ * `DisplaySafeAnalysisOption` declares BOTH `win_probability` and `target_fit`
+ * (`format/format-analysis-for-context.ts:39-60`), and its own docblock records
+ * the live divergence: **89% win vs 29% target-fit**. {@link TARGET_FIT_DEFINITION}
+ * is the pack's authority on the distinction.
+ *
+ * The first cut of `SIMULATION_SHARE_MEANING_INSTRUCTION` opened *"Each
+ * option's percentage in `analysis` is how often that option scored highest"* —
+ * a blanket claim that silently redefined `target_fit` as a simulation share
+ * and contradicted that authority INSIDE THE SAME PACK. Two definitions of one
+ * number is exactly what this instruction exists to prevent, so it had
+ * reproduced its own defect one field over.
+ *
+ * The detector is unchanged and still keys on `win_probability` — it was never
+ * the thing that was wrong.
+ */
+const WITH_BOTH_PERCENTAGES = {
+  status: 'ok',
+  options: [
+    // The live case from the display option's own docblock.
+    { label: 'Adopt RudderStack', win_probability: '89%', target_fit: '29%' },
+    { label: 'Adopt Segment', win_probability: '11%', target_fit: '64%' },
+  ],
+};
+
+describe('the win-share definition does not reach across and redefine target_fit', () => {
+  it('⛔ the instruction never makes a blanket claim about "each option\u2019s percentage"', () => {
+    // The exact shape of the defect: a claim quantified over every percentage
+    // on the option rather than over the one key it is about.
+    expect(SIMULATION_SHARE_MEANING_INSTRUCTION).not.toContain("Each option's percentage");
+    expect(SIMULATION_SHARE_MEANING_INSTRUCTION).toContain('`win_probability`');
+  });
+
+  it('⭐ PERMITTED arm, both percentages present: the reading fires and target_fit keeps its own meaning', () => {
+    const message = buildUserMessage(packWith(WITH_BOTH_PERCENTAGES), USER_MESSAGE);
+    expect(message).toContain(SIMULATION_SHARE_MEANING_INSTRUCTION);
+    expect(message.split(RATIFIED_READING).length - 1).toBe(1);
+    expect(message).toContain('`target_fit`, when it is present, is a DIFFERENT quantity');
+  });
+
+  it('⭐ PROVISIONAL arm, both percentages present: same, and still exactly once', () => {
+    const message = buildUserMessage(
+      packWith(WITH_BOTH_PERCENTAGES, { status: 'provisional_figures' }),
+      USER_MESSAGE,
+    );
+    expect(message).toContain(SIMULATION_SHARE_MEANING_INSTRUCTION);
+    expect(message).toContain(PROVISIONAL_FIGURES_INSTRUCTION);
+    expect(message.split(RATIFIED_READING).length - 1).toBe(1);
+    expect(message).toContain('`target_fit`, when it is present, is a DIFFERENT quantity');
+  });
+
+  it('the two authorities in the pack AGREE about what target_fit is', () => {
+    // Derived, not restated: both are read from source. If either moves to
+    // calling target_fit a win share, or stops distinguishing the two, this
+    // REDs — which is the drift the finding was about.
+    expect(TARGET_FIT_DEFINITION).toContain('meets your target');
+    expect(TARGET_FIT_DEFINITION).toContain('win_probability only says how often');
+    expect(SIMULATION_SHARE_MEANING_INSTRUCTION).toContain('meets the target');
+    expect(SIMULATION_SHARE_MEANING_INSTRUCTION).toContain('It is not a simulation share');
   });
 });

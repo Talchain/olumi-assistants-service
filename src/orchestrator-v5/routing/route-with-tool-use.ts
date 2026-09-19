@@ -2000,8 +2000,17 @@ export const MARGIN_MEANING_INSTRUCTION = [
  */
 export const SIMULATION_SHARE_MEANING_INSTRUCTION = [
   '## What a simulation share is (deterministic authority)',
-  "Each option's percentage in `analysis` is how often that option scored highest against the goal across the simulated runs.",
+  // ⚠ SCOPED TO ONE KEY, NOT TO "each option's percentage". A display option can
+  // carry TWO percentages — `win_probability` AND `target_fit` — and
+  // `format-analysis-for-context.ts` is the authority that they are DIFFERENT
+  // quantities ("an option can win most often yet still be unlikely to meet the
+  // target"; live case 89% win vs 29% target-fit). The first cut of this line
+  // said "each option's percentage", which silently redefined `target_fit` as a
+  // simulation share and contradicted that authority inside the same pack — two
+  // definitions of one number is the defect this instruction exists to prevent.
+  "An option's `win_probability` in `analysis` is how often that option scored highest against the goal across the simulated runs.",
   '- A simulation share is how often an option scored highest against the goal, not the probability that the goal is achieved. Do not restate it as a chance of success.',
+  '- `target_fit`, when it is present, is a DIFFERENT quantity: the modelled probability that the option meets the target. It is not a simulation share, the two can diverge sharply, and neither may be described in the other\u2019s terms.',
   '- It is not a confidence in the evidence either. The figures come from estimates in this model, so they move when those estimates change.',
   '- Do not expose field names, status tokens or internal identifiers.',
 ].join('\n');
