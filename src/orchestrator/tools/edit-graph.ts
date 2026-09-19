@@ -109,6 +109,13 @@ import {
   type LabelValueDivergence,
 } from "../../orchestrator-v5/label-value-divergence.js";
 import {
+  detectStatedLevelDivergences,
+  buildStatedLevelDivergenceDescription,
+  buildStatedLevelDivergenceNote,
+  buildStatedLevelDivergenceActions,
+  type StatedLevelDivergence,
+} from "../../orchestrator-v5/stated-level-divergence.js";
+import {
   findSuccessClaimHit,
   findForbiddenPhraseHit,
   findEditInternalsHit,
@@ -1950,12 +1957,33 @@ export function buildAppliedChanges(
   const divergenceByIndex = new Map<number, LabelValueDivergence>();
   for (const d of divergences) divergenceByIndex.set(d.index, d);
 
+  // The same cross-check one shape over: a PROSE-ONLY write onto a node whose
+  // number is still the product's own guess has not given that factor a value,
+  // and "Added a note to X" is true of this apply and of an apply that DID move
+  // the number alike. Witnessed on capture d9c4066c (2026-09-19): the person
+  // said product quality would be very high, the note landed, the receipt said
+  // "Added a note", and the analysis six minutes later ran on 0.5.
+  //
+  // Disjoint from the label-value family by construction — that one requires a
+  // `label` key on the op, this one refuses any key that is not prose — so the
+  // two can never contend for the same index. The prose key list is PASSED IN,
+  // never re-declared, so this file keeps exactly one copy of it.
+  const statedLevelDivergences = detectStatedLevelDivergences(operations, graph, AUTHORED_PROSE_KEYS);
+  const statedLevelByIndex = new Map<number, StatedLevelDivergence>();
+  for (const d of statedLevelDivergences) statedLevelByIndex.set(d.index, d);
+
   const changes: AppliedChangeItem[] = operations.map((op, index) => {
     const label = resolveElementLabel(op.path, graph, preGraph, op.value);
     const divergence = divergenceByIndex.get(index);
-    const description = divergence
-      ? buildLabelValueDivergenceDescription(divergence)
-      : buildOperationDescription(op, graph, preGraph);
+    const statedLevel = statedLevelByIndex.get(index);
+    let description: string;
+    if (divergence) {
+      description = buildLabelValueDivergenceDescription(divergence);
+    } else if (statedLevel) {
+      description = buildStatedLevelDivergenceDescription(statedLevel);
+    } else {
+      description = buildOperationDescription(op, graph, preGraph);
+    }
     return { label, description, element_ref: op.path };
   });
 
@@ -4269,6 +4297,27 @@ export async function handleEditGraph(
       );
     }
 
+    // The prose-only sibling of the same harm: the person contributed an
+    // assessment, it landed as a note, and the factor's number is still ours.
+    // Detected off the receipt graph so the receipt and the chat disclosure
+    // cannot disagree about whether there is anything to disclose.
+    const statedLevelDivergences = detectStatedLevelDivergences(
+      operations,
+      postGraphForReceipt,
+      AUTHORED_PROSE_KEYS,
+    );
+    if (statedLevelDivergences.length > 0) {
+      log.warn(
+        {
+          event: 'edit_graph.stated_level_divergence_disclosed',
+          request_id: requestId,
+          count: statedLevelDivergences.length,
+          paths: statedLevelDivergences.map((d) => d.path),
+        },
+        'edit_graph: a note landed on a node whose modelled value is still machine-authored — disclosing',
+      );
+    }
+
     log.info(
       {
         elapsed_ms: latencyMs,
@@ -4339,6 +4388,26 @@ export async function handleEditGraph(
     const divergenceNote = buildLabelValueDivergenceNote(labelValueDivergences);
     if (divergenceNote) {
       textParts.push(scrubFragment(divergenceNote));
+    }
+    // The prose-only disclosure. It quotes the person's OWN sentence for this
+    // turn rather than the recorded note, because the note is written by the
+    // prose lane and may re-tense them: on capture d9c4066c a forward
+    // expectation ("product quality WILL BE very high") was recorded as a fact
+    // about today ("Current product quality IS assessed as very high"). The
+    // quote costs no model surface and no new field, and it is dropped rather
+    // than paraphrased when there is nothing genuinely theirs to quote.
+    // ⚠ Sanitised and length-bounded HERE, at the caller, exactly as the
+    // module's contract requires — it stays dependency-free on purpose.
+    const lastUserMessage = [...(context.messages ?? [])]
+      .reverse()
+      .find((m) => m.role === 'user' && typeof m.content === 'string' && m.content.trim().length > 0);
+    const rawQuote = lastUserMessage?.content?.trim() ?? '';
+    // Length-bounded here; the whole composed note is scrubbed once below, so
+    // scrubbing the quote separately would only duplicate the leak telemetry.
+    const statedLevelQuote = rawQuote.length > 0 && rawQuote.length <= 240 ? rawQuote : null;
+    const statedLevelNote = buildStatedLevelDivergenceNote(statedLevelDivergences, statedLevelQuote);
+    if (statedLevelNote) {
+      textParts.push(scrubFragment(statedLevelNote));
     }
     // P0 fix (2026-05): NEVER render PLoT repair / A5 enforcement reasons
     // into user-facing assistant_text. Repair `action` strings come from
@@ -4433,6 +4502,13 @@ export async function handleEditGraph(
     // chip's replayed message routes to the intervention-writing lane). This
     // is the affordance the honest disclosure above points at.
     suggestedActions.push(...buildLabelValueDivergenceActions(labelValueDivergences));
+    // ⛔ The prose-only affordance carries NO NUMBER. There is no defensible
+    // mapping from a level word to a value (three ladders in this estate
+    // disagree — see `stated-level-divergence.ts`), so the chip asks, the
+    // person answers, and the existing value path writes. That sequence is
+    // what makes the resulting number genuinely theirs rather than ours with
+    // their name on it.
+    suggestedActions.push(...buildStatedLevelDivergenceActions(statedLevelDivergences));
 
     return {
       blocks: [block],
